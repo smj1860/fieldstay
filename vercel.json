@@ -1,0 +1,24 @@
+{
+  "framework": "nextjs",
+  "regions": ["iad1"],
+  "functions": {
+    "app/api/inngest/route.ts": {
+      "maxDuration": 300
+    },
+    "app/api/webhooks/stripe/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/work-orders/[token]/complete/route.ts": {
+      "maxDuration": 30
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options",         "value": "DENY" }
+      ]
+    }
+  ]
+}
