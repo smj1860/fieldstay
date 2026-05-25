@@ -4,47 +4,934 @@ Read this entire file before writing any code or running any commands.
 
 ---
 
-## Current State — What's Done, What Remains
+## Current State — Phase 1 Complete
 
-### ✅ Complete and working
-- All PM dashboard features (properties, turnovers, inventory, maintenance,
-  communications, owners, settings, owner portal, vendor portal)
-- Inngest pipeline (10 functions — iCal sync, emails, POs, alerts)
-- Brand colors (#102246 navy, #FCD116 gold), btn-cta class
-- PowerSync schema (`lib/powersync/schema.ts`) and client (`lib/powersync/client.ts`)
-- Crew shell with offline indicator (`app/crew/crew-shell.tsx`)
-- Crew dashboard page (`app/crew/page.tsx`)
-- Crew inventory count page + API route
-- New property form includes `avg_nightly_rate`
-- `fieldstay_migration_v2.sql` exists (partial — see Step 1)
-- `types/database.ts` updated for most v2 fields
+**107 source files. The full product is built and working.**
 
-### ❌ Still needs to be built (this session)
-
-| # | What | Files |
-|---|------|-------|
-| 1 | v2 migration: add invite + milestones | `fieldstay_migration_v2.sql` |
-| 2 | types: add `invite_sent_at` | `types/database.ts` |
-| 3 | Bulk photo toggle in checklist builder | `checklist-builder.tsx` |
-| 4 | Photo capture in crew turnover page | `app/crew/turnovers/[id]/page.tsx` |
-| 5 | Crew invite: settings action + button | `settings/actions.ts`, `settings-tabs.tsx` |
-| 6 | Crew invite: accept pages + API route | new files |
-| 7 | middleware: add accept-invite to public | `middleware.ts` |
+| Area | Status |
+|------|--------|
+| Auth — signup, login, onboarding | ✅ Complete |
+| Properties CRUD + 7-step setup wizard | ✅ Complete |
+| Turnovers board + detail + crew assignment | ✅ Complete |
+| Checklist instances auto-created on turnover generation | ✅ Complete |
+| Checklist builder with bulk + per-section photo toggles | ✅ Complete |
+| Inventory management + catalog picker + PO history | ✅ Complete |
+| Maintenance — work order board + detail + schedule tracking | ✅ Complete |
+| Communications — sent guest message log | ✅ Complete |
+| Owners — add owners, portal links, P&L transaction management | ✅ Complete |
+| Settings — org, crew, vendors, Stripe billing | ✅ Complete |
+| Owner portal — tokenized P&L view | ✅ Complete |
+| Vendor portal — tokenized work order completion | ✅ Complete |
+| Booking revenue auto-created from iCal (nights × avg_nightly_rate) | ✅ Complete |
+| WO expense auto-created on completion | ✅ Complete |
+| Crew app — PowerSync offline (dashboard, checklist, photo capture) | ✅ Complete |
+| Crew invite flow — email invite + accept-invite pages | ✅ Complete |
+| Inngest pipeline — 10 functions, all registered | ✅ Complete |
+| Brand colors (#102246 navy, #FCD116 gold) | ✅ Complete |
+| Migrations v1 + v2 (with invite fields + org_milestones table) | ✅ Complete |
 
 ---
 
-## Step 1 — Update fieldstay_migration_v2.sql
+## Phase 2 — What to Build Next
 
-The current v2 file only has `avg_nightly_rate` and `booking_id`.
-Add the invite fields and milestones table. All statements use
-`IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` so re-running the full
-file on the existing Supabase project is safe — nothing breaks.
+Two features remain before the product is ready for public launch:
 
-**Replace the entire contents of `fieldstay_migration_v2.sql`:**
+1. **Review / Milestone Framework** — track PM wins, surface a prompt
+   asking for a review at the right moment
+2. **Public Landing Page** — `fieldstay.com` marketing page for signups
 
-```sql
--- FieldStay Migration v2
--- Safe to re-run — all statements are idempotent
+Build in this order.
+
+---
+
+## Build 1 — Review / Milestone Framework
+
+The `org_milestones` table already exists (created in v2 migration).
+Nothing populates it yet, and no UI exists.
+
+### How it works
+
+Inngest functions silently record milestones as PMs use the product.
+The dashboard layout checks for any un-prompted milestone and shows
+a slim, dismissible banner — never a modal, never blocking work.
+One prompt at a time, oldest first. PM clicks "Leave a Review" or
+"Maybe later" — both clear the prompt.
+
+### Milestones to track
+
+| Milestone key | When to record | Prompt message |
+|---------------|---------------|----------------|
+| `first_ical_sync` | After first successful iCal sync for an org | "Your first bookings are syncing." |
+| `first_turnover_complete` | When first turnover reaches `completed` status | "First turnover done — FieldStay is working." |
+| `first_purchase_order` | When first PO is generated for an org | "FieldStay just caught a restock before you ran out." |
+| `first_owner_portal_view` | When owner portal token is accessed for first time | "Your owner just viewed their P&L." |
+| `second_property_configured` | When second property completes setup wizard | "You're managing multiple properties with FieldStay." |
+| `turnover_milestone_10` | When 10th turnover is completed for the org | "10 turnovers coordinated through FieldStay." |
+| `turnover_milestone_50` | When 50th turnover is completed | "50 turnovers. That's serious volume." |
+| `thirty_days` | 30 days after org `created_at` | "You've been running operations with FieldStay for a month." |
+
+### Step 1a — Record milestones in Inngest functions
+
+Add milestone recording to the relevant functions. Use `upsert` with
+`ignoreDuplicates: true` so re-runs never double-record.
+
+**Edit:** `lib/inngest/functions/ical-sync.ts`
+
+In `syncIcalFeed`, inside the `mark-sync-success` step, add after the
+feed status update:
+
+```ts
+// Record first-sync milestone for this org
+await supabase.from('org_milestones').upsert(
+  { org_id, milestone: 'first_ical_sync' },
+  { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+)
+```
+
+**Edit:** `lib/inngest/functions/turnover-events.ts`
+
+In `handleTurnoverCompleted`, add a step after the PM notification:
+
+```ts
+await step.run('record-completion-milestones', async () => {
+  const supabase = createServiceClient()
+
+  // Count total completed turnovers for this org
+  const { count } = await supabase
+    .from('turnovers')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', org_id)
+    .eq('status', 'completed')
+
+  const n = count ?? 0
+
+  // First ever completion
+  if (n === 1) {
+    await supabase.from('org_milestones').upsert(
+      { org_id, milestone: 'first_turnover_complete' },
+      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+    )
+  }
+  // 10th turnover
+  if (n === 10) {
+    await supabase.from('org_milestones').upsert(
+      { org_id, milestone: 'turnover_milestone_10' },
+      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+    )
+  }
+  // 50th turnover
+  if (n === 50) {
+    await supabase.from('org_milestones').upsert(
+      { org_id, milestone: 'turnover_milestone_50' },
+      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+    )
+  }
+})
+```
+
+**Edit:** `lib/inngest/functions/inventory-events.ts`
+
+In `handleInventoryCountSubmitted`, after the PO is created and sent:
+
+```ts
+// Record first PO milestone
+await supabase.from('org_milestones').upsert(
+  { org_id, milestone: 'first_purchase_order' },
+  { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+)
+```
+
+**Edit:** `lib/inngest/functions/maintenance-check.ts`
+
+In `dailyMaintenanceCheck`, inside the daily run, add a check for
+the 30-day milestone:
+
+```ts
+await step.run('check-thirty-day-milestone', async () => {
+  const supabase = createServiceClient()
+
+  // Find orgs that are 30+ days old and haven't hit this milestone yet
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
+
+  const { data: orgs } = await supabase
+    .from('organizations')
+    .select('id')
+    .lte('created_at', thirtyDaysAgo)
+
+  for (const org of orgs ?? []) {
+    await supabase.from('org_milestones').upsert(
+      { org_id: org.id, milestone: 'thirty_days' },
+      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+    )
+  }
+})
+```
+
+**Edit:** `app/owner/[token]/page.tsx`
+
+After recording `last_accessed_at`, also record the milestone:
+
+```ts
+// Record owner portal view milestone
+const supabase = createServiceClient()
+await supabase.from('org_milestones').upsert(
+  { org_id: owner.org_id, milestone: 'first_owner_portal_view' },
+  { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+)
+```
+
+**Edit:** `app/(dashboard)/properties/actions.ts`
+
+In `markStepComplete`, when all steps are done for a property, check
+if this is the second fully configured property for the org:
+
+```ts
+// After marking step complete — check for second_property_configured milestone
+const allSteps = ['details','ical','inventory','messages','checklist','maintenance','crew']
+const isFullySetup = allSteps.every((s) => updated[s] === true)
+
+if (isFullySetup) {
+  // Count fully configured properties for this org
+  const { data: props } = await supabase
+    .from('properties')
+    .select('id, setup_steps_completed')
+    .eq('org_id', membership.org_id)
+    .eq('is_active', true)
+
+  const fullyConfigured = (props ?? []).filter((p) => {
+    const steps = p.setup_steps_completed as Record<string, boolean>
+    return allSteps.every((s) => steps[s] === true)
+  })
+
+  if (fullyConfigured.length === 2) {
+    await supabase.from('org_milestones').upsert(
+      { org_id: membership.org_id, milestone: 'second_property_configured' },
+      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+    )
+  }
+}
+```
+
+### Step 1b — Milestone prompt API routes
+
+**New file:** `app/api/milestones/seen/route.ts`
+
+Called when a prompt is displayed — marks it as prompted so it doesn't
+show again immediately.
+
+```ts
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+
+export async function POST(request: NextRequest) {
+  const { milestone, orgId } = await request.json()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  await supabase
+    .from('org_milestones')
+    .update({ prompted_at: new Date().toISOString() })
+    .eq('org_id', orgId)
+    .eq('milestone', milestone)
+
+  return NextResponse.json({ success: true })
+}
+```
+
+**New file:** `app/api/milestones/dismiss/route.ts`
+
+Called when PM clicks "Maybe later" or closes the prompt.
+
+```ts
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+
+export async function POST(request: NextRequest) {
+  const { milestone, orgId } = await request.json()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  await supabase
+    .from('org_milestones')
+    .update({ dismissed: true })
+    .eq('org_id', orgId)
+    .eq('milestone', milestone)
+
+  return NextResponse.json({ success: true })
+}
+```
+
+**New file:** `app/api/milestones/review-clicked/route.ts`
+
+Called when PM clicks "Leave a Review" — records the click for tracking.
+
+```ts
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
+
+export async function POST(request: NextRequest) {
+  const { milestone, orgId } = await request.json()
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  await supabase
+    .from('org_milestones')
+    .update({ review_clicked: true, dismissed: true })
+    .eq('org_id', orgId)
+    .eq('milestone', milestone)
+
+  return NextResponse.json({ success: true })
+}
+```
+
+### Step 1c — Review prompt component
+
+**New file:** `components/review-prompt.tsx`
+
+```tsx
+'use client'
+import { useState } from 'react'
+import { Star, X } from 'lucide-react'
+
+// Update this URL once the Google Business profile is set up
+const REVIEW_URL = 'https://g.page/r/FIELDSTAY_GOOGLE_PLACE_ID/review'
+
+export function ReviewPrompt({
+  milestone,
+  message,
+  orgId,
+}: {
+  milestone: string
+  message:   string
+  orgId:     string
+}) {
+  const [hidden, setHidden] = useState(false)
+
+  if (hidden) return null
+
+  const markSeen = () =>
+    fetch('/api/milestones/seen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ milestone, orgId }),
+    })
+
+  const handleReview = async () => {
+    await fetch('/api/milestones/review-clicked', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ milestone, orgId }),
+    })
+    window.open(REVIEW_URL, '_blank', 'noopener,noreferrer')
+    setHidden(true)
+  }
+
+  const handleDismiss = async () => {
+    await fetch('/api/milestones/dismiss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ milestone, orgId }),
+    })
+    setHidden(true)
+  }
+
+  // Mark as seen on first render
+  useState(() => { markSeen() })
+
+  return (
+    <div className="flex items-center gap-3 bg-gold-50 border border-gold-300
+                    rounded-xl px-4 py-3 mb-6 animate-fade-in">
+      <Star className="w-5 h-5 text-gold-400 flex-shrink-0 fill-gold-300" />
+      <p className="text-sm text-brand-800 flex-1">
+        <span className="font-semibold">🎉 {message}</span>
+        {' '}Would you mind leaving us a quick review?
+      </p>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <button
+          onClick={handleReview}
+          className="btn-cta text-xs px-3 py-1.5"
+        >
+          Leave a Review
+        </button>
+        <button
+          onClick={handleDismiss}
+          className="text-accent-400 hover:text-accent-600 transition-colors p-1"
+          title="Maybe later"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+```
+
+### Step 1d — Wire into dashboard layout
+
+**Edit:** `app/(dashboard)/layout.tsx`
+
+In the server component, after getting the membership, fetch any
+pending (un-prompted, un-dismissed) milestone:
+
+```ts
+// Fetch the oldest un-prompted milestone for this org
+const { data: pendingMilestone } = await supabase
+  .from('org_milestones')
+  .select('milestone, achieved_at')
+  .eq('org_id', membership.org_id)
+  .eq('dismissed', false)
+  .is('prompted_at', null)
+  .order('achieved_at', { ascending: true })
+  .limit(1)
+  .maybeSingle()
+```
+
+Pass it to the layout and render the prompt above the page content.
+
+The milestone → message map (define as a constant in the layout file):
+
+```ts
+const MILESTONE_MESSAGES: Record<string, string> = {
+  first_ical_sync:             'Your first bookings are syncing.',
+  first_turnover_complete:     'First turnover done — FieldStay is working.',
+  first_purchase_order:        'FieldStay just caught a restock before you ran out.',
+  first_owner_portal_view:     'Your owner just viewed their P&L.',
+  second_property_configured:  'You\'re managing multiple properties with FieldStay.',
+  turnover_milestone_10:       '10 turnovers coordinated through FieldStay.',
+  turnover_milestone_50:       '50 turnovers. That\'s serious volume.',
+  thirty_days:                 'You\'ve been running operations with FieldStay for a month.',
+}
+```
+
+In the layout JSX, render it inside the main content area before `{children}`:
+
+```tsx
+{pendingMilestone && MILESTONE_MESSAGES[pendingMilestone.milestone] && (
+  <ReviewPrompt
+    milestone={pendingMilestone.milestone}
+    message={MILESTONE_MESSAGES[pendingMilestone.milestone]}
+    orgId={membership.org_id}
+  />
+)}
+{children}
+```
+
+Import `ReviewPrompt` from `@/components/review-prompt`.
+
+---
+
+## Build 2 — Public Landing Page
+
+A simple, clean marketing page at `fieldstay.com` (root `/`) for
+property managers to discover and sign up for FieldStay.
+
+### Update middleware to allow root route
+
+**Edit:** `middleware.ts`
+
+Add `'/'` to `PUBLIC_ROUTES` so unauthenticated visitors can see the
+landing page instead of being redirected to `/login`:
+
+```ts
+const PUBLIC_ROUTES = [
+  '/',                      // ← ADD: landing page
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/crew/accept-invite',
+]
+```
+
+Also update the authenticated redirect so logged-in users hitting `/`
+go to `/properties` (not back to the landing page):
+
+```ts
+// Already-authenticated user hitting public route
+if (user && isPublic && pathname !== '/') {
+  // Don't redirect from landing — let them see it if they want
+  // Only redirect from /login, /signup etc.
+  if (pathname !== '/') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/properties'
+    url.search   = ''
+    return NextResponse.redirect(url)
+  }
+}
+```
+
+### Create the landing page
+
+**New file:** `app/page.tsx`
+
+Landing page content to include:
+- Navigation bar: FieldStay logo + "Log In" + "Start Free Trial" buttons
+- Hero: headline, subheadline, CTA button → `/signup`
+- Feature highlights (3–4 key features)
+- How it works (3 steps)
+- Pricing summary (Starter / Growth / Pro)
+- Footer
+
+```tsx
+import Link from 'next/link'
+import {
+  CalendarCheck, Package, Wrench, BarChart3,
+  CheckCircle2, ArrowRight
+} from 'lucide-react'
+
+export default function LandingPage() {
+  return (
+    <div className="min-h-screen bg-white">
+      {/* Nav */}
+      <nav className="border-b border-accent-100 px-6 py-4">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <span className="text-2xl font-bold text-brand-800">FieldStay</span>
+          <div className="flex items-center gap-3">
+            <Link href="/login" className="btn-ghost text-sm">Log In</Link>
+            <Link href="/signup" className="btn-primary text-sm">Start Free Trial</Link>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero */}
+      <section className="max-w-5xl mx-auto px-6 py-20 text-center">
+        <h1 className="text-5xl font-bold text-brand-800 leading-tight mb-4">
+          STR Operations,<br />Finally Handled.
+        </h1>
+        <p className="text-xl text-accent-500 max-w-2xl mx-auto mb-8">
+          FieldStay gives short-term rental property managers one platform for
+          turnovers, inventory, maintenance, and owner reporting — with offline
+          access for your cleaning crew.
+        </p>
+        <Link href="/signup" className="btn-cta text-base px-8 py-3 inline-flex items-center gap-2">
+          Start Free Trial <ArrowRight className="w-5 h-5" />
+        </Link>
+        <p className="text-sm text-accent-400 mt-3">14-day free trial · No credit card required</p>
+      </section>
+
+      {/* Features */}
+      <section className="bg-accent-50 py-16">
+        <div className="max-w-5xl mx-auto px-6">
+          <h2 className="text-3xl font-bold text-brand-800 text-center mb-12">
+            Everything you need to run the back of house
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {[
+              { icon: CalendarCheck, title: 'Turnovers', desc: 'Auto-generated from your Airbnb and VRBO calendars. Assign crew, track checklists.' },
+              { icon: Package,       title: 'Inventory',  desc: 'Par levels per property. Crew submits counts. Purchase orders sent to you automatically.' },
+              { icon: Wrench,        title: 'Maintenance', desc: 'Work orders, vendor portal, routine and seasonal schedule tracking.' },
+              { icon: BarChart3,     title: 'Owner P&L',  desc: 'Revenue from bookings, expenses from work orders. Owners get a clean read-only portal.' },
+            ].map((f) => (
+              <div key={f.title} className="bg-white rounded-xl p-5 shadow-card">
+                <f.icon className="w-7 h-7 text-brand-800 mb-3" />
+                <h3 className="font-semibold text-accent-900 mb-1">{f.title}</h3>
+                <p className="text-sm text-accent-500">{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section className="py-16">
+        <div className="max-w-3xl mx-auto px-6 text-center">
+          <h2 className="text-3xl font-bold text-brand-800 mb-10">
+            Up and running in minutes
+          </h2>
+          <div className="space-y-6 text-left">
+            {[
+              { n: '1', title: 'Add your property', desc: 'Name, address, check-in times, door codes, Wi-Fi — all in one place.' },
+              { n: '2', title: 'Connect your calendars', desc: 'Paste your Airbnb or VRBO iCal URL. FieldStay syncs bookings and auto-generates turnovers.' },
+              { n: '3', title: 'Invite your crew', desc: 'Crew gets a link, creates an account, and sees their assignments on their phone — even offline.' },
+            ].map((step) => (
+              <div key={step.n} className="flex items-start gap-4">
+                <span className="w-8 h-8 rounded-full bg-gold-300 text-brand-800 font-bold
+                                 text-sm flex items-center justify-center flex-shrink-0 mt-0.5">
+                  {step.n}
+                </span>
+                <div>
+                  <p className="font-semibold text-accent-900">{step.title}</p>
+                  <p className="text-sm text-accent-500 mt-0.5">{step.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing */}
+      <section className="bg-accent-50 py-16">
+        <div className="max-w-4xl mx-auto px-6">
+          <h2 className="text-3xl font-bold text-brand-800 text-center mb-10">
+            Simple pricing
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {[
+              { name: 'Starter',    price: '$XX',  props: 'Up to 5 properties',   features: ['All core features', 'Crew app', 'Guest messaging', 'Owner portal'] },
+              { name: 'Growth',     price: '$XX',  props: 'Up to 20 properties',  features: ['Everything in Starter', 'Priority support'] },
+              { name: 'Pro',        price: '$XX',  props: 'Up to 50 properties',  features: ['Everything in Growth', 'Dedicated onboarding'] },
+            ].map((plan, i) => (
+              <div key={plan.name} className={`bg-white rounded-xl p-6 shadow-card ${i === 1 ? 'ring-2 ring-brand-800' : ''}`}>
+                {i === 1 && (
+                  <span className="badge bg-gold-300 text-brand-800 font-semibold text-xs mb-3 inline-block">
+                    Most Popular
+                  </span>
+                )}
+                <h3 className="text-lg font-bold text-accent-900">{plan.name}</h3>
+                <p className="text-3xl font-bold text-brand-800 my-2">
+                  {plan.price}<span className="text-sm font-normal text-accent-400">/mo</span>
+                </p>
+                <p className="text-sm text-accent-500 mb-4">{plan.props}</p>
+                <ul className="space-y-2">
+                  {plan.features.map((f) => (
+                    <li key={f} className="flex items-center gap-2 text-sm text-accent-700">
+                      <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/signup" className="btn-primary w-full text-center mt-5 block py-2.5 text-sm">
+                  Start Free Trial
+                </Link>
+              </div>
+            ))}
+          </div>
+          <p className="text-center text-sm text-accent-400 mt-6">
+            All plans include a 14-day free trial.
+            Need more than 50 properties?{' '}
+            <a href="mailto:hello@fieldstay.com" className="text-brand-700 hover:underline">
+              Contact us
+            </a>
+          </p>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t border-accent-100 py-8">
+        <div className="max-w-5xl mx-auto px-6 flex items-center justify-between">
+          <span className="font-bold text-brand-800">FieldStay</span>
+          <div className="flex items-center gap-6 text-sm text-accent-400">
+            <a href="mailto:hello@fieldstay.com" className="hover:text-accent-600">Contact</a>
+            <Link href="/login" className="hover:text-accent-600">Log In</Link>
+            <Link href="/signup" className="hover:text-accent-600">Sign Up</Link>
+          </div>
+        </div>
+      </footer>
+    </div>
+  )
+}
+```
+
+**Note:** Replace `$XX` pricing with actual amounts once decided.
+Replace `FIELDSTAY_GOOGLE_PLACE_ID` in `components/review-prompt.tsx`
+with the real ID once the Google Business profile is set up.
+
+---
+
+## External Configuration — PowerSync Sync Rules
+
+**This is NOT a code change.** This must be done manually in the
+PowerSync dashboard. Claude Code cannot do this.
+
+### Where to configure
+
+1. Go to https://powersync.com → log in → open your FieldStay instance
+2. Left sidebar → **Sync Rules**
+3. Replace all existing content with the YAML below
+4. Click **Deploy**
+
+### Sync rules YAML
+
+```yaml
+bucket_definitions:
+  # Turnovers assigned to this crew member
+  crew_turnovers:
+    data:
+      - table: turnovers
+        where: >
+          id IN (
+            SELECT ta.turnover_id
+            FROM turnover_assignments ta
+            JOIN crew_members cm ON ta.crew_member_id = cm.id
+            WHERE cm.user_id = token_parameters.user_id
+              AND turnovers.checkout_datetime >= NOW() - INTERVAL '1 day'
+          )
+
+  # Checklist instances for those turnovers
+  crew_checklist_instances:
+    data:
+      - table: checklist_instances
+        where: >
+          turnover_id IN (
+            SELECT ta.turnover_id
+            FROM turnover_assignments ta
+            JOIN crew_members cm ON ta.crew_member_id = cm.id
+            WHERE cm.user_id = token_parameters.user_id
+          )
+
+  # Checklist items for those instances
+  crew_checklist_items:
+    data:
+      - table: checklist_instance_items
+        where: >
+          instance_id IN (
+            SELECT ci.id
+            FROM checklist_instances ci
+            JOIN turnover_assignments ta ON ci.turnover_id = ta.turnover_id
+            JOIN crew_members cm ON ta.crew_member_id = cm.id
+            WHERE cm.user_id = token_parameters.user_id
+          )
+
+  # Inventory items for properties the crew member is assigned to
+  crew_inventory:
+    data:
+      - table: inventory_items
+        where: >
+          property_id IN (
+            SELECT DISTINCT t.property_id
+            FROM turnovers t
+            JOIN turnover_assignments ta ON ta.turnover_id = t.id
+            JOIN crew_members cm ON ta.crew_member_id = cm.id
+            WHERE cm.user_id = token_parameters.user_id
+          )
+```
+
+### After deploying
+
+`token_parameters.user_id` is the Supabase Auth user ID from the JWT.
+PowerSync receives it automatically from the `SupabaseConnector` in
+`lib/powersync/client.ts` when crew log in on their devices.
+
+**Verify it's working:**
+1. PowerSync dashboard → **Diagnostics** → look for connected clients
+2. On a crew device, log in at `/crew` — assignments should load and
+   remain available without internet after the first sync
+
+---
+
+## External Configuration — Stripe Setup
+
+**Not code — configure in Stripe dashboard.**
+
+1. Go to https://dashboard.stripe.com → Products → Add product
+2. Create three products:
+   - **FieldStay Starter** — monthly price → copy price ID → `STRIPE_PRICE_STARTER`
+   - **FieldStay Growth** — monthly price → copy price ID → `STRIPE_PRICE_GROWTH`
+   - **FieldStay Pro** — monthly price → copy price ID → `STRIPE_PRICE_PRO`
+3. Add a webhook endpoint:
+   - URL: `https://app.fieldstay.com/api/webhooks/stripe`
+   - Events to listen for:
+     - `customer.subscription.created`
+     - `customer.subscription.updated`
+     - `customer.subscription.deleted`
+   - Copy the signing secret → `STRIPE_WEBHOOK_SECRET`
+
+---
+
+## External Configuration — Resend Domain
+
+**Not code — configure in Resend dashboard.**
+
+1. Go to https://resend.com → Domains → Add Domain → `fieldstay.com`
+2. Add the DNS records shown to your domain registrar
+3. Wait for verification (usually under 30 minutes)
+4. Update `RESEND_FROM_EMAIL` in production env vars to `noreply@fieldstay.com`
+
+---
+
+## Deployment — Vercel
+
+1. Go to https://vercel.com → Add New Project → import from GitHub
+2. Set environment variables (all from `.env.example`):
+   ```
+   NEXT_PUBLIC_SUPABASE_URL
+   NEXT_PUBLIC_SUPABASE_ANON_KEY
+   SUPABASE_SERVICE_ROLE_KEY
+   INNGEST_EVENT_KEY
+   INNGEST_SIGNING_KEY
+   RESEND_API_KEY
+   RESEND_FROM_EMAIL         = noreply@fieldstay.com
+   RESEND_FROM_NAME          = FieldStay
+   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+   STRIPE_SECRET_KEY
+   STRIPE_WEBHOOK_SECRET
+   STRIPE_PRICE_STARTER
+   STRIPE_PRICE_GROWTH
+   STRIPE_PRICE_PRO
+   NEXT_PUBLIC_POWERSYNC_URL
+   NEXT_PUBLIC_APP_URL       = https://app.fieldstay.com
+   ```
+3. Deploy
+4. Set custom domain: `app.fieldstay.com` → Vercel project
+5. Run v2 migration on production Supabase project (if not already done)
+6. Configure PowerSync sync rules (above)
+7. Create Stripe products and webhook endpoint pointing to production URL
+
+---
+
+## Repository Structure (Complete)
+
+```
+fieldstay/
+├── middleware.ts                         ✅ + landing page in PUBLIC_ROUTES (Build 2)
+├── fieldstay_migration_v1.sql            ✅ Run on production Supabase
+├── fieldstay_migration_v2.sql            ✅ Run on production Supabase
+│
+├── components/
+│   └── review-prompt.tsx                 ← CREATE (Build 1c)
+│
+├── lib/
+│   ├── inngest/functions/
+│   │   ├── ical-sync.ts                  ✅ + milestone recording (Build 1a)
+│   │   ├── booking-events.ts             ✅
+│   │   ├── turnover-events.ts            ✅ + milestone recording (Build 1a)
+│   │   ├── inventory-events.ts           ✅ + milestone recording (Build 1a)
+│   │   ├── maintenance-check.ts          ✅ + 30-day milestone (Build 1a)
+│   │   └── work-order-events.ts          ✅
+│   └── [all other lib files]             ✅ No changes
+│
+├── app/
+│   ├── page.tsx                          ← CREATE: landing page (Build 2)
+│   ├── (dashboard)/
+│   │   ├── layout.tsx                    ✅ + milestone fetch + ReviewPrompt (Build 1d)
+│   │   ├── properties/actions.ts         ✅ + second_property_configured (Build 1a)
+│   │   └── [all other dashboard files]   ✅ No changes
+│   ├── owner/[token]/page.tsx            ✅ + owner portal view milestone (Build 1a)
+│   └── api/
+│       └── milestones/
+│           ├── seen/route.ts             ← CREATE (Build 1b)
+│           ├── dismiss/route.ts          ← CREATE (Build 1b)
+│           └── review-clicked/route.ts   ← CREATE (Build 1b)
+```
+
+---
+
+## Code Patterns
+
+### Auth (every server component + server action)
+```ts
+const { user, supabase, membership } = await requireOrgMember()
+// Always filter every query by membership.org_id
+```
+
+### Service client — Inngest, webhooks, tokenized routes ONLY
+```ts
+import { createServiceClient } from '@/lib/supabase/server'
+const supabase = createServiceClient()
+// Bypasses RLS — never in dashboard pages or server actions
+```
+
+### Crew pages — PowerSync (offline-capable)
+```tsx
+'use client'
+import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
+const { data } = usePowerSyncQuery('SELECT * FROM turnovers WHERE ...', [param])
+const db = usePowerSync()
+await db.execute('UPDATE ... SET ... WHERE id = ?', [value, id])
+```
+
+### Pre-built CSS (use before writing custom Tailwind)
+```
+.btn-primary  .btn-secondary  .btn-ghost  .btn-danger
+.btn-cta                     ← gold (#FCD116), MUST use text-brand-800 (never white)
+.card  .input  .label
+.badge  .badge-green  .badge-amber  .badge-red  .badge-blue  .badge-slate
+.section-header  .page-title  .page-subtitle  .page-header
+```
+
+### Brand tokens
+```
+bg-brand-800    = #102246  primary navy
+bg-gold-300     = #FCD116  action yellow
+bg-accent-50    = #F8F9FA  page backgrounds
+text-accent-800 = #1A1D20  body text
+```
+
+---
+
+## Rules — Never Violate
+
+1. Always filter by `org_id` on every database query
+2. Never call `getSession()` — always `getUser()` (validates JWT server-side)
+3. Never forget `revalidatePath()` after mutations
+4. Never use service client in dashboard pages or server actions
+5. Never register an Inngest function without adding it to `app/api/inngest/route.ts`
+6. Never use `any` type — import from `types/database.ts`
+7. `.btn-cta` MUST use `text-brand-800` — never white text on gold
+
+---
+
+## Database Reference
+
+```
+organizations → organization_members → auth.users
+             → org_milestones
+             → properties (avg_nightly_rate)
+                  → ical_feeds → bookings → turnovers
+                  │                └── turnover_assignments → crew_members (invite fields)
+                  │                └── checklist_instances → checklist_instance_items
+                  → inventory_items → inventory_counts → inventory_count_items
+                  → purchase_orders → purchase_order_items
+                  → work_orders → work_order_updates, work_order_photos
+                  → maintenance_schedules
+                  → guest_message_templates → guest_messages_sent
+                  → property_owners → owner_portal_tokens
+                  └── owner_transactions (booking_id, work_order_id)
+```
+
+---
+
+## Inngest Pipeline (Complete — 10 functions)
+
+```
+cron (4h)   → iCal sync → bookings + turnovers + checklist instances
+                         + booking revenue transactions
+                         + first_ical_sync milestone
+cron (8am)  → maintenance check → alerts or auto WOs
+                                 + thirty_days milestone check
+booking     → confirmation email → sleepUntil → pre-checkout email
+turnover    → crew notification → sleepUntil 24h → unassigned warning
+            → on complete → PM notification + completion milestones
+count       → apply quantities → below par → PO + PM email + first_po milestone
+work order  → vendor portal link → on complete → PM alert + expense transaction
+```
+
+---
+
+## Verification Checklist
+
+After completing Phase 2 builds:
+
+**Review framework:**
+- [ ] Trigger an iCal sync → check `org_milestones` table in Supabase
+  for `first_ical_sync` row
+- [ ] Complete a turnover from the PM dashboard → `first_turnover_complete`
+  row appears
+- [ ] Refresh dashboard → gold review prompt banner appears at top
+- [ ] Click "Maybe later" → prompt disappears, `dismissed = true` in DB
+- [ ] New milestone fires → new prompt appears on next visit
+
+**Landing page:**
+- [ ] Visit `http://localhost:3000` while logged out → landing page renders
+- [ ] Visit while logged in → landing page still renders (no redirect)
+- [ ] "Start Free Trial" → goes to `/signup`
+- [ ] "Log In" → goes to `/login`
+
+**PowerSync (external config):**
+- [ ] Sync rules deployed in PowerSync dashboard
+- [ ] Crew member logs in on mobile → assignments load
+- [ ] Turn off Wi-Fi → assignments still visible
+- [ ] Check off a task → syncs to Supabase when Wi-Fi returns
+
+**Production deployment:**
+- [ ] v2 migration run on production Supabase
+- [ ] All env vars set in Vercel
+- [ ] Stripe webhook active and pointing to production URL
+- [ ] Resend domain verified for `fieldstay.com`
+- [ ] `app.fieldstay.com` resolves to Vercel deployment-- Safe to re-run — all statements are idempotent
 
 -- avg_nightly_rate on properties
 ALTER TABLE properties
