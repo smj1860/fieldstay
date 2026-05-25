@@ -1,493 +1,387 @@
 # CLAUDE.md — FieldStay
 
-Complete reference for working on this codebase. Read every section before
-writing any code or running any commands.
+Read this entire file before writing any code or running any commands.
 
 ---
 
-## Current State — Where We Are
+## Current State — What's Done, What Remains
 
-**90 source files. The PM-facing product is complete.**
+### ✅ Complete and working
+- All PM dashboard features (properties, turnovers, inventory, maintenance,
+  communications, owners, settings, owner portal, vendor portal)
+- Inngest pipeline (10 functions — iCal sync, emails, POs, alerts)
+- Brand colors (#102246 navy, #FCD116 gold), btn-cta class
+- PowerSync schema (`lib/powersync/schema.ts`) and client (`lib/powersync/client.ts`)
+- Crew shell with offline indicator (`app/crew/crew-shell.tsx`)
+- Crew dashboard page (`app/crew/page.tsx`)
+- Crew inventory count page + API route
+- New property form includes `avg_nightly_rate`
+- `fieldstay_migration_v2.sql` exists (partial — see Step 1)
+- `types/database.ts` updated for most v2 fields
 
-Every dashboard feature is built and working:
+### ❌ Still needs to be built (this session)
 
-| Feature | Status |
-|---------|--------|
-| Auth (signup, login, onboarding) | ✅ Complete |
-| Properties CRUD + 7-step setup wizard | ✅ Complete |
-| Turnovers board + detail + crew assignment | ✅ Complete |
-| Checklist instances created on turnover generation | ✅ Complete |
-| Inventory management + catalog picker + PO history | ✅ Complete |
-| Maintenance — work order board + WO detail + schedule management | ✅ Complete |
-| Communications — sent guest message log | ✅ Complete |
-| Owners — add owners, generate portal links, transaction P&L | ✅ Complete |
-| Settings — org, crew, vendors, Stripe billing | ✅ Complete |
-| Owner portal (tokenized P&L view) | ✅ Complete |
-| Vendor portal (tokenized WO completion) | ✅ Complete |
-| Inngest pipeline — iCal sync, emails, POs, alerts (10 functions) | ✅ Complete |
-| middleware.ts — route protection | ✅ Fixed |
-| Auto-create booking revenue transactions | ✅ Complete |
-| Auto-create WO expense transactions | ✅ Complete |
-| Manual transaction entry in owners dashboard | ✅ Complete |
-| Crew app (PowerSync offline) | ⬜ Not built |
-
-**One remaining feature: the crew offline app.**
+| # | What | Files |
+|---|------|-------|
+| 1 | v2 migration: add invite + milestones | `fieldstay_migration_v2.sql` |
+| 2 | types: add `invite_sent_at` | `types/database.ts` |
+| 3 | Bulk photo toggle in checklist builder | `checklist-builder.tsx` |
+| 4 | Photo capture in crew turnover page | `app/crew/turnovers/[id]/page.tsx` |
+| 5 | Crew invite: settings action + button | `settings/actions.ts`, `settings-tabs.tsx` |
+| 6 | Crew invite: accept pages + API route | new files |
+| 7 | middleware: add accept-invite to public | `middleware.ts` |
 
 ---
 
-## Two Things to Fix Before Crew App
+## Step 1 — Update fieldstay_migration_v2.sql
 
-### Fix A — Migration file missing two columns
+The current v2 file only has `avg_nightly_rate` and `booking_id`.
+Add the invite fields and milestones table. All statements use
+`IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` so re-running the full
+file on the existing Supabase project is safe — nothing breaks.
 
-The code references `properties.avg_nightly_rate` and
-`owner_transactions.booking_id` but neither column exists in
-`fieldstay_migration_v1.sql`. Anyone running a fresh migration gets a
-database without these columns and the code fails.
-
-**Create a new file `fieldstay_migration_v2.sql` in the repo root:**
+**Replace the entire contents of `fieldstay_migration_v2.sql`:**
 
 ```sql
 -- FieldStay Migration v2
--- Run this AFTER fieldstay_migration_v1.sql
+-- Safe to re-run — all statements are idempotent
 
--- avg_nightly_rate on properties (booking revenue auto-calculation)
+-- avg_nightly_rate on properties
 ALTER TABLE properties
   ADD COLUMN IF NOT EXISTS avg_nightly_rate numeric(10,2) DEFAULT NULL;
 
--- booking_id on owner_transactions (link revenue record to the booking)
+-- booking_id on owner_transactions
 ALTER TABLE owner_transactions
   ADD COLUMN IF NOT EXISTS booking_id uuid REFERENCES bookings(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_owner_txn_booking_id
   ON owner_transactions(booking_id);
+
+-- Crew invite fields
+ALTER TABLE crew_members
+  ADD COLUMN IF NOT EXISTS invite_token       uuid UNIQUE DEFAULT gen_random_uuid(),
+  ADD COLUMN IF NOT EXISTS invite_sent_at     timestamptz,
+  ADD COLUMN IF NOT EXISTS invite_accepted_at timestamptz;
+
+CREATE INDEX IF NOT EXISTS idx_crew_members_invite_token
+  ON crew_members(invite_token);
+
+-- Milestones table (review prompt framework — phase 2 feature)
+CREATE TABLE IF NOT EXISTS org_milestones (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id         uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  milestone      text NOT NULL,
+  achieved_at    timestamptz NOT NULL DEFAULT NOW(),
+  prompted_at    timestamptz,
+  review_clicked boolean NOT NULL DEFAULT false,
+  dismissed      boolean NOT NULL DEFAULT false,
+  UNIQUE(org_id, milestone)
+);
+
+CREATE INDEX IF NOT EXISTS idx_org_milestones_org_id
+  ON org_milestones(org_id);
 ```
 
-Run this in Supabase SQL Editor on the existing project (the two columns are
-already missing from the live database if it was created from v1 only).
+Then run this file in Supabase SQL Editor.
 
-### Fix B — New property form missing avg_nightly_rate
+---
 
-The edit form (setup wizard step 1) has the nightly rate field but the
-initial "Add Property" form does not. When a PM creates a new property they
-can't set the rate until they re-enter the wizard.
+## Step 2 — Add invite_sent_at to types/database.ts
 
-**Edit:** `app/(dashboard)/properties/new/new-property-form.tsx`
+**Edit:** `types/database.ts`
 
-After the check-in/check-out time grid, add:
-
-```tsx
-<div>
-  <label htmlFor="avg_nightly_rate" className="label">
-    Average Nightly Rate ($)
-  </label>
-  <input
-    id="avg_nightly_rate"
-    name="avg_nightly_rate"
-    type="number"
-    min="0"
-    step="0.01"
-    className="input"
-    placeholder="e.g. 285.00"
-  />
-  <p className="text-xs text-accent-400 mt-1">
-    Used to auto-calculate booking revenue in the owner portal. Can be set later.
-  </p>
-</div>
-```
-
-**Edit:** `app/(dashboard)/properties/actions.ts`
-
-In `createProperty`, parse and include `avg_nightly_rate`:
+In the `CrewMember` interface, `invite_sent_at` is missing. Add it:
 
 ```ts
-const avg_nightly_rate = formData.get('avg_nightly_rate')
-  ? parseFloat(formData.get('avg_nightly_rate') as string)
-  : null
-
-// Add to the insert payload:
-avg_nightly_rate,
+// CrewMember interface should have all three:
+invite_token:        string | null
+invite_sent_at:      string | null   // ← ADD THIS
+invite_accepted_at:  string | null
 ```
 
 ---
 
-## The Remaining Feature: Crew App
+## Step 3 — Checklist Builder: Bulk Photo Toggle
 
-The crew-facing offline PWA at `/crew`. Currently a stub with a TODO comment.
+The checklist builder has a per-item camera icon toggle for `requires_photo`
+but no bulk controls. PMs need to require photos for an entire section
+(e.g. "all final walkthrough items") or the whole checklist at once.
 
-Cleaning crew use this on-site to view assigned turnovers, complete
-checklists room-by-room, and submit inventory counts — all without reliable
-internet via PowerSync.
+**Edit:** `app/(dashboard)/properties/[id]/setup/checklist/checklist-builder.tsx`
 
-The crew layout and auth check already exist (`app/crew/layout.tsx`). What's
-needed is the PowerSync integration and the actual pages.
+### 3a — Add bulk toggle logic
 
-### Architecture
-
-PowerSync keeps a local SQLite database on the device, synced from Supabase.
-Reads are from SQLite (always available, even offline). Writes queue locally
-and sync to Supabase when internet returns.
-
-**What syncs to each crew member's device:**
-- Their assigned turnovers (today + next 7 days)
-- Checklist instances + items for those turnovers
-- Inventory items for their assigned properties
-
-**What they write back (synced when online):**
-- Checklist item completions (`is_completed`, `crew_notes`)
-- Turnover status changes (`in_progress`, `completed`)
-- Inventory count submissions
-
-### Step 1 — Create PowerSync schema
-
-**New file:** `lib/powersync/schema.ts`
+After the existing state declarations (`useState`, `useTransition` calls),
+add these two helper functions inside the `ChecklistBuilder` component:
 
 ```ts
-import { Column, ColumnType, Schema, Table } from '@powersync/web'
-
-const turnovers = new Table({
-  property_id:       new Column({ type: ColumnType.TEXT }),
-  checkout_datetime: new Column({ type: ColumnType.TEXT }),
-  checkin_datetime:  new Column({ type: ColumnType.TEXT }),
-  window_minutes:    new Column({ type: ColumnType.INTEGER }),
-  status:            new Column({ type: ColumnType.TEXT }),
-  priority:          new Column({ type: ColumnType.TEXT }),
-  notes:             new Column({ type: ColumnType.TEXT }),
-})
-
-const checklist_instances = new Table({
-  turnover_id: new Column({ type: ColumnType.TEXT }),
-  status:      new Column({ type: ColumnType.TEXT }),
-})
-
-const checklist_instance_items = new Table({
-  instance_id:        new Column({ type: ColumnType.TEXT }),
-  section_name:       new Column({ type: ColumnType.TEXT }),
-  task:               new Column({ type: ColumnType.TEXT }),
-  is_completed:       new Column({ type: ColumnType.INTEGER }),
-  requires_photo:     new Column({ type: ColumnType.INTEGER }),
-  photo_storage_path: new Column({ type: ColumnType.TEXT }),
-  crew_notes:         new Column({ type: ColumnType.TEXT }),
-  sort_order:         new Column({ type: ColumnType.INTEGER }),
-})
-
-const inventory_items = new Table({
-  property_id:      new Column({ type: ColumnType.TEXT }),
-  name:             new Column({ type: ColumnType.TEXT }),
-  category:         new Column({ type: ColumnType.TEXT }),
-  unit:             new Column({ type: ColumnType.TEXT }),
-  par_level:        new Column({ type: ColumnType.INTEGER }),
-  current_quantity: new Column({ type: ColumnType.INTEGER }),
-})
-
-export const AppSchema = new Schema([
-  turnovers,
-  checklist_instances,
-  checklist_instance_items,
-  inventory_items,
-])
-```
-
-### Step 2 — Create PowerSync client
-
-**New file:** `lib/powersync/client.ts`
-
-```ts
-import { PowerSyncDatabase } from '@powersync/web'
-import { createClient } from '@/lib/supabase/client'
-import { AppSchema } from './schema'
-
-class SupabaseConnector {
-  private supabase = createClient()
-
-  async fetchCredentials() {
-    const { data: { session } } = await this.supabase.auth.getSession()
-    if (!session) throw new Error('No session')
-    return {
-      endpoint: process.env.NEXT_PUBLIC_POWERSYNC_URL!,
-      token:    session.access_token,
-    }
-  }
-
-  async uploadData(database: PowerSyncDatabase) {
-    const transaction = await database.getNextCrudTransaction()
-    if (!transaction) return
-
-    for (const op of transaction.crud) {
-      // Crew marks checklist items complete
-      if (op.table === 'checklist_instance_items' && op.op === 'PUT') {
-        await this.supabase
-          .from('checklist_instance_items')
-          .update({
-            is_completed: op.opData?.is_completed,
-            crew_notes:   op.opData?.crew_notes,
-          })
-          .eq('id', op.id)
-      }
-      // Crew updates turnover status
-      if (op.table === 'turnovers' && op.op === 'PUT') {
-        await this.supabase
-          .from('turnovers')
-          .update({ status: op.opData?.status })
-          .eq('id', op.id)
-      }
-    }
-    await transaction.complete()
-  }
+// Toggle ALL items across ALL sections
+const toggleAllPhotos = () => {
+  const totalItems    = sections.reduce((n, s) => n + s.items.length, 0)
+  const photoItems    = sections.reduce((n, s) => n + s.items.filter((i) => i.requires_photo).length, 0)
+  const newValue      = !(totalItems > 0 && photoItems === totalItems)
+  setSections((prev) => prev.map((s) => ({
+    ...s,
+    items: s.items.map((item) => ({ ...item, requires_photo: newValue })),
+  })))
 }
 
-let db: PowerSyncDatabase | null = null
-
-export function getPowerSyncDb(): PowerSyncDatabase {
-  if (!db) {
-    db = new PowerSyncDatabase({
-      schema:   AppSchema,
-      database: { dbFilename: 'fieldstay-crew.db' },
-    })
-    db.connect(new SupabaseConnector())
-  }
-  return db
+// Toggle ALL items in a single section
+const toggleSectionPhotos = (sectionTempId: string) => {
+  setSections((prev) => prev.map((s) => {
+    if (s.tempId !== sectionTempId) return s
+    const newValue = !s.items.every((i) => i.requires_photo)
+    return { ...s, items: s.items.map((item) => ({ ...item, requires_photo: newValue })) }
+  }))
 }
 ```
 
-### Step 3 — Wrap crew layout with PowerSync context
+### 3b — Global toggle bar
 
-**Edit:** `app/crew/layout.tsx`
-
-The layout is currently a server component that does auth verification.
-Restructure it so the auth check stays server-side but the PowerSync
-provider wraps the client content:
+Add this block immediately after the title/description of the checklist
+builder and before the sections list (before the `sections.map(...)` call):
 
 ```tsx
-// app/crew/layout.tsx
-import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { CrewShell } from './crew-shell'  // new client component
-
-export default async function CrewLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: crew } = await supabase
-    .from('crew_members')
-    .select('id, name, org_id')
-    .eq('user_id', user.id)
-    .single()
-  if (!crew) redirect('/login')
-
-  return <CrewShell crewName={crew.name}>{children}</CrewShell>
-}
-```
-
-**New file:** `app/crew/crew-shell.tsx`
-
-```tsx
-'use client'
-import { PowerSyncContext } from '@powersync/react'
-import { getPowerSyncDb } from '@/lib/powersync/client'
-
-export function CrewShell({
-  crewName,
-  children,
-}: {
-  crewName: string
-  children: React.ReactNode
-}) {
-  const db = getPowerSyncDb()
+{/* Global photo requirement toggle */}
+{sections.some((s) => s.items.length > 0) && (() => {
+  const totalItems  = sections.reduce((n, s) => n + s.items.length, 0)
+  const photoItems  = sections.reduce((n, s) => n + s.items.filter((i) => i.requires_photo).length, 0)
+  const allOn       = totalItems > 0 && photoItems === totalItems
 
   return (
-    <PowerSyncContext.Provider value={db}>
-      <div className="min-h-screen bg-accent-50 flex flex-col max-w-lg mx-auto">
-        <header className="bg-brand-800 text-white px-4 py-4 flex items-center justify-between sticky top-0 z-10">
-          <div>
-            <span className="font-bold text-lg">FieldStay Crew</span>
-            <p className="text-brand-200 text-xs">{crewName}</p>
-          </div>
-          <SyncStatus />
-        </header>
-        <main className="flex-1 px-4 py-6">{children}</main>
+    <div className="flex items-center justify-between px-4 py-3 bg-accent-50
+                    rounded-xl border border-accent-200 mb-4">
+      <div className="flex items-center gap-2">
+        <Camera className="w-4 h-4 text-accent-500" />
+        <div>
+          <p className="text-sm font-medium text-accent-700">
+            Require photo proof for all tasks
+          </p>
+          <p className="text-xs text-accent-400">
+            {photoItems} of {totalItems} tasks require a photo
+          </p>
+        </div>
       </div>
-    </PowerSyncContext.Provider>
-  )
-}
-
-function SyncStatus() {
-  const { syncStatus } = usePowerSync()   // from @powersync/react
-  const syncing = syncStatus?.connected
-
-  if (syncing) return null
-  return (
-    <span className="bg-amber-400 text-amber-900 text-xs font-medium px-2 py-1 rounded-full">
-      Offline
-    </span>
-  )
-}
-```
-
-### Step 4 — Crew dashboard (today's assignments)
-
-**Replace:** `app/crew/page.tsx`
-
-```tsx
-'use client'
-import { usePowerSyncQuery } from '@powersync/react'
-import Link from 'next/link'
-import { formatWindow } from '@/lib/utils'
-import { CalendarCheck, Clock, AlertCircle } from 'lucide-react'
-import { cn } from '@/lib/utils'
-
-export default function CrewDashboardPage() {
-  const today    = new Date().toISOString().split('T')[0]
-  const weekOut  = new Date(Date.now() + 7 * 86_400_000).toISOString().split('T')[0]
-
-  const { data: turnovers } = usePowerSyncQuery(
-    `SELECT * FROM turnovers
-     WHERE date(checkout_datetime) >= ? AND date(checkout_datetime) <= ?
-       AND status != 'completed' AND status != 'cancelled'
-     ORDER BY checkout_datetime ASC`,
-    [today, weekOut]
-  )
-
-  if (!turnovers?.length) {
-    return (
-      <div className="text-center py-20">
-        <CalendarCheck className="w-10 h-10 text-accent-300 mx-auto mb-3" />
-        <p className="font-semibold text-accent-700">No upcoming assignments</p>
-        <p className="text-sm text-accent-400 mt-1">You're all caught up.</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-3">
-      <h2 className="text-lg font-bold text-accent-900">My Assignments</h2>
-      {turnovers.map((t) => {
-        const checkout = new Date(t.checkout_datetime)
-        const isToday  = checkout.toDateString() === new Date().toDateString()
-        const isUrgent = t.priority === 'urgent' || t.priority === 'high'
-
-        return (
-          <Link
-            key={t.id}
-            href={`/crew/turnovers/${t.id}`}
-            className={cn(
-              'block bg-white rounded-xl border p-4 transition-shadow hover:shadow-card-md',
-              isUrgent ? 'border-amber-300' : 'border-accent-200'
-            )}
-          >
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <span className={cn(
-                'text-xs font-semibold px-2 py-0.5 rounded-full',
-                t.status === 'assigned'    ? 'bg-blue-50 text-blue-700' :
-                t.status === 'in_progress' ? 'bg-purple-50 text-purple-700' :
-                'bg-accent-100 text-accent-600'
-              )}>
-                {t.status === 'assigned' ? 'Assigned' :
-                 t.status === 'in_progress' ? 'In Progress' : t.status}
-              </span>
-              {isUrgent && (
-                <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
-              )}
-            </div>
-            <div className="flex items-center gap-2 text-sm text-accent-600">
-              <span className="font-medium text-accent-800">
-                {isToday ? 'Today' : checkout.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-              </span>
-              <span>·</span>
-              <span>{checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</span>
-              {t.window_minutes && (
-                <>
-                  <span>·</span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5" />
-                    {formatWindow(t.window_minutes)}
-                  </span>
-                </>
-              )}
-            </div>
-          </Link>
-        )
-      })}
+      <button
+        type="button"
+        onClick={toggleAllPhotos}
+        className={cn(
+          'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full',
+          'border-2 border-transparent transition-colors duration-200 focus:outline-none',
+          allOn ? 'bg-brand-800' : 'bg-accent-300'
+        )}
+        role="switch"
+        aria-checked={allOn}
+      >
+        <span className={cn(
+          'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow',
+          'transform transition-transform duration-200',
+          allOn ? 'translate-x-5' : 'translate-x-0'
+        )} />
+      </button>
     </div>
   )
-}
+})()}
 ```
 
-### Step 5 — Turnover detail + checklist
+### 3c — Per-section camera toggle
 
-**New directory:** `app/crew/turnovers/[id]/`
+In the section header row (the `div` containing the section name input and
+the up/down/delete buttons), add a section-level camera toggle button.
+Insert it between the section name input and the move/delete controls:
 
-**New file:** `app/crew/turnovers/[id]/page.tsx`
+```tsx
+{/* Section photo toggle — inside section header div, before up/down buttons */}
+{(() => {
+  const sectionAllPhoto = section.items.length > 0 &&
+    section.items.every((i) => i.requires_photo)
+  return (
+    <button
+      type="button"
+      onClick={() => toggleSectionPhotos(section.tempId)}
+      title={sectionAllPhoto
+        ? 'Remove photo requirement for all items in this section'
+        : 'Require photo for all items in this section'}
+      className={cn(
+        'p-1 rounded transition-colors',
+        sectionAllPhoto
+          ? 'text-brand-800 bg-brand-50'
+          : 'text-accent-300 hover:text-accent-500'
+      )}
+    >
+      <Camera className="w-3.5 h-3.5" />
+    </button>
+  )
+})()}
+```
+
+Make sure `Camera` is imported from `lucide-react` (it likely already is).
+
+---
+
+## Step 4 — Crew Turnover Page: Real Photo Capture
+
+The current `app/crew/turnovers/[id]/page.tsx` shows the camera icon as a
+visual indicator only. It has no upload logic and `toggleItem` ignores
+`requires_photo` entirely — crew can check off any item without a photo
+even if one is required.
+
+**Replace the entire file** `app/crew/turnovers/[id]/page.tsx` with:
 
 ```tsx
 'use client'
 import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
 import { useParams, useRouter } from 'next/navigation'
-import { useState } from 'react'
-import { ArrowLeft, Camera, CheckCircle2, Circle } from 'lucide-react'
+import { useState, useRef } from 'react'
+import {
+  ArrowLeft, Camera, CheckCircle2, Circle,
+  Loader2, ImageIcon, AlertCircle,
+} from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 
 export default function CrewTurnoverPage() {
-  const { id } = useParams<{ id: string }>()
-  const router  = useRouter()
-  const db      = usePowerSync()
+  const { id }   = useParams<{ id: string }>()
+  const router   = useRouter()
+  const db       = usePowerSync()
+  const supabase = createClient()
 
-  // Fetch turnover
+  const [uploadingItemId, setUploadingItemId] = useState<string | null>(null)
+  const [uploadError, setUploadError]         = useState<string | null>(null)
+  const [completing, setCompleting]           = useState(false)
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+
+  // Data fetching via PowerSync (offline-capable)
   const { data: turnovers } = usePowerSyncQuery(
     'SELECT * FROM turnovers WHERE id = ?', [id]
   )
   const turnover = turnovers?.[0]
 
-  // Fetch checklist instance for this turnover
   const { data: instances } = usePowerSyncQuery(
     'SELECT * FROM checklist_instances WHERE turnover_id = ?', [id]
   )
   const instance = instances?.[0]
 
-  // Fetch checklist items
   const { data: items } = usePowerSyncQuery(
-    `SELECT * FROM checklist_instance_items WHERE instance_id = ?
+    `SELECT * FROM checklist_instance_items
+     WHERE instance_id = ?
      ORDER BY section_name, sort_order`,
     [instance?.id ?? '']
   )
 
-  const completedCount = items?.filter((i) => i.is_completed).length ?? 0
-  const totalCount     = items?.length ?? 0
+  const completedCount  = items?.filter((i) => i.is_completed).length ?? 0
+  const totalCount      = items?.length ?? 0
+  const pendingPhotos   = items?.filter(
+    (i) => i.requires_photo && !i.photo_storage_path
+  ) ?? []
 
-  // Group by section
-  const sections = (items ?? []).reduce<Record<string, typeof items>>((acc, item) => {
-    if (!acc[item.section_name]) acc[item.section_name] = []
-    acc[item.section_name]!.push(item)
-    return acc
-  }, {})
+  // Group items by section
+  const sections = (items ?? []).reduce<Record<string, NonNullable<typeof items>>>(
+    (acc, item) => {
+      if (!acc[item.section_name]) acc[item.section_name] = []
+      acc[item.section_name]!.push(item)
+      return acc
+    },
+    {}
+  )
 
-  const toggleItem = async (itemId: string, current: number) => {
+  // ── Toggle checklist item completion ────────────────────────────────────────
+  const toggleItem = async (
+    itemId: string,
+    current: number,
+    requiresPhoto: number,
+    photoPath: string | null
+  ) => {
+    // Requires photo but none uploaded — trigger camera instead of toggling
+    if (!current && requiresPhoto && !photoPath) {
+      fileInputRefs.current[itemId]?.click()
+      return
+    }
     await db.execute(
       'UPDATE checklist_instance_items SET is_completed = ? WHERE id = ?',
       [current ? 0 : 1, itemId]
     )
   }
 
+  // ── Photo capture and upload ─────────────────────────────────────────────────
+  // Photos REQUIRE an internet connection (offline photo queuing is phase 2).
+  const handlePhotoCapture = async (itemId: string, file: File) => {
+    setUploadingItemId(itemId)
+    setUploadError(null)
+    try {
+      const ext  = file.name.split('.').pop() ?? 'jpg'
+      const path = `turnover-${id}/${itemId}-${Date.now()}.${ext}`
+
+      const { error } = await supabase.storage
+        .from('turnover-photos')
+        .upload(path, file, { contentType: file.type, upsert: true })
+
+      if (error) throw new Error(error.message)
+
+      // Update local PowerSync DB — connector syncs to Supabase when online
+      await db.execute(
+        `UPDATE checklist_instance_items
+         SET photo_storage_path = ?, is_completed = 1
+         WHERE id = ?`,
+        [path, itemId]
+      )
+    } catch (err) {
+      console.error('Photo upload failed:', err)
+      setUploadError(
+        'Photo upload failed. Make sure you have a connection and try again.'
+      )
+    } finally {
+      setUploadingItemId(null)
+    }
+  }
+
+  // ── Status actions ───────────────────────────────────────────────────────────
   const markInProgress = async () => {
-    await db.execute('UPDATE turnovers SET status = ? WHERE id = ?', ['in_progress', id])
+    await db.execute(
+      'UPDATE turnovers SET status = ? WHERE id = ?',
+      ['in_progress', id]
+    )
   }
 
   const markComplete = async () => {
-    await db.execute('UPDATE turnovers SET status = ? WHERE id = ?', ['completed', id])
+    if (pendingPhotos.length > 0) {
+      const ok = confirm(
+        `${pendingPhotos.length} item${pendingPhotos.length !== 1 ? 's' : ''} ` +
+        `still need photos. Mark complete anyway?`
+      )
+      if (!ok) return
+    }
+    setCompleting(true)
+    await db.execute(
+      'UPDATE turnovers SET status = ? WHERE id = ?',
+      ['completed', id]
+    )
     router.push('/crew')
   }
 
-  if (!turnover) return <div className="text-center py-20 text-accent-400">Loading…</div>
+  // ── Loading state ────────────────────────────────────────────────────────────
+  if (!turnover) {
+    return (
+      <div className="text-center py-20 text-accent-400">
+        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+        <p className="text-sm">Loading…</p>
+      </div>
+    )
+  }
 
   return (
     <div>
-      <Link href="/crew" className="flex items-center gap-1.5 text-sm text-accent-400 hover:text-accent-600 mb-4">
+      <Link
+        href="/crew"
+        className="flex items-center gap-1.5 text-sm text-accent-400
+                   hover:text-accent-600 mb-4 transition-colors"
+      >
         <ArrowLeft className="w-3.5 h-3.5" />
-        Back
+        Back to Assignments
       </Link>
 
-      {/* Header */}
+      {/* Turnover info */}
       <div className="bg-white rounded-xl border border-accent-200 p-4 mb-4">
         <div className="flex items-center justify-between mb-3">
           <span className={cn(
@@ -499,102 +393,220 @@ export default function CrewTurnoverPage() {
             {turnover.priority} priority
           </span>
           {turnover.window_minutes && (
-            <span className="text-sm font-medium text-accent-600">
-              {Math.floor(turnover.window_minutes / 60)}h {turnover.window_minutes % 60}m window
+            <span className="text-sm font-semibold text-accent-600">
+              {Math.floor(turnover.window_minutes / 60)}h
+              {turnover.window_minutes % 60 > 0
+                ? ` ${turnover.window_minutes % 60}m`
+                : ''} window
             </span>
           )}
         </div>
-        <div className="text-sm text-accent-600 space-y-1">
-          <p><span className="text-accent-400">Checkout:</span> {formatDateTime(turnover.checkout_datetime)}</p>
-          <p><span className="text-accent-400">Check-in:</span> {formatDateTime(turnover.checkin_datetime)}</p>
+        <div className="space-y-1 text-sm">
+          <div className="flex gap-3">
+            <span className="text-accent-400 w-20 flex-shrink-0">Checkout</span>
+            <span className="font-medium text-accent-900">
+              {formatDateTime(turnover.checkout_datetime)}
+            </span>
+          </div>
+          <div className="flex gap-3">
+            <span className="text-accent-400 w-20 flex-shrink-0">Next In</span>
+            <span className="font-medium text-accent-900">
+              {formatDateTime(turnover.checkin_datetime)}
+            </span>
+          </div>
         </div>
         {turnover.notes && (
-          <p className="mt-2 text-sm text-accent-600 bg-amber-50 rounded-lg px-3 py-2">
+          <p className="mt-3 text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
             📝 {turnover.notes}
           </p>
         )}
       </div>
+
+      {/* Upload error banner */}
+      {uploadError && (
+        <div className="flex items-start gap-2 bg-red-50 border border-red-200
+                        rounded-xl px-4 py-3 mb-4">
+          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-red-700">{uploadError}</p>
+        </div>
+      )}
 
       {/* Checklist progress */}
       {totalCount > 0 && (
         <div className="mb-4">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-sm font-semibold text-accent-700">
-              Checklist — {completedCount}/{totalCount}
+              Checklist — {completedCount} of {totalCount}
             </span>
-            <span className="text-sm text-accent-500">
+            <span className="text-sm text-accent-400">
               {Math.round((completedCount / totalCount) * 100)}%
             </span>
           </div>
-          <div className="h-2 bg-accent-100 rounded-full overflow-hidden">
+          <div className="h-2 bg-accent-200 rounded-full overflow-hidden">
             <div
               className={cn(
-                'h-full rounded-full transition-all',
-                completedCount === totalCount ? 'bg-green-500' : 'bg-brand-600'
+                'h-full rounded-full transition-all duration-300',
+                completedCount === totalCount ? 'bg-green-500' : 'bg-brand-800'
               )}
               style={{ width: `${Math.round((completedCount / totalCount) * 100)}%` }}
             />
           </div>
+          {pendingPhotos.length > 0 && (
+            <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+              <Camera className="w-3 h-3" />
+              {pendingPhotos.length} item{pendingPhotos.length !== 1 ? 's' : ''} still
+              need{pendingPhotos.length === 1 ? 's' : ''} a photo
+            </p>
+          )}
         </div>
       )}
 
       {/* Sections */}
-      {Object.entries(sections).map(([section, sectionItems]) => (
-        <div key={section} className="mb-4">
-          <h3 className="text-xs font-semibold text-accent-500 uppercase tracking-wide mb-2">
-            {section}
+      {Object.entries(sections).map(([sectionName, sectionItems]) => (
+        <div key={sectionName} className="mb-4">
+          <h3 className="text-xs font-semibold text-accent-500 uppercase
+                         tracking-wide mb-2 px-1">
+            {sectionName}
           </h3>
-          <div className="bg-white rounded-xl border border-accent-200 divide-y divide-accent-100 overflow-hidden">
-            {sectionItems!.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => toggleItem(item.id, item.is_completed)}
-                className={cn(
-                  'w-full flex items-start gap-3 px-4 py-3 text-left transition-colors',
-                  item.is_completed ? 'bg-green-50' : 'hover:bg-accent-50'
-                )}
-              >
-                {item.is_completed
-                  ? <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-                  : <Circle className="w-5 h-5 text-accent-300 flex-shrink-0 mt-0.5" />
-                }
-                <span className={cn(
-                  'text-sm',
-                  item.is_completed ? 'text-green-700 line-through' : 'text-accent-800'
-                )}>
-                  {item.task}
-                </span>
-                {item.requires_photo && (
-                  <Camera className={cn(
-                    'w-4 h-4 flex-shrink-0 ml-auto',
-                    item.photo_storage_path ? 'text-green-500' : 'text-accent-300'
-                  )} />
-                )}
-              </button>
-            ))}
+          <div className="bg-white rounded-xl border border-accent-200
+                          divide-y divide-accent-100 overflow-hidden">
+            {sectionItems.map((item) => {
+              const needsPhoto = item.requires_photo && !item.photo_storage_path
+              const uploading  = uploadingItemId === item.id
+
+              return (
+                <div
+                  key={item.id}
+                  className={cn(
+                    'flex items-start gap-3 px-4 py-3',
+                    item.is_completed ? 'bg-green-50' : 'bg-white'
+                  )}
+                >
+                  {/* Completion circle — tapping triggers photo if required */}
+                  <button
+                    className="flex-shrink-0 mt-0.5"
+                    onClick={() => toggleItem(
+                      item.id,
+                      item.is_completed,
+                      item.requires_photo,
+                      item.photo_storage_path
+                    )}
+                  >
+                    {item.is_completed
+                      ? <CheckCircle2 className="w-5 h-5 text-green-500" />
+                      : <Circle className={cn(
+                          'w-5 h-5',
+                          needsPhoto ? 'text-amber-400' : 'text-accent-300'
+                        )} />
+                    }
+                  </button>
+
+                  {/* Task label */}
+                  <div className="flex-1 min-w-0">
+                    <p className={cn(
+                      'text-sm leading-snug',
+                      item.is_completed
+                        ? 'text-green-700 line-through'
+                        : 'text-accent-800'
+                    )}>
+                      {item.task}
+                    </p>
+                    {item.notes && (
+                      <p className="text-xs text-accent-400 mt-0.5">{item.notes}</p>
+                    )}
+                    {item.photo_storage_path && (
+                      <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
+                        <ImageIcon className="w-3 h-3" />
+                        Photo attached
+                      </p>
+                    )}
+                    {needsPhoto && !uploading && (
+                      <p className="text-xs text-amber-600 mt-0.5">
+                        Photo required before completing
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Camera button — only shown when requires_photo */}
+                  {item.requires_photo && (
+                    <div className="flex-shrink-0">
+                      {uploading ? (
+                        <div className="p-1.5">
+                          <Loader2 className="w-4 h-4 text-accent-400 animate-spin" />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => fileInputRefs.current[item.id]?.click()}
+                          className={cn(
+                            'p-1.5 rounded-lg transition-colors',
+                            item.photo_storage_path
+                              ? 'text-green-600 bg-green-50 hover:bg-green-100'
+                              : 'text-amber-600 bg-amber-50 hover:bg-amber-100'
+                          )}
+                          title={
+                            item.photo_storage_path
+                              ? 'Replace photo'
+                              : 'Tap to take required photo'
+                          }
+                        >
+                          <Camera className="w-4 h-4" />
+                        </button>
+                      )}
+                      {/*
+                        Hidden file input.
+                        capture="environment" triggers the rear camera on mobile.
+                        On desktop it opens the file picker.
+                      */}
+                      <input
+                        ref={(el) => { fileInputRefs.current[item.id] = el }}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) handlePhotoCapture(item.id, file)
+                          e.target.value = '' // reset so same file can be re-selected
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       ))}
 
       {totalCount === 0 && (
-        <div className="bg-white rounded-xl border border-accent-200 p-6 text-center text-accent-400 text-sm mb-4">
+        <div className="bg-white rounded-xl border border-accent-200 p-6
+                        text-center text-accent-400 text-sm mb-4">
           No checklist for this turnover.
         </div>
       )}
 
       {/* Actions */}
-      <div className="space-y-2 pb-8">
+      <div className="space-y-3 pb-8 mt-4">
         {turnover.status === 'assigned' && (
-          <button onClick={markInProgress} className="btn-secondary w-full py-3">
+          <button
+            onClick={markInProgress}
+            className="btn-secondary w-full py-3"
+          >
             Start Turnover
           </button>
         )}
         <button
           onClick={markComplete}
-          disabled={turnover.status === 'completed'}
-          className="btn-primary w-full py-3"
+          disabled={completing || turnover.status === 'completed'}
+          className="btn-cta w-full py-3 flex items-center justify-center gap-2
+                     disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {turnover.status === 'completed' ? '✓ Complete' : 'Mark as Complete'}
+          {completing
+            ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+            : turnover.status === 'completed'
+            ? '✓ Marked Complete'
+            : 'Mark as Complete'
+          }
         </button>
       </div>
     </div>
@@ -602,304 +614,539 @@ export default function CrewTurnoverPage() {
 }
 ```
 
-### Step 6 — Inventory count page (offline)
+---
 
-**New file:** `app/crew/inventory/[propertyId]/page.tsx`
+## Step 5 — Crew Invite Flow
 
-```tsx
-'use client'
-import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
-import { useParams, useRouter } from 'next/navigation'
-import { useState } from 'react'
-import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
-import type { InventoryCategory } from '@/types/database'
+Crew members are added to the roster in Settings but have no way to log
+in until they have a Supabase Auth account linked to `crew_members.user_id`.
+This step builds the full invite flow.
 
-export default function CrewInventoryPage() {
-  const { propertyId } = useParams<{ propertyId: string }>()
-  const db     = usePowerSync()
-  const router = useRouter()
-  const [counts, setCounts] = useState<Record<string, number>>({})
-  const [submitting, setSubmitting] = useState(false)
-  const [notes, setNotes] = useState('')
+### 5a — Update middleware.ts
 
-  const { data: items } = usePowerSyncQuery(
-    `SELECT * FROM inventory_items WHERE property_id = ? ORDER BY category, name`,
-    [propertyId]
-  )
+**Edit:** `middleware.ts`
 
-  const handleSubmit = async () => {
-    setSubmitting(true)
-    // Write counts back to local SQLite — PowerSync syncs to Supabase
-    for (const [itemId, qty] of Object.entries(counts)) {
-      await db.execute(
-        'UPDATE inventory_items SET current_quantity = ? WHERE id = ?',
-        [qty, itemId]
-      )
-    }
-    // Also fire the server action via fetch to create the count record + trigger Inngest
-    await fetch('/api/crew/inventory-count', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ propertyId, counts, notes }),
-    })
-    router.push('/crew')
+Add `/crew/accept-invite` to `PUBLIC_ROUTES`:
+
+```ts
+const PUBLIC_ROUTES = [
+  '/login',
+  '/signup',
+  '/forgot-password',
+  '/reset-password',
+  '/crew/accept-invite',   // ← ADD THIS
+]
+```
+
+### 5b — Add inviteCrewMember action to settings
+
+**Edit:** `app/(dashboard)/settings/actions.ts`
+
+Add this function (after existing exports):
+
+```ts
+export async function inviteCrewMember(
+  crewMemberId: string
+): Promise<{ error?: string; success?: boolean }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (!['admin', 'manager'].includes(membership.role)) {
+    return { error: 'Permission denied' }
   }
 
-  // ... render items grouped by category with quantity inputs
+  const { data: crew } = await supabase
+    .from('crew_members')
+    .select('id, name, email, invite_token, user_id')
+    .eq('id', crewMemberId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!crew)        return { error: 'Crew member not found' }
+  if (!crew.email)  return { error: 'No email address on file for this crew member' }
+  if (crew.user_id) return { error: 'This crew member already has an active account' }
+
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('name')
+    .eq('id', membership.org_id)
+    .single()
+
+  const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew/accept-invite/${crew.invite_token}`
+
+  const { resend, FROM } = await import('@/lib/resend/client')
+  const { error: emailError } = await resend.emails.send({
+    from:    FROM,
+    to:      crew.email,
+    subject: `You've been invited to join ${org?.name ?? 'FieldStay'}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+        <h2 style="color:#102246;margin-bottom:8px">
+          You're invited to FieldStay
+        </h2>
+        <p style="color:#1A1D20">Hi ${crew.name},</p>
+        <p style="color:#1A1D20">
+          <strong>${org?.name ?? 'Your property manager'}</strong> has invited
+          you to join their team on FieldStay — the app you'll use to view
+          cleaning assignments, complete checklists, and submit inventory counts.
+        </p>
+        <p style="margin:28px 0">
+          <a href="${inviteUrl}"
+             style="background:#FCD116;color:#102246;padding:14px 28px;
+                    text-decoration:none;border-radius:8px;font-weight:700;
+                    display:inline-block;font-size:15px">
+            Accept Invitation →
+          </a>
+        </p>
+        <p style="color:#6C757D;font-size:13px">
+          This link expires in 7 days. If you weren't expecting this, you can
+          safely ignore it.
+        </p>
+      </div>
+    `,
+  })
+
+  if (emailError) return { error: emailError.message }
+
+  await supabase
+    .from('crew_members')
+    .update({ invite_sent_at: new Date().toISOString() })
+    .eq('id', crewMemberId)
+
+  revalidatePath('/settings')
+  return { success: true }
 }
 ```
 
-**New file:** `app/api/crew/inventory-count/route.ts`
+### 5c — Add invite button to settings crew tab
+
+**Edit:** `app/(dashboard)/settings/settings-tabs.tsx`
+
+First, import `inviteCrewMember` at the top with the other action imports.
+
+Update the `CrewMember` interface to include the new fields:
 
 ```ts
-import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { inngest } from '@/lib/inngest/client'
+interface CrewMember {
+  id:                  string
+  name:                string
+  email:               string | null
+  phone:               string | null
+  specialty:           string
+  preferred_contact:   string
+  is_active:           boolean
+  user_id:             string | null
+  invite_sent_at:      string | null
+  invite_accepted_at:  string | null
+}
+```
 
-export async function POST(request: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+Update the crew fetch in `app/(dashboard)/settings/page.tsx` to include
+these fields:
 
-  const { propertyId, counts, notes } = await request.json()
+```ts
+.select(`id, name, email, phone, specialty, preferred_contact,
+         is_active, user_id, invite_sent_at, invite_accepted_at`)
+```
 
-  // Get crew member record
+In the `CrewRow` component add these state declarations and the invite handler:
+
+```tsx
+const [inviting, setInviting]         = useState(false)
+const [inviteSent, setInviteSent]     = useState(false)
+const [inviteError, setInviteError]   = useState<string | null>(null)
+
+const handleInvite = async () => {
+  setInviting(true)
+  setInviteError(null)
+  const result = await inviteCrewMember(member.id)
+  setInviting(false)
+  if (result.error) {
+    setInviteError(result.error)
+  } else {
+    setInviteSent(true)
+  }
+}
+```
+
+In the crew row JSX, add an invite status column. The logic:
+- `user_id` is set → show green "Active" badge
+- `invite_accepted_at` is set but no `user_id` → anomaly, show "Active"
+- `inviteSent` just happened → show "✓ Invite sent"
+- `invite_sent_at` is set (previously sent) → show "Resend invite" link
+- None of the above → show "Invite to app" button
+
+```tsx
+{/* Status / invite column */}
+<td className="py-2.5 pr-2">
+  {member.user_id ? (
+    <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+      <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+      Active
+    </span>
+  ) : inviteSent ? (
+    <span className="text-xs text-brand-700 font-medium">✓ Invite sent</span>
+  ) : member.invite_sent_at ? (
+    <button
+      onClick={handleInvite}
+      disabled={inviting}
+      className="text-xs text-accent-500 hover:text-accent-700 underline
+                 underline-offset-2 disabled:opacity-50"
+    >
+      {inviting ? 'Sending…' : 'Resend invite'}
+    </button>
+  ) : (
+    <button
+      onClick={handleInvite}
+      disabled={inviting}
+      className="btn-secondary text-xs px-2.5 py-1 disabled:opacity-50"
+    >
+      {inviting ? 'Sending…' : 'Invite to app'}
+    </button>
+  )}
+  {inviteError && (
+    <p className="text-xs text-red-500 mt-0.5">{inviteError}</p>
+  )}
+</td>
+```
+
+### 5d — Accept invite landing page
+
+**New file:** `app/crew/accept-invite/[token]/page.tsx`
+
+```tsx
+import { createServiceClient } from '@/lib/supabase/server'
+import { notFound } from 'next/navigation'
+import { AcceptInviteForm } from './accept-invite-form'
+
+interface Props { params: { token: string } }
+
+export default async function AcceptInvitePage({ params }: Props) {
+  const supabase = createServiceClient()
+
   const { data: crew } = await supabase
     .from('crew_members')
-    .select('id, org_id')
-    .eq('user_id', user.id)
+    .select('id, name, email, invite_sent_at, invite_accepted_at, user_id')
+    .eq('invite_token', params.token)
     .single()
 
-  if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 403 })
+  if (!crew) notFound()
 
-  // Create inventory_count record
-  const { data: count } = await supabase
-    .from('inventory_counts')
-    .insert({
-      property_id:         propertyId,
-      org_id:              crew.org_id,
-      submitted_by_crew_id: crew.id,
-      notes,
-    })
-    .select('id')
-    .single()
+  // Already linked to an account
+  if (crew.user_id || crew.invite_accepted_at) {
+    return (
+      <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center">
+          <p className="text-3xl mb-3">✅</p>
+          <h2 className="text-lg font-bold text-accent-900 mb-2">
+            Account Already Active
+          </h2>
+          <p className="text-sm text-accent-500 mb-6">
+            Your FieldStay account is set up. Log in to see your assignments.
+          </p>
+          <a href="/login" className="btn-primary w-full block text-center py-2.5">
+            Go to Login →
+          </a>
+        </div>
+      </div>
+    )
+  }
 
-  if (!count) return NextResponse.json({ error: 'Failed' }, { status: 500 })
-
-  // Insert count items
-  const items = Object.entries(counts as Record<string, number>).map(([id, qty]) => ({
-    count_id:           count.id,
-    inventory_item_id:  id,
-    quantity_counted:   qty,
-  }))
-
-  if (items.length > 0) {
-    await supabase.from('inventory_count_items').insert(items)
-
-    // Update current quantities
-    for (const { inventory_item_id, quantity_counted } of items) {
-      await supabase
-        .from('inventory_items')
-        .update({ current_quantity: quantity_counted })
-        .eq('id', inventory_item_id)
-        .eq('org_id', crew.org_id)
+  // Check expiry (7 days from when invite was sent)
+  if (crew.invite_sent_at) {
+    const expired =
+      new Date(crew.invite_sent_at).getTime() + 7 * 86_400_000 < Date.now()
+    if (expired) {
+      return (
+        <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center">
+            <p className="text-3xl mb-3">⏰</p>
+            <h2 className="text-lg font-bold text-accent-900 mb-2">
+              Invite Link Expired
+            </h2>
+            <p className="text-sm text-accent-500">
+              This link has expired. Ask your property manager to send a new invite.
+            </p>
+          </div>
+        </div>
+      )
     }
   }
 
-  // Fire Inngest to check par levels and generate PO if needed
-  await inngest.send({
-    name: 'inventory/count-submitted',
-    data: { count_id: count.id, property_id: propertyId, org_id: crew.org_id },
-  })
+  return (
+    <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-white tracking-tight">
+            FieldStay
+          </h1>
+          <p className="text-brand-200 text-sm mt-1">Crew App</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-lg p-8">
+          <h2 className="text-xl font-bold text-accent-900 mb-1">
+            Welcome, {crew.name}
+          </h2>
+          <p className="text-sm text-accent-500 mb-6">
+            Create a password to activate your account.
+          </p>
+          <AcceptInviteForm
+            token={params.token}
+            crewId={crew.id}
+            email={crew.email ?? ''}
+            name={crew.name}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+```
+
+**New file:** `app/crew/accept-invite/[token]/accept-invite-form.tsx`
+
+```tsx
+'use client'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+
+export function AcceptInviteForm({
+  token,
+  crewId,
+  email,
+  name,
+}: {
+  token:  string
+  crewId: string
+  email:  string
+  name:   string
+}) {
+  const router              = useRouter()
+  const [password, setPass] = useState('')
+  const [confirm, setConf]  = useState('')
+  const [error, setError]   = useState<string | null>(null)
+  const [loading, setLoad]  = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters')
+      return
+    }
+    if (password !== confirm) {
+      setError('Passwords do not match')
+      return
+    }
+
+    setLoad(true)
+    try {
+      const supabase = createClient()
+
+      // Create Supabase Auth account
+      const { data, error: signUpErr } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: name } },
+      })
+
+      if (signUpErr)  throw signUpErr
+      if (!data.user) throw new Error('Account creation failed — please try again')
+
+      // Link Auth user to crew record
+      const res = await fetch('/api/crew/accept-invite', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ token, userId: data.user.id }),
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? 'Failed to activate account')
+      }
+
+      router.push('/crew')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setLoad(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700
+                        text-sm rounded-xl px-4 py-3">
+          {error}
+        </div>
+      )}
+
+      <div>
+        <label className="label">Email</label>
+        <input
+          type="email"
+          value={email}
+          disabled
+          className="input bg-accent-50 text-accent-500 cursor-not-allowed"
+        />
+      </div>
+
+      <div>
+        <label className="label">
+          Password <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="password"
+          required
+          minLength={8}
+          value={password}
+          onChange={(e) => setPass(e.target.value)}
+          className="input"
+          placeholder="At least 8 characters"
+          autoComplete="new-password"
+        />
+      </div>
+
+      <div>
+        <label className="label">
+          Confirm Password <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="password"
+          required
+          value={confirm}
+          onChange={(e) => setConf(e.target.value)}
+          className="input"
+          placeholder="Repeat password"
+          autoComplete="new-password"
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="btn-cta w-full py-2.5 disabled:opacity-60"
+      >
+        {loading ? 'Creating account…' : 'Activate Account →'}
+      </button>
+    </form>
+  )
+}
+```
+
+### 5e — Accept invite API route
+
+**New file:** `app/api/crew/accept-invite/route.ts`
+
+```ts
+import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient } from '@/lib/supabase/server'
+
+export async function POST(request: NextRequest) {
+  const body = await request.json().catch(() => null)
+  if (!body?.token || !body?.userId) {
+    return NextResponse.json(
+      { error: 'Missing token or userId' },
+      { status: 400 }
+    )
+  }
+
+  const { token, userId } = body as { token: string; userId: string }
+  const supabase = createServiceClient()
+
+  const { data: crew } = await supabase
+    .from('crew_members')
+    .select('id, user_id, invite_accepted_at')
+    .eq('invite_token', token)
+    .single()
+
+  if (!crew) {
+    return NextResponse.json({ error: 'Invalid invite token' }, { status: 404 })
+  }
+
+  if (crew.user_id || crew.invite_accepted_at) {
+    return NextResponse.json({ error: 'Invite already used' }, { status: 409 })
+  }
+
+  const { error } = await supabase
+    .from('crew_members')
+    .update({
+      user_id:            userId,
+      invite_accepted_at: new Date().toISOString(),
+    })
+    .eq('id', crew.id)
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   return NextResponse.json({ success: true })
 }
 ```
 
-### Step 7 — PowerSync sync rules
+---
 
-Configure these in the PowerSync dashboard (not in code). They define what
-each crew member's device receives based on their assignments:
+## Final File Map — Everything Touched This Session
 
-```yaml
-bucket_definitions:
-  crew_turnovers:
-    parameters: []
-    data:
-      - table: turnovers
-        where: >
-          id IN (
-            SELECT ta.turnover_id
-            FROM turnover_assignments ta
-            JOIN crew_members cm ON ta.crew_member_id = cm.id
-            WHERE cm.user_id = token_parameters.user_id
-              AND turnovers.checkout_datetime >= NOW() - INTERVAL '1 day'
-          )
+```
+fieldstay_migration_v2.sql            REPLACE (add invite cols + milestones)
+types/database.ts                     EDIT (add invite_sent_at to CrewMember)
+middleware.ts                         EDIT (add /crew/accept-invite to PUBLIC_ROUTES)
 
-  crew_checklists:
-    parameters: []
-    data:
-      - table: checklist_instances
-        where: >
-          turnover_id IN (
-            SELECT ta.turnover_id
-            FROM turnover_assignments ta
-            JOIN crew_members cm ON ta.crew_member_id = cm.id
-            WHERE cm.user_id = token_parameters.user_id
-          )
-      - table: checklist_instance_items
-        where: >
-          instance_id IN (
-            SELECT ci.id
-            FROM checklist_instances ci
-            JOIN turnover_assignments ta ON ci.turnover_id = ta.turnover_id
-            JOIN crew_members cm ON ta.crew_member_id = cm.id
-            WHERE cm.user_id = token_parameters.user_id
-          )
+app/(dashboard)/properties/[id]/setup/checklist/
+  checklist-builder.tsx               EDIT (bulk photo toggles — Steps 3a/3b/3c)
 
-  crew_inventory:
-    parameters: []
-    data:
-      - table: inventory_items
-        where: >
-          property_id IN (
-            SELECT DISTINCT t.property_id
-            FROM turnovers t
-            JOIN turnover_assignments ta ON ta.turnover_id = t.id
-            JOIN crew_members cm ON ta.crew_member_id = cm.id
-            WHERE cm.user_id = token_parameters.user_id
-          )
+app/(dashboard)/settings/
+  actions.ts                          EDIT (add inviteCrewMember)
+  settings-tabs.tsx                   EDIT (invite button in crew rows)
+  page.tsx                            EDIT (fetch invite fields)
+
+app/crew/
+  turnovers/[id]/page.tsx             REPLACE (full photo capture — Step 4)
+
+app/crew/accept-invite/[token]/       CREATE (new directory)
+  page.tsx                            CREATE
+  accept-invite-form.tsx              CREATE
+
+app/api/crew/
+  accept-invite/route.ts              CREATE
 ```
 
 ---
 
-## What Needs Discussion
-
-### 1 — Photo upload for checklist items that require_photo
-
-The checklist has a `requires_photo` flag per item. Crew can see which items
-need photos but there's no implementation for capturing/uploading them yet.
-
-**Two options:**
-- **Simple:** Use `<input type="file" accept="image/*" capture="environment">`
-  which triggers the native camera on mobile. Upload to Supabase Storage via
-  a fetch call, store the path in `checklist_instance_items.photo_storage_path`.
-- **Complex:** Queue the upload locally when offline, sync the file when online.
-  This requires more PowerSync work.
-
-The simple approach is fine for v1.
-
-### 2 — Crew gets invited vs. self-service signup
-
-Currently the Settings page lets PMs add crew members with name/email/phone.
-But for a crew member to USE the app (login, get PowerSync sync), they need
-a Supabase Auth account with their `user_id` linked to `crew_members.user_id`.
-
-**The gap:** There's no invite flow. A PM adds Maria to their crew roster but
-Maria has no way to create an account that gets linked to that crew record.
-
-**Options:**
-a) PM invites crew via email → crew clicks link → signs up → their user_id
-   gets linked to the crew record (similar to org member invite flow)
-b) Crew signs up at a specific URL → system links them by email match
-
-Option (a) is cleaner. The `organization_members` table has an invite token
-pattern already — same approach for crew members.
-
-### 3 — Deployment: are services set up?
-
-Before the app can go live:
-- Supabase project created + migration run?
-- Inngest app set up and functions tested?
-- Resend domain verified?
-- Stripe products + prices created?
-- PowerSync instance connected to Supabase?
-- Vercel project + env vars configured?
-
----
-
-## Repository Structure (Current)
-
-```
-fieldstay/
-├── middleware.ts                    ✅ Route protection
-├── fieldstay_migration_v1.sql       ✅ Run in Supabase (+ v2 migration needed)
-├── package.json + config files      ✅
-│
-├── types/database.ts                ✅ All tables typed (incl. avg_nightly_rate, booking_id)
-│
-├── lib/
-│   ├── auth.ts                      ✅
-│   ├── utils.ts                     ✅
-│   ├── wizard.ts                    ✅
-│   ├── ical/parser.ts               ✅
-│   ├── turnovers/generator.ts       ✅ Creates checklist instances on turnover generation
-│   ├── supabase/{server,client,middleware}.ts  ✅
-│   ├── inngest/
-│   │   ├── client.ts + events.ts    ✅
-│   │   └── functions/ (10 functions)  ✅ All registered
-│   ├── resend/client.ts             ✅
-│   ├── stripe/client.ts             ✅
-│   └── powersync/                   ⬜ NOT BUILT YET
-│
-├── app/
-│   ├── (auth)/                      ✅ login + signup
-│   ├── onboarding/                  ✅
-│   ├── (dashboard)/
-│   │   ├── properties/              ✅ (new form missing avg_nightly_rate — Fix B)
-│   │   ├── turnovers/               ✅
-│   │   ├── inventory/               ✅ catalog picker included
-│   │   ├── maintenance/             ✅
-│   │   ├── communications/          ✅
-│   │   ├── owners/                  ✅ transaction P&L included
-│   │   └── settings/                ✅
-│   ├── owner/[token]/               ✅ Full P&L view
-│   ├── work-orders/[token]/         ✅ Vendor portal
-│   ├── crew/                        ⬜ STUB — build using guide above
-│   └── api/                         ✅ inngest + stripe + work-order completion
-```
-
----
-
-## Code Patterns — Required Reading
+## Code Patterns
 
 ### Auth (every server component + server action)
-
 ```ts
 const { user, supabase, membership } = await requireOrgMember()
-// Always filter by membership.org_id
-const { property, supabase, membership } = await requireProperty(propertyId)
+// Always filter by membership.org_id — never skip
 ```
 
-### Service client (background jobs + tokenized routes ONLY)
-
+### Service client (Inngest, webhooks, tokenized routes ONLY)
 ```ts
 import { createServiceClient } from '@/lib/supabase/server'
 const supabase = createServiceClient()
-// Bypasses RLS — never in dashboard pages or server actions
-```
-
-### Pre-built CSS — always use these first
-
-```
-.btn-primary  .btn-secondary  .btn-ghost  .btn-danger
-.card  .input  .label
-.badge  .badge-green  .badge-amber  .badge-red  .badge-blue  .badge-slate
-.section-header  .page-title  .page-subtitle  .page-header
+// Bypasses RLS — never in dashboard pages or regular server actions
 ```
 
 ### Crew pages — PowerSync pattern
-
 ```tsx
 'use client'
 import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
 
-// Read (offline-capable):
 const { data } = usePowerSyncQuery('SELECT * FROM turnovers WHERE ...', [param])
-
-// Write (queued offline, syncs when online):
 const db = usePowerSync()
-await db.execute('UPDATE checklist_instance_items SET is_completed = ? WHERE id = ?', [1, id])
+await db.execute('UPDATE ... SET ... WHERE id = ?', [value, id])
+```
+
+### Pre-built CSS (use before writing custom Tailwind)
+```
+.btn-primary  .btn-secondary  .btn-ghost  .btn-danger
+.btn-cta                          ← yellow, MUST use text-brand-800
+.card  .input  .label
+.badge  .badge-green  .badge-amber  .badge-red  .badge-blue  .badge-slate
+.section-header  .page-title  .page-subtitle  .page-header
 ```
 
 ---
@@ -912,97 +1159,25 @@ await db.execute('UPDATE checklist_instance_items SET is_completed = ? WHERE id 
 4. Never use service client in dashboard pages or server actions
 5. Never register an Inngest function without adding it to `app/api/inngest/route.ts`
 6. Never use `any` type — import from `types/database.ts`
+7. `btn-cta` (yellow) MUST use `text-brand-800` — never white text on yellow
 
 ---
 
-## Database Reference
+## Verification Checklist
 
-```
-organizations → organization_members → auth.users
-             → properties (avg_nightly_rate)
-                  → ical_feeds → bookings → turnovers
-                  │                └── turnover_assignments → crew_members
-                  │                └── checklist_instances → checklist_instance_items
-                  → inventory_items → inventory_counts
-                  → purchase_orders → purchase_order_items
-                  → work_orders → work_order_updates, work_order_photos
-                  → maintenance_schedules
-                  → guest_message_templates
-                  → property_owners → owner_portal_tokens
-                  └── owner_transactions (booking_id, work_order_id)
-```
+After completing all steps, verify:
 
----
-
-## Inngest Pipeline (Complete)
-
-```
-cron (4h)  → sync iCal → bookings + turnovers + checklist instances + revenue txns
-cron (8am) → maintenance check → alerts or auto work orders
-booking    → confirmation email → sleepUntil → pre-checkout email
-turnover   → crew notification → sleepUntil 24h → unassigned warning
-count      → apply quantities → below par → PO + PM email
-work order → vendor portal link → on complete → PM alert + expense txn
-```
-
----
-
-## Deployment Checklist
-
-- [ ] v2 migration run (`fieldstay_migration_v2.sql`)
-- [ ] All env vars in Vercel project settings
-- [ ] Storage buckets: `turnover-photos`, `work-order-photos`, `crew-uploads`
-- [ ] Inngest functions registered and tested
-- [ ] Stripe webhook: `https://app.fieldstay.com/api/webhooks/stripe`
-- [ ] Resend domain `fieldstay.com` verified
-- [ ] PowerSync instance connected to Supabase (before crew app goes live)
-
-Color Updates Needed in the Codebase
-tailwind.config.ts needs to be updated to match the new brand palette. Here's the exact replacement:
-colors: {
-  brand: {
-    50:  '#EEF1F7',
-    100: '#D5DBE9',
-    200: '#AAB7D4',
-    300: '#7F93BE',
-    400: '#546FA9',
-    500: '#2A4B8D',
-    600: '#1A3570',
-    700: '#152C5C',
-    800: '#102246',  // ← primary deep navy (was #093b31 forest green)
-    900: '#0B1830',
-  },
-  gold: {
-    50:  '#FFFDE7',
-    100: '#FFF8C2',
-    200: '#FEF08A',
-    300: '#FCD116',  // ← primary accent yellow
-    400: '#EAB800',
-    500: '#CA9A00',
-  },
-  accent: {
-    50:  '#F8F9FA',  // ← app background
-    100: '#E9ECEF',
-    200: '#DEE2E6',
-    300: '#CED4DA',
-    400: '#ADB5BD',
-    500: '#6C757D',
-    600: '#495057',
-    700: '#343A40',
-    800: '#1A1D20',  // ← body text
-    900: '#0D0F11',
-  },
-},
-Then in globals.css, update the button classes
-/* Primary button — navy background, dark text on yellow CTA */
-.btn-primary {
-  @apply btn bg-brand-800 text-white hover:bg-brand-700 focus:ring-brand-500;
-}
-
-/* CTA / action button — yellow, dark text */
-.btn-cta {
-  @apply btn bg-gold-300 text-brand-800 hover:bg-gold-400 focus:ring-gold-300;
-}
-
-Use .btn-cta for: "Save & Continue", "Add Property", "Assign Crew", alert badges. Use .btn-primary (navy) for secondary actions and nav.
-Also update the sidebar background in app/(dashboard)/layout.tsx from bg-brand-800 — that still works since we're keeping the same Tailwind key.
+- [ ] v2 migration re-run — check `crew_members` table in Supabase for
+  `invite_token`, `invite_sent_at`, `invite_accepted_at` columns
+- [ ] Settings → Crew tab → crew member with email shows "Invite to app" button
+- [ ] Click invite → email received → link goes to `/crew/accept-invite/[token]`
+- [ ] Accept invite form → create account → redirected to `/crew`
+- [ ] In Supabase, `crew_members.user_id` now populated for that crew member
+- [ ] Checklist builder → global photo toggle switches all items
+- [ ] Section header camera button toggles all items in that section
+- [ ] Crew app turnover page → item with `requires_photo=true` → tapping
+  circle triggers camera → photo uploads → item auto-checks off
+- [ ] Item with `requires_photo=false` → tapping circle toggles immediately
+  (no camera prompt)
+- [ ] "Mark as Complete" on a turnover with pending photos → shows confirm
+  dialog before proceeding
