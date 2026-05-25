@@ -158,6 +158,29 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
       const photos   = Array.isArray(wo.work_order_photos) ? wo.work_order_photos : []
 
+      // Auto-create expense transaction if WO has a cost
+      const cost = wo.actual_cost
+      if (property && cost && cost > 0) {
+        const { count } = await supabase
+          .from('owner_transactions')
+          .select('id', { count: 'exact', head: true })
+          .eq('work_order_id', work_order_id)
+
+        if ((count ?? 0) === 0) {
+          await supabase.from('owner_transactions').insert({
+            property_id:      (property as { id: string }).id,
+            org_id:           wo.org_id,
+            work_order_id,
+            transaction_type: 'expense',
+            category:         'maintenance',
+            amount:           cost,
+            description:      wo.title,
+            transaction_date: new Date().toISOString().split('T')[0],
+            notes:            'Auto-created from vendor portal completion',
+          })
+        }
+      }
+
       await resend.emails.send({
         from:    FROM,
         to:      user.email,

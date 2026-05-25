@@ -1,104 +1,198 @@
-# CLAUDE.md — FieldStay Development Guide
+# CLAUDE.md — FieldStay
 
-This file tells Claude Code everything it needs to know to work on the FieldStay codebase.
-Read this entire file before writing any code or running any commands.
+Complete reference for working on this codebase. Read every section before
+writing any code or running any commands.
+
+---
+
+## 🚨 Fix This First — Critical Bug
+
+**`middleware.ts` is missing from the repo root.**
+
+The file `middleware (35).ts` at root is junk (wrong content, wrong name).
+Without `middleware.ts`, Next.js cannot protect any routes. Fix before anything else.
+
+**Step 1 — Delete all junk root files:**
+
+```bash
+rm -f "actions (16).ts" "actions (19).ts" "actions (21).ts" "actions (23).ts" \
+      "actions (27).ts" "actions (30).ts" actions.ts auth.ts \
+      booking-events.ts "client (37).ts" "client (38).ts" client.ts \
+      details-form.tsx events.ts fieldstay-complete.zip ical-form.tsx \
+      inventory-events.ts "layout (33).tsx" "layout (34).tsx" "layout (4).tsx" \
+      layout.tsx maintenance-check.ts maintenance-form.tsx messages-form.tsx \
+      "middleware (35).ts" "page (12).tsx" "page (15).tsx" "page (17).tsx" \
+      "page (18).tsx" "page (31).tsx" "page (8).tsx" page.tsx parser.ts \
+      server.ts turnover-events.ts utils.ts wizard.ts
+```
+
+**Step 2 — Recreate `middleware.ts` at repo root:**
+
+```ts
+import { NextResponse, type NextRequest } from 'next/server'
+import { updateSession } from '@/lib/supabase/middleware'
+
+const PUBLIC_ROUTES = ['/login', '/signup', '/forgot-password', '/reset-password']
+const TOKEN_ROUTES  = ['/owner/', '/work-orders/', '/api/work-orders']
+const BYPASS_ROUTES = ['/api/inngest', '/api/webhooks/stripe', '/_next', '/favicon', '/robots', '/sitemap']
+
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return NextResponse.next()
+  if (TOKEN_ROUTES.some((r) => pathname.startsWith(r)))  return NextResponse.next()
+
+  const { supabaseResponse, user } = await updateSession(request)
+
+  const isPublic = PUBLIC_ROUTES.some((r) => pathname === r || pathname.startsWith(r + '/'))
+
+  if (!user && !isPublic) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('next', pathname)
+    return NextResponse.redirect(url)
+  }
+
+  if (user && isPublic) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/properties'
+    url.search   = ''
+    return NextResponse.redirect(url)
+  }
+
+  return supabaseResponse
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+}
+```
+
+Commit and push this fix before doing anything else.
 
 ---
 
 ## What Is FieldStay?
 
-FieldStay is a multi-tenant SaaS platform for short-term rental (STR) property managers.
-It is a standalone product — not connected to any other codebase.
+Multi-tenant SaaS for short-term rental (STR) property managers.
+Standalone product — not connected to any other codebase.
 
-**Core value:** One platform for turnover coordination, inventory tracking, maintenance
-scheduling, and owner reporting. Offline-capable for cleaning crews via PowerSync.
+**Core features:** turnover coordination, inventory with purchase orders,
+maintenance scheduling, guest messaging, and owner P&L reporting.
+Offline-capable for cleaning crews via PowerSync.
 
-**Tech stack:**
-- **Framework:** Next.js 15 (App Router, TypeScript)
-- **Database:** Supabase (Postgres + Row Level Security + Realtime + Storage)
-- **Auth:** Supabase Auth
-- **Background jobs:** Inngest (event-driven, scheduled functions)
-- **Offline sync:** PowerSync (SQLite on-device for crew app)
-- **Email:** Resend
-- **Payments:** Stripe
-- **Hosting:** Vercel
+**Stack:**
+| Layer        | Tech                              |
+|--------------|-----------------------------------|
+| Framework    | Next.js 15 (App Router, TS)       |
+| Database     | Supabase (Postgres + RLS)         |
+| Auth         | Supabase Auth                     |
+| Storage      | Supabase Storage                  |
+| Background   | Inngest                           |
+| Offline sync | PowerSync (crew app — not built)  |
+| Email        | Resend                            |
+| Payments     | Stripe                            |
+| Hosting      | Vercel                            |
 
 ---
 
-## First-Time Setup (Claude Code Environment)
+## First-Time Local Setup
 
-### Step 1 — Install dependencies
-
+### 1 — Install dependencies
 ```bash
 npm install
 ```
 
-### Step 2 — Environment variables
-
+### 2 — Environment variables
 ```bash
 cp .env.example .env.local
 ```
 
-Then fill in every variable in `.env.local`. The required services are:
+Fill `.env.local`:
 
-**Supabase** — create a project at https://supabase.com
-- `NEXT_PUBLIC_SUPABASE_URL` — project URL from Settings > API
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — anon key from Settings > API
-- `SUPABASE_SERVICE_ROLE_KEY` — service role key from Settings > API
+**Supabase** — project → Settings → API
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+```
 
-**Inngest** — create an account at https://inngest.com, create an app named `fieldstay`
-- `INNGEST_EVENT_KEY` — from Manage > Keys
-- `INNGEST_SIGNING_KEY` — from Manage > Keys
+**Inngest** — app named `fieldstay` → Manage → Keys
+```
+INNGEST_EVENT_KEY=
+INNGEST_SIGNING_KEY=
+```
 
-**Resend** — create an account at https://resend.com, add domain `fieldstay.com`
-- `RESEND_API_KEY` — API key
-- `RESEND_FROM_EMAIL` — verified sender email (e.g. noreply@fieldstay.com)
-- `RESEND_FROM_NAME` — "FieldStay"
+**Resend**
+```
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=onboarding@resend.dev   # pre-verified for local dev
+RESEND_FROM_NAME=FieldStay
+```
 
-**Stripe** — create account at https://stripe.com
-- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
-- `STRIPE_SECRET_KEY`
-- `STRIPE_WEBHOOK_SECRET` — from Webhooks > endpoint
-- `STRIPE_PRICE_STARTER`, `STRIPE_PRICE_GROWTH`, `STRIPE_PRICE_PRO` — price IDs
+**Stripe**
+```
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PRICE_STARTER=
+STRIPE_PRICE_GROWTH=
+STRIPE_PRICE_PRO=
+```
+Local webhook testing: `stripe listen --forward-to localhost:3000/api/webhooks/stripe`
 
-**PowerSync** — create account at https://powersync.com, connect Supabase project
-- `NEXT_PUBLIC_POWERSYNC_URL` — instance URL
+**PowerSync** — placeholder until crew app is built
+```
+NEXT_PUBLIC_POWERSYNC_URL=https://placeholder.powersync.journey.tech
+```
 
 **App**
-- `NEXT_PUBLIC_APP_URL` — `http://localhost:3000` for local dev
-
-### Step 3 — Supabase database setup
-
-Run the migration file in the Supabase SQL Editor:
-1. Go to https://supabase.com/dashboard/project/[your-project]/sql
-2. Paste and run the entire contents of `fieldstay_migration_v1.sql`
-3. This creates all 30 tables, 57 RLS policies, 55 indexes, and seeds inventory catalog data
-
-Then create Storage buckets (in Supabase Dashboard > Storage > New Bucket):
-- `turnover-photos` — public
-- `work-order-photos` — public
-- `crew-uploads` — public
-
-### Step 4 — Run the dev server
-
-In terminal 1:
-```bash
-npm run dev
+```
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-In terminal 2 (for Inngest local dev):
+### 3 — Run the migration
+
+In Supabase SQL Editor: run `fieldstay_migration_v1.sql` in full.
+Then run the v2 migration from **Outstanding Schema Changes** below.
+
+Create Storage buckets (public): `turnover-photos`, `work-order-photos`, `crew-uploads`
+
+### 4 — Dev servers
+
 ```bash
-npm run inngest:dev
+npm run dev          # Terminal 1
+npm run inngest:dev  # Terminal 2 — UI at http://localhost:8288
 ```
 
-Inngest dev server runs at http://localhost:8288 — visit it to see and trigger functions.
+### 5 — First user
 
-### Step 5 — Verify everything works
+Sign up at http://localhost:3000/signup → onboarding → add first property.
 
-1. Visit http://localhost:3000 — should redirect to /login
-2. Sign up for an account (the signup page still needs to be built — see build queue)
-3. For now, create a user in Supabase Dashboard > Authentication > Users
-4. Then manually insert an organization and organization_member record in the SQL editor
+---
+
+## Outstanding Schema Changes (Run After v1 Migration)
+
+```sql
+-- v2: avg_nightly_rate on properties (booking revenue auto-calculation)
+ALTER TABLE properties
+  ADD COLUMN IF NOT EXISTS avg_nightly_rate numeric(10,2) DEFAULT NULL;
+
+-- v2: booking_id on owner_transactions (link revenue to specific booking)
+ALTER TABLE owner_transactions
+  ADD COLUMN IF NOT EXISTS booking_id uuid REFERENCES bookings(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_owner_txn_booking_id ON owner_transactions(booking_id);
+```
+
+Also update `types/database.ts`:
+```ts
+// In Property interface, add:
+avg_nightly_rate: number | null
+
+// In OwnerTransaction interface, add:
+booking_id: string | null
+```
 
 ---
 
@@ -106,603 +200,778 @@ Inngest dev server runs at http://localhost:8288 — visit it to see and trigger
 
 ```
 fieldstay/
-├── app/
-│   ├── (auth)/                    # Public auth pages
-│   │   ├── login/                 # ✅ Built
-│   │   └── signup/                # ⬜ TODO
-│   ├── (dashboard)/               # Protected PM/manager views
-│   │   ├── layout.tsx             # ✅ Sidebar nav, org membership check
-│   │   ├── properties/            # ✅ Full CRUD + 7-step wizard
-│   │   ├── turnovers/             # ✅ Board + detail
-│   │   ├── inventory/             # ⬜ TODO (stub exists)
-│   │   ├── maintenance/           # ⬜ TODO (stub exists)
-│   │   ├── communications/        # ⬜ TODO (stub exists)
-│   │   ├── owners/                # ⬜ TODO (stub exists)
-│   │   └── settings/              # ⬜ TODO (stub exists)
-│   ├── crew/                      # Crew offline PWA (PowerSync)
-│   │   └── layout.tsx             # ✅ Basic shell — full app TODO
-│   ├── owner/[token]/             # ✅ Tokenized owner portal shell
-│   └── api/
-│       ├── inngest/route.ts       # ✅ All functions registered
-│       ├── webhooks/stripe/       # ✅ Subscription lifecycle
-│       └── work-orders/[token]/   # ✅ Vendor completion portal
+├── middleware.ts                    ← RECREATE (see top of file)
+├── fieldstay_migration_v1.sql       ✅ Run in Supabase SQL Editor
+├── package.json / next.config.ts / tailwind.config.ts / tsconfig.json / vercel.json
+│
+├── types/database.ts                ✅ All 30 tables typed — update for v2
+│
 ├── lib/
-│   ├── supabase/                  # ✅ server.ts, client.ts, middleware.ts
+│   ├── auth.ts                      ✅ requireAuth, requireOrgMember, requireProperty
+│   ├── utils.ts                     ✅ cn, formatDate, formatWindow, status maps
+│   ├── wizard.ts                    ✅ WIZARD_STEPS helpers
+│   ├── ical/parser.ts               ✅ iCal parsing
+│   ├── turnovers/generator.ts       ✅ NEEDS checklist instance creation (Fix 1)
+│   ├── supabase/{server,client,middleware}.ts  ✅
 │   ├── inngest/
-│   │   ├── client.ts              # ✅
-│   │   ├── events.ts              # ✅ All event types defined
-│   │   └── functions/             # ✅ All 8 functions built
-│   ├── ical/parser.ts             # ✅
-│   ├── turnovers/generator.ts     # ✅
-│   ├── resend/client.ts           # ✅
-│   ├── stripe/client.ts           # ✅
-│   ├── auth.ts                    # ✅ requireAuth, requireOrgMember, requireProperty
-│   ├── wizard.ts                  # ✅ WIZARD_STEPS, step helpers
-│   └── utils.ts                   # ✅ cn, formatDate, formatWindow, etc.
-├── types/
-│   └── database.ts                # ✅ All 30 tables typed
-├── middleware.ts                  # ✅ Route protection
-├── fieldstay_migration_v1.sql     # ✅ Complete database schema
-└── CLAUDE.md                      # This file
+│   │   ├── client.ts + events.ts    ✅
+│   │   └── functions/
+│   │       ├── ical-sync.ts         ✅
+│   │       ├── booking-events.ts    ✅ NEEDS booking revenue auto-create (Fix 2b)
+│   │       ├── turnover-events.ts   ✅
+│   │       ├── maintenance-check.ts ✅
+│   │       ├── inventory-events.ts  ✅
+│   │       └── work-order-events.ts ✅ NEEDS expense auto-create (Fix 2c)
+│   ├── resend/client.ts             ✅
+│   └── stripe/client.ts             ✅
+│
+├── app/
+│   ├── (auth)/login/ + signup/      ✅
+│   ├── onboarding/                  ✅
+│   ├── (dashboard)/
+│   │   ├── layout.tsx + dashboard-nav.tsx  ✅
+│   │   ├── properties/              ✅ Full CRUD + 7-step wizard
+│   │   │   └── [id]/setup/          ✅ NEEDS avg_nightly_rate in details step (Fix 2a)
+│   │   ├── turnovers/               ✅ Board + detail
+│   │   ├── inventory/               ✅ NEEDS catalog picker in add modal (Fix 3)
+│   │   ├── maintenance/             ✅ Work order board + schedule management + WO detail
+│   │   ├── communications/          ✅ Sent message log
+│   │   ├── owners/                  ✅ NEEDS transaction management UI (Fix 2d)
+│   │   └── settings/                ✅ Org / Crew / Vendors / Billing
+│   ├── owner/[token]/page.tsx       ✅ Read-only P&L portal
+│   ├── work-orders/[token]/         ✅ Vendor completion portal
+│   ├── crew/                        ⬜ STUB — build after fixes
+│   └── api/inngest/ + webhooks/stripe/ + work-orders/[token]/complete/  ✅
 ```
 
 ---
 
-## Code Patterns — Read Before Writing Any Code
+## Three Things to Fix (In Order)
 
-### Pattern 1: Server Components fetch data, Client Components handle interaction
+---
 
-```tsx
-// page.tsx — Server Component (fetches data)
-export default async function InventoryPage({ params }) {
-  const { supabase, membership } = await requireOrgMember()
-  const { data: items } = await supabase
-    .from('inventory_items')
-    .select('*')
-    .eq('org_id', membership.org_id)
-  return <InventoryList items={items ?? []} />
-}
+### Fix 1 — Checklist instances never created
 
-// inventory-list.tsx — Client Component (handles interaction)
-'use client'
-export function InventoryList({ items }) {
-  const [state, action, pending] = useActionState(updateItem, null)
-  // ...
+When a turnover is generated, no `checklist_instance` or `checklist_instance_items`
+records are created. The crew sees empty turnovers even when the property has
+a checklist set up.
+
+**Edit:** `lib/turnovers/generator.ts`
+
+After the `supabase.from('turnovers').insert(...)` that creates a turnover and
+confirms the id, add immediately after:
+
+```ts
+// Snapshot the default checklist into an instance for this turnover
+if (defaultTemplate?.id && turnover) {
+  const { data: sections } = await supabase
+    .from('checklist_template_sections')
+    .select(`
+      id, name, sort_order,
+      checklist_template_items ( id, task, requires_photo, notes, sort_order )
+    `)
+    .eq('template_id', defaultTemplate.id)
+    .order('sort_order', { ascending: true })
+
+  if (sections && sections.length > 0) {
+    const { data: instance } = await supabase
+      .from('checklist_instances')
+      .insert({
+        turnover_id:       turnover.id,
+        org_id:            orgId,
+        template_id:       defaultTemplate.id,
+        template_snapshot: sections,
+        status:            'not_started',
+      })
+      .select('id')
+      .single()
+
+    if (instance) {
+      const items = sections.flatMap((section) =>
+        (section.checklist_template_items ?? []).map((item: {
+          task: string; requires_photo: boolean; notes: string | null; sort_order: number
+        }) => ({
+          instance_id:    instance.id,
+          section_name:   section.name,
+          task:           item.task,
+          requires_photo: item.requires_photo,
+          notes:          item.notes,
+          sort_order:     item.sort_order,
+          is_completed:   false,
+        }))
+      )
+      if (items.length > 0) {
+        await supabase.from('checklist_instance_items').insert(items)
+      }
+    }
+  }
 }
 ```
 
-### Pattern 2: Server Actions with `useActionState`
+---
+
+### Fix 2 — Owner P&L: auto-populate revenue/expenses + manual entry UI
+
+The owner portal always shows $0 because `owner_transactions` is never populated.
+
+**Design:** Three data sources feed the P&L:
+1. **Booking revenue** — auto-created when iCal detects a new booking,
+   calculated as `nights × property.avg_nightly_rate` (if the PM has set a rate)
+2. **Work order expenses** — auto-created when PM or vendor marks a WO complete
+   and there is a cost on it
+3. **Manual entries** — PM can add any revenue or expense from the owners dashboard
+   (nightly rate overrides, cleaning fees, utilities, insurance, anything)
+
+The owner portal is read-only — data flows in from the dashboard, not from the portal.
+
+#### Fix 2a — Add avg_nightly_rate to property details step
+
+**Edit:** `app/(dashboard)/properties/[id]/setup/details/details-form.tsx`
+
+Add after the check-in/check-out time grid:
+
+```tsx
+<div>
+  <label htmlFor="avg_nightly_rate" className="label">
+    Average Nightly Rate ($)
+  </label>
+  <input
+    id="avg_nightly_rate"
+    name="avg_nightly_rate"
+    type="number"
+    min="0"
+    step="0.01"
+    defaultValue={property.avg_nightly_rate ?? ''}
+    className="input"
+    placeholder="e.g. 285.00"
+  />
+  <p className="text-xs text-accent-400 mt-1">
+    Used to automatically estimate booking revenue in the owner portal.
+    You can always adjust individual entries manually.
+  </p>
+</div>
+```
+
+**Edit:** `app/(dashboard)/properties/[id]/setup/details/actions.ts`
+
+Parse and include in the update:
 
 ```ts
-// actions.ts
-'use server'
-export async function updateInventoryItem(
-  _prev: ActionState | null,
+const avg_nightly_rate = formData.get('avg_nightly_rate')
+  ? parseFloat(formData.get('avg_nightly_rate') as string)
+  : null
+// Add avg_nightly_rate to the supabase.update(...) payload
+```
+
+Apply the same field to `app/(dashboard)/properties/new/new-property-form.tsx`.
+
+#### Fix 2b — Auto-create booking revenue transaction in Inngest
+
+**Edit:** `lib/inngest/functions/booking-events.ts`
+
+In `handleBookingDetected`, add a new step after fetching the booking/property data:
+
+```ts
+await step.run('create-booking-revenue-transaction', async () => {
+  const supabase = createServiceClient()
+
+  // Fetch nightly rate from the property
+  const { data: prop } = await supabase
+    .from('properties')
+    .select('avg_nightly_rate')
+    .eq('id', property_id)
+    .single()
+
+  // Skip if PM hasn't set a rate — they'll add manually
+  if (!prop?.avg_nightly_rate) return
+
+  // Avoid duplicate if already recorded (re-sync scenario)
+  const { count } = await supabase
+    .from('owner_transactions')
+    .select('id', { count: 'exact', head: true })
+    .eq('booking_id', booking_id)
+
+  if ((count ?? 0) > 0) return
+
+  // Calculate nights
+  const checkin  = new Date(booking.checkin_date + 'T00:00:00')
+  const checkout = new Date(booking.checkout_date + 'T00:00:00')
+  const nights   = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
+  if (nights <= 0) return
+
+  const amount      = parseFloat((nights * prop.avg_nightly_rate).toFixed(2))
+  const guestLabel  = booking.guest_name ? ` — ${booking.guest_name}` : ''
+  const description = `${nights} night${nights !== 1 ? 's' : ''}${guestLabel}`
+
+  await supabase.from('owner_transactions').insert({
+    property_id,
+    org_id,
+    booking_id,
+    transaction_type: 'revenue',
+    category:         'booking_revenue',
+    amount,
+    description,
+    transaction_date: booking.checkin_date,
+    notes:            `${booking.source} · ${booking.checkin_date} to ${booking.checkout_date}`,
+  })
+})
+```
+
+#### Fix 2c — Auto-create expense when work order is completed
+
+**Edit:** `app/(dashboard)/maintenance/actions.ts`
+
+In `updateWorkOrderStatus`, after marking the WO complete, add:
+
+```ts
+if (status === 'completed') {
+  // Fetch the WO to get cost
+  const { data: wo } = await supabase
+    .from('work_orders')
+    .select('actual_cost, estimated_cost, title, property_id')
+    .eq('id', workOrderId)
+    .single()
+
+  const cost = wo?.actual_cost ?? wo?.estimated_cost
+  if (wo && cost && cost > 0) {
+    // Check not already recorded
+    const { count } = await supabase
+      .from('owner_transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('work_order_id', workOrderId)
+
+    if ((count ?? 0) === 0) {
+      await supabase.from('owner_transactions').insert({
+        property_id:      wo.property_id,
+        org_id:           membership.org_id,
+        work_order_id:    workOrderId,
+        transaction_type: 'expense',
+        category:         'maintenance',
+        amount:           cost,
+        description:      wo.title,
+        transaction_date: new Date().toISOString().split('T')[0],
+      })
+    }
+  }
+}
+```
+
+Apply the same pattern in `lib/inngest/functions/work-order-events.ts` inside
+`handleWorkOrderCompletedViaPortal` — if `actual_cost` is on the WO, create
+the expense transaction there too.
+
+#### Fix 2d — Manual transaction UI in Owners dashboard
+
+Add server actions to `app/(dashboard)/owners/actions.ts`:
+
+```ts
+export async function addOwnerTransaction(
+  _prev: OwnersActionState | null,
   formData: FormData
-): Promise<ActionState> {
+): Promise<OwnersActionState> {
   const { supabase, membership } = await requireOrgMember()
-  // Always verify org ownership before mutating
-  // ...
-  revalidatePath('/inventory')
+
+  const property_id      = formData.get('property_id') as string
+  const transaction_type = formData.get('transaction_type') as 'revenue' | 'expense'
+  const category         = formData.get('category') as string
+  const amount           = parseFloat(formData.get('amount') as string)
+  const description      = (formData.get('description') as string)?.trim()
+  const transaction_date = formData.get('transaction_date') as string
+  const notes            = (formData.get('notes') as string)?.trim() || null
+
+  if (!property_id)           return { error: 'Property is required' }
+  if (!description)           return { error: 'Description is required' }
+  if (!amount || amount <= 0) return { error: 'Amount must be greater than 0' }
+  if (!transaction_date)      return { error: 'Date is required' }
+
+  const { data: property } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('id', property_id)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!property) return { error: 'Property not found' }
+
+  const { error } = await supabase.from('owner_transactions').insert({
+    property_id,
+    org_id:           membership.org_id,
+    transaction_type,
+    category:         category as import('@/types/database').TxnCategory,
+    amount,
+    description,
+    transaction_date,
+    notes,
+  })
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/owners')
   return { success: true }
 }
+
+export async function deleteOwnerTransaction(txnId: string): Promise<void> {
+  const { supabase, membership } = await requireOrgMember()
+  await supabase
+    .from('owner_transactions')
+    .delete()
+    .eq('id', txnId)
+    .eq('org_id', membership.org_id)
+  revalidatePath('/owners')
+}
 ```
 
-```tsx
-// client form
-'use client'
-const [state, action, pending] = useActionState(updateInventoryItem, null)
-return <form action={action}>...</form>
-```
+**Edit:** `app/(dashboard)/owners/page.tsx`
 
-### Pattern 3: Auth helpers
+Add transaction fetch:
 
 ```ts
-// Simple auth check — use in every Server Component and Server Action
-const { user, supabase, membership } = await requireOrgMember()
-// membership.org_id, membership.role, membership.org.plan
-
-// Property ownership check
-const { property, supabase, membership } = await requireProperty(propertyId)
-// If property doesn't belong to org → automatic redirect to /properties
-```
-
-### Pattern 4: Service client for background jobs
-
-```ts
-// In Inngest functions and webhook handlers — bypasses RLS
-import { createServiceClient } from '@/lib/supabase/server'
-const supabase = createServiceClient()
-// Use for: iCal sync, email sending, Stripe webhooks
-```
-
-### Pattern 5: Inngest functions
-
-```ts
-export const myFunction = inngest.createFunction(
-  { id: 'my-function', name: 'Human Readable Name', retries: 2 },
-  { event: 'my-event/name' as const },
-  async ({ event, step, logger }) => {
-    // Use step.run() for each discrete unit of work
-    // Each step is retried independently if it fails
-    const result = await step.run('step-name', async () => {
-      // Database operations, API calls, etc.
-    })
-    // Use step.sleepUntil() for time-based delays
-    await step.sleepUntil('wait-label', new Date('2025-01-01'))
-    // Use step.sendEvent() to fan out
-    await step.sendEvent('fan-out', [{ name: 'other/event', data: {} }])
-  }
-)
-// Register in app/api/inngest/route.ts
-```
-
-### Pattern 6: Database queries — always filter by org_id
-
-```ts
-// WRONG — missing org_id filter (RLS will catch it but be explicit)
-const { data } = await supabase.from('properties').select('*')
-
-// RIGHT — always include org_id
-const { data } = await supabase
-  .from('properties')
-  .select('*')
+const { data: transactions } = await supabase
+  .from('owner_transactions')
+  .select('id, property_id, transaction_type, category, amount, description, transaction_date, notes, work_order_id, booking_id')
   .eq('org_id', membership.org_id)
+  .order('transaction_date', { ascending: false })
 ```
 
-### Pattern 7: TypeScript types
+Pass `transactions` to `OwnersManager`.
+
+**Edit:** `app/(dashboard)/owners/owners-manager.tsx`
+
+Add a collapsible "Transactions" panel per owner that shows:
+- All existing transactions for that property (grouped by month, newest first)
+- Each row: date | type badge | category | description | amount | delete button
+- "Add Transaction" button that opens an inline form
+
+The add transaction form collects:
+- **Type:** Revenue / Expense (toggle — two buttons, not a dropdown)
+- **Date:** date input (defaults to today)
+- **Category:** select (booking_revenue, cleaning_fee, maintenance, restock, utility, insurance, supplies, other)
+- **Description:** text (required) — e.g. "4-night stay", "HVAC repair", "Internet bill"
+- **Amount:** number (required, always positive — type determines +/−)
+- **Notes:** optional text
+
+The category list for **Revenue**: booking_revenue, other
+The category list for **Expense**: cleaning_fee, maintenance, restock, utility, insurance, supplies, other
+
+Keep the form simple — no linking to bookings or work orders required. Auto-populated
+transactions from Inngest already handle that linkage.
+
+---
+
+### Fix 3 — Add catalog picker to inventory add-item modal
+
+The `/inventory` page add-item modal only allows custom items. PMs who want
+to add a standard item (toilet paper, dish soap, etc.) after initial setup
+must type everything manually.
+
+#### Fix 3a — Pass catalog items from server
+
+**Edit:** `app/(dashboard)/inventory/page.tsx`
+
+Add to the `Promise.all`:
 
 ```ts
-// Import types from types/database.ts — never use `any`
-import type { Property, Turnover, WorkOrder } from '@/types/database'
+supabase
+  .from('inventory_catalog')
+  .select('id, name, category, default_unit')
+  .eq('is_active', true)
+  .order('category')
+  .order('name'),
+```
 
-// For Supabase query results with joins, define inline types
-interface TurnoverWithAssignment extends Turnover {
-  turnover_assignments: TurnoverAssignment[]
+Pass `catalogItems` to `InventoryManager`.
+
+#### Fix 3b — Update InventoryManager props
+
+Add `catalogItems: CatalogItem[]` to the Props interface and component signature.
+Define:
+
+```ts
+interface CatalogItem {
+  id: string
+  name: string
+  category: InventoryCategory
+  default_unit: string
 }
 ```
 
-### Pattern 8: Tailwind styling
+Compute which catalog items are already added to the selected property:
 
-Use only the design tokens defined in `tailwind.config.ts`:
-- `brand-800` = forest green (primary buttons, sidebar)
-- `accent-*` = slate scale (text, borders, backgrounds)
-- Pre-built component classes in `globals.css`: `.btn-primary`, `.btn-secondary`, `.btn-ghost`, `.btn-danger`, `.card`, `.input`, `.label`, `.badge`, `.badge-green`, `.badge-amber`, `.badge-red`, `.badge-blue`, `.badge-slate`, `.section-header`, `.page-title`, `.page-subtitle`
-
----
-
-## What Has Been Built
-
-### Database (complete)
-- 30 tables, 57 RLS policies, 55 indexes
-- Full multi-tenant isolation via `org_id` on every table
-- 4 roles: admin, manager, crew, viewer
-- Inventory catalog pre-seeded with 38 common STR items
-
-### Auth & Middleware
-- Supabase Auth integration (login form built)
-- Route protection via `middleware.ts`
-- `requireOrgMember()` and `requireProperty()` helpers in `lib/auth.ts`
-
-### Properties (complete)
-- Properties list with setup progress indicators
-- Add new property form
-- 7-step setup wizard (details, iCal, inventory, messages, checklist, maintenance, crew)
-- Each wizard step saves independently with progress tracking
-
-### Turnovers (complete)
-- Board grouped by: urgent, today, tomorrow, this week, upcoming, completed
-- Inline crew assignment dropdown
-- Status updates: assigned → in_progress → completed / flagged
-- Manual turnover creation modal
-- Turnover detail page with checklist instance view
-- Manual iCal sync trigger
-
-### Inngest Functions (complete — all registered)
-- `syncAllIcalFeeds` — cron every 4h, fans out per feed
-- `syncIcalFeed` — parse iCal, upsert bookings, generate turnovers
-- `handleBookingDetected` — booking confirmation email + pre-checkout reminder (sleepUntil)
-- `handleTurnoverCreated` — crew notification + 24h unassigned warning
-- `handleTurnoverCompleted` — PM notification
-- `dailyMaintenanceCheck` — cron 8am, alert or auto-create work orders
-- `handleInventoryCountSubmitted` — apply count, generate PO, email PM
-- `handleWorkOrderCreated` — vendor portal link email
-- `handleWorkOrderCompletedViaPortal` — PM notification
-- `handleWorkOrderOverdue` — overdue alert
-
-### Supporting Libraries
-- `lib/ical/parser.ts` — robust iCal parsing (ical.js)
-- `lib/turnovers/generator.ts` — turnover generation from booking pairs
-- `lib/resend/client.ts` — email client + `renderTemplate()` for `{{variable}}` substitution
-- `lib/stripe/client.ts` — Stripe client + plan definitions
-- `lib/wizard.ts` — wizard step constants and helpers
-
----
-
-## Build Queue — What Still Needs to Be Built
-
-Build in this order — each item depends on the previous.
-
-### 1. Signup + Onboarding (NEXT — nothing works without this)
-
-**Files to create:**
-- `app/(auth)/signup/page.tsx`
-- `app/(auth)/signup/signup-form.tsx` (client)
-- `app/onboarding/page.tsx` — create org + first property
-- `app/onboarding/layout.tsx`
-
-**Key implementation notes:**
-- Signup form: email + password + full name → `supabase.auth.signUp()`
-- After signup, redirect to `/onboarding`
-- Onboarding creates the `organizations` record and the first `organization_members` row
-- Organization `slug` = `slugify(orgName)` — must be unique; add suffix if collision
-- After org created, redirect to `/properties/new`
-- The `handle_new_user` trigger in Supabase auto-creates the `profiles` row
-
-**Organization creation (server action):**
 ```ts
-// Create org
-const { data: org } = await supabase.from('organizations').insert({
-  name, slug, billing_email: user.email, plan: 'starter', plan_status: 'trialing',
-  trial_ends_at: new Date(Date.now() + 14 * 86_400_000).toISOString(),
-}).select('id').single()
+const existingCatalogIds = new Set(
+  propertyItems.map((i) => i.catalog_item_id).filter(Boolean) as string[]
+)
+```
 
-// Add user as admin
-await supabase.from('organization_members').insert({
-  org_id: org.id, user_id: user.id, role: 'admin',
-  invite_accepted_at: new Date().toISOString(),
-})
+Pass both to `AddItemModal`.
+
+#### Fix 3c — Replace AddItemModal with two-tab version
+
+Make `AddItemModal` have two tabs: **From Catalog** and **Custom Item**.
+
+**From Catalog tab:**
+- Category filter pills at the top (All, Paper Goods, Cleaning, Kitchen, Bath, etc.)
+- Scrollable list of available catalog items (exclude already-added ones, show a "Already added" note for those)
+- Clicking a row selects it (highlighted state)
+- Par level input appears once an item is selected
+- Submit button shows the selected item name: `Add "Toilet Paper"`
+
+**Custom Item tab:**
+- Existing form unchanged (name, category, unit, par level, notes)
+
+Both tabs submit to the same `addInventoryItem` action.
+
+#### Fix 3d — Update addInventoryItem action
+
+**Edit:** `app/(dashboard)/inventory/actions.ts`
+
+Accept `catalog_item_id`:
+
+```ts
+const catalog_item_id = (formData.get('catalog_item_id') as string) || null
+
+// In the insert, change catalog_item_id from null to:
+catalog_item_id,
 ```
 
 ---
 
-### 2. Inventory Management Page
+## Next Major Feature: Crew App (PowerSync Offline)
 
-**Files to create:**
-- `app/(dashboard)/inventory/page.tsx` (replace stub — server)
-- `app/(dashboard)/inventory/inventory-manager.tsx` (client)
-- `app/(dashboard)/inventory/actions.ts`
+The crew-facing app at `/crew` is a stub. Build this after the three fixes above
+are working and verified.
 
-**What it shows:**
-- Tabs per property (or property filter dropdown)
-- All inventory items grouped by category with current qty vs par level
-- Color coding: red = at/below par, amber = low, green = healthy
-- Edit par level inline
-- Add custom item
-- View purchase order history
-- "Run inventory count" button → shows a form for PM to manually enter quantities
+### Files to create
 
-**Inventory count from dashboard (PM can do it, not just crew):**
-```ts
-// Server action: submitInventoryCount
-// Creates inventory_count + inventory_count_items records
-// Fires inngest event: 'inventory/count-submitted'
-await inngest.send({ name: 'inventory/count-submitted', data: { count_id, property_id, org_id } })
+```
+lib/powersync/schema.ts       ← PowerSync SQLite table definitions
+lib/powersync/client.ts       ← PowerSync database + Supabase connector
+
+app/crew/page.tsx             ← Replace stub: today's assigned turnovers
+app/crew/turnovers/[id]/page.tsx        ← Turnover detail
+app/crew/turnovers/[id]/checklist.tsx   ← Offline checklist completion
+app/crew/inventory/[propertyId]/page.tsx ← Offline inventory count form
 ```
 
----
+### PowerSync schema
 
-### 3. Maintenance Page (Work Orders)
-
-**Files to create:**
-- `app/(dashboard)/maintenance/page.tsx` (replace stub — server)
-- `app/(dashboard)/maintenance/maintenance-board.tsx` (client)
-- `app/(dashboard)/maintenance/[id]/page.tsx` — work order detail
-- `app/(dashboard)/maintenance/actions.ts`
-
-**What it shows:**
-- Work orders grouped by status: pending, assigned, in_progress, completed
-- Filter by property, vendor, priority
-- Create work order modal (title, property, vendor, scheduled_date, priority, description, estimated_cost, portal_enabled toggle)
-- Work order detail: status history (work_order_updates), photos, completion notes
-
-**Create work order server action:**
-```ts
-// After insert, if portal_enabled, fire Inngest event
-if (portal_enabled) {
-  await inngest.send({ name: 'work-order/created', data: {
-    work_order_id: wo.id, property_id, org_id,
-    vendor_id: vendor_id ?? null, portal_enabled: true,
-  }})
-}
-```
-
-**Vendor portal page (tokenized, no auth):**
-- `app/work-orders/[token]/page.tsx` — form to mark complete + upload photos
-- Calls `POST /api/work-orders/[token]/complete` (already built)
-
----
-
-### 4. Settings Page
-
-**Files to create:**
-- `app/(dashboard)/settings/page.tsx` (replace stub)
-- `app/(dashboard)/settings/org-settings.tsx`
-- `app/(dashboard)/settings/crew-management.tsx`
-- `app/(dashboard)/settings/vendor-management.tsx`
-- `app/(dashboard)/settings/billing.tsx`
-- `app/(dashboard)/settings/actions.ts`
-
-**Sections (tab-based):**
-1. **Organization** — name, billing email
-2. **Crew** — list all crew members, add new, edit contact + notification prefs, deactivate
-3. **Vendors** — list vendors, add new, edit specialty + portal_enabled toggle
-4. **Billing** — current plan, Stripe billing portal link, upgrade options
-5. **Danger Zone** — account settings
-
-**Stripe billing portal:**
-```ts
-// Server action
-const session = await stripe.billingPortal.sessions.create({
-  customer: org.stripe_customer_id,
-  return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
-})
-redirect(session.url)
-```
-
----
-
-### 5. Communications Page (Sent Message Log)
-
-**Files to create:**
-- `app/(dashboard)/communications/page.tsx` (replace stub)
-
-**What it shows:**
-- Table of all `guest_messages_sent` for the org
-- Columns: date sent, property, guest, trigger (booking/checkout), subject, status
-- Filter by property, trigger type, date range
-- Simple read-only view — no editing needed
-
----
-
-### 6. Owner Portal (P&L View)
-
-**Files to create:**
-- `app/(dashboard)/owners/page.tsx` (replace stub — manage owners, generate portal links)
-- `app/(dashboard)/owners/actions.ts`
-- `app/owner/[token]/page.tsx` (replace stub — the actual owner portal view)
-
-**PM-side (dashboard):**
-- List all `property_owners` across the org
-- Add owner: name, email, property, revenue_share_pct
-- Generate portal link → creates `owner_portal_tokens` record, emails owner
-
-**Owner portal (/owner/[token]):**
-- Full P&L view for their property
-- Revenue table (booking_revenue transactions)
-- Expense table (maintenance, restock, other)
-- Net calculation per month
-- Work order history
-- Simple and clean — not an accounting tool
-
-**P&L data model:**
-```ts
-// owner_transactions table has: transaction_type (revenue|expense), category, amount, description, date
-// Revenue is added manually or auto-created from booking data
-// Expenses are auto-created when work orders and POs are completed
-```
-
-**Add manual transaction server action:**
-```ts
-await supabase.from('owner_transactions').insert({
-  property_id, org_id, transaction_type, category,
-  amount, description, transaction_date,
-  work_order_id: null, purchase_order_id: null,
-})
-```
-
----
-
-### 7. Crew App (PowerSync Offline)
-
-This is the most complex remaining feature. Build after all dashboard features are stable.
-
-**Files to create:**
-- `app/crew/page.tsx` (replace stub — crew dashboard)
-- `app/crew/turnovers/page.tsx` — list of assigned turnovers
-- `app/crew/turnovers/[id]/page.tsx` — turnover + checklist (offline)
-- `app/crew/inventory/[propertyId]/page.tsx` — inventory count form (offline)
-- `lib/powersync/schema.ts` — PowerSync client schema
-- `lib/powersync/client.ts` — PowerSync client setup
-- `components/crew/PowerSyncProvider.tsx` — context provider
-
-**PowerSync setup:**
 ```ts
 // lib/powersync/schema.ts
-import { Column, ColumnType, Index, IndexedColumn, Schema, Table } from '@powersync/web'
+import { Column, ColumnType, Schema, Table } from '@powersync/web'
 
 const turnovers = new Table({
-  property_id:       new Column({ type: ColumnType.TEXT }),
-  checkout_datetime: new Column({ type: ColumnType.TEXT }),
-  checkin_datetime:  new Column({ type: ColumnType.TEXT }),
-  status:            new Column({ type: ColumnType.TEXT }),
-  // ... other fields
-}, { indexes: [] })
+  property_id:          new Column({ type: ColumnType.TEXT }),
+  checkout_datetime:    new Column({ type: ColumnType.TEXT }),
+  checkin_datetime:     new Column({ type: ColumnType.TEXT }),
+  window_minutes:       new Column({ type: ColumnType.INTEGER }),
+  status:               new Column({ type: ColumnType.TEXT }),
+  priority:             new Column({ type: ColumnType.TEXT }),
+  notes:                new Column({ type: ColumnType.TEXT }),
+})
 
-export const AppSchema = new Schema([turnovers, /* checklist_instances, etc. */])
+const checklist_instances = new Table({
+  turnover_id: new Column({ type: ColumnType.TEXT }),
+  status:      new Column({ type: ColumnType.TEXT }),
+})
+
+const checklist_instance_items = new Table({
+  instance_id:        new Column({ type: ColumnType.TEXT }),
+  section_name:       new Column({ type: ColumnType.TEXT }),
+  task:               new Column({ type: ColumnType.TEXT }),
+  is_completed:       new Column({ type: ColumnType.INTEGER }),
+  requires_photo:     new Column({ type: ColumnType.INTEGER }),
+  photo_storage_path: new Column({ type: ColumnType.TEXT }),
+  crew_notes:         new Column({ type: ColumnType.TEXT }),
+  sort_order:         new Column({ type: ColumnType.INTEGER }),
+})
+
+const inventory_items = new Table({
+  property_id:      new Column({ type: ColumnType.TEXT }),
+  name:             new Column({ type: ColumnType.TEXT }),
+  category:         new Column({ type: ColumnType.TEXT }),
+  unit:             new Column({ type: ColumnType.TEXT }),
+  par_level:        new Column({ type: ColumnType.INTEGER }),
+  current_quantity: new Column({ type: ColumnType.INTEGER }),
+})
+
+export const AppSchema = new Schema([
+  turnovers, checklist_instances, checklist_instance_items, inventory_items,
+])
 ```
 
-**Sync rules (configure in PowerSync dashboard):**
+### PowerSync client + Supabase connector
+
+```ts
+// lib/powersync/client.ts
+import { PowerSyncDatabase } from '@powersync/web'
+import { createClient } from '@/lib/supabase/client'
+import { AppSchema } from './schema'
+
+class SupabaseConnector {
+  private supabase = createClient()
+
+  async fetchCredentials() {
+    const { data: { session } } = await this.supabase.auth.getSession()
+    if (!session) throw new Error('No session')
+    return {
+      endpoint: process.env.NEXT_PUBLIC_POWERSYNC_URL!,
+      token:    session.access_token,
+    }
+  }
+
+  async uploadData(database: PowerSyncDatabase) {
+    const transaction = await database.getNextCrudTransaction()
+    if (!transaction) return
+
+    for (const op of transaction.crud) {
+      if (op.table === 'checklist_instance_items' && op.op === 'PUT') {
+        await this.supabase
+          .from('checklist_instance_items')
+          .update({ is_completed: op.opData?.is_completed, crew_notes: op.opData?.crew_notes })
+          .eq('id', op.id)
+      }
+      if (op.table === 'turnovers' && op.op === 'PUT') {
+        await this.supabase
+          .from('turnovers')
+          .update({ status: op.opData?.status })
+          .eq('id', op.id)
+      }
+    }
+    await transaction.complete()
+  }
+}
+
+let db: PowerSyncDatabase | null = null
+
+export function getPowerSyncDb(): PowerSyncDatabase {
+  if (!db) {
+    db = new PowerSyncDatabase({
+      schema:   AppSchema,
+      database: { dbFilename: 'fieldstay-crew.db' },
+    })
+    db.connect(new SupabaseConnector())
+  }
+  return db
+}
+```
+
+### Update crew layout
+
+```tsx
+// app/crew/layout.tsx
+// Add PowerSyncContext.Provider wrapping children
+// Import getPowerSyncDb and PowerSyncContext from @powersync/react
+// Wrap the layout content in <PowerSyncContext.Provider value={getPowerSyncDb()}>
+```
+
+### Crew pages pattern
+
+```tsx
+// All crew pages use usePowerSyncQuery instead of supabase:
+'use client'
+import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
+
+// Read data (offline-capable):
+const { data: turnovers } = usePowerSyncQuery(
+  `SELECT * FROM turnovers WHERE status != 'completed' ORDER BY checkout_datetime`,
+  []
+)
+
+// Write data (queued offline, syncs when online):
+const db = usePowerSync()
+await db.execute(
+  `UPDATE checklist_instance_items SET is_completed = ? WHERE id = ?`,
+  [1, itemId]
+)
+```
+
+### PowerSync sync rules (configure in PowerSync dashboard)
+
 ```yaml
-# Sync rules in PowerSync app — syncs only what crew needs
 - table: turnovers
   parameters:
-    - sql: SELECT ta.turnover_id FROM turnover_assignments ta
-             JOIN crew_members cm ON ta.crew_member_id = cm.id
-             WHERE cm.user_id = token_parameters.user_id
+    - sql: |
+        SELECT ta.turnover_id as id FROM turnover_assignments ta
+        JOIN crew_members cm ON ta.crew_member_id = cm.id
+        WHERE cm.user_id = token_parameters.user_id
+      parameters: [user_id]
+
+- table: checklist_instances
+  parameters:
+    - sql: |
+        SELECT ci.id FROM checklist_instances ci
+        JOIN turnover_assignments ta ON ci.turnover_id = ta.turnover_id
+        JOIN crew_members cm ON ta.crew_member_id = cm.id
+        WHERE cm.user_id = token_parameters.user_id
       parameters: [user_id]
 
 - table: checklist_instance_items
   parameters:
-    - sql: SELECT cii.id FROM checklist_instance_items cii
-             JOIN checklist_instances ci ON cii.instance_id = ci.id
-             JOIN turnovers t ON ci.turnover_id = t.id
-             JOIN turnover_assignments ta ON ta.turnover_id = t.id
-             JOIN crew_members cm ON ta.crew_member_id = cm.id
-             WHERE cm.user_id = token_parameters.user_id
+    - sql: |
+        SELECT cii.id FROM checklist_instance_items cii
+        JOIN checklist_instances ci ON cii.instance_id = ci.id
+        JOIN turnover_assignments ta ON ci.turnover_id = ta.turnover_id
+        JOIN crew_members cm ON ta.crew_member_id = cm.id
+        WHERE cm.user_id = token_parameters.user_id
+      parameters: [user_id]
+
+- table: inventory_items
+  parameters:
+    - sql: |
+        SELECT DISTINCT ii.id FROM inventory_items ii
+        JOIN turnovers t ON t.property_id = ii.property_id
+        JOIN turnover_assignments ta ON ta.turnover_id = t.id
+        JOIN crew_members cm ON ta.crew_member_id = cm.id
+        WHERE cm.user_id = token_parameters.user_id
       parameters: [user_id]
 ```
 
-**Key implementation:** Crew app uses `usePowerSyncQuery()` hooks instead of Supabase queries. Writes go through PowerSync's offline queue and sync when online.
-
 ---
 
-### 8. Billing (Stripe Checkout)
+## Code Patterns
 
-**Files to create:**
-- `app/(dashboard)/billing/page.tsx`
-- `app/api/billing/checkout/route.ts` — create Stripe checkout session
-- `app/api/billing/portal/route.ts` — create Stripe billing portal session
+### Auth (every server component + server action)
 
-**Stripe checkout:**
 ```ts
-const session = await stripe.checkout.sessions.create({
-  customer: org.stripe_customer_id ?? undefined,
-  customer_email: org.stripe_customer_id ? undefined : user.email,
-  mode: 'subscription',
-  payment_method_types: ['card'],
-  line_items: [{ price: PLANS[selectedPlan].priceId, quantity: 1 }],
-  success_url: `${APP_URL}/settings?upgraded=true`,
-  cancel_url: `${APP_URL}/settings`,
-  metadata: { org_id: org.id },
-})
+const { user, supabase, membership } = await requireOrgMember()
+// membership.org_id — always filter by this
+// membership.role   — 'admin' | 'manager' | 'crew' | 'viewer'
+
+const { property, supabase, membership } = await requireProperty(propertyId)
+// redirects if property doesn't belong to org
 ```
 
-The Stripe webhook (`app/api/webhooks/stripe/route.ts`) is already built and handles subscription lifecycle.
+### Server action
+
+```ts
+'use server'
+export async function myAction(_prev: State | null, formData: FormData): Promise<State> {
+  const { supabase, membership } = await requireOrgMember()
+  const { error } = await supabase
+    .from('table')
+    .update({ field: value })
+    .eq('id', id)
+    .eq('org_id', membership.org_id)   // NEVER skip this
+  if (error) return { error: error.message }
+  revalidatePath('/page')
+  return { success: true }
+}
+```
+
+### Service client (Inngest + webhooks + tokenized routes only)
+
+```ts
+import { createServiceClient } from '@/lib/supabase/server'
+const supabase = createServiceClient()
+// Bypasses RLS — never in dashboard pages or server actions
+```
+
+### Pre-built CSS classes (use before writing custom Tailwind)
+
+```
+.btn-primary  .btn-secondary  .btn-ghost  .btn-danger
+.card  .input  .label
+.badge  .badge-green  .badge-amber  .badge-red  .badge-blue  .badge-slate
+.section-header  .page-title  .page-subtitle  .page-header
+```
+
+Brand: `brand-800` (forest green primary), `accent-*` (slate UI chrome).
 
 ---
 
-## Important Rules
+## Rules — Never Violate
 
-### Never do these things:
-
-1. **Never skip the `org_id` filter** on any database query. Even with RLS, always be explicit.
-
-2. **Never use the service client in client components or server components.** Service client is only for Inngest functions and webhook handlers.
-
-3. **Never put secrets in client-side code.** Variables without `NEXT_PUBLIC_` prefix are server-only.
-
-4. **Never call `supabase.auth.getSession()` — use `supabase.auth.getUser()`.** `getSession()` reads from cookie without server validation. `getUser()` makes a network call that validates the JWT.
-
-5. **Never forget `revalidatePath()`** after mutations. Without it, the page won't show updated data.
-
-6. **Never create a new Inngest function without registering it** in `app/api/inngest/route.ts`.
-
-7. **Never use `any` type.** Import from `types/database.ts` instead.
-
-### Always do these things:
-
-1. **Always use `requireOrgMember()`** at the top of every Server Component page and Server Action.
-
-2. **Always use the `cn()` utility** for conditional class names.
-
-3. **Always bump `LMD_ADMIN_VERSION` (n/a for FieldStay)** — for FieldStay, just ensure `revalidatePath()` is called after mutations.
-
-4. **Always handle the loading/pending state** in forms (`disabled={pending}`).
-
-5. **Always use pre-built CSS classes** from `globals.css` (`.btn-primary`, `.card`, `.input`, etc.) before writing custom Tailwind.
-
-6. **Always protect the `org_id`** in joins — if a query involves multiple tables, verify org ownership at the root table level.
+1. Always filter by `org_id` on every database query
+2. Never call `getSession()` — always `getUser()` (validates JWT server-side)
+3. Never forget `revalidatePath()` after any mutation
+4. Never use service client in dashboard pages or server actions
+5. Never register an Inngest function without adding it to `app/api/inngest/route.ts`
+6. Never use `any` type — import from `types/database.ts`
+7. Never expose secret env vars to client components (no `NEXT_PUBLIC_` prefix = server only)
 
 ---
 
-## Database Quick Reference
-
-### Key tables and their primary relationships:
+## Database Reference
 
 ```
 organizations (tenant root)
-  └── organization_members → auth.users (role: admin|manager|crew|viewer)
-  └── properties → org_id
-        └── ical_feeds → property_id
-        └── bookings → ical_feed_id, property_id
-        └── turnovers → booking_id, prev_booking_id, property_id
-              └── turnover_assignments → crew_member_id
-              └── checklist_instances → turnover_id
-                    └── checklist_instance_items
-        └── inventory_items → property_id
-              └── inventory_counts (from crew)
-        └── purchase_orders → property_id
-        └── work_orders → vendor_id, property_id
-        └── maintenance_schedules → property_id
-        └── guest_message_templates → property_id
-  └── crew_members → org_id (may have user_id for app login)
-  └── vendors → org_id
-  └── checklist_templates → org_id, property_id (null = org-level)
+  └── organization_members → auth.users
+  └── properties (+ avg_nightly_rate after v2)
+        ├── ical_feeds → bookings → turnovers
+        │     └── turnover_assignments → crew_members
+        │     └── checklist_instances → checklist_instance_items
+        ├── inventory_items → inventory_counts → inventory_count_items
+        ├── purchase_orders → purchase_order_items
+        ├── work_orders → work_order_updates, work_order_photos
+        ├── maintenance_schedules
+        ├── guest_message_templates
+        ├── property_owners → owner_portal_tokens
+        └── owner_transactions (+ booking_id after v2)
+  ├── crew_members  ├── vendors  └── checklist_templates
 ```
 
-### Canonical table names (easy to get wrong):
-- Properties: `lmd_property_profiles` — NO. For FieldStay it's just `properties`
-- There is no `lmd_` prefix — this is a clean Supabase schema
-- Crew: `crew_members` (not `lmd_crew_members`)
+---
 
-### RLS helper functions (defined in migration):
-- `get_user_org_ids()` — returns org_ids for current user
-- `is_org_member(org_id, roles[])` — check membership + role
-- `get_crew_member_id()` — get crew_members.id for current user
+## Inngest Event Pipeline
+
+```
+cron (every 4h) → ical/sync.all.requested
+  → ical/sync.requested (per feed)
+    → upsert bookings → cancel affected turnovers
+    → generate turnovers + snapshot checklist instances (Fix 1)
+    → booking/detected (per new booking)
+        → send confirmation email
+        → create revenue transaction at (nights × avg_nightly_rate) (Fix 2b)
+        → sleepUntil N days pre-checkout → send reminder email
+    → turnover/created
+        → notify crew → sleepUntil 24h → warn PM if unassigned
+
+cron (8am daily) → maintenance/daily-check
+  → due schedules → auto WO or alert PM
+
+inventory/count-submitted → apply count → if below par → PO + email PM
+
+work-order/created → vendor portal link (if portal_enabled)
+work-order/completed-via-portal → notify PM → create expense transaction (Fix 2c)
+work-order/overdue → alert PM
+```
 
 ---
 
-## Email Templates
+## Stripe Plans
 
-All guest emails use `{{variable}}` syntax. The `renderTemplate()` function in
-`lib/resend/client.ts` substitutes them at send time.
+| Plan       | Max Properties | Env Var                  |
+|------------|---------------|--------------------------|
+| starter    | 5             | `STRIPE_PRICE_STARTER`   |
+| growth     | 20            | `STRIPE_PRICE_GROWTH`    |
+| pro        | 50            | `STRIPE_PRICE_PRO`       |
+| enterprise | unlimited     | custom — contact sales   |
 
-Available variables: `guest_name`, `property_name`, `property_address`,
-`checkin_date`, `checkout_date`, `checkin_time`, `checkout_time`,
-`wifi_name`, `wifi_password`, `door_code`, `host_name`, `host_phone`
-
-Emails are HTML but written with simple inline styles — no email framework needed.
-Keep them readable as plain text (use `<br/>` not complex layouts).
-
----
-
-## Stripe Plan Configuration
-
-Plans are defined in `lib/stripe/client.ts`:
-
-| Plan       | Properties | Price ID env var          |
-|------------|-----------|---------------------------|
-| starter    | 5         | `STRIPE_PRICE_STARTER`    |
-| growth     | 20        | `STRIPE_PRICE_GROWTH`     |
-| pro        | 50        | `STRIPE_PRICE_PRO`        |
-| enterprise | unlimited | (custom — contact sales)  |
-
-The `organizations.max_properties` field is set by the Stripe webhook handler
-when a subscription is created/updated.
+`organizations.max_properties` updated by Stripe webhook on subscription change.
 
 ---
 
 ## Deployment Checklist
 
-Before deploying to Vercel:
-
-1. ✅ All env vars set in Vercel project settings
-2. ✅ Supabase migration run on production database
-3. ✅ Supabase Storage buckets created: `turnover-photos`, `work-order-photos`, `crew-uploads`
-4. ✅ Inngest app configured with production event key + signing key
-5. ✅ Stripe webhook endpoint pointing to `https://app.fieldstay.com/api/webhooks/stripe`
-6. ✅ Resend domain verified
-7. ✅ PowerSync instance connected to production Supabase
+- [ ] `middleware.ts` recreated at repo root, junk files deleted
+- [ ] v2 migration run (ALTER TABLE statements above)
+- [ ] All env vars set in Vercel project settings
+- [ ] Storage buckets created: `turnover-photos`, `work-order-photos`, `crew-uploads`
+- [ ] Inngest production keys configured
+- [ ] Stripe webhook endpoint: `https://app.fieldstay.com/api/webhooks/stripe`
+  Events: `customer.subscription.created/updated/deleted`
+- [ ] Resend domain `fieldstay.com` verified
 
 ---
 
-## Running Tests / Debugging
+## Testing End-to-End Locally
 
-### Test the iCal sync locally:
-1. Start both `npm run dev` and `npm run inngest:dev`
-2. Visit http://localhost:8288 (Inngest dev UI)
-3. In the Functions tab, find "Sync All iCal Feeds"
-4. Click "Invoke" to trigger a manual sync
-5. Watch the event stream for any errors
-
-### Test email sending locally:
-Resend has a test mode — emails go to a sandbox inbox.
-For local dev, set `RESEND_API_KEY=re_test_...` (test key) to avoid sending real emails.
-
-### Check RLS is working:
-In Supabase SQL Editor, run queries as a specific user:
-```sql
-SET request.jwt.claims = '{"sub": "user-uuid-here"}';
-SELECT * FROM properties; -- should only return that user's org's properties
-```
+1. Add a property, set `avg_nightly_rate` to 200, add inventory items with par levels, build a checklist
+2. Add an owner for that property, generate a portal link
+3. Trigger iCal sync in Inngest UI (http://localhost:8288)
+4. Verify: bookings appear, turnovers created, checklist instances created, revenue transaction created
+5. Assign crew to a turnover, open the turnover detail — checklist should be visible
+6. Go to /inventory — items shown, "Run Count" fires Inngest, PO generated if below par
+7. Create a work order at /maintenance, mark it complete with a cost
+8. Open /owners — transaction for the work order expense should appear
+9. Open the owner portal link — monthly P&L should show revenue + expense with net

@@ -92,6 +92,7 @@ export interface Property {
   internal_notes: string | null
   setup_steps_completed: Record<string, boolean>
   is_active: boolean
+  avg_nightly_rate: number | null
   created_at: string
   updated_at: string
 }
@@ -454,6 +455,7 @@ export interface OwnerTransaction {
   transaction_date: string
   work_order_id: string | null
   purchase_order_id: string | null
+  booking_id: string | null
   notes: string | null
   created_at: string
   updated_at: string

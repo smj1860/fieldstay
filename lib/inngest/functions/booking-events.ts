@@ -76,6 +76,48 @@ export const handleBookingDetected = inngest.createFunction(
       return
     }
 
+    // ── Auto-create booking revenue transaction ──────────────────────────────
+
+    await step.run('create-booking-revenue-transaction', async () => {
+      const supabase = createServiceClient()
+
+      const { data: prop } = await supabase
+        .from('properties')
+        .select('avg_nightly_rate')
+        .eq('id', property_id)
+        .single()
+
+      if (!prop?.avg_nightly_rate) return
+
+      const { count } = await supabase
+        .from('owner_transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('booking_id', booking_id)
+
+      if ((count ?? 0) > 0) return
+
+      const checkin  = new Date(booking.checkin_date + 'T00:00:00')
+      const checkout = new Date(booking.checkout_date + 'T00:00:00')
+      const nights   = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
+      if (nights <= 0) return
+
+      const amount      = parseFloat((nights * prop.avg_nightly_rate).toFixed(2))
+      const guestLabel  = booking.guest_name ? ` — ${booking.guest_name}` : ''
+      const description = `${nights} night${nights !== 1 ? 's' : ''}${guestLabel}`
+
+      await supabase.from('owner_transactions').insert({
+        property_id,
+        org_id,
+        booking_id,
+        transaction_type: 'revenue',
+        category:         'booking_revenue',
+        amount,
+        description,
+        transaction_date: booking.checkin_date,
+        notes:            `iCal · ${booking.checkin_date} to ${booking.checkout_date}`,
+      })
+    })
+
     // Build template variables
     const variables: Record<string, string> = {
       guest_name:       booking.guest_name ?? 'Guest',

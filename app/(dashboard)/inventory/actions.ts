@@ -35,12 +35,13 @@ export async function addInventoryItem(
 ): Promise<InventoryActionState> {
   const { supabase, membership } = await requireOrgMember()
 
-  const property_id = formData.get('property_id') as string
-  const name        = (formData.get('name') as string)?.trim()
-  const category    = formData.get('category') as InventoryCategory
-  const unit        = (formData.get('unit') as string)?.trim()
-  const par_level   = parseInt(formData.get('par_level') as string, 10) || 1
-  const notes       = (formData.get('notes') as string)?.trim() || null
+  const property_id    = formData.get('property_id') as string
+  const catalog_item_id = (formData.get('catalog_item_id') as string) || null
+  const name           = (formData.get('name') as string)?.trim()
+  const category       = formData.get('category') as InventoryCategory
+  const unit           = (formData.get('unit') as string)?.trim()
+  const par_level      = parseInt(formData.get('par_level') as string, 10) || 1
+  const notes          = (formData.get('notes') as string)?.trim() || null
 
   if (!property_id) return { error: 'Property is required' }
   if (!name)        return { error: 'Item name is required' }
@@ -59,7 +60,7 @@ export async function addInventoryItem(
   const { error } = await supabase.from('inventory_items').insert({
     property_id,
     org_id:           membership.org_id,
-    catalog_item_id:  null,
+    catalog_item_id,
     name,
     category,
     unit,

@@ -11,6 +11,7 @@ export default async function InventoryPage() {
     { data: properties },
     { data: items },
     { data: purchaseOrders },
+    { data: catalogItems },
   ] = await Promise.all([
     supabase
       .from('properties')
@@ -35,6 +36,12 @@ export default async function InventoryPage() {
       .eq('org_id', membership.org_id)
       .order('generated_at', { ascending: false })
       .limit(10),
+    supabase
+      .from('inventory_catalog')
+      .select('id, name, category, default_unit')
+      .eq('is_active', true)
+      .order('category')
+      .order('name'),
   ])
 
   return (
@@ -43,6 +50,7 @@ export default async function InventoryPage() {
         properties={properties ?? []}
         items={items ?? []}
         purchaseOrders={purchaseOrders ?? []}
+        catalogItems={catalogItems ?? []}
       />
     </div>
   )
