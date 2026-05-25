@@ -9,6 +9,7 @@ import {
   addCrewMember,
   updateCrewMember,
   deactivateCrewMember,
+  inviteCrewMember,
   addVendor,
   updateVendorPortal,
   deactivateVendor,
@@ -203,6 +204,7 @@ function CrewTab({ crew }: { crew: CrewMember[] }) {
                   <th className="text-left py-2 pr-4 font-medium text-accent-500 text-xs uppercase tracking-wide">Specialty</th>
                   <th className="text-left py-2 pr-4 font-medium text-accent-500 text-xs uppercase tracking-wide">Contact</th>
                   <th className="text-left py-2 pr-4 font-medium text-accent-500 text-xs uppercase tracking-wide">Pref</th>
+                  <th className="text-left py-2 pr-4 font-medium text-accent-500 text-xs uppercase tracking-wide">App Access</th>
                   <th className="py-2 text-right font-medium text-accent-500 text-xs uppercase tracking-wide">Actions</th>
                 </tr>
               </thead>
@@ -291,6 +293,21 @@ function CrewRow({ member }: { member: CrewMember }) {
   const [error, setError]             = useState<string | null>(null)
   const [saving, startSave]           = useTransition()
   const [deactivating, startDeact]    = useTransition()
+  const [inviting, setInviting]       = useState(false)
+  const [inviteSent, setInviteSent]   = useState(false)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+
+  async function handleInvite() {
+    setInviting(true)
+    setInviteError(null)
+    const result = await inviteCrewMember(member.id)
+    setInviting(false)
+    if (result.error) {
+      setInviteError(result.error)
+    } else {
+      setInviteSent(true)
+    }
+  }
 
   function handleSave() {
     setError(null)
@@ -364,6 +381,7 @@ function CrewRow({ member }: { member: CrewMember }) {
             <option value="both">Both</option>
           </select>
         </td>
+        <td className="py-2 pr-4" />
         <td className="py-2 text-right">
           <div className="flex items-center justify-end gap-1">
             <button
@@ -400,6 +418,36 @@ function CrewRow({ member }: { member: CrewMember }) {
       </td>
       <td className="py-2.5 pr-4">
         <span className="badge badge-slate capitalize">{member.preferred_contact}</span>
+      </td>
+      <td className="py-2.5 pr-4">
+        {member.user_id ? (
+          <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+            Active
+          </span>
+        ) : inviteSent ? (
+          <span className="text-xs text-brand-700 font-medium">✓ Invite sent</span>
+        ) : member.invite_sent_at ? (
+          <button
+            onClick={handleInvite}
+            disabled={inviting}
+            className="text-xs text-accent-500 hover:text-accent-700 underline underline-offset-2 disabled:opacity-50"
+          >
+            {inviting ? 'Sending…' : 'Resend invite'}
+          </button>
+        ) : (
+          <button
+            onClick={handleInvite}
+            disabled={inviting || !member.email}
+            className="btn-secondary text-xs px-2.5 py-1 disabled:opacity-50"
+            title={!member.email ? 'Add an email address first' : undefined}
+          >
+            {inviting ? 'Sending…' : 'Invite to app'}
+          </button>
+        )}
+        {inviteError && (
+          <p className="text-xs text-red-500 mt-0.5">{inviteError}</p>
+        )}
       </td>
       <td className="py-2.5 text-right">
         <div className="flex items-center justify-end gap-1">

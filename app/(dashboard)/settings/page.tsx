@@ -21,7 +21,7 @@ export default async function SettingsPage() {
 
     supabase
       .from('crew_members')
-      .select('id, name, email, phone, preferred_contact, specialty, is_active, notes')
+      .select('id, name, email, phone, preferred_contact, specialty, is_active, notes, user_id, invite_sent_at, invite_accepted_at')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),

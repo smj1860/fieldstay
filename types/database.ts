@@ -166,6 +166,9 @@ export interface CrewMember {
   specialty: string
   is_active: boolean
   notes: string | null
+  invite_token: string | null
+  invite_sent_at: string | null
+  invite_accepted_at: string | null
   created_at: string
   updated_at: string
 }
