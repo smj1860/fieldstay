@@ -181,6 +181,73 @@ export async function openBillingPortal(): Promise<void> {
   redirect(session.url)
 }
 
+export async function inviteCrewMember(
+  crewMemberId: string
+): Promise<{ error?: string; success?: boolean }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (!['admin', 'manager'].includes(membership.role)) {
+    return { error: 'Permission denied' }
+  }
+
+  const { data: crew } = await supabase
+    .from('crew_members')
+    .select('id, name, email, invite_token, user_id')
+    .eq('id', crewMemberId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!crew)        return { error: 'Crew member not found' }
+  if (!crew.email)  return { error: 'No email address on file for this crew member' }
+  if (crew.user_id) return { error: 'This crew member already has an active account' }
+
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('name')
+    .eq('id', membership.org_id)
+    .single()
+
+  const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew/accept-invite/${crew.invite_token}`
+
+  const { resend, FROM } = await import('@/lib/resend/client')
+  const { error: emailError } = await resend.emails.send({
+    from:    FROM,
+    to:      crew.email,
+    subject: `You've been invited to join ${org?.name ?? 'FieldStay'}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+        <h2 style="color:#102246;margin-bottom:8px">You're invited to FieldStay</h2>
+        <p style="color:#1A1D20">Hi ${crew.name},</p>
+        <p style="color:#1A1D20">
+          <strong>${org?.name ?? 'Your property manager'}</strong> has invited you to join
+          their team on FieldStay — the app you'll use to view cleaning assignments,
+          complete checklists, and submit inventory counts.
+        </p>
+        <p style="margin:28px 0">
+          <a href="${inviteUrl}"
+             style="background:#FCD116;color:#102246;padding:14px 28px;text-decoration:none;
+                    border-radius:8px;font-weight:700;display:inline-block;font-size:15px">
+            Accept Invitation →
+          </a>
+        </p>
+        <p style="color:#6C757D;font-size:13px">
+          This link expires in 7 days. If you weren't expecting this, you can safely ignore it.
+        </p>
+      </div>
+    `,
+  })
+
+  if (emailError) return { error: emailError.message }
+
+  await supabase
+    .from('crew_members')
+    .update({ invite_sent_at: new Date().toISOString() })
+    .eq('id', crewMemberId)
+
+  revalidatePath('/settings')
+  return { success: true }
+}
+
 export async function startCheckout(plan: string): Promise<void> {
   const { supabase, membership } = await requireOrgMember()
 

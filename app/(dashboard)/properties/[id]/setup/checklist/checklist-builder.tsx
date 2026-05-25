@@ -87,6 +87,24 @@ export function ChecklistBuilder({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const toggleAllPhotos = () => {
+    const totalItems = sections.reduce((n, s) => n + s.items.length, 0)
+    const photoItems = sections.reduce((n, s) => n + s.items.filter((i) => i.requires_photo).length, 0)
+    const newValue   = !(totalItems > 0 && photoItems === totalItems)
+    setSections((prev) => prev.map((s) => ({
+      ...s,
+      items: s.items.map((item) => ({ ...item, requires_photo: newValue })),
+    })))
+  }
+
+  const toggleSectionPhotos = (sectionTempId: string) => {
+    setSections((prev) => prev.map((s) => {
+      if (s.tempId !== sectionTempId) return s
+      const newValue = !s.items.every((i) => i.requires_photo)
+      return { ...s, items: s.items.map((item) => ({ ...item, requires_photo: newValue })) }
+    }))
+  }
+
   const addSection = () => {
     setSections((p) => [...p, { tempId: makeId(), name: 'New Section', items: [] }])
   }
@@ -170,6 +188,42 @@ export function ChecklistBuilder({
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>
       )}
 
+      {/* Global photo requirement toggle */}
+      {sections.some((s) => s.items.length > 0) && (() => {
+        const totalItems = sections.reduce((n, s) => n + s.items.length, 0)
+        const photoItems = sections.reduce((n, s) => n + s.items.filter((i) => i.requires_photo).length, 0)
+        const allOn      = totalItems > 0 && photoItems === totalItems
+
+        return (
+          <div className="flex items-center justify-between px-4 py-3 bg-accent-50 rounded-xl border border-accent-200 mb-4">
+            <div className="flex items-center gap-2">
+              <Camera className="w-4 h-4 text-accent-500" />
+              <div>
+                <p className="text-sm font-medium text-accent-700">Require photo proof for all tasks</p>
+                <p className="text-xs text-accent-400">{photoItems} of {totalItems} tasks require a photo</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={toggleAllPhotos}
+              className={cn(
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full',
+                'border-2 border-transparent transition-colors duration-200 focus:outline-none',
+                allOn ? 'bg-brand-800' : 'bg-accent-300'
+              )}
+              role="switch"
+              aria-checked={allOn}
+            >
+              <span className={cn(
+                'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow',
+                'transform transition-transform duration-200',
+                allOn ? 'translate-x-5' : 'translate-x-0'
+              )} />
+            </button>
+          </div>
+        )
+      })()}
+
       {sections.map((section, si) => (
         <div key={section.tempId} className="border border-accent-200 rounded-xl overflow-hidden">
           {/* Section header */}
@@ -180,6 +234,27 @@ export function ChecklistBuilder({
               className="flex-1 text-sm font-semibold bg-transparent text-accent-800 focus:outline-none border-b border-transparent focus:border-brand-500"
             />
             <div className="flex items-center gap-0.5 ml-auto">
+              {(() => {
+                const sectionAllPhoto = section.items.length > 0 &&
+                  section.items.every((i) => i.requires_photo)
+                return (
+                  <button
+                    type="button"
+                    onClick={() => toggleSectionPhotos(section.tempId)}
+                    title={sectionAllPhoto
+                      ? 'Remove photo requirement for all items in this section'
+                      : 'Require photo for all items in this section'}
+                    className={cn(
+                      'p-1 rounded transition-colors',
+                      sectionAllPhoto
+                        ? 'text-brand-800 bg-brand-50'
+                        : 'text-accent-300 hover:text-accent-500'
+                    )}
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                  </button>
+                )
+              })()}
               <button onClick={() => moveSection(section.tempId, -1)} disabled={si === 0} className="btn-ghost p-1 disabled:opacity-30">
                 <ChevronUp className="w-3.5 h-3.5" />
               </button>
