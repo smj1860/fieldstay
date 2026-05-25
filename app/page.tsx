@@ -127,23 +127,31 @@ export default function LandingPage() {
 
       {/* ── Pricing ──────────────────────────────────────────── */}
       <section className="py-20 px-6 bg-accent-50">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           <div className="text-center mb-14">
             <h2 className="text-3xl font-bold text-brand-800 mb-3">Simple, transparent pricing</h2>
-            <p className="text-accent-500">Start free for 14 days. No credit card required.</p>
+            <p className="text-accent-500">Try free for 14 days — no credit card required.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
 
             {/* Starter */}
             <div className="card flex flex-col">
               <h3 className="text-lg font-bold text-accent-900 mb-1">Starter</h3>
-              <p className="text-accent-500 text-sm mb-6">For independent PMs just getting started</p>
-              <div className="mb-6">
-                <span className="text-4xl font-bold text-brand-800">$49</span>
+              <p className="text-accent-500 text-sm mb-6">Perfect for managing 1–2 properties</p>
+              <div className="mb-2">
+                <span className="text-5xl font-bold text-brand-800">$69.99</span>
                 <span className="text-accent-400 text-sm">/mo</span>
               </div>
-              <ul className="space-y-2 mb-8 flex-1">
-                {['Up to 5 properties', 'iCal sync', 'Turnover coordination', 'Inventory management', 'Crew app access'].map((f) => (
+              <p className="text-xs text-gold-500 font-medium mb-6">14-day free trial · No credit card required</p>
+              <ul className="space-y-2.5 mb-8 flex-1">
+                {[
+                  'Up to 2 properties',
+                  'iCal sync (Airbnb, VRBO, direct)',
+                  'Turnover coordination',
+                  'Inventory management',
+                  'Crew app (offline-capable)',
+                  'Owner P&L portal',
+                ].map((f) => (
                   <li key={f} className="flex items-center gap-2 text-sm text-accent-600">
                     <Check className="w-4 h-4 text-brand-800 flex-shrink-0" />
                     {f}
@@ -155,21 +163,29 @@ export default function LandingPage() {
               </Link>
             </div>
 
-            {/* Growth — featured */}
+            {/* FieldStay — featured */}
             <div className="card flex flex-col ring-2 ring-brand-800 relative">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
                 <span className="bg-gold-300 text-brand-800 text-xs font-bold px-3 py-1 rounded-full">
                   Most Popular
                 </span>
               </div>
-              <h3 className="text-lg font-bold text-accent-900 mb-1">Growth</h3>
-              <p className="text-accent-500 text-sm mb-6">For growing portfolios</p>
-              <div className="mb-6">
-                <span className="text-4xl font-bold text-brand-800">$99</span>
+              <h3 className="text-lg font-bold text-accent-900 mb-1">FieldStay</h3>
+              <p className="text-accent-500 text-sm mb-6">The full platform for growing portfolios</p>
+              <div className="mb-2">
+                <span className="text-5xl font-bold text-brand-800">$99.99</span>
                 <span className="text-accent-400 text-sm">/mo</span>
               </div>
-              <ul className="space-y-2 mb-8 flex-1">
-                {['Up to 20 properties', 'Everything in Starter', 'Maintenance scheduling', 'Vendor portal', 'Owner P&L portal', 'Priority support'].map((f) => (
+              <p className="text-xs text-gold-500 font-medium mb-6">14-day free trial · No credit card required</p>
+              <ul className="space-y-2.5 mb-8 flex-1">
+                {[
+                  'Up to 20 properties',
+                  'Everything in Starter',
+                  'Maintenance scheduling',
+                  'Vendor completion portal',
+                  'Work order expense tracking',
+                  'Priority support',
+                ].map((f) => (
                   <li key={f} className="flex items-center gap-2 text-sm text-accent-600">
                     <Check className="w-4 h-4 text-brand-800 flex-shrink-0" />
                     {f}
@@ -181,28 +197,14 @@ export default function LandingPage() {
               </Link>
             </div>
 
-            {/* Pro */}
-            <div className="card flex flex-col">
-              <h3 className="text-lg font-bold text-accent-900 mb-1">Pro</h3>
-              <p className="text-accent-500 text-sm mb-6">For established PM companies</p>
-              <div className="mb-6">
-                <span className="text-4xl font-bold text-brand-800">$199</span>
-                <span className="text-accent-400 text-sm">/mo</span>
-              </div>
-              <ul className="space-y-2 mb-8 flex-1">
-                {['Up to 50 properties', 'Everything in Growth', 'Multiple team members', 'API access', 'Dedicated onboarding'].map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-sm text-accent-600">
-                    <Check className="w-4 h-4 text-brand-800 flex-shrink-0" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <Link href="/signup" className="btn-secondary text-center py-2.5 text-sm font-medium">
-                Start Free Trial
-              </Link>
-            </div>
-
           </div>
+
+          <p className="text-center text-sm text-accent-400 mt-8">
+            Managing 50+ properties?{' '}
+            <a href="mailto:hello@fieldstay.com" className="text-brand-800 font-medium hover:underline">
+              Contact us for enterprise pricing →
+            </a>
+          </p>
         </div>
       </section>
 

@@ -17,11 +17,11 @@ export const PLANS = {
   starter: {
     name: 'Starter',
     priceId: process.env.STRIPE_PRICE_STARTER!,
-    maxProperties: 5,
-    description: 'Up to 5 properties',
+    maxProperties: 2,
+    description: 'Up to 2 properties',
   },
   growth: {
-    name: 'Growth',
+    name: 'FieldStay',
     priceId: process.env.STRIPE_PRICE_GROWTH!,
     maxProperties: 20,
     description: 'Up to 20 properties',
