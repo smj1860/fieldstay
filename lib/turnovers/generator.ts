@@ -110,6 +110,51 @@ export async function generateTurnoversForProperty(
 
     if (!error && turnover) {
       newTurnoverIds.push(turnover.id)
+
+      // Snapshot the default checklist into an instance for this turnover
+      if (defaultTemplate?.id) {
+        const { data: sections } = await supabase
+          .from('checklist_template_sections')
+          .select(`
+            id, name, sort_order,
+            checklist_template_items ( id, task, requires_photo, notes, sort_order )
+          `)
+          .eq('template_id', defaultTemplate.id)
+          .order('sort_order', { ascending: true })
+
+        if (sections && sections.length > 0) {
+          const { data: instance } = await supabase
+            .from('checklist_instances')
+            .insert({
+              turnover_id:       turnover.id,
+              org_id:            orgId,
+              template_id:       defaultTemplate.id,
+              template_snapshot: sections,
+              status:            'not_started',
+            })
+            .select('id')
+            .single()
+
+          if (instance) {
+            const items = sections.flatMap((section) =>
+              (section.checklist_template_items ?? []).map((item: {
+                task: string; requires_photo: boolean; notes: string | null; sort_order: number
+              }) => ({
+                instance_id:    instance.id,
+                section_name:   section.name,
+                task:           item.task,
+                requires_photo: item.requires_photo,
+                notes:          item.notes,
+                sort_order:     item.sort_order,
+                is_completed:   false,
+              }))
+            )
+            if (items.length > 0) {
+              await supabase.from('checklist_instance_items').insert(items)
+            }
+          }
+        }
+      }
     }
   }
 

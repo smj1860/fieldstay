@@ -93,6 +93,21 @@ export function DetailsForm({ property }: { property: Property }) {
       </div>
 
       <div>
+        <label htmlFor="avg_nightly_rate" className="label">Average Nightly Rate ($)</label>
+        <input
+          id="avg_nightly_rate"
+          name="avg_nightly_rate"
+          type="number"
+          min="0"
+          step="0.01"
+          defaultValue={property.avg_nightly_rate ?? ''}
+          className="input"
+          placeholder="e.g. 285.00"
+        />
+        <p className="text-xs text-accent-400 mt-1">Used to automatically estimate booking revenue in the owner portal. You can always adjust individually.</p>
+      </div>
+
+      <div>
         <label htmlFor="internal_notes" className="label">Internal Notes</label>
         <textarea id="internal_notes" name="internal_notes" rows={3} defaultValue={property.internal_notes ?? ''} className="input resize-none" placeholder="Anything crew or vendors should know…" />
       </div>

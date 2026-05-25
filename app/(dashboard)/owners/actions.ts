@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
+import type { TxnCategory } from '@/types/database'
 
 export type OwnersActionState = { error?: string; success?: boolean; token?: string }
 
@@ -84,4 +85,63 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
 
   revalidatePath('/owners')
   return { success: true, token }
+}
+
+// ── Add manual transaction ────────────────────────────────────────────────────
+
+export async function addOwnerTransaction(
+  _prev: OwnersActionState | null,
+  formData: FormData
+): Promise<OwnersActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const property_id      = formData.get('property_id') as string
+  const transaction_type = formData.get('transaction_type') as 'revenue' | 'expense'
+  const category         = formData.get('category') as string
+  const amount           = parseFloat(formData.get('amount') as string)
+  const description      = (formData.get('description') as string)?.trim()
+  const transaction_date = formData.get('transaction_date') as string
+  const notes            = (formData.get('notes') as string)?.trim() || null
+
+  if (!property_id)           return { error: 'Property is required' }
+  if (!description)           return { error: 'Description is required' }
+  if (!amount || amount <= 0) return { error: 'Amount must be greater than 0' }
+  if (!transaction_date)      return { error: 'Date is required' }
+
+  const { data: property } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('id', property_id)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!property) return { error: 'Property not found' }
+
+  const { error } = await supabase.from('owner_transactions').insert({
+    property_id,
+    org_id:           membership.org_id,
+    transaction_type,
+    category:         category as TxnCategory,
+    amount,
+    description,
+    transaction_date,
+    notes,
+  })
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/owners')
+  return { success: true }
+}
+
+// ── Delete transaction ────────────────────────────────────────────────────────
+
+export async function deleteOwnerTransaction(txnId: string): Promise<void> {
+  const { supabase, membership } = await requireOrgMember()
+  await supabase
+    .from('owner_transactions')
+    .delete()
+    .eq('id', txnId)
+    .eq('org_id', membership.org_id)
+  revalidatePath('/owners')
 }

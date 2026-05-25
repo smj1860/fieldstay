@@ -25,6 +25,13 @@ interface InventoryItem {
   notes: string | null
 }
 
+interface CatalogItem {
+  id: string
+  name: string
+  category: InventoryCategory
+  default_unit: string
+}
+
 interface PurchaseOrderItem {
   id: string
   item_name: string
@@ -227,27 +234,58 @@ function CategorySection({
 
 function AddItemModal({
   propertyId,
+  propertyItems,
+  catalogItems,
   onClose,
 }: {
   propertyId: string
+  propertyItems: InventoryItem[]
+  catalogItems: CatalogItem[]
   onClose: () => void
 }) {
   const [state, action, pending] = useActionState(addInventoryItem, null)
+  const [tab, setTab]                       = useState<'catalog' | 'custom'>('catalog')
+  const [selectedCatalog, setSelectedCatalog] = useState<CatalogItem | null>(null)
+  const [categoryFilter, setCategoryFilter]   = useState<InventoryCategory | 'all'>('all')
 
-  // Close on success
   if (state?.success) {
     onClose()
     return null
   }
 
+  const addedCatalogIds = new Set(
+    propertyItems.map((i) => i.catalog_item_id).filter(Boolean) as string[]
+  )
+
+  const visibleCatalog = catalogItems.filter((c) =>
+    categoryFilter === 'all' || c.category === categoryFilter
+  )
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-card-lg w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-accent-900">Add Custom Item</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
+      <div className="bg-white rounded-2xl shadow-card-lg w-full max-w-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-accent-900">Add Inventory Item</h3>
+          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-4 border-b border-accent-200">
+          {(['catalog', 'custom'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => { setTab(t); setSelectedCatalog(null) }}
+              className={cn(
+                'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+                tab === t
+                  ? 'border-brand-700 text-brand-800'
+                  : 'border-transparent text-accent-500 hover:text-accent-700'
+              )}
+            >
+              {t === 'catalog' ? 'From Catalog' : 'Custom Item'}
+            </button>
+          ))}
         </div>
 
         {state?.error && (
@@ -256,46 +294,127 @@ function AddItemModal({
           </div>
         )}
 
-        <form action={action} className="space-y-4">
-          <input type="hidden" name="property_id" value={propertyId} />
+        {tab === 'catalog' ? (
+          <form action={action} className="space-y-4">
+            <input type="hidden" name="property_id" value={propertyId} />
+            {selectedCatalog && (
+              <>
+                <input type="hidden" name="catalog_item_id" value={selectedCatalog.id} />
+                <input type="hidden" name="name" value={selectedCatalog.name} />
+                <input type="hidden" name="category" value={selectedCatalog.category} />
+                <input type="hidden" name="unit" value={selectedCatalog.default_unit} />
+              </>
+            )}
 
-          <div>
-            <label className="label">Item Name <span className="text-red-500">*</span></label>
-            <input name="name" type="text" required className="input" placeholder="e.g. Paper Towels" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Category</label>
-              <select name="category" className="input">
-                {CATEGORY_ORDER.map((c) => (
-                  <option key={c} value={c}>{INVENTORY_CATEGORY_LABELS[c]}</option>
-                ))}
-              </select>
+            {/* Category filter */}
+            <div className="flex gap-1.5 flex-wrap">
+              {(['all', ...CATEGORY_ORDER] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setCategoryFilter(c)}
+                  className={cn(
+                    'px-2.5 py-1 text-xs rounded-full border transition-colors',
+                    categoryFilter === c
+                      ? 'bg-brand-800 text-white border-brand-800'
+                      : 'bg-white text-accent-600 border-accent-200 hover:border-accent-400'
+                  )}
+                >
+                  {c === 'all' ? 'All' : INVENTORY_CATEGORY_LABELS[c]}
+                </button>
+              ))}
             </div>
-            <div>
-              <label className="label">Unit <span className="text-red-500">*</span></label>
-              <input name="unit" type="text" required className="input" placeholder="rolls, boxes, oz…" />
+
+            {/* Catalog list */}
+            <div className="border border-accent-200 rounded-xl overflow-hidden max-h-52 overflow-y-auto">
+              {visibleCatalog.map((item) => {
+                const alreadyAdded = addedCatalogIds.has(item.id)
+                const isSelected   = selectedCatalog?.id === item.id
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => !alreadyAdded && setSelectedCatalog(isSelected ? null : item)}
+                    className={cn(
+                      'w-full flex items-center justify-between px-4 py-2.5 text-left text-sm border-b border-accent-50 last:border-0 transition-colors',
+                      isSelected   && 'bg-brand-800 text-white',
+                      alreadyAdded && 'opacity-40 cursor-not-allowed',
+                      !isSelected && !alreadyAdded && 'hover:bg-accent-50'
+                    )}
+                  >
+                    <span className="font-medium">{item.name}</span>
+                    <span className={cn('text-xs', isSelected ? 'text-brand-200' : 'text-accent-400')}>
+                      {alreadyAdded ? 'Already added' : item.default_unit}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
-          </div>
 
-          <div>
-            <label className="label">Par Level</label>
-            <input name="par_level" type="number" min={1} defaultValue={1} className="input" />
-          </div>
+            {selectedCatalog && (
+              <div>
+                <label className="label">Par Level</label>
+                <input name="par_level" type="number" min={1} defaultValue={1} className="input" />
+              </div>
+            )}
 
-          <div>
-            <label className="label">Notes</label>
-            <textarea name="notes" rows={2} className="input resize-none" placeholder="Any details…" />
-          </div>
+            <div className="flex gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={pending || !selectedCatalog}
+                className="btn-primary flex-1 disabled:opacity-50"
+              >
+                {pending
+                  ? 'Adding…'
+                  : selectedCatalog
+                  ? `Add "${selectedCatalog.name}"`
+                  : 'Select an item above'}
+              </button>
+              <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            </div>
+          </form>
+        ) : (
+          <form action={action} className="space-y-4">
+            <input type="hidden" name="property_id" value={propertyId} />
 
-          <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={pending} className="btn-primary flex-1">
-              {pending ? 'Adding…' : 'Add Item'}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
-          </div>
-        </form>
+            <div>
+              <label className="label">Item Name <span className="text-red-500">*</span></label>
+              <input name="name" type="text" required className="input" placeholder="e.g. Paper Towels" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Category</label>
+                <select name="category" className="input">
+                  {CATEGORY_ORDER.map((c) => (
+                    <option key={c} value={c}>{INVENTORY_CATEGORY_LABELS[c]}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Unit <span className="text-red-500">*</span></label>
+                <input name="unit" type="text" required className="input" placeholder="rolls, boxes, oz…" />
+              </div>
+            </div>
+
+            <div>
+              <label className="label">Par Level</label>
+              <input name="par_level" type="number" min={1} defaultValue={1} className="input" />
+            </div>
+
+            <div>
+              <label className="label">Notes</label>
+              <textarea name="notes" rows={2} className="input resize-none" placeholder="Any details…" />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button type="submit" disabled={pending} className="btn-primary flex-1">
+                {pending ? 'Adding…' : 'Add Item'}
+              </button>
+              <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )
@@ -518,10 +637,12 @@ export function InventoryManager({
   properties,
   items,
   purchaseOrders,
+  catalogItems,
 }: {
   properties: Property[]
   items: InventoryItem[]
   purchaseOrders: PurchaseOrder[]
+  catalogItems: CatalogItem[]
 }) {
   const [selectedPropertyId, setSelectedPropertyId] = useState<string>(
     properties[0]?.id ?? ''
@@ -644,6 +765,8 @@ export function InventoryManager({
       {showAddItem && selectedPropertyId && (
         <AddItemModal
           propertyId={selectedPropertyId}
+          propertyItems={propertyItems}
+          catalogItems={catalogItems}
           onClose={() => setShowAddItem(false)}
         />
       )}

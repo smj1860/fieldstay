@@ -121,6 +121,36 @@ export async function updateWorkOrderStatus(
 
   if (error) return { error: error.message }
 
+  // Auto-create expense transaction when WO is completed with a cost
+  if (status === 'completed') {
+    const { data: wo } = await supabase
+      .from('work_orders')
+      .select('actual_cost, estimated_cost, title, property_id')
+      .eq('id', workOrderId)
+      .single()
+
+    const cost = wo?.actual_cost ?? wo?.estimated_cost
+    if (wo && cost && cost > 0) {
+      const { count } = await supabase
+        .from('owner_transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('work_order_id', workOrderId)
+
+      if ((count ?? 0) === 0) {
+        await supabase.from('owner_transactions').insert({
+          property_id:      wo.property_id,
+          org_id:           membership.org_id,
+          work_order_id:    workOrderId,
+          transaction_type: 'expense',
+          category:         'maintenance',
+          amount:           cost,
+          description:      wo.title,
+          transaction_date: new Date().toISOString().split('T')[0],
+        })
+      }
+    }
+  }
+
   // Record the status change in history
   await supabase.from('work_order_updates').insert({
     work_order_id:             workOrderId,

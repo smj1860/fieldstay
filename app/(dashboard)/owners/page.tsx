@@ -38,6 +38,13 @@ export default async function OwnersPage() {
     .eq('is_active', true)
     .order('name')
 
+  // Fetch transactions for the P&L panels
+  const { data: transactions } = await supabase
+    .from('owner_transactions')
+    .select('id, property_id, transaction_type, category, amount, description, transaction_date, notes, work_order_id, booking_id')
+    .eq('org_id', membership.org_id)
+    .order('transaction_date', { ascending: false })
+
   // Derive base URL for portal links
   const headersList = await headers()
   const host        = headersList.get('host') ?? 'localhost:3000'
@@ -48,6 +55,7 @@ export default async function OwnersPage() {
     <OwnersManager
       owners={owners ?? []}
       properties={properties ?? []}
+      transactions={transactions ?? []}
       baseUrl={baseUrl}
     />
   )
