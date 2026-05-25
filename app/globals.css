@@ -68,6 +68,11 @@
            focus:ring-brand-500;
   }
 
+  .btn-cta {
+    @apply btn bg-gold-300 text-brand-800 hover:bg-gold-400
+           focus:ring-gold-300;
+  }
+
   .btn-secondary {
     @apply btn bg-white text-accent-700 border border-accent-200
            hover:bg-accent-50 focus:ring-accent-300;

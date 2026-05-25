@@ -107,6 +107,25 @@ export function NewPropertyForm() {
         </div>
       </div>
 
+      {/* Avg nightly rate */}
+      <div>
+        <label htmlFor="avg_nightly_rate" className="label">
+          Average Nightly Rate ($)
+        </label>
+        <input
+          id="avg_nightly_rate"
+          name="avg_nightly_rate"
+          type="number"
+          min="0"
+          step="0.01"
+          className="input"
+          placeholder="e.g. 285.00"
+        />
+        <p className="text-xs text-accent-400 mt-1">
+          Used to auto-calculate booking revenue in the owner portal. Can be set later.
+        </p>
+      </div>
+
       {/* Access info */}
       <div className="grid grid-cols-2 gap-4">
         <div>

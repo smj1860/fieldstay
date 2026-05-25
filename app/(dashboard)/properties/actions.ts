@@ -33,8 +33,11 @@ export async function createProperty(
   const checkout_time = (formData.get('checkout_time') as string) || '11:00'
   const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
   const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
-  const door_code     = (formData.get('door_code') as string)?.trim() || null
-  const internal_notes = (formData.get('internal_notes') as string)?.trim() || null
+  const door_code        = (formData.get('door_code') as string)?.trim() || null
+  const internal_notes   = (formData.get('internal_notes') as string)?.trim() || null
+  const avg_nightly_rate = formData.get('avg_nightly_rate')
+    ? parseFloat(formData.get('avg_nightly_rate') as string)
+    : null
 
   if (!name) return { error: 'Property name is required' }
 
@@ -70,6 +73,7 @@ export async function createProperty(
       wifi_password,
       door_code,
       internal_notes,
+      avg_nightly_rate,
       setup_steps_completed: { details: true },
     })
     .select('id')
