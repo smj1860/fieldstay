@@ -167,6 +167,21 @@ export const dailyMaintenanceCheck = inngest.createFunction(
       })
     }
 
+    await step.run('check-thirty-day-milestone', async () => {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
+      const { data: orgs } = await supabase
+        .from('organizations')
+        .select('id')
+        .lte('created_at', thirtyDaysAgo)
+
+      for (const org of orgs ?? []) {
+        await supabase.from('org_milestones').upsert(
+          { org_id: org.id, milestone: 'thirty_days' },
+          { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+        )
+      }
+    })
+
     return { checked: dueSchedules.length }
   }
 )

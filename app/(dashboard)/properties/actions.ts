@@ -155,6 +155,29 @@ export async function markStepComplete(
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
 
+  const allSteps = ['details', 'ical', 'inventory', 'messages', 'checklist', 'maintenance', 'crew']
+  const isFullySetup = allSteps.every((s) => updated[s] === true)
+
+  if (isFullySetup) {
+    const { data: props } = await supabase
+      .from('properties')
+      .select('id, setup_steps_completed')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+
+    const fullyConfigured = (props ?? []).filter((p) => {
+      const steps = p.setup_steps_completed as Record<string, boolean>
+      return allSteps.every((s) => steps?.[s] === true)
+    })
+
+    if (fullyConfigured.length === 2) {
+      await supabase.from('org_milestones').upsert(
+        { org_id: membership.org_id, milestone: 'second_property_configured' },
+        { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+      )
+    }
+  }
+
   revalidatePath(`/properties/${propertyId}`)
 }
 

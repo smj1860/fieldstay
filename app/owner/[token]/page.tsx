@@ -47,6 +47,7 @@ export default async function OwnerPortalPage({ params }: Props) {
       last_accessed_at,
       property_owners (
         id,
+        org_id,
         name,
         revenue_share_pct,
         property_id,
@@ -90,6 +91,17 @@ export default async function OwnerPortalPage({ params }: Props) {
     .from('owner_portal_tokens')
     .update({ last_accessed_at: new Date().toISOString() })
     .eq('id', portalToken.id)
+
+  const ownerForMilestone = Array.isArray(portalToken.property_owners)
+    ? portalToken.property_owners[0]
+    : portalToken.property_owners
+
+  if (ownerForMilestone?.org_id) {
+    await supabase.from('org_milestones').upsert(
+      { org_id: ownerForMilestone.org_id, milestone: 'first_owner_portal_view' },
+      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+    )
+  }
 
   const owner = Array.isArray(portalToken.property_owners)
     ? portalToken.property_owners[0]
