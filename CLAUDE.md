@@ -956,3 +956,53 @@ work order → vendor portal link → on complete → PM alert + expense txn
 - [ ] Stripe webhook: `https://app.fieldstay.com/api/webhooks/stripe`
 - [ ] Resend domain `fieldstay.com` verified
 - [ ] PowerSync instance connected to Supabase (before crew app goes live)
+
+Color Updates Needed in the Codebase
+tailwind.config.ts needs to be updated to match the new brand palette. Here's the exact replacement:
+colors: {
+  brand: {
+    50:  '#EEF1F7',
+    100: '#D5DBE9',
+    200: '#AAB7D4',
+    300: '#7F93BE',
+    400: '#546FA9',
+    500: '#2A4B8D',
+    600: '#1A3570',
+    700: '#152C5C',
+    800: '#102246',  // ← primary deep navy (was #093b31 forest green)
+    900: '#0B1830',
+  },
+  gold: {
+    50:  '#FFFDE7',
+    100: '#FFF8C2',
+    200: '#FEF08A',
+    300: '#FCD116',  // ← primary accent yellow
+    400: '#EAB800',
+    500: '#CA9A00',
+  },
+  accent: {
+    50:  '#F8F9FA',  // ← app background
+    100: '#E9ECEF',
+    200: '#DEE2E6',
+    300: '#CED4DA',
+    400: '#ADB5BD',
+    500: '#6C757D',
+    600: '#495057',
+    700: '#343A40',
+    800: '#1A1D20',  // ← body text
+    900: '#0D0F11',
+  },
+},
+Then in globals.css, update the button classes
+/* Primary button — navy background, dark text on yellow CTA */
+.btn-primary {
+  @apply btn bg-brand-800 text-white hover:bg-brand-700 focus:ring-brand-500;
+}
+
+/* CTA / action button — yellow, dark text */
+.btn-cta {
+  @apply btn bg-gold-300 text-brand-800 hover:bg-gold-400 focus:ring-gold-300;
+}
+
+Use .btn-cta for: "Save & Continue", "Add Property", "Assign Crew", alert badges. Use .btn-primary (navy) for secondary actions and nav.
+Also update the sidebar background in app/(dashboard)/layout.tsx from bg-brand-800 — that still works since we're keeping the same Tailwind key.
