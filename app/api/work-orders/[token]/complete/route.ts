@@ -14,15 +14,16 @@ import { inngest } from '@/lib/inngest/client'
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
+  const { token } = await params
   const supabase = createServiceClient()
 
   // Validate token
   const { data: workOrder } = await supabase
     .from('work_orders')
     .select('id, org_id, property_id, status, portal_enabled, completion_token_expires_at')
-    .eq('completion_token', params.token)
+    .eq('completion_token', token)
     .single()
 
   if (!workOrder) {
@@ -101,7 +102,7 @@ export async function POST(
     name: 'work-order/completed-via-portal',
     data: {
       work_order_id:    workOrder.id,
-      completion_token: params.token,
+      completion_token: token,
       notes:            notes ?? null,
       photo_paths:      photosPaths,
     },
@@ -118,8 +119,9 @@ export async function POST(
  */
 export async function GET(
   _request: NextRequest,
-  { params }: { params: { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
+  const { token } = await params
   const supabase = createServiceClient()
 
   const { data: workOrder } = await supabase
@@ -129,7 +131,7 @@ export async function GET(
       completion_token_expires_at,
       properties (name, city, state)
     `)
-    .eq('completion_token', params.token)
+    .eq('completion_token', token)
     .single()
 
   if (!workOrder || !workOrder.portal_enabled) {

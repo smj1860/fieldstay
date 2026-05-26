@@ -6,7 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { stripe, PLANS } from '@/lib/stripe/client'
 import type { ContactPref } from '@/types/database'
 
-export type SettingsActionState = { error?: string; success?: boolean }
+export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
 
 // ── Organization ─────────────────────────────────────────────
 
@@ -248,12 +248,20 @@ export async function inviteCrewMember(
   return { success: true }
 }
 
-export async function startCheckout(plan: string): Promise<void> {
+export async function createCheckoutSession(
+  planKey: 'pro' | 'growth',
+  interval: 'monthly' | 'annual'
+): Promise<SettingsActionState> {
   const { supabase, membership } = await requireOrgMember()
 
-  const planKey = plan as keyof typeof PLANS
   const planDef = PLANS[planKey]
-  if (!planDef || !planDef.priceId) return
+  if (!planDef) return { error: 'Invalid plan' }
+
+  const priceId = interval === 'annual'
+    ? planDef.annualPriceId
+    : planDef.monthlyPriceId
+
+  if (!priceId) return { error: 'Plan not available' }
 
   const { data: org } = await supabase
     .from('organizations')
@@ -262,14 +270,18 @@ export async function startCheckout(plan: string): Promise<void> {
     .single()
 
   const session = await stripe.checkout.sessions.create({
-    mode: 'subscription',
-    line_items: [{ price: planDef.priceId, quantity: 1 }],
-    customer: org?.stripe_customer_id ?? undefined,
-    customer_email: !org?.stripe_customer_id ? (org?.billing_email ?? undefined) : undefined,
-    success_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
-    cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
-    metadata: { org_id: membership.org_id, plan },
+    mode:                 'subscription',
+    payment_method_types: ['card'],
+    customer:             org?.stripe_customer_id ?? undefined,
+    customer_email:       !org?.stripe_customer_id ? (org?.billing_email ?? undefined) : undefined,
+    line_items:           [{ price: priceId, quantity: 1 }],
+    success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
+    cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
+    metadata:             { org_id: membership.org_id, plan: planKey },
   })
 
-  if (session.url) redirect(session.url)
+  if (!session.url) return { error: 'Could not create checkout session' }
+
+  revalidatePath('/settings')
+  return { redirectUrl: session.url }
 }

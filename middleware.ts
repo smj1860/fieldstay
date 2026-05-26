@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 
-const PUBLIC_ROUTES  = ['/login', '/signup', '/forgot-password', '/reset-password', '/crew/accept-invite']
+const PUBLIC_ROUTES  = ['/', '/login', '/signup', '/forgot-password', '/reset-password', '/crew/accept-invite']
 const TOKEN_ROUTES   = ['/owner/', '/work-orders/', '/api/work-orders']
 const BYPASS_ROUTES  = ['/api/inngest', '/api/webhooks/stripe', '/_next', '/favicon', '/robots', '/sitemap']
 
@@ -22,7 +22,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  if (user && isPublic) {
+  if (user && isPublic && pathname !== '/') {
     const url = request.nextUrl.clone()
     url.pathname = '/properties'
     url.search   = ''

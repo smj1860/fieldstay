@@ -6,10 +6,11 @@ import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle } f
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Property' }
-interface Props { params: { id: string } }
+interface Props { params: Promise<{ id: string }> }
 
 export default async function PropertyDetailPage({ params }: Props) {
-  const { property, supabase } = await requireProperty(params.id)
+  const { id } = await params
+  const { property, supabase } = await requireProperty(id)
 
   const completed = (property.setup_steps_completed as Record<string, boolean>) ?? {}
   const progress  = calcSetupProgress(completed)

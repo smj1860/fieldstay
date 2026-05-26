@@ -114,6 +114,13 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       return po.id
     })
 
+    await step.run('record-first-po-milestone', async () => {
+      await supabase.from('org_milestones').upsert(
+        { org_id, milestone: 'first_purchase_order' },
+        { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+      )
+    })
+
     // ── Email PM with PO summary ─────────────────────────────────────────────
 
     await step.run('email-po-to-pm', async () => {

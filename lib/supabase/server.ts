@@ -1,6 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import type { Database } from '@/types/database'
+
+// Database['public'] doesn't satisfy postgrest-js v2.106's GenericSchema constraint
+// (hand-written interfaces lack index signatures required by Record<string, GenericTable>).
+// We omit the <Database> type arg so Schema defaults to `any`, which allows all
+// .from() queries to type-check. Replace with Supabase CLI-generated types once connected.
 
 /**
  * Server-side Supabase client for use in:
@@ -15,7 +19,7 @@ import type { Database } from '@/types/database'
 export async function createClient() {
   const cookieStore = await cookies()
 
-  return createServerClient<Database>(
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -45,7 +49,7 @@ export async function createClient() {
  * Never expose to the client.
  */
 export function createServiceClient() {
-  return createServerClient<Database>(
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {

@@ -297,6 +297,11 @@ export const syncIcalFeed = inngest.createFunction(
         last_sync_status: 'success',
         last_sync_error:  null,
       }).eq('id', feed_id)
+
+      await supabase.from('org_milestones').upsert(
+        { org_id, milestone: 'first_ical_sync' },
+        { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+      )
     })
 
     return {

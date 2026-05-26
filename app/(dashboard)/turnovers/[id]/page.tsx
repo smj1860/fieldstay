@@ -8,9 +8,10 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Turnover Detail' }
 
-interface Props { params: { id: string } }
+interface Props { params: Promise<{ id: string }> }
 
 export default async function TurnoverDetailPage({ params }: Props) {
+  const { id } = await params
   const { supabase, membership } = await requireOrgMember()
 
   const { data: turnover } = await supabase
@@ -29,7 +30,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
         checklist_instance_items ( id, section_name, task, is_completed, requires_photo, photo_storage_path, crew_notes )
       )
     `)
-    .eq('id', params.id)
+    .eq('id', id)
     .eq('org_id', membership.org_id)
     .single()
 

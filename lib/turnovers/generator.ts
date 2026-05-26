@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Database, PriorityLevel } from '@/types/database'
+import type { PriorityLevel } from '@/types/database'
 
-type DBClient = SupabaseClient<Database>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DBClient = SupabaseClient<any>
 
 export interface GeneratedTurnover {
   id:                string

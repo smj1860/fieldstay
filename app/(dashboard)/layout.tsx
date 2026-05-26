@@ -2,6 +2,18 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardNav } from './dashboard-nav'
+import { ReviewPrompt } from '@/components/review-prompt'
+
+const MILESTONE_MESSAGES: Record<string, string> = {
+  first_ical_sync:              'Your first bookings are syncing.',
+  first_turnover_complete:      'First turnover done — FieldStay is working.',
+  first_purchase_order:         'FieldStay just caught a restock before you ran out.',
+  first_owner_portal_view:      'Your owner just viewed their P&L.',
+  second_property_configured:   "You're managing multiple properties with FieldStay.",
+  turnover_milestone_10:        '10 turnovers coordinated through FieldStay.',
+  turnover_milestone_50:        '50 turnovers. That\'s serious volume.',
+  thirty_days:                  "You've been running operations with FieldStay for a month.",
+}
 
 export default async function DashboardLayout({
   children,
@@ -26,6 +38,24 @@ export default async function DashboardLayout({
   const org = Array.isArray(membership.organizations)
     ? membership.organizations[0]
     : membership.organizations
+
+  const { data: pendingMilestone } = await supabase
+    .from('org_milestones')
+    .select('milestone, achieved_at')
+    .eq('org_id', membership.org_id)
+    .eq('dismissed', false)
+    .is('prompted_at', null)
+    .order('achieved_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+
+  if (pendingMilestone) {
+    await supabase
+      .from('org_milestones')
+      .update({ prompted_at: new Date().toISOString() })
+      .eq('org_id', membership.org_id)
+      .eq('milestone', pendingMilestone.milestone)
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-accent-50">
@@ -59,6 +89,13 @@ export default async function DashboardLayout({
       {/* Main content */}
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-7xl mx-auto px-6 py-8">
+          {pendingMilestone && MILESTONE_MESSAGES[pendingMilestone.milestone] && (
+            <ReviewPrompt
+              milestone={pendingMilestone.milestone}
+              message={MILESTONE_MESSAGES[pendingMilestone.milestone]}
+              orgId={membership.org_id}
+            />
+          )}
           {children}
         </div>
       </main>

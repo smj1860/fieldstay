@@ -3,10 +3,11 @@ import { CrewSetup } from './crew-setup'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Crew Setup' }
-interface Props { params: { id: string } }
+interface Props { params: Promise<{ id: string }> }
 
 export default async function CrewPage({ params }: Props) {
-  const { property, supabase, membership } = await requireProperty(params.id)
+  const { id } = await params
+  const { property, supabase, membership } = await requireProperty(id)
 
   const { data: crew } = await supabase
     .from('crew_members')

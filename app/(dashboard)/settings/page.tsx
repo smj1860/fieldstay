@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
 import { SettingsTabs } from './settings-tabs'
+import type { Organization, CrewMember, Vendor, OrganizationMember } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Settings' }
 
@@ -48,10 +49,10 @@ export default async function SettingsPage() {
       </div>
 
       <SettingsTabs
-        org={org!}
-        crew={crew ?? []}
-        vendors={vendors ?? []}
-        orgMembers={orgMembers ?? []}
+        org={org as unknown as Organization}
+        crew={(crew ?? []) as unknown as CrewMember[]}
+        vendors={(vendors ?? []) as unknown as Vendor[]}
+        orgMembers={(orgMembers ?? []) as unknown as OrganizationMember[]}
         currentRole={membership.role}
       />
     </div>

@@ -202,6 +202,30 @@ export const handleTurnoverCompleted = inngest.createFunction(
       })
     })
 
+    await step.run('record-completion-milestones', async () => {
+      const supabase = createServiceClient()
+
+      const { count } = await supabase
+        .from('turnovers')
+        .select('id', { count: 'exact', head: true })
+        .eq('org_id', org_id)
+        .eq('status', 'completed')
+
+      const n = count ?? 0
+
+      const milestones: string[] = []
+      if (n === 1)  milestones.push('first_turnover_complete')
+      if (n === 10) milestones.push('turnover_milestone_10')
+      if (n === 50) milestones.push('turnover_milestone_50')
+
+      for (const milestone of milestones) {
+        await supabase.from('org_milestones').upsert(
+          { org_id, milestone },
+          { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+        )
+      }
+    })
+
     return { turnover_id, notified: true }
   }
 )

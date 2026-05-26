@@ -7,7 +7,7 @@ export const metadata: Metadata = {
     template: '%s — FieldStay',
   },
   description: 'STR operations platform for property managers.',
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'),
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'),
 }
 
 export const viewport: Viewport = {
