@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { Suspense } from 'react'
 import { LoginForm } from './login-form'
 
 export const metadata: Metadata = { title: 'Log In' }
@@ -12,7 +13,9 @@ export default function LoginPage() {
         Sign in to your FieldStay account
       </p>
 
-      <LoginForm />
+      <Suspense>
+        <LoginForm />
+      </Suspense>
 
       <p className="text-center text-sm text-accent-500 mt-6">
         Don&apos;t have an account?{' '}

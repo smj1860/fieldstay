@@ -20,7 +20,7 @@ export function parseIcalFeed(raw: string): ParsedBooking[] {
     throw new Error('Failed to parse iCal data — invalid format')
   }
 
-  const component = new ICAL.Component(jcalData as Parameters<typeof ICAL.Component>[0])
+  const component = new ICAL.Component(jcalData as string | unknown[])
   const vevents   = component.getAllSubcomponents('vevent')
 
   const results: ParsedBooking[] = []
@@ -76,25 +76,28 @@ export function parseIcalFeed(raw: string): ParsedBooking[] {
   return results
 }
 
-/**
- * Convert a Date to a date-only string (YYYY-MM-DD) in local time.
- * iCal all-day events give midnight UTC which needs careful handling.
- */
-export function toDateString(d: Date): string {
-  return d.toISOString().slice(0, 10)
+function asDate(d: Date | string): Date {
+  return typeof d === 'string' ? new Date(d) : d
 }
 
 /**
- * Convert a Date to a time string (HH:MM).
+ * Convert a Date (or ISO string from step.run serialization) to YYYY-MM-DD.
  */
-export function toTimeString(d: Date): string {
-  return d.toISOString().slice(11, 16)
+export function toDateString(d: Date | string): string {
+  return asDate(d).toISOString().slice(0, 10)
 }
 
 /**
- * Returns true if this event is an all-day event
- * (midnight UTC start, common for STR platforms).
+ * Convert a Date (or ISO string) to a time string (HH:MM).
  */
-export function isAllDay(d: Date): boolean {
-  return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0
+export function toTimeString(d: Date | string): string {
+  return asDate(d).toISOString().slice(11, 16)
+}
+
+/**
+ * Returns true if this event is an all-day event (midnight UTC start).
+ */
+export function isAllDay(d: Date | string): boolean {
+  const dt = asDate(d)
+  return dt.getUTCHours() === 0 && dt.getUTCMinutes() === 0 && dt.getUTCSeconds() === 0
 }

@@ -3,10 +3,11 @@ import { ChecklistBuilder } from './checklist-builder'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Cleaning Checklist' }
-interface Props { params: { id: string } }
+interface Props { params: Promise<{ id: string }> }
 
 export default async function ChecklistPage({ params }: Props) {
-  const { property, supabase } = await requireProperty(params.id)
+  const { id } = await params
+  const { property, supabase } = await requireProperty(id)
 
   const { data: template } = await supabase
     .from('checklist_templates')

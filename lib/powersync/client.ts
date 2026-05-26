@@ -1,4 +1,5 @@
 import { PowerSyncDatabase } from '@powersync/web'
+import type { AbstractPowerSyncDatabase } from '@powersync/common'
 import { createClient } from '@/lib/supabase/client'
 import { AppSchema } from './schema'
 
@@ -7,14 +8,14 @@ class SupabaseConnector {
 
   async fetchCredentials() {
     const { data: { session } } = await this.supabase.auth.getSession()
-    if (!session) throw new Error('No session')
+    if (!session) return null
     return {
       endpoint: process.env.NEXT_PUBLIC_POWERSYNC_URL!,
       token:    session.access_token,
     }
   }
 
-  async uploadData(database: PowerSyncDatabase) {
+  async uploadData(database: AbstractPowerSyncDatabase) {
     const transaction = await database.getNextCrudTransaction()
     if (!transaction) return
 

@@ -21,31 +21,31 @@ export default function CrewTurnoverPage() {
   const [completing, setCompleting]           = useState(false)
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
-  const { data: turnovers } = usePowerSyncQuery(
-    'SELECT * FROM turnovers WHERE id = ?', [id]
-  )
-  const turnover = turnovers?.[0]
+  type TurnoverRow    = { id: string; status: string; priority: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number; notes: string | null }
+  type InstanceRow    = { id: string; turnover_id: string; status: string }
+  type ChecklistItem  = { id: string; instance_id: string; section_name: string; task: string; notes: string | null; is_completed: number; requires_photo: number; photo_storage_path: string | null; crew_notes: string | null; sort_order: number }
 
-  const { data: instances } = usePowerSyncQuery(
-    'SELECT * FROM checklist_instances WHERE turnover_id = ?', [id]
-  )
-  const instance = instances?.[0]
+  const turnovers = usePowerSyncQuery<TurnoverRow>('SELECT * FROM turnovers WHERE id = ?', [id])
+  const turnover  = turnovers?.[0]
 
-  const { data: items } = usePowerSyncQuery(
+  const instances = usePowerSyncQuery<InstanceRow>('SELECT * FROM checklist_instances WHERE turnover_id = ?', [id])
+  const instance  = instances?.[0]
+
+  const items = usePowerSyncQuery<ChecklistItem>(
     `SELECT * FROM checklist_instance_items
      WHERE instance_id = ?
      ORDER BY section_name, sort_order`,
     [instance?.id ?? '']
   )
 
-  const completedCount = items?.filter((i) => i.is_completed).length ?? 0
+  const completedCount = items?.filter((i: ChecklistItem) => i.is_completed).length ?? 0
   const totalCount     = items?.length ?? 0
   const pendingPhotos  = items?.filter(
-    (i) => i.requires_photo && !i.photo_storage_path
+    (i: ChecklistItem) => i.requires_photo && !i.photo_storage_path
   ) ?? []
 
-  const sections = (items ?? []).reduce<Record<string, NonNullable<typeof items>>>(
-    (acc, item) => {
+  const sections = (items ?? []).reduce<Record<string, ChecklistItem[]>>(
+    (acc: Record<string, ChecklistItem[]>, item: ChecklistItem) => {
       if (!acc[item.section_name]) acc[item.section_name] = []
       acc[item.section_name]!.push(item)
       return acc

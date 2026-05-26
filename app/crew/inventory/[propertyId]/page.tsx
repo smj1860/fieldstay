@@ -14,12 +14,13 @@ export default function CrewInventoryPage() {
   const [submitting, setSubmitting] = useState(false)
   const [notes, setNotes]         = useState('')
 
-  const { data: items } = usePowerSyncQuery(
+  type InvRow = { id: string; name: string; category: InventoryCategory; unit: string; par_level: number; current_quantity: number }
+  const items = usePowerSyncQuery<InvRow>(
     `SELECT * FROM inventory_items WHERE property_id = ? ORDER BY category, name`,
     [propertyId]
   )
 
-  const grouped = (items ?? []).reduce<Record<string, typeof items>>((acc, item) => {
+  const grouped = items.reduce<Record<string, InvRow[]>>((acc: Record<string, InvRow[]>, item: InvRow) => {
     const cat = item.category as InventoryCategory
     if (!acc[cat]) acc[cat] = []
     acc[cat]!.push(item)
@@ -67,7 +68,7 @@ export default function CrewInventoryPage() {
             {INVENTORY_CATEGORY_LABELS[category as InventoryCategory] ?? category}
           </h3>
           <div className="bg-white rounded-xl border border-accent-200 divide-y divide-accent-100 overflow-hidden">
-            {catItems!.map((item) => {
+            {catItems!.map((item: InvRow) => {
               const current = counts[item.id] ?? item.current_quantity ?? 0
               const isLow   = current < item.par_level
 

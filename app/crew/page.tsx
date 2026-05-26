@@ -8,7 +8,8 @@ export default function CrewDashboardPage() {
   const today   = new Date().toISOString().split('T')[0]
   const weekOut = new Date(Date.now() + 7 * 86_400_000).toISOString().split('T')[0]
 
-  const { data: turnovers } = usePowerSyncQuery(
+  type TurnoverRow = { id: string; status: string; priority: string; checkout_datetime: string; window_minutes: number | null }
+  const turnovers = usePowerSyncQuery<TurnoverRow>(
     `SELECT * FROM turnovers
      WHERE date(checkout_datetime) >= ? AND date(checkout_datetime) <= ?
        AND status != 'completed' AND status != 'cancelled'

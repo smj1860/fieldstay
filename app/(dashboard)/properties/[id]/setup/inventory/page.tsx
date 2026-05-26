@@ -5,10 +5,11 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Inventory Setup' }
 
-interface Props { params: { id: string } }
+interface Props { params: Promise<{ id: string }> }
 
 export default async function InventoryPage({ params }: Props) {
-  const { property, supabase } = await requireProperty(params.id)
+  const { id } = await params
+  const { property, supabase } = await requireProperty(id)
 
   const [{ data: catalogItems }, { data: propertyItems }] = await Promise.all([
     supabase

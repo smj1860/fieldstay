@@ -3,10 +3,11 @@ import { MaintenanceScheduleManager } from './maintenance-form'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Maintenance Schedules' }
-interface Props { params: { id: string } }
+interface Props { params: Promise<{ id: string }> }
 
 export default async function MaintenancePage({ params }: Props) {
-  const { property, supabase, membership } = await requireProperty(params.id)
+  const { id } = await params
+  const { property, supabase, membership } = await requireProperty(id)
 
   const [{ data: schedules }, { data: vendors }] = await Promise.all([
     supabase

@@ -4,10 +4,11 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Property Details' }
 
-interface Props { params: { id: string } }
+interface Props { params: Promise<{ id: string }> }
 
 export default async function DetailsPage({ params }: Props) {
-  const { property } = await requireProperty(params.id)
+  const { id } = await params
+  const { property } = await requireProperty(id)
   return (
     <div className="card">
       <h2 className="text-lg font-semibold text-accent-900 mb-1">Property Details</h2>

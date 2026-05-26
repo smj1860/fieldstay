@@ -23,6 +23,7 @@ interface InventoryItem {
   current_quantity: number
   low_stock_threshold_pct: number
   notes: string | null
+  catalog_item_id: string | null
 }
 
 interface CatalogItem {

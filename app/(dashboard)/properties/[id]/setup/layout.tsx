@@ -6,11 +6,12 @@ import { cn } from '@/lib/utils'
 
 interface Props {
   children: React.ReactNode
-  params: { id: string }
+  params: Promise<{ id: string }>
 }
 
 export default async function SetupLayout({ children, params }: Props) {
-  const { property } = await requireProperty(params.id)
+  const { id } = await params
+  const { property } = await requireProperty(id)
   const completed    = (property.setup_steps_completed as Record<string, boolean>) ?? {}
   const progress     = calcSetupProgress(completed)
 

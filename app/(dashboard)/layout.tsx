@@ -49,6 +49,14 @@ export default async function DashboardLayout({
     .limit(1)
     .maybeSingle()
 
+  if (pendingMilestone) {
+    await supabase
+      .from('org_milestones')
+      .update({ prompted_at: new Date().toISOString() })
+      .eq('org_id', membership.org_id)
+      .eq('milestone', pendingMilestone.milestone)
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-accent-50">
       {/* Sidebar */}

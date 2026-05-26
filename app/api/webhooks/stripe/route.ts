@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { stripe } from '@/lib/stripe/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
-import { PLANS, type PlanKey } from '@/lib/stripe/client'
+import { PLANS, getPlanByPriceId, type PlanKey } from '@/lib/stripe/client'
 
 export async function POST(request: NextRequest) {
   const body      = await request.text()
@@ -32,12 +32,9 @@ export async function POST(request: NextRequest) {
     case 'customer.subscription.updated': {
       const subscription = event.data.object
       const customerId   = subscription.customer as string
-      const priceId      = subscription.items.data[0]?.price.id
-
-      // Match price ID to plan
-      const plan = (Object.entries(PLANS).find(
-        ([, p]) => p.priceId === priceId
-      )?.[0] ?? 'starter') as PlanKey
+      const priceId      = subscription.items.data[0]?.price.id ?? ''
+      const planKey      = getPlanByPriceId(priceId) ?? 'pro'
+      const plan         = planKey as PlanKey
 
       const planStatus = subscription.status === 'active'   ? 'active'
                        : subscription.status === 'trialing' ? 'trialing'

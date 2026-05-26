@@ -14,7 +14,7 @@ import {
   updateVendorPortal,
   deactivateVendor,
   openBillingPortal,
-  startCheckout,
+  createCheckoutSession,
   type SettingsActionState,
 } from './actions'
 
@@ -39,10 +39,10 @@ const VENDOR_SPECIALTY_LABELS: Record<VendorSpecialty, string> = {
 const VENDOR_SPECIALTIES = Object.keys(VENDOR_SPECIALTY_LABELS) as VendorSpecialty[]
 
 const PLAN_INFO = {
-  starter:    { name: 'Starter',    maxProperties: 5,   description: 'Up to 5 properties',    badge: 'badge-slate' },
-  growth:     { name: 'Growth',     maxProperties: 20,  description: 'Up to 20 properties',   badge: 'badge-blue'  },
-  pro:        { name: 'Pro',        maxProperties: 50,  description: 'Up to 50 properties',   badge: 'badge-green' },
-  enterprise: { name: 'Enterprise', maxProperties: 999, description: 'Unlimited properties',  badge: 'badge-amber' },
+  starter:    { name: 'Starter',    maxProperties: 2,   description: 'Up to 2 properties',    badge: 'badge-slate' },
+  pro:        { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',   badge: 'badge-blue'  },
+  growth:     { name: 'Growth',     maxProperties: 45,  description: '16–45 properties',      badge: 'badge-green' },
+  enterprise: { name: 'Enterprise', maxProperties: 999, description: '45+ properties',        badge: 'badge-amber' },
 } as const
 
 const PLAN_STATUS_BADGES: Record<string, string> = {
@@ -670,37 +670,60 @@ function VendorRow({ vendor }: { vendor: Vendor }) {
 
 // ── Billing tab ───────────────────────────────────────────────────────────────
 
-const UPGRADE_PLANS = ['starter', 'growth', 'pro'] as const
+const DISPLAY_PLANS = [
+  {
+    key:      'pro'    as const,
+    name:     'Pro',
+    props:    'Up to 15 properties',
+    monthly:  149,
+    annual:   1490,
+    savings:  '$298',
+  },
+  {
+    key:      'growth' as const,
+    name:     'Growth',
+    props:    '16–45 properties',
+    monthly:  219,
+    annual:   2190,
+    savings:  '$438',
+  },
+]
 
 function BillingTab({ org }: { org: Organization }) {
-  const currentPlan  = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
-  const statusBadge  = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
-  const isTrialing   = org.plan_status === 'trialing'
+  const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.pro
+  const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
+  const isTrialing  = org.plan_status === 'trialing'
 
-  const [portalPending, startPortal]     = useTransition()
-  const [checkoutPlan, setCheckoutPlan]  = useState<string | null>(null)
-  const [checkoutPending, startCheckoutT] = useTransition()
+  const [interval, setInterval]             = useState<'monthly' | 'annual'>('monthly')
+  const [checkoutPlan, setCheckoutPlan]     = useState<string | null>(null)
+  const [checkoutError, setCheckoutError]   = useState<string | null>(null)
+  const [checkoutPending, startCheckoutT]   = useTransition()
+  const [portalPending, startPortal]        = useTransition()
 
   function handleBillingPortal() {
-    startPortal(async () => {
-      await openBillingPortal()
-    })
+    startPortal(async () => { await openBillingPortal() })
   }
 
-  function handleCheckout(plan: string) {
-    setCheckoutPlan(plan)
+  function handleCheckout(planKey: 'pro' | 'growth') {
+    setCheckoutPlan(planKey)
+    setCheckoutError(null)
     startCheckoutT(async () => {
-      await startCheckout(plan)
-      setCheckoutPlan(null)
+      const result = await createCheckoutSession(planKey, interval)
+      if (result?.redirectUrl) {
+        window.location.href = result.redirectUrl
+      } else if (result?.error) {
+        setCheckoutError(result.error)
+        setCheckoutPlan(null)
+      }
     })
   }
 
   return (
     <div className="max-w-2xl space-y-6">
+
       {/* Current plan summary */}
       <div className="card">
         <h2 className="text-base font-semibold text-accent-900 mb-4">Current Plan</h2>
-
         <div className="flex items-center gap-3 flex-wrap">
           <span className={cn('badge text-sm px-3 py-1', currentPlan.badge)}>
             {currentPlan.name}
@@ -737,18 +760,52 @@ function BillingTab({ org }: { org: Organization }) {
         )}
       </div>
 
-      {/* Plan comparison */}
+      {/* Plan upgrade cards */}
       <div>
-        <h3 className="section-header">Available Plans</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {UPGRADE_PLANS.map((planKey) => {
-            const plan      = PLAN_INFO[planKey]
-            const isCurrent = org.plan === planKey
-            const isPending = checkoutPlan === planKey
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="section-header mb-0">Available Plans</h3>
+          {/* Monthly / Annual toggle */}
+          <div className="flex items-center gap-1 bg-accent-100 rounded-lg p-1 text-sm">
+            <button
+              onClick={() => setInterval('monthly')}
+              className={cn(
+                'px-3 py-1 rounded-md font-medium transition-colors',
+                interval === 'monthly'
+                  ? 'bg-white text-accent-900 shadow-sm'
+                  : 'text-accent-500 hover:text-accent-700'
+              )}
+            >
+              Monthly
+            </button>
+            <button
+              onClick={() => setInterval('annual')}
+              className={cn(
+                'px-3 py-1 rounded-md font-medium transition-colors',
+                interval === 'annual'
+                  ? 'bg-white text-accent-900 shadow-sm'
+                  : 'text-accent-500 hover:text-accent-700'
+              )}
+            >
+              Annual
+              <span className="ml-1.5 text-xs text-green-600 font-normal">2 months free</span>
+            </button>
+          </div>
+        </div>
+
+        {checkoutError && (
+          <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            {checkoutError}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {DISPLAY_PLANS.map((plan) => {
+            const isCurrent = org.plan === plan.key
+            const isPending = checkoutPlan === plan.key && checkoutPending
 
             return (
               <div
-                key={planKey}
+                key={plan.key}
                 className={cn(
                   'card flex flex-col gap-3',
                   isCurrent && 'ring-2 ring-brand-700 ring-offset-2'
@@ -756,21 +813,30 @@ function BillingTab({ org }: { org: Organization }) {
               >
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-accent-900">{plan.name}</span>
-                  {isCurrent && (
-                    <span className="badge badge-green text-xs">Current</span>
+                  {isCurrent && <span className="badge badge-green text-xs">Current</span>}
+                </div>
+                <p className="text-sm text-accent-500">{plan.props}</p>
+                <div>
+                  {interval === 'monthly' ? (
+                    <p className="text-2xl font-bold text-brand-800">
+                      ${plan.monthly}<span className="text-sm font-normal text-accent-400">/mo</span>
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-2xl font-bold text-brand-800">
+                        ${plan.annual}<span className="text-sm font-normal text-accent-400">/yr</span>
+                      </p>
+                      <p className="text-xs text-green-600">Save {plan.savings} vs monthly</p>
+                    </>
                   )}
                 </div>
-                <p className="text-sm text-accent-500">{plan.description}</p>
-                <p className="text-xs text-accent-400">
-                  Up to {plan.maxProperties} properties
-                </p>
                 {!isCurrent && (
                   <button
-                    onClick={() => handleCheckout(planKey)}
+                    onClick={() => handleCheckout(plan.key)}
                     disabled={checkoutPending}
                     className="btn-primary text-sm mt-auto"
                   >
-                    {isPending && checkoutPending ? (
+                    {isPending ? (
                       <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
                     ) : `Upgrade to ${plan.name}`}
                   </button>
@@ -778,8 +844,25 @@ function BillingTab({ org }: { org: Organization }) {
               </div>
             )
           })}
+
+          {/* Enterprise */}
+          <div className="card flex flex-col gap-3 sm:col-span-2">
+            <div className="flex items-start justify-between flex-wrap gap-3">
+              <div>
+                <span className="font-semibold text-accent-900">Enterprise</span>
+                <p className="text-sm text-accent-500 mt-0.5">45+ properties — custom pricing</p>
+              </div>
+              <a
+                href="mailto:hello@fieldstay.app"
+                className="btn-secondary text-sm"
+              >
+                Contact Us →
+              </a>
+            </div>
+          </div>
         </div>
       </div>
+
     </div>
   )
 }

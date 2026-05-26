@@ -3,10 +3,11 @@ import { MessagesForm } from './messages-form'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Guest Messages' }
-interface Props { params: { id: string } }
+interface Props { params: Promise<{ id: string }> }
 
 export default async function MessagesPage({ params }: Props) {
-  const { property, supabase } = await requireProperty(params.id)
+  const { id } = await params
+  const { property, supabase } = await requireProperty(id)
 
   const { data: templates } = await supabase
     .from('guest_message_templates')
