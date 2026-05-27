@@ -1,226 +1,492 @@
+'use client'
+
+import { useState } from 'react'
 import Link from 'next/link'
-import { CalendarCheck, Package, Wrench, BarChart3, CheckCircle2, ArrowRight } from 'lucide-react'
 
 export default function LandingPage() {
-  return (
-    <div className="min-h-screen bg-white">
+  const [annual, setAnnual] = useState(false)
 
-      {/* ── Nav ─────────────────────────────────────────────── */}
-      <nav className="border-b border-accent-100 px-6 py-4 sticky top-0 bg-white/95 backdrop-blur z-50">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <span className="text-2xl font-bold text-brand-800">FieldStay</span>
-          <div className="flex items-center gap-3">
-            <Link href="/login"  className="btn-ghost text-sm">Log In</Link>
-            <Link href="/signup" className="btn-primary text-sm">Start Free Trial</Link>
-          </div>
+  return (
+    <div className="min-h-screen" style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif" }}>
+
+      {/* ── Nav ──────────────────────────────────────────────────────────── */}
+      <nav className="sticky top-0 z-50 flex items-center justify-between px-8 h-16"
+           style={{ background: '#102246' }}>
+        <span className="text-xl font-black tracking-tight" style={{ color: '#fff' }}>
+          Field<span style={{ color: '#FCD116' }}>Stay</span>
+        </span>
+        <div className="flex items-center gap-2">
+          <Link href="/login"
+                className="text-sm px-4 py-2 rounded-md transition-colors"
+                style={{ color: 'rgba(255,255,255,0.65)' }}
+                onMouseOver={e => (e.currentTarget.style.color = '#fff')}
+                onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}>
+            Log In
+          </Link>
+          <Link href="/signup"
+                className="text-sm font-bold px-4 py-2 rounded-md transition-opacity"
+                style={{ background: '#FCD116', color: '#102246' }}>
+            Start Free Trial
+          </Link>
         </div>
       </nav>
 
-      {/* ── Hero ─────────────────────────────────────────────── */}
-      <section className="max-w-5xl mx-auto px-6 py-24 text-center">
-        <h1 className="text-5xl font-bold text-brand-800 leading-tight mb-5">
-          STR Operations,<br />Finally Handled.
+      {/* ── Hero ─────────────────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden text-center px-8 py-24"
+               style={{ background: '#102246' }}>
+        {/* Dot grid texture */}
+        <div className="absolute inset-0 pointer-events-none"
+             style={{
+               backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)',
+               backgroundSize: '28px 28px',
+             }} />
+
+        {/* Eyebrow */}
+        <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold
+                        uppercase tracking-widest mb-7"
+             style={{ background: 'rgba(252,209,22,0.12)', border: '1px solid rgba(252,209,22,0.25)', color: '#FCD116' }}>
+          Built for STR Property Managers
+        </div>
+
+        {/* Headline */}
+        <h1 className="mx-auto mb-5 font-black leading-[1.08] tracking-tight"
+            style={{ fontSize: 'clamp(36px, 5vw, 54px)', color: '#fff', maxWidth: 720, letterSpacing: '-1.5px' }}>
+          Stop Running Your Properties on{' '}
+          <span style={{ color: '#FCD116' }}>Texts & Spreadsheets.</span>
         </h1>
-        <p className="text-xl text-accent-500 max-w-2xl mx-auto mb-8">
-          FieldStay gives short-term rental property managers one platform
-          for turnovers, inventory, maintenance, and owner reporting — with
-          true offline access for your cleaning crew.
+
+        {/* Subhead */}
+        <p className="mx-auto mb-9" style={{ fontSize: 18, color: 'rgba(255,255,255,0.62)', maxWidth: 560, lineHeight: 1.65 }}>
+          FieldStay coordinates your turnovers, inventory, maintenance, and owner
+          reporting in one platform — with a true offline app your cleaning crew
+          can use anywhere at the property.
         </p>
-        <Link
-          href="/signup"
-          className="btn-cta text-base px-8 py-3 inline-flex items-center gap-2"
-        >
-          Start Free Trial <ArrowRight className="w-5 h-5" />
+
+        {/* CTA */}
+        <Link href="/signup"
+              className="inline-flex items-center gap-2 rounded-lg font-black text-base transition-all"
+              style={{ background: '#FCD116', color: '#102246', padding: '16px 36px' }}>
+          Start Free Trial <span style={{ fontSize: 20 }}>→</span>
         </Link>
-        <p className="text-sm text-accent-400 mt-3">
-          14-day free trial · No credit card required
+        <p className="mt-4 text-sm" style={{ color: 'rgba(255,255,255,0.38)' }}>
+          14-day free trial · No credit card required · Cancel anytime
         </p>
       </section>
 
-      {/* ── Features ─────────────────────────────────────────── */}
-      <section className="bg-accent-50 py-16">
-        <div className="max-w-5xl mx-auto px-6">
-          <h2 className="text-3xl font-bold text-brand-800 text-center mb-12">
-            Everything between check-out and check-in
+      {/* ── Stats bar ────────────────────────────────────────────────────── */}
+      <div className="flex justify-center gap-16 px-8 py-5"
+           style={{ background: '#0d1e3d', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        {[
+          { num: '15 min', label: 'Avg. property setup' },
+          { num: '0',      label: 'Spreadsheets needed' },
+          { num: '100%',   label: 'Offline crew access' },
+        ].map((s) => (
+          <div key={s.label} className="text-center">
+            <div className="font-black leading-none mb-1"
+                 style={{ fontSize: 28, color: '#FCD116', letterSpacing: '-1px' }}>
+              {s.num}
+            </div>
+            <div className="text-xs font-bold uppercase tracking-wider"
+                 style={{ color: 'rgba(255,255,255,0.45)' }}>
+              {s.label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Pain section ─────────────────────────────────────────────────── */}
+      <section className="px-8 py-20" style={{ background: '#F8F9FA' }}>
+        <div className="mx-auto" style={{ maxWidth: 900 }}>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3"
+             style={{ color: '#102246' }}>
+            Sound familiar?
+          </p>
+          <h2 className="font-black mb-2 tracking-tight"
+              style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
+            Managing properties today is chaotic.
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
+          <p className="mb-10 text-base" style={{ color: '#6B7280' }}>
+            If any of these describe your week, FieldStay was built for you.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {[
               {
-                icon: CalendarCheck,
-                title: 'Turnovers',
-                desc:  'Auto-generated from your Airbnb and VRBO calendars. Assign crew, track checklists, capture photos.',
+                icon: '💬',
+                title: 'Coordinating cleaners over group text',
+                body: 'Scrolling back through 40 messages trying to figure out if someone confirmed Saturday\'s checkout.',
               },
               {
-                icon: Package,
-                title: 'Inventory',
-                desc:  'Par levels per property. Crew submits counts. Purchase orders generated and sent to you automatically.',
+                icon: '📦',
+                title: 'Finding out you\'re out of supplies at 9pm',
+                body: 'Crew texts you mid-turnover that there\'s no laundry pods. Next guests check in tomorrow at 3pm.',
               },
               {
-                icon: Wrench,
-                title: 'Maintenance',
-                desc:  'Work orders, vendor portal, routine and seasonal schedule tracking — all in one place.',
+                icon: '🔧',
+                title: 'Chasing vendors for work order updates',
+                body: 'You submitted the repair request two weeks ago. Still no idea if anyone has looked at it.',
               },
               {
-                icon: BarChart3,
-                title: 'Owner P&L',
-                desc:  'Revenue from bookings, expenses from work orders. Owners get a clean, tokenized read-only portal.',
+                icon: '📊',
+                title: 'Copy-pasting P&Ls to owners every month',
+                body: 'Manually pulling numbers from your booking platform and pasting them into a spreadsheet to email out.',
+              },
+            ].map((item) => (
+              <div key={item.title}
+                   className="flex items-start gap-4 rounded-xl p-5"
+                   style={{ background: '#fff', border: '1px solid #E5E7EB' }}>
+                <div className="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                     style={{ background: '#FFF8E7' }}>
+                  {item.icon}
+                </div>
+                <div>
+                  <p className="font-bold text-sm mb-1" style={{ color: '#111827' }}>{item.title}</p>
+                  <p className="text-sm leading-relaxed" style={{ color: '#6B7280' }}>{item.body}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Features ─────────────────────────────────────────────────────── */}
+      <section className="px-8 py-20" style={{ background: '#fff' }}>
+        <div className="mx-auto" style={{ maxWidth: 960 }}>
+          <div className="text-center mb-14">
+            <h2 className="font-black mb-3 tracking-tight"
+                style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
+              Everything between check-out and check-in.
+            </h2>
+            <p className="text-base mx-auto" style={{ color: '#6B7280', maxWidth: 480 }}>
+              FieldStay handles operations so you can focus on growing your portfolio.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {[
+              {
+                tag: 'Turnovers',
+                title: 'Automated from your calendar',
+                body: 'Connect your Airbnb or VRBO iCal. FieldStay reads your bookings, generates turnovers in the gaps, and assigns them to crew — with mandatory photo proof on any task that needs it.',
+                details: [
+                  'Auto-generated from booking gaps',
+                  'Crew notified immediately on assignment',
+                  'Photo capture blocks completion when required',
+                  'True offline access — no Wi-Fi required on-site',
+                ],
+              },
+              {
+                tag: 'Inventory',
+                title: 'Par levels that reorder themselves',
+                body: 'Set par levels for every item at every property. When crew submits their count and something\'s below par, a purchase order emails you automatically. You just place the order.',
+                details: [
+                  'Pre-seeded catalog of common STR supplies',
+                  'Per-property par level configuration',
+                  'Crew submits counts offline via mobile app',
+                  'Auto-generated PO when stock is low',
+                ],
+              },
+              {
+                tag: 'Maintenance',
+                title: 'Work orders vendors actually complete',
+                body: 'Create work orders and assign vendors. Vendors get a tokenized link — no account needed — to mark work complete, attach photos, and add notes. You\'re notified instantly.',
+                details: [
+                  'Vendor portal requires zero login to use',
+                  'Routine and seasonal schedule tracking',
+                  'Auto-create work orders from due schedules',
+                  'Maintenance costs flow into owner P&L',
+                ],
+              },
+              {
+                tag: 'Owner P&L',
+                title: 'P&L your owners can actually see',
+                body: 'Revenue auto-calculates from synced bookings. Maintenance costs flow in from completed work orders. Owners click a link and see their numbers — no password, no account needed.',
+                details: [
+                  'Revenue auto-pulled from booking data',
+                  'Expenses auto-created from work order costs',
+                  'Monthly P&L with category breakdown',
+                  'Tokenized portal — owners click link, done',
+                ],
               },
             ].map((f) => (
-              <div key={f.title} className="bg-white rounded-xl p-5 shadow-sm border border-accent-100">
-                <f.icon className="w-7 h-7 text-brand-800 mb-3" />
-                <h3 className="font-semibold text-accent-900 mb-1">{f.title}</h3>
-                <p className="text-sm text-accent-500">{f.desc}</p>
+              <div key={f.tag}
+                   className="rounded-2xl p-7 relative overflow-hidden transition-all"
+                   style={{ border: '1px solid #E5E7EB' }}>
+                <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
+                     style={{ background: '#102246' }} />
+                <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
+                      style={{ background: '#EEF2FF', color: '#102246' }}>
+                  {f.tag}
+                </span>
+                <h3 className="font-black mb-3 tracking-tight"
+                    style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
+                  {f.title}
+                </h3>
+                <p className="text-sm leading-relaxed mb-5" style={{ color: '#6B7280' }}>
+                  {f.body}
+                </p>
+                <div className="flex flex-col gap-2">
+                  {f.details.map((d) => (
+                    <div key={d} className="flex items-center gap-2.5 text-sm" style={{ color: '#374151' }}>
+                      <span className="flex-shrink-0 flex items-center justify-center rounded-full text-xs font-black"
+                            style={{ width: 18, height: 18, background: '#102246', color: '#FCD116', lineHeight: '18px' }}>
+                        ✓
+                      </span>
+                      {d}
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── How it works ─────────────────────────────────────── */}
-      <section className="py-16">
-        <div className="max-w-3xl mx-auto px-6 text-center">
-          <h2 className="text-3xl font-bold text-brand-800 mb-10">
-            Up and running in minutes
+      {/* ── How it works ─────────────────────────────────────────────────── */}
+      <section className="px-8 py-20 text-center" style={{ background: '#102246' }}>
+        <div className="mx-auto" style={{ maxWidth: 800 }}>
+          <h2 className="font-black mb-3 tracking-tight"
+              style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#fff', letterSpacing: '-1px' }}>
+            Up and running in minutes.
           </h2>
-          <div className="space-y-6 text-left">
+          <p className="mb-14 text-base" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            No implementation fees. No onboarding call required.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-left">
             {[
               {
-                n:    '1',
-                title: 'Add your property',
-                desc:  'Name, address, check-in times, door codes, Wi-Fi — everything your crew and guests need.',
+                n: '01',
+                title: 'Add your properties',
+                desc: 'Name, address, check-in times, door codes, Wi-Fi details — and paste your Airbnb or VRBO iCal URL. Bookings sync automatically.',
               },
               {
-                n:    '2',
-                title: 'Connect your calendars',
-                desc:  'Paste your Airbnb or VRBO iCal URL. FieldStay syncs bookings and generates turnovers automatically.',
+                n: '02',
+                title: 'Configure the details',
+                desc: 'Set inventory par levels, build your cleaning checklist, add maintenance schedules, invite your crew. Takes about 15 minutes per property.',
               },
               {
-                n:    '3',
-                title: 'Invite your crew',
-                desc:  'Crew gets an email link, creates an account, and sees their assignments on their phone — offline included.',
+                n: '03',
+                title: 'Run on autopilot',
+                desc: 'Turnovers generate, crew works offline, purchase orders send themselves, owners see their P&L. You manage exceptions, not logistics.',
               },
             ].map((step) => (
-              <div key={step.n} className="flex items-start gap-4">
-                <span className="w-8 h-8 rounded-full bg-gold-300 text-brand-800 font-bold text-sm flex items-center justify-center flex-shrink-0 mt-0.5">
+              <div key={step.n}
+                   className="rounded-2xl p-7"
+                   style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div className="font-black mb-3 leading-none"
+                     style={{ fontSize: 40, color: 'rgba(252,209,22,0.2)', letterSpacing: '-2px' }}>
                   {step.n}
-                </span>
-                <div>
-                  <p className="font-semibold text-accent-900">{step.title}</p>
-                  <p className="text-sm text-accent-500 mt-0.5">{step.desc}</p>
                 </div>
+                <p className="font-bold mb-2" style={{ fontSize: 17, color: '#fff' }}>{step.title}</p>
+                <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                  {step.desc}
+                </p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── Pricing ──────────────────────────────────────────── */}
-      <section className="bg-accent-50 py-16">
-        <div className="max-w-4xl mx-auto px-6">
-          <h2 className="text-3xl font-bold text-brand-800 text-center mb-2">
-            Simple, transparent pricing
-          </h2>
-          <p className="text-center text-accent-500 mb-10">
-            Full software on every plan. No features gated.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      {/* ── Pricing ──────────────────────────────────────────────────────── */}
+      <section className="px-8 py-20" style={{ background: '#F8F9FA' }}>
+        <div className="mx-auto" style={{ maxWidth: 900 }}>
+          <div className="text-center mb-10">
+            <h2 className="font-black mb-2 tracking-tight"
+                style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
+              Simple, transparent pricing.
+            </h2>
+            <p className="text-sm" style={{ color: '#6B7280' }}>
+              Full software on every plan. No features gated by tier.
+            </p>
+          </div>
+
+          {/* Billing toggle */}
+          <div className="flex items-center justify-center gap-3 mb-9">
+            <span className="text-sm font-bold"
+                  style={{ color: annual ? '#9CA3AF' : '#102246' }}>
+              Monthly
+            </span>
+            <button
+              onClick={() => setAnnual(!annual)}
+              className="relative rounded-full transition-colors"
+              style={{ width: 48, height: 26, background: '#102246', border: 'none', cursor: 'pointer' }}
+            >
+              <span className="absolute top-[3px] rounded-full transition-transform"
+                    style={{
+                      width: 20, height: 20,
+                      background: '#FCD116',
+                      left: 3,
+                      transform: annual ? 'translateX(22px)' : 'translateX(0)',
+                      display: 'block',
+                      transition: 'transform 0.2s',
+                    }} />
+            </button>
+            <span className="text-sm font-bold flex items-center gap-2"
+                  style={{ color: annual ? '#102246' : '#9CA3AF' }}>
+              Annual
+              <span className="rounded-full px-2 py-0.5 text-xs font-black"
+                    style={{ background: '#FCD116', color: '#102246' }}>
+                Save 2 months
+              </span>
+            </span>
+          </div>
+
+          {/* Plan cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               {
-                name:      'Pro',
-                price:     '$149',
-                annual:    '$1,490/yr',
-                savings:   'Save $298',
-                props:     'Up to 15 properties',
+                name: 'Pro',
+                props: 'Up to 15 properties',
+                monthly: 149, annual: 1490,
                 highlight: false,
-                features:  ['All core features', 'Crew offline app', 'Inventory + POs', 'Owner P&L portal', 'Vendor portal'],
+                features: [
+                  'iCal sync (Airbnb, VRBO)',
+                  'Turnover board + crew app',
+                  'Offline checklist + photo capture',
+                  'Inventory with auto purchase orders',
+                  'Maintenance + vendor portal',
+                  'Owner P&L portal',
+                  'Crew email invites',
+                ],
+                cta: 'Start Free Trial',
+                ctaHref: '/signup',
               },
               {
-                name:      'Growth',
-                price:     '$219',
-                annual:    '$2,190/yr',
-                savings:   'Save $438',
-                props:     '16–45 properties',
+                name: 'Growth',
+                props: '16–45 properties',
+                monthly: 219, annual: 2190,
                 highlight: true,
-                features:  ['Everything in Pro', 'Up to 45 properties', 'Priority support'],
+                badge: 'Most Popular',
+                features: [
+                  'Everything in Pro',
+                  'Up to 45 properties',
+                  'Priority support',
+                ],
+                cta: 'Start Free Trial',
+                ctaHref: '/signup',
               },
               {
-                name:      'Enterprise',
-                price:     'Custom',
-                annual:    '',
-                savings:   '',
-                props:     '45+ properties',
+                name: 'Enterprise',
+                props: '45+ properties',
+                monthly: null, annual: null,
                 highlight: false,
-                features:  ['Everything in Growth', 'Custom onboarding', 'Dedicated support', 'Volume pricing'],
+                features: [
+                  'Everything in Growth',
+                  'Unlimited properties',
+                  'Custom onboarding',
+                  'Dedicated account support',
+                ],
+                cta: 'Contact Us',
+                ctaHref: 'mailto:hello@fieldstay.app',
               },
             ].map((plan) => (
-              <div
-                key={plan.name}
-                className={`bg-white rounded-xl p-6 border border-accent-100 flex flex-col ${
-                  plan.highlight ? 'ring-2 ring-brand-800 shadow-md' : 'shadow-sm'
-                }`}
-              >
-                {plan.highlight && (
-                  <span className="inline-block bg-gold-300 text-brand-800 text-xs font-bold px-2 py-0.5 rounded-full mb-3 self-start">
-                    Most Popular
+              <div key={plan.name}
+                   className="rounded-2xl p-7 flex flex-col"
+                   style={{
+                     background: '#fff',
+                     border: plan.highlight ? '2px solid #102246' : '1.5px solid #E5E7EB',
+                     boxShadow: plan.highlight ? '0 0 0 4px rgba(16,34,70,0.07)' : 'none',
+                   }}>
+                {plan.badge && (
+                  <span className="self-start rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4"
+                        style={{ background: '#FCD116', color: '#102246' }}>
+                    {plan.badge}
                   </span>
                 )}
-                <h3 className="text-lg font-bold text-accent-900">{plan.name}</h3>
-                <div className="my-2">
-                  <span className="text-3xl font-bold text-brand-800">{plan.price}</span>
-                  {plan.price !== 'Custom' && (
-                    <span className="text-sm font-normal text-accent-400">/mo</span>
+                <p className="font-black mb-1" style={{ fontSize: 18, color: '#111827' }}>
+                  {plan.name}
+                </p>
+                <p className="text-sm mb-5" style={{ color: '#9CA3AF' }}>{plan.props}</p>
+
+                {/* Price */}
+                <div className="mb-5">
+                  {plan.monthly !== null ? (
+                    <>
+                      <span className="font-black tracking-tight"
+                            style={{ fontSize: 42, color: '#102246', letterSpacing: '-2px', lineHeight: 1 }}>
+                        {annual ? `$${plan.annual!.toLocaleString()}` : `$${plan.monthly}`}
+                      </span>
+                      <span className="text-sm ml-1" style={{ color: '#9CA3AF' }}>
+                        {annual ? '/yr' : '/mo'}
+                      </span>
+                      {!annual && (
+                        <p className="text-xs mt-1" style={{ color: '#9CA3AF' }}>
+                          or ${plan.annual!.toLocaleString()}/yr — save ${(plan.monthly! * 12 - plan.annual!)} 
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <span className="font-black" style={{ fontSize: 34, color: '#102246', letterSpacing: '-1px' }}>
+                      Custom
+                    </span>
                   )}
                 </div>
-                {plan.annual && (
-                  <p className="text-xs text-accent-400 mb-0.5">
-                    or {plan.annual}{plan.savings && ` · ${plan.savings}`}
-                  </p>
-                )}
-                <p className="text-sm text-accent-500 mb-4">{plan.props}</p>
-                <ul className="space-y-2 mb-5 flex-1">
+
+                <div className="mb-5" style={{ height: 1, background: '#F3F4F6' }} />
+
+                <div className="flex flex-col gap-2.5 flex-1 mb-6">
                   {plan.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-accent-700">
-                      <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                    <div key={f} className="flex items-start gap-2 text-sm" style={{ color: '#374151' }}>
+                      <span className="flex-shrink-0 flex items-center justify-center rounded-full text-xs font-black mt-0.5"
+                            style={{ width: 18, height: 18, minWidth: 18, background: '#102246', color: '#FCD116', lineHeight: '18px' }}>
+                        ✓
+                      </span>
                       {f}
-                    </li>
+                    </div>
                   ))}
-                </ul>
-                {plan.price === 'Custom' ? (
-                  <a
-                    href="mailto:hello@fieldstay.app"
-                    className="btn-secondary w-full text-center block py-2.5 text-sm"
-                  >
-                    Contact Us
-                  </a>
-                ) : (
-                  <Link
-                    href="/signup"
-                    className="btn-primary w-full text-center block py-2.5 text-sm"
-                  >
-                    Start Free Trial
-                  </Link>
-                )}
+                </div>
+
+                <Link href={plan.ctaHref}
+                      className="block text-center rounded-lg font-bold text-sm py-3 transition-opacity"
+                      style={{
+                        background: plan.highlight ? '#FCD116' : plan.monthly === null ? 'transparent' : '#102246',
+                        color: plan.highlight ? '#102246' : plan.monthly === null ? '#102246' : '#fff',
+                        border: plan.monthly === null ? '1.5px solid #E5E7EB' : 'none',
+                      }}>
+                  {plan.cta}
+                </Link>
               </div>
             ))}
           </div>
-          <p className="text-center text-sm text-accent-400 mt-6">
-            All plans include a 14-day free trial. No credit card required.
-            Annual billing saves approximately 2 months.
+
+          <p className="text-center text-xs mt-6" style={{ color: '#9CA3AF' }}>
+            All plans include a 14-day free trial. No credit card required. Annual billing saves approximately 2 months.
           </p>
         </div>
       </section>
 
-      {/* ── Footer ───────────────────────────────────────────── */}
-      <footer className="border-t border-accent-100 py-8">
-        <div className="max-w-5xl mx-auto px-6 flex items-center justify-between">
-          <span className="font-bold text-brand-800">FieldStay</span>
-          <div className="flex items-center gap-6 text-sm text-accent-400">
-            <a href="mailto:hello@fieldstay.app" className="hover:text-accent-600 transition-colors">
-              Contact
-            </a>
-            <Link href="/login"  className="hover:text-accent-600 transition-colors">Log In</Link>
-            <Link href="/signup" className="hover:text-accent-600 transition-colors">Sign Up</Link>
-          </div>
+      {/* ── Bottom CTA ───────────────────────────────────────────────────── */}
+      <section className="px-8 py-20 text-center" style={{ background: '#FCD116' }}>
+        <h2 className="font-black mb-3 tracking-tight"
+            style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
+          Ready to stop firefighting?
+        </h2>
+        <p className="text-base mb-9 mx-auto" style={{ color: 'rgba(16,34,70,0.62)', maxWidth: 440 }}>
+          Join property managers who replaced their texts and spreadsheets with one platform that actually works.
+        </p>
+        <Link href="/signup"
+              className="inline-flex items-center gap-2 rounded-lg font-black text-base transition-opacity"
+              style={{ background: '#102246', color: '#fff', padding: '16px 36px' }}>
+          Start Free — 14 Days Free <span style={{ fontSize: 20 }}>→</span>
+        </Link>
+      </section>
+
+      {/* ── Footer ───────────────────────────────────────────────────────── */}
+      <footer className="flex items-center justify-between px-8 py-7"
+              style={{ background: '#0d1e3d' }}>
+        <span className="font-black text-base" style={{ color: '#fff' }}>
+          Field<span style={{ color: '#FCD116' }}>Stay</span>
+        </span>
+        <div className="flex items-center gap-6">
+          {[
+            { label: 'hello@fieldstay.app', href: 'mailto:hello@fieldstay.app' },
+            { label: 'Log In', href: '/login' },
+            { label: 'Sign Up', href: '/signup' },
+          ].map((l) => (
+            <Link key={l.label} href={l.href}
+                  className="text-sm transition-colors"
+                  style={{ color: 'rgba(255,255,255,0.4)' }}>
+              {l.label}
+            </Link>
+          ))}
         </div>
       </footer>
 

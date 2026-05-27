@@ -1,7 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { requireAuth } from '@/lib/auth'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { slugify } from '@/lib/utils'
 
 export type OnboardingState = { error?: string }
@@ -10,18 +10,25 @@ export async function createOrganization(
   _prev: OnboardingState | null,
   formData: FormData
 ): Promise<OnboardingState> {
-  const { user, supabase } = await requireAuth()
+  // Verify identity with regular client
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
   const name = (formData.get('org_name') as string)?.trim()
   if (!name) return { error: 'Organization name is required' }
 
+  // Use service client for inserts — user identity already verified above
+  const admin = createServiceClient()
+
   let slug = slugify(name)
-  const { count } = await supabase
+  const { count } = await admin
     .from('organizations')
     .select('id', { count: 'exact', head: true })
     .eq('slug', slug)
   if ((count ?? 0) > 0) slug = `${slug}-${Date.now().toString(36)}`
 
-  const { data: org, error } = await supabase
+  const { data: org, error } = await admin
     .from('organizations')
     .insert({
       name,
@@ -37,10 +44,10 @@ export async function createOrganization(
 
   if (error) return { error: error.message }
 
-  await supabase.from('organization_members').insert({
-    org_id: org.id,
-    user_id: user.id,
-    role: 'admin',
+  await admin.from('organization_members').insert({
+    org_id:             org.id,
+    user_id:            user.id,
+    role:               'admin',
     invite_accepted_at: new Date().toISOString(),
   })
 

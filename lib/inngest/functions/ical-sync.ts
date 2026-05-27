@@ -68,7 +68,7 @@ export const syncIcalFeed = inngest.createFunction(
     id:      'ical-sync-feed',
     name:    'Sync iCal Feed',
     // Allow up to 20 feeds syncing in parallel
-    concurrency: { limit: 20 },
+    concurrency: { limit: 5 },
     // Retry up to 2 times on network errors
     retries: 2,
   },

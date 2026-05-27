@@ -3,7 +3,7 @@ import { updateSession } from '@/lib/supabase/middleware'
 
 const PUBLIC_ROUTES  = ['/', '/login', '/signup', '/forgot-password', '/reset-password', '/crew/accept-invite']
 const TOKEN_ROUTES   = ['/owner/', '/work-orders/', '/api/work-orders']
-const BYPASS_ROUTES  = ['/api/inngest', '/api/webhooks/stripe', '/_next', '/favicon', '/robots', '/sitemap']
+const BYPASS_ROUTES  = ['/api/inngest', '/api/webhooks/stripe', '/_next', '/favicon', '/robots', '/sitemap', '/auth/callback',]
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl

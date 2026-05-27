@@ -1,404 +1,414 @@
-# CLAUDE.md — FieldStay
+# CLAUDE.md — FieldStay: Issues 1–4
 
-Read this entire file before writing any code or running any commands.
-
----
-
-## Current State
-
-The codebase is feature-complete. All Phase 1 and Phase 2 features are
-built and committed. The Vercel build is failing for one reason:
-`RESEND_API_KEY` and several other environment variables are not set in
-Vercel, causing SDK clients to crash during module initialization at
-build time.
-
-**Two tasks remain:**
-1. Code: make SDK clients crash-safe when env vars are missing (Step 1)
-2. Operations: add all missing env vars to Vercel (Step 2)
-
-After both are done, the build will pass and the app will be live.
+Read this entire file before writing any code. Complete the four issues
+in order. Test each before moving to the next.
 
 ---
 
-## Step 1 — Safe SDK Initialization (Code Changes)
+## Issue 1 — Inventory Items from Setup Wizard Not Appearing in Inventory Tab
 
-### Why this is happening
+### Root cause
 
-Next.js evaluates imported modules at build time. When
-`lib/resend/client.ts` runs `new Resend(undefined!)` because
-`RESEND_API_KEY` is not set in Vercel, the process crashes and the
-build fails. The fix: use `?? ''` so the SDK receives an empty string
-instead of `undefined` — SDKs initialize without throwing on an empty
-string, and will only fail with a clear error message when they
-actually attempt an API call at runtime.
+In `inventory-setup.tsx` the "Save & Continue" / complete button calls
+`completeInventoryStep(propertyId)` directly. That action only marks the
+setup step complete and redirects — it does NOT save items. Items a PM
+adds from the catalog or custom form go into local React state (`isDirty: true`)
+but are never persisted if the user clicks Continue without first clicking
+Save. Items are lost.
 
-### Fix lib/resend/client.ts
+### Fix — `app/(dashboard)/properties/[id]/setup/inventory/inventory-setup.tsx`
 
-Change line 7:
+Find the complete button handler. It currently looks like:
 
-```ts
-// Before:
-export const resend = new Resend(process.env.RESEND_API_KEY!)
-
-// After:
-export const resend = new Resend(process.env.RESEND_API_KEY ?? '')
-```
-
-No other changes needed in this file.
-
-### Fix lib/stripe/client.ts
-
-`STRIPE_SECRET_KEY` is already set in Vercel so this isn't currently
-crashing, but apply the same pattern for safety:
-
-```ts
-// Before:
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-
-// After:
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
-```
-
-No other changes needed in this file.
-
-That's the only code change required. After committing these two lines,
-move to Step 2.
-
----
-
-## Step 2 — Add All Environment Variables to Vercel
-
-### How to add them
-
-Vercel Dashboard → your FieldStay project → **Settings** →
-**Environment Variables** → Add each variable below for the
-**Production** environment.
-
-### Variables to add (Stephen has STRIPE_SECRET_KEY — add everything else)
-
----
-
-#### SUPABASE
-
-**Where to find:** Supabase Dashboard → your project →
-Settings → API
-
-| Variable | Value |
-|----------|-------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Your project URL — looks like `https://abcdefgh.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | The `anon` / `public` key (long JWT string) |
-| `SUPABASE_SERVICE_ROLE_KEY` | The `service_role` key — **treat as a secret, never expose client-side** |
-
----
-
-#### INNGEST
-
-**Where to find:** https://app.inngest.com → your FieldStay app →
-Manage → Keys
-
-| Variable | Value |
-|----------|-------|
-| `INNGEST_EVENT_KEY` | Event key — starts with `evt_` |
-| `INNGEST_SIGNING_KEY` | Signing key — starts with `signkey-prod-` |
-
----
-
-#### RESEND
-
-**Where to find:** https://resend.com → API Keys → Create API Key
-(give it full access, name it "FieldStay Production")
-
-| Variable | Value |
-|----------|-------|
-| `RESEND_API_KEY` | API key — starts with `re_` |
-| `RESEND_FROM_EMAIL` | `noreply@fieldstay.app` (type this literally) |
-| `RESEND_FROM_NAME` | `FieldStay` (type this literally) |
-
-> **Note:** Resend will reject emails until `fieldstay.app` is verified
-> as a sending domain. Go to Resend → Domains → Add Domain →
-> `fieldstay.app` → add the DNS records at Namecheap → wait for
-> verification. Until then, emails send from Resend's shared domain
-> which may land in spam.
-
----
-
-#### STRIPE
-
-**Already set:** `STRIPE_SECRET_KEY` ✅
-
-**Where to find the rest:**
-- API keys: Stripe Dashboard → Developers → API keys
-- Webhook secret: Stripe Dashboard → Developers → Webhooks → your endpoint → Signing secret
-- Price IDs: Stripe Dashboard → Products → click each product → copy the Price ID
-
-| Variable | Where |
-|----------|-------|
-| `STRIPE_WEBHOOK_SECRET` | Stripe → Developers → Webhooks → endpoint → Signing secret (starts with `whsec_`) |
-| `STRIPE_PRICE_PRO_MONTHLY` | The `price_` ID for Pro, $149/month |
-| `STRIPE_PRICE_PRO_ANNUAL` | The `price_` ID for Pro, $1,490/year |
-| `STRIPE_PRICE_GROWTH_MONTHLY` | The `price_` ID for Growth, $219/month |
-| `STRIPE_PRICE_GROWTH_ANNUAL` | The `price_` ID for Growth, $2,190/year |
-
-> **Stripe webhook setup (if not done yet):**
-> Stripe Dashboard → Developers → Webhooks → Add endpoint
-> URL: `https://app.fieldstay.app/api/webhooks/stripe`
-> Events to select:
-> - `customer.subscription.created`
-> - `customer.subscription.updated`
-> - `customer.subscription.deleted`
-> Copy the signing secret into `STRIPE_WEBHOOK_SECRET`.
-
----
-
-#### POWERSYNC
-
-**Where to find:** https://app.powersync.com → your project →
-Instances → click your instance → copy the Instance URL
-
-| Variable | Value |
-|----------|-------|
-| `NEXT_PUBLIC_POWERSYNC_URL` | Your instance URL — looks like `https://abc123.powersync.journey.tech` |
-
-> **Note:** PowerSync sync rules also need to be configured in the
-> dashboard (see External Configuration section below). This is a
-> separate step from the env var.
-
----
-
-#### APP URL
-
-| Variable | Value |
-|----------|-------|
-| `NEXT_PUBLIC_APP_URL` | `https://app.fieldstay.app` (type this literally) |
-
----
-
-### Complete variable checklist
-
-| # | Variable | Status |
-|---|----------|--------|
-| 1 | `NEXT_PUBLIC_SUPABASE_URL` | ⬜ Add |
-| 2 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ⬜ Add |
-| 3 | `SUPABASE_SERVICE_ROLE_KEY` | ⬜ Add |
-| 4 | `INNGEST_EVENT_KEY` | ⬜ Add |
-| 5 | `INNGEST_SIGNING_KEY` | ⬜ Add |
-| 6 | `RESEND_API_KEY` | ⬜ Add |
-| 7 | `RESEND_FROM_EMAIL` | ⬜ Add |
-| 8 | `RESEND_FROM_NAME` | ⬜ Add |
-| 9 | `STRIPE_SECRET_KEY` | ✅ Done |
-| 10 | `STRIPE_WEBHOOK_SECRET` | ⬜ Add |
-| 11 | `STRIPE_PRICE_PRO_MONTHLY` | ⬜ Add |
-| 12 | `STRIPE_PRICE_PRO_ANNUAL` | ⬜ Add |
-| 13 | `STRIPE_PRICE_GROWTH_MONTHLY` | ⬜ Add |
-| 14 | `STRIPE_PRICE_GROWTH_ANNUAL` | ⬜ Add |
-| 15 | `NEXT_PUBLIC_POWERSYNC_URL` | ⬜ Add |
-| 16 | `NEXT_PUBLIC_APP_URL` | ⬜ Add |
-
-After adding all 16, trigger a new Vercel deployment (push a commit or
-click **Redeploy** in the Vercel dashboard). The build should pass.
-
----
-
-## Step 3 — Domain Setup in Vercel
-
-Once the build passes, add custom domains in Vercel:
-
-Vercel Dashboard → your project → Settings → Domains
-
-Add these two:
-1. `fieldstay.app` — the marketing landing page at `/`
-2. `app.fieldstay.app` — the main app
-
-For each domain, Vercel will show you DNS records to add. Go to
-Namecheap → your domain → Advanced DNS → add each record Vercel
-shows:
-
-- For `fieldstay.app`: add an **A record** pointing to Vercel's IP,
-  or a **CNAME** if Vercel offers that option for apex domains
-- For `app.fieldstay.app`: add a **CNAME record** →
-  `cname.vercel-dns.com`
-
-SSL is automatic — Vercel provisions it for free via Let's Encrypt.
-Do NOT buy SSL from Namecheap.
-
----
-
-## Step 4 — Post-Deploy: Register Inngest Functions
-
-After the first successful deploy, Inngest needs to discover the
-functions. Visit this URL once (it auto-registers them):
-
-```
-https://app.fieldstay.app/api/inngest
-```
-
-Then go to https://app.inngest.com → your app → Functions — all 10
-functions should appear:
-- syncAllIcalFeeds
-- syncIcalFeed
-- handleBookingDetected
-- handleTurnoverCreated
-- handleTurnoverCompleted
-- dailyMaintenanceCheck
-- handleInventoryCountSubmitted
-- handleWorkOrderCreated
-- handleWorkOrderCompletedViaPortal
-- handleWorkOrderOverdue
-
-If they don't appear, check that `INNGEST_EVENT_KEY` and
-`INNGEST_SIGNING_KEY` are set correctly in Vercel.
-
----
-
-## External Configuration — PowerSync Sync Rules
-
-**Not a code change — configure in the PowerSync dashboard.**
-
-1. Go to https://app.powersync.com → your project → **Sync Rules**
-2. Replace all content with the YAML below and click **Deploy**
-
-```yaml
-bucket_definitions:
-  crew_turnovers:
-    data:
-      - table: turnovers
-        where: >
-          id IN (
-            SELECT ta.turnover_id
-            FROM turnover_assignments ta
-            JOIN crew_members cm ON ta.crew_member_id = cm.id
-            WHERE cm.user_id = token_parameters.user_id
-              AND turnovers.checkout_datetime >= NOW() - INTERVAL '1 day'
-          )
-
-  crew_checklist_instances:
-    data:
-      - table: checklist_instances
-        where: >
-          turnover_id IN (
-            SELECT ta.turnover_id
-            FROM turnover_assignments ta
-            JOIN crew_members cm ON ta.crew_member_id = cm.id
-            WHERE cm.user_id = token_parameters.user_id
-          )
-
-  crew_checklist_items:
-    data:
-      - table: checklist_instance_items
-        where: >
-          instance_id IN (
-            SELECT ci.id FROM checklist_instances ci
-            JOIN turnover_assignments ta ON ci.turnover_id = ta.turnover_id
-            JOIN crew_members cm ON ta.crew_member_id = cm.id
-            WHERE cm.user_id = token_parameters.user_id
-          )
-
-  crew_inventory:
-    data:
-      - table: inventory_items
-        where: >
-          property_id IN (
-            SELECT DISTINCT t.property_id FROM turnovers t
-            JOIN turnover_assignments ta ON ta.turnover_id = t.id
-            JOIN crew_members cm ON ta.crew_member_id = cm.id
-            WHERE cm.user_id = token_parameters.user_id
-          )
-```
-
----
-
-## Full Launch Checklist
-
-### Code
-- [ ] `lib/resend/client.ts` — `?? ''` safe init applied
-- [ ] `lib/stripe/client.ts` — `?? ''` safe init applied
-- [ ] Both committed and pushed
-
-### Vercel
-- [ ] All 16 env vars added (checklist above)
-- [ ] Build passes — green checkmark in Vercel dashboard
-- [ ] `fieldstay.app` domain added and verified
-- [ ] `app.fieldstay.app` domain added and verified
-- [ ] SSL active on both domains (Vercel handles automatically)
-
-### Supabase
-- [ ] v1 migration confirmed run on production project
-- [ ] v2 migration confirmed run on production project
-- [ ] Storage buckets created: `turnover-photos`, `work-order-photos`,
-  `crew-uploads` (Supabase Dashboard → Storage → New Bucket, set to
-  Public)
-
-### Inngest
-- [ ] Functions registered — visit `https://app.fieldstay.app/api/inngest`
-- [ ] All 10 functions visible in Inngest dashboard
-
-### Stripe
-- [ ] Webhook endpoint created pointing to
-  `https://app.fieldstay.app/api/webhooks/stripe`
-- [ ] All 4 price IDs in Vercel env vars
-- [ ] Test: create a Stripe test checkout and confirm subscription
-  webhook fires correctly
-
-### Resend
-- [ ] `fieldstay.app` domain verified in Resend
-- [ ] Test: trigger an iCal sync with a property that has a booking
-  → confirm booking confirmation email arrives
-
-### PowerSync
-- [ ] Sync rules deployed in PowerSync dashboard
-- [ ] Test: crew member logs into `/crew` on a phone → assignments
-  visible → turn off Wi-Fi → still visible
-
----
-
-## Code Patterns (Reference)
-
-### Auth
-```ts
-const { user, supabase, membership } = await requireOrgMember()
-// Always filter every query by membership.org_id
-```
-
-### Service client — Inngest, webhooks, tokenized routes ONLY
-```ts
-import { createServiceClient } from '@/lib/supabase/server'
-const supabase = createServiceClient()
-// Bypasses RLS — never in dashboard pages or server actions
-```
-
-### Crew (PowerSync offline reads + writes)
 ```tsx
-'use client'
-import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
-const { data } = usePowerSyncQuery('SELECT * FROM turnovers WHERE ...', [param])
-const db = usePowerSync()
-await db.execute('UPDATE ... SET ... WHERE id = ?', [value, id])
+onClick={() => startComplete(() => completeInventoryStep(propertyId))}
 ```
 
-### CSS
-```
-.btn-primary  .btn-secondary  .btn-ghost  .btn-danger
-.btn-cta     ← gold (#FCD116) — MUST use text-brand-800, never white
-.card  .input  .label
-.badge  .badge-green  .badge-amber  .badge-red  .badge-blue  .badge-slate
+Replace with a handler that saves dirty items first:
+
+```tsx
+onClick={() => startComplete(async () => {
+  const dirty = items.filter((i) => i.isDirty)
+  if (dirty.length > 0) {
+    const result = await upsertInventoryItems(propertyId, dirty)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    setItems((prev) => prev.map((i) => ({ ...i, isDirty: false, isNew: false })))
+  }
+  await completeInventoryStep(propertyId)
+})}
 ```
 
-### Brand tokens
+This auto-saves any unsaved items before completing the step so nothing
+is lost regardless of whether the PM clicked the separate Save button.
+
+---
+
+## Issue 2 — Maintenance Schedule UX + Work Order Edit/Notes
+
+### 2a — Fix prefill so suggestion chips actually populate the form
+
+**File:** `app/(dashboard)/properties/[id]/setup/maintenance/maintenance-form.tsx`
+
+The `prefill` function currently ignores its parameters — it opens the
+form but doesn't set any values. The `ROUTINE_SUGGESTIONS` and
+`SEASONAL_SUGGESTIONS` arrays already exist and are correct, but
+clicking them does nothing useful.
+
+Add controlled state variables for the form fields and wire them up:
+
+```tsx
+// Add these state declarations after existing useState calls:
+const [prefilledName, setPrefilledName]           = useState('')
+const [prefilledFrequency, setPrefilledFrequency] = useState('quarterly')
+const [prefilledMonth, setPrefilledMonth]         = useState<number | ''>('')
+
+// Replace the broken prefill function with:
+const prefill = (values: Partial<{ name: string; frequency: string; month_due: number }>) => {
+  setPrefilledName(values.name ?? '')
+  setPrefilledFrequency(values.frequency ?? 'quarterly')
+  setPrefilledMonth(values.month_due ?? '')
+  setSchedType(values.month_due !== undefined ? 'seasonal' : 'routine')
+  setShowForm(true)
+}
+
+// Add a resetPrefill helper called when the form is closed/submitted:
+const resetPrefill = () => {
+  setPrefilledName('')
+  setPrefilledFrequency('quarterly')
+  setPrefilledMonth('')
+}
 ```
-bg-brand-800    = #102246  primary navy
-bg-gold-300     = #FCD116  action yellow (dark text only)
-bg-accent-50    = #F8F9FA  page backgrounds
-text-accent-800 = #1A1D20  body text
+
+Then update the form inputs to use these values. Change the name input:
+
+```tsx
+// Before:
+<input name="name" type="text" required className="input" ... />
+
+// After:
+<input
+  name="name"
+  type="text"
+  required
+  className="input"
+  value={prefilledName}
+  onChange={(e) => setPrefilledName(e.target.value)}
+  placeholder="e.g. HVAC Filter Change"
+/>
+```
+
+Change the frequency select:
+
+```tsx
+<select
+  name="frequency"
+  className="input"
+  value={prefilledFrequency}
+  onChange={(e) => setPrefilledFrequency(e.target.value)}
+>
+  {FREQUENCIES.map((f) => (
+    <option key={f.value} value={f.value}>{f.label}</option>
+  ))}
+</select>
+```
+
+Change the month select (for seasonal):
+
+```tsx
+<select
+  name="month_due"
+  className="input"
+  value={prefilledMonth}
+  onChange={(e) => setPrefilledMonth(e.target.value ? Number(e.target.value) : '')}
+>
+  <option value="">Select month…</option>
+  {MONTHS.map((m, i) => (
+    <option key={i + 1} value={i + 1}>{m}</option>
+  ))}
+</select>
+```
+
+Call `resetPrefill()` when the form is submitted successfully or closed.
+
+### 2b — Work order edit button + edit action
+
+**File:** `app/(dashboard)/maintenance/actions.ts`
+
+Add a new server action after `createWorkOrder`:
+
+```ts
+export async function updateWorkOrder(
+  workOrderId: string,
+  data: {
+    title:           string
+    description:     string | null
+    priority:        string
+    vendor_id:       string | null
+    scheduled_date:  string | null
+    estimated_cost:  number | null
+    portal_enabled:  boolean
+  }
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({
+      title:          data.title,
+      description:    data.description || null,
+      priority:       data.priority as never,
+      vendor_id:      data.vendor_id || null,
+      scheduled_date: data.scheduled_date || null,
+      estimated_cost: data.estimated_cost || null,
+      portal_enabled: data.portal_enabled,
+    })
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath(`/maintenance/${workOrderId}`)
+  revalidatePath('/maintenance')
+  return {}
+}
+```
+
+**File:** `app/(dashboard)/maintenance/[id]/work-order-detail.tsx`
+
+Add an edit button next to the Cancel button in the WO header actions area.
+The edit button opens an inline edit form (not a separate page) with the
+current values pre-populated:
+
+```tsx
+// Add edit state at the top of the component with other state:
+const [editing, setEditing] = useState(false)
+const [editError, setEditError] = useState<string | null>(null)
+const [saving, setSaving] = useState(false)
+
+// Edit form submit handler:
+const handleEditSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault()
+  setSaving(true)
+  setEditError(null)
+  const fd = new FormData(e.currentTarget)
+  const result = await updateWorkOrder(workOrder.id, {
+    title:          fd.get('title') as string,
+    description:    fd.get('description') as string | null,
+    priority:       fd.get('priority') as string,
+    vendor_id:      fd.get('vendor_id') as string | null,
+    scheduled_date: fd.get('scheduled_date') as string | null,
+    estimated_cost: fd.get('estimated_cost')
+      ? parseFloat(fd.get('estimated_cost') as string)
+      : null,
+    portal_enabled: fd.get('portal_enabled') === 'true',
+  })
+  setSaving(false)
+  if (result.error) { setEditError(result.error); return }
+  setEditing(false)
+}
+```
+
+When `editing` is true, render an edit form panel above the work order
+detail with fields for: Title, Description, Priority, Vendor, Scheduled
+Date, Estimated Cost, Portal Enabled toggle. The form has Save and
+Cancel buttons.
+
+Add an "Edit" button (pencil icon) in the work order header alongside
+the existing Cancel work order button:
+
+```tsx
+// Add Edit button (only show when WO is not completed or cancelled):
+{!['completed', 'cancelled'].includes(workOrder.status) && (
+  <button
+    onClick={() => setEditing(!editing)}
+    className="btn-secondary text-sm flex items-center gap-1.5"
+  >
+    <Pencil className="w-3.5 h-3.5" />
+    {editing ? 'Close Edit' : 'Edit'}
+  </button>
+)}
+```
+
+Import `Pencil` from lucide-react.
+
+### 2c — Work order notes thread (PM can add notes any time)
+
+The current UI only allows completion notes. PMs need to add notes
+throughout the life of a WO — questions for vendors, reminders, updates.
+
+**File:** `app/(dashboard)/maintenance/actions.ts`
+
+Add a new action:
+
+```ts
+export async function addWorkOrderNote(
+  workOrderId: string,
+  note: string
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  // Verify ownership
+  const { data: wo } = await supabase
+    .from('work_orders')
+    .select('id, org_id')
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!wo) return { error: 'Work order not found' }
+
+  await supabase.from('work_order_updates').insert({
+    work_order_id:           workOrderId,
+    org_id:                  membership.org_id,
+    updated_by_user_id:      (await supabase.auth.getUser()).data.user?.id ?? null,
+    updated_via_vendor_portal: false,
+    status_from:             null,
+    status_to:               null,
+    notes:                   note.trim(),
+  })
+
+  revalidatePath(`/maintenance/${workOrderId}`)
+  return {}
+}
+```
+
+**File:** `app/(dashboard)/maintenance/[id]/work-order-detail.tsx`
+
+Add a notes section below the work order description and above the
+status history. It should have:
+- A compact textarea with a "Add Note" button
+- The existing `work_order_updates` timeline already shows `u.notes`
+  for each entry — so added notes will appear inline with status changes
+
+```tsx
+// Add state:
+const [noteText, setNoteText]   = useState('')
+const [addingNote, setAddingNote] = useState(false)
+
+const handleAddNote = async () => {
+  if (!noteText.trim()) return
+  setAddingNote(true)
+  await addWorkOrderNote(workOrder.id, noteText)
+  setNoteText('')
+  setAddingNote(false)
+}
+```
+
+Render below the description section:
+
+```tsx
+<div className="mt-4">
+  <h3 className="section-header mb-2">Add Note</h3>
+  <div className="flex gap-2">
+    <textarea
+      rows={2}
+      value={noteText}
+      onChange={(e) => setNoteText(e.target.value)}
+      className="input resize-none flex-1 text-sm"
+      placeholder="Add a note, question for vendor, or update…"
+    />
+    <button
+      onClick={handleAddNote}
+      disabled={addingNote || !noteText.trim()}
+      className="btn-secondary self-end px-3 py-2 text-sm"
+    >
+      {addingNote ? '…' : 'Add'}
+    </button>
+  </div>
+</div>
 ```
 
 ---
 
-## Rules — Never Violate
+## Issue 3 — Settings Showing Wrong Plan (Starter / 2 Properties)
 
-1. Always filter by `org_id` on every database query
-2. Never call `getSession()` — always `getUser()`
-3. Never forget `revalidatePath()` after mutations
-4. Never use service client in dashboard pages or server actions
-5. Never register an Inngest function without adding it to `app/api/inngest/route.ts`
-6. Never use `any` type — import from `types/database.ts`
-7. `.btn-cta` MUST use `text-brand-800` — never white text on gold
+### 3a — Fix onboarding default plan
+
+**File:** `app/onboarding/actions.ts`
+
+Change lines 37–40 from:
+
+```ts
+plan:           'starter',
+plan_status:    'trialing',
+trial_ends_at:  new Date(Date.now() + 14 * 86_400_000).toISOString(),
+max_properties: 5,
+```
+
+To:
+
+```ts
+plan:           'pro',
+plan_status:    'trialing',
+trial_ends_at:  new Date(Date.now() + 14 * 86_400_000).toISOString(),
+max_properties: 15,
+```
+
+### 3b — Fix settings plan display
+
+**File:** `app/(dashboard)/settings/settings-tabs.tsx`
+
+Update the `PLAN_INFO` constant — `starter` is no longer a real plan.
+Change it to reflect current pricing, or remove it and update the fallback:
+
+```ts
+const PLAN_INFO = {
+  pro:        { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',  badge: 'badge-blue'  },
+  growth:     { name: 'Growth',     maxProperties: 45,  description: '16–45 properties',     badge: 'badge-green' },
+  enterprise: { name: 'Enterprise', maxProperties: 999, description: '45+ properties',       badge: 'badge-amber' },
+  // Keep starter for any legacy accounts but point to pro values:
+  starter:    { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',  badge: 'badge-blue'  },
+} as const
+```
+
+Update the fallback on line 103 and line 693 from:
+
+```ts
+?? PLAN_INFO.starter
+```
+
+To:
+
+```ts
+?? PLAN_INFO.pro
+```
+
+Also update the existing org in the database directly — run in Supabase
+SQL Editor to fix any accounts already created with 'starter':
+
+```sql
+UPDATE organizations
+SET plan = 'pro', max_properties = 15
+WHERE plan = 'starter';
+```
+
+---
+
+
+## Verification Checklist
+
+After completing all four issues:
+
+**Issue 1:**
+- [ ] Add items from catalog in inventory setup wizard
+- [ ] Click Continue WITHOUT clicking Save first
+- [ ] Go to main Inventory tab — all items should appear
+
+**Issue 2:**
+- [ ] In maintenance setup wizard, click a routine suggestion chip
+      (e.g. "HVAC Filter Change") — form should open pre-filled with
+      that name and quarterly frequency
+- [ ] Click a seasonal suggestion (e.g. "Pool Opening") — form should
+      open with correct month pre-filled
+- [ ] Create a work order — Edit button appears in WO detail
+- [ ] Click Edit — can change title, description, priority, save works
+- [ ] Add a note in WO detail — appears in the updates timeline
+
+**Issue 3:**
+- [ ] Sign up fresh → complete onboarding → Settings → Billing shows
+      "Pro" plan with "Up to 15 properties" (not Starter / 2 properties)
+- [ ] Existing accounts updated in DB via SQL
+
