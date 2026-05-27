@@ -1,0 +1,319 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import {
+  LayoutDashboard, Building2, CalendarCheck, Package,
+  Wrench, Mail, BarChart3, Settings, ChevronLeft,
+  ChevronRight, Menu, X, Bell, Sun, Moon,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
+import type { MemberRole } from '@/types/database'
+
+const NAV_ITEMS = [
+  { href: '/ops',             label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin','manager','viewer'] },
+  { href: '/properties',     label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'] },
+  { href: '/turnovers',      label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
+  { href: '/inventory',      label: 'Inventory',    icon: Package,         roles: ['admin','manager']          },
+  { href: '/maintenance',    label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager']          },
+  { href: '/communications', label: 'Comms',        icon: Mail,            roles: ['admin','manager']          },
+  { href: '/owners',         label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager']          },
+  { href: '/settings',       label: 'Settings',     icon: Settings,        roles: ['admin']                    },
+] as const
+
+interface Props {
+  role:      MemberRole
+  orgName:   string
+  userEmail: string
+  children:  React.ReactNode
+}
+
+export function DashboardShell({ role, orgName, userEmail, children }: Props) {
+  const pathname   = usePathname()
+  const [collapsed,   setCollapsed]   = useState(false)
+  const [mobileOpen,  setMobileOpen]  = useState(false)
+  const [theme,       setTheme]       = useState<'dark' | 'light'>('dark')
+  const [time,        setTime]        = useState('')
+
+  // Live clock
+  useEffect(() => {
+    const tick = () => {
+      setTime(new Date().toLocaleTimeString('en-US', {
+        hour:   'numeric',
+        minute: '2-digit',
+        hour12: true,
+      }))
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Persist + apply theme
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('fs-theme') as 'dark' | 'light' | null
+      if (stored) setTheme(stored)
+    } catch {}
+  }, [])
+
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    try { localStorage.setItem('fs-theme', next) } catch {}
+    if (next === 'light') {
+      document.documentElement.classList.add('light')
+    } else {
+      document.documentElement.classList.remove('light')
+    }
+  }
+
+  const filteredNav = NAV_ITEMS.filter((item) =>
+    item.roles.includes(role as never)
+  )
+
+  const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
+    <aside
+      className={cn(
+        'flex flex-col h-full transition-all duration-300',
+        mobile ? 'w-64' : collapsed ? 'w-[68px]' : 'w-60'
+      )}
+      style={{
+        background:  'var(--bg-base)',
+        borderRight: '1px solid var(--border)',
+      }}
+    >
+      {/* Logo */}
+      <div
+        className="flex items-center gap-3 px-4 py-5 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--border)', minHeight: 72 }}
+      >
+        <div
+          className="w-8 h-8 rounded-lg flex-shrink-0 flex items-center
+                     justify-center font-black text-sm"
+          style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+        >
+          FS
+        </div>
+        {(!collapsed || mobile) && (
+          <div className="min-w-0">
+            <span className="font-display font-bold text-base leading-none"
+                  style={{ color: 'var(--text-primary)' }}>
+              FieldStay
+            </span>
+            <p className="text-xs truncate mt-0.5"
+               style={{ color: 'var(--text-muted)' }}>
+              {orgName}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Nav links */}
+      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+        {filteredNav.map((item) => {
+          const Icon   = item.icon
+          const active = pathname === item.href ||
+                         pathname.startsWith(item.href + '/')
+
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => setMobileOpen(false)}
+              title={collapsed && !mobile ? item.label : undefined}
+              className={cn(
+                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm',
+                'font-medium transition-all relative'
+              )}
+              style={{
+                background: active ? 'var(--bg-raised)' : 'transparent',
+                color:      active ? 'var(--text-primary)' : 'var(--text-muted)',
+                borderLeft: active
+                  ? '2px solid var(--accent-gold)'
+                  : '2px solid transparent',
+              }}
+              onMouseOver={(e) => {
+                if (!active) e.currentTarget.style.color = 'var(--text-primary)'
+              }}
+              onMouseOut={(e) => {
+                if (!active) e.currentTarget.style.color = 'var(--text-muted)'
+              }}
+            >
+              <Icon className="w-4 h-4 flex-shrink-0" />
+              {(!collapsed || mobile) && (
+                <span className="truncate">{item.label}</span>
+              )}
+            </Link>
+          )
+        })}
+      </nav>
+
+      {/* Bottom user row */}
+      <div
+        className="p-3 flex-shrink-0"
+        style={{ borderTop: '1px solid var(--border)' }}
+      >
+        <Link
+          href="/settings"
+          className="flex items-center gap-2.5 px-2 py-2 rounded-lg transition-all"
+          style={{ color: 'var(--text-muted)' }}
+          onMouseOver={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
+          onMouseOut={(e)  => (e.currentTarget.style.color = 'var(--text-muted)')}
+        >
+          <span
+            className="w-7 h-7 rounded-full flex-shrink-0 flex items-center
+                       justify-center text-xs font-bold"
+            style={{
+              background: 'var(--accent-gold-dim)',
+              color:      'var(--accent-gold)',
+            }}
+          >
+            {userEmail[0]?.toUpperCase() ?? '?'}
+          </span>
+          {(!collapsed || mobile) && (
+            <span className="truncate text-xs">{userEmail}</span>
+          )}
+        </Link>
+      </div>
+    </aside>
+  )
+
+  return (
+    <div className="flex h-screen overflow-hidden"
+         style={{ background: 'var(--bg-base)' }}>
+
+      {/* Desktop sidebar */}
+      <div className="hidden md:flex h-full flex-shrink-0">
+        <Sidebar />
+      </div>
+
+      {/* Mobile drawer overlay */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden">
+          <div
+            className="absolute inset-0"
+            style={{ background: 'rgba(0,0,0,0.6)' }}
+            onClick={() => setMobileOpen(false)}
+          />
+          <div className="relative z-10 h-full flex-shrink-0">
+            <Sidebar mobile />
+          </div>
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="absolute top-4 right-4 z-20 p-2 rounded-lg"
+            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+
+      {/* Main area */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+
+        {/* Top bar */}
+        <header
+          className="h-[60px] flex items-center justify-between px-5 flex-shrink-0"
+          style={{
+            background:   'var(--bg-base)',
+            borderBottom: '1px solid var(--border)',
+          }}
+        >
+          {/* Left: hamburger (mobile) + collapse (desktop) */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setMobileOpen(true)}
+              className="md:hidden p-2 rounded-lg transition-colors"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="hidden md:flex p-2 rounded-lg transition-all"
+              style={{ color: 'var(--text-muted)' }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = 'var(--border)'
+                e.currentTarget.style.color = 'var(--text-primary)'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--text-muted)'
+              }}
+            >
+              {collapsed
+                ? <ChevronRight className="w-4 h-4" />
+                : <ChevronLeft  className="w-4 h-4" />
+              }
+            </button>
+          </div>
+
+          {/* Right: clock + theme toggle + notifications */}
+          <div className="flex items-center gap-2">
+            {time && (
+              <span
+                className="hidden sm:block text-xs font-medium mr-2"
+                style={{
+                  color:               'var(--text-muted)',
+                  fontVariantNumeric:  'tabular-nums',
+                  letterSpacing:       '0.04em',
+                }}
+              >
+                {time}
+              </span>
+            )}
+
+            <button
+              onClick={toggleTheme}
+              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+              style={{ color: 'var(--text-muted)' }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = 'var(--border)'
+                e.currentTarget.style.color = 'var(--text-primary)'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--text-muted)'
+              }}
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark'
+                ? <Sun  className="w-4 h-4" />
+                : <Moon className="w-4 h-4" />
+              }
+            </button>
+
+            <button
+              className="w-8 h-8 rounded-lg flex items-center justify-center
+                         transition-all relative"
+              style={{ color: 'var(--text-muted)' }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = 'var(--border)'
+                e.currentTarget.style.color = 'var(--text-primary)'
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--text-muted)'
+              }}
+            >
+              <Bell className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
+        {/* Page content */}
+        <main
+          className="flex-1 overflow-y-auto"
+          style={{ background: 'var(--bg-canvas)' }}
+        >
+          <div className="max-w-7xl mx-auto px-6 py-7">
+            {children}
+          </div>
+        </main>
+      </div>
+    </div>
+  )
+}

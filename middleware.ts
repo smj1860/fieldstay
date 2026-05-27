@@ -24,7 +24,7 @@ export async function middleware(request: NextRequest) {
 
   if (user && isPublic && pathname !== '/') {
     const url = request.nextUrl.clone()
-    url.pathname = '/properties'
+    url.pathname = '/ops'
     url.search   = ''
     return NextResponse.redirect(url)
   }
