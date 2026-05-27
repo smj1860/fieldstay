@@ -27,10 +27,10 @@ export async function createOrganization(
       name,
       slug,
       billing_email: user.email,
-      plan: 'starter',
+      plan: 'pro',
       plan_status: 'trialing',
       trial_ends_at: new Date(Date.now() + 14 * 86_400_000).toISOString(),
-      max_properties: 5,
+      max_properties: 15,
     })
     .select('id')
     .single()

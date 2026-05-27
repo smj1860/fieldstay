@@ -57,9 +57,22 @@ export function MaintenanceScheduleManager({
   const [showForm, setShowForm] = useState(false)
   const [schedType, setSchedType] = useState<'routine' | 'seasonal'>('routine')
   const [completing, setCompleting] = useState(false)
+  const [prefilledName, setPrefilledName]           = useState('')
+  const [prefilledFrequency, setPrefilledFrequency] = useState('quarterly')
+  const [prefilledMonth, setPrefilledMonth]         = useState<number | ''>('')
 
   const prefill = (values: Partial<{ name: string; frequency: string; month_due: number }>) => {
+    setPrefilledName(values.name ?? '')
+    setPrefilledFrequency(values.frequency ?? 'quarterly')
+    setPrefilledMonth(values.month_due ?? '')
+    setSchedType(values.month_due !== undefined ? 'seasonal' : 'routine')
     setShowForm(true)
+  }
+
+  const resetPrefill = () => {
+    setPrefilledName('')
+    setPrefilledFrequency('quarterly')
+    setPrefilledMonth('')
   }
 
   return (
@@ -108,7 +121,7 @@ export function MaintenanceScheduleManager({
               {ROUTINE_SUGGESTIONS.map((s) => (
                 <button
                   key={s.name}
-                  onClick={() => { setSchedType('routine'); setShowForm(true) }}
+                  onClick={() => prefill({ name: s.name, frequency: s.frequency })}
                   className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-accent-600 hover:bg-accent-100 transition-colors"
                 >
                   <RefreshCw className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
@@ -123,7 +136,7 @@ export function MaintenanceScheduleManager({
               {SEASONAL_SUGGESTIONS.map((s) => (
                 <button
                   key={s.name}
-                  onClick={() => { setSchedType('seasonal'); setShowForm(true) }}
+                  onClick={() => prefill({ name: s.name, month_due: s.month })}
                   className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-accent-600 hover:bg-accent-100 transition-colors"
                 >
                   <Calendar className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
@@ -146,11 +159,20 @@ export function MaintenanceScheduleManager({
 
           <form action={async (fd) => {
             await formAction(fd)
+            resetPrefill()
             setShowForm(false)
           }} className="space-y-4">
             <div>
               <label className="label">Name</label>
-              <input name="name" type="text" className="input" placeholder="e.g. HVAC Filter Change" />
+              <input
+                name="name"
+                type="text"
+                required
+                className="input"
+                value={prefilledName}
+                onChange={(e) => setPrefilledName(e.target.value)}
+                placeholder="e.g. HVAC Filter Change"
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -176,15 +198,26 @@ export function MaintenanceScheduleManager({
               {schedType === 'routine' ? (
                 <div>
                   <label className="label">Frequency</label>
-                  <select name="frequency" className="input">
+                  <select
+                    name="frequency"
+                    className="input"
+                    value={prefilledFrequency}
+                    onChange={(e) => setPrefilledFrequency(e.target.value)}
+                  >
                     {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                   </select>
                 </div>
               ) : (
                 <div>
                   <label className="label">Month Due</label>
-                  <select name="month_due" className="input">
-                    {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+                  <select
+                    name="month_due"
+                    className="input"
+                    value={prefilledMonth}
+                    onChange={(e) => setPrefilledMonth(e.target.value ? Number(e.target.value) : '')}
+                  >
+                    <option value="">Select month…</option>
+                    {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
                   </select>
                 </div>
               )}
@@ -222,7 +255,7 @@ export function MaintenanceScheduleManager({
               <button type="submit" disabled={pending} className="btn-primary text-sm">
                 {pending ? 'Adding…' : 'Add Schedule'}
               </button>
-              <button type="button" onClick={() => setShowForm(false)} className="btn-ghost text-sm">Cancel</button>
+              <button type="button" onClick={() => { resetPrefill(); setShowForm(false) }} className="btn-ghost text-sm">Cancel</button>
             </div>
           </form>
         </div>

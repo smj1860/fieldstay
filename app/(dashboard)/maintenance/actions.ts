@@ -88,6 +88,76 @@ export async function createWorkOrder(
   redirect('/maintenance')
 }
 
+// ── Update Work Order ────────────────────────────────────────────────────────
+
+export async function updateWorkOrder(
+  workOrderId: string,
+  data: {
+    title:           string
+    description:     string | null
+    priority:        string
+    vendor_id:       string | null
+    scheduled_date:  string | null
+    estimated_cost:  number | null
+    portal_enabled:  boolean
+  }
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({
+      title:          data.title,
+      description:    data.description || null,
+      priority:       data.priority as never,
+      vendor_id:      data.vendor_id || null,
+      scheduled_date: data.scheduled_date || null,
+      estimated_cost: data.estimated_cost || null,
+      portal_enabled: data.portal_enabled,
+    })
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath(`/maintenance/${workOrderId}`)
+  revalidatePath('/maintenance')
+  return {}
+}
+
+// ── Add Work Order Note ──────────────────────────────────────────────────────
+
+export async function addWorkOrderNote(
+  workOrderId: string,
+  note: string
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: wo } = await supabase
+    .from('work_orders')
+    .select('id, org_id')
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!wo) return { error: 'Work order not found' }
+
+  const { data: { user } } = await supabase.auth.getUser()
+
+  await supabase.from('work_order_updates').insert({
+    work_order_id:             workOrderId,
+    org_id:                    membership.org_id,
+    updated_by_user_id:        user?.id ?? null,
+    updated_via_vendor_portal: false,
+    status_from:               null,
+    status_to:                 null,
+    notes:                     note.trim(),
+  })
+
+  revalidatePath(`/maintenance/${workOrderId}`)
+  return {}
+}
+
 // ── Update Work Order Status ─────────────────────────────────────────────────
 
 export async function updateWorkOrderStatus(

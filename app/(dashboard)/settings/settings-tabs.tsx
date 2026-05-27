@@ -39,10 +39,10 @@ const VENDOR_SPECIALTY_LABELS: Record<VendorSpecialty, string> = {
 const VENDOR_SPECIALTIES = Object.keys(VENDOR_SPECIALTY_LABELS) as VendorSpecialty[]
 
 const PLAN_INFO = {
-  starter:    { name: 'Starter',    maxProperties: 2,   description: 'Up to 2 properties',    badge: 'badge-slate' },
-  pro:        { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',   badge: 'badge-blue'  },
-  growth:     { name: 'Growth',     maxProperties: 45,  description: '16–45 properties',      badge: 'badge-green' },
-  enterprise: { name: 'Enterprise', maxProperties: 999, description: '45+ properties',        badge: 'badge-amber' },
+  pro:        { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',  badge: 'badge-blue'  },
+  growth:     { name: 'Growth',     maxProperties: 45,  description: '16–45 properties',     badge: 'badge-green' },
+  enterprise: { name: 'Enterprise', maxProperties: 999, description: '45+ properties',       badge: 'badge-amber' },
+  starter:    { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',  badge: 'badge-blue'  },
 } as const
 
 const PLAN_STATUS_BADGES: Record<string, string> = {
@@ -100,7 +100,7 @@ export function SettingsTabs({ org, crew, vendors, orgMembers, currentRole }: Pr
 function OrgTab({ org }: { org: Organization }) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
-  const plan       = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
+  const plan       = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.pro
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
 
   return (

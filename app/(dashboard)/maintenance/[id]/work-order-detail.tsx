@@ -5,10 +5,10 @@ import Link from 'next/link'
 import {
   Calendar, DollarSign, User, Wrench, Clock,
   CheckCircle2, AlertTriangle, XCircle, ArrowRight,
-  ExternalLink, Trash2
+  ExternalLink, Trash2, Pencil
 } from 'lucide-react'
 import { cn, formatDate, formatDateTime, WO_STATUS_LABELS } from '@/lib/utils'
-import { updateWorkOrderStatus, deleteWorkOrder } from '../actions'
+import { updateWorkOrderStatus, deleteWorkOrder, updateWorkOrder, addWorkOrderNote } from '../actions'
 import type { WoStatus, PriorityLevel } from '@/types/database'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -275,9 +275,11 @@ function StatusTimeline({ updates }: { updates: WorkOrderUpdate[] }) {
 export function WorkOrderDetail({
   workOrder,
   updates,
+  vendors = [],
 }: {
   workOrder: WorkOrderDetailProps
   updates: WorkOrderUpdate[]
+  vendors?: { id: string; name: string; specialty: string }[]
 }) {
   const property = Array.isArray(workOrder.properties)
     ? workOrder.properties[0]
@@ -291,6 +293,41 @@ export function WorkOrderDetail({
     ? `${process.env.NEXT_PUBLIC_APP_URL ?? ''}/work-orders/${workOrder.completion_token}`
     : null
 
+  const [editing, setEditing]     = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [saving, setSaving]       = useState(false)
+  const [noteText, setNoteText]   = useState('')
+  const [addingNote, setAddingNote] = useState(false)
+
+  const handleEditSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setSaving(true)
+    setEditError(null)
+    const fd = new FormData(e.currentTarget)
+    const result = await updateWorkOrder(workOrder.id, {
+      title:          fd.get('title') as string,
+      description:    (fd.get('description') as string) || null,
+      priority:       fd.get('priority') as string,
+      vendor_id:      (fd.get('vendor_id') as string) || null,
+      scheduled_date: (fd.get('scheduled_date') as string) || null,
+      estimated_cost: fd.get('estimated_cost')
+        ? parseFloat(fd.get('estimated_cost') as string)
+        : null,
+      portal_enabled: fd.get('portal_enabled') === 'true',
+    })
+    setSaving(false)
+    if (result.error) { setEditError(result.error); return }
+    setEditing(false)
+  }
+
+  const handleAddNote = async () => {
+    if (!noteText.trim()) return
+    setAddingNote(true)
+    await addWorkOrderNote(workOrder.id, noteText)
+    setNoteText('')
+    setAddingNote(false)
+  }
+
   return (
     <div className="max-w-3xl">
       {/* Header */}
@@ -303,11 +340,82 @@ export function WorkOrderDetail({
           <span className={statusBadgeClass(workOrder.status)}>
             {WO_STATUS_LABELS[workOrder.status]}
           </span>
+          {!['completed', 'cancelled'].includes(workOrder.status) && (
+            <button
+              onClick={() => setEditing(!editing)}
+              className="btn-secondary text-sm flex items-center gap-1.5"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              {editing ? 'Close Edit' : 'Edit'}
+            </button>
+          )}
         </div>
         <p className="page-subtitle mt-1">
           Created {formatDateTime(workOrder.created_at)} &bull; {SOURCE_LABELS[workOrder.source] ?? workOrder.source}
         </p>
       </div>
+
+      {/* Edit form */}
+      {editing && (
+        <div className="card mb-6">
+          <h3 className="section-header mb-4">Edit Work Order</h3>
+          {editError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-3">{editError}</div>
+          )}
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            <div>
+              <label className="label">Title</label>
+              <input name="title" type="text" required className="input" defaultValue={workOrder.title} />
+            </div>
+            <div>
+              <label className="label">Description</label>
+              <textarea name="description" rows={3} className="input resize-none" defaultValue={workOrder.description ?? ''} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Priority</label>
+                <select name="priority" className="input" defaultValue={workOrder.priority}>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Scheduled Date</label>
+                <input name="scheduled_date" type="date" className="input" defaultValue={workOrder.scheduled_date ?? ''} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Estimated Cost ($)</label>
+                <input name="estimated_cost" type="number" min="0" step="0.01" className="input" defaultValue={workOrder.estimated_cost ?? ''} />
+              </div>
+              {vendors.length > 0 && (
+                <div>
+                  <label className="label">Vendor</label>
+                  <select name="vendor_id" className="input" defaultValue={workOrder.vendor_id ?? ''}>
+                    <option value="">None</option>
+                    {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <select name="portal_enabled" className="input w-auto text-sm" defaultValue={workOrder.portal_enabled ? 'true' : 'false'}>
+                <option value="false">Portal disabled</option>
+                <option value="true">Portal enabled</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button type="submit" disabled={saving} className="btn-primary text-sm">
+                {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+              <button type="button" onClick={() => setEditing(false)} className="btn-ghost text-sm">Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left — main info */}
@@ -334,6 +442,27 @@ export function WorkOrderDetail({
               )}
             </div>
           )}
+
+          {/* Add Note */}
+          <div className="card">
+            <h3 className="section-header mb-2">Add Note</h3>
+            <div className="flex gap-2">
+              <textarea
+                rows={2}
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                className="input resize-none flex-1 text-sm"
+                placeholder="Add a note, question for vendor, or update…"
+              />
+              <button
+                onClick={handleAddNote}
+                disabled={addingNote || !noteText.trim()}
+                className="btn-secondary self-end px-3 py-2 text-sm"
+              >
+                {addingNote ? '…' : 'Add'}
+              </button>
+            </div>
+          </div>
 
           {/* Status Controls */}
           {workOrder.status !== 'completed' && (
