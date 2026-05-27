@@ -112,7 +112,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
     return (
       <button
         onClick={() => setEditing(true)}
-        className="text-sm text-accent-600 hover:text-brand-700 hover:underline tabular-nums"
+        className="text-sm text-secondary-themed hover:text-brand-700 hover:underline tabular-nums"
         title="Click to edit par level"
       >
         {item.par_level}
@@ -140,7 +140,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
       </button>
       <button
         onClick={() => { setEditing(false); setValue(String(item.par_level)); setError(null) }}
-        className="text-xs px-2 py-1 rounded bg-accent-100 text-accent-600 hover:bg-accent-200"
+        className="text-xs px-2 py-1 rounded bg-raised-themed text-secondary-themed hover:bg-raised-themed"
       >
         Cancel
       </button>
@@ -169,10 +169,10 @@ function CategorySection({
         className="flex items-center gap-2 w-full text-left py-2 group"
       >
         {open
-          ? <ChevronDown className="w-4 h-4 text-accent-400" />
-          : <ChevronRight className="w-4 h-4 text-accent-400" />
+          ? <ChevronDown className="w-4 h-4 text-muted-themed" />
+          : <ChevronRight className="w-4 h-4 text-muted-themed" />
         }
-        <span className="text-sm font-semibold text-accent-700">
+        <span className="text-sm font-semibold text-secondary-themed">
           {INVENTORY_CATEGORY_LABELS[category]}
         </span>
         <span className="badge badge-slate text-xs">{items.length}</span>
@@ -187,9 +187,9 @@ function CategorySection({
       </button>
 
       {open && (
-        <div className="mt-1 border border-accent-200 rounded-xl overflow-hidden">
+        <div className="mt-1 border border-themed rounded-xl overflow-hidden">
           {/* Header row */}
-          <div className="grid grid-cols-[1fr_80px_80px_100px_120px] gap-2 px-4 py-2 bg-accent-50 border-b border-accent-200 text-xs font-medium text-accent-500 uppercase tracking-wide">
+          <div className="grid grid-cols-[1fr_80px_80px_100px_120px] gap-2 px-4 py-2 bg-canvas-themed border-b border-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
             <span>Item</span>
             <span className="text-right">Current</span>
             <span className="text-right">Par Level</span>
@@ -202,24 +202,24 @@ function CategorySection({
               key={item.id}
               className={cn(
                 'grid grid-cols-[1fr_80px_80px_100px_120px] gap-2 px-4 py-2.5 items-center text-sm',
-                idx !== items.length - 1 && 'border-b border-accent-100',
+                idx !== items.length - 1 && 'border-b border-themed',
                 getStockStatus(item) === 'critical' && 'bg-red-50/40',
                 getStockStatus(item) === 'low'      && 'bg-amber-50/30',
               )}
             >
               <div className="min-w-0">
-                <span className="font-medium text-accent-800 truncate block">{item.name}</span>
+                <span className="font-medium text-primary-themed truncate block">{item.name}</span>
                 {item.notes && (
-                  <span className="text-xs text-accent-400 truncate block">{item.notes}</span>
+                  <span className="text-xs text-muted-themed truncate block">{item.notes}</span>
                 )}
               </div>
-              <div className="text-right tabular-nums font-medium text-accent-800">
+              <div className="text-right tabular-nums font-medium text-primary-themed">
                 {item.current_quantity}
               </div>
               <div className="text-right">
                 <ParLevelEditor item={item} />
               </div>
-              <div className="text-right text-accent-500 text-xs">{item.unit}</div>
+              <div className="text-right text-muted-themed text-xs">{item.unit}</div>
               <div className="text-right">
                 <StockBadge item={item} />
               </div>
@@ -264,14 +264,14 @@ function AddItemModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-card-lg w-full max-w-lg p-6">
+      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-accent-900">Add Inventory Item</h3>
+          <h3 className="text-lg font-semibold text-primary-themed">Add Inventory Item</h3>
           <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-4 border-b border-accent-200">
+        <div className="flex gap-1 mb-4 border-b border-themed">
           {(['catalog', 'custom'] as const).map((t) => (
             <button
               key={t}
@@ -281,7 +281,7 @@ function AddItemModal({
                 'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
                 tab === t
                   ? 'border-brand-700 text-brand-800'
-                  : 'border-transparent text-accent-500 hover:text-accent-700'
+                  : 'border-transparent text-muted-themed hover:text-secondary-themed'
               )}
             >
               {t === 'catalog' ? 'From Catalog' : 'Custom Item'}
@@ -318,7 +318,7 @@ function AddItemModal({
                     'px-2.5 py-1 text-xs rounded-full border transition-colors',
                     categoryFilter === c
                       ? 'bg-brand-800 text-white border-brand-800'
-                      : 'bg-white text-accent-600 border-accent-200 hover:border-accent-400'
+                      : 'bg-card-themed text-secondary-themed border-themed hover:border-themed'
                   )}
                 >
                   {c === 'all' ? 'All' : INVENTORY_CATEGORY_LABELS[c]}
@@ -327,7 +327,7 @@ function AddItemModal({
             </div>
 
             {/* Catalog list */}
-            <div className="border border-accent-200 rounded-xl overflow-hidden max-h-52 overflow-y-auto">
+            <div className="border border-themed rounded-xl overflow-hidden max-h-52 overflow-y-auto">
               {visibleCatalog.map((item) => {
                 const alreadyAdded = addedCatalogIds.has(item.id)
                 const isSelected   = selectedCatalog?.id === item.id
@@ -337,14 +337,14 @@ function AddItemModal({
                     type="button"
                     onClick={() => !alreadyAdded && setSelectedCatalog(isSelected ? null : item)}
                     className={cn(
-                      'w-full flex items-center justify-between px-4 py-2.5 text-left text-sm border-b border-accent-50 last:border-0 transition-colors',
+                      'w-full flex items-center justify-between px-4 py-2.5 text-left text-sm border-b border-themed last:border-0 transition-colors',
                       isSelected   && 'bg-brand-800 text-white',
                       alreadyAdded && 'opacity-40 cursor-not-allowed',
-                      !isSelected && !alreadyAdded && 'hover:bg-accent-50'
+                      !isSelected && !alreadyAdded && 'hover:bg-canvas-themed'
                     )}
                   >
                     <span className="font-medium">{item.name}</span>
-                    <span className={cn('text-xs', isSelected ? 'text-brand-200' : 'text-accent-400')}>
+                    <span className={cn('text-xs', isSelected ? 'text-brand-200' : 'text-muted-themed')}>
                       {alreadyAdded ? 'Already added' : item.default_unit}
                     </span>
                   </button>
@@ -445,11 +445,11 @@ function RunCountModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 bg-black/40 overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-card-lg w-full max-w-2xl p-6 mb-8">
+      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-2xl p-6 mb-8">
         <div className="flex items-center justify-between mb-5">
           <div>
-            <h3 className="text-lg font-semibold text-accent-900">Run Inventory Count</h3>
-            <p className="text-sm text-accent-500 mt-0.5">Enter current quantities for each item</p>
+            <h3 className="text-lg font-semibold text-primary-themed">Run Inventory Count</h3>
+            <p className="text-sm text-muted-themed mt-0.5">Enter current quantities for each item</p>
           </div>
           <button onClick={onClose} className="btn-ghost p-1.5">
             <X className="w-4 h-4" />
@@ -463,7 +463,7 @@ function RunCountModal({
         )}
 
         {items.length === 0 ? (
-          <div className="text-center py-10 text-accent-400">
+          <div className="text-center py-10 text-muted-themed">
             <Package className="w-8 h-8 mx-auto mb-2" />
             <p className="text-sm">No items to count for this property.</p>
           </div>
@@ -473,32 +473,32 @@ function RunCountModal({
 
             {byCategory.map(({ cat, catItems }) => (
               <div key={cat}>
-                <h4 className="text-xs font-semibold text-accent-500 uppercase tracking-wide mb-2">
+                <h4 className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2">
                   {INVENTORY_CATEGORY_LABELS[cat]}
                 </h4>
-                <div className="border border-accent-200 rounded-xl overflow-hidden">
+                <div className="border border-themed rounded-xl overflow-hidden">
                   {catItems.map((item, idx) => (
                     <div
                       key={item.id}
                       className={cn(
                         'grid grid-cols-[1fr_80px_100px_130px] gap-3 px-4 py-2.5 items-center',
-                        idx !== catItems.length - 1 && 'border-b border-accent-100'
+                        idx !== catItems.length - 1 && 'border-b border-themed'
                       )}
                     >
                       <div className="min-w-0">
-                        <span className="text-sm font-medium text-accent-800 block truncate">{item.name}</span>
-                        <span className="text-xs text-accent-400">{item.unit}</span>
+                        <span className="text-sm font-medium text-primary-themed block truncate">{item.name}</span>
+                        <span className="text-xs text-muted-themed">{item.unit}</span>
                       </div>
-                      <div className="text-right text-xs text-accent-500">
+                      <div className="text-right text-xs text-muted-themed">
                         <span className="block">Current</span>
-                        <span className="font-medium text-accent-700 tabular-nums">{item.current_quantity}</span>
+                        <span className="font-medium text-secondary-themed tabular-nums">{item.current_quantity}</span>
                       </div>
-                      <div className="text-right text-xs text-accent-500">
+                      <div className="text-right text-xs text-muted-themed">
                         <span className="block">Par</span>
-                        <span className="font-medium text-accent-700 tabular-nums">{item.par_level}</span>
+                        <span className="font-medium text-secondary-themed tabular-nums">{item.par_level}</span>
                       </div>
                       <div className="flex flex-col items-end gap-0.5">
-                        <label className="text-xs text-accent-500">New Count</label>
+                        <label className="text-xs text-muted-themed">New Count</label>
                         <input
                           name={`item_${item.id}`}
                           type="number"
@@ -523,7 +523,7 @@ function RunCountModal({
               />
             </div>
 
-            <div className="flex gap-3 pt-2 border-t border-accent-100">
+            <div className="flex gap-3 pt-2 border-t border-themed">
               <button type="submit" disabled={pending} className="btn-primary flex-1">
                 {pending ? 'Submitting…' : 'Submit Count'}
               </button>
@@ -551,21 +551,21 @@ function PurchaseOrdersPanel({
   const propertyOrders = orders.filter((o) => o.property_id === propertyId)
 
   return (
-    <div className="mt-6 border border-accent-200 rounded-xl overflow-hidden">
+    <div className="mt-6 border border-themed rounded-xl overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 w-full text-left px-4 py-3 bg-accent-50 hover:bg-accent-100 transition-colors"
+        className="flex items-center gap-2 w-full text-left px-4 py-3 bg-canvas-themed hover:bg-raised-themed transition-colors"
       >
-        <ShoppingCart className="w-4 h-4 text-accent-500" />
-        <span className="text-sm font-semibold text-accent-700">Purchase Orders</span>
+        <ShoppingCart className="w-4 h-4 text-muted-themed" />
+        <span className="text-sm font-semibold text-secondary-themed">Purchase Orders</span>
         <span className="badge badge-slate text-xs">{propertyOrders.length}</span>
-        <ChevronDown className={cn('w-4 h-4 text-accent-400 ml-auto transition-transform', open && 'rotate-180')} />
+        <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
       </button>
 
       {open && (
-        <div className="divide-y divide-accent-100">
+        <div className="divide-y divide-themed">
           {propertyOrders.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-accent-400">
+            <div className="px-4 py-6 text-center text-sm text-muted-themed">
               No purchase orders for this property yet.
             </div>
           ) : (
@@ -580,24 +580,24 @@ function PurchaseOrdersPanel({
                 <div key={po.id}>
                   <button
                     onClick={() => setExpandedId(isExpanded ? null : po.id)}
-                    className="flex items-center gap-3 w-full text-left px-4 py-3 hover:bg-accent-50 transition-colors"
+                    className="flex items-center gap-3 w-full text-left px-4 py-3 hover:bg-canvas-themed transition-colors"
                   >
                     <span className={poBadgeClass(po.status)}>
                       {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
                     </span>
-                    <span className="text-sm text-accent-600">{formatDate(po.generated_at)}</span>
+                    <span className="text-sm text-secondary-themed">{formatDate(po.generated_at)}</span>
                     {po.total_estimated_cost != null && (
-                      <span className="text-sm font-medium text-accent-800 ml-auto mr-2">
+                      <span className="text-sm font-medium text-primary-themed ml-auto mr-2">
                         ${po.total_estimated_cost.toFixed(2)}
                       </span>
                     )}
-                    <ChevronDown className={cn('w-3.5 h-3.5 text-accent-400 transition-transform', isExpanded && 'rotate-180')} />
+                    <ChevronDown className={cn('w-3.5 h-3.5 text-muted-themed transition-transform', isExpanded && 'rotate-180')} />
                   </button>
 
                   {isExpanded && poItems.length > 0 && (
                     <div className="px-4 pb-3">
-                      <div className="border border-accent-200 rounded-lg overflow-hidden text-xs">
-                        <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 bg-accent-50 font-medium text-accent-500 uppercase tracking-wide">
+                      <div className="border border-themed rounded-lg overflow-hidden text-xs">
+                        <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 bg-canvas-themed font-medium text-muted-themed uppercase tracking-wide">
                           <span>Item</span>
                           <span className="text-right">Current</span>
                           <span className="text-right">To Buy</span>
@@ -606,7 +606,7 @@ function PurchaseOrdersPanel({
                         {poItems.map((pi) => (
                           <div
                             key={pi.id}
-                            className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 border-t border-accent-100 text-accent-700"
+                            className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 border-t border-themed text-secondary-themed"
                           >
                             <span className="truncate">{pi.item_name}</span>
                             <span className="text-right tabular-nums">{pi.current_quantity}</span>
@@ -704,14 +704,14 @@ export function InventoryManager({
       {/* Property tabs */}
       {properties.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
-          <Package className="w-10 h-10 text-accent-300 mx-auto mb-3" />
-          <h3 className="font-semibold text-accent-700 mb-1">No properties yet</h3>
-          <p className="text-sm text-accent-400">Add a property to start managing inventory.</p>
+          <Package className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+          <h3 className="font-semibold text-secondary-themed mb-1">No properties yet</h3>
+          <p className="text-sm text-muted-themed">Add a property to start managing inventory.</p>
         </div>
       ) : (
         <>
           {/* Tabs */}
-          <div className="flex gap-1 mb-6 overflow-x-auto pb-0.5 border-b border-accent-200">
+          <div className="flex gap-1 mb-6 overflow-x-auto pb-0.5 border-b border-themed">
             {properties.map((p) => (
               <button
                 key={p.id}
@@ -720,7 +720,7 @@ export function InventoryManager({
                   'px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors',
                   selectedPropertyId === p.id
                     ? 'border-brand-700 text-brand-800'
-                    : 'border-transparent text-accent-500 hover:text-accent-800 hover:border-accent-300'
+                    : 'border-transparent text-muted-themed hover:text-primary-themed hover:border-themed'
                 )}
               >
                 <span className="max-w-[140px] truncate block">{p.name}</span>
@@ -731,11 +731,11 @@ export function InventoryManager({
           {/* Items display */}
           {propertyItems.length === 0 ? (
             <div className="card text-center py-16 max-w-md mx-auto mt-2">
-              <Package className="w-10 h-10 text-accent-300 mx-auto mb-3" />
-              <h3 className="font-semibold text-accent-700 mb-1">No items yet</h3>
-              <p className="text-sm text-accent-400 mb-4">
+              <Package className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+              <h3 className="font-semibold text-secondary-themed mb-1">No items yet</h3>
+              <p className="text-sm text-muted-themed mb-4">
                 Add inventory items to{' '}
-                <span className="font-medium text-accent-600">{selectedProperty?.name}</span> to
+                <span className="font-medium text-secondary-themed">{selectedProperty?.name}</span> to
                 start tracking stock levels.
               </p>
               <button

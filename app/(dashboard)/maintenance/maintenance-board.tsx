@@ -124,8 +124,8 @@ function WorkOrderCard({
     <div
       onClick={onClick}
       className={cn(
-        'bg-white rounded-xl border border-accent-200 p-4 cursor-pointer',
-        'hover:shadow-[0_2px_8px_0_rgba(0,0,0,.08)] hover:border-accent-300 transition-all',
+        'bg-card-themed rounded-xl border border-themed p-4 cursor-pointer',
+        'hover:shadow-[0_2px_8px_0_rgba(0,0,0,.08)] hover:border-themed transition-all',
         wo.priority === 'urgent' && 'border-l-4 border-l-red-400',
         wo.priority === 'high'   && 'border-l-4 border-l-amber-400',
       )}
@@ -134,7 +134,7 @@ function WorkOrderCard({
         <div className="flex-1 min-w-0">
           {/* Title + badges */}
           <div className="flex items-start gap-2 flex-wrap">
-            <span className="font-semibold text-accent-900 text-sm leading-snug flex-1 min-w-0 truncate">
+            <span className="font-semibold text-primary-themed text-sm leading-snug flex-1 min-w-0 truncate">
               {wo.title}
             </span>
             <span className={priorityBadgeClass(wo.priority)}>
@@ -146,7 +146,7 @@ function WorkOrderCard({
           </div>
 
           {/* Property + vendor */}
-          <div className="flex items-center gap-3 mt-1.5 text-xs text-accent-500 flex-wrap">
+          <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-themed flex-wrap">
             {property && (
               <span className="flex items-center gap-1">
                 <Wrench className="w-3 h-3" />
@@ -174,7 +174,7 @@ function WorkOrderCard({
           </div>
         </div>
 
-        <ChevronRight className="w-4 h-4 text-accent-300 flex-shrink-0 mt-0.5" />
+        <ChevronRight className="w-4 h-4 text-muted-themed flex-shrink-0 mt-0.5" />
       </div>
     </div>
   )
@@ -196,9 +196,9 @@ function CreateWorkOrderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-accent-900">New Work Order</h3>
+          <h3 className="text-lg font-semibold text-primary-themed">New Work Order</h3>
           <button onClick={onClose} className="btn-ghost p-1.5">
             <X className="w-4 h-4" />
           </button>
@@ -301,18 +301,18 @@ function CreateWorkOrderModal({
 
           {/* Portal enabled */}
           {selectedVendor && (
-            <label className="flex items-center gap-2 text-sm text-accent-700 cursor-pointer">
+            <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
               <input
                 type="checkbox"
                 name="portal_enabled"
                 defaultChecked
-                className="w-4 h-4 rounded border-accent-300 text-brand-600 focus:ring-brand-500"
+                className="w-4 h-4 rounded border-themed text-brand-600 focus:ring-brand-500"
               />
               Send vendor portal link (vendor can mark complete via link)
             </label>
           )}
 
-          <div className="flex gap-3 pt-2 border-t border-accent-100">
+          <div className="flex gap-3 pt-2 border-t border-themed">
             <button type="submit" disabled={pending} className="btn-primary flex-1">
               {pending ? 'Creating…' : 'Create Work Order'}
             </button>
@@ -347,59 +347,59 @@ function SchedulesSection({ schedules }: { schedules: ScheduleRow[] }) {
         onClick={() => setOpen((o) => !o)}
         className="flex items-center gap-2 w-full text-left group mb-1"
       >
-        <span className="text-sm font-semibold text-accent-700 group-hover:text-accent-900 transition-colors">
+        <span className="text-sm font-semibold text-secondary-themed group-hover:text-primary-themed transition-colors">
           Maintenance Schedules
         </span>
         <span className="badge badge-slate">{schedules.length}</span>
         <ChevronDown className={cn(
-          'w-4 h-4 text-accent-400 ml-auto transition-transform',
+          'w-4 h-4 text-muted-themed ml-auto transition-transform',
           open && 'rotate-180'
         )} />
       </button>
-      <p className="text-xs text-accent-400 mb-3">Recurring tasks that generate work orders automatically</p>
+      <p className="text-xs text-muted-themed mb-3">Recurring tasks that generate work orders automatically</p>
 
       {open && (
-        <div className="overflow-x-auto rounded-xl border border-accent-200 bg-white">
+        <div className="overflow-x-auto rounded-xl border border-themed bg-card-themed">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-accent-100 bg-accent-50">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-accent-500 uppercase tracking-wide">Name</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-accent-500 uppercase tracking-wide">Property</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-accent-500 uppercase tracking-wide">Frequency</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-accent-500 uppercase tracking-wide">Next Due</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-accent-500 uppercase tracking-wide">Last Done</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-accent-500 uppercase tracking-wide">Auto</th>
+              <tr className="border-b border-themed bg-canvas-themed">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Name</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Property</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Frequency</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Next Due</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Last Done</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Auto</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-accent-100">
+            <tbody className="divide-y divide-themed">
               {schedules.map((s) => {
                 const property = getJoined(s.properties)
                 const isOverdue = s.next_due_date && new Date(s.next_due_date) < new Date()
                 return (
-                  <tr key={s.id} className="hover:bg-accent-50 transition-colors">
+                  <tr key={s.id} className="hover:bg-canvas-themed transition-colors">
                     <td className="px-4 py-3">
-                      <span className="font-medium text-accent-900">{s.name}</span>
+                      <span className="font-medium text-primary-themed">{s.name}</span>
                       {s.description && (
-                        <p className="text-xs text-accent-400 mt-0.5 truncate max-w-[200px]">{s.description}</p>
+                        <p className="text-xs text-muted-themed mt-0.5 truncate max-w-[200px]">{s.description}</p>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-accent-600">{property?.name ?? '—'}</td>
-                    <td className="px-4 py-3 text-accent-600">
+                    <td className="px-4 py-3 text-secondary-themed">{property?.name ?? '—'}</td>
+                    <td className="px-4 py-3 text-secondary-themed">
                       {s.frequency ? FREQUENCY_LABELS[s.frequency] ?? s.frequency : '—'}
                     </td>
                     <td className="px-4 py-3">
                       {s.next_due_date ? (
                         <span className={cn(
                           'flex items-center gap-1',
-                          isOverdue ? 'text-red-600 font-medium' : 'text-accent-600'
+                          isOverdue ? 'text-red-600 font-medium' : 'text-secondary-themed'
                         )}>
                           {isOverdue && <AlertTriangle className="w-3 h-3" />}
                           {formatDate(s.next_due_date)}
                         </span>
                       ) : '—'}
                     </td>
-                    <td className="px-4 py-3 text-accent-600">
+                    <td className="px-4 py-3 text-secondary-themed">
                       {s.last_completed_date ? (
                         <span className="flex items-center gap-1 text-green-600">
                           <CheckCircle2 className="w-3 h-3" />
@@ -499,7 +499,7 @@ export function MaintenanceBoard({
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 bg-white border border-accent-200 rounded-lg px-1 py-1 w-fit mb-4">
+      <div className="flex items-center gap-1 bg-card-themed border border-themed rounded-lg px-1 py-1 w-fit mb-4">
         {STATUS_TABS.map((tab) => {
           const count = tab.key === 'all'
             ? workOrders.length
@@ -512,13 +512,13 @@ export function MaintenanceBoard({
                 'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
                 activeTab === tab.key
                   ? 'bg-brand-800 text-white'
-                  : 'text-accent-500 hover:text-accent-700'
+                  : 'text-muted-themed hover:text-secondary-themed'
               )}
             >
               {tab.label}
               <span className={cn(
                 'px-1.5 py-0.5 rounded-full text-xs font-semibold',
-                activeTab === tab.key ? 'bg-brand-700 text-brand-100' : 'bg-accent-100 text-accent-500'
+                activeTab === tab.key ? 'bg-brand-700 text-brand-100' : 'bg-raised-themed text-muted-themed'
               )}>
                 {count}
               </span>
@@ -555,7 +555,7 @@ export function MaintenanceBoard({
         {(filterProperty !== 'all' || filterPriority !== 'all') && (
           <button
             onClick={() => { setFilterProperty('all'); setFilterPriority('all') }}
-            className="btn-ghost text-xs py-1.5 text-accent-400"
+            className="btn-ghost text-xs py-1.5 text-muted-themed"
           >
             <X className="w-3 h-3" /> Clear filters
           </button>
@@ -565,9 +565,9 @@ export function MaintenanceBoard({
       {/* Work Orders List */}
       {filtered.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
-          <Wrench className="w-10 h-10 text-accent-300 mx-auto mb-3" />
-          <h3 className="font-semibold text-accent-700 mb-1">No work orders found</h3>
-          <p className="text-sm text-accent-400 mb-4">
+          <Wrench className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+          <h3 className="font-semibold text-secondary-themed mb-1">No work orders found</h3>
+          <p className="text-sm text-muted-themed mb-4">
             {workOrders.length === 0
               ? 'Create your first work order to track maintenance tasks.'
               : 'No work orders match the current filters.'

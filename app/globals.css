@@ -272,25 +272,26 @@
    requiring changes to every individual file. In light mode, the CSS vars
    resolve to equivalent values so no visual difference. */
 @layer utilities {
-  .bg-white         { background-color: var(--bg-card) !important; }
-  .bg-accent-50     { background-color: var(--bg-canvas) !important; }
-  .bg-accent-100    { background-color: var(--bg-raised) !important; }
-  .bg-accent-200    { background-color: var(--border-strong) !important; }
+  .bg-card-themed   { background-color: var(--bg-card); }
+  .bg-canvas-themed { background-color: var(--bg-canvas); }
+  .bg-raised-themed { background-color: var(--bg-raised); }
 
-  .text-accent-900,
-  .text-accent-800  { color: var(--text-primary) !important; }
-  .text-accent-700  { color: var(--text-secondary) !important; }
-  .text-accent-600,
-  .text-accent-500  { color: var(--text-muted) !important; }
-  .text-accent-400  { color: var(--text-muted) !important; opacity: 0.7; }
+  .hover\:bg-card-themed:hover   { background-color: var(--bg-card); }
+  .hover\:bg-canvas-themed:hover { background-color: var(--bg-canvas); }
+  .hover\:bg-raised-themed:hover { background-color: var(--bg-raised); }
 
-  .border-accent-200,
-  .border-accent-100 { border-color: var(--border) !important; }
+  .text-primary-themed   { color: var(--text-primary); }
+  .text-secondary-themed { color: var(--text-secondary); }
+  .text-muted-themed     { color: var(--text-muted); }
 
-  .hover\:bg-accent-50:hover,
-  .hover\:bg-accent-100:hover { background-color: var(--bg-hover) !important; }
-  .hover\:bg-white:hover      { background-color: var(--bg-raised) !important; }
+  .hover\:text-primary-themed:hover   { color: var(--text-primary); }
+  .hover\:text-secondary-themed:hover { color: var(--text-secondary); }
+  .hover\:text-muted-themed:hover     { color: var(--text-muted); }
 
-  .divide-accent-100 > * + * { border-color: var(--border) !important; }
-  .divide-accent-200 > * + * { border-color: var(--border-strong) !important; }
+  .group:hover .group-hover\:text-primary-themed { color: var(--text-primary); }
+
+  .border-themed              { border-color: var(--border); }
+  .hover\:border-themed:hover { border-color: var(--border); }
+
+  .divide-themed > * + * { border-color: var(--border); }
 }

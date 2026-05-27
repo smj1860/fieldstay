@@ -54,16 +54,16 @@ export default async function PropertiesPage() {
                 {/* Header */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <h3 className="font-semibold text-accent-900 truncate">{p.name}</h3>
+                    <h3 className="font-semibold text-primary-themed truncate">{p.name}</h3>
                     {(p.city || p.state) && (
-                      <p className="text-sm text-accent-400 mt-0.5">
+                      <p className="text-sm text-muted-themed mt-0.5">
                         {[p.city, p.state].filter(Boolean).join(', ')}
                       </p>
                     )}
                   </div>
                   <Link
                     href={`/properties/${p.id}/setup/details`}
-                    className="flex-shrink-0 text-accent-400 hover:text-accent-600 transition-colors p-1"
+                    className="flex-shrink-0 text-muted-themed hover:text-secondary-themed transition-colors p-1"
                     title="Property settings"
                   >
                     <Settings className="w-4 h-4" />
@@ -71,7 +71,7 @@ export default async function PropertiesPage() {
                 </div>
 
                 {/* Meta */}
-                <div className="flex gap-3 text-xs text-accent-500">
+                <div className="flex gap-3 text-xs text-muted-themed">
                   <span className="capitalize">{p.property_type}</span>
                   <span>·</span>
                   <span>{p.bedrooms} bed</span>
@@ -94,7 +94,7 @@ export default async function PropertiesPage() {
                         Continue →
                       </Link>
                     </div>
-                    <div className="h-1.5 bg-accent-100 rounded-full overflow-hidden">
+                    <div className="h-1.5 bg-raised-themed rounded-full overflow-hidden">
                       <div
                         className="h-full bg-amber-400 rounded-full transition-all"
                         style={{ width: `${progress}%` }}
@@ -109,7 +109,7 @@ export default async function PropertiesPage() {
                 )}
 
                 {/* Actions */}
-                <div className="flex gap-2 pt-1 border-t border-accent-100">
+                <div className="flex gap-2 pt-1 border-t border-themed">
                   <Link
                     href={`/properties/${p.id}`}
                     className="btn-secondary text-xs px-3 py-1.5 flex-1 justify-center"
@@ -138,8 +138,8 @@ function EmptyState() {
       <div className="w-12 h-12 rounded-full bg-brand-50 flex items-center justify-center mx-auto mb-4">
         <Plus className="w-6 h-6 text-brand-700" />
       </div>
-      <h3 className="font-semibold text-accent-900 mb-1">Add your first property</h3>
-      <p className="text-sm text-accent-500 mb-6">
+      <h3 className="font-semibold text-primary-themed mb-1">Add your first property</h3>
+      <p className="text-sm text-muted-themed mb-6">
         Connect your Airbnb or VRBO calendar and FieldStay handles the rest.
       </p>
       <Link href="/properties/new" className="btn-primary">
