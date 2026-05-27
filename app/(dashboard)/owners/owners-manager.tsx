@@ -174,9 +174,9 @@ function AddTransactionForm({
   const categories = txnType === 'revenue' ? REVENUE_CATEGORIES : EXPENSE_CATEGORIES
 
   return (
-    <div className="mt-3 border border-accent-200 rounded-xl p-4 bg-accent-50">
+    <div className="mt-3 border border-themed rounded-xl p-4 bg-canvas-themed">
       <div className="flex items-center justify-between mb-3">
-        <h4 className="text-sm font-semibold text-accent-800">Add Transaction</h4>
+        <h4 className="text-sm font-semibold text-primary-themed">Add Transaction</h4>
         <button onClick={onClose} className="btn-ghost p-1">
           <X className="w-3.5 h-3.5" />
         </button>
@@ -201,7 +201,7 @@ function AddTransactionForm({
               'flex-1 py-1.5 text-sm rounded-lg font-medium border transition-colors',
               txnType === 'revenue'
                 ? 'bg-green-600 text-white border-green-600'
-                : 'bg-white text-accent-600 border-accent-200 hover:border-accent-400'
+                : 'bg-card-themed text-secondary-themed border-themed hover:border-themed'
             )}
           >
             + Revenue
@@ -213,7 +213,7 @@ function AddTransactionForm({
               'flex-1 py-1.5 text-sm rounded-lg font-medium border transition-colors',
               txnType === 'expense'
                 ? 'bg-red-600 text-white border-red-600'
-                : 'bg-white text-accent-600 border-accent-200 hover:border-accent-400'
+                : 'bg-card-themed text-secondary-themed border-themed hover:border-themed'
             )}
           >
             − Expense
@@ -298,15 +298,15 @@ function TransactionPanel({
   }
 
   return (
-    <div className="mt-3 border-t border-accent-100 pt-3">
+    <div className="mt-3 border-t border-themed pt-3">
       <button
         type="button"
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 text-sm font-medium text-accent-700 hover:text-accent-900 w-full text-left"
+        className="flex items-center gap-2 text-sm font-medium text-secondary-themed hover:text-primary-themed w-full text-left"
       >
         {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
         Transactions
-        <span className="ml-auto text-xs text-accent-400">{propertyTxns.length} entries</span>
+        <span className="ml-auto text-xs text-muted-themed">{propertyTxns.length} entries</span>
         <span className={cn('text-xs font-semibold', net >= 0 ? 'text-green-600' : 'text-red-600')}>
           Net {formatCurrency(net)}
         </span>
@@ -324,9 +324,9 @@ function TransactionPanel({
               <div className="text-xs text-red-600 mb-0.5">Expenses</div>
               <div className="text-sm font-semibold text-red-700">{formatCurrency(totalExpense)}</div>
             </div>
-            <div className={cn('rounded-lg p-2 text-center', net >= 0 ? 'bg-accent-50' : 'bg-amber-50')}>
-              <div className="text-xs text-accent-500 mb-0.5">Net</div>
-              <div className={cn('text-sm font-semibold', net >= 0 ? 'text-accent-800' : 'text-amber-700')}>
+            <div className={cn('rounded-lg p-2 text-center', net >= 0 ? 'bg-canvas-themed' : 'bg-amber-50')}>
+              <div className="text-xs text-muted-themed mb-0.5">Net</div>
+              <div className={cn('text-sm font-semibold', net >= 0 ? 'text-primary-themed' : 'text-amber-700')}>
                 {formatCurrency(net)}
               </div>
             </div>
@@ -334,28 +334,28 @@ function TransactionPanel({
 
           {/* Transaction list */}
           {propertyTxns.length > 0 ? (
-            <div className="border border-accent-100 rounded-xl overflow-hidden mb-3">
+            <div className="border border-themed rounded-xl overflow-hidden mb-3">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="bg-accent-50 border-b border-accent-100">
-                    <th className="text-left px-3 py-2 text-accent-500 font-medium">Date</th>
-                    <th className="text-left px-3 py-2 text-accent-500 font-medium">Description</th>
-                    <th className="text-left px-3 py-2 text-accent-500 font-medium">Category</th>
-                    <th className="text-right px-3 py-2 text-accent-500 font-medium">Amount</th>
+                  <tr className="bg-canvas-themed border-b border-themed">
+                    <th className="text-left px-3 py-2 text-muted-themed font-medium">Date</th>
+                    <th className="text-left px-3 py-2 text-muted-themed font-medium">Description</th>
+                    <th className="text-left px-3 py-2 text-muted-themed font-medium">Category</th>
+                    <th className="text-right px-3 py-2 text-muted-themed font-medium">Amount</th>
                     <th className="px-2 py-2" />
                   </tr>
                 </thead>
                 <tbody>
                   {propertyTxns.map((txn) => (
-                    <tr key={txn.id} className="border-b border-accent-50 last:border-0">
-                      <td className="px-3 py-2 text-accent-500 whitespace-nowrap">
+                    <tr key={txn.id} className="border-b border-themed last:border-0">
+                      <td className="px-3 py-2 text-muted-themed whitespace-nowrap">
                         {new Date(txn.transaction_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
                       </td>
-                      <td className="px-3 py-2 text-accent-700 max-w-[160px]">
+                      <td className="px-3 py-2 text-secondary-themed max-w-[160px]">
                         <div className="truncate">{txn.description}</div>
-                        {txn.notes && <div className="truncate text-accent-400">{txn.notes}</div>}
+                        {txn.notes && <div className="truncate text-muted-themed">{txn.notes}</div>}
                       </td>
-                      <td className="px-3 py-2 text-accent-500 whitespace-nowrap">
+                      <td className="px-3 py-2 text-muted-themed whitespace-nowrap">
                         {CATEGORY_LABELS[txn.category] ?? txn.category}
                       </td>
                       <td className={cn(
@@ -369,7 +369,7 @@ function TransactionPanel({
                           <button
                             onClick={() => handleDelete(txn.id)}
                             disabled={deletingId === txn.id}
-                            className="btn-ghost p-1 text-accent-400 hover:text-red-600"
+                            className="btn-ghost p-1 text-muted-themed hover:text-red-600"
                             title="Delete transaction"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -382,7 +382,7 @@ function TransactionPanel({
               </table>
             </div>
           ) : (
-            <p className="text-xs text-accent-400 mb-3">No transactions yet.</p>
+            <p className="text-xs text-muted-themed mb-3">No transactions yet.</p>
           )}
 
           {/* Add form or button */}
@@ -421,9 +421,9 @@ function AddOwnerModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-card-lg w-full max-w-lg p-6">
+      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg p-6">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-accent-900">Add Property Owner</h3>
+          <h3 className="text-lg font-semibold text-primary-themed">Add Property Owner</h3>
           <button onClick={onClose} className="btn-ghost p-1.5">
             <X className="w-4 h-4" />
           </button>
@@ -507,11 +507,11 @@ function OwnerCard({
     <div className="card p-4">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <div className="font-semibold text-accent-900">{owner.name}</div>
-          <div className="text-sm text-accent-500 mt-0.5">{getPropertyName(owner)}</div>
-          {owner.email && <div className="text-xs text-accent-400 mt-0.5">{owner.email}</div>}
+          <div className="font-semibold text-primary-themed">{owner.name}</div>
+          <div className="text-sm text-muted-themed mt-0.5">{getPropertyName(owner)}</div>
+          {owner.email && <div className="text-xs text-muted-themed mt-0.5">{owner.email}</div>}
           {owner.revenue_share_pct != null && (
-            <div className="text-xs text-accent-400">{owner.revenue_share_pct}% revenue share</div>
+            <div className="text-xs text-muted-themed">{owner.revenue_share_pct}% revenue share</div>
           )}
         </div>
 
@@ -574,9 +574,9 @@ export function OwnersManager({
 
       {owners.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto">
-          <Link2 className="w-10 h-10 text-accent-300 mx-auto mb-3" />
-          <h3 className="font-semibold text-accent-700 mb-1">No owners yet</h3>
-          <p className="text-sm text-accent-400 mb-4">
+          <Link2 className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+          <h3 className="font-semibold text-secondary-themed mb-1">No owners yet</h3>
+          <p className="text-sm text-muted-themed mb-4">
             Add property owners to give them access to their P&L via a secure portal link.
           </p>
           <button onClick={() => setShowAdd(true)} className="btn-primary mx-auto">

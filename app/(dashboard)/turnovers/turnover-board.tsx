@@ -156,16 +156,16 @@ function CrewAssignDropdown({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-accent-200 rounded-xl shadow-card-lg py-1 min-w-[160px]">
+          <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg py-1 min-w-[160px]">
             {crewMembers.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-accent-400">No crew members yet</p>
+              <p className="px-3 py-2 text-xs text-muted-themed">No crew members yet</p>
             ) : (
               crewMembers.map((c) => (
                 <button
                   key={c.id}
                   onClick={() => handleAssign(c.id)}
                   className={cn(
-                    'w-full text-left px-3 py-2 text-sm hover:bg-accent-50 transition-colors flex items-center gap-2',
+                    'w-full text-left px-3 py-2 text-sm hover:bg-canvas-themed transition-colors flex items-center gap-2',
                     assignedCrew?.id === c.id && 'text-brand-700 font-medium'
                   )}
                 >
@@ -225,11 +225,11 @@ function TurnoverCard({
   return (
     <div
       className={cn(
-        'bg-white rounded-xl border transition-shadow',
+        'bg-card-themed rounded-xl border transition-shadow',
         isOverdue          ? 'border-red-200 shadow-[0_0_0_1px_#fca5a5]' :
         turnover.priority === 'urgent' ? 'border-red-200' :
         turnover.priority === 'high'   ? 'border-amber-200' :
-        'border-accent-200',
+        'border-themed',
         'hover:shadow-card-md'
       )}
     >
@@ -244,17 +244,17 @@ function TurnoverCard({
           isOverdue              ? 'bg-red-500' :
           turnover.priority === 'urgent' ? 'bg-red-400' :
           turnover.priority === 'high'   ? 'bg-amber-400' :
-          turnover.priority === 'medium' ? 'bg-blue-300' : 'bg-accent-200'
+          turnover.priority === 'medium' ? 'bg-blue-300' : 'bg-raised-themed'
         )} />
 
         <div className="flex-1 min-w-0">
           {/* Property + status */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-semibold text-accent-900 text-sm">
+            <span className="font-semibold text-primary-themed text-sm">
               {property?.name ?? 'Unknown Property'}
             </span>
             {property?.city && (
-              <span className="text-xs text-accent-400">{property.city}</span>
+              <span className="text-xs text-muted-themed">{property.city}</span>
             )}
             <span className={statusBadge(turnover.status)}>
               {TURNOVER_STATUS_LABELS[turnover.status as keyof typeof TURNOVER_STATUS_LABELS] ?? turnover.status}
@@ -267,18 +267,18 @@ function TurnoverCard({
           </div>
 
           {/* Times + window */}
-          <div className="flex items-center gap-3 mt-1.5 text-xs text-accent-500">
+          <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-themed">
             <span>
-              <span className="font-medium text-accent-700">Out:</span>{' '}
+              <span className="font-medium text-secondary-themed">Out:</span>{' '}
               {checkout.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}{' '}
               {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
             </span>
-            <span className="text-accent-300">→</span>
+            <span className="text-muted-themed">→</span>
             <span>
-              <span className="font-medium text-accent-700">In:</span>{' '}
+              <span className="font-medium text-secondary-themed">In:</span>{' '}
               {checkin.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
               {checkin.toDateString() !== checkout.toDateString() && (
-                <span className="text-accent-400 ml-1">
+                <span className="text-muted-themed ml-1">
                   ({checkin.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})
                 </span>
               )}
@@ -297,15 +297,15 @@ function TurnoverCard({
             crewMembers={crewMembers}
             assignedCrew={assignedCrew}
           />
-          <ChevronDown className={cn('w-4 h-4 text-accent-400 transition-transform', expanded && 'rotate-180')} />
+          <ChevronDown className={cn('w-4 h-4 text-muted-themed transition-transform', expanded && 'rotate-180')} />
         </div>
       </div>
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="border-t border-accent-100 p-4 space-y-4">
+        <div className="border-t border-themed p-4 space-y-4">
           {turnover.notes && (
-            <p className="text-sm text-accent-600 bg-accent-50 rounded-lg px-3 py-2">
+            <p className="text-sm text-secondary-themed bg-canvas-themed rounded-lg px-3 py-2">
               {turnover.notes}
             </p>
           )}
@@ -313,7 +313,7 @@ function TurnoverCard({
           {/* Flag notes input */}
           {showFlagInput && (
             <div className="space-y-2">
-              <label className="text-xs font-medium text-accent-600">What needs attention?</label>
+              <label className="text-xs font-medium text-secondary-themed">What needs attention?</label>
               <textarea
                 value={flagNotes}
                 onChange={(e) => setFlagNotes(e.target.value)}
@@ -413,7 +413,7 @@ function BoardSection({
         <span className={cn(
           'text-sm font-semibold',
           variant === 'urgent' ? 'text-red-600' :
-          variant === 'muted'  ? 'text-accent-400' : 'text-accent-700'
+          variant === 'muted'  ? 'text-muted-themed' : 'text-secondary-themed'
         )}>
           {label}
         </span>
@@ -423,7 +423,7 @@ function BoardSection({
         )}>
           {turnovers.length}
         </span>
-        <ChevronDown className={cn('w-3.5 h-3.5 text-accent-400 ml-auto transition-transform', open && 'rotate-180')} />
+        <ChevronDown className={cn('w-3.5 h-3.5 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
       </button>
 
       {open && (
@@ -455,9 +455,9 @@ function AddTurnoverModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-white rounded-2xl shadow-card-lg w-full max-w-md p-6">
+      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-accent-900">Add Turnover</h3>
+          <h3 className="text-lg font-semibold text-primary-themed">Add Turnover</h3>
           <button onClick={onClose} className="btn-ghost p-1.5">
             <X className="w-4 h-4" />
           </button>
@@ -588,7 +588,7 @@ export function TurnoverBoard({
 
       {/* Filters */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
-        <div className="flex items-center gap-1.5 bg-white border border-accent-200 rounded-lg px-1 py-1">
+        <div className="flex items-center gap-1.5 bg-card-themed border border-themed rounded-lg px-1 py-1">
           {(['active', 'completed', 'all'] as const).map((s) => (
             <button
               key={s}
@@ -597,7 +597,7 @@ export function TurnoverBoard({
                 'px-3 py-1.5 text-xs font-medium rounded-md transition-colors capitalize',
                 filterStatus === s
                   ? 'bg-brand-800 text-white'
-                  : 'text-accent-500 hover:text-accent-700'
+                  : 'text-muted-themed hover:text-secondary-themed'
               )}
             >
               {s}
@@ -622,9 +622,9 @@ export function TurnoverBoard({
       {/* Board */}
       {filtered.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
-          <CalendarCheck className="w-10 h-10 text-accent-300 mx-auto mb-3" />
-          <h3 className="font-semibold text-accent-700 mb-1">No turnovers found</h3>
-          <p className="text-sm text-accent-400">
+          <CalendarCheck className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+          <h3 className="font-semibold text-secondary-themed mb-1">No turnovers found</h3>
+          <p className="text-sm text-muted-themed">
             {turnovers.length === 0
               ? 'Add a property and connect your calendar to start seeing turnovers here.'
               : 'No turnovers match the current filter.'

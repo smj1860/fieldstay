@@ -42,13 +42,23 @@ const config: Config = {
           800: '#1A1D20',
           900: '#0D0F11',
         },
+        // Dark theme surface palette
+        surface: {
+          base:   '#0a1628',
+          canvas: '#0e1e3e',
+          card:   '#152b52',
+          raised: '#1a3464',
+        },
       },
       boxShadow: {
-        'card':    '0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.05)',
-        'card-md': '0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.05)',
+        'card':      '0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.05)',
+        'card-md':   '0 4px 6px -1px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.05)',
+        'dark-card': '0 1px 4px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3)',
+        'dark-lg':   '0 8px 32px rgba(0,0,0,0.5)',
       },
       fontFamily: {
-        sans: ['Inter var', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['var(--font-syne)', 'sans-serif'],
+        sans:    ['var(--font-dm-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
     },
   },

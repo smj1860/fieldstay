@@ -239,7 +239,18 @@ export function InventorySetup({
       <div className="flex items-center gap-3 pt-4 border-t border-accent-100">
         <button
           disabled={completing}
-          onClick={() => startComplete(() => completeInventoryStep(propertyId))}
+          onClick={() => startComplete(async () => {
+            const dirty = items.filter((i) => i.isDirty)
+            if (dirty.length > 0) {
+              const result = await upsertInventoryItems(propertyId, dirty)
+              if (result.error) {
+                setError(result.error)
+                return
+              }
+              setItems((prev) => prev.map((i) => ({ ...i, isDirty: false, isNew: false })))
+            }
+            await completeInventoryStep(propertyId)
+          })}
           className="btn-primary"
         >
           {completing ? 'Saving…' : items.length > 0 ? 'Save & Continue →' : 'Skip for now →'}

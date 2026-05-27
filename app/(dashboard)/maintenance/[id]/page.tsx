@@ -17,6 +17,7 @@ export default async function WorkOrderPage({
   const [
     { data: workOrder },
     { data: updates },
+    { data: vendors },
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -40,6 +41,13 @@ export default async function WorkOrderPage({
       .eq('work_order_id', id)
       .eq('org_id', membership.org_id)
       .order('created_at', { ascending: true }),
+
+    supabase
+      .from('vendors')
+      .select('id, name, specialty')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   if (!workOrder) notFound()
@@ -54,6 +62,7 @@ export default async function WorkOrderPage({
       <WorkOrderDetail
         workOrder={workOrder as never}
         updates={updates ?? []}
+        vendors={(vendors ?? []) as { id: string; name: string; specialty: string }[]}
       />
     </div>
   )
