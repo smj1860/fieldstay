@@ -202,12 +202,12 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="vendor-email" className="label">Email</label>
-            <input id="vendor-email" name="email" type="email" className="input" placeholder="info@abcplumbing.com" />
+            <label htmlFor="vendor-email" className="label">Email <span className="text-red-400">*</span></label>
+            <input id="vendor-email" name="email" type="email" required className="input" placeholder="info@abcplumbing.com" />
           </div>
           <div>
-            <label htmlFor="vendor-phone" className="label">Phone</label>
-            <input id="vendor-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
+            <label htmlFor="vendor-phone" className="label">Phone <span className="text-red-400">*</span></label>
+            <input id="vendor-phone" name="phone" type="tel" required className="input" placeholder="+1 555-0100" />
           </div>
         </div>
 

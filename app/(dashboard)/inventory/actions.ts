@@ -40,7 +40,7 @@ export async function addInventoryItem(
   const name           = (formData.get('name') as string)?.trim()
   const category       = formData.get('category') as InventoryCategory
   const unit           = (formData.get('unit') as string)?.trim()
-  const par_level      = parseInt(formData.get('par_level') as string, 10) || 1
+  const par_level      = parseFloat(formData.get('par_level') as string) || 1
   const notes          = (formData.get('notes') as string)?.trim() || null
 
   if (!property_id) return { error: 'Property is required' }

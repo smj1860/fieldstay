@@ -4,10 +4,14 @@ import { useState, useTransition, useActionState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
-  User, ChevronRight, AlertTriangle, CheckCircle2, Clock
+  User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
+  Pencil, Trash2,
 } from 'lucide-react'
 import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
-import { createWorkOrder, createWorkOrderFromSchedule } from './actions'
+import {
+  createWorkOrder, createWorkOrderFromSchedule,
+  createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
+} from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency } from '@/types/database'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -47,16 +51,20 @@ interface VendorOption {
 interface ScheduleRow {
   id: string
   property_id: string
+  org_id: string
   name: string
   description: string | null
   schedule_type: ScheduleType
   frequency: ScheduleFrequency | null
+  month_due: number | null
   next_due_date: string | null
   last_completed_date: string | null
   estimated_cost: number | null
   auto_create_wo: boolean
   assigned_vendor_id: string | null
+  instructions: string | null
   properties: { name: string } | { name: string }[] | null
+  vendors: { id: string; name: string } | { id: string; name: string }[] | null
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -100,6 +108,20 @@ const FREQUENCY_LABELS: Partial<Record<ScheduleFrequency, string>> = {
   semi_annual: 'Semi-annual',
   annual:      'Annual',
 }
+
+const FREQUENCIES: { value: ScheduleFrequency; label: string }[] = [
+  { value: 'weekly',      label: 'Weekly'      },
+  { value: 'biweekly',   label: 'Bi-weekly'   },
+  { value: 'monthly',    label: 'Monthly'      },
+  { value: 'quarterly',  label: 'Quarterly'    },
+  { value: 'semi_annual', label: 'Semi-annual' },
+  { value: 'annual',     label: 'Annual'       },
+]
+
+const MONTHS = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+]
 
 const STATUS_TABS = [
   { key: 'all',         label: 'All' },
@@ -325,12 +347,241 @@ function CreateWorkOrderModal({
   )
 }
 
+// ── Schedule Form Fields (shared by Add + Edit) ───────────────────────────────
+
+function ScheduleFormFields({
+  properties,
+  vendors,
+  defaults,
+}: {
+  properties: PropertyOption[]
+  vendors: VendorOption[]
+  defaults?: Partial<ScheduleRow>
+}) {
+  const [schedType, setSchedType] = useState<ScheduleType>(defaults?.schedule_type ?? 'routine')
+
+  return (
+    <>
+      <div>
+        <label className="label">Name <span className="text-red-500">*</span></label>
+        <input name="name" type="text" required className="input" defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
+      </div>
+
+      {!defaults && (
+        <div>
+          <label className="label">Property <span className="text-red-500">*</span></label>
+          <select name="property_id" required className="input">
+            <option value="">Select property…</option>
+            {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      <div>
+        <label className="label">Type</label>
+        <select
+          name="schedule_type"
+          className="input"
+          value={schedType}
+          onChange={(e) => setSchedType(e.target.value as ScheduleType)}
+        >
+          <option value="routine">Routine (recurring)</option>
+          <option value="seasonal">Seasonal (specific month)</option>
+          <option value="one_time">One-time</option>
+        </select>
+      </div>
+
+      {schedType === 'routine' && (
+        <div>
+          <label className="label">Frequency</label>
+          <select name="frequency" className="input" defaultValue={defaults?.frequency ?? 'quarterly'}>
+            {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+        </div>
+      )}
+
+      {schedType === 'seasonal' && (
+        <div>
+          <label className="label">Month Due</label>
+          <select name="month_due" className="input" defaultValue={defaults?.month_due ?? ''}>
+            <option value="">Select month…</option>
+            {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+          </select>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label">Next Due Date</label>
+          <input name="next_due_date" type="date" className="input" defaultValue={defaults?.next_due_date ?? ''} />
+        </div>
+        <div>
+          <label className="label">Est. Cost ($)</label>
+          <input name="estimated_cost" type="number" min="0" step="0.01" className="input" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
+        </div>
+      </div>
+
+      <div>
+        <label className="label">Assigned Vendor</label>
+        <select name="assigned_vendor_id" className="input" defaultValue={defaults?.assigned_vendor_id ?? ''}>
+          <option value="">None</option>
+          {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+        </select>
+      </div>
+
+      <div>
+        <label className="label">Description</label>
+        <textarea name="description" rows={2} className="input resize-none" defaultValue={defaults?.description ?? ''} placeholder="Brief description…" />
+      </div>
+
+      <div>
+        <label className="label">Instructions</label>
+        <textarea name="instructions" rows={2} className="input resize-none" defaultValue={defaults?.instructions ?? ''} placeholder="Step-by-step instructions for vendor or crew…" />
+      </div>
+
+      <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
+        <input type="checkbox" name="auto_create_wo" defaultChecked={defaults?.auto_create_wo ?? false} className="w-4 h-4 rounded" />
+        Auto-create work order when due
+      </label>
+    </>
+  )
+}
+
+// ── Add Schedule Modal ────────────────────────────────────────────────────────
+
+function AddScheduleModal({
+  properties,
+  vendors,
+  onClose,
+}: {
+  properties: PropertyOption[]
+  vendors: VendorOption[]
+  onClose: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    const fd = new FormData(e.currentTarget)
+    const result = await createMaintenanceSchedule({
+      property_id:        fd.get('property_id') as string,
+      name:               fd.get('name') as string,
+      description:        (fd.get('description') as string) || null,
+      schedule_type:      (fd.get('schedule_type') as ScheduleType) || 'routine',
+      frequency:          (fd.get('frequency') as ScheduleFrequency) || null,
+      month_due:          fd.get('month_due') ? Number(fd.get('month_due')) : null,
+      next_due_date:      (fd.get('next_due_date') as string) || null,
+      estimated_cost:     fd.get('estimated_cost') ? parseFloat(fd.get('estimated_cost') as string) : null,
+      assigned_vendor_id: (fd.get('assigned_vendor_id') as string) || null,
+      auto_create_wo:     fd.get('auto_create_wo') === 'on',
+      instructions:       (fd.get('instructions') as string) || null,
+    })
+    setSaving(false)
+    if (result.error) { setError(result.error); return }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-lg font-semibold text-primary-themed">Add Maintenance Schedule</h3>
+          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+        </div>
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <ScheduleFormFields properties={properties} vendors={vendors} />
+          <div className="flex gap-3 pt-2 border-t border-themed">
+            <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving…' : 'Add Schedule'}</button>
+            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit Schedule Modal ───────────────────────────────────────────────────────
+
+function EditScheduleModal({
+  schedule,
+  vendors,
+  onClose,
+}: {
+  schedule: ScheduleRow
+  vendors: VendorOption[]
+  onClose: () => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setSaving(true)
+    setError(null)
+    const fd = new FormData(e.currentTarget)
+    const result = await updateMaintenanceSchedule(schedule.id, {
+      name:               fd.get('name') as string,
+      description:        (fd.get('description') as string) || null,
+      schedule_type:      (fd.get('schedule_type') as ScheduleType) || 'routine',
+      frequency:          (fd.get('frequency') as ScheduleFrequency) || null,
+      month_due:          fd.get('month_due') ? Number(fd.get('month_due')) : null,
+      next_due_date:      (fd.get('next_due_date') as string) || null,
+      estimated_cost:     fd.get('estimated_cost') ? parseFloat(fd.get('estimated_cost') as string) : null,
+      assigned_vendor_id: (fd.get('assigned_vendor_id') as string) || null,
+      auto_create_wo:     fd.get('auto_create_wo') === 'on',
+      instructions:       (fd.get('instructions') as string) || null,
+    })
+    setSaving(false)
+    if (result.error) { setError(result.error); return }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-lg font-semibold text-primary-themed">Edit Schedule</h3>
+          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+        </div>
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
+          <div className="flex gap-3 pt-2 border-t border-themed">
+            <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving…' : 'Save Changes'}</button>
+            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Schedules Section ─────────────────────────────────────────────────────────
 
-function SchedulesSection({ schedules }: { schedules: ScheduleRow[] }) {
-  const [open, setOpen] = useState(false)
-  const [creating, startCreate] = useTransition()
+function SchedulesSection({
+  schedules,
+  properties,
+  vendors,
+}: {
+  schedules: ScheduleRow[]
+  properties: PropertyOption[]
+  vendors: VendorOption[]
+}) {
+  const [open, setOpen]             = useState(false)
+  const [showAdd, setShowAdd]       = useState(false)
+  const [editingId, setEditingId]   = useState<string | null>(null)
+  const [creating, startCreate]     = useTransition()
+  const [deleting, startDelete]     = useTransition()
   const [creatingId, setCreatingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const handleCreateWO = (scheduleId: string) => {
     setCreatingId(scheduleId)
@@ -340,103 +591,154 @@ function SchedulesSection({ schedules }: { schedules: ScheduleRow[] }) {
     })
   }
 
-  if (!schedules.length) return null
+  const handleDelete = (scheduleId: string) => {
+    if (!confirm('Remove this schedule? This cannot be undone.')) return
+    setDeletingId(scheduleId)
+    startDelete(async () => {
+      await deleteMaintenanceSchedule(scheduleId)
+      setDeletingId(null)
+    })
+  }
+
+  const editingSchedule = schedules.find((s) => s.id === editingId) ?? null
 
   return (
-    <div className="mt-8">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 w-full text-left group mb-1"
-      >
-        <span className="text-sm font-semibold text-secondary-themed group-hover:text-primary-themed transition-colors">
-          Maintenance Schedules
-        </span>
-        <span className="badge badge-slate">{schedules.length}</span>
-        <ChevronDown className={cn(
-          'w-4 h-4 text-muted-themed ml-auto transition-transform',
-          open && 'rotate-180'
-        )} />
-      </button>
-      <p className="text-xs text-muted-themed mb-3">Recurring tasks that generate work orders automatically</p>
-
-      {open && (
-        <div className="overflow-x-auto rounded-xl border border-themed bg-card-themed">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-themed bg-canvas-themed">
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Name</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Property</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Frequency</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Next Due</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Last Done</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Auto</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-themed">
-              {schedules.map((s) => {
-                const property = getJoined(s.properties)
-                const isOverdue = s.next_due_date && new Date(s.next_due_date) < new Date()
-                return (
-                  <tr key={s.id} className="hover:bg-canvas-themed transition-colors">
-                    <td className="px-4 py-3">
-                      <span className="font-medium text-primary-themed">{s.name}</span>
-                      {s.description && (
-                        <p className="text-xs text-muted-themed mt-0.5 truncate max-w-[200px]">{s.description}</p>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-secondary-themed">{property?.name ?? '—'}</td>
-                    <td className="px-4 py-3 text-secondary-themed">
-                      {s.frequency ? FREQUENCY_LABELS[s.frequency] ?? s.frequency : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {s.next_due_date ? (
-                        <span className={cn(
-                          'flex items-center gap-1',
-                          isOverdue ? 'text-red-600 font-medium' : 'text-secondary-themed'
-                        )}>
-                          {isOverdue && <AlertTriangle className="w-3 h-3" />}
-                          {formatDate(s.next_due_date)}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-secondary-themed">
-                      {s.last_completed_date ? (
-                        <span className="flex items-center gap-1 text-green-600">
-                          <CheckCircle2 className="w-3 h-3" />
-                          {formatDate(s.last_completed_date)}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td className="px-4 py-3">
-                      {s.auto_create_wo ? (
-                        <span className="badge badge-green">Auto</span>
-                      ) : (
-                        <span className="badge badge-slate">Manual</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => handleCreateWO(s.id)}
-                        disabled={creating && creatingId === s.id}
-                        className="btn-secondary text-xs py-1.5 px-3 whitespace-nowrap"
-                      >
-                        {creating && creatingId === s.id ? (
-                          <Clock className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Plus className="w-3 h-3" />
-                        )}
-                        Create WO
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+    <>
+      <div className="mt-8">
+        <div className="flex items-center gap-2 mb-1">
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="flex items-center gap-2 flex-1 text-left group"
+          >
+            <span className="text-sm font-semibold text-secondary-themed group-hover:text-primary-themed transition-colors">
+              Maintenance Schedules
+            </span>
+            <span className="badge badge-slate">{schedules.length}</span>
+            <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
+          </button>
+          <button
+            onClick={() => setShowAdd(true)}
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" />
+            Add Schedule
+          </button>
         </div>
+        <p className="text-xs text-muted-themed mb-3">Recurring tasks that generate work orders automatically</p>
+
+        {open && schedules.length === 0 && (
+          <div className="text-center py-8 text-sm text-muted-themed border border-themed rounded-xl">
+            No schedules yet. Click "Add Schedule" to create one.
+          </div>
+        )}
+
+        {open && schedules.length > 0 && (
+          <div className="overflow-x-auto rounded-xl border border-themed bg-card-themed">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-themed bg-canvas-themed">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Name</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Property</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Frequency</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Next Due</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Last Done</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Auto</th>
+                  <th className="px-4 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-themed">
+                {schedules.map((s) => {
+                  const property  = getJoined(s.properties)
+                  const isOverdue = s.next_due_date && new Date(s.next_due_date) < new Date()
+                  return (
+                    <tr key={s.id} className="hover:bg-canvas-themed transition-colors">
+                      <td className="px-4 py-3">
+                        <span className="font-medium text-primary-themed">{s.name}</span>
+                        {s.description && (
+                          <p className="text-xs text-muted-themed mt-0.5 truncate max-w-[200px]">{s.description}</p>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-secondary-themed">{property?.name ?? '—'}</td>
+                      <td className="px-4 py-3 text-secondary-themed">
+                        {s.schedule_type === 'seasonal' && s.month_due
+                          ? MONTHS[(s.month_due - 1) % 12]
+                          : s.frequency ? FREQUENCY_LABELS[s.frequency] ?? s.frequency : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {s.next_due_date ? (
+                          <span className={cn('flex items-center gap-1', isOverdue ? 'text-red-600 font-medium' : 'text-secondary-themed')}>
+                            {isOverdue && <AlertTriangle className="w-3 h-3" />}
+                            {formatDate(s.next_due_date)}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-secondary-themed">
+                        {s.last_completed_date ? (
+                          <span className="flex items-center gap-1 text-green-600">
+                            <CheckCircle2 className="w-3 h-3" />
+                            {formatDate(s.last_completed_date)}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        {s.auto_create_wo ? (
+                          <span className="badge badge-green">Auto</span>
+                        ) : (
+                          <span className="badge badge-slate">Manual</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleCreateWO(s.id)}
+                            disabled={creating && creatingId === s.id}
+                            className="btn-secondary text-xs py-1.5 px-3 whitespace-nowrap"
+                          >
+                            {creating && creatingId === s.id ? <Clock className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                            Create WO
+                          </button>
+                          <button
+                            onClick={() => setEditingId(s.id)}
+                            className="btn-ghost p-1.5"
+                            title="Edit schedule"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(s.id)}
+                            disabled={deleting && deletingId === s.id}
+                            className="btn-ghost p-1.5 text-red-500 hover:text-red-600"
+                            title="Delete schedule"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {showAdd && (
+        <AddScheduleModal
+          properties={properties}
+          vendors={vendors}
+          onClose={() => setShowAdd(false)}
+        />
       )}
-    </div>
+
+      {editingSchedule && (
+        <EditScheduleModal
+          schedule={editingSchedule}
+          vendors={vendors}
+          onClose={() => setEditingId(null)}
+        />
+      )}
+    </>
   )
 }
 
@@ -594,7 +896,7 @@ export function MaintenanceBoard({
       )}
 
       {/* Maintenance Schedules */}
-      <SchedulesSection schedules={schedules} />
+      <SchedulesSection schedules={schedules} properties={properties} vendors={vendors} />
 
       {/* Create Modal */}
       {showCreate && (

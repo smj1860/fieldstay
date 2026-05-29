@@ -200,12 +200,12 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="crew-email" className="label">Email</label>
-            <input id="crew-email" name="email" type="email" className="input" placeholder="alex@example.com" />
+            <label htmlFor="crew-email" className="label">Email <span className="text-red-400">*</span></label>
+            <input id="crew-email" name="email" type="email" required className="input" placeholder="alex@example.com" />
           </div>
           <div>
-            <label htmlFor="crew-phone" className="label">Phone</label>
-            <input id="crew-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
+            <label htmlFor="crew-phone" className="label">Phone <span className="text-red-400">*</span></label>
+            <input id="crew-phone" name="phone" type="tel" required className="input" placeholder="+1 555-0100" />
           </div>
         </div>
 
