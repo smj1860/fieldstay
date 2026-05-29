@@ -60,7 +60,7 @@ export default async function CommsLogPage() {
 
   return (
     <CommsLogClient
-      logs={logs         ?? []}
+      logs={(logs ?? []) as never}
       vendors={vendors   ?? []}
       crew={crew         ?? []}
       properties={properties ?? []}
