@@ -3,8 +3,9 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
+import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
-import type { ContactPref } from '@/types/database'
+import type { ContactPref, VendorSpecialty } from '@/types/database'
 
 export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
 
@@ -29,6 +30,51 @@ export async function updateOrgSettings(
   if (error) return { error: error.message }
 
   revalidatePath('/settings')
+  return { success: true }
+}
+
+// ── Security / Password ───────────────────────────────────────
+
+export async function changePassword(
+  _prev: SettingsActionState | null,
+  formData: FormData
+): Promise<SettingsActionState> {
+  const newPassword = (formData.get('new_password') as string)?.trim()
+  const confirm     = (formData.get('confirm_password') as string)?.trim()
+
+  if (!newPassword || newPassword.length < 8)
+    return { error: 'Password must be at least 8 characters' }
+  if (newPassword !== confirm)
+    return { error: 'Passwords do not match' }
+
+  const supabase = await createClient()
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+
+  if (error) return { error: error.message }
+  return { success: true }
+}
+
+// ── Notifications ─────────────────────────────────────────────
+
+export async function updateNotificationPrefs(
+  _prev: SettingsActionState | null,
+  formData: FormData
+): Promise<SettingsActionState> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated' }
+
+  const prefs = {
+    push_turnovers:      formData.get('push_turnovers')      === 'on',
+    push_maintenance:    formData.get('push_maintenance')    === 'on',
+    push_inventory:      formData.get('push_inventory')      === 'on',
+    push_work_orders:    formData.get('push_work_orders')    === 'on',
+    email_daily_digest:  formData.get('email_daily_digest')  === 'on',
+    email_weekly_report: formData.get('email_weekly_report') === 'on',
+  }
+
+  const { error } = await supabase.auth.updateUser({ data: { notification_prefs: prefs } })
+  if (error) return { error: error.message }
   return { success: true }
 }
 
@@ -61,6 +107,7 @@ export async function addCrewMember(
 
   if (error) return { error: error.message }
 
+  revalidatePath('/crew-manage')
   revalidatePath('/settings')
   return { success: true }
 }
@@ -86,6 +133,7 @@ export async function updateCrewMember(
 
   if (error) return { error: error.message }
 
+  revalidatePath('/crew-manage')
   revalidatePath('/settings')
   return { success: true }
 }
@@ -99,7 +147,38 @@ export async function deactivateCrewMember(crewId: string): Promise<void> {
     .eq('id', crewId)
     .eq('org_id', membership.org_id)
 
+  revalidatePath('/crew-manage')
   revalidatePath('/settings')
+}
+
+export async function bulkImportCrew(
+  rows: Array<{ name: string; email?: string; phone?: string; specialty?: string }>
+): Promise<{ imported: number; skipped: number; error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
+
+  const valid   = rows.filter((r) => r.name?.trim())
+  const skipped = rows.length - valid.length
+
+  if (!valid.length) return { imported: 0, skipped, error: 'No rows with a valid name' }
+
+  const records = valid.map((r) => ({
+    org_id:            membership.org_id,
+    name:              r.name.trim(),
+    email:             r.email?.trim() || null,
+    phone:             r.phone?.trim() || null,
+    specialty:         r.specialty?.trim() || '',
+    preferred_contact: 'email' as ContactPref,
+    is_active:         true,
+  }))
+
+  const { error } = await supabase.from('crew_members').insert(records)
+  if (error) return { imported: 0, skipped, error: error.message }
+
+  revalidatePath('/crew-manage')
+  revalidatePath('/settings')
+  return { imported: valid.length, skipped }
 }
 
 // ── Vendors ───────────────────────────────────────────────────
@@ -125,13 +204,14 @@ export async function addVendor(
     contact_name,
     email,
     phone,
-    specialty: specialty as import('@/types/database').VendorSpecialty,
+    specialty: specialty as VendorSpecialty,
     portal_enabled,
     is_active: true,
   })
 
   if (error) return { error: error.message }
 
+  revalidatePath('/vendors')
   revalidatePath('/settings')
   return { success: true }
 }
@@ -145,6 +225,7 @@ export async function updateVendorPortal(vendorId: string, enabled: boolean): Pr
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
 
+  revalidatePath('/vendors')
   revalidatePath('/settings')
 }
 
@@ -157,7 +238,39 @@ export async function deactivateVendor(vendorId: string): Promise<void> {
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
 
+  revalidatePath('/vendors')
   revalidatePath('/settings')
+}
+
+export async function bulkImportVendors(
+  rows: Array<{ name: string; contact_name?: string; email?: string; phone?: string; specialty?: string }>
+): Promise<{ imported: number; skipped: number; error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
+
+  const valid   = rows.filter((r) => r.name?.trim())
+  const skipped = rows.length - valid.length
+
+  if (!valid.length) return { imported: 0, skipped, error: 'No rows with a valid name' }
+
+  const records = valid.map((r) => ({
+    org_id:         membership.org_id,
+    name:           r.name.trim(),
+    contact_name:   r.contact_name?.trim() || null,
+    email:          r.email?.trim() || null,
+    phone:          r.phone?.trim() || null,
+    specialty:      (r.specialty?.trim() as VendorSpecialty) || 'general' as VendorSpecialty,
+    portal_enabled: false,
+    is_active:      true,
+  }))
+
+  const { error } = await supabase.from('vendors').insert(records)
+  if (error) return { imported: 0, skipped, error: error.message }
+
+  revalidatePath('/vendors')
+  revalidatePath('/settings')
+  return { imported: valid.length, skipped }
 }
 
 // ── Billing ───────────────────────────────────────────────────
@@ -216,16 +329,16 @@ export async function inviteCrewMember(
     subject: `You've been invited to join ${org?.name ?? 'FieldStay'}`,
     html: `
       <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
-        <h2 style="color:#102246;margin-bottom:8px">You're invited to FieldStay</h2>
-        <p style="color:#1A1D20">Hi ${crew.name},</p>
-        <p style="color:#1A1D20">
+        <h2 style="color:#FCD116;margin-bottom:8px">You're invited to FieldStay</h2>
+        <p style="color:#e2e8f0">Hi ${crew.name},</p>
+        <p style="color:#e2e8f0">
           <strong>${org?.name ?? 'Your property manager'}</strong> has invited you to join
           their team on FieldStay — the app you'll use to view cleaning assignments,
           complete checklists, and submit inventory counts.
         </p>
         <p style="margin:28px 0">
           <a href="${inviteUrl}"
-             style="background:#FCD116;color:#102246;padding:14px 28px;text-decoration:none;
+             style="background:#FCD116;color:#0a1628;padding:14px 28px;text-decoration:none;
                     border-radius:8px;font-weight:700;display:inline-block;font-size:15px">
             Accept Invitation →
           </a>
@@ -244,6 +357,7 @@ export async function inviteCrewMember(
     .update({ invite_sent_at: new Date().toISOString() })
     .eq('id', crewMemberId)
 
+  revalidatePath('/crew-manage')
   revalidatePath('/settings')
   return { success: true }
 }

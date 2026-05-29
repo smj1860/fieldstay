@@ -1,60 +1,27 @@
 import type { Metadata } from 'next'
 import { requireOrgMember } from '@/lib/auth'
 import { SettingsTabs } from './settings-tabs'
-import type { Organization, CrewMember, Vendor, OrganizationMember } from '@/types/database'
+import type { Organization } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Settings' }
 
 export default async function SettingsPage() {
   const { supabase, membership } = await requireOrgMember()
 
-  const [
-    { data: org },
-    { data: crew },
-    { data: vendors },
-    { data: orgMembers },
-  ] = await Promise.all([
-    supabase
-      .from('organizations')
-      .select('id, name, billing_email, plan, plan_status, trial_ends_at, max_properties, stripe_customer_id')
-      .eq('id', membership.org_id)
-      .single(),
-
-    supabase
-      .from('crew_members')
-      .select('id, name, email, phone, preferred_contact, specialty, is_active, notes, user_id, invite_sent_at, invite_accepted_at')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-      .order('name'),
-
-    supabase
-      .from('vendors')
-      .select('id, name, contact_name, email, phone, specialty, portal_enabled, is_active, notes')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-      .order('name'),
-
-    supabase
-      .from('organization_members')
-      .select('id, org_id, user_id, role, invited_email, invite_accepted_at')
-      .eq('org_id', membership.org_id)
-      .order('created_at'),
-  ])
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('id, name, billing_email, plan, plan_status, trial_ends_at, max_properties, stripe_customer_id')
+    .eq('id', membership.org_id)
+    .single()
 
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
-        <p className="page-subtitle">Manage your organization, crew, vendors, and billing</p>
+        <p className="page-subtitle">Manage your organization, billing, security, and notifications</p>
       </div>
 
-      <SettingsTabs
-        org={org as unknown as Organization}
-        crew={(crew ?? []) as unknown as CrewMember[]}
-        vendors={(vendors ?? []) as unknown as Vendor[]}
-        orgMembers={(orgMembers ?? []) as unknown as OrganizationMember[]}
-        currentRole={membership.role}
-      />
+      <SettingsTabs org={org as unknown as Organization} />
     </div>
   )
 }
