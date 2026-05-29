@@ -20,7 +20,7 @@ const NAV_ITEMS = [
   { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager']          },
   { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager']          },
   { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager']          },
-  { href: '/communications', label: 'Comms',     icon: Mail,            roles: ['admin','manager']          },
+  { href: '/comms-log', label: 'Comms Log',     icon: Mail,            roles: ['admin','manager']          },
   { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager']          },
   { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin']                    },
 ] as const
