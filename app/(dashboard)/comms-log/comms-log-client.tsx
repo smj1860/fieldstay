@@ -4,7 +4,7 @@ import { useState, useTransition, useActionState, useMemo } from 'react'
 import {
   Plus, X, Search, ChevronDown, ChevronUp, Trash2,
   Mail, Phone, MessageSquare, Users, Briefcase,
-  FileText, Cpu, Filter,
+  FileText, Cpu,
 } from 'lucide-react'
 import { cn, formatDate, formatDateTime } from '@/lib/utils'
 import { createCommunicationLog, deleteCommunicationLog } from './actions'
@@ -13,12 +13,12 @@ import type { CommChannel, CommRecipientType } from '@/types/database'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface LogEntry {
-  id:             string
-  recipient_type: CommRecipientType
-  channel:        CommChannel
-  subject:        string | null
-  body:           string | null
-  source:         'manual' | 'system'
+  id:              string
+  recipient_type:  CommRecipientType
+  channel:         CommChannel
+  subject:         string | null
+  body:            string | null
+  source:          'manual' | 'system'
   communicated_at: string
   vendor_id:       string | null
   crew_member_id:  string | null
@@ -30,8 +30,9 @@ interface LogEntry {
   work_orders:     { id: string; title: string } | null
 }
 
-interface PersonOption  { id: string; name: string; specialty?: string }
-interface SimpleOption  { id: string; name: string }
+interface PersonOption     { id: string; name: string; specialty?: string }
+interface PropertyOption   { id: string; name: string }
+interface WorkOrderOption  { id: string; title: string }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -52,11 +53,11 @@ const CHANNEL_BADGE: Record<CommChannel, string> = {
 }
 
 const CHANNEL_ICON: Record<CommChannel, React.ReactNode> = {
-  email:     <Mail      className="w-3 h-3" />,
+  email:     <Mail          className="w-3 h-3" />,
   sms:       <MessageSquare className="w-3 h-3" />,
-  phone:     <Phone     className="w-3 h-3" />,
-  in_person: <Users     className="w-3 h-3" />,
-  note:      <FileText  className="w-3 h-3" />,
+  phone:     <Phone         className="w-3 h-3" />,
+  in_person: <Users         className="w-3 h-3" />,
+  note:      <FileText      className="w-3 h-3" />,
 }
 
 // ── Log entry row ─────────────────────────────────────────────────────────────
@@ -66,10 +67,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
   const [deleting, startDelete]     = useTransition()
   const [confirmDelete, setConfirm] = useState(false)
 
-  const recipient = entry.recipient_type === 'vendor'
-    ? entry.vendors
-    : entry.crew_members
-
+  const recipient     = entry.recipient_type === 'vendor' ? entry.vendors : entry.crew_members
   const recipientName = recipient?.name ?? '—'
 
   return (
@@ -92,11 +90,11 @@ function LogRow({ entry }: { entry: LogEntry }) {
           }}
         >
           {entry.recipient_type === 'vendor'
-            ? <Briefcase className="w-3.5 h-3.5" style={{ color: 'var(--accent-blue)' }} />
+            ? <Briefcase className="w-3.5 h-3.5" style={{ color: 'var(--accent-blue)'  }} />
             : <Users     className="w-3.5 h-3.5" style={{ color: 'var(--accent-green)' }} />}
         </div>
 
-        {/* Main content */}
+        {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -133,7 +131,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
           </div>
         </div>
 
-        {/* Date + expand */}
+        {/* Date + chevron */}
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
             {formatDate(entry.communicated_at)}
@@ -146,10 +144,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
 
       {/* Expanded body */}
       {expanded && (
-        <div
-          className="px-4 pb-4 pt-0 border-t"
-          style={{ borderColor: 'var(--border)' }}
-        >
+        <div className="px-4 pb-4 pt-0 border-t" style={{ borderColor: 'var(--border)' }}>
           <div className="mt-3 space-y-3">
             {entry.body ? (
               <div
@@ -218,11 +213,11 @@ function AddEntryModal({
 }: {
   vendors:    PersonOption[]
   crew:       PersonOption[]
-  properties: SimpleOption[]
-  workOrders: SimpleOption[]
+  properties: PropertyOption[]
+  workOrders: WorkOrderOption[]
   onClose:    () => void
 }) {
-  const [state, action, pending] = useActionState(createCommunicationLog, null)
+  const [state, action, pending]         = useActionState(createCommunicationLog, null)
   const [recipientType, setRecipientType] = useState<CommRecipientType>('vendor')
 
   if (state?.success) { onClose(); return null }
@@ -264,10 +259,10 @@ function AddEntryModal({
                   type="button"
                   onClick={() => setRecipientType(t)}
                   className={cn(
-                    'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors capitalize',
+                    'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors',
                     recipientType === t
-                      ? 'border-transparent text-white'
-                      : 'border-themed bg-canvas-themed text-secondary-themed hover:text-primary-themed'
+                      ? 'border-themed'
+                      : 'bg-canvas-themed border-themed text-secondary-themed hover:text-primary-themed'
                   )}
                   style={recipientType === t
                     ? { background: 'var(--bg-raised)', color: 'var(--text-primary)', borderColor: 'var(--border-strong)' }
@@ -305,9 +300,9 @@ function AddEntryModal({
             </select>
           </div>
 
-          {/* Date / time */}
+          {/* Date */}
           <div>
-            <label className="label">Date & Time</label>
+            <label className="label">Date &amp; Time</label>
             <input
               name="communicated_at"
               type="datetime-local"
@@ -324,8 +319,12 @@ function AddEntryModal({
           {/* Subject */}
           <div>
             <label className="label">Subject</label>
-            <input name="subject" type="text" className="input"
-                   placeholder="e.g. HVAC repair instructions, Written warning" />
+            <input
+              name="subject"
+              type="text"
+              className="input"
+              placeholder="e.g. HVAC repair instructions, Written warning"
+            />
           </div>
 
           {/* Body */}
@@ -339,7 +338,7 @@ function AddEntryModal({
             />
           </div>
 
-          {/* Optional context */}
+          {/* Context links */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label">Property (optional)</label>
@@ -385,8 +384,8 @@ export function CommsLogClient({
   logs:       LogEntry[]
   vendors:    PersonOption[]
   crew:       PersonOption[]
-  properties: SimpleOption[]
-  workOrders: SimpleOption[]
+  properties: PropertyOption[]
+  workOrders: WorkOrderOption[]
 }) {
   const [showAdd, setShowAdd]               = useState(false)
   const [search, setSearch]                 = useState('')
@@ -400,20 +399,21 @@ export function CommsLogClient({
       if (filterChannel !== 'all' && entry.channel !== filterChannel) return false
       if (filterProperty !== 'all' && entry.property_id !== filterProperty) return false
       if (search.trim()) {
-        const q   = search.toLowerCase()
+        const q    = search.toLowerCase()
         const name = entry.recipient_type === 'vendor'
-          ? entry.vendors?.name ?? ''
-          : entry.crew_members?.name ?? ''
-        const matchName     = name.toLowerCase().includes(q)
-        const matchSubject  = entry.subject?.toLowerCase().includes(q) ?? false
-        const matchBody     = entry.body?.toLowerCase().includes(q)    ?? false
-        if (!matchName && !matchSubject && !matchBody) return false
+          ? (entry.vendors?.name     ?? '')
+          : (entry.crew_members?.name ?? '')
+        if (
+          !name.toLowerCase().includes(q) &&
+          !(entry.subject?.toLowerCase().includes(q) ?? false) &&
+          !(entry.body?.toLowerCase().includes(q) ?? false)
+        ) return false
       }
       return true
     })
   }, [logs, filterType, filterChannel, filterProperty, search])
 
-  const hasFilters = search || filterType !== 'all' || filterChannel !== 'all' || filterProperty !== 'all'
+  const hasFilters = !!(search || filterType !== 'all' || filterChannel !== 'all' || filterProperty !== 'all')
 
   return (
     <div>
@@ -421,9 +421,7 @@ export function CommsLogClient({
       <div className="page-header flex items-start justify-between">
         <div>
           <h1 className="page-title">Comms Log</h1>
-          <p className="page-subtitle">
-            Record of all communications with crew and vendors
-          </p>
+          <p className="page-subtitle">Record of all communications with crew and vendors</p>
         </div>
         <button onClick={() => setShowAdd(true)} className="btn-primary">
           <Plus className="w-4 h-4" />
@@ -433,7 +431,6 @@ export function CommsLogClient({
 
       {/* Filters */}
       <div className="flex items-center gap-2 mb-5 flex-wrap">
-        {/* Search */}
         <div className="relative flex-1 min-w-[200px] max-w-xs">
           <Search
             className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
@@ -448,7 +445,6 @@ export function CommsLogClient({
           />
         </div>
 
-        {/* Type filter */}
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value as typeof filterType)}
@@ -459,7 +455,6 @@ export function CommsLogClient({
           <option value="crew">Crew Only</option>
         </select>
 
-        {/* Channel filter */}
         <select
           value={filterChannel}
           onChange={(e) => setFilterChannel(e.target.value as typeof filterChannel)}
@@ -471,7 +466,6 @@ export function CommsLogClient({
           ))}
         </select>
 
-        {/* Property filter */}
         {properties.length > 1 && (
           <select
             value={filterProperty}
@@ -485,7 +479,6 @@ export function CommsLogClient({
           </select>
         )}
 
-        {/* Clear */}
         {hasFilters && (
           <button
             onClick={() => {
@@ -502,7 +495,7 @@ export function CommsLogClient({
         )}
       </div>
 
-      {/* Stats bar */}
+      {/* Stats */}
       <div className="flex items-center gap-4 mb-4 text-xs" style={{ color: 'var(--text-muted)' }}>
         <span>
           {filtered.length} entr{filtered.length !== 1 ? 'ies' : 'y'}
@@ -514,13 +507,10 @@ export function CommsLogClient({
         </span>
       </div>
 
-      {/* Log entries */}
+      {/* Entries */}
       {filtered.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
-          <FileText
-            className="w-10 h-10 mx-auto mb-3"
-            style={{ color: 'var(--text-muted)' }}
-          />
+          <FileText className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
           <h3 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
             {logs.length === 0 ? 'No communications logged yet' : 'No entries match your filters'}
           </h3>
@@ -544,7 +534,6 @@ export function CommsLogClient({
         </div>
       )}
 
-      {/* Add modal */}
       {showAdd && (
         <AddEntryModal
           vendors={vendors}
