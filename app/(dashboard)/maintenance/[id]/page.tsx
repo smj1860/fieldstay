@@ -1,35 +1,32 @@
 import { requireOrgMember } from '@/lib/auth'
 import { notFound } from 'next/navigation'
-import Link from 'next/link'
 import { WorkOrderDetail } from './work-order-detail'
-import type { Metadata } from 'next'
 
-export const metadata: Metadata = { title: 'Work Order' }
+interface Props { params: Promise<{ id: string }> }
 
-export default async function WorkOrderPage({
-  params,
-}: {
-  params: Promise<{ id: string }>
-}) {
+export default async function WorkOrderPage({ params }: Props) {
   const { id } = await params
   const { supabase, membership } = await requireOrgMember()
 
   const [
-    { data: workOrder },
+    { data: wo },
     { data: updates },
+    { data: photos },
     { data: vendors },
   ] = await Promise.all([
     supabase
       .from('work_orders')
       .select(`
-        id, property_id, vendor_id, assigned_crew_id,
-        title, description, priority, status, source,
+        id, property_id, vendor_id, title, description,
+        priority, status, source, source_schedule_id,
         scheduled_date, completed_date,
-        estimated_cost, actual_cost,
-        portal_enabled, completion_token, completion_notes,
-        invoice_reference, created_at, updated_at,
-        properties ( id, name, city, state ),
-        vendors ( id, name, specialty, email, phone )
+        estimated_cost, actual_cost, invoice_reference,
+        portal_enabled, completion_token, completion_token_expires_at,
+        completion_notes, quote_token, quote_token_expires_at,
+        quoted_amount, quote_notes,
+        created_at, updated_at,
+        properties (id, name, city, state),
+        vendors (id, name, specialty, email, phone)
       `)
       .eq('id', id)
       .eq('org_id', membership.org_id)
@@ -39,7 +36,12 @@ export default async function WorkOrderPage({
       .from('work_order_updates')
       .select('id, status_from, status_to, notes, updated_via_vendor_portal, created_at')
       .eq('work_order_id', id)
-      .eq('org_id', membership.org_id)
+      .order('created_at', { ascending: true }),
+
+    supabase
+      .from('work_order_photos')
+      .select('id, storage_path, uploaded_by, caption, created_at')
+      .eq('work_order_id', id)
       .order('created_at', { ascending: true }),
 
     supabase
@@ -50,20 +52,14 @@ export default async function WorkOrderPage({
       .order('name'),
   ])
 
-  if (!workOrder) notFound()
+  if (!wo) notFound()
 
   return (
-    <div>
-      <div className="mb-4">
-        <Link href="/maintenance" className="text-sm text-accent-500 hover:text-accent-700 transition-colors flex items-center gap-1">
-          ← Back to Maintenance
-        </Link>
-      </div>
-      <WorkOrderDetail
-        workOrder={workOrder as never}
-        updates={updates ?? []}
-        vendors={(vendors ?? []) as { id: string; name: string; specialty: string }[]}
-      />
-    </div>
+    <WorkOrderDetail
+      workOrder={wo as never}
+      updates={updates ?? []}
+      photos={photos ?? []}
+      vendors={vendors ?? []}
+    />
   )
 }

@@ -22,7 +22,7 @@ export type ChecklistStatus = 'not_started' | 'in_progress' | 'completed'
 export type InventoryCategory = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom' | 'outdoor' | 'other'
 export type PoStatus       = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
-export type WoStatus       = 'pending' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
+export type WoStatus       = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
 export type WoSource       = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report'
 export type ScheduleType   = 'routine' | 'seasonal'
 export type ScheduleFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
@@ -371,6 +371,10 @@ export interface WorkOrder {
   completion_token_expires_at: string | null
   completion_notes: string | null
   invoice_reference: string | null
+  quote_token: string | null
+  quote_token_expires_at: string | null
+  quoted_amount: number | null
+  quote_notes: string | null
   created_at: string
   updated_at: string
 }

@@ -78,11 +78,12 @@ function priorityBadgeClass(priority: PriorityLevel): string {
 
 function statusBadgeClass(status: WoStatus): string {
   const map: Record<WoStatus, string> = {
-    pending:     'badge badge-slate',
-    assigned:    'badge badge-blue',
-    in_progress: 'badge badge-amber',
-    completed:   'badge badge-green',
-    cancelled:   'badge badge-slate',
+    pending:         'badge badge-slate',
+    quote_requested: 'badge badge-gold',
+    assigned:        'badge badge-blue',
+    in_progress:     'badge badge-amber',
+    completed:       'badge badge-green',
+    cancelled:       'badge badge-slate',
   }
   return map[status]
 }

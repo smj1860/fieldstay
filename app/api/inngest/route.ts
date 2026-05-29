@@ -21,6 +21,8 @@ import {
   handleWorkOrderCreated,
   handleWorkOrderCompletedViaPortal,
   handleWorkOrderOverdue,
+  handleWorkOrderQuoteRequested,
+  handleWorkOrderQuoteSubmitted,
 } from '@/lib/inngest/functions/work-order-events'
 
 export const { GET, POST, PUT } = serve({
@@ -47,5 +49,7 @@ export const { GET, POST, PUT } = serve({
     handleWorkOrderCreated,
     handleWorkOrderCompletedViaPortal,
     handleWorkOrderOverdue,
+    handleWorkOrderQuoteRequested,
+    handleWorkOrderQuoteSubmitted,
   ],
 })
