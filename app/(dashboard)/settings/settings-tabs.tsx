@@ -1,18 +1,13 @@
 'use client'
 
 import { useState, useTransition, useActionState } from 'react'
-import { Pencil, X, Check, Loader2 } from 'lucide-react'
+import { Loader2, Eye, EyeOff, Lock, Bell, BellOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { Organization, CrewMember, Vendor, OrganizationMember, MemberRole, VendorSpecialty } from '@/types/database'
+import type { Organization } from '@/types/database'
 import {
   updateOrgSettings,
-  addCrewMember,
-  updateCrewMember,
-  deactivateCrewMember,
-  inviteCrewMember,
-  addVendor,
-  updateVendorPortal,
-  deactivateVendor,
+  changePassword,
+  updateNotificationPrefs,
   openBillingPortal,
   createCheckoutSession,
   type SettingsActionState,
@@ -20,23 +15,8 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const TABS = ['Organization', 'Crew', 'Vendors', 'Billing'] as const
+const TABS = ['Organization', 'Billing', 'Security', 'Notifications'] as const
 type Tab = typeof TABS[number]
-
-const VENDOR_SPECIALTY_LABELS: Record<VendorSpecialty, string> = {
-  plumbing:     'Plumbing',
-  electrical:   'Electrical',
-  hvac:         'HVAC',
-  landscaping:  'Landscaping',
-  cleaning:     'Cleaning',
-  pest_control: 'Pest Control',
-  pool:         'Pool',
-  roofing:      'Roofing',
-  general:      'General',
-  other:        'Other',
-}
-
-const VENDOR_SPECIALTIES = Object.keys(VENDOR_SPECIALTY_LABELS) as VendorSpecialty[]
 
 const PLAN_INFO = {
   pro:        { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',  badge: 'badge-blue'  },
@@ -57,13 +37,9 @@ const PLAN_STATUS_BADGES: Record<string, string> = {
 
 interface Props {
   org: Organization
-  crew: CrewMember[]
-  vendors: Vendor[]
-  orgMembers: OrganizationMember[]
-  currentRole: MemberRole
 }
 
-export function SettingsTabs({ org, crew, vendors, orgMembers, currentRole }: Props) {
+export function SettingsTabs({ org }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Organization')
 
   return (
@@ -75,11 +51,19 @@ export function SettingsTabs({ org, crew, vendors, orgMembers, currentRole }: Pr
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              'px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px',
-              activeTab === tab
-                ? 'border-brand-700 text-brand-800'
-                : 'border-transparent text-muted-themed hover:text-secondary-themed hover:border-themed'
+              'px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px'
             )}
+            style={
+              activeTab === tab
+                ? { borderColor: 'var(--accent-gold)', color: 'var(--text-primary)' }
+                : { borderColor: 'transparent', color: 'var(--text-muted)' }
+            }
+            onMouseOver={(e) => {
+              if (activeTab !== tab) e.currentTarget.style.color = 'var(--text-secondary)'
+            }}
+            onMouseOut={(e) => {
+              if (activeTab !== tab) e.currentTarget.style.color = 'var(--text-muted)'
+            }}
           >
             {tab}
           </button>
@@ -87,10 +71,10 @@ export function SettingsTabs({ org, crew, vendors, orgMembers, currentRole }: Pr
       </div>
 
       {/* Tab panels */}
-      {activeTab === 'Organization' && <OrgTab org={org} />}
-      {activeTab === 'Crew'         && <CrewTab crew={crew} />}
-      {activeTab === 'Vendors'      && <VendorsTab vendors={vendors} />}
-      {activeTab === 'Billing'      && <BillingTab org={org} />}
+      {activeTab === 'Organization'  && <OrgTab org={org} />}
+      {activeTab === 'Billing'       && <BillingTab org={org} />}
+      {activeTab === 'Security'      && <SecurityTab />}
+      {activeTab === 'Notifications' && <NotificationsTab />}
     </div>
   )
 }
@@ -100,7 +84,7 @@ export function SettingsTabs({ org, crew, vendors, orgMembers, currentRole }: Pr
 function OrgTab({ org }: { org: Organization }) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
-  const plan       = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.pro
+  const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.pro
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
 
   return (
@@ -118,12 +102,12 @@ function OrgTab({ org }: { org: Organization }) {
         </div>
 
         {state?.success && (
-          <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 mb-4">
+          <div className="bg-green-950 border border-green-800 text-green-400 text-sm rounded-lg px-4 py-3 mb-4">
             Settings saved successfully.
           </div>
         )}
         {state?.error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">
+          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
             {state.error}
           </div>
         )}
@@ -131,7 +115,7 @@ function OrgTab({ org }: { org: Organization }) {
         <form action={formAction} className="space-y-4">
           <div>
             <label htmlFor="org-name" className="label">
-              Organization Name <span className="text-red-500">*</span>
+              Organization Name <span className="text-red-400">*</span>
             </label>
             <input
               id="org-name"
@@ -169,502 +153,218 @@ function OrgTab({ org }: { org: Organization }) {
   )
 }
 
-// ── Crew tab ─────────────────────────────────────────────────────────────────
+// ── Security tab ─────────────────────────────────────────────────────────────
 
-function CrewTab({ crew }: { crew: CrewMember[] }) {
-  const [showAddForm, setShowAddForm] = useState(false)
+function SecurityTab() {
+  const [state, formAction, pending] = useActionState(changePassword, null)
+  const [showNew,     setShowNew]     = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
 
   return (
-    <div className="space-y-6">
+    <div className="max-w-xl space-y-6">
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-primary-themed">Crew Members</h2>
-          <button
-            onClick={() => setShowAddForm((v) => !v)}
-            className="btn-secondary text-sm"
+        <div className="flex items-center gap-3 mb-4">
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: 'var(--accent-gold-dim)' }}
           >
-            {showAddForm ? 'Cancel' : '+ Add Crew Member'}
-          </button>
+            <Lock className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-primary-themed">Change Password</h2>
+            <p className="text-xs text-muted-themed">Must be at least 8 characters</p>
+          </div>
         </div>
 
-        {showAddForm && (
-          <AddCrewForm onSuccess={() => setShowAddForm(false)} />
-        )}
-
-        {crew.length === 0 && !showAddForm ? (
-          <p className="text-sm text-muted-themed py-4 text-center">
-            No active crew members yet. Add one to get started.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-themed">
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">Name</th>
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">Specialty</th>
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">Contact</th>
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">Pref</th>
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">App Access</th>
-                  <th className="py-2 text-right font-medium text-muted-themed text-xs uppercase tracking-wide">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-themed">
-                {crew.map((member) => (
-                  <CrewRow key={member.id} member={member} />
-                ))}
-              </tbody>
-            </table>
+        {state?.success && (
+          <div className="bg-green-950 border border-green-800 text-green-400 text-sm rounded-lg px-4 py-3 mb-4">
+            Password updated successfully.
           </div>
         )}
+        {state?.error && (
+          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
+            {state.error}
+          </div>
+        )}
+
+        <form action={formAction} className="space-y-4">
+          <div>
+            <label htmlFor="new-password" className="label">New Password</label>
+            <div className="relative">
+              <input
+                id="new-password"
+                name="new_password"
+                type={showNew ? 'text' : 'password'}
+                required
+                minLength={8}
+                className="input pr-10"
+                placeholder="Min. 8 characters"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNew((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                {showNew
+                  ? <EyeOff className="w-4 h-4" />
+                  : <Eye    className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="confirm-password" className="label">Confirm New Password</label>
+            <div className="relative">
+              <input
+                id="confirm-password"
+                name="confirm_password"
+                type={showConfirm ? 'text' : 'password'}
+                required
+                minLength={8}
+                className="input pr-10"
+                placeholder="Re-enter your new password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirm((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                {showConfirm
+                  ? <EyeOff className="w-4 h-4" />
+                  : <Eye    className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-themed">
+            <button type="submit" disabled={pending} className="btn-primary">
+              {pending
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Updating…</>
+                : 'Update Password'
+              }
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
 }
 
-function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
-  const [state, formAction, pending] = useActionState(addCrewMember, null)
+// ── Notifications tab ─────────────────────────────────────────────────────────
 
-  if (state?.success) {
-    onSuccess()
-    return null
-  }
+const PUSH_PREFS = [
+  { key: 'push_turnovers',   label: 'Turnover assignments',      desc: 'When a turnover is scheduled or updated' },
+  { key: 'push_maintenance', label: 'Maintenance alerts',        desc: 'New work orders and status changes'      },
+  { key: 'push_inventory',   label: 'Inventory low-stock alerts',desc: 'When items fall below reorder threshold' },
+  { key: 'push_work_orders', label: 'Work order updates',        desc: 'When vendors update or complete work'    },
+] as const
 
-  return (
-    <div className="mb-6 p-4 bg-canvas-themed rounded-lg border border-themed">
-      <h3 className="text-sm font-semibold text-secondary-themed mb-3">New Crew Member</h3>
+const EMAIL_PREFS = [
+  { key: 'email_daily_digest',  label: 'Daily ops digest',    desc: 'Summary of today\'s activity each morning'  },
+  { key: 'email_weekly_report', label: 'Weekly report',       desc: 'Full ops report every Monday morning'       },
+] as const
 
-      {state?.error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-3">
-          {state.error}
-        </div>
-      )}
-
-      <form action={formAction} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="crew-name" className="label">Name <span className="text-red-500">*</span></label>
-            <input id="crew-name" name="name" type="text" required className="input" placeholder="Alex Johnson" />
-          </div>
-          <div>
-            <label htmlFor="crew-specialty" className="label">Specialty</label>
-            <input id="crew-specialty" name="specialty" type="text" className="input" placeholder="e.g. Cleaning, HVAC" />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="crew-email" className="label">Email</label>
-            <input id="crew-email" name="email" type="email" className="input" placeholder="alex@example.com" />
-          </div>
-          <div>
-            <label htmlFor="crew-phone" className="label">Phone</label>
-            <input id="crew-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
-          </div>
-        </div>
-
-        <div className="w-48">
-          <label htmlFor="crew-pref" className="label">Preferred Contact</label>
-          <select id="crew-pref" name="preferred_contact" className="input">
-            <option value="email">Email</option>
-            <option value="sms">SMS</option>
-            <option value="both">Both</option>
-          </select>
-        </div>
-
-        <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={pending} className="btn-primary text-sm">
-            {pending ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</>
-            ) : 'Add Crew Member'}
-          </button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
-function CrewRow({ member }: { member: CrewMember }) {
-  const [editing, setEditing]         = useState(false)
-  const [name, setName]               = useState(member.name)
-  const [specialty, setSpecialty]     = useState(member.specialty)
-  const [email, setEmail]             = useState(member.email ?? '')
-  const [phone, setPhone]             = useState(member.phone ?? '')
-  const [pref, setPref]               = useState(member.preferred_contact)
-  const [error, setError]             = useState<string | null>(null)
-  const [saving, startSave]           = useTransition()
-  const [deactivating, startDeact]    = useTransition()
-  const [inviting, setInviting]       = useState(false)
-  const [inviteSent, setInviteSent]   = useState(false)
-  const [inviteError, setInviteError] = useState<string | null>(null)
-
-  async function handleInvite() {
-    setInviting(true)
-    setInviteError(null)
-    const result = await inviteCrewMember(member.id)
-    setInviting(false)
-    if (result.error) {
-      setInviteError(result.error)
-    } else {
-      setInviteSent(true)
-    }
-  }
-
-  function handleSave() {
-    setError(null)
-    startSave(async () => {
-      const result = await updateCrewMember(member.id, {
-        name,
-        email:             email || undefined,
-        phone:             phone || undefined,
-        specialty,
-        preferred_contact: pref,
-      })
-      if (result.error) {
-        setError(result.error)
-      } else {
-        setEditing(false)
-      }
-    })
-  }
-
-  function handleDeactivate() {
-    startDeact(async () => {
-      await deactivateCrewMember(member.id)
-    })
-  }
-
-  if (editing) {
-    return (
-      <tr className="bg-raised-themed">
-        <td className="py-2 pr-4">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="input py-1 text-sm"
-          />
-          {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
-        </td>
-        <td className="py-2 pr-4">
-          <input
-            value={specialty}
-            onChange={(e) => setSpecialty(e.target.value)}
-            className="input py-1 text-sm"
-            placeholder="Specialty"
-          />
-        </td>
-        <td className="py-2 pr-4">
-          <div className="space-y-1">
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="input py-1 text-sm"
-              placeholder="Email"
-              type="email"
-            />
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className="input py-1 text-sm"
-              placeholder="Phone"
-              type="tel"
-            />
-          </div>
-        </td>
-        <td className="py-2 pr-4">
-          <select
-            value={pref}
-            onChange={(e) => setPref(e.target.value as typeof pref)}
-            className="input py-1 text-sm"
-          >
-            <option value="email">Email</option>
-            <option value="sms">SMS</option>
-            <option value="both">Both</option>
-          </select>
-        </td>
-        <td className="py-2 pr-4" />
-        <td className="py-2 text-right">
-          <div className="flex items-center justify-end gap-1">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="btn-primary py-1 px-2 text-xs"
-              title="Save"
-            >
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            </button>
-            <button
-              onClick={() => setEditing(false)}
-              className="btn-ghost py-1 px-2 text-xs"
-              title="Cancel"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </td>
-      </tr>
-    )
-  }
+function NotificationsTab() {
+  const [state, formAction, pending] = useActionState(updateNotificationPrefs, null)
 
   return (
-    <tr className="hover:bg-raised-themed transition-colors">
-      <td className="py-2.5 pr-4 font-medium text-primary-themed">{member.name}</td>
-      <td className="py-2.5 pr-4 text-secondary-themed">{member.specialty || '—'}</td>
-      <td className="py-2.5 pr-4 text-secondary-themed">
-        <div className="space-y-0.5">
-          {member.email && <div className="truncate max-w-[180px]">{member.email}</div>}
-          {member.phone && <div>{member.phone}</div>}
-          {!member.email && !member.phone && <span className="text-muted-themed">—</span>}
-        </div>
-      </td>
-      <td className="py-2.5 pr-4">
-        <span className="badge badge-slate capitalize">{member.preferred_contact}</span>
-      </td>
-      <td className="py-2.5 pr-4">
-        {member.user_id ? (
-          <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
-            Active
-          </span>
-        ) : inviteSent ? (
-          <span className="text-xs text-brand-700 font-medium">✓ Invite sent</span>
-        ) : member.invite_sent_at ? (
-          <button
-            onClick={handleInvite}
-            disabled={inviting}
-            className="text-xs text-muted-themed hover:text-secondary-themed underline underline-offset-2 disabled:opacity-50"
-          >
-            {inviting ? 'Sending…' : 'Resend invite'}
-          </button>
-        ) : (
-          <button
-            onClick={handleInvite}
-            disabled={inviting || !member.email}
-            className="btn-secondary text-xs px-2.5 py-1 disabled:opacity-50"
-            title={!member.email ? 'Add an email address first' : undefined}
-          >
-            {inviting ? 'Sending…' : 'Invite to app'}
-          </button>
-        )}
-        {inviteError && (
-          <p className="text-xs text-red-500 mt-0.5">{inviteError}</p>
-        )}
-      </td>
-      <td className="py-2.5 text-right">
-        <div className="flex items-center justify-end gap-1">
-          <button
-            onClick={() => setEditing(true)}
-            className="btn-ghost py-1 px-2 text-xs"
-            title="Edit"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={handleDeactivate}
-            disabled={deactivating}
-            className="btn-danger py-1 px-2 text-xs"
-            title="Deactivate"
-          >
-            {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-      </td>
-    </tr>
-  )
-}
+    <div className="max-w-xl space-y-6">
 
-// ── Vendors tab ───────────────────────────────────────────────────────────────
-
-function VendorsTab({ vendors }: { vendors: Vendor[] }) {
-  const [showAddForm, setShowAddForm] = useState(false)
-
-  return (
-    <div className="space-y-6">
+      {/* Push Notifications */}
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-primary-themed">Vendors</h2>
-          <button
-            onClick={() => setShowAddForm((v) => !v)}
-            className="btn-secondary text-sm"
+        <div className="flex items-center gap-3 mb-4">
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: 'var(--accent-blue-dim)' }}
           >
-            {showAddForm ? 'Cancel' : '+ Add Vendor'}
-          </button>
+            <Bell className="w-4 h-4" style={{ color: 'var(--accent-blue)' }} />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-primary-themed">Push Notifications</h2>
+            <p className="text-xs text-muted-themed">Receive alerts on this device</p>
+          </div>
         </div>
 
-        {showAddForm && (
-          <AddVendorForm onSuccess={() => setShowAddForm(false)} />
-        )}
-
-        {vendors.length === 0 && !showAddForm ? (
-          <p className="text-sm text-muted-themed py-4 text-center">
-            No active vendors yet. Add one to get started.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-themed">
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">Name</th>
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">Specialty</th>
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">Contact</th>
-                  <th className="text-left py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide">Portal</th>
-                  <th className="py-2 text-right font-medium text-muted-themed text-xs uppercase tracking-wide">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-themed">
-                {vendors.map((vendor) => (
-                  <VendorRow key={vendor.id} vendor={vendor} />
-                ))}
-              </tbody>
-            </table>
+        {state?.success && (
+          <div className="bg-green-950 border border-green-800 text-green-400 text-sm rounded-lg px-4 py-3 mb-4">
+            Preferences saved.
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
-  const [state, formAction, pending] = useActionState(addVendor, null)
-
-  if (state?.success) {
-    onSuccess()
-    return null
-  }
-
-  return (
-    <div className="mb-6 p-4 bg-canvas-themed rounded-lg border border-themed">
-      <h3 className="text-sm font-semibold text-secondary-themed mb-3">New Vendor</h3>
-
-      {state?.error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-3">
-          {state.error}
-        </div>
-      )}
-
-      <form action={formAction} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="vendor-name" className="label">Vendor Name <span className="text-red-500">*</span></label>
-            <input id="vendor-name" name="name" type="text" required className="input" placeholder="ABC Plumbing" />
+        {state?.error && (
+          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
+            {state.error}
           </div>
-          <div>
-            <label htmlFor="vendor-contact" className="label">Contact Name</label>
-            <input id="vendor-contact" name="contact_name" type="text" className="input" placeholder="John Smith" />
-          </div>
-        </div>
+        )}
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="vendor-email" className="label">Email</label>
-            <input id="vendor-email" name="email" type="email" className="input" placeholder="info@abcplumbing.com" />
-          </div>
-          <div>
-            <label htmlFor="vendor-phone" className="label">Phone</label>
-            <input id="vendor-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="vendor-specialty" className="label">Specialty</label>
-            <select id="vendor-specialty" name="specialty" className="input">
-              {VENDOR_SPECIALTIES.map((s) => (
-                <option key={s} value={s}>{VENDOR_SPECIALTY_LABELS[s]}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-secondary-themed">
+        <form action={formAction} className="space-y-1">
+          {PUSH_PREFS.map((pref) => (
+            <label
+              key={pref.key}
+              className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors"
+              style={{ background: 'transparent' }}
+              onMouseOver={(e) => (e.currentTarget.style.background = 'var(--bg-raised)')}
+              onMouseOut={(e)  => (e.currentTarget.style.background = 'transparent')}
+            >
               <input
                 type="checkbox"
-                name="portal_enabled"
-                className="w-4 h-4 rounded border-themed text-brand-700 focus:ring-brand-500"
+                name={pref.key}
+                defaultChecked
+                className="mt-0.5 w-4 h-4 rounded"
+                style={{ accentColor: 'var(--accent-gold)' }}
               />
-              Enable vendor portal
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-primary-themed">{pref.label}</p>
+                <p className="text-xs text-muted-themed">{pref.desc}</p>
+              </div>
             </label>
+          ))}
+
+          {/* Email preferences */}
+          <div className="pt-4 mt-2 border-t border-themed">
+            <div className="flex items-center gap-2 mb-3">
+              <BellOff className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+              <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
+                Email Digests
+              </span>
+            </div>
+            {EMAIL_PREFS.map((pref) => (
+              <label
+                key={pref.key}
+                className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors"
+                style={{ background: 'transparent' }}
+                onMouseOver={(e) => (e.currentTarget.style.background = 'var(--bg-raised)')}
+                onMouseOut={(e)  => (e.currentTarget.style.background = 'transparent')}
+              >
+                <input
+                  type="checkbox"
+                  name={pref.key}
+                  defaultChecked
+                  className="mt-0.5 w-4 h-4 rounded"
+                  style={{ accentColor: 'var(--accent-gold)' }}
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-primary-themed">{pref.label}</p>
+                  <p className="text-xs text-muted-themed">{pref.desc}</p>
+                </div>
+              </label>
+            ))}
           </div>
-        </div>
 
-        <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={pending} className="btn-primary text-sm">
-            {pending ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</>
-            ) : 'Add Vendor'}
-          </button>
-        </div>
-      </form>
+          <div className="pt-4 border-t border-themed">
+            <button type="submit" disabled={pending} className="btn-primary">
+              {pending
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+                : 'Save Preferences'
+              }
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
-  )
-}
-
-function VendorRow({ vendor }: { vendor: Vendor }) {
-  const [portalEnabled, setPortalEnabled] = useState(vendor.portal_enabled)
-  const [togglingPortal, startToggle]     = useTransition()
-  const [deactivating, startDeact]        = useTransition()
-
-  function handleTogglePortal() {
-    const next = !portalEnabled
-    setPortalEnabled(next)
-    startToggle(async () => {
-      await updateVendorPortal(vendor.id, next)
-    })
-  }
-
-  function handleDeactivate() {
-    startDeact(async () => {
-      await deactivateVendor(vendor.id)
-    })
-  }
-
-  return (
-    <tr className="hover:bg-raised-themed transition-colors">
-      <td className="py-2.5 pr-4">
-        <div className="font-medium text-primary-themed">{vendor.name}</div>
-        {vendor.contact_name && (
-          <div className="text-xs text-muted-themed">{vendor.contact_name}</div>
-        )}
-      </td>
-      <td className="py-2.5 pr-4">
-        <span className="badge badge-blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>
-      </td>
-      <td className="py-2.5 pr-4 text-secondary-themed">
-        <div className="space-y-0.5">
-          {vendor.email && <div className="truncate max-w-[180px]">{vendor.email}</div>}
-          {vendor.phone && <div>{vendor.phone}</div>}
-          {!vendor.email && !vendor.phone && <span className="text-muted-themed">—</span>}
-        </div>
-      </td>
-      <td className="py-2.5 pr-4">
-        <button
-          onClick={handleTogglePortal}
-          disabled={togglingPortal}
-          className={cn(
-            'relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50',
-            portalEnabled ? 'bg-brand-700' : 'bg-raised-themed'
-          )}
-          role="switch"
-          aria-checked={portalEnabled}
-          title={portalEnabled ? 'Disable vendor portal' : 'Enable vendor portal'}
-        >
-          <span
-            className={cn(
-              'inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform',
-              portalEnabled ? 'translate-x-4' : 'translate-x-0.5'
-            )}
-          />
-        </button>
-      </td>
-      <td className="py-2.5 text-right">
-        <button
-          onClick={handleDeactivate}
-          disabled={deactivating}
-          className="btn-danger py-1 px-2 text-xs"
-          title="Deactivate vendor"
-        >
-          {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-        </button>
-      </td>
-    </tr>
   )
 }
 
@@ -672,20 +372,20 @@ function VendorRow({ vendor }: { vendor: Vendor }) {
 
 const DISPLAY_PLANS = [
   {
-    key:      'pro'    as const,
-    name:     'Pro',
-    props:    'Up to 15 properties',
-    monthly:  149,
-    annual:   1490,
-    savings:  '$298',
+    key:     'pro'    as const,
+    name:    'Pro',
+    props:   'Up to 15 properties',
+    monthly: 149,
+    annual:  1490,
+    savings: '$298',
   },
   {
-    key:      'growth' as const,
-    name:     'Growth',
-    props:    '16–45 properties',
-    monthly:  219,
-    annual:   2190,
-    savings:  '$438',
+    key:     'growth' as const,
+    name:    'Growth',
+    props:   '16–45 properties',
+    monthly: 219,
+    annual:  2190,
+    savings: '$438',
   },
 ]
 
@@ -694,11 +394,11 @@ function BillingTab({ org }: { org: Organization }) {
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
   const isTrialing  = org.plan_status === 'trialing'
 
-  const [interval, setInterval]             = useState<'monthly' | 'annual'>('monthly')
-  const [checkoutPlan, setCheckoutPlan]     = useState<string | null>(null)
-  const [checkoutError, setCheckoutError]   = useState<string | null>(null)
-  const [checkoutPending, startCheckoutT]   = useTransition()
-  const [portalPending, startPortal]        = useTransition()
+  const [interval, setInterval]           = useState<'monthly' | 'annual'>('monthly')
+  const [checkoutPlan, setCheckoutPlan]   = useState<string | null>(null)
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [checkoutPending, startCheckoutT] = useTransition()
+  const [portalPending, startPortal]      = useTransition()
 
   function handleBillingPortal() {
     startPortal(async () => { await openBillingPortal() })
@@ -735,7 +435,8 @@ function BillingTab({ org }: { org: Organization }) {
         </div>
 
         {isTrialing && org.trial_ends_at && (
-          <p className="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <p className="mt-3 text-sm rounded-lg px-3 py-2"
+             style={{ color: 'var(--accent-amber)', background: 'var(--accent-amber-dim)', border: '1px solid rgba(245,158,11,0.25)' }}>
             Trial ends on{' '}
             <strong>
               {new Date(org.trial_ends_at).toLocaleDateString('en-US', {
@@ -752,9 +453,10 @@ function BillingTab({ org }: { org: Organization }) {
               disabled={portalPending}
               className="btn-secondary"
             >
-              {portalPending ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> Opening portal…</>
-              ) : 'Manage Billing'}
+              {portalPending
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Opening portal…</>
+                : 'Manage Billing'
+              }
             </button>
           </div>
         )}
@@ -766,34 +468,28 @@ function BillingTab({ org }: { org: Organization }) {
           <h3 className="section-header mb-0">Available Plans</h3>
           {/* Monthly / Annual toggle */}
           <div className="flex items-center gap-1 bg-raised-themed rounded-lg p-1 text-sm">
-            <button
-              onClick={() => setInterval('monthly')}
-              className={cn(
-                'px-3 py-1 rounded-md font-medium transition-colors',
-                interval === 'monthly'
-                  ? 'bg-card-themed text-primary-themed shadow-sm'
-                  : 'text-muted-themed hover:text-secondary-themed'
-              )}
-            >
-              Monthly
-            </button>
-            <button
-              onClick={() => setInterval('annual')}
-              className={cn(
-                'px-3 py-1 rounded-md font-medium transition-colors',
-                interval === 'annual'
-                  ? 'bg-card-themed text-primary-themed shadow-sm'
-                  : 'text-muted-themed hover:text-secondary-themed'
-              )}
-            >
-              Annual
-              <span className="ml-1.5 text-xs text-green-600 font-normal">2 months free</span>
-            </button>
+            {(['monthly', 'annual'] as const).map((iv) => (
+              <button
+                key={iv}
+                onClick={() => setInterval(iv)}
+                className="px-3 py-1 rounded-md font-medium transition-colors"
+                style={
+                  interval === iv
+                    ? { background: 'var(--bg-card)', color: 'var(--text-primary)' }
+                    : { color: 'var(--text-muted)' }
+                }
+              >
+                {iv === 'monthly' ? 'Monthly' : (
+                  <>Annual <span className="ml-1.5 text-xs" style={{ color: 'var(--accent-green)' }}>2 months free</span></>
+                )}
+              </button>
+            ))}
           </div>
         </div>
 
         {checkoutError && (
-          <div className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <div className="mb-4 text-sm rounded-lg px-3 py-2"
+               style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}>
             {checkoutError}
           </div>
         )}
@@ -806,10 +502,8 @@ function BillingTab({ org }: { org: Organization }) {
             return (
               <div
                 key={plan.key}
-                className={cn(
-                  'card flex flex-col gap-3',
-                  isCurrent && 'ring-2 ring-brand-700 ring-offset-2'
-                )}
+                className="card flex flex-col gap-3"
+                style={isCurrent ? { outline: '2px solid var(--accent-gold)', outlineOffset: '2px' } : undefined}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-primary-themed">{plan.name}</span>
@@ -818,15 +512,19 @@ function BillingTab({ org }: { org: Organization }) {
                 <p className="text-sm text-muted-themed">{plan.props}</p>
                 <div>
                   {interval === 'monthly' ? (
-                    <p className="text-2xl font-bold text-brand-800">
-                      ${plan.monthly}<span className="text-sm font-normal text-muted-themed">/mo</span>
+                    <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                      <span style={{ color: 'var(--accent-gold)' }}>${plan.monthly}</span>
+                      <span className="text-sm font-normal text-muted-themed">/mo</span>
                     </p>
                   ) : (
                     <>
-                      <p className="text-2xl font-bold text-brand-800">
-                        ${plan.annual}<span className="text-sm font-normal text-muted-themed">/yr</span>
+                      <p className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                        <span style={{ color: 'var(--accent-gold)' }}>${plan.annual}</span>
+                        <span className="text-sm font-normal text-muted-themed">/yr</span>
                       </p>
-                      <p className="text-xs text-green-600">Save {plan.savings} vs monthly</p>
+                      <p className="text-xs" style={{ color: 'var(--accent-green)' }}>
+                        Save {plan.savings} vs monthly
+                      </p>
                     </>
                   )}
                 </div>
@@ -836,9 +534,10 @@ function BillingTab({ org }: { org: Organization }) {
                     disabled={checkoutPending}
                     className="btn-primary text-sm mt-auto"
                   >
-                    {isPending ? (
-                      <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
-                    ) : `Upgrade to ${plan.name}`}
+                    {isPending
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
+                      : `Upgrade to ${plan.name}`
+                    }
                   </button>
                 )}
               </div>
@@ -852,10 +551,7 @@ function BillingTab({ org }: { org: Organization }) {
                 <span className="font-semibold text-primary-themed">Enterprise</span>
                 <p className="text-sm text-muted-themed mt-0.5">45+ properties — custom pricing</p>
               </div>
-              <a
-                href="mailto:hello@fieldstay.app"
-                className="btn-secondary text-sm"
-              >
+              <a href="mailto:hello@fieldstay.app" className="btn-secondary text-sm">
                 Contact Us →
               </a>
             </div>
