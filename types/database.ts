@@ -22,7 +22,10 @@ export type ChecklistStatus = 'not_started' | 'in_progress' | 'completed'
 export type InventoryCategory = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom' | 'outdoor' | 'other'
 export type PoStatus       = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
-export type WoStatus       = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
+export type WoStatus          = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
+export type CommChannel       = 'email' | 'sms' | 'phone' | 'in_person' | 'note'
+export type CommRecipientType = 'vendor' | 'crew'
+export type CommSource        = 'manual' | 'system'
 export type WoSource       = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report'
 export type ScheduleType   = 'routine' | 'seasonal'
 export type ScheduleFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
@@ -466,6 +469,23 @@ export interface OwnerTransaction {
   notes: string | null
   created_at: string
   updated_at: string
+}
+
+export interface CommunicationLog {
+  id:                 string
+  org_id:             string
+  recipient_type:     CommRecipientType
+  vendor_id:          string | null
+  crew_member_id:     string | null
+  channel:            CommChannel
+  subject:            string | null
+  body:               string | null
+  property_id:        string | null
+  work_order_id:      string | null
+  source:             CommSource
+  logged_by_user_id:  string | null
+  communicated_at:    string
+  created_at:         string
 }
 
 export interface OrgMilestone {
