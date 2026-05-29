@@ -12,7 +12,6 @@ export type FieldStayEvents = {
 
   // ----------------------------------------------------------
   // iCal Sync
-  // Triggered on a schedule to poll all active feeds.
   // ----------------------------------------------------------
   'ical/sync.requested': {
     data: {
@@ -22,7 +21,6 @@ export type FieldStayEvents = {
     }
   }
 
-  // Fired after a successful sync pass across all orgs
   'ical/sync.all.requested': {
     data: Record<string, never>
   }
@@ -31,7 +29,6 @@ export type FieldStayEvents = {
   // Bookings
   // ----------------------------------------------------------
 
-  // New booking detected from iCal — triggers guest messaging
   'booking/detected': {
     data: {
       booking_id: string
@@ -39,12 +36,11 @@ export type FieldStayEvents = {
       org_id: string
       guest_name: string | null
       guest_email: string | null
-      checkin_date: string   // ISO date string
+      checkin_date: string
       checkout_date: string
     }
   }
 
-  // Fired N days before checkout — triggers pre-checkout email
   'booking/checkout-approaching': {
     data: {
       booking_id: string
@@ -61,7 +57,6 @@ export type FieldStayEvents = {
   // Turnovers
   // ----------------------------------------------------------
 
-  // New turnover created (from iCal gap or manual)
   'turnover/created': {
     data: {
       turnover_id: string
@@ -73,7 +68,6 @@ export type FieldStayEvents = {
     }
   }
 
-  // Crew marked turnover complete — triggers inventory count prompt
   'turnover/completed': {
     data: {
       turnover_id: string
@@ -84,7 +78,6 @@ export type FieldStayEvents = {
     }
   }
 
-  // Turnover approaching with no crew assigned
   'turnover/unassigned-warning': {
     data: {
       turnover_id: string
@@ -99,7 +92,6 @@ export type FieldStayEvents = {
   // Inventory & Purchase Orders
   // ----------------------------------------------------------
 
-  // Inventory count submitted — evaluate all items against par
   'inventory/count-submitted': {
     data: {
       count_id: string
@@ -108,16 +100,14 @@ export type FieldStayEvents = {
     }
   }
 
-  // One or more items below par threshold — generate PO
   'inventory/below-par': {
     data: {
       property_id: string
       org_id: string
-      item_ids: string[]  // inventory_items that are below par
+      item_ids: string[]
     }
   }
 
-  // PO generated and ready to send to PM
   'purchase-order/created': {
     data: {
       purchase_order_id: string
@@ -130,7 +120,6 @@ export type FieldStayEvents = {
   // Work Orders
   // ----------------------------------------------------------
 
-  // New work order created — notify vendor/crew if portal enabled
   'work-order/created': {
     data: {
       work_order_id: string
@@ -141,7 +130,6 @@ export type FieldStayEvents = {
     }
   }
 
-  // Work order past scheduled date with no completion
   'work-order/overdue': {
     data: {
       work_order_id: string
@@ -152,7 +140,6 @@ export type FieldStayEvents = {
     }
   }
 
-  // Vendor submitted completion via portal
   'work-order/completed-via-portal': {
     data: {
       work_order_id: string
@@ -162,16 +149,33 @@ export type FieldStayEvents = {
     }
   }
 
+  'work-order/quote-requested': {
+    data: {
+      work_order_id: string
+      property_id: string
+      org_id: string
+      vendor_id: string
+      quote_token: string
+    }
+  }
+
+  'work-order/quote-submitted': {
+    data: {
+      work_order_id: string
+      org_id: string
+      quoted_amount: number
+      quote_notes: string | null
+    }
+  }
+
   // ----------------------------------------------------------
   // Maintenance Schedules
   // ----------------------------------------------------------
 
-  // Daily sweep — check all schedules for upcoming/overdue items
   'maintenance/daily-check': {
     data: Record<string, never>
   }
 
-  // A schedule is due within the alert window
   'maintenance/schedule-due': {
     data: {
       schedule_id: string
@@ -188,7 +192,6 @@ export type FieldStayEvents = {
   // Guest Messaging
   // ----------------------------------------------------------
 
-  // Send a guest message (booking confirmation or pre-checkout)
   'guest-message/send': {
     data: {
       booking_id: string
@@ -202,7 +205,6 @@ export type FieldStayEvents = {
   // Billing / Stripe
   // ----------------------------------------------------------
 
-  // Stripe subscription activated or updated
   'billing/subscription-updated': {
     data: {
       org_id: string
