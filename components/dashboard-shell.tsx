@@ -7,19 +7,22 @@ import {
   LayoutDashboard, Building2, CalendarCheck, Package,
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Bell, Sun, Moon,
+  Users2, Briefcase,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
 
 const NAV_ITEMS = [
-  { href: '/ops',             label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin','manager','viewer'] },
-  { href: '/properties',     label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'] },
-  { href: '/turnovers',      label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
-  { href: '/inventory',      label: 'Inventory',    icon: Package,         roles: ['admin','manager']          },
-  { href: '/maintenance',    label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager']          },
-  { href: '/communications', label: 'Comms',        icon: Mail,            roles: ['admin','manager']          },
-  { href: '/owners',         label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager']          },
-  { href: '/settings',       label: 'Settings',     icon: Settings,        roles: ['admin']                    },
+  { href: '/ops',          label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin','manager','viewer'] },
+  { href: '/properties',  label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'] },
+  { href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
+  { href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin','manager']          },
+  { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager']          },
+  { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager']          },
+  { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager']          },
+  { href: '/communications', label: 'Comms',     icon: Mail,            roles: ['admin','manager']          },
+  { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager']          },
+  { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin']                    },
 ] as const
 
 interface Props {
@@ -31,18 +34,16 @@ interface Props {
 
 export function DashboardShell({ role, orgName, userEmail, children }: Props) {
   const pathname   = usePathname()
-  const [collapsed,   setCollapsed]   = useState(false)
-  const [mobileOpen,  setMobileOpen]  = useState(false)
-  const [theme,       setTheme]       = useState<'dark' | 'light'>('dark')
-  const [time,        setTime]        = useState('')
+  const [collapsed,  setCollapsed]  = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [theme,      setTheme]      = useState<'dark' | 'light'>('dark')
+  const [time,       setTime]       = useState('')
 
   // Live clock
   useEffect(() => {
     const tick = () => {
       setTime(new Date().toLocaleTimeString('en-US', {
-        hour:   'numeric',
-        minute: '2-digit',
-        hour12: true,
+        hour: 'numeric', minute: '2-digit', hour12: true,
       }))
     }
     tick()
@@ -257,9 +258,9 @@ export function DashboardShell({ role, orgName, userEmail, children }: Props) {
               <span
                 className="hidden sm:block text-xs font-medium mr-2"
                 style={{
-                  color:               'var(--text-muted)',
-                  fontVariantNumeric:  'tabular-nums',
-                  letterSpacing:       '0.04em',
+                  color:              'var(--text-muted)',
+                  fontVariantNumeric: 'tabular-nums',
+                  letterSpacing:      '0.04em',
                 }}
               >
                 {time}

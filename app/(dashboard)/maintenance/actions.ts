@@ -603,3 +603,110 @@ export async function createWorkOrderFromSchedule(
   revalidatePath('/maintenance')
   return { success: true }
 }
+
+// ── Maintenance Schedule CRUD ────────────────────────────────────────────────
+
+export async function createMaintenanceSchedule(
+  data: {
+    property_id:       string
+    name:              string
+    description:       string | null
+    schedule_type:     ScheduleType
+    frequency:         ScheduleFrequency | null
+    month_due:         number | null
+    next_due_date:     string | null
+    estimated_cost:    number | null
+    assigned_vendor_id: string | null
+    auto_create_wo:    boolean
+    instructions:      string | null
+  }
+): Promise<MaintenanceActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: property } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('id', data.property_id)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!property) return { error: 'Property not found' }
+
+  const { error } = await supabase.from('maintenance_schedules').insert({
+    property_id:        data.property_id,
+    org_id:             membership.org_id,
+    name:               data.name,
+    description:        data.description || null,
+    schedule_type:      data.schedule_type,
+    frequency:          data.frequency || null,
+    month_due:          data.month_due || null,
+    next_due_date:      data.next_due_date || null,
+    estimated_cost:     data.estimated_cost || null,
+    assigned_vendor_id: data.assigned_vendor_id || null,
+    auto_create_wo:     data.auto_create_wo,
+    instructions:       data.instructions || null,
+    is_active:          true,
+  })
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/maintenance')
+  return { success: true }
+}
+
+export async function updateMaintenanceSchedule(
+  scheduleId: string,
+  data: {
+    name:              string
+    description:       string | null
+    schedule_type:     ScheduleType
+    frequency:         ScheduleFrequency | null
+    month_due:         number | null
+    next_due_date:     string | null
+    estimated_cost:    number | null
+    assigned_vendor_id: string | null
+    auto_create_wo:    boolean
+    instructions:      string | null
+  }
+): Promise<MaintenanceActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('maintenance_schedules')
+    .update({
+      name:               data.name,
+      description:        data.description || null,
+      schedule_type:      data.schedule_type,
+      frequency:          data.frequency || null,
+      month_due:          data.month_due || null,
+      next_due_date:      data.next_due_date || null,
+      estimated_cost:     data.estimated_cost || null,
+      assigned_vendor_id: data.assigned_vendor_id || null,
+      auto_create_wo:     data.auto_create_wo,
+      instructions:       data.instructions || null,
+    })
+    .eq('id', scheduleId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/maintenance')
+  return { success: true }
+}
+
+export async function deleteMaintenanceSchedule(
+  scheduleId: string
+): Promise<MaintenanceActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('maintenance_schedules')
+    .update({ is_active: false })
+    .eq('id', scheduleId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/maintenance')
+  return { success: true }
+}

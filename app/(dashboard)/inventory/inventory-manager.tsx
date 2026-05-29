@@ -93,7 +93,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
   const [error, setError]     = useState<string | null>(null)
 
   const handleSave = () => {
-    const n = parseInt(value, 10)
+    const n = parseFloat(value)
     if (isNaN(n) || n < 0) { setError('Invalid number'); return }
     setError(null)
     startSave(async () => {
@@ -115,7 +115,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
         className="text-sm text-secondary-themed hover:text-brand-700 hover:underline tabular-nums"
         title="Click to edit par level"
       >
-        {item.par_level}
+        {Number.isInteger(item.par_level) ? item.par_level : item.par_level.toFixed(1)}
       </button>
     )
   }
@@ -125,6 +125,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
       <input
         type="number"
         min={0}
+        step={0.5}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
@@ -303,7 +304,6 @@ function AddItemModal({
                 <input type="hidden" name="catalog_item_id" value={selectedCatalog.id} />
                 <input type="hidden" name="name" value={selectedCatalog.name} />
                 <input type="hidden" name="category" value={selectedCatalog.category} />
-                <input type="hidden" name="unit" value={selectedCatalog.default_unit} />
               </>
             )}
 
@@ -353,9 +353,22 @@ function AddItemModal({
             </div>
 
             {selectedCatalog && (
-              <div>
-                <label className="label">Par Level</label>
-                <input name="par_level" type="number" min={1} defaultValue={1} className="input" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Unit <span className="text-red-500">*</span></label>
+                  <input
+                    name="unit"
+                    type="text"
+                    required
+                    className="input"
+                    defaultValue={selectedCatalog.default_unit}
+                    placeholder="rolls, boxes, oz…"
+                  />
+                </div>
+                <div>
+                  <label className="label">Par Level</label>
+                  <input name="par_level" type="number" min={0} step={0.5} defaultValue={1} className="input" />
+                </div>
               </div>
             )}
 
@@ -400,7 +413,7 @@ function AddItemModal({
 
             <div>
               <label className="label">Par Level</label>
-              <input name="par_level" type="number" min={1} defaultValue={1} className="input" />
+              <input name="par_level" type="number" min={0} step={0.5} defaultValue={1} className="input" />
             </div>
 
             <div>
@@ -495,7 +508,9 @@ function RunCountModal({
                       </div>
                       <div className="text-right text-xs text-muted-themed">
                         <span className="block">Par</span>
-                        <span className="font-medium text-secondary-themed tabular-nums">{item.par_level}</span>
+                        <span className="font-medium text-secondary-themed tabular-nums">
+                          {Number.isInteger(item.par_level) ? item.par_level : item.par_level.toFixed(1)}
+                        </span>
                       </div>
                       <div className="flex flex-col items-end gap-0.5">
                         <label className="text-xs text-muted-themed">New Count</label>

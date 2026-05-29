@@ -45,15 +45,16 @@ export default async function MaintenancePage() {
     supabase
       .from('maintenance_schedules')
       .select(`
-        id, property_id, name, description,
-        schedule_type, frequency, next_due_date,
+        id, property_id, org_id, name, description,
+        schedule_type, frequency, month_due, next_due_date,
         last_completed_date, estimated_cost, auto_create_wo, is_active,
-        assigned_vendor_id,
-        properties ( name )
+        assigned_vendor_id, instructions,
+        properties ( name ),
+        vendors ( id, name )
       `)
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
-      .order('next_due_date', { ascending: true }),
+      .order('next_due_date', { ascending: true, nullsFirst: false }),
   ])
 
   return (
