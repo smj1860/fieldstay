@@ -65,11 +65,12 @@ export const TURNOVER_STATUS_LABELS = {
 
 /** Work order status display map */
 export const WO_STATUS_LABELS = {
-  pending:     'Pending',
-  assigned:    'Assigned',
-  in_progress: 'In Progress',
-  completed:   'Complete',
-  cancelled:   'Cancelled',
+  pending:         'Pending',
+  quote_requested: 'Quote Requested',
+  assigned:        'Assigned',
+  in_progress:     'In Progress',
+  completed:       'Complete',
+  cancelled:       'Cancelled',
 } as const
 
 /** Inventory category display labels */
