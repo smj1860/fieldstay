@@ -15,6 +15,7 @@ import type { MemberRole } from '@/types/database'
 const NAV_ITEMS = [
   { href: '/ops',          label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin','manager','viewer'] },
   { href: '/properties',  label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'] },
+  { href: '/bookings', label: 'Bookings', icon: CalendarCheck, roles: ['admin','manager','viewer'] },
   { href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
   { href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin','manager']          },
   { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager']          },
