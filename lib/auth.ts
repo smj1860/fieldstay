@@ -10,6 +10,7 @@ export interface OrgMembership {
     plan: string
     plan_status: string
     max_properties: number
+    trial_ends_at: string | null
   }
 }
 
@@ -41,7 +42,7 @@ export async function requireOrgMember(): Promise<
     .from('organization_members')
     .select(`
       org_id, role,
-      organizations ( name, plan, plan_status, max_properties )
+      organizations ( name, plan, plan_status, max_properties, trial_ends_at )
     `)
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
@@ -61,6 +62,7 @@ export async function requireOrgMember(): Promise<
       plan:           orgData?.plan ?? 'starter',
       plan_status:    orgData?.plan_status ?? 'trialing',
       max_properties: orgData?.max_properties ?? 5,
+      trial_ends_at:  orgData?.trial_ends_at ?? null,
     },
   }
 

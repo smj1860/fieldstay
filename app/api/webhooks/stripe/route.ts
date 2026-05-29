@@ -28,6 +28,30 @@ export async function POST(request: NextRequest) {
 
   switch (event.type) {
 
+    case 'checkout.session.completed': {
+      const session    = event.data.object
+      const orgId      = session.metadata?.org_id
+      const customerId = typeof session.customer === 'string'
+        ? session.customer
+        : null
+
+      if (!orgId || !customerId) {
+        console.error(
+          '[Stripe] checkout.session.completed missing org_id or customer',
+          { sessionId: session.id }
+        )
+        break
+      }
+
+      await supabase
+        .from('organizations')
+        .update({ stripe_customer_id: customerId })
+        .eq('id', orgId)
+        .is('stripe_customer_id', null)
+
+      break
+    }
+
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
       const subscription = event.data.object
