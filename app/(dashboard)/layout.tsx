@@ -25,7 +25,7 @@ export default async function DashboardLayout({
 
   const { data: membership } = await supabase
     .from('organization_members')
-    .select('org_id, role, organizations(name, plan, plan_status, max_properties)')
+    .select('org_id, role, organizations(name, plan, plan_status, max_properties, trial_ends_at)')
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
     .single()
@@ -35,6 +35,25 @@ export default async function DashboardLayout({
   const org = Array.isArray(membership.organizations)
     ? membership.organizations[0]
     : membership.organizations
+
+  // ── Billing gate ──────────────────────────────────────────────────────────
+  const planStatus  = org?.plan_status  ?? 'trialing'
+  const trialEndsAt = org?.trial_ends_at ?? null
+
+  const trialExpired = planStatus === 'trialing'
+    && trialEndsAt !== null
+    && new Date(trialEndsAt) < new Date()
+
+  const isBlocked = trialExpired
+    || planStatus === 'cancelled'
+    || planStatus === 'paused'
+
+  const isPastDue = planStatus === 'past_due'
+
+  if (isBlocked) {
+    redirect('/billing-wall')
+  }
+  // ── End billing gate ──────────────────────────────────────────────────────
 
   const { data: pendingMilestone } = await supabase
     .from('org_milestones')
@@ -60,6 +79,27 @@ export default async function DashboardLayout({
       orgName={org?.name ?? 'FieldStay'}
       userEmail={user.email ?? ''}
     >
+      {isPastDue && (
+        <div
+          className="mx-4 mt-4 px-4 py-3 rounded-xl flex items-center justify-between gap-4 text-sm"
+          style={{
+            background: 'var(--accent-red-dim)',
+            border:     '1px solid rgba(240,84,84,0.3)',
+          }}
+        >
+          <span style={{ color: 'var(--accent-red)' }}>
+            <strong>Payment past due.</strong> Please update your payment method
+            to avoid interruption.
+          </span>
+          <a
+            href="/settings"
+            className="text-xs font-semibold underline whitespace-nowrap"
+            style={{ color: 'var(--accent-red)' }}
+          >
+            Update billing →
+          </a>
+        </div>
+      )}
       {pendingMilestone && MILESTONE_MESSAGES[pendingMilestone.milestone] && (
         <ReviewPrompt
           milestone={pendingMilestone.milestone}
