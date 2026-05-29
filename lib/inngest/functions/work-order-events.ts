@@ -261,3 +261,137 @@ export const handleWorkOrderOverdue = inngest.createFunction(
     return { work_order_id, alerted: true }
   }
 )
+
+/**
+ * Triggered when PM requests a vendor quote.
+ * Sends vendor an email with the quote submission link.
+ */
+export const handleWorkOrderQuoteRequested = inngest.createFunction(
+  {
+    id:      'work-order-quote-requested',
+    name:    'Work Order Quote Requested',
+    retries: 2,
+  },
+  { event: 'work-order/quote-requested' as const },
+  async ({ event, step, logger }) => {
+    const { work_order_id } = event.data
+
+    await step.run('send-vendor-quote-request', async () => {
+      const supabase = createServiceClient()
+
+      const { data: wo } = await supabase
+        .from('work_orders')
+        .select(`
+          id, title, description, scheduled_date, quote_token, estimated_cost,
+          vendors ( name, email ),
+          properties ( name, city, state )
+        `)
+        .eq('id', work_order_id)
+        .single()
+
+      if (!wo?.quote_token) return
+
+      const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
+      const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+
+      if (!vendor?.email) {
+        logger.warn(`Quote request for WO ${work_order_id}: vendor has no email`)
+        return
+      }
+
+      const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/work-orders/${wo.quote_token}/quote`
+
+      await resend.emails.send({
+        from:    FROM,
+        to:      vendor.email,
+        subject: `Quote requested — ${wo.title} at ${property?.name}`,
+        html: `
+          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+            <h2 style="color:#FCD116;margin-bottom:8px">Quote Request</h2>
+            <p>You've been asked to submit a quote for a job at <strong>${property?.name}</strong>.</p>
+            <table style="border-collapse:collapse;width:100%;margin:16px 0">
+              <tr><td style="padding:8px;color:#64748b">Job</td><td style="padding:8px;font-weight:600">${wo.title}</td></tr>
+              ${wo.description ? `<tr><td style="padding:8px;color:#64748b">Details</td><td style="padding:8px">${wo.description}</td></tr>` : ''}
+              ${wo.scheduled_date ? `<tr><td style="padding:8px;color:#64748b">Target Date</td><td style="padding:8px;font-weight:600">${new Date(wo.scheduled_date).toLocaleDateString()}</td></tr>` : ''}
+              ${wo.estimated_cost ? `<tr><td style="padding:8px;color:#64748b">Budget Est.</td><td style="padding:8px">$${wo.estimated_cost}</td></tr>` : ''}
+            </table>
+            <p>Click below to view the job details and submit your quote:</p>
+            <p><a href="${quoteUrl}" style="background:#FCD116;color:#0a1628;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">Submit Quote →</a></p>
+            <p style="color:#94a3b8;font-size:12px;margin-top:24px">This link expires in 14 days.</p>
+          </div>
+        `,
+      })
+
+      logger.info(`Sent quote request to ${vendor.email} for WO ${work_order_id}`)
+    })
+
+    return { work_order_id }
+  }
+)
+
+/**
+ * Triggered when vendor submits a quote via portal.
+ * Notifies PM of the quote amount for review.
+ */
+export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
+  {
+    id:      'work-order-quote-submitted',
+    name:    'Work Order Quote Submitted',
+    retries: 2,
+  },
+  { event: 'work-order/quote-submitted' as const },
+  async ({ event, step }) => {
+    const { work_order_id, org_id, quoted_amount, quote_notes } = event.data
+
+    await step.run('notify-pm-of-quote', async () => {
+      const supabase = createServiceClient()
+
+      const { data: wo } = await supabase
+        .from('work_orders')
+        .select(`
+          id, title, vendors ( name ),
+          properties ( name )
+        `)
+        .eq('id', work_order_id)
+        .single()
+
+      if (!wo) return
+
+      const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
+      const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+
+      const { data: adminMember } = await supabase
+        .from('organization_members')
+        .select('user_id')
+        .eq('org_id', org_id)
+        .eq('role', 'admin')
+        .single()
+
+      if (!adminMember?.user_id) return
+
+      const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
+      if (!user?.email) return
+
+      await resend.emails.send({
+        from:    FROM,
+        to:      user.email,
+        subject: `💬 Quote received — ${wo.title} at ${property?.name}`,
+        html: `
+          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+            <h2>Quote received</h2>
+            <p><strong>${vendor?.name ?? 'Your vendor'}</strong> has submitted a quote for <strong>${wo.title}</strong>.</p>
+            <table style="border-collapse:collapse;width:100%;margin:16px 0">
+              <tr><td style="padding:8px;color:#64748b">Property</td><td style="padding:8px;font-weight:600">${property?.name}</td></tr>
+              <tr style="background:#f8fafc"><td style="padding:8px;color:#64748b">Quoted Amount</td><td style="padding:8px;font-weight:600;font-size:18px">$${quoted_amount.toFixed(2)}</td></tr>
+              ${quote_notes ? `<tr><td style="padding:8px;color:#64748b">Vendor Notes</td><td style="padding:8px">${quote_notes}</td></tr>` : ''}
+            </table>
+            <p>Review and approve or decline the quote in FieldStay:</p>
+            <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#FCD116;color:#0a1628;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">Review Quote →</a></p>
+          </div>
+        `,
+      })
+    })
+
+    return { work_order_id, notified: true }
+  }
+)
