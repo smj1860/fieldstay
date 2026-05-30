@@ -327,48 +327,52 @@ function AddItemsModal({
                 })}
               </div>
 
-              {/* Selected items with par level inputs */}
+              {/* Selected items with unit + par level inputs */}
               {selectedArray.length > 0 && (
                 <div className="border border-themed rounded-xl overflow-hidden">
-                  <div className="px-4 py-2 bg-canvas-themed border-b border-themed flex items-center justify-between">
+                  <div className="px-4 py-2 bg-canvas-themed border-b border-themed">
                     <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
                       Selected — {selectedArray.length} item{selectedArray.length !== 1 ? 's' : ''}
                     </span>
                   </div>
                   {selectedArray.map(({ catalogItem, parLevel, unit }) => (
-                    <div key={catalogItem.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0">
-                      <span className="flex-1 text-sm font-medium text-primary-themed truncate min-w-0">
-                        {catalogItem.name}
-                      </span>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <div className="flex flex-col gap-0.5">
-                          <label className="text-xs text-muted-themed">Unit</label>
+                    <div key={catalogItem.id} className="px-4 py-3 border-b border-themed last:border-0 space-y-2">
+                      {/* Name row */}
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium text-primary-themed truncate min-w-0">
+                          {catalogItem.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeSelected(catalogItem.id)}
+                          className="flex-shrink-0 text-muted-themed hover:text-red-500 p-0.5 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      {/* Inputs row */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-muted-themed block mb-1">Unit</label>
                           <input
                             type="text"
                             value={unit}
                             onChange={(e) => updateSelected(catalogItem.id, 'unit', e.target.value)}
-                            className="input py-1 px-2 text-xs w-20"
-                            placeholder="rolls…"
+                            className="input py-1.5 px-2 text-sm w-full"
+                            placeholder="rolls, boxes, oz…"
                           />
                         </div>
-                        <div className="flex flex-col gap-0.5">
-                          <label className="text-xs text-muted-themed">Par</label>
+                        <div>
+                          <label className="text-xs text-muted-themed block mb-1">Par Level</label>
                           <input
                             type="number"
                             min={0}
                             step={0.5}
                             value={parLevel}
                             onChange={(e) => updateSelected(catalogItem.id, 'parLevel', e.target.value)}
-                            className="input py-1 px-2 text-xs w-16"
+                            className="input py-1.5 px-2 text-sm w-full"
                           />
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => removeSelected(catalogItem.id)}
-                          className="text-muted-themed hover:text-red-500 p-1 mt-3"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
                       </div>
                     </div>
                   ))}
