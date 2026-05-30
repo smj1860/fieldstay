@@ -1,7 +1,15 @@
 'use client'
-import { PowerSyncContext } from '@powersync/react'
-import { usePowerSync } from '@powersync/react'
-import { getPowerSyncDb } from '@/lib/powersync/client'
+import { useEffect }           from 'react'
+import { PowerSyncContext }    from '@powersync/react'
+import { usePowerSync }        from '@powersync/react'
+import { getPowerSyncDb }      from '@/lib/powersync/client'
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
+}
 
 export function CrewShell({
   crewName,
@@ -11,6 +19,44 @@ export function CrewShell({
   children: React.ReactNode
 }) {
   const db = getPowerSyncDb()
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+
+    const register = async () => {
+      try {
+        const reg      = await navigator.serviceWorker.register('/sw.js')
+        const existing = await reg.pushManager.getSubscription()
+        if (existing) return
+
+        const permission = await Notification.requestPermission()
+        if (permission !== 'granted') return
+
+        const sub  = await reg.pushManager.subscribe({
+          userVisibleOnly:      true,
+          applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+        })
+
+        const json = sub.toJSON()
+        if (!json.keys) return
+
+        await fetch('/api/crew/push-subscribe', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            endpoint: json.endpoint,
+            p256dh:   json.keys.p256dh,
+            auth:     json.keys.auth,
+          }),
+        })
+      } catch (err) {
+        console.error('[push] registration failed:', err)
+      }
+    }
+
+    register()
+  }, [])
 
   return (
     <PowerSyncContext.Provider value={db}>

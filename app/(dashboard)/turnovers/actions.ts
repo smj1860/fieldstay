@@ -54,6 +54,46 @@ export async function assignCrew(
       .eq('status', 'pending_assignment') // only if not already further along
   }
 
+  // Send push notification to the assigned crew member
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const serviceClient = createServiceClient()
+
+    const { data: subs } = await serviceClient
+      .from('push_subscriptions')
+      .select('endpoint, p256dh, auth')
+      .eq('crew_member_id', crewMemberId)
+
+    if (subs && subs.length > 0) {
+      const { sendPushToCrewMember } = await import('@/lib/push/client')
+
+      const count = turnovers.length
+      const { data: firstTurnover } = await serviceClient
+        .from('turnovers')
+        .select('checkout_datetime, properties(name)')
+        .eq('id', turnovers[0]!.id)
+        .single()
+
+      const props    = firstTurnover?.properties
+      const propName = Array.isArray(props)
+        ? (props[0] as { name?: string } | undefined)?.name
+        : (props as unknown as { name?: string } | null)?.name
+
+      const body = count === 1 && propName
+        ? `${propName} — ${new Date(firstTurnover!.checkout_datetime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
+        : `${count} new assignment${count !== 1 ? 's' : ''} added`
+
+      await sendPushToCrewMember(subs, {
+        title: 'New Assignment',
+        body,
+        url:   '/crew',
+      })
+    }
+  } catch (err) {
+    // Push failure must never break the assignment
+    console.error('[push] failed to notify crew member:', err)
+  }
+
   revalidatePath('/turnovers')
   return { success: true }
 }

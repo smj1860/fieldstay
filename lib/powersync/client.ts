@@ -24,8 +24,9 @@ class SupabaseConnector {
         await this.supabase
           .from('checklist_instance_items')
           .update({
-            is_completed: op.opData?.is_completed,
-            crew_notes:   op.opData?.crew_notes,
+            is_completed:       op.opData?.is_completed,
+            crew_notes:         op.opData?.crew_notes,
+            photo_storage_path: op.opData?.photo_storage_path ?? null,
           })
           .eq('id', op.id)
       }
@@ -33,6 +34,12 @@ class SupabaseConnector {
         await this.supabase
           .from('turnovers')
           .update({ status: op.opData?.status })
+          .eq('id', op.id)
+      }
+      if (op.table === 'inventory_items' && op.op === 'PUT') {
+        await this.supabase
+          .from('inventory_items')
+          .update({ current_quantity: op.opData?.current_quantity })
           .eq('id', op.id)
       }
     }

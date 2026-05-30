@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useTransition, useActionState } from 'react'
+import { Fragment, useState, useActionState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Plus, ClipboardList, ChevronDown, ChevronRight, X,
-  Package, AlertTriangle, ShoppingCart,
+  Package, AlertTriangle, ShoppingCart, Check, History,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
-import { updateParLevel, addInventoryItem, submitInventoryCount } from './actions'
+import { updateParLevel, addInventoryItems, submitInventoryCount } from './actions'
 import type { InventoryCategory, PoStatus } from '@/types/database'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -31,6 +32,13 @@ interface CatalogItem {
   name: string
   category: InventoryCategory
   default_unit: string
+}
+
+interface InventoryCount {
+  id: string
+  property_id: string
+  submitted_at: string
+  notes: string | null
 }
 
 interface PurchaseOrderItem {
@@ -89,18 +97,19 @@ const CATEGORY_ORDER: InventoryCategory[] = [
 function ParLevelEditor({ item }: { item: InventoryItem }) {
   const [editing, setEditing] = useState(false)
   const [value, setValue]     = useState(String(item.par_level))
-  const [saving, startSave]   = useTransition()
+  const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState<string | null>(null)
+  const router = useRouter()
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const n = parseFloat(value)
     if (isNaN(n) || n < 0) { setError('Invalid number'); return }
     setError(null)
-    startSave(async () => {
-      const res = await updateParLevel(item.id, n)
-      if (res.error) setError(res.error)
-      else setEditing(false)
-    })
+    setSaving(true)
+    const res = await updateParLevel(item.id, n)
+    setSaving(false)
+    if (res.error) setError(res.error)
+    else { setEditing(false); router.refresh() }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -150,107 +159,41 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
   )
 }
 
-// ── Category section ──────────────────────────────────────────────────────────
+// ── Add Items Modal (multi-select) ────────────────────────────────────────────
 
-function CategorySection({
-  category,
-  items,
-}: {
-  category: InventoryCategory
-  items: InventoryItem[]
-}) {
-  const [open, setOpen] = useState(true)
-  const criticalCount = items.filter((i) => getStockStatus(i) === 'critical').length
-  const lowCount      = items.filter((i) => getStockStatus(i) === 'low').length
-
-  return (
-    <div className="mb-4">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 w-full text-left py-2 group"
-      >
-        {open
-          ? <ChevronDown className="w-4 h-4 text-muted-themed" />
-          : <ChevronRight className="w-4 h-4 text-muted-themed" />
-        }
-        <span className="text-sm font-semibold text-secondary-themed">
-          {INVENTORY_CATEGORY_LABELS[category]}
-        </span>
-        <span className="badge badge-slate text-xs">{items.length}</span>
-        {criticalCount > 0 && (
-          <span className="badge badge-red text-xs flex items-center gap-0.5">
-            <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
-          </span>
-        )}
-        {lowCount > 0 && criticalCount === 0 && (
-          <span className="badge badge-amber text-xs">{lowCount} low</span>
-        )}
-      </button>
-
-      {open && (
-        <div className="mt-1 border border-themed rounded-xl overflow-hidden">
-          {/* Header row */}
-          <div className="grid grid-cols-[1fr_80px_80px_100px_120px] gap-2 px-4 py-2 bg-canvas-themed border-b border-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
-            <span>Item</span>
-            <span className="text-right">Current</span>
-            <span className="text-right">Par Level</span>
-            <span className="text-right">Unit</span>
-            <span className="text-right">Status</span>
-          </div>
-
-          {items.map((item, idx) => (
-            <div
-              key={item.id}
-              className={cn(
-                'grid grid-cols-[1fr_80px_80px_100px_120px] gap-2 px-4 py-2.5 items-center text-sm',
-                idx !== items.length - 1 && 'border-b border-themed',
-                getStockStatus(item) === 'critical' && 'bg-red-50/40',
-                getStockStatus(item) === 'low'      && 'bg-amber-50/30',
-              )}
-            >
-              <div className="min-w-0">
-                <span className="font-medium text-primary-themed truncate block">{item.name}</span>
-                {item.notes && (
-                  <span className="text-xs text-muted-themed truncate block">{item.notes}</span>
-                )}
-              </div>
-              <div className="text-right tabular-nums font-medium text-primary-themed">
-                {item.current_quantity}
-              </div>
-              <div className="text-right">
-                <ParLevelEditor item={item} />
-              </div>
-              <div className="text-right text-muted-themed text-xs">{item.unit}</div>
-              <div className="text-right">
-                <StockBadge item={item} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+type SelectedCatalogItem = {
+  catalogItem: CatalogItem
+  parLevel: string
+  unit: string
 }
 
-// ── Add Item Modal ────────────────────────────────────────────────────────────
-
-function AddItemModal({
+function AddItemsModal({
   propertyId,
   propertyItems,
   catalogItems,
   onClose,
+  onSuccess,
 }: {
   propertyId: string
   propertyItems: InventoryItem[]
   catalogItems: CatalogItem[]
   onClose: () => void
+  onSuccess: () => void
 }) {
-  const [state, action, pending] = useActionState(addInventoryItem, null)
-  const [tab, setTab]                       = useState<'catalog' | 'custom'>('catalog')
-  const [selectedCatalog, setSelectedCatalog] = useState<CatalogItem | null>(null)
-  const [categoryFilter, setCategoryFilter]   = useState<InventoryCategory | 'all'>('all')
+  const [state, action, pending] = useActionState(addInventoryItems, null)
+  const [tab, setTab]             = useState<'catalog' | 'custom'>('catalog')
+  const [categoryFilter, setCategoryFilter] = useState<InventoryCategory | 'all'>('all')
+  const [selected, setSelected]   = useState<Map<string, SelectedCatalogItem>>(new Map())
+
+  // Custom item state
+  const [customName,     setCustomName]     = useState('')
+  const [customCategory, setCustomCategory] = useState<InventoryCategory>('other')
+  const [customUnit,     setCustomUnit]     = useState('')
+  const [customParLevel, setCustomParLevel] = useState('1')
+  const [customNotes,    setCustomNotes]    = useState('')
 
   if (state?.success) {
+    onSuccess()
     onClose()
     return null
   }
@@ -263,21 +206,51 @@ function AddItemModal({
     categoryFilter === 'all' || c.category === categoryFilter
   )
 
+  const toggleItem = (item: CatalogItem) => {
+    if (addedCatalogIds.has(item.id)) return
+    setSelected((prev) => {
+      const next = new Map(prev)
+      if (next.has(item.id)) {
+        next.delete(item.id)
+      } else {
+        next.set(item.id, { catalogItem: item, parLevel: '1', unit: item.default_unit })
+      }
+      return next
+    })
+  }
+
+  const updateSelected = (id: string, field: 'parLevel' | 'unit', value: string) => {
+    setSelected((prev) => {
+      const next = new Map(prev)
+      const entry = next.get(id)
+      if (entry) next.set(id, { ...entry, [field]: value })
+      return next
+    })
+  }
+
+  const removeSelected = (id: string) => {
+    setSelected((prev) => { const next = new Map(prev); next.delete(id); return next })
+  }
+
+  const selectedArray = Array.from(selected.values())
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-primary-themed">Add Inventory Item</h3>
+      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg flex flex-col max-h-[90vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
+          <h3 className="text-lg font-semibold text-primary-themed">Add Inventory Items</h3>
           <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-4 border-b border-themed">
+        <div className="flex gap-1 px-6 border-b border-themed flex-shrink-0">
           {(['catalog', 'custom'] as const).map((t) => (
             <button
               key={t}
               type="button"
-              onClick={() => { setTab(t); setSelectedCatalog(null) }}
+              onClick={() => setTab(t)}
               className={cn(
                 'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
                 tab === t
@@ -291,144 +264,228 @@ function AddItemModal({
         </div>
 
         {state?.error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+          <div className="mx-6 mt-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 flex-shrink-0">
             {state.error}
           </div>
         )}
 
-        {tab === 'catalog' ? (
-          <form action={action} className="space-y-4">
-            <input type="hidden" name="property_id" value={propertyId} />
-            {selectedCatalog && (
-              <>
-                <input type="hidden" name="catalog_item_id" value={selectedCatalog.id} />
-                <input type="hidden" name="name" value={selectedCatalog.name} />
-                <input type="hidden" name="category" value={selectedCatalog.category} />
-              </>
-            )}
-
-            {/* Category filter */}
-            <div className="flex gap-1.5 flex-wrap">
-              {(['all', ...CATEGORY_ORDER] as const).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setCategoryFilter(c)}
-                  className={cn(
-                    'px-2.5 py-1 text-xs rounded-full border transition-colors',
-                    categoryFilter === c
-                      ? 'bg-brand-800 text-white border-brand-800'
-                      : 'bg-card-themed text-secondary-themed border-themed hover:border-themed'
-                  )}
-                >
-                  {c === 'all' ? 'All' : INVENTORY_CATEGORY_LABELS[c]}
-                </button>
-              ))}
-            </div>
-
-            {/* Catalog list */}
-            <div className="border border-themed rounded-xl overflow-hidden max-h-52 overflow-y-auto">
-              {visibleCatalog.map((item) => {
-                const alreadyAdded = addedCatalogIds.has(item.id)
-                const isSelected   = selectedCatalog?.id === item.id
-                return (
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+          {tab === 'catalog' ? (
+            <>
+              {/* Category filter chips */}
+              <div className="flex gap-1.5 flex-wrap">
+                {(['all', ...CATEGORY_ORDER] as const).map((c) => (
                   <button
-                    key={item.id}
+                    key={c}
                     type="button"
-                    onClick={() => !alreadyAdded && setSelectedCatalog(isSelected ? null : item)}
+                    onClick={() => setCategoryFilter(c)}
                     className={cn(
-                      'w-full flex items-center justify-between px-4 py-2.5 text-left text-sm border-b border-themed last:border-0 transition-colors',
-                      isSelected   && 'bg-brand-800 text-white',
-                      alreadyAdded && 'opacity-40 cursor-not-allowed',
-                      !isSelected && !alreadyAdded && 'hover:bg-canvas-themed'
+                      'px-2.5 py-1 text-xs rounded-full border transition-colors',
+                      categoryFilter === c
+                        ? 'bg-brand-800 text-white border-brand-800'
+                        : 'bg-card-themed text-secondary-themed border-themed hover:border-brand-700'
                     )}
                   >
-                    <span className="font-medium">{item.name}</span>
-                    <span className={cn('text-xs', isSelected ? 'text-brand-200' : 'text-muted-themed')}>
-                      {alreadyAdded ? 'Already added' : item.default_unit}
-                    </span>
+                    {c === 'all' ? 'All' : INVENTORY_CATEGORY_LABELS[c]}
                   </button>
-                )
-              })}
-            </div>
+                ))}
+              </div>
 
-            {selectedCatalog && (
+              {/* Catalog list */}
+              <div className="border border-themed rounded-xl overflow-hidden">
+                {visibleCatalog.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-muted-themed">No items in this category.</div>
+                ) : visibleCatalog.map((item) => {
+                  const alreadyAdded = addedCatalogIds.has(item.id)
+                  const isSelected   = selected.has(item.id)
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => toggleItem(item)}
+                      disabled={alreadyAdded}
+                      className={cn(
+                        'w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm border-b border-themed last:border-0 transition-colors',
+                        isSelected   && 'bg-brand-50',
+                        alreadyAdded && 'opacity-40 cursor-not-allowed',
+                        !isSelected && !alreadyAdded && 'hover:bg-canvas-themed'
+                      )}
+                    >
+                      <div className={cn(
+                        'w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors',
+                        isSelected ? 'bg-brand-800 border-brand-800' : 'border-themed'
+                      )}>
+                        {isSelected && <Check className="w-3 h-3 text-white" />}
+                      </div>
+                      <span className="flex-1 font-medium text-primary-themed">{item.name}</span>
+                      <span className="text-xs text-muted-themed">
+                        {alreadyAdded ? 'Already added' : item.default_unit}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Selected items with par level inputs */}
+              {selectedArray.length > 0 && (
+                <div className="border border-themed rounded-xl overflow-hidden">
+                  <div className="px-4 py-2 bg-canvas-themed border-b border-themed flex items-center justify-between">
+                    <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
+                      Selected — {selectedArray.length} item{selectedArray.length !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  {selectedArray.map(({ catalogItem, parLevel, unit }) => (
+                    <div key={catalogItem.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0">
+                      <span className="flex-1 text-sm font-medium text-primary-themed truncate min-w-0">
+                        {catalogItem.name}
+                      </span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-xs text-muted-themed">Unit</label>
+                          <input
+                            type="text"
+                            value={unit}
+                            onChange={(e) => updateSelected(catalogItem.id, 'unit', e.target.value)}
+                            className="input py-1 px-2 text-xs w-20"
+                            placeholder="rolls…"
+                          />
+                        </div>
+                        <div className="flex flex-col gap-0.5">
+                          <label className="text-xs text-muted-themed">Par</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step={0.5}
+                            value={parLevel}
+                            onChange={(e) => updateSelected(catalogItem.id, 'parLevel', e.target.value)}
+                            className="input py-1 px-2 text-xs w-16"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeSelected(catalogItem.id)}
+                          className="text-muted-themed hover:text-red-500 p-1 mt-3"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            /* Custom item fields */
+            <>
+              <div>
+                <label className="label">Item Name <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  className="input"
+                  placeholder="e.g. Paper Towels"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Category</label>
+                  <select
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value as InventoryCategory)}
+                    className="input"
+                  >
+                    {CATEGORY_ORDER.map((c) => (
+                      <option key={c} value={c}>{INVENTORY_CATEGORY_LABELS[c]}</option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="label">Unit <span className="text-red-500">*</span></label>
                   <input
-                    name="unit"
                     type="text"
-                    required
+                    value={customUnit}
+                    onChange={(e) => setCustomUnit(e.target.value)}
                     className="input"
-                    defaultValue={selectedCatalog.default_unit}
                     placeholder="rolls, boxes, oz…"
                   />
                 </div>
-                <div>
-                  <label className="label">Par Level</label>
-                  <input name="par_level" type="number" min={0} step={0.5} defaultValue={1} className="input" />
-                </div>
               </div>
-            )}
+              <div>
+                <label className="label">Par Level</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={customParLevel}
+                  onChange={(e) => setCustomParLevel(e.target.value)}
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="label">Notes</label>
+                <textarea
+                  value={customNotes}
+                  onChange={(e) => setCustomNotes(e.target.value)}
+                  rows={2}
+                  className="input resize-none"
+                  placeholder="Any details…"
+                />
+              </div>
+            </>
+          )}
+        </div>
 
-            <div className="flex gap-3 pt-2">
+        {/* Footer with form + submit */}
+        <div className="px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
+          {tab === 'catalog' ? (
+            <form action={action} className="flex gap-3">
+              <input type="hidden" name="property_id" value={propertyId} />
+              <input type="hidden" name="item_count" value={selectedArray.length} />
+              {selectedArray.map(({ catalogItem, parLevel, unit }, i) => (
+                <Fragment key={catalogItem.id}>
+                  <input type="hidden" name={`item_${i}_catalog_item_id`} value={catalogItem.id} />
+                  <input type="hidden" name={`item_${i}_name`}           value={catalogItem.name} />
+                  <input type="hidden" name={`item_${i}_category`}       value={catalogItem.category} />
+                  <input type="hidden" name={`item_${i}_unit`}           value={unit} />
+                  <input type="hidden" name={`item_${i}_par_level`}      value={parLevel} />
+                </Fragment>
+              ))}
               <button
                 type="submit"
-                disabled={pending || !selectedCatalog}
+                disabled={pending || selectedArray.length === 0}
                 className="btn-primary flex-1 disabled:opacity-50"
               >
                 {pending
                   ? 'Adding…'
-                  : selectedCatalog
-                  ? `Add "${selectedCatalog.name}"`
-                  : 'Select an item above'}
+                  : selectedArray.length === 0
+                  ? 'Select items above'
+                  : `Add ${selectedArray.length} item${selectedArray.length !== 1 ? 's' : ''}`}
               </button>
               <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
-            </div>
-          </form>
-        ) : (
-          <form action={action} className="space-y-4">
-            <input type="hidden" name="property_id" value={propertyId} />
-
-            <div>
-              <label className="label">Item Name <span className="text-red-500">*</span></label>
-              <input name="name" type="text" required className="input" placeholder="e.g. Paper Towels" />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">Category</label>
-                <select name="category" className="input">
-                  {CATEGORY_ORDER.map((c) => (
-                    <option key={c} value={c}>{INVENTORY_CATEGORY_LABELS[c]}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Unit <span className="text-red-500">*</span></label>
-                <input name="unit" type="text" required className="input" placeholder="rolls, boxes, oz…" />
-              </div>
-            </div>
-
-            <div>
-              <label className="label">Par Level</label>
-              <input name="par_level" type="number" min={0} step={0.5} defaultValue={1} className="input" />
-            </div>
-
-            <div>
-              <label className="label">Notes</label>
-              <textarea name="notes" rows={2} className="input resize-none" placeholder="Any details…" />
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <button type="submit" disabled={pending} className="btn-primary flex-1">
+            </form>
+          ) : (
+            <form action={action} className="flex gap-3">
+              <input type="hidden" name="property_id"        value={propertyId} />
+              <input type="hidden" name="item_count"         value="1" />
+              <input type="hidden" name="item_0_catalog_item_id" value="" />
+              <input type="hidden" name="item_0_name"        value={customName} />
+              <input type="hidden" name="item_0_category"    value={customCategory} />
+              <input type="hidden" name="item_0_unit"        value={customUnit} />
+              <input type="hidden" name="item_0_par_level"   value={customParLevel} />
+              <input type="hidden" name="item_0_notes"       value={customNotes} />
+              <button
+                type="submit"
+                disabled={pending || !customName.trim() || !customUnit.trim()}
+                className="btn-primary flex-1 disabled:opacity-50"
+              >
                 {pending ? 'Adding…' : 'Add Item'}
               </button>
               <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
-            </div>
-          </form>
-        )}
+            </form>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -440,14 +497,17 @@ function RunCountModal({
   propertyId,
   items,
   onClose,
+  onSuccess,
 }: {
   propertyId: string
   items: InventoryItem[]
   onClose: () => void
+  onSuccess: () => void
 }) {
   const [state, action, pending] = useActionState(submitInventoryCount, null)
 
   if (state?.success) {
+    onSuccess()
     onClose()
     return null
   }
@@ -551,99 +611,280 @@ function RunCountModal({
   )
 }
 
-// ── Purchase Orders Panel ─────────────────────────────────────────────────────
+// ── Property Inventory Card ───────────────────────────────────────────────────
 
-function PurchaseOrdersPanel({
-  orders,
-  propertyId,
+function PropertyInventoryCard({
+  property,
+  items,
+  catalogItems,
+  recentCounts,
+  purchaseOrders,
+  onRefresh,
 }: {
-  orders: PurchaseOrder[]
-  propertyId: string
+  property: Property
+  items: InventoryItem[]
+  catalogItems: CatalogItem[]
+  recentCounts: InventoryCount[]
+  purchaseOrders: PurchaseOrder[]
+  onRefresh: () => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [showAddItems,   setShowAddItems]   = useState(false)
+  const [showRunCount,   setShowRunCount]   = useState(false)
+  const [showCounts,     setShowCounts]     = useState(true)
+  const [showPOs,        setShowPOs]        = useState(false)
+  const [expandedPO,     setExpandedPO]     = useState<string | null>(null)
 
-  const propertyOrders = orders.filter((o) => o.property_id === propertyId)
+  const criticalCount = items.filter((i) => getStockStatus(i) === 'critical').length
+  const lowCount      = items.filter((i) => getStockStatus(i) === 'low').length
+
+  const byCategory = CATEGORY_ORDER
+    .map((cat) => ({ cat, catItems: items.filter((i) => i.category === cat) }))
+    .filter(({ catItems }) => catItems.length > 0)
 
   return (
-    <div className="mt-6 border border-themed rounded-xl overflow-hidden">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 w-full text-left px-4 py-3 bg-canvas-themed hover:bg-raised-themed transition-colors"
-      >
-        <ShoppingCart className="w-4 h-4 text-muted-themed" />
-        <span className="text-sm font-semibold text-secondary-themed">Purchase Orders</span>
-        <span className="badge badge-slate text-xs">{propertyOrders.length}</span>
-        <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
-      </button>
+    <div className="card flex flex-col gap-0 p-0 overflow-hidden hover:shadow-card-md transition-shadow">
 
-      {open && (
+      {/* Card header */}
+      <div className="flex items-start justify-between gap-3 p-5 border-b border-themed">
+        <div className="min-w-0">
+          <h3 className="font-semibold text-primary-themed">{property.name}</h3>
+          {(property.city || property.state) && (
+            <p className="text-sm text-muted-themed mt-0.5">
+              {[property.city, property.state].filter(Boolean).join(', ')}
+            </p>
+          )}
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <span className="badge badge-slate text-xs">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+            {criticalCount > 0 && (
+              <span className="badge badge-red text-xs flex items-center gap-0.5">
+                <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
+              </span>
+            )}
+            {lowCount > 0 && criticalCount === 0 && (
+              <span className="badge badge-amber text-xs">{lowCount} low</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => setShowRunCount(true)}
+            disabled={items.length === 0}
+            className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            Run Count
+          </button>
+          <button
+            onClick={() => setShowAddItems(true)}
+            className="btn-secondary text-xs px-3 py-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Items
+          </button>
+        </div>
+      </div>
+
+      {/* Inventory list */}
+      {items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-10 text-muted-themed gap-3">
+          <Package className="w-8 h-8" />
+          <div className="text-center">
+            <p className="text-sm font-medium text-secondary-themed">No inventory items yet</p>
+            <p className="text-xs text-muted-themed mt-0.5">Add items to start tracking stock levels.</p>
+          </div>
+          <button onClick={() => setShowAddItems(true)} className="btn-primary text-xs px-3 py-1.5">
+            <Plus className="w-3.5 h-3.5" /> Add First Item
+          </button>
+        </div>
+      ) : (
         <div className="divide-y divide-themed">
-          {propertyOrders.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-muted-themed">
-              No purchase orders for this property yet.
+          {/* Column header */}
+          <div className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
+            <span>Item</span>
+            <span className="text-right">Current</span>
+            <span className="text-right">Par</span>
+            <span className="text-right">Unit</span>
+            <span className="text-right">Status</span>
+          </div>
+          {byCategory.map(({ cat, catItems }) => (
+            <CategoryRows key={cat} category={cat} items={catItems} />
+          ))}
+        </div>
+      )}
+
+      {/* Prior counts — last 6, collapsible */}
+      <div className="border-t border-themed">
+        <button
+          onClick={() => setShowCounts((o) => !o)}
+          className="flex items-center gap-2 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
+        >
+          <History className="w-3.5 h-3.5 text-muted-themed" />
+          <span className="text-sm font-medium text-secondary-themed">Prior Counts</span>
+          {recentCounts.length > 0 && (
+            <span className="badge badge-slate text-xs">{Math.min(recentCounts.length, 6)}</span>
+          )}
+          <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', showCounts && 'rotate-180')} />
+        </button>
+        {showCounts && (
+          recentCounts.length === 0 ? (
+            <div className="px-5 py-4 text-sm text-muted-themed border-t border-themed">
+              No counts recorded yet. Use <strong>Run Count</strong> to log current quantities.
             </div>
           ) : (
-            propertyOrders.map((po) => {
-              const poItems = Array.isArray(po.purchase_order_items)
-                ? po.purchase_order_items
-                : po.purchase_order_items ? [po.purchase_order_items] : []
-
-              const isExpanded = expandedId === po.id
-
-              return (
-                <div key={po.id}>
-                  <button
-                    onClick={() => setExpandedId(isExpanded ? null : po.id)}
-                    className="flex items-center gap-3 w-full text-left px-4 py-3 hover:bg-canvas-themed transition-colors"
-                  >
-                    <span className={poBadgeClass(po.status)}>
-                      {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
+            <div className="border-t border-themed">
+              {/* Header row */}
+              <div className="grid grid-cols-[1fr_auto] gap-4 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
+                <span>Date</span>
+                <span>Notes</span>
+              </div>
+              <div className="divide-y divide-themed">
+                {recentCounts.slice(0, 6).map((count) => (
+                  <div key={count.id} className="flex items-start justify-between gap-4 px-5 py-3">
+                    <span className="text-sm font-medium text-secondary-themed whitespace-nowrap">
+                      {formatDate(count.submitted_at)}
                     </span>
-                    <span className="text-sm text-secondary-themed">{formatDate(po.generated_at)}</span>
-                    {po.total_estimated_cost != null && (
-                      <span className="text-sm font-medium text-primary-themed ml-auto mr-2">
-                        ${po.total_estimated_cost.toFixed(2)}
-                      </span>
-                    )}
-                    <ChevronDown className={cn('w-3.5 h-3.5 text-muted-themed transition-transform', isExpanded && 'rotate-180')} />
-                  </button>
+                    <span className="text-sm text-muted-themed text-right truncate max-w-xs">
+                      {count.notes ?? '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        )}
+      </div>
 
-                  {isExpanded && poItems.length > 0 && (
-                    <div className="px-4 pb-3">
-                      <div className="border border-themed rounded-lg overflow-hidden text-xs">
-                        <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 bg-canvas-themed font-medium text-muted-themed uppercase tracking-wide">
-                          <span>Item</span>
-                          <span className="text-right">Current</span>
-                          <span className="text-right">To Buy</span>
-                          <span className="text-right">Est. Cost</span>
-                        </div>
-                        {poItems.map((pi) => (
-                          <div
-                            key={pi.id}
-                            className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 border-t border-themed text-secondary-themed"
-                          >
-                            <span className="truncate">{pi.item_name}</span>
-                            <span className="text-right tabular-nums">{pi.current_quantity}</span>
-                            <span className="text-right tabular-nums font-medium">{pi.quantity_to_buy}</span>
-                            <span className="text-right tabular-nums">
-                              {pi.estimated_unit_cost != null
-                                ? `$${(pi.estimated_unit_cost * pi.quantity_to_buy).toFixed(2)}`
-                                : '—'
-                              }
-                            </span>
+      {/* Purchase Orders collapsible */}
+      {purchaseOrders.length > 0 && (
+        <div className="border-t border-themed">
+          <button
+            onClick={() => setShowPOs((o) => !o)}
+            className="flex items-center gap-2 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
+          >
+            <ShoppingCart className="w-3.5 h-3.5 text-muted-themed" />
+            <span className="text-sm font-medium text-secondary-themed">Purchase Orders</span>
+            <span className="badge badge-slate text-xs">{purchaseOrders.length}</span>
+            <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', showPOs && 'rotate-180')} />
+          </button>
+          {showPOs && (
+            <div className="border-t border-themed divide-y divide-themed">
+              {purchaseOrders.map((po) => {
+                const poItems = Array.isArray(po.purchase_order_items)
+                  ? po.purchase_order_items
+                  : po.purchase_order_items ? [po.purchase_order_items] : []
+                const isExpanded = expandedPO === po.id
+                return (
+                  <div key={po.id}>
+                    <button
+                      onClick={() => setExpandedPO(isExpanded ? null : po.id)}
+                      className="flex items-center gap-3 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
+                    >
+                      <span className={poBadgeClass(po.status)}>
+                        {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
+                      </span>
+                      <span className="text-sm text-secondary-themed">{formatDate(po.generated_at)}</span>
+                      {po.total_estimated_cost != null && (
+                        <span className="text-sm font-medium text-primary-themed ml-auto mr-2">
+                          ${po.total_estimated_cost.toFixed(2)}
+                        </span>
+                      )}
+                      <ChevronDown className={cn('w-3.5 h-3.5 text-muted-themed transition-transform', isExpanded && 'rotate-180')} />
+                    </button>
+                    {isExpanded && poItems.length > 0 && (
+                      <div className="px-5 pb-3">
+                        <div className="border border-themed rounded-lg overflow-hidden text-xs">
+                          <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 bg-canvas-themed font-medium text-muted-themed uppercase tracking-wide">
+                            <span>Item</span>
+                            <span className="text-right">Current</span>
+                            <span className="text-right">To Buy</span>
+                            <span className="text-right">Est. Cost</span>
                           </div>
-                        ))}
+                          {poItems.map((pi) => (
+                            <div
+                              key={pi.id}
+                              className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 border-t border-themed text-secondary-themed"
+                            >
+                              <span className="truncate">{pi.item_name}</span>
+                              <span className="text-right tabular-nums">{pi.current_quantity}</span>
+                              <span className="text-right tabular-nums font-medium">{pi.quantity_to_buy}</span>
+                              <span className="text-right tabular-nums">
+                                {pi.estimated_unit_cost != null
+                                  ? `$${(pi.estimated_unit_cost * pi.quantity_to_buy).toFixed(2)}`
+                                  : '—'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
       )}
+
+      {/* Modals */}
+      {showAddItems && (
+        <AddItemsModal
+          propertyId={property.id}
+          propertyItems={items}
+          catalogItems={catalogItems}
+          onClose={() => setShowAddItems(false)}
+          onSuccess={onRefresh}
+        />
+      )}
+      {showRunCount && (
+        <RunCountModal
+          propertyId={property.id}
+          items={items}
+          onClose={() => setShowRunCount(false)}
+          onSuccess={onRefresh}
+        />
+      )}
     </div>
+  )
+}
+
+// ── Category rows (inline, no accordion — category label as divider) ──────────
+
+function CategoryRows({ category, items }: { category: InventoryCategory; items: InventoryItem[] }) {
+  return (
+    <>
+      <div className="px-5 py-1.5 bg-canvas-themed">
+        <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
+          {INVENTORY_CATEGORY_LABELS[category]}
+        </span>
+      </div>
+      {items.map((item) => (
+        <div
+          key={item.id}
+          className={cn(
+            'grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2.5 items-center text-sm',
+            getStockStatus(item) === 'critical' && 'bg-red-50/40',
+            getStockStatus(item) === 'low'      && 'bg-amber-50/30',
+          )}
+        >
+          <div className="min-w-0">
+            <span className="font-medium text-primary-themed truncate block">{item.name}</span>
+            {item.notes && (
+              <span className="text-xs text-muted-themed truncate block">{item.notes}</span>
+            )}
+          </div>
+          <div className="text-right tabular-nums font-medium text-primary-themed">
+            {item.current_quantity}
+          </div>
+          <div className="text-right">
+            <ParLevelEditor item={item} />
+          </div>
+          <div className="text-right text-muted-themed text-xs">{item.unit}</div>
+          <div className="text-right">
+            <StockBadge item={item} />
+          </div>
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -654,69 +895,39 @@ export function InventoryManager({
   items,
   purchaseOrders,
   catalogItems,
+  recentCounts,
 }: {
   properties: Property[]
   items: InventoryItem[]
   purchaseOrders: PurchaseOrder[]
   catalogItems: CatalogItem[]
+  recentCounts: InventoryCount[]
 }) {
-  const [selectedPropertyId, setSelectedPropertyId] = useState<string>(
-    properties[0]?.id ?? ''
-  )
-  const [showAddItem,    setShowAddItem]    = useState(false)
-  const [showRunCount,   setShowRunCount]   = useState(false)
+  const router = useRouter()
 
-  const selectedProperty = properties.find((p) => p.id === selectedPropertyId)
-  const propertyItems    = items.filter((i) => i.property_id === selectedPropertyId)
-
-  // Stats for header
-  const criticalCount = propertyItems.filter((i) => getStockStatus(i) === 'critical').length
-  const lowCount      = propertyItems.filter((i) => getStockStatus(i) === 'low').length
-
-  // Group by category
-  const byCategory = CATEGORY_ORDER
-    .map((cat) => ({ cat, catItems: propertyItems.filter((i) => i.category === cat) }))
-    .filter(({ catItems }) => catItems.length > 0)
+  const totalItems    = items.length
+  const totalCritical = items.filter((i) => getStockStatus(i) === 'critical').length
+  const totalLow      = items.filter((i) => getStockStatus(i) === 'low').length
 
   return (
     <>
-      {/* Page header */}
       <div className="page-header flex items-start justify-between">
         <div>
           <h1 className="page-title">Inventory</h1>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
-            <p className="page-subtitle">{propertyItems.length} items</p>
-            {criticalCount > 0 && (
+            <p className="page-subtitle">{totalItems} items across {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'}</p>
+            {totalCritical > 0 && (
               <span className="badge badge-red flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
+                <AlertTriangle className="w-3 h-3" /> {totalCritical} critical
               </span>
             )}
-            {lowCount > 0 && (
-              <span className="badge badge-amber">{lowCount} low</span>
+            {totalLow > 0 && (
+              <span className="badge badge-amber">{totalLow} low</span>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowAddItem(true)}
-            className="btn-secondary"
-            disabled={!selectedPropertyId}
-          >
-            <Plus className="w-4 h-4" />
-            Add Item
-          </button>
-          <button
-            onClick={() => setShowRunCount(true)}
-            className="btn-primary"
-            disabled={!selectedPropertyId || propertyItems.length === 0}
-          >
-            <ClipboardList className="w-4 h-4" />
-            Run Count
-          </button>
-        </div>
       </div>
 
-      {/* Property tabs */}
       {properties.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
           <Package className="w-10 h-10 text-muted-themed mx-auto mb-3" />
@@ -724,76 +935,19 @@ export function InventoryManager({
           <p className="text-sm text-muted-themed">Add a property to start managing inventory.</p>
         </div>
       ) : (
-        <>
-          {/* Tabs */}
-          <div className="flex gap-1 mb-6 overflow-x-auto pb-0.5 border-b border-themed">
-            {properties.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => setSelectedPropertyId(p.id)}
-                className={cn(
-                  'px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors',
-                  selectedPropertyId === p.id
-                    ? 'border-brand-700 text-brand-800'
-                    : 'border-transparent text-muted-themed hover:text-primary-themed hover:border-themed'
-                )}
-              >
-                <span className="max-w-[140px] truncate block">{p.name}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Items display */}
-          {propertyItems.length === 0 ? (
-            <div className="card text-center py-16 max-w-md mx-auto mt-2">
-              <Package className="w-10 h-10 text-muted-themed mx-auto mb-3" />
-              <h3 className="font-semibold text-secondary-themed mb-1">No items yet</h3>
-              <p className="text-sm text-muted-themed mb-4">
-                Add inventory items to{' '}
-                <span className="font-medium text-secondary-themed">{selectedProperty?.name}</span> to
-                start tracking stock levels.
-              </p>
-              <button
-                onClick={() => setShowAddItem(true)}
-                className="btn-primary mx-auto"
-              >
-                <Plus className="w-4 h-4" />
-                Add First Item
-              </button>
-            </div>
-          ) : (
-            <div>
-              {byCategory.map(({ cat, catItems }) => (
-                <CategorySection key={cat} category={cat} items={catItems} />
-              ))}
-            </div>
-          )}
-
-          {/* Purchase Orders panel */}
-          <PurchaseOrdersPanel
-            orders={purchaseOrders}
-            propertyId={selectedPropertyId}
-          />
-        </>
-      )}
-
-      {/* Add Item modal */}
-      {showAddItem && selectedPropertyId && (
-        <AddItemModal
-          propertyId={selectedPropertyId}
-          propertyItems={propertyItems}
-          catalogItems={catalogItems}
-          onClose={() => setShowAddItem(false)}
-        />
-      )}
-
-      {/* Run Count modal */}
-      {showRunCount && selectedPropertyId && (
-        <RunCountModal
-          propertyId={selectedPropertyId}
-          items={propertyItems}
-          onClose={() => setShowRunCount(false)}
-        />
+        <div className="space-y-6">
+          {properties.map((p) => (
+            <PropertyInventoryCard
+              key={p.id}
+              property={p}
+              items={items.filter((i) => i.property_id === p.id)}
+              catalogItems={catalogItems}
+              recentCounts={recentCounts.filter((c) => c.property_id === p.id)}
+              purchaseOrders={(purchaseOrders ?? []).filter((o) => o.property_id === p.id)}
+              onRefresh={() => router.refresh()}
+            />
+          ))}
+        </div>
       )}
     </>
   )
