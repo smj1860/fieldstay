@@ -27,27 +27,20 @@ export async function updateParLevel(
   return { success: true }
 }
 
-// ── Add custom inventory item ────────────────────────────────────────────────
+// ── Add inventory items (bulk) ───────────────────────────────────────────────
 
-export async function addInventoryItem(
+export async function addInventoryItems(
   _prev: InventoryActionState | null,
   formData: FormData
 ): Promise<InventoryActionState> {
   const { supabase, membership } = await requireOrgMember()
 
-  const property_id    = formData.get('property_id') as string
-  const catalog_item_id = (formData.get('catalog_item_id') as string) || null
-  const name           = (formData.get('name') as string)?.trim()
-  const category       = formData.get('category') as InventoryCategory
-  const unit           = (formData.get('unit') as string)?.trim()
-  const par_level      = parseFloat(formData.get('par_level') as string) || 1
-  const notes          = (formData.get('notes') as string)?.trim() || null
+  const property_id = formData.get('property_id') as string
+  const itemCount   = parseInt(formData.get('item_count') as string, 10) || 0
 
   if (!property_id) return { error: 'Property is required' }
-  if (!name)        return { error: 'Item name is required' }
-  if (!unit)        return { error: 'Unit is required' }
+  if (itemCount === 0) return { error: 'Select at least one item' }
 
-  // Verify property belongs to org
   const { data: property } = await supabase
     .from('properties')
     .select('id')
@@ -57,20 +50,35 @@ export async function addInventoryItem(
 
   if (!property) return { error: 'Property not found' }
 
-  const { error } = await supabase.from('inventory_items').insert({
-    property_id,
-    org_id:           membership.org_id,
-    catalog_item_id,
-    name,
-    category,
-    unit,
-    par_level,
-    current_quantity: 0,
-    low_stock_threshold_pct: 20,
-    is_active: true,
-    notes,
-  })
+  const rows = []
+  for (let i = 0; i < itemCount; i++) {
+    const catalog_item_id = (formData.get(`item_${i}_catalog_item_id`) as string) || null
+    const name     = (formData.get(`item_${i}_name`) as string)?.trim()
+    const category = (formData.get(`item_${i}_category`) as InventoryCategory) || 'other'
+    const unit     = (formData.get(`item_${i}_unit`) as string)?.trim()
+    const par_level = parseFloat(formData.get(`item_${i}_par_level`) as string) || 1
+    const notes    = (formData.get(`item_${i}_notes`) as string)?.trim() || null
 
+    if (!name || !unit) continue
+
+    rows.push({
+      property_id,
+      org_id:                 membership.org_id,
+      catalog_item_id,
+      name,
+      category,
+      unit,
+      par_level,
+      current_quantity:       0,
+      low_stock_threshold_pct: 20,
+      is_active:              true,
+      notes,
+    })
+  }
+
+  if (rows.length === 0) return { error: 'No valid items to add' }
+
+  const { error } = await supabase.from('inventory_items').insert(rows)
   if (error) return { error: error.message }
 
   revalidatePath('/inventory')

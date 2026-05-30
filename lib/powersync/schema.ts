@@ -2,6 +2,7 @@ import { column, Schema, Table } from '@powersync/web'
 
 const turnovers = new Table({
   property_id:       column.text,
+  org_id:            column.text,
   checkout_datetime: column.text,
   checkin_datetime:  column.text,
   window_minutes:    column.integer,
@@ -35,9 +36,17 @@ const inventory_items = new Table({
   current_quantity: column.integer,
 })
 
+const properties = new Table({
+  name:    column.text,
+  address: column.text,
+  city:    column.text,
+  state:   column.text,
+})
+
 export const AppSchema = new Schema({
   turnovers,
   checklist_instances,
   checklist_instance_items,
   inventory_items,
+  properties,
 })
