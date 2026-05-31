@@ -124,11 +124,12 @@ const MONTHS = [
 ]
 
 const STATUS_TABS = [
-  { key: 'all',         label: 'All' },
-  { key: 'pending',     label: 'Pending' },
-  { key: 'assigned',    label: 'Assigned' },
-  { key: 'in_progress', label: 'In Progress' },
-  { key: 'completed',   label: 'Completed' },
+  { key: 'all',             label: 'All'           },
+  { key: 'pending',         label: 'Pending'       },
+  { key: 'quote_requested', label: 'Awaiting Quote' },
+  { key: 'assigned',        label: 'Assigned'      },
+  { key: 'in_progress',     label: 'In Progress'   },
+  { key: 'completed',       label: 'Completed'     },
 ] as const
 
 // ── Work Order Card ───────────────────────────────────────────────────────────
@@ -215,7 +216,15 @@ function CreateWorkOrderModal({
   onClose: () => void
 }) {
   const [state, action, pending] = useActionState(createWorkOrder, null)
-  const [selectedVendor, setSelectedVendor] = useState('')
+  const [assignMode,         setAssignMode]         = useState<'assign' | 'quotes'>('assign')
+  const [selectedVendor,     setSelectedVendor]     = useState('')
+  const [selectedQuoteVendors, setSelectedQuoteVendors] = useState<string[]>([])
+
+  const toggleQuoteVendor = (id: string) => {
+    setSelectedQuoteVendors((prev) =>
+      prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
@@ -234,6 +243,12 @@ function CreateWorkOrderModal({
         )}
 
         <form action={action} className="space-y-4">
+          {/* Hidden fields for quote mode */}
+          <input type="hidden" name="request_quotes" value={assignMode === 'quotes' ? 'true' : 'false'} />
+          {assignMode === 'quotes' && selectedQuoteVendors.map((id) => (
+            <input key={id} type="hidden" name="quote_vendor_ids" value={id} />
+          ))}
+
           {/* Title */}
           <div>
             <label htmlFor="wo-title" className="label">
@@ -274,32 +289,15 @@ function CreateWorkOrderModal({
             />
           </div>
 
-          {/* Priority + Vendor */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="wo-priority" className="label">Priority</label>
-              <select id="wo-priority" name="priority" defaultValue="medium" className="input">
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="urgent">Urgent</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="wo-vendor" className="label">Vendor (optional)</label>
-              <select
-                id="wo-vendor"
-                name="vendor_id"
-                className="input"
-                value={selectedVendor}
-                onChange={(e) => setSelectedVendor(e.target.value)}
-              >
-                <option value="">Unassigned</option>
-                {vendors.map((v) => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
-            </div>
+          {/* Priority */}
+          <div>
+            <label htmlFor="wo-priority" className="label">Priority</label>
+            <select id="wo-priority" name="priority" defaultValue="medium" className="input">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
           </div>
 
           {/* Scheduled date + cost */}
@@ -322,22 +320,98 @@ function CreateWorkOrderModal({
             </div>
           </div>
 
-          {/* Portal enabled */}
-          {selectedVendor && (
-            <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
-              <input
-                type="checkbox"
-                name="portal_enabled"
-                defaultChecked
-                className="w-4 h-4 rounded border-themed text-brand-600 focus:ring-brand-500"
-              />
-              Send vendor portal link (vendor can mark complete via link)
-            </label>
+          {/* Vendor assignment mode — only shown when vendors exist */}
+          {vendors.length > 0 && (
+            <div>
+              <label className="label">Vendor</label>
+              {/* Mode toggle */}
+              <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setAssignMode('assign')}
+                  className={cn(
+                    'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
+                    assignMode === 'assign'
+                      ? 'bg-brand-800 text-white'
+                      : 'text-muted-themed hover:text-secondary-themed'
+                  )}
+                >
+                  Assign directly
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssignMode('quotes')}
+                  className={cn(
+                    'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
+                    assignMode === 'quotes'
+                      ? 'bg-brand-800 text-white'
+                      : 'text-muted-themed hover:text-secondary-themed'
+                  )}
+                >
+                  Request quotes first
+                </button>
+              </div>
+
+              {assignMode === 'assign' ? (
+                <>
+                  <select
+                    id="wo-vendor"
+                    name="vendor_id"
+                    className="input"
+                    value={selectedVendor}
+                    onChange={(e) => setSelectedVendor(e.target.value)}
+                  >
+                    <option value="">Unassigned</option>
+                    {vendors.map((v) => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                  {selectedVendor && (
+                    <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer mt-2">
+                      <input
+                        type="checkbox"
+                        name="portal_enabled"
+                        defaultChecked
+                        className="w-4 h-4 rounded border-themed text-brand-600 focus:ring-brand-500"
+                      />
+                      Send vendor portal link (vendor can mark complete via link)
+                    </label>
+                  )}
+                </>
+              ) : (
+                <div className="border border-themed rounded-xl overflow-hidden">
+                  <div className="px-3 py-2 bg-canvas-themed border-b border-themed">
+                    <p className="text-xs text-muted-themed">
+                      Select vendors to receive an RFQ — you'll be taken to the work order to review and approve quotes.
+                    </p>
+                  </div>
+                  {vendors.map((v) => (
+                    <label
+                      key={v.id}
+                      className="flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0 cursor-pointer hover:bg-canvas-themed transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedQuoteVendors.includes(v.id)}
+                        onChange={() => toggleQuoteVendor(v.id)}
+                        className="w-4 h-4 rounded border-themed text-brand-600 focus:ring-brand-500"
+                      />
+                      <span className="flex-1 text-sm font-medium text-primary-themed">{v.name}</span>
+                      <span className="text-xs text-muted-themed capitalize">{v.specialty.replace('_', ' ')}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           <div className="flex gap-3 pt-2 border-t border-themed">
             <button type="submit" disabled={pending} className="btn-primary flex-1">
-              {pending ? 'Creating…' : 'Create Work Order'}
+              {pending
+                ? 'Creating…'
+                : assignMode === 'quotes' && selectedQuoteVendors.length > 0
+                ? `Create & Request ${selectedQuoteVendors.length} Quote${selectedQuoteVendors.length !== 1 ? 's' : ''}`
+                : 'Create Work Order'}
             </button>
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
