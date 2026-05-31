@@ -493,3 +493,1000 @@ iOS Safari requires the app to be added to the Home Screen (PWA
 installed) before push notifications work. This is an OS-level
 limitation, not a code issue. Android Chrome works without
 installation.
+
+
+# NEW UPDATED CLAUDE.md — FieldStay: Quote Request Rearchitecture
+
+## Context
+
+The current quote request system has a structural flaw: it stores one
+quote on the work order itself (`quote_token`, `quoted_amount`, etc. as
+columns on `work_orders`) and locks the WO into a `quote_requested`
+status while waiting. This prevents sending to multiple vendors
+simultaneously, which is standard practice in property management.
+
+This task replaces that design with a proper `quote_requests` table —
+one row per vendor per work order — so PMs can solicit quotes from
+multiple vendors at once, compare them side by side, and approve one.
+
+---
+
+## ⚠️ SQL — Stephen runs this in Supabase BEFORE Claude Code touches anything
+
+```sql
+-- 1. Create status enum for quote requests
+CREATE TYPE quote_request_status AS ENUM (
+  'pending',    -- sent to vendor, waiting for response
+  'submitted',  -- vendor submitted a quote amount
+  'approved',   -- PM approved this quote (WO assigned to this vendor)
+  'declined',   -- PM declined this quote
+  'expired'     -- token expired without vendor responding
+);
+
+-- 2. Create the quote_requests table
+CREATE TABLE public.quote_requests (
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  work_order_id          UUID NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
+  org_id                 UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  vendor_id              UUID NOT NULL REFERENCES vendors(id) ON DELETE CASCADE,
+  status                 quote_request_status NOT NULL DEFAULT 'pending',
+  quote_token            TEXT UNIQUE NOT NULL,
+  quote_token_expires_at TIMESTAMPTZ NOT NULL,
+  quoted_amount          NUMERIC(10,2),
+  quote_notes            TEXT,
+  sent_at                TIMESTAMPTZ NOT NULL DEFAULT now(),
+  submitted_at           TIMESTAMPTZ,
+  created_at             TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 3. Indexes
+CREATE INDEX idx_quote_requests_work_order_id ON quote_requests(work_order_id);
+CREATE INDEX idx_quote_requests_vendor_id     ON quote_requests(vendor_id);
+CREATE INDEX idx_quote_requests_org_id        ON quote_requests(org_id);
+CREATE INDEX idx_quote_requests_token
+  ON quote_requests(quote_token);
+
+-- 4. RLS
+ALTER TABLE public.quote_requests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Org members can view quote requests"
+  ON quote_requests FOR SELECT
+  USING (org_id IN (SELECT get_user_org_ids()));
+
+CREATE POLICY "Admins and managers can manage quote requests"
+  ON quote_requests FOR ALL
+  USING (is_org_member(org_id, ARRAY['admin','manager']::member_role[]));
+
+-- 5. Drop old quote columns from work_orders
+--    (data is not migrated — these were never used in production)
+ALTER TABLE work_orders
+  DROP COLUMN IF EXISTS quote_token,
+  DROP COLUMN IF EXISTS quote_token_expires_at,
+  DROP COLUMN IF EXISTS quoted_amount,
+  DROP COLUMN IF EXISTS quote_notes;
+
+-- NOTE: The 'quote_requested' value in the wo_status enum is intentionally
+-- left in place. Removing enum values in Postgres requires recreating the
+-- type which is complex. It will simply be unused going forward.
+```
+
+---
+
+## Scope — 10 files, no new files created
+
+| File | Change |
+|------|--------|
+| `types/database.ts` | Add `QuoteRequestStatus` type + `QuoteRequest` interface; remove old quote fields from `WorkOrder` |
+| `app/(dashboard)/maintenance/actions.ts` | Remove `requestVendorQuote` + `approveVendorQuote`; add `sendQuoteRequests`, `approveQuoteRequest`, `declineQuoteRequest` |
+| `app/(dashboard)/maintenance/[id]/page.tsx` | Add `quote_requests` query; pass to `WorkOrderDetail` |
+| `app/(dashboard)/maintenance/[id]/work-order-detail.tsx` | Replace `QuotePanel` with `QuotesPanel`; remove old quote props |
+| `app/api/work-orders/[token]/quote/route.ts` | Look up by `quote_requests.quote_token` instead of `work_orders.quote_token` |
+| `app/work-orders/[token]/quote/page.tsx` | Fetch quote_request by token; join WO info |
+| `app/work-orders/[token]/vendor-portal.tsx` | `VendorQuotePortal` checks `quoteRequest.status` not `workOrder.status` |
+| `lib/inngest/events.ts` | Add `quote_request_id` to both quote event data shapes |
+| `lib/inngest/functions/work-order-events.ts` | Update both quote handlers to read from `quote_requests` table |
+
+**Do not touch any other file.**
+
+---
+
+## 1 — `types/database.ts`
+
+Add after the existing type definitions at the top of the file:
+
+```typescript
+export type QuoteRequestStatus = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
+```
+
+Add the `QuoteRequest` interface (place it near the other interfaces,
+after `WorkOrderPhoto`):
+
+```typescript
+export interface QuoteRequest {
+  id:                     string
+  work_order_id:          string
+  org_id:                 string
+  vendor_id:              string
+  status:                 QuoteRequestStatus
+  quote_token:            string
+  quote_token_expires_at: string
+  quoted_amount:          number | null
+  quote_notes:            string | null
+  sent_at:                string
+  submitted_at:           string | null
+  created_at:             string
+}
+```
+
+Remove these four fields from the `WorkOrder` interface — they no
+longer exist on the table:
+
+```typescript
+// REMOVE these four lines:
+quote_token: string | null
+quote_token_expires_at: string | null
+quoted_amount: number | null
+quote_notes: string | null
+```
+
+---
+
+## 2 — `app/(dashboard)/maintenance/actions.ts`
+
+**Remove** the following two functions entirely:
+- `requestVendorQuote`
+- `approveVendorQuote`
+
+**Add** these three functions at the end of the file:
+
+```typescript
+// ── Send quote requests to multiple vendors ───────────────────────────────────
+
+export async function sendQuoteRequests(
+  workOrderId: string,
+  vendorIds: string[]
+): Promise<{ error?: string; sent: number }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (!vendorIds.length) return { error: 'Select at least one vendor', sent: 0 }
+
+  const { data: wo } = await supabase
+    .from('work_orders')
+    .select('id, property_id, status')
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!wo) return { error: 'Work order not found', sent: 0 }
+  if (wo.status === 'completed' || wo.status === 'cancelled') {
+    return { error: 'Cannot request quotes on a completed or cancelled work order', sent: 0 }
+  }
+
+  // Skip vendors who already have a pending or submitted quote for this WO
+  const { data: existing } = await supabase
+    .from('quote_requests')
+    .select('vendor_id')
+    .eq('work_order_id', workOrderId)
+    .in('status', ['pending', 'submitted'])
+
+  const existingVendorIds = new Set((existing ?? []).map((r) => r.vendor_id))
+  const toSend = vendorIds.filter((id) => !existingVendorIds.has(id))
+
+  if (!toSend.length) {
+    return { error: 'All selected vendors already have an active quote request', sent: 0 }
+  }
+
+  let sent = 0
+
+  for (const vendorId of toSend) {
+    const quote_token            = crypto.randomUUID().replace(/-/g, '')
+    const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+
+    const { data: qr, error } = await supabase
+      .from('quote_requests')
+      .insert({
+        work_order_id: workOrderId,
+        org_id:        membership.org_id,
+        vendor_id:     vendorId,
+        quote_token,
+        quote_token_expires_at,
+        status:        'pending',
+      })
+      .select('id')
+      .single()
+
+    if (error || !qr) continue
+
+    await inngest.send({
+      name: 'work-order/quote-requested',
+      data: {
+        work_order_id:    workOrderId,
+        quote_request_id: qr.id,
+        property_id:      wo.property_id,
+        org_id:           membership.org_id,
+        vendor_id:        vendorId,
+        quote_token,
+      },
+    })
+
+    sent++
+  }
+
+  revalidatePath(`/maintenance/${workOrderId}`)
+  revalidatePath('/maintenance')
+  return { sent }
+}
+
+// ── Approve one quote — assign WO, decline all others ────────────────────────
+
+export async function approveQuoteRequest(
+  quoteRequestId: string
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: qr } = await supabase
+    .from('quote_requests')
+    .select('id, work_order_id, vendor_id, quoted_amount, status, org_id')
+    .eq('id', quoteRequestId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!qr) return { error: 'Quote request not found' }
+  if (qr.status !== 'submitted') return { error: 'Can only approve a quote that has been submitted by the vendor' }
+
+  // Mark this one approved
+  await supabase
+    .from('quote_requests')
+    .update({ status: 'approved' })
+    .eq('id', quoteRequestId)
+
+  // Decline all other pending/submitted quotes for this WO
+  await supabase
+    .from('quote_requests')
+    .update({ status: 'declined' })
+    .eq('work_order_id', qr.work_order_id)
+    .neq('id', quoteRequestId)
+    .in('status', ['pending', 'submitted'])
+
+  // Assign vendor to WO, generate completion portal, move to assigned
+  const completion_token            = crypto.randomUUID().replace(/-/g, '')
+  const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({
+      vendor_id:                  qr.vendor_id,
+      status:                     'assigned',
+      estimated_cost:             qr.quoted_amount ?? undefined,
+      portal_enabled:             true,
+      completion_token,
+      completion_token_expires_at,
+    })
+    .eq('id', qr.work_order_id)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  await supabase.from('work_order_updates').insert({
+    work_order_id:             qr.work_order_id,
+    org_id:                    membership.org_id,
+    updated_via_vendor_portal: false,
+    status_from:               'pending',
+    status_to:                 'assigned',
+    notes:                     `Quote approved — $${qr.quoted_amount?.toFixed(2) ?? '?'}. Vendor assigned and notified.`,
+  })
+
+  // Notify vendor via existing work-order/created Inngest event
+  await inngest.send({
+    name: 'work-order/created',
+    data: {
+      work_order_id:  qr.work_order_id,
+      property_id:    '',   // Inngest handler fetches this from DB
+      org_id:         membership.org_id,
+      vendor_id:      qr.vendor_id,
+      portal_enabled: true,
+    },
+  })
+
+  revalidatePath(`/maintenance/${qr.work_order_id}`)
+  revalidatePath('/maintenance')
+  return {}
+}
+
+// ── Decline a single quote request ────────────────────────────────────────────
+
+export async function declineQuoteRequest(
+  quoteRequestId: string
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: qr } = await supabase
+    .from('quote_requests')
+    .select('id, work_order_id')
+    .eq('id', quoteRequestId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!qr) return { error: 'Quote request not found' }
+
+  await supabase
+    .from('quote_requests')
+    .update({ status: 'declined' })
+    .eq('id', quoteRequestId)
+
+  revalidatePath(`/maintenance/${qr.work_order_id}`)
+  return {}
+}
+```
+
+---
+
+## 3 — `app/(dashboard)/maintenance/[id]/page.tsx`
+
+Add a fourth parallel query to fetch quote requests with vendor info:
+
+```typescript
+const [
+  { data: wo },
+  { data: updates },
+  { data: photos },
+  { data: quoteRequests },   // ADD THIS
+  { data: vendors },
+] = await Promise.all([
+  // ... existing queries unchanged ...
+
+  // ADD: quote requests for this WO
+  supabase
+    .from('quote_requests')
+    .select('id, vendor_id, status, quoted_amount, quote_notes, sent_at, submitted_at, quote_token, quote_token_expires_at, vendors(id, name, specialty, email)')
+    .eq('work_order_id', id)
+    .order('created_at', { ascending: true }),
+
+  // ... vendors query unchanged ...
+])
+```
+
+Pass `quoteRequests` to `WorkOrderDetail`:
+```tsx
+<WorkOrderDetail
+  workOrder={wo as never}
+  updates={updates ?? []}
+  photos={photos ?? []}
+  quoteRequests={(quoteRequests ?? []) as never}
+  vendors={vendors ?? []}
+/>
+```
+
+---
+
+## 4 — `app/(dashboard)/maintenance/[id]/work-order-detail.tsx`
+
+### Types
+
+Remove `quote_token`, `quote_token_expires_at`, `quoted_amount`,
+`quote_notes` from the `WorkOrderDetailProps` interface.
+
+Add a `QuoteRequest` local interface:
+
+```typescript
+interface QuoteRequestRow {
+  id:                     string
+  vendor_id:              string
+  status:                 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
+  quoted_amount:          number | null
+  quote_notes:            string | null
+  sent_at:                string
+  submitted_at:           string | null
+  quote_token:            string
+  quote_token_expires_at: string
+  vendors: { id: string; name: string; specialty: string; email: string | null } | null
+}
+```
+
+### Imports
+
+Add to the action imports:
+```typescript
+import { sendQuoteRequests, approveQuoteRequest, declineQuoteRequest } from '../actions'
+```
+
+Remove `requestVendorQuote` and `approveVendorQuote` from imports.
+
+### Replace `QuotePanel` with `QuotesPanel`
+
+Delete the existing `QuotePanel` function entirely. Replace it with this:
+
+```typescript
+// ── Quotes Panel ──────────────────────────────────────────────────────────────
+
+const QUOTE_STATUS_LABELS: Record<QuoteRequestRow['status'], string> = {
+  pending:   'Awaiting Response',
+  submitted: 'Quote Received',
+  approved:  'Approved',
+  declined:  'Declined',
+  expired:   'Expired',
+}
+
+const QUOTE_STATUS_BADGE: Record<QuoteRequestRow['status'], string> = {
+  pending:   'badge-slate',
+  submitted: 'badge-gold',
+  approved:  'badge-green',
+  declined:  'badge-slate',
+  expired:   'badge-red',
+}
+
+function QuotesPanel({
+  workOrder,
+  quoteRequests,
+  vendors,
+}: {
+  workOrder:     { id: string; status: string }
+  quoteRequests: QuoteRequestRow[]
+  vendors:       { id: string; name: string; specialty: string }[]
+}) {
+  const [showForm,    setShowForm]    = useState(false)
+  const [selected,    setSelected]    = useState<string[]>([])
+  const [sending,     startSend]      = useTransition()
+  const [approving,   setApproving]   = useState<string | null>(null)
+  const [declining,   setDeclining]   = useState<string | null>(null)
+  const [err,         setErr]         = useState<string | null>(null)
+
+  const canRequest = !['completed', 'cancelled'].includes(workOrder.status)
+  const activeVendorIds = new Set(
+    quoteRequests
+      .filter((q) => q.status === 'pending' || q.status === 'submitted')
+      .map((q) => q.vendor_id)
+  )
+  const availableVendors = vendors.filter((v) => !activeVendorIds.has(v.id))
+
+  const handleSend = () => {
+    if (!selected.length) return
+    startSend(async () => {
+      const r = await sendQuoteRequests(workOrder.id, selected)
+      if (r.error) { setErr(r.error); return }
+      setSelected([])
+      setShowForm(false)
+      setErr(null)
+    })
+  }
+
+  const handleApprove = (quoteRequestId: string) => {
+    setApproving(quoteRequestId)
+    startSend(async () => {
+      const r = await approveQuoteRequest(quoteRequestId)
+      if (r.error) setErr(r.error)
+      setApproving(null)
+    })
+  }
+
+  const handleDecline = (quoteRequestId: string) => {
+    setDeclining(quoteRequestId)
+    startSend(async () => {
+      const r = await declineQuoteRequest(quoteRequestId)
+      if (r.error) setErr(r.error)
+      setDeclining(null)
+    })
+  }
+
+  // Don't render panel at all if no quotes exist and WO can't accept new ones
+  if (!quoteRequests.length && !canRequest) return null
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <MessageSquareDollar className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
+          <h3 className="section-header mb-0">Quote Requests</h3>
+          {quoteRequests.length > 0 && (
+            <span className="badge badge-slate">{quoteRequests.length}</span>
+          )}
+        </div>
+        {canRequest && availableVendors.length > 0 && (
+          <button onClick={() => setShowForm((v) => !v)} className="btn-secondary text-xs py-1.5 px-2.5">
+            <Plus className="w-3 h-3" />
+            Request Quotes
+          </button>
+        )}
+      </div>
+
+      {err && (
+        <div className="text-xs rounded px-3 py-2 mb-3"
+             style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
+          {err}
+        </div>
+      )}
+
+      {/* Vendor selection form */}
+      {showForm && (
+        <div className="mb-4 p-3 rounded-xl border border-themed space-y-3"
+             style={{ background: 'var(--bg-canvas)' }}>
+          <p className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+            Select vendors to receive an RFQ:
+          </p>
+          <div className="space-y-1.5">
+            {availableVendors.map((v) => (
+              <label key={v.id} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(v.id)}
+                  onChange={(e) => {
+                    setSelected((prev) =>
+                      e.target.checked ? [...prev, v.id] : prev.filter((id) => id !== v.id)
+                    )
+                  }}
+                  className="rounded"
+                />
+                <span className="text-sm" style={{ color: 'var(--text-primary)' }}>{v.name}</span>
+                <span className="text-xs capitalize" style={{ color: 'var(--text-muted)' }}>
+                  {v.specialty.replace('_', ' ')}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSend}
+              disabled={!selected.length || sending}
+              className="btn-primary text-sm"
+            >
+              {sending
+                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending…</>
+                : `Send to ${selected.length || ''} Vendor${selected.length !== 1 ? 's' : ''}`
+              }
+            </button>
+            <button onClick={() => { setShowForm(false); setSelected([]) }} className="btn-ghost text-sm">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quote requests list */}
+      {quoteRequests.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          No quote requests yet. Request quotes from one or more vendors before assigning.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {quoteRequests.map((qr) => {
+            const vendor   = Array.isArray(qr.vendors) ? qr.vendors[0] : qr.vendors
+            const isExpired = new Date(qr.quote_token_expires_at) < new Date()
+            const portalUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/work-orders/${qr.quote_token}/quote`
+
+            return (
+              <div
+                key={qr.id}
+                className="flex items-start gap-3 p-3 rounded-xl border border-themed"
+                style={{ background: 'var(--bg-raised)' }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {vendor?.name ?? '—'}
+                    </span>
+                    <span className={cn('badge', QUOTE_STATUS_BADGE[isExpired && qr.status === 'pending' ? 'expired' : qr.status])}>
+                      {QUOTE_STATUS_LABELS[isExpired && qr.status === 'pending' ? 'expired' : qr.status]}
+                    </span>
+                  </div>
+
+                  {qr.quoted_amount != null && (
+                    <p className="text-lg font-bold" style={{ color: 'var(--accent-gold)' }}>
+                      ${qr.quoted_amount.toFixed(2)}
+                    </p>
+                  )}
+                  {qr.quote_notes && (
+                    <p className="text-xs italic mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {qr.quote_notes}
+                    </p>
+                  )}
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    Sent {formatDate(qr.sent_at)}
+                    {qr.submitted_at && ` · Received ${formatDate(qr.submitted_at)}`}
+                  </p>
+                </div>
+
+                {/* Actions */}
+                <div className="flex flex-col gap-1.5 flex-shrink-0">
+                  {qr.status === 'submitted' && (
+                    <button
+                      onClick={() => handleApprove(qr.id)}
+                      disabled={approving === qr.id}
+                      className="btn-primary text-xs py-1.5 px-2.5 whitespace-nowrap"
+                    >
+                      {approving === qr.id ? <Loader2 className="w-3 h-3 animate-spin" /> : '✓ Approve'}
+                    </button>
+                  )}
+                  {(qr.status === 'pending' || qr.status === 'submitted') && (
+                    <button
+                      onClick={() => handleDecline(qr.id)}
+                      disabled={declining === qr.id}
+                      className="btn-danger text-xs py-1.5 px-2.5"
+                    >
+                      {declining === qr.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Decline'}
+                    </button>
+                  )}
+                  {qr.status === 'pending' && !isExpired && (
+                    <button
+                      onClick={() => navigator.clipboard.writeText(portalUrl)}
+                      className="btn-ghost text-xs py-1.5 px-2.5 whitespace-nowrap"
+                      title="Copy vendor portal link"
+                    >
+                      Copy Link
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+```
+
+### Update `WorkOrderDetail` component
+
+Add `quoteRequests` prop:
+
+```typescript
+export function WorkOrderDetail({
+  workOrder,
+  updates,
+  photos,
+  quoteRequests = [],   // ADD
+  vendors = [],
+}: {
+  workOrder:     WorkOrderDetailProps
+  updates:       WorkOrderUpdate[]
+  photos:        WorkOrderPhoto[]
+  quoteRequests: QuoteRequestRow[]   // ADD
+  vendors?:      { id: string; name: string; specialty: string }[]
+})
+```
+
+Replace the call to `<QuotePanel workOrder={workOrder} />` with:
+
+```tsx
+<QuotesPanel
+  workOrder={{ id: workOrder.id, status: workOrder.status }}
+  quoteRequests={quoteRequests}
+  vendors={vendors}
+/>
+```
+
+Add `Plus` and `MessageSquareDollar` to the lucide-react imports if
+not already present. Remove `MessageSquareDot` import if it was only
+used by the old `QuotePanel`.
+
+---
+
+## 5 — `app/api/work-orders/[token]/quote/route.ts`
+
+Rewrite entirely. Look up by `quote_requests.quote_token` instead
+of `work_orders.quote_token`:
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient }       from '@/lib/supabase/server'
+import { inngest }                   from '@/lib/inngest/client'
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  const { token }  = await params
+  const supabase   = createServiceClient()
+
+  const { data: qr } = await supabase
+    .from('quote_requests')
+    .select(`
+      id, status, quote_token_expires_at,
+      work_orders (
+        id, title, description, scheduled_date, estimated_cost,
+        properties (name, city, state)
+      )
+    `)
+    .eq('quote_token', token)
+    .single()
+
+  if (!qr) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+  const wo = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
+
+  return NextResponse.json({
+    quoteRequest: {
+      id:                     qr.id,
+      status:                 qr.status,
+      quote_token_expires_at: qr.quote_token_expires_at,
+    },
+    workOrder: wo,
+  })
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  const { token }  = await params
+  const supabase   = createServiceClient()
+
+  const { data: qr } = await supabase
+    .from('quote_requests')
+    .select('id, org_id, work_order_id, status, quote_token_expires_at')
+    .eq('quote_token', token)
+    .single()
+
+  if (!qr) return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })
+
+  if (qr.status !== 'pending') {
+    return NextResponse.json({ error: 'This quote request is no longer active' }, { status: 409 })
+  }
+
+  if (new Date(qr.quote_token_expires_at) < new Date()) {
+    await supabase.from('quote_requests').update({ status: 'expired' }).eq('id', qr.id)
+    return NextResponse.json({ error: 'This quote link has expired' }, { status: 410 })
+  }
+
+  const body          = await request.json().catch(() => ({})) as { amount?: number; notes?: string }
+  const quoted_amount = parseFloat(String(body.amount ?? 0))
+  const quote_notes   = (body.notes as string | undefined)?.trim() || null
+
+  if (!quoted_amount || quoted_amount <= 0) {
+    return NextResponse.json({ error: 'A valid quote amount is required' }, { status: 400 })
+  }
+
+  await supabase
+    .from('quote_requests')
+    .update({
+      status:       'submitted',
+      quoted_amount,
+      quote_notes,
+      submitted_at: new Date().toISOString(),
+    })
+    .eq('id', qr.id)
+
+  await supabase.from('work_order_updates').insert({
+    work_order_id:             qr.work_order_id,
+    org_id:                    qr.org_id,
+    updated_via_vendor_portal: true,
+    status_from:               null,
+    status_to:                 null,
+    notes: `Vendor submitted quote: $${quoted_amount.toFixed(2)}${quote_notes ? ` — ${quote_notes}` : ''}`,
+  })
+
+  await inngest.send({
+    name: 'work-order/quote-submitted' as const,
+    data: {
+      work_order_id:    qr.work_order_id,
+      quote_request_id: qr.id,
+      org_id:           qr.org_id,
+      quoted_amount,
+      quote_notes,
+    },
+  })
+
+  return NextResponse.json({ success: true })
+}
+```
+
+---
+
+## 6 — `app/work-orders/[token]/quote/page.tsx`
+
+Rewrite to fetch from `quote_requests`:
+
+```typescript
+import { createServiceClient } from '@/lib/supabase/server'
+import { VendorQuotePortal }   from '../vendor-portal'
+
+interface Props { params: Promise<{ token: string }> }
+
+export default async function QuotePortalPage({ params }: Props) {
+  const { token }  = await params
+  const supabase   = createServiceClient()
+
+  const { data: qr } = await supabase
+    .from('quote_requests')
+    .select(`
+      id, status, quote_token_expires_at,
+      work_orders (
+        id, title, description, scheduled_date, estimated_cost,
+        properties (name, city, state)
+      )
+    `)
+    .eq('quote_token', token)
+    .single()
+
+  if (!qr) {
+    return (
+      <div className="min-h-screen bg-accent-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow p-8 max-w-md w-full text-center">
+          <h2 className="text-xl font-semibold text-accent-900 mb-2">Not Found</h2>
+          <p className="text-sm text-accent-500">This quote link is invalid or has been removed.</p>
+        </div>
+      </div>
+    )
+  }
+
+  const wo       = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
+  const property = wo && (Array.isArray(wo.properties) ? wo.properties[0] : wo.properties)
+  const expired  = new Date(qr.quote_token_expires_at) < new Date()
+
+  return (
+    <VendorQuotePortal
+      token={token}
+      quoteRequestStatus={qr.status}
+      workOrder={{
+        id:             wo?.id ?? '',
+        title:          wo?.title ?? '',
+        description:    wo?.description ?? null,
+        scheduled_date: wo?.scheduled_date ?? null,
+        estimated_cost: wo?.estimated_cost ?? null,
+      }}
+      property={property ?? null}
+      expired={expired}
+    />
+  )
+}
+```
+
+---
+
+## 7 — `app/work-orders/[token]/vendor-portal.tsx`
+
+Update `VendorQuotePortal` to accept `quoteRequestStatus` as a prop
+instead of checking `workOrder.status`:
+
+```typescript
+// Change the props interface — add quoteRequestStatus, remove status from workOrder
+export function VendorQuotePortal({
+  token,
+  quoteRequestStatus,   // NEW — replaces workOrder.status check
+  workOrder,
+  property,
+  expired,
+}: {
+  token:                string
+  quoteRequestStatus:   string   // 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
+  workOrder:            WorkOrderInfo   // remove 'status' from WorkOrderInfo if it was there
+  property:             PropertyInfo | null
+  expired:              boolean
+})
+```
+
+Inside the component, update the `alreadyQuoted` check:
+
+```typescript
+// BEFORE:
+const alreadyQuoted = workOrder.status !== 'quote_requested'
+
+// AFTER:
+const alreadyQuoted = quoteRequestStatus !== 'pending'
+```
+
+Remove `status` from `WorkOrderInfo` interface if it was only used
+for this check.
+
+---
+
+## 8 — `lib/inngest/events.ts`
+
+Add `quote_request_id` to both quote event data shapes:
+
+```typescript
+'work-order/quote-requested': {
+  data: {
+    work_order_id:    string
+    quote_request_id: string   // ADD
+    property_id:      string
+    org_id:           string
+    vendor_id:        string
+    quote_token:      string
+  }
+}
+
+'work-order/quote-submitted': {
+  data: {
+    work_order_id:    string
+    quote_request_id: string   // ADD
+    org_id:           string
+    quoted_amount:    number
+    quote_notes:      string | null
+  }
+}
+```
+
+---
+
+## 9 — `lib/inngest/functions/work-order-events.ts`
+
+### `handleWorkOrderQuoteRequested`
+
+This function currently fetches `quote_token` from `work_orders`.
+Update it to fetch from `quote_requests` using `quote_request_id`:
+
+```typescript
+async ({ event, step, logger }) => {
+  const { work_order_id, quote_request_id, vendor_id } = event.data
+
+  await step.run('send-vendor-quote-request', async () => {
+    const supabase = createServiceClient()
+
+    // Fetch quote request and WO info together
+    const { data: qr } = await supabase
+      .from('quote_requests')
+      .select(`
+        id, quote_token, status,
+        work_orders (
+          id, title, description, scheduled_date, estimated_cost,
+          properties (name, city, state)
+        ),
+        vendors (name, email)
+      `)
+      .eq('id', quote_request_id)
+      .single()
+
+    if (!qr?.quote_token) return
+
+    const wo       = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
+    const vendor   = Array.isArray(qr.vendors)     ? qr.vendors[0]     : qr.vendors
+    const property = wo && (Array.isArray(wo.properties) ? wo.properties[0] : wo.properties)
+
+    if (!vendor?.email) {
+      logger.warn(`Quote request ${quote_request_id}: vendor has no email`)
+      return
+    }
+
+    const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/work-orders/${qr.quote_token}/quote`
+
+    // ... rest of email send logic unchanged, just use the variables above
+  })
+}
+```
+
+### `handleWorkOrderQuoteSubmitted`
+
+Update to fetch `quoted_amount` from `quote_requests` using
+`quote_request_id` (it's already in the event data, so this just
+means using `event.data.quote_request_id` if you need to look up
+additional context):
+
+```typescript
+async ({ event, step }) => {
+  const { work_order_id, org_id, quoted_amount, quote_notes, quote_request_id } = event.data
+  // Rest of the function is unchanged — it already has quoted_amount in the event data
+  // Just destructure quote_request_id in case it's needed for future use
+}
+```
+
+---
+
+## Verification Checklist
+
+- [ ] `npm run build` passes with zero TypeScript errors
+- [ ] Work order detail page shows "Quote Requests" panel
+- [ ] "Request Quotes" button appears on pending WOs
+- [ ] Selecting multiple vendors and clicking Send fires one RFQ per vendor
+- [ ] Each vendor receives their own unique portal link via email
+- [ ] Vendor submits quote → status updates to "Quote Received" in the panel
+- [ ] Multiple quotes received → all shown side by side with amounts
+- [ ] Approving one quote → WO moves to `assigned`, other quotes auto-declined
+- [ ] Declining a single quote → only that request declined, others unaffected
+- [ ] Vendor portal page loads correctly via `/work-orders/[token]/quote`
+- [ ] Already-submitted quote shows "This quote request is no longer active" if vendor tries to resubmit
+- [ ] `quote_requested` WO status no longer appears anywhere in the new flow
+- [ ] No TypeScript errors referencing removed WorkOrder quote fields
+
+## Notes
+
+- The `quote_requested` value in `wo_status` remains in the database enum
+  but is not used by any new code. Do not try to remove it from the enum
+  — that requires recreating the type in Postgres and is not worth the risk.
+- The WO status stays `pending` while quotes are being gathered.
+  The status only moves to `assigned` when a quote is approved.
+- The `Copy Link` button on pending quote requests lets PMs manually
+  share the portal link if the email didn't arrive.
+- `availableVendors` filters out vendors who already have an active
+  (pending or submitted) quote request, preventing duplicate RFQs
+  to the same vendor.
