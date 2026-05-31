@@ -7,6 +7,8 @@
  * which generates these automatically from your live schema.
  */
 
+export type QuoteRequestStatus = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
+
 export type OrgPlan        = 'starter' | 'growth' | 'pro' | 'enterprise'
 export type OrgPlanStatus  = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'paused'
 export type MemberRole     = 'admin' | 'manager' | 'crew' | 'viewer'
@@ -374,10 +376,6 @@ export interface WorkOrder {
   completion_token_expires_at: string | null
   completion_notes: string | null
   invoice_reference: string | null
-  quote_token: string | null
-  quote_token_expires_at: string | null
-  quoted_amount: number | null
-  quote_notes: string | null
   created_at: string
   updated_at: string
 }
@@ -400,6 +398,21 @@ export interface WorkOrderPhoto {
   storage_path: string
   uploaded_by: string | null
   created_at: string
+}
+
+export interface QuoteRequest {
+  id:                     string
+  work_order_id:          string
+  org_id:                 string
+  vendor_id:              string
+  status:                 QuoteRequestStatus
+  quote_token:            string
+  quote_token_expires_at: string
+  quoted_amount:          number | null
+  quote_notes:            string | null
+  sent_at:                string
+  submitted_at:           string | null
+  created_at:             string
 }
 
 export interface MaintenanceSchedule {
@@ -532,6 +545,7 @@ export interface Database {
       work_orders:                 { Row: WorkOrder;                Insert: Partial<WorkOrder>;                Update: Partial<WorkOrder>;                Relationships: [] }
       work_order_updates:          { Row: WorkOrderUpdate;          Insert: Partial<WorkOrderUpdate>;          Update: Partial<WorkOrderUpdate>;          Relationships: [] }
       work_order_photos:           { Row: WorkOrderPhoto;           Insert: Partial<WorkOrderPhoto>;           Update: Partial<WorkOrderPhoto>;           Relationships: [] }
+      quote_requests:              { Row: QuoteRequest;             Insert: Partial<QuoteRequest>;             Update: Partial<QuoteRequest>;             Relationships: [] }
       maintenance_schedules:       { Row: MaintenanceSchedule;      Insert: Partial<MaintenanceSchedule>;      Update: Partial<MaintenanceSchedule>;      Relationships: [] }
       guest_message_templates:     { Row: GuestMessageTemplate;     Insert: Partial<GuestMessageTemplate>;     Update: Partial<GuestMessageTemplate>;     Relationships: [] }
       guest_messages_sent:         { Row: GuestMessageSent;         Insert: Partial<GuestMessageSent>;         Update: Partial<GuestMessageSent>;         Relationships: [] }

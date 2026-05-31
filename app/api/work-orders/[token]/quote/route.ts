@@ -1,62 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
-import { inngest } from '@/lib/inngest/client'
+import { createServiceClient }       from '@/lib/supabase/server'
+import { inngest }                   from '@/lib/inngest/client'
 
-/**
- * GET /api/work-orders/[token]/quote
- * Returns WO details so the quote portal page can render.
- */
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
-  const { token } = await params
-  const supabase  = createServiceClient()
+  const { token }  = await params
+  const supabase   = createServiceClient()
 
-  const { data: wo } = await supabase
-    .from('work_orders')
+  const { data: qr } = await supabase
+    .from('quote_requests')
     .select(`
-      id, title, description, status, scheduled_date,
-      estimated_cost, quote_token_expires_at,
-      properties (name, city, state)
+      id, status, quote_token_expires_at,
+      work_orders (
+        id, title, description, scheduled_date, estimated_cost,
+        properties (name, city, state)
+      )
     `)
     .eq('quote_token', token)
     .single()
 
-  if (!wo) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!qr) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  return NextResponse.json({ workOrder: wo })
+  const wo = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
+
+  return NextResponse.json({
+    quoteRequest: {
+      id:                     qr.id,
+      status:                 qr.status,
+      quote_token_expires_at: qr.quote_token_expires_at,
+    },
+    workOrder: wo,
+  })
 }
 
-/**
- * POST /api/work-orders/[token]/quote
- * Body: { amount: number, notes?: string }
- * Vendor submits their quote; WO status remains quote_requested, PM is notified.
- */
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
-  const { token } = await params
-  const supabase  = createServiceClient()
+  const { token }  = await params
+  const supabase   = createServiceClient()
 
-  const { data: wo } = await supabase
-    .from('work_orders')
-    .select('id, org_id, status, quote_token_expires_at')
+  const { data: qr } = await supabase
+    .from('quote_requests')
+    .select('id, org_id, work_order_id, status, quote_token_expires_at')
     .eq('quote_token', token)
     .single()
 
-  if (!wo) return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })
+  if (!qr) return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })
 
-  if (wo.status !== 'quote_requested') {
-    return NextResponse.json({ error: 'Quote no longer needed for this work order' }, { status: 409 })
+  if (qr.status !== 'pending') {
+    return NextResponse.json({ error: 'This quote request is no longer active' }, { status: 409 })
   }
 
-  if (wo.quote_token_expires_at && new Date(wo.quote_token_expires_at) < new Date()) {
+  if (new Date(qr.quote_token_expires_at) < new Date()) {
+    await supabase.from('quote_requests').update({ status: 'expired' }).eq('id', qr.id)
     return NextResponse.json({ error: 'This quote link has expired' }, { status: 410 })
   }
 
-  const body = await request.json().catch(() => ({})) as { amount?: number; notes?: string }
+  const body          = await request.json().catch(() => ({})) as { amount?: number; notes?: string }
   const quoted_amount = parseFloat(String(body.amount ?? 0))
   const quote_notes   = (body.notes as string | undefined)?.trim() || null
 
@@ -65,24 +68,30 @@ export async function POST(
   }
 
   await supabase
-    .from('work_orders')
-    .update({ quoted_amount, quote_notes })
-    .eq('id', wo.id)
+    .from('quote_requests')
+    .update({
+      status:       'submitted',
+      quoted_amount,
+      quote_notes,
+      submitted_at: new Date().toISOString(),
+    })
+    .eq('id', qr.id)
 
   await supabase.from('work_order_updates').insert({
-    work_order_id:             wo.id,
-    org_id:                    wo.org_id,
+    work_order_id:             qr.work_order_id,
+    org_id:                    qr.org_id,
     updated_via_vendor_portal: true,
-    status_from:               'quote_requested',
-    status_to:                 'quote_requested',
-    notes:                     `Vendor submitted quote: $${quoted_amount.toFixed(2)}${quote_notes ? ` — ${quote_notes}` : ''}`,
+    status_from:               null,
+    status_to:                 null,
+    notes: `Vendor submitted quote: $${quoted_amount.toFixed(2)}${quote_notes ? ` — ${quote_notes}` : ''}`,
   })
 
   await inngest.send({
     name: 'work-order/quote-submitted' as const,
     data: {
-      work_order_id: wo.id,
-      org_id:        wo.org_id,
+      work_order_id:    qr.work_order_id,
+      quote_request_id: qr.id,
+      org_id:           qr.org_id,
       quoted_amount,
       quote_notes,
     },

@@ -254,46 +254,50 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
   },
   { event: 'work-order/quote-requested' as const },
   async ({ event, step, logger }) => {
-    const { work_order_id } = event.data
+    const { work_order_id, quote_request_id } = event.data
 
     await step.run('send-vendor-quote-request', async () => {
       const supabase = createServiceClient()
 
-      const { data: wo } = await supabase
-        .from('work_orders')
+      const { data: qr } = await supabase
+        .from('quote_requests')
         .select(`
-          id, title, description, scheduled_date, quote_token, estimated_cost,
-          vendors ( name, email ),
-          properties ( name, city, state )
+          id, quote_token, status,
+          work_orders (
+            id, title, description, scheduled_date, estimated_cost,
+            properties (name, city, state)
+          ),
+          vendors (name, email)
         `)
-        .eq('id', work_order_id)
+        .eq('id', quote_request_id)
         .single()
 
-      if (!wo?.quote_token) return
+      if (!qr?.quote_token) return
 
-      const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
-      const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+      const wo       = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
+      const vendor   = Array.isArray(qr.vendors)     ? qr.vendors[0]     : qr.vendors
+      const property = wo && (Array.isArray(wo.properties) ? wo.properties[0] : wo.properties)
 
       if (!vendor?.email) {
-        logger.warn(`Quote request for WO ${work_order_id}: vendor has no email`)
+        logger.warn(`Quote request ${quote_request_id}: vendor has no email`)
         return
       }
 
-      const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/work-orders/${wo.quote_token}/quote`
+      const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/work-orders/${qr.quote_token}/quote`
 
       await resend.emails.send({
         from:    FROM,
         to:      vendor.email,
-        subject: `Quote requested — ${wo.title} at ${property?.name}`,
+        subject: `Quote requested — ${wo?.title} at ${property?.name}`,
         html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
             <h2>Quote Request</h2>
             <p>You've been asked to submit a quote for a job at <strong>${property?.name}</strong>.</p>
             <table style="border-collapse:collapse;width:100%;margin:16px 0">
-              <tr><td style="padding:8px;color:#64748b">Job</td><td style="padding:8px;font-weight:600">${wo.title}</td></tr>
-              ${wo.description ? `<tr><td style="padding:8px;color:#64748b">Details</td><td style="padding:8px">${wo.description}</td></tr>` : ''}
-              ${wo.scheduled_date ? `<tr><td style="padding:8px;color:#64748b">Target Date</td><td style="padding:8px;font-weight:600">${new Date(wo.scheduled_date).toLocaleDateString()}</td></tr>` : ''}
-              ${wo.estimated_cost ? `<tr><td style="padding:8px;color:#64748b">Budget Est.</td><td style="padding:8px">$${wo.estimated_cost}</td></tr>` : ''}
+              <tr><td style="padding:8px;color:#64748b">Job</td><td style="padding:8px;font-weight:600">${wo?.title}</td></tr>
+              ${wo?.description ? `<tr><td style="padding:8px;color:#64748b">Details</td><td style="padding:8px">${wo.description}</td></tr>` : ''}
+              ${wo?.scheduled_date ? `<tr><td style="padding:8px;color:#64748b">Target Date</td><td style="padding:8px;font-weight:600">${new Date(wo.scheduled_date).toLocaleDateString()}</td></tr>` : ''}
+              ${wo?.estimated_cost ? `<tr><td style="padding:8px;color:#64748b">Budget Est.</td><td style="padding:8px">$${wo.estimated_cost}</td></tr>` : ''}
             </table>
             <p>Click below to view the job details and submit your quote:</p>
             <p><a href="${quoteUrl}" style="background:#FCD116;color:#0a1628;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">Submit Quote →</a></p>
@@ -319,7 +323,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
   },
   { event: 'work-order/quote-submitted' as const },
   async ({ event, step }) => {
-    const { work_order_id, org_id, quoted_amount, quote_notes } = event.data
+    const { work_order_id, quote_request_id, org_id, quoted_amount, quote_notes } = event.data
 
     await step.run('notify-pm-of-quote', async () => {
       const supabase = createServiceClient()

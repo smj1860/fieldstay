@@ -151,20 +151,22 @@ export type FieldStayEvents = {
 
   'work-order/quote-requested': {
     data: {
-      work_order_id: string
-      property_id: string
-      org_id: string
-      vendor_id: string
-      quote_token: string
+      work_order_id:    string
+      quote_request_id: string
+      property_id:      string
+      org_id:           string
+      vendor_id:        string
+      quote_token:      string
     }
   }
 
   'work-order/quote-submitted': {
     data: {
-      work_order_id: string
-      org_id: string
-      quoted_amount: number
-      quote_notes: string | null
+      work_order_id:    string
+      quote_request_id: string
+      org_id:           string
+      quoted_amount:    number
+      quote_notes:      string | null
     }
   }
 

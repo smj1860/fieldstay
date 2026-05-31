@@ -394,113 +394,179 @@ export async function deleteWorkOrderPhoto(photoId: string): Promise<{ error?: s
   return {}
 }
 
-// ── Feature 5: Request vendor quote ──────────────────────────────────────────
+// ── Send quote requests to multiple vendors ───────────────────────────────────
 
-export async function requestVendorQuote(
-  workOrderId: string
-): Promise<{ error?: string }> {
+export async function sendQuoteRequests(
+  workOrderId: string,
+  vendorIds: string[]
+): Promise<{ error?: string; sent: number }> {
   const { supabase, membership } = await requireOrgMember()
+
+  if (!vendorIds.length) return { error: 'Select at least one vendor', sent: 0 }
 
   const { data: wo } = await supabase
     .from('work_orders')
-    .select('id, vendor_id, property_id, status')
+    .select('id, property_id, status')
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
     .single()
 
-  if (!wo) return { error: 'Work order not found' }
-  if (!wo.vendor_id) return { error: 'Assign a vendor before requesting a quote' }
-  if (wo.status !== 'pending') return { error: 'Can only request a quote on a pending work order' }
+  if (!wo) return { error: 'Work order not found', sent: 0 }
+  if (wo.status === 'completed' || wo.status === 'cancelled') {
+    return { error: 'Cannot request quotes on a completed or cancelled work order', sent: 0 }
+  }
 
-  const quote_token = crypto.randomUUID().replace(/-/g, '')
-  const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+  // Skip vendors who already have a pending or submitted quote for this WO
+  const { data: existing } = await supabase
+    .from('quote_requests')
+    .select('vendor_id')
+    .eq('work_order_id', workOrderId)
+    .in('status', ['pending', 'submitted'])
 
-  const { error } = await supabase
-    .from('work_orders')
-    .update({ status: 'quote_requested', quote_token, quote_token_expires_at })
-    .eq('id', workOrderId)
-    .eq('org_id', membership.org_id)
+  const existingVendorIds = new Set((existing ?? []).map((r) => r.vendor_id))
+  const toSend = vendorIds.filter((id) => !existingVendorIds.has(id))
 
-  if (error) return { error: error.message }
+  if (!toSend.length) {
+    return { error: 'All selected vendors already have an active quote request', sent: 0 }
+  }
 
-  await supabase.from('work_order_updates').insert({
-    work_order_id:             workOrderId,
-    org_id:                    membership.org_id,
-    updated_via_vendor_portal: false,
-    status_from:               'pending',
-    status_to:                 'quote_requested',
-    notes:                     'Quote requested from vendor',
-  })
+  let sent = 0
 
-  await inngest.send({
-    name: 'work-order/quote-requested',
-    data: {
-      work_order_id: workOrderId,
-      property_id:   wo.property_id,
-      org_id:        membership.org_id,
-      vendor_id:     wo.vendor_id,
-      quote_token,
-    },
-  })
+  for (const vendorId of toSend) {
+    const quote_token            = crypto.randomUUID().replace(/-/g, '')
+    const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+
+    const { data: qr, error } = await supabase
+      .from('quote_requests')
+      .insert({
+        work_order_id: workOrderId,
+        org_id:        membership.org_id,
+        vendor_id:     vendorId,
+        quote_token,
+        quote_token_expires_at,
+        status:        'pending',
+      })
+      .select('id')
+      .single()
+
+    if (error || !qr) continue
+
+    await inngest.send({
+      name: 'work-order/quote-requested',
+      data: {
+        work_order_id:    workOrderId,
+        quote_request_id: qr.id,
+        property_id:      wo.property_id,
+        org_id:           membership.org_id,
+        vendor_id:        vendorId,
+        quote_token,
+      },
+    })
+
+    sent++
+  }
 
   revalidatePath(`/maintenance/${workOrderId}`)
   revalidatePath('/maintenance')
-  return {}
+  return { sent }
 }
 
-export async function approveVendorQuote(workOrderId: string): Promise<{ error?: string }> {
+// ── Approve one quote — assign WO, decline all others ────────────────────────
+
+export async function approveQuoteRequest(
+  quoteRequestId: string
+): Promise<{ error?: string }> {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: wo } = await supabase
-    .from('work_orders')
-    .select('id, vendor_id, quoted_amount, status')
-    .eq('id', workOrderId)
+  const { data: qr } = await supabase
+    .from('quote_requests')
+    .select('id, work_order_id, vendor_id, quoted_amount, status, org_id')
+    .eq('id', quoteRequestId)
     .eq('org_id', membership.org_id)
     .single()
 
-  if (!wo || wo.status !== 'quote_requested') return { error: 'Work order not in quote_requested state' }
+  if (!qr) return { error: 'Quote request not found' }
+  if (qr.status !== 'submitted') return { error: 'Can only approve a quote that has been submitted by the vendor' }
 
-  const completion_token = crypto.randomUUID().replace(/-/g, '')
+  // Mark this one approved
+  await supabase
+    .from('quote_requests')
+    .update({ status: 'approved' })
+    .eq('id', quoteRequestId)
+
+  // Decline all other pending/submitted quotes for this WO
+  await supabase
+    .from('quote_requests')
+    .update({ status: 'declined' })
+    .eq('work_order_id', qr.work_order_id)
+    .neq('id', quoteRequestId)
+    .in('status', ['pending', 'submitted'])
+
+  const completion_token            = crypto.randomUUID().replace(/-/g, '')
   const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
   const { error } = await supabase
     .from('work_orders')
     .update({
-      status:                    'assigned',
-      estimated_cost:            wo.quoted_amount ?? undefined,
-      portal_enabled:            true,
+      vendor_id:                  qr.vendor_id,
+      status:                     'assigned',
+      estimated_cost:             qr.quoted_amount ?? undefined,
+      portal_enabled:             true,
       completion_token,
       completion_token_expires_at,
     })
-    .eq('id', workOrderId)
+    .eq('id', qr.work_order_id)
     .eq('org_id', membership.org_id)
 
   if (error) return { error: error.message }
 
   await supabase.from('work_order_updates').insert({
-    work_order_id:             workOrderId,
+    work_order_id:             qr.work_order_id,
     org_id:                    membership.org_id,
     updated_via_vendor_portal: false,
-    status_from:               'quote_requested',
+    status_from:               'pending',
     status_to:                 'assigned',
-    notes:                     `Quote approved — $${wo.quoted_amount?.toFixed(2) ?? '?'}. Vendor notified.`,
+    notes:                     `Quote approved — $${qr.quoted_amount?.toFixed(2) ?? '?'}. Vendor assigned and notified.`,
   })
 
-  if (wo.vendor_id) {
-    await inngest.send({
-      name: 'work-order/created',
-      data: {
-        work_order_id:  workOrderId,
-        property_id:    '',
-        org_id:         membership.org_id,
-        vendor_id:      wo.vendor_id,
-        portal_enabled: true,
-      },
-    })
-  }
+  await inngest.send({
+    name: 'work-order/created',
+    data: {
+      work_order_id:  qr.work_order_id,
+      property_id:    '',
+      org_id:         membership.org_id,
+      vendor_id:      qr.vendor_id,
+      portal_enabled: true,
+    },
+  })
 
-  revalidatePath(`/maintenance/${workOrderId}`)
+  revalidatePath(`/maintenance/${qr.work_order_id}`)
   revalidatePath('/maintenance')
+  return {}
+}
+
+// ── Decline a single quote request ────────────────────────────────────────────
+
+export async function declineQuoteRequest(
+  quoteRequestId: string
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: qr } = await supabase
+    .from('quote_requests')
+    .select('id, work_order_id')
+    .eq('id', quoteRequestId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!qr) return { error: 'Quote request not found' }
+
+  await supabase
+    .from('quote_requests')
+    .update({ status: 'declined' })
+    .eq('id', quoteRequestId)
+
+  revalidatePath(`/maintenance/${qr.work_order_id}`)
   return {}
 }
 

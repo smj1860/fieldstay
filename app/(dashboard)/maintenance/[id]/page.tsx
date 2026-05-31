@@ -12,6 +12,7 @@ export default async function WorkOrderPage({ params }: Props) {
     { data: wo },
     { data: updates },
     { data: photos },
+    { data: quoteRequests },
     { data: vendors },
   ] = await Promise.all([
     supabase
@@ -22,8 +23,7 @@ export default async function WorkOrderPage({ params }: Props) {
         scheduled_date, completed_date,
         estimated_cost, actual_cost, invoice_reference,
         portal_enabled, completion_token, completion_token_expires_at,
-        completion_notes, quote_token, quote_token_expires_at,
-        quoted_amount, quote_notes,
+        completion_notes,
         created_at, updated_at,
         properties (id, name, city, state),
         vendors (id, name, specialty, email, phone)
@@ -45,6 +45,12 @@ export default async function WorkOrderPage({ params }: Props) {
       .order('created_at', { ascending: true }),
 
     supabase
+      .from('quote_requests')
+      .select('id, vendor_id, status, quoted_amount, quote_notes, sent_at, submitted_at, quote_token, quote_token_expires_at, vendors(id, name, specialty, email)')
+      .eq('work_order_id', id)
+      .order('created_at', { ascending: true }),
+
+    supabase
       .from('vendors')
       .select('id, name, specialty')
       .eq('org_id', membership.org_id)
@@ -59,6 +65,7 @@ export default async function WorkOrderPage({ params }: Props) {
       workOrder={wo as never}
       updates={updates ?? []}
       photos={photos ?? []}
+      quoteRequests={(quoteRequests ?? []) as never}
       vendors={vendors ?? []}
     />
   )
