@@ -39,6 +39,11 @@ export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 
+// Communication logs
+export type CommRecipientType   = 'vendor' | 'crew'
+export type CommChannel         = 'email' | 'sms' | 'phone' | 'in_person' | 'note'
+export type CommSource          = 'manual' | 'system'
+
 // Integration framework
 export type IntegrationAuthType = 'oauth2' | 'api_key'
 export type IntegrationStatus   = 'active' | 'revoked' | 'error'
@@ -508,15 +513,15 @@ export interface QuoteRequest {
 export interface CommunicationLog {
   id:                string
   org_id:            string
-  recipient_type:    'vendor' | 'crew'
+  recipient_type:    CommRecipientType
   vendor_id:         string | null
   crew_member_id:    string | null
-  channel:           'email' | 'sms' | 'phone' | 'in_person' | 'note'
+  channel:           CommChannel
   subject:           string | null
   body:              string | null
   property_id:       string | null
   work_order_id:     string | null
-  source:            'manual' | 'system'
+  source:            CommSource
   logged_by_user_id: string | null
   communicated_at:   string
   created_at:        string
