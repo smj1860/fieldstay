@@ -14,15 +14,42 @@ const FEATURES = [
   },
   {
     number: '02',
+    title:  'RepuGuard Reputation Engine',
+    desc:   'AI-driven guest review responses built on live property context. Auto-pilot for 4 and 5-star reviews. Private human-in-the-loop validation queues for 1 to 3-star operational issues.',
+  },
+  {
+    number: '03',
     title:  'Inventory & Maintenance',
     desc:   'Set par levels for every property. Low-stock alerts trigger purchase orders automatically. Schedule recurring maintenance — seasonal or routine — with vendor assignments built in.',
   },
   {
-    number: '03',
+    number: '04',
     title:  'Owner Reporting Portal',
     desc:   'Property owners get a secure, tokenized P&L portal showing revenue, expenses, and net returns by period. You share one link. They check it themselves.',
   },
 ]
+
+// ── Sandbox Demo Dataset ───────────────────────────────────────────────────
+const SANDBOX_SCENARIOS = {
+  glowing: {
+    label: '5-Star Review',
+    guest: 'David • The Lakehouse',
+    text: '"Absolutely incredible stay! The back deck views at sunset were breathtaking. We spent every night out there. Also, a huge shoutout to Sarah who helped us coordinate an early check-in so our toddler could nap. Clean, spacious, and perfect."',
+    reply: 'Hi David, thank you so much for the wonderful review! We\'re thrilled you got to experience those breathtaking sunset views from the back deck—they really are the best part of the property. I\'ll be sure to pass your kind words along to Sarah; she loves going above and beyond to make sure families have a smooth check-in. We would love to host your family again for another lakeside getaway soon!'
+  },
+  critical: {
+    label: '4-Star Review',
+    guest: 'Emily • Downtown Loft',
+    text: '"Great location, super stylish, and walking distance to everything. The bed was incredibly comfortable. Only giving 4 stars because we couldn\'t find the remote for the living room TV and the coffee pods ran out on day two."',
+    reply: 'Hi Emily, thank you for staying with us and for highlighting the stylish space and comfortable bed! We are so glad our downtown location worked out perfectly for your walks. I do apologize for the frustration with the living room remote and the coffee shortage. We want every guest to have a flawless experience, so we\'ve already tracked down that remote and stocked the closet with extra coffee pods for future stays. If you ever head back this way, please reach out directly—we\'d love the chance to welcome you back for a perfect stay.'
+  },
+  mitigation: {
+    label: '3-Star Review',
+    guest: 'Marcus • Mountain Cabin',
+    text: '"The cabin itself is beautiful and the hot tub was clean. However, the gravel driveway is incredibly steep and our sedan struggled to get up it. Also, the WiFi was too slow to stream movies in the evening."',
+    reply: 'Hi Marcus, thank you for taking the time to share your feedback. We are glad you found the cabin beautiful and enjoyed the hot tub. Thank you for letting us know how your sedan handled the gravel driveway; that will help us with our messaging and warnings in the future to set better expectations for our guests. We also want to let you know we have recently upgraded our internet provider to ensure faster, more reliable speeds for streaming in the evenings. Please feel free to reach out to us directly at [Phone Number] so we can ensure an even better stay next time.'
+  }
+}
 
 export default function OwnerRezLandingPage() {
   const router = useRouter()
@@ -34,9 +61,12 @@ export default function OwnerRezLandingPage() {
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
 
-  // Auth state — handle users who are already logged in
+  // Auth state
   const [authed,        setAuthed]        = useState(false)
   const [checkingAuth,  setCheckingAuth]  = useState(true)
+
+  // Sandbox active tab selector
+  const [activeTab, setActiveTab] = useState<keyof typeof SANDBOX_SCENARIOS>('glowing')
 
   useEffect(() => {
     const check = async () => {
@@ -68,12 +98,6 @@ export default function OwnerRezLandingPage() {
       })
 
       if (signUpError) throw signUpError
-
-      // After account creation, go directly to the OwnerRez OAuth connect flow.
-      // The connect route stores the user_id in oauth_states and redirects to
-      // OwnerRez for authorization. If email confirmation is required in your
-      // Supabase settings, the connect route will redirect to login instead —
-      // the user can return here after confirming their email.
       router.push('/api/integrations/ownerrez/connect')
 
     } catch (err) {
@@ -83,11 +107,11 @@ export default function OwnerRezLandingPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif" }}>
+    <div className="min-h-screen" style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif", background: '#102246' }}>
 
       {/* ── Nav ─────────────────────────────────────────────────────────── */}
       <nav className="sticky top-0 z-50 flex items-center justify-between px-8 h-16"
-           style={{ background: '#102246' }}>
+           style={{ background: '#102246', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
         <span className="text-xl font-black tracking-tight" style={{ color: '#fff' }}>
           Field<span style={{ color: '#FCD116' }}>Stay</span>
         </span>
@@ -103,10 +127,7 @@ export default function OwnerRezLandingPage() {
       </nav>
 
       {/* ── Hero ────────────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden px-8 py-20"
-               style={{ background: '#102246' }}>
-
-        {/* Dot grid texture — matches homepage */}
+      <section className="relative overflow-hidden px-8 py-20">
         <div className="absolute inset-0 pointer-events-none"
              style={{
                backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)',
@@ -118,67 +139,39 @@ export default function OwnerRezLandingPage() {
 
             {/* ── Left: Messaging ──────────────────────────────────────── */}
             <div className="flex-1 pt-4">
-
-              {/* Partnership eyebrow */}
               <div className="inline-flex items-center gap-2.5 rounded-full px-4 py-1.5 mb-8"
-                   style={{
-                     background: 'rgba(252,209,22,0.1)',
-                     border:     '1px solid rgba(252,209,22,0.3)',
-                   }}>
-                {/* OwnerRez "OR" logomark */}
+                   style={{ background: 'rgba(252,209,22,0.1)', border: '1px solid rgba(252,209,22,0.3)' }}>
                 <span className="font-black text-xs rounded px-1.5 py-0.5 leading-none"
                       style={{ background: '#5BAC43', color: '#fff', letterSpacing: '-0.3px' }}>
                   OR
                 </span>
-                <span className="text-xs font-bold uppercase tracking-widest"
-                      style={{ color: '#FCD116' }}>
-                  OwnerRez Integration Partner
+                <span className="text-xs font-bold uppercase tracking-widest" style={{ color: '#FCD116' }}>
+                  Exclusive OwnerRez Launch Special
                 </span>
               </div>
 
-              {/* Headline */}
               <h1 className="font-black leading-[1.06] tracking-tight mb-6"
-                  style={{
-                    fontSize:      'clamp(34px, 4.5vw, 52px)',
-                    color:         '#fff',
-                    letterSpacing: '-1.5px',
-                    maxWidth:      560,
-                  }}>
-                The operations layer your{' '}
-                <span style={{ color: '#FCD116' }}>OwnerRez account</span>{' '}
-                is missing.
+                  style={{ fontSize: 'clamp(34px, 4.5vw, 52px)', color: '#fff', letterSpacing: '-1.5px', maxWidth: 560 }}>
+                The operations layer your <span style={{ color: '#FCD116' }}>OwnerRez account</span> is missing.
               </h1>
 
-              {/* Subhead */}
               <p className="mb-10 leading-relaxed"
                  style={{ fontSize: 17, color: 'rgba(255,255,255,0.6)', maxWidth: 500 }}>
-                FieldStay connects directly to OwnerRez and adds everything your
-                team needs on the ground — automated turnover scheduling, offline
-                crew checklists, inventory tracking, and maintenance — synced to
-                your bookings automatically.
+                FieldStay syncs seamlessly to your OwnerRez bookings to automate turnover management on the ground, while the new RepuGuard module drafts context-perfect responses to guest reviews entirely on autopilot.
               </p>
 
-              {/* Trust signals */}
               <div className="flex flex-wrap gap-6">
                 {[
-                  'Free 14-day trial',
-                  'No credit card required',
-                  'Connects in minutes',
+                  '3-Month RepuGuard Trial',
+                  '$15/mo Grandfathered Launch Price',
+                  'Connects in under 5 minutes',
                 ].map((signal) => (
                   <div key={signal} className="flex items-center gap-2">
                     <span className="flex items-center justify-center rounded-full font-black text-xs"
-                          style={{
-                            width:      18,
-                            height:     18,
-                            minWidth:   18,
-                            background: '#FCD116',
-                            color:      '#102246',
-                            lineHeight: '18px',
-                          }}>
+                          style={{ width: 18, height: 18, minWidth: 18, background: '#FCD116', color: '#102246', lineHeight: '18px' }}>
                       ✓
                     </span>
-                    <span className="text-sm font-medium"
-                          style={{ color: 'rgba(255,255,255,0.7)' }}>
+                    <span className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.7)' }}>
                       {signal}
                     </span>
                   </div>
@@ -188,11 +181,8 @@ export default function OwnerRezLandingPage() {
 
             {/* ── Right: Signup form ────────────────────────────────────── */}
             <div className="w-full lg:w-[400px] flex-shrink-0">
-              <div className="rounded-2xl p-8"
-                   style={{ background: '#fff', boxShadow: '0 24px 64px rgba(0,0,0,0.3)' }}>
-
+              <div className="rounded-2xl p-8" style={{ background: '#fff', boxShadow: '0 24px 64px rgba(0,0,0,0.3)' }}>
                 {checkingAuth ? (
-                  // Auth check in progress — show skeleton to avoid layout shift
                   <div className="space-y-3 animate-pulse">
                     <div className="h-5 rounded" style={{ background: '#F3F4F6', width: '60%' }} />
                     <div className="h-4 rounded" style={{ background: '#F3F4F6', width: '80%' }} />
@@ -201,165 +191,55 @@ export default function OwnerRezLandingPage() {
                     <div className="h-11 rounded-lg" style={{ background: '#F3F4F6' }} />
                     <div className="h-12 rounded-lg mt-2" style={{ background: '#F3F4F6' }} />
                   </div>
-
                 ) : authed ? (
-                  // Already logged in — skip signup, go straight to connect
                   <div className="text-center">
-                    <div className="inline-flex items-center justify-center rounded-full mb-4"
-                         style={{ width: 52, height: 52, background: 'rgba(16,34,70,0.08)' }}>
-                      <span className="font-black text-xl"
-                            style={{ color: '#102246' }}>✓</span>
+                    <div className="inline-flex items-center justify-center rounded-full mb-4" style={{ width: 52, height: 52, background: 'rgba(16,34,70,0.08)' }}>
+                      <span className="font-black text-xl" style={{ color: '#102246' }}>✓</span>
                     </div>
-                    <h2 className="font-black mb-2 tracking-tight"
-                        style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.5px' }}>
+                    <h2 className="font-black mb-2 tracking-tight" style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.5px' }}>
                       You&apos;re already signed in
                     </h2>
-                    <p className="text-sm mb-7"
-                       style={{ color: '#6B7280', lineHeight: 1.6 }}>
-                      Click below to connect your OwnerRez account to FieldStay.
+                    <p className="text-sm mb-7" style={{ color: '#6B7280', lineHeight: 1.6 }}>
+                      Click below to link your OwnerRez account to FieldStay and unlock your ecosystem perks.
                     </p>
                     <a href="/api/integrations/ownerrez/connect"
                        className="block w-full text-center rounded-xl font-bold text-sm py-3.5 transition-opacity hover:opacity-90"
                        style={{ background: '#FCD116', color: '#102246' }}>
                       Connect OwnerRez Account →
                     </a>
-                    <p className="text-xs mt-5" style={{ color: '#9CA3AF' }}>
-                      Not you?{' '}
-                      <Link href="/login"
-                            className="underline underline-offset-2"
-                            style={{ color: '#6B7280' }}>
-                        Sign in to a different account
-                      </Link>
-                    </p>
                   </div>
-
                 ) : (
-                  // Standard signup form
                   <>
-                    <h2 className="font-black mb-1 tracking-tight"
-                        style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.5px' }}>
+                    <h2 className="font-black mb-1 tracking-tight" style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.5px' }}>
                       Create your FieldStay account
                     </h2>
                     <p className="text-sm mb-6" style={{ color: '#6B7280' }}>
-                      Connect your OwnerRez account in the next step.
+                      Secure your $15/mo grandfathered partner rate.
                     </p>
 
                     {error && (
-                      <div className="rounded-lg px-4 py-3 mb-5 text-sm"
-                           style={{
-                             background:  '#FEF2F2',
-                             border:      '1px solid #FECACA',
-                             color:       '#B91C1C',
-                           }}>
+                      <div className="rounded-lg px-4 py-3 mb-5 text-sm" style={{ background: '#FEF2F2', border: '1px solid #FECACA', color: '#B91C1C' }}>
                         {error}
                       </div>
                     )}
 
                     <form onSubmit={handleSignup} className="space-y-4">
-
                       <div>
-                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide"
-                               style={{ color: '#374151' }}>
-                          Full Name
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          autoComplete="name"
-                          value={fullName}
-                          onChange={e => setFullName(e.target.value)}
-                          placeholder="Jane Smith"
-                          className="w-full rounded-lg px-4 py-3 text-sm outline-none transition-colors"
-                          style={{
-                            border:     '1.5px solid #E5E7EB',
-                            color:      '#111827',
-                            background: '#fff',
-                          }}
-                          onFocus={e  => (e.currentTarget.style.borderColor = '#102246')}
-                          onBlur={e   => (e.currentTarget.style.borderColor = '#E5E7EB')}
-                        />
+                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: '#374151' }}>Full Name</label>
+                        <input type="text" required value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Jane Smith" className="w-full rounded-lg px-4 py-3 text-sm outline-none" style={{ border: '1.5px solid #E5E7EB', color: '#111827' }} />
                       </div>
-
                       <div>
-                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide"
-                               style={{ color: '#374151' }}>
-                          Email
-                        </label>
-                        <input
-                          type="email"
-                          required
-                          autoComplete="email"
-                          value={email}
-                          onChange={e => setEmail(e.target.value)}
-                          placeholder="jane@example.com"
-                          className="w-full rounded-lg px-4 py-3 text-sm outline-none transition-colors"
-                          style={{
-                            border:     '1.5px solid #E5E7EB',
-                            color:      '#111827',
-                            background: '#fff',
-                          }}
-                          onFocus={e  => (e.currentTarget.style.borderColor = '#102246')}
-                          onBlur={e   => (e.currentTarget.style.borderColor = '#E5E7EB')}
-                        />
+                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: '#374151' }}>Email</label>
+                        <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="jane@example.com" className="w-full rounded-lg px-4 py-3 text-sm outline-none" style={{ border: '1.5px solid #E5E7EB', color: '#111827' }} />
                       </div>
-
                       <div>
-                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide"
-                               style={{ color: '#374151' }}>
-                          Password
-                        </label>
-                        <input
-                          type="password"
-                          required
-                          autoComplete="new-password"
-                          value={password}
-                          onChange={e => setPassword(e.target.value)}
-                          placeholder="At least 8 characters"
-                          className="w-full rounded-lg px-4 py-3 text-sm outline-none transition-colors"
-                          style={{
-                            border:     '1.5px solid #E5E7EB',
-                            color:      '#111827',
-                            background: '#fff',
-                          }}
-                          onFocus={e  => (e.currentTarget.style.borderColor = '#102246')}
-                          onBlur={e   => (e.currentTarget.style.borderColor = '#E5E7EB')}
-                        />
+                        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: '#374151' }}>Password</label>
+                        <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" className="w-full rounded-lg px-4 py-3 text-sm outline-none" style={{ border: '1.5px solid #E5E7EB', color: '#111827' }} />
                       </div>
-
-                      <button
-                        type="submit"
-                        disabled={loading}
-                        className="w-full rounded-xl font-bold text-sm py-3.5 mt-2 transition-opacity"
-                        style={{
-                          background: loading ? '#E5E7EB' : '#FCD116',
-                          color:      loading ? '#9CA3AF' : '#102246',
-                          cursor:     loading ? 'not-allowed' : 'pointer',
-                          border:     'none',
-                        }}>
+                      <button type="submit" disabled={loading} className="w-full rounded-xl font-bold text-sm py-3.5 mt-2 text-center" style={{ background: loading ? '#E5E7EB' : '#FCD116', color: '#102246', border: 'none', cursor: loading ? 'not-allowed' : 'pointer' }}>
                         {loading ? 'Creating account…' : 'Create Account & Connect OwnerRez →'}
                       </button>
-
                     </form>
-
-                    {/* Divider */}
-                    <div className="flex items-center gap-3 my-5">
-                      <div className="flex-1 h-px" style={{ background: '#F3F4F6' }} />
-                      <span className="text-xs" style={{ color: '#D1D5DB' }}>or</span>
-                      <div className="flex-1 h-px" style={{ background: '#F3F4F6' }} />
-                    </div>
-
-                    <p className="text-center text-sm" style={{ color: '#6B7280' }}>
-                      Already have an account?{' '}
-                      <Link href="/login"
-                            className="font-semibold underline underline-offset-2"
-                            style={{ color: '#102246' }}>
-                        Log in
-                      </Link>
-                    </p>
-
-                    <p className="text-center text-xs mt-5" style={{ color: '#9CA3AF' }}>
-                      14-day free trial · No credit card required
-                    </p>
                   </>
                 )}
               </div>
@@ -370,86 +250,109 @@ export default function OwnerRezLandingPage() {
       </section>
 
       {/* ── Features ────────────────────────────────────────────────────── */}
-      <section className="px-8 py-20"
-               style={{ background: '#0c1d3a' }}>
+      <section className="px-8 py-20" style={{ background: '#0c1d3a' }}>
         <div className="mx-auto" style={{ maxWidth: 1100 }}>
-
           <div className="text-center mb-14">
-            <h2 className="font-black tracking-tight mb-3"
-                style={{
-                  fontSize:      'clamp(26px, 3.5vw, 36px)',
-                  color:         '#fff',
-                  letterSpacing: '-1px',
-                }}>
+            <h2 className="font-black tracking-tight mb-3" style={{ fontSize: 'clamp(26px, 3.5vw, 36px)', color: '#fff', letterSpacing: '-1px' }}>
               Everything OwnerRez doesn&apos;t handle.
             </h2>
             <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              Built specifically for the field operations side of short-term rentals.
+              Engineered exclusively for tactical field logistics and reputation management.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
             {FEATURES.map((f) => (
-              <div key={f.number}
-                   className="rounded-2xl p-7"
-                   style={{
-                     background: 'rgba(255,255,255,0.05)',
-                     border:     '1px solid rgba(255,255,255,0.08)',
-                   }}>
-                <div className="font-black mb-4 leading-none"
-                     style={{
-                       fontSize:      44,
-                       color:         'rgba(252,209,22,0.18)',
-                       letterSpacing: '-2px',
-                     }}>
+              <div key={f.number} className="rounded-2xl p-7" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <div className="font-black mb-4 leading-none" style={{ fontSize: 36, color: 'rgba(252,209,22,0.2)', letterSpacing: '-2px' }}>
                   {f.number}
                 </div>
-                <p className="font-bold mb-3"
-                   style={{ fontSize: 16, color: '#fff', letterSpacing: '-0.3px' }}>
-                  {f.title}
-                </p>
-                <p className="text-sm leading-relaxed"
-                   style={{ color: 'rgba(255,255,255,0.5)' }}>
-                  {f.desc}
-                </p>
+                <p className="font-bold mb-3" style={{ fontSize: 16, color: '#fff' }}>{f.title}</p>
+                <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>{f.desc}</p>
               </div>
             ))}
           </div>
+        </div>
+      </section>
 
+      {/* ── Interactive Simulated Sandbox ─────────────────────────────── */}
+      <section className="px-8 py-20" style={{ background: '#102246', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="mx-auto" style={{ maxWidth: 900 }}>
+          <div className="text-center mb-12">
+            <span className="text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full" style={{ background: 'rgba(252,209,22,0.1)', color: '#FCD116' }}>
+              Module Preview
+            </span>
+            <h2 className="font-black tracking-tight mt-3 mb-4" style={{ fontSize: 32, color: '#fff', letterSpacing: '-1px' }}>
+              See RepuGuard in Action
+            </h2>
+            <p className="text-sm mx-auto" style={{ color: 'rgba(255,255,255,0.6)', maxWidth: 550 }}>
+              Select a real-world review scenario below to see how our engine creates non-defensive, context-aware, human responses without template strings.
+            </p>
+          </div>
+
+          {/* Sandbox Controls */}
+          <div className="flex justify-center gap-3 mb-8">
+            {(Object.keys(SANDBOX_SCENARIOS) as Array<keyof typeof SANDBOX_SCENARIOS>).map((key) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className="px-4 py-2 rounded-lg text-xs font-bold transition-all"
+                style={{
+                  background: activeTab === key ? '#FCD116' : 'rgba(255,255,255,0.05)',
+                  color: activeTab === key ? '#102246' : 'rgba(255,255,255,0.7)',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                {SANDBOX_SCENARIOS[key].label}
+              </button>
+            ))}
+          </div>
+
+          {/* Sandbox Visual Layout Box */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 rounded-2xl p-6" style={{ background: '#0c1d3a', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                Incoming Guest Review
+              </span>
+              <p className="text-xs font-semibold mt-1 mb-3" style={{ color: '#FCD116' }}>
+                {SANDBOX_SCENARIOS[activeTab].guest}
+              </p>
+              <div className="rounded-xl p-4 text-sm italic leading-relaxed" style={{ background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.85)' }}>
+                {SANDBOX_SCENARIOS[activeTab].text}
+              </div>
+            </div>
+
+            <div style={{ borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '1rem' }}>
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                RepuGuard Smart Output
+              </span>
+              <p className="text-xs font-semibold mt-1 mb-3" style={{ color: '#5BAC43' }}>
+                ✓ Operational Anchor Rule Active
+              </p>
+              <div className="rounded-xl p-4 text-sm leading-relaxed" style={{ background: 'rgba(16,34,70,0.4)', color: '#fff', border: '1px solid rgba(252,209,22,0.1)' }}>
+                {SANDBOX_SCENARIOS[activeTab].reply}
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* ── Bottom CTA ──────────────────────────────────────────────────── */}
-      <section className="px-8 py-16 text-center"
-               style={{ background: '#F8F9FA', borderTop: '1px solid #E5E7EB' }}>
-        <p className="font-black mb-1 tracking-tight"
-           style={{
-             fontSize:      'clamp(22px, 3vw, 30px)',
-             color:         '#102246',
-             letterSpacing: '-0.75px',
-           }}>
-          Ready to connect?
+      <section className="px-8 py-16 text-center" style={{ background: '#F8F9FA', borderTop: '1px solid #E5E7EB' }}>
+        <p className="font-black mb-1 tracking-tight" style={{ fontSize: 'clamp(22px, 3vw, 30px)', color: '#102246', letterSpacing: '-0.75px' }}>
+          Lock In Your Year 1 Pricing
         </p>
         <p className="text-sm mb-7" style={{ color: '#6B7280' }}>
-          It takes less than 5 minutes to be fully set up.
+          Enjoy a 3-month free trial of RepuGuard, grandfathered at $15/mo for life.
         </p>
-        <a href="#"
-           onClick={e => {
-             e.preventDefault()
-             window.scrollTo({ top: 0, behavior: 'smooth' })
-           }}
-           className="inline-block rounded-xl font-bold text-sm px-8 py-3.5 transition-opacity hover:opacity-90"
-           style={{ background: '#102246', color: '#FCD116' }}>
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="inline-block rounded-xl font-bold text-sm px-8 py-3.5 transition-opacity hover:opacity-90"
+          style={{ background: '#102246', color: '#FCD116', border: 'none', cursor: 'pointer' }}
+        >
           Get Started Free →
-        </a>
-        <p className="text-xs mt-4" style={{ color: '#9CA3AF' }}>
-          Questions?{' '}
-          <a href="mailto:hello@fieldstay.app"
-             className="underline underline-offset-2"
-             style={{ color: '#6B7280' }}>
-            hello@fieldstay.app
-          </a>
-        </p>
+        </button>
       </section>
 
     </div>
