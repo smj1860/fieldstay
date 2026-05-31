@@ -53,7 +53,7 @@ const BYPASS_ROUTES = [
   '/auth/callback',
 ]
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return NextResponse.next()
