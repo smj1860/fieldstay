@@ -6,7 +6,7 @@ import {
   Calendar, DollarSign, User, Wrench, Clock,
   CheckCircle2, AlertTriangle, XCircle, ArrowRight,
   ExternalLink, Trash2, Pencil, Camera, ImageIcon,
-  X, Loader2, Receipt, MessageSquareDot,
+  X, Loader2, Receipt, MessageSquareDot, Plus,
 } from 'lucide-react'
 import { cn, formatDate, formatDateTime, WO_STATUS_LABELS } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -18,8 +18,9 @@ import {
   logActualCost,
   recordWorkOrderPhoto,
   deleteWorkOrderPhoto,
-  requestVendorQuote,
-  approveVendorQuote,
+  sendQuoteRequests,
+  approveQuoteRequest,
+  declineQuoteRequest,
 } from '../actions'
 import type { WoStatus, PriorityLevel } from '@/types/database'
 
@@ -44,14 +45,23 @@ interface WorkOrderDetailProps {
   completion_token_expires_at: string | null
   completion_notes: string | null
   invoice_reference: string | null
-  quote_token: string | null
-  quote_token_expires_at: string | null
-  quoted_amount: number | null
-  quote_notes: string | null
   created_at: string
   updated_at: string
   properties: { id: string; name: string; city: string | null; state: string | null } | null
   vendors: { id: string; name: string; specialty: string; email: string | null; phone: string | null } | null
+}
+
+interface QuoteRequestRow {
+  id:                     string
+  vendor_id:              string
+  status:                 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
+  quoted_amount:          number | null
+  quote_notes:            string | null
+  sent_at:                string
+  submitted_at:           string | null
+  quote_token:            string
+  quote_token_expires_at: string
+  vendors: { id: string; name: string; specialty: string; email: string | null } | null
 }
 
 interface WorkOrderUpdate {
@@ -194,32 +204,95 @@ function StatusControls({ workOrderId, currentStatus }: { workOrderId: string; c
   )
 }
 
-// ── Feature 5: Quote panel ────────────────────────────────────────────────────
+// ── Quotes Panel ──────────────────────────────────────────────────────────────
 
-function QuotePanel({ workOrder }: { workOrder: WorkOrderDetailProps }) {
-  const [requesting, startRequest] = useTransition()
-  const [approving,  startApprove] = useTransition()
-  const [err, setErr] = useState<string | null>(null)
+const QUOTE_STATUS_LABELS: Record<QuoteRequestRow['status'], string> = {
+  pending:   'Awaiting Response',
+  submitted: 'Quote Received',
+  approved:  'Approved',
+  declined:  'Declined',
+  expired:   'Expired',
+}
 
-  const hasVendor    = !!workOrder.vendor_id
-  const isPending    = workOrder.status === 'pending'
-  const isQuoted     = workOrder.status === 'quote_requested'
-  const hasQuote     = workOrder.quoted_amount != null
-  const quoteExpired = workOrder.quote_token_expires_at
-    ? new Date(workOrder.quote_token_expires_at) < new Date()
-    : false
+const QUOTE_STATUS_BADGE: Record<QuoteRequestRow['status'], string> = {
+  pending:   'badge-slate',
+  submitted: 'badge-gold',
+  approved:  'badge-green',
+  declined:  'badge-slate',
+  expired:   'badge-red',
+}
 
-  const quotePortalUrl = workOrder.quote_token
-    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/work-orders/${workOrder.quote_token}/quote`
-    : null
+function QuotesPanel({
+  workOrder,
+  quoteRequests,
+  vendors,
+}: {
+  workOrder:     { id: string; status: string }
+  quoteRequests: QuoteRequestRow[]
+  vendors:       { id: string; name: string; specialty: string }[]
+}) {
+  const [showForm,  setShowForm]  = useState(false)
+  const [selected,  setSelected]  = useState<string[]>([])
+  const [sending,   startSend]    = useTransition()
+  const [approving, setApproving] = useState<string | null>(null)
+  const [declining, setDeclining] = useState<string | null>(null)
+  const [err,       setErr]       = useState<string | null>(null)
 
-  if (!isPending && !isQuoted) return null
+  const canRequest = !['completed', 'cancelled'].includes(workOrder.status)
+  const activeVendorIds = new Set(
+    quoteRequests
+      .filter((q) => q.status === 'pending' || q.status === 'submitted')
+      .map((q) => q.vendor_id)
+  )
+  const availableVendors = vendors.filter((v) => !activeVendorIds.has(v.id))
+
+  const handleSend = () => {
+    if (!selected.length) return
+    startSend(async () => {
+      const r = await sendQuoteRequests(workOrder.id, selected)
+      if (r.error) { setErr(r.error); return }
+      setSelected([])
+      setShowForm(false)
+      setErr(null)
+    })
+  }
+
+  const handleApprove = (quoteRequestId: string) => {
+    setApproving(quoteRequestId)
+    startSend(async () => {
+      const r = await approveQuoteRequest(quoteRequestId)
+      if (r.error) setErr(r.error)
+      setApproving(null)
+    })
+  }
+
+  const handleDecline = (quoteRequestId: string) => {
+    setDeclining(quoteRequestId)
+    startSend(async () => {
+      const r = await declineQuoteRequest(quoteRequestId)
+      if (r.error) setErr(r.error)
+      setDeclining(null)
+    })
+  }
+
+  if (!quoteRequests.length && !canRequest) return null
 
   return (
     <div className="card">
-      <div className="flex items-center gap-2 mb-3">
-        <MessageSquareDot className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
-        <h3 className="section-header mb-0">Vendor Quote</h3>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <MessageSquareDot className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
+          <h3 className="section-header mb-0">Quote Requests</h3>
+          {quoteRequests.length > 0 && (
+            <span className="badge badge-slate">{quoteRequests.length}</span>
+          )}
+        </div>
+        {canRequest && availableVendors.length > 0 && (
+          <button onClick={() => setShowForm((v) => !v)} className="btn-secondary text-xs py-1.5 px-2.5">
+            <Plus className="w-3 h-3" />
+            Request Quotes
+          </button>
+        )}
       </div>
 
       {err && (
@@ -229,77 +302,126 @@ function QuotePanel({ workOrder }: { workOrder: WorkOrderDetailProps }) {
         </div>
       )}
 
-      {isPending && !isQuoted && (
-        <>
-          {!hasVendor && (
-            <p className="text-xs text-muted-themed mb-3">Assign a vendor first to request a quote.</p>
-          )}
-          <button
-            disabled={!hasVendor || requesting}
-            onClick={() => startRequest(async () => {
-              const r = await requestVendorQuote(workOrder.id)
-              if (r.error) setErr(r.error)
-            })}
-            className="btn-secondary text-sm"
-          >
-            {requesting ? <><Loader2 className="w-4 h-4 animate-spin" /> Sending…</> : 'Request Quote from Vendor'}
-          </button>
-        </>
+      {showForm && (
+        <div className="mb-4 p-3 rounded-xl border border-themed space-y-3"
+             style={{ background: 'var(--bg-canvas)' }}>
+          <p className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>
+            Select vendors to receive an RFQ:
+          </p>
+          <div className="space-y-1.5">
+            {availableVendors.map((v) => (
+              <label key={v.id} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(v.id)}
+                  onChange={(e) => {
+                    setSelected((prev) =>
+                      e.target.checked ? [...prev, v.id] : prev.filter((id) => id !== v.id)
+                    )
+                  }}
+                  className="rounded"
+                />
+                <span className="text-sm" style={{ color: 'var(--text-primary)' }}>{v.name}</span>
+                <span className="text-xs capitalize" style={{ color: 'var(--text-muted)' }}>
+                  {v.specialty.replace('_', ' ')}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleSend}
+              disabled={!selected.length || sending}
+              className="btn-primary text-sm"
+            >
+              {sending
+                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending…</>
+                : `Send to ${selected.length || ''} Vendor${selected.length !== 1 ? 's' : ''}`
+              }
+            </button>
+            <button onClick={() => { setShowForm(false); setSelected([]) }} className="btn-ghost text-sm">
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
 
-      {isQuoted && (
-        <div className="space-y-3">
-          {hasQuote ? (
-            <div className="p-3 rounded-lg border border-themed" style={{ background: 'var(--bg-raised)' }}>
-              <p className="text-xs text-muted-themed mb-1">Vendor quoted:</p>
-              <p className="text-2xl font-bold" style={{ color: 'var(--accent-gold)' }}>
-                ${workOrder.quoted_amount!.toFixed(2)}
-              </p>
-              {workOrder.quote_notes && (
-                <p className="text-xs text-secondary-themed mt-1 italic">{workOrder.quote_notes}</p>
-              )}
-              <div className="flex gap-2 mt-3">
-                <button
-                  disabled={approving}
-                  onClick={() => startApprove(async () => {
-                    const r = await approveVendorQuote(workOrder.id)
-                    if (r.error) setErr(r.error)
-                  })}
-                  className="btn-primary text-sm"
-                >
-                  {approving ? <><Loader2 className="w-4 h-4 animate-spin" /> Approving…</> : '✓ Approve & Assign'}
-                </button>
-                <button
-                  onClick={() => startRequest(async () => {
-                    const r = await updateWorkOrderStatus(workOrder.id, 'cancelled')
-                  })}
-                  className="btn-danger text-sm"
-                >
-                  Decline
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="p-3 rounded-lg" style={{ background: 'var(--accent-gold-dim)', border: '1px solid rgba(252,209,22,0.3)' }}>
-              <p className="text-sm font-medium" style={{ color: 'var(--accent-gold)' }}>
-                Waiting for vendor to submit quote
-              </p>
-              {quoteExpired && (
-                <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }}>Quote link has expired.</p>
-              )}
-            </div>
-          )}
+      {quoteRequests.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          No quote requests yet. Request quotes from one or more vendors before assigning.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {quoteRequests.map((qr) => {
+            const vendor    = Array.isArray(qr.vendors) ? qr.vendors[0] : qr.vendors
+            const isExpired = new Date(qr.quote_token_expires_at) < new Date()
+            const displayStatus = (isExpired && qr.status === 'pending') ? 'expired' : qr.status
+            const portalUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/work-orders/${qr.quote_token}/quote`
 
-          {quotePortalUrl && !hasQuote && (
-            <div>
-              <p className="text-xs text-muted-themed mb-1">Share this link with the vendor:</p>
-              <a href={quotePortalUrl} target="_blank" rel="noopener noreferrer"
-                 className="text-xs flex items-center gap-1 hover:underline break-all"
-                 style={{ color: 'var(--accent-blue)' }}>
-                {quotePortalUrl} <ExternalLink className="w-3 h-3 flex-shrink-0" />
-              </a>
-            </div>
-          )}
+            return (
+              <div
+                key={qr.id}
+                className="flex items-start gap-3 p-3 rounded-xl border border-themed"
+                style={{ background: 'var(--bg-raised)' }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap mb-1">
+                    <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                      {vendor?.name ?? '—'}
+                    </span>
+                    <span className={cn('badge', QUOTE_STATUS_BADGE[displayStatus])}>
+                      {QUOTE_STATUS_LABELS[displayStatus]}
+                    </span>
+                  </div>
+
+                  {qr.quoted_amount != null && (
+                    <p className="text-lg font-bold" style={{ color: 'var(--accent-gold)' }}>
+                      ${qr.quoted_amount.toFixed(2)}
+                    </p>
+                  )}
+                  {qr.quote_notes && (
+                    <p className="text-xs italic mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      {qr.quote_notes}
+                    </p>
+                  )}
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                    Sent {formatDate(qr.sent_at)}
+                    {qr.submitted_at && ` · Received ${formatDate(qr.submitted_at)}`}
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5 flex-shrink-0">
+                  {qr.status === 'submitted' && (
+                    <button
+                      onClick={() => handleApprove(qr.id)}
+                      disabled={approving === qr.id}
+                      className="btn-primary text-xs py-1.5 px-2.5 whitespace-nowrap"
+                    >
+                      {approving === qr.id ? <Loader2 className="w-3 h-3 animate-spin" /> : '✓ Approve'}
+                    </button>
+                  )}
+                  {(qr.status === 'pending' || qr.status === 'submitted') && (
+                    <button
+                      onClick={() => handleDecline(qr.id)}
+                      disabled={declining === qr.id}
+                      className="btn-danger text-xs py-1.5 px-2.5"
+                    >
+                      {declining === qr.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Decline'}
+                    </button>
+                  )}
+                  {qr.status === 'pending' && !isExpired && (
+                    <button
+                      onClick={() => navigator.clipboard.writeText(portalUrl)}
+                      className="btn-ghost text-xs py-1.5 px-2.5 whitespace-nowrap"
+                      title="Copy vendor portal link"
+                    >
+                      Copy Link
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -588,12 +710,14 @@ export function WorkOrderDetail({
   workOrder,
   updates,
   photos,
+  quoteRequests = [],
   vendors = [],
 }: {
-  workOrder: WorkOrderDetailProps
-  updates: WorkOrderUpdate[]
-  photos: WorkOrderPhoto[]
-  vendors?: { id: string; name: string; specialty: string }[]
+  workOrder:     WorkOrderDetailProps
+  updates:       WorkOrderUpdate[]
+  photos:        WorkOrderPhoto[]
+  quoteRequests: QuoteRequestRow[]
+  vendors?:      { id: string; name: string; specialty: string }[]
 }) {
   const property = Array.isArray(workOrder.properties) ? workOrder.properties[0] : workOrder.properties
   const vendor   = Array.isArray(workOrder.vendors)   ? workOrder.vendors[0]   : workOrder.vendors
@@ -735,8 +859,12 @@ export function WorkOrderDetail({
             </div>
           )}
 
-          {/* Feature 5: Quote panel */}
-          <QuotePanel workOrder={workOrder} />
+          {/* Quote Requests panel */}
+          <QuotesPanel
+            workOrder={{ id: workOrder.id, status: workOrder.status }}
+            quoteRequests={quoteRequests}
+            vendors={vendors}
+          />
 
           {workOrder.completion_notes && (
             <div className="card" style={{ background: 'var(--accent-green-dim)', border: '1px solid rgba(47,217,140,0.25)' }}>

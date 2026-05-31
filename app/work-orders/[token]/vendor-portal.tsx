@@ -7,7 +7,7 @@ interface WorkOrderInfo {
   id: string
   title: string
   description: string | null
-  status: string
+  status?: string
   scheduled_date: string | null
   estimated_cost: number | null
 }
@@ -194,14 +194,16 @@ export function VendorPortal({
 
 export function VendorQuotePortal({
   token,
+  quoteRequestStatus,
   workOrder,
   property,
   expired,
 }: {
-  token: string
-  workOrder: WorkOrderInfo
-  property: PropertyInfo | null
-  expired: boolean
+  token:              string
+  quoteRequestStatus: string
+  workOrder:          WorkOrderInfo
+  property:           PropertyInfo | null
+  expired:            boolean
 }) {
   const [amount, setAmount]     = useState('')
   const [notes, setNotes]       = useState('')
@@ -209,7 +211,7 @@ export function VendorQuotePortal({
   const [success, setSuccess]   = useState(false)
   const [error, setError]       = useState<string | null>(null)
 
-  const alreadyQuoted = workOrder.status !== 'quote_requested'
+  const alreadyQuoted = quoteRequestStatus !== 'pending'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
