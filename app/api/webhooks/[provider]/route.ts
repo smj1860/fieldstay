@@ -25,13 +25,13 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
 ) {
-  const { provider } = await params
-  const providerId = provider.toLowerCase()
+  const resolvedParams = await params
+  const providerId = resolvedParams.provider.toLowerCase()
 
   // ── 1. Validate the provider exists ───────────────────────
-  let provider
+  let providerAdapter
   try {
-    provider = getProvider(providerId)
+    providerAdapter = getProvider(providerId)
   } catch {
     // Return 404 but don't reveal internals
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -45,7 +45,7 @@ export async function POST(
 
   let isAuthentic: boolean
   try {
-    isAuthentic = await provider.validateWebhook(clonedForValidation)
+    isAuthentic = await providerAdapter.validateWebhook(clonedForValidation)
   } catch (err) {
     console.error(`[Webhook:${providerId}] Validation error:`, err)
     // Fail closed — if we can't validate, reject
@@ -116,7 +116,7 @@ export async function POST(
   //
   //    We always return 200 quickly and offload heavy processing to Inngest.
   try {
-    await provider.handleWebhookEvent({ action, payload, externalUserId })
+    await providerAdapter.handleWebhookEvent({ action, payload, externalUserId })
   } catch (err) {
     // Again: log, don't 500 — provider is not responsible for our processing errors
     console.error(`[Webhook:${providerId}] Handler threw for action "${action}":`, err)
