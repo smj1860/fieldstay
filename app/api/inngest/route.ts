@@ -16,6 +16,10 @@ import { dailyMaintenanceCheck } from '@/lib/inngest/functions/maintenance-check
 // Inventory
 import { handleInventoryCountSubmitted } from '@/lib/inngest/functions/inventory-events'
 
+// OwnerRez integration
+import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
+import { ownerRezIncrementalSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
+
 // Work orders
 import {
   handleWorkOrderCreated,
@@ -44,6 +48,10 @@ export const { GET, POST, PUT } = serve({
 
     // Inventory → PO
     handleInventoryCountSubmitted,
+
+    // OwnerRez sync
+    ownerRezInitialSync,
+    ownerRezIncrementalSync,
 
     // Work orders
     handleWorkOrderCreated,

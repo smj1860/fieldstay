@@ -204,6 +204,28 @@ export type FieldStayEvents = {
   }
 
   // ----------------------------------------------------------
+  // Integrations
+  // ----------------------------------------------------------
+
+  'integration/ownerrez.connected': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
+  'integration/ownerrez.sync.requested': {
+    data: {
+      provider_id:  string
+      event_type:   string
+      entity_type:  string
+      entity_id:    string
+      triggered_at: string
+    }
+  }
+
+  // ----------------------------------------------------------
   // Billing / Stripe
   // ----------------------------------------------------------
 
