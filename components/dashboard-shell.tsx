@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Building2, CalendarCheck, Package,
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Bell, Sun, Moon,
-  Users2, Briefcase,
+  Users2, Briefcase, MessageSquareDot,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -27,13 +27,14 @@ const NAV_ITEMS = [
 ] as const
 
 interface Props {
-  role:      MemberRole
-  orgName:   string
-  userEmail: string
-  children:  React.ReactNode
+  role:            MemberRole
+  orgName:         string
+  userEmail:       string
+  repuguardActive?: boolean
+  children:        React.ReactNode
 }
 
-export function DashboardShell({ role, orgName, userEmail, children }: Props) {
+export function DashboardShell({ role, orgName, userEmail, repuguardActive = false, children }: Props) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -71,9 +72,14 @@ export function DashboardShell({ role, orgName, userEmail, children }: Props) {
     }
   }
 
-  const filteredNav = NAV_ITEMS.filter((item) =>
-    item.roles.includes(role as never)
-  )
+  const REPUGUARD_NAV = repuguardActive
+    ? [{ href: '/reviews', label: 'Reviews', icon: MessageSquareDot, roles: ['admin', 'manager'] as const }]
+    : []
+
+  const filteredNav = [
+    ...NAV_ITEMS.filter((item) => item.roles.includes(role as never)),
+    ...REPUGUARD_NAV.filter(item => item.roles.includes(role as 'admin' | 'manager')),
+  ]
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
     <aside

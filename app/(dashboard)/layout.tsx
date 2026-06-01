@@ -25,7 +25,7 @@ export default async function DashboardLayout({
 
   const { data: membership } = await supabase
     .from('organization_members')
-    .select('org_id, role, organizations(name, plan, plan_status, max_properties, trial_ends_at)')
+    .select('org_id, role, organizations(name, plan, plan_status, max_properties, trial_ends_at, repuguard_status)')
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
     .single()
@@ -35,6 +35,9 @@ export default async function DashboardLayout({
   const org = Array.isArray(membership.organizations)
     ? membership.organizations[0]
     : membership.organizations
+
+  const repuguardActive =
+    org?.repuguard_status === 'trial' || org?.repuguard_status === 'active'
 
   // ── Billing gate ──────────────────────────────────────────────────────────
   const planStatus  = org?.plan_status  ?? 'trialing'
@@ -78,6 +81,7 @@ export default async function DashboardLayout({
       role={membership.role}
       orgName={org?.name ?? 'FieldStay'}
       userEmail={user.email ?? ''}
+      repuguardActive={repuguardActive}
     >
       {isPastDue && (
         <div
