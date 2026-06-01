@@ -152,7 +152,7 @@ export default function OwnerRezLandingPage() {
               {/* Subhead */}
               <p className="mb-10 leading-relaxed"
                  style={{ fontSize: 17, color: 'rgba(255,255,255,0.6)', maxWidth: 500 }}>
-                FieldStay connects directly to your bookings to automate everything your team handles on the ground — fully operational offline automated turnover management,
+                FieldStay connects directly to your OwnerRez bookings to automate everything your team handles on the ground — fully operational offline automated turnover management,
                 crew checklists, asset inventory tracking with par levels, and field maintenance schedules and work orders.
               </p>
 
