@@ -33,9 +33,9 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
 ) {
-  const { provider } = await params
+  const resolvedParams = await params
   const appUrl     = process.env.NEXT_PUBLIC_APP_URL!
-  const providerId = provider.toLowerCase()
+  const providerId = resolvedParams.provider.toLowerCase()
   const { searchParams } = request.nextUrl
 
   // Parameters sent back by the provider after the user acts on the auth screen
@@ -141,14 +141,14 @@ export async function GET(
   await admin.from('oauth_states').delete().eq('state', returnedState)
 
   // ── 3. Load the provider adapter ──────────────────────────
-  let provider
+  let providerAdapter
   try {
-    provider = getProvider(providerId)
+    providerAdapter = getProvider(providerId)
   } catch {
     return errorRedirect('unknown_provider')
   }
 
-  if (!provider.exchangeCodeForToken) {
+  if (!providerAdapter.exchangeCodeForToken) {
     return errorRedirect('provider_not_oauth')
   }
 
@@ -159,7 +159,7 @@ export async function GET(
   let tokenData
 
   try {
-    tokenData = await provider.exchangeCodeForToken({ code, redirectUri })
+    tokenData = await providerAdapter.exchangeCodeForToken({ code, redirectUri })
   } catch (err) {
     console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
     return errorRedirect('token_exchange_failed')
