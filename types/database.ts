@@ -1,403 +1,498 @@
 /**
  * FieldStay — Database Types
  *
- * Hand-written to match the v1 migration schema.
+ * Hand-written to match the live Supabase schema.
  * After connecting Supabase CLI, replace with:
- *   npm run types:supabase
+ *   npx supabase gen types typescript --linked > types/database.ts
  * which generates these automatically from your live schema.
+ *
+ * Last updated: integration framework added (integration_providers,
+ * integration_connections, oauth_states).
  */
 
-export type QuoteRequestStatus = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
+// ─────────────────────────────────────────────────────────────
+// Scalar union types — mirror Postgres enums and CHECK constraints
+// ─────────────────────────────────────────────────────────────
 
-export type OrgPlan        = 'starter' | 'growth' | 'pro' | 'enterprise'
-export type OrgPlanStatus  = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'paused'
-export type MemberRole     = 'admin' | 'manager' | 'crew' | 'viewer'
-export type PropertyType   = 'house' | 'condo' | 'cabin' | 'cottage' | 'townhouse' | 'other'
-export type IcalSource     = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other'
-export type SyncStatus     = 'pending' | 'success' | 'error'
-export type BookingStatus  = 'confirmed' | 'cancelled' | 'blocked' | 'tentative'
-export type BookingSource  = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'manual' | 'other'
-export type TurnoverStatus = 'pending_assignment' | 'assigned' | 'in_progress' | 'completed' | 'flagged' | 'cancelled'
-export type PriorityLevel  = 'low' | 'medium' | 'high' | 'urgent'
-export type ContactPref    = 'email' | 'sms' | 'both'
-export type ChecklistStatus = 'not_started' | 'in_progress' | 'completed'
-export type InventoryCategory = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom' | 'outdoor' | 'other'
-export type PoStatus       = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
-export type VendorSpecialty = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
-export type WoStatus          = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
-export type CommChannel       = 'email' | 'sms' | 'phone' | 'in_person' | 'note'
-export type CommRecipientType = 'vendor' | 'crew'
-export type CommSource        = 'manual' | 'system'
-export type WoSource       = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report'
-export type ScheduleType   = 'routine' | 'seasonal'
-export type ScheduleFrequency = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
-export type MessageTrigger = 'booking_confirmed' | 'pre_checkout'
-export type MessageStatus  = 'sent' | 'failed' | 'bounced'
-export type TxnType        = 'revenue' | 'expense'
-export type TxnCategory    = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
+export type OrgPlan             = 'starter' | 'growth' | 'pro' | 'enterprise'
+export type OrgPlanStatus       = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'paused'
+export type MemberRole          = 'admin' | 'manager' | 'crew' | 'viewer'
+export type PropertyType        = 'house' | 'condo' | 'cabin' | 'cottage' | 'townhouse' | 'other'
+export type IcalSource          = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other'
+export type SyncStatus          = 'pending' | 'success' | 'error'
+export type BookingStatus       = 'confirmed' | 'cancelled' | 'blocked' | 'tentative'
+export type BookingSource       = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'manual' | 'other'
+export type TurnoverStatus      = 'pending_assignment' | 'assigned' | 'in_progress' | 'completed' | 'flagged' | 'cancelled'
+export type PriorityLevel       = 'low' | 'medium' | 'high' | 'urgent'
+export type ContactPref         = 'email' | 'sms' | 'both'
+export type ChecklistStatus     = 'not_started' | 'in_progress' | 'completed'
+export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom' | 'outdoor' | 'other'
+export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
+export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
+export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
+export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report'
+export type ScheduleType        = 'routine' | 'seasonal'
+export type ScheduleFrequency   = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
+export type MessageTrigger      = 'booking_confirmed' | 'pre_checkout'
+export type MessageStatus       = 'sent' | 'failed' | 'bounced'
+export type TxnType             = 'revenue' | 'expense'
+export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
+export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 
-// ----------------------------------------------------------
-// Row types — mirror each Supabase table
-// ----------------------------------------------------------
+// Communication logs
+export type CommRecipientType   = 'vendor' | 'crew'
+export type CommChannel         = 'email' | 'sms' | 'phone' | 'in_person' | 'note'
+export type CommSource          = 'manual' | 'system'
+
+// Integration framework
+export type IntegrationAuthType = 'oauth2' | 'api_key'
+export type IntegrationStatus   = 'active' | 'revoked' | 'error'
+
+// ─────────────────────────────────────────────────────────────
+// Row interfaces — one per Supabase table
+// ─────────────────────────────────────────────────────────────
 
 export interface Profile {
-  id: string
-  full_name: string | null
-  phone: string | null
-  avatar_url: string | null
-  created_at: string
-  updated_at: string
+  id:          string
+  full_name:   string | null
+  phone:       string | null
+  avatar_url:  string | null
+  created_at:  string
+  updated_at:  string
 }
 
 export interface Organization {
-  id: string
-  name: string
-  slug: string
-  billing_email: string | null
-  stripe_customer_id: string | null
+  id:                     string
+  name:                   string
+  slug:                   string
+  billing_email:          string | null
+  stripe_customer_id:     string | null
   stripe_subscription_id: string | null
-  plan: OrgPlan
-  plan_status: OrgPlanStatus
-  trial_ends_at: string | null
-  max_properties: number
-  created_at: string
-  updated_at: string
+  plan:                   OrgPlan
+  plan_status:            OrgPlanStatus
+  trial_ends_at:          string | null
+  max_properties:         number
+  created_at:             string
+  updated_at:             string
 }
 
 export interface OrganizationMember {
-  id: string
-  org_id: string
-  user_id: string | null
-  role: MemberRole
-  invited_email: string | null
-  invite_token: string | null
+  id:                 string
+  org_id:             string
+  user_id:            string | null
+  role:               MemberRole
+  invited_email:      string | null
+  invite_token:       string | null
   invite_accepted_at: string | null
-  created_at: string
+  created_at:         string
 }
 
 export interface Property {
-  id: string
-  org_id: string
-  name: string
-  address: string | null
-  city: string | null
-  state: string | null
-  zip: string | null
-  property_type: PropertyType
-  bedrooms: number
-  bathrooms: number
-  max_guests: number
-  avg_stay_length: number
+  id:                      string
+  org_id:                  string
+  name:                    string
+  address:                 string | null
+  city:                    string | null
+  state:                   string | null
+  zip:                     string | null
+  property_type:           PropertyType
+  bedrooms:                number
+  bathrooms:               number
+  max_guests:              number
+  avg_stay_length:         number
   avg_turnovers_per_month: number
-  wifi_name: string | null
-  wifi_password: string | null
-  door_code: string | null
-  checkout_time: string
-  checkin_time: string
-  internal_notes: string | null
-  setup_steps_completed: Record<string, boolean>
-  is_active: boolean
-  avg_nightly_rate: number | null
-  created_at: string
-  updated_at: string
+  wifi_name:               string | null
+  wifi_password:           string | null
+  door_code:               string | null
+  checkout_time:           string
+  checkin_time:            string
+  internal_notes:          string | null
+  setup_steps_completed:   Record<string, boolean>
+  is_active:               boolean
+  avg_nightly_rate:        number | null
+  created_at:              string
+  updated_at:              string
 }
 
 export interface PropertyOwner {
-  id: string
-  org_id: string
-  property_id: string
-  name: string
-  email: string | null
-  phone: string | null
+  id:                string
+  org_id:            string
+  property_id:       string
+  name:              string
+  email:             string | null
+  phone:             string | null
   revenue_share_pct: number | null
-  notes: string | null
-  created_at: string
-  updated_at: string
+  notes:             string | null
+  created_at:        string
+  updated_at:        string
 }
 
 export interface OwnerPortalToken {
-  id: string
+  id:                string
   property_owner_id: string
-  token: string
-  expires_at: string | null
-  last_accessed_at: string | null
-  created_at: string
+  token:             string
+  expires_at:        string | null
+  last_accessed_at:  string | null
+  created_at:        string
 }
 
 export interface IcalFeed {
-  id: string
-  property_id: string
-  org_id: string
-  name: string
-  url: string
-  source: IcalSource
-  last_synced_at: string | null
+  id:               string
+  property_id:      string
+  org_id:           string
+  name:             string
+  url:              string
+  source:           IcalSource
+  last_synced_at:   string | null
   last_sync_status: SyncStatus
-  last_sync_error: string | null
-  is_active: boolean
-  created_at: string
-  updated_at: string
+  last_sync_error:  string | null
+  is_active:        boolean
+  created_at:       string
+  updated_at:       string
 }
 
 export interface Booking {
-  id: string
-  property_id: string
-  org_id: string
-  ical_feed_id: string | null
-  ical_uid: string | null
-  guest_name: string | null
-  guest_email: string | null
-  checkin_date: string
+  id:            string
+  property_id:   string
+  org_id:        string
+  ical_feed_id:  string | null
+  ical_uid:      string | null
+  guest_name:    string | null
+  guest_email:   string | null
+  checkin_date:  string
   checkout_date: string
-  checkin_time: string | null
+  checkin_time:  string | null
   checkout_time: string | null
-  source: BookingSource
-  status: BookingStatus
-  notes: string | null
+  source:        BookingSource
+  status:        BookingStatus
+  notes:         string | null
   raw_ical_data: Record<string, unknown> | null
-  created_at: string
-  updated_at: string
+  created_at:    string
+  updated_at:    string
 }
 
 export interface CrewMember {
-  id: string
-  org_id: string
-  user_id: string | null
-  name: string
-  email: string | null
-  phone: string | null
-  preferred_contact: ContactPref
-  sms_carrier: string | null
-  specialty: string
-  is_active: boolean
-  notes: string | null
-  invite_token: string | null
-  invite_sent_at: string | null
+  id:                 string
+  org_id:             string
+  user_id:            string | null
+  name:               string
+  email:              string | null
+  phone:              string | null
+  preferred_contact:  ContactPref
+  sms_carrier:        string | null
+  specialty:          string
+  is_active:          boolean
+  notes:              string | null
+  invite_token:       string | null
+  invite_sent_at:     string | null
   invite_accepted_at: string | null
-  created_at: string
-  updated_at: string
+  created_at:         string
+  updated_at:         string
 }
 
 export interface Vendor {
-  id: string
-  org_id: string
-  name: string
-  contact_name: string | null
-  email: string | null
-  phone: string | null
-  specialty: VendorSpecialty
+  id:             string
+  org_id:         string
+  name:           string
+  contact_name:   string | null
+  email:          string | null
+  phone:          string | null
+  specialty:      VendorSpecialty
   portal_enabled: boolean
-  notes: string | null
-  is_active: boolean
-  created_at: string
-  updated_at: string
+  notes:          string | null
+  is_active:      boolean
+  created_at:     string
+  updated_at:     string
 }
 
 export interface ChecklistTemplate {
-  id: string
-  org_id: string
+  id:          string
+  org_id:      string
   property_id: string | null
-  name: string
+  name:        string
   description: string | null
-  is_default: boolean
-  created_at: string
-  updated_at: string
+  is_default:  boolean
+  created_at:  string
+  updated_at:  string
 }
 
 export interface ChecklistTemplateSection {
-  id: string
+  id:          string
   template_id: string
-  name: string
-  sort_order: number
-  created_at: string
+  name:        string
+  sort_order:  number
+  created_at:  string
 }
 
 export interface ChecklistTemplateItem {
-  id: string
-  section_id: string
-  template_id: string
-  task: string
+  id:             string
+  section_id:     string
+  template_id:    string
+  task:           string
   requires_photo: boolean
-  notes: string | null
-  sort_order: number
-  created_at: string
+  notes:          string | null
+  sort_order:     number
+  created_at:     string
 }
 
 export interface Turnover {
-  id: string
-  property_id: string
-  org_id: string
-  booking_id: string | null
-  prev_booking_id: string | null
-  checkout_datetime: string
-  checkin_datetime: string
-  window_minutes: number | null
-  status: TurnoverStatus
-  priority: PriorityLevel
+  id:                    string
+  property_id:           string
+  org_id:                string
+  booking_id:            string | null
+  prev_booking_id:       string | null
+  checkout_datetime:     string
+  checkin_datetime:      string
+  window_minutes:        number | null
+  status:                TurnoverStatus
+  priority:              PriorityLevel
   checklist_template_id: string | null
-  notes: string | null
-  completion_notes: string | null
-  completed_at: string | null
-  auto_generated: boolean
-  created_at: string
-  updated_at: string
+  notes:                 string | null
+  completion_notes:      string | null
+  completed_at:          string | null
+  auto_generated:        boolean
+  created_at:            string
+  updated_at:            string
 }
 
 export interface TurnoverAssignment {
-  id: string
-  turnover_id: string
-  crew_member_id: string
-  assigned_at: string
-  notified_at: string | null
+  id:                string
+  turnover_id:       string
+  crew_member_id:    string
+  assigned_at:       string
+  notified_at:       string | null
   notification_type: ContactPref | null
-  created_at: string
+  created_at:        string
 }
 
 export interface ChecklistInstance {
-  id: string
-  turnover_id: string
-  org_id: string
-  template_id: string | null
+  id:                string
+  turnover_id:       string
+  org_id:            string
+  template_id:       string | null
   template_snapshot: Record<string, unknown>
-  status: ChecklistStatus
-  started_at: string | null
-  completed_at: string | null
-  created_at: string
-  updated_at: string
+  status:            ChecklistStatus
+  started_at:        string | null
+  completed_at:      string | null
+  created_at:        string
+  updated_at:        string
 }
 
 export interface ChecklistInstanceItem {
-  id: string
-  instance_id: string
-  section_name: string
-  task: string
-  requires_photo: boolean
-  notes: string | null
-  sort_order: number
-  is_completed: boolean
-  completed_at: string | null
+  id:                   string
+  instance_id:          string
+  section_name:         string
+  task:                 string
+  requires_photo:       boolean
+  notes:                string | null
+  sort_order:           number
+  is_completed:         boolean
+  completed_at:         string | null
   completed_by_crew_id: string | null
-  photo_storage_path: string | null
-  crew_notes: string | null
-  created_at: string
-  updated_at: string
+  photo_storage_path:   string | null
+  crew_notes:           string | null
+  created_at:           string
+  updated_at:           string
 }
 
 export interface InventoryCatalogItem {
-  id: string
-  name: string
-  category: InventoryCategory
+  id:           string
+  name:         string
+  category:     InventoryCategory
   default_unit: string
-  description: string | null
-  is_active: boolean
-  created_at: string
+  description:  string | null
+  is_active:    boolean
+  created_at:   string
 }
 
 export interface InventoryItem {
-  id: string
-  property_id: string
-  org_id: string
-  catalog_item_id: string | null
-  name: string
-  category: InventoryCategory
-  unit: string
-  par_level: number
-  current_quantity: number
+  id:                      string
+  property_id:             string
+  org_id:                  string
+  catalog_item_id:         string | null
+  name:                    string
+  category:                InventoryCategory
+  unit:                    string
+  par_level:               number
+  current_quantity:        number
   low_stock_threshold_pct: number
-  is_active: boolean
-  notes: string | null
-  created_at: string
-  updated_at: string
+  is_active:               boolean
+  notes:                   string | null
+  created_at:              string
+  updated_at:              string
 }
 
 export interface InventoryCount {
-  id: string
-  property_id: string
-  org_id: string
+  id:                   string
+  property_id:          string
+  org_id:               string
   submitted_by_crew_id: string | null
-  submitted_at: string
-  notes: string | null
-  created_at: string
+  submitted_at:         string
+  notes:                string | null
+  created_at:           string
 }
 
 export interface InventoryCountItem {
-  id: string
-  count_id: string
+  id:                string
+  count_id:          string
   inventory_item_id: string
-  quantity_counted: number
-  created_at: string
+  quantity_counted:  number
+  created_at:        string
 }
 
 export interface PurchaseOrder {
-  id: string
-  property_id: string
-  org_id: string
-  status: PoStatus
-  generated_at: string
-  sent_at: string | null
-  acknowledged_at: string | null
-  notes: string | null
+  id:                   string
+  property_id:          string
+  org_id:               string
+  status:               PoStatus
+  generated_at:         string
+  sent_at:              string | null
+  acknowledged_at:      string | null
+  notes:                string | null
   total_estimated_cost: number | null
-  created_at: string
-  updated_at: string
+  created_at:           string
+  updated_at:           string
 }
 
 export interface PurchaseOrderItem {
-  id: string
-  purchase_order_id: string
-  inventory_item_id: string | null
-  item_name: string
-  current_quantity: number
-  par_level: number
-  quantity_to_buy: number
+  id:                  string
+  purchase_order_id:   string
+  inventory_item_id:   string | null
+  item_name:           string
+  current_quantity:    number
+  par_level:           number
+  quantity_to_buy:     number
   estimated_unit_cost: number | null
-  notes: string | null
-  created_at: string
+  notes:               string | null
+  created_at:          string
 }
 
 export interface WorkOrder {
-  id: string
-  property_id: string
-  org_id: string
-  vendor_id: string | null
-  assigned_crew_id: string | null
-  title: string
-  description: string | null
-  priority: PriorityLevel
-  status: WoStatus
-  source: WoSource
-  source_schedule_id: string | null
-  scheduled_date: string | null
-  completed_date: string | null
-  estimated_cost: number | null
-  actual_cost: number | null
-  portal_enabled: boolean
-  completion_token: string | null
+  id:                          string
+  property_id:                 string
+  org_id:                      string
+  vendor_id:                   string | null
+  assigned_crew_id:            string | null
+  title:                       string
+  description:                 string | null
+  priority:                    PriorityLevel
+  status:                      WoStatus
+  source:                      WoSource
+  source_schedule_id:          string | null
+  scheduled_date:              string | null
+  completed_date:              string | null
+  estimated_cost:              number | null
+  actual_cost:                 number | null
+  portal_enabled:              boolean
+  completion_token:            string | null
   completion_token_expires_at: string | null
-  completion_notes: string | null
-  invoice_reference: string | null
-  created_at: string
-  updated_at: string
+  completion_notes:            string | null
+  invoice_reference:           string | null
+  quote_token:                 string | null
+  quote_token_expires_at:      string | null
+  quoted_amount:               number | null
+  quote_notes:                 string | null
+  created_at:                  string
+  updated_at:                  string
 }
 
 export interface WorkOrderUpdate {
-  id: string
-  work_order_id: string
-  org_id: string
-  updated_by_user_id: string | null
+  id:                        string
+  work_order_id:             string
+  org_id:                    string
+  updated_by_user_id:        string | null
   updated_via_vendor_portal: boolean
-  status_from: WoStatus | null
-  status_to: WoStatus | null
-  notes: string | null
-  created_at: string
+  status_from:               WoStatus | null
+  status_to:                 WoStatus | null
+  notes:                     string | null
+  created_at:                string
 }
 
 export interface WorkOrderPhoto {
-  id: string
+  id:            string
   work_order_id: string
-  storage_path: string
-  uploaded_by: string | null
-  created_at: string
+  storage_path:  string
+  uploaded_by:   string | null
+  created_at:    string
+}
+
+export interface MaintenanceSchedule {
+  id:                  string
+  property_id:         string
+  org_id:              string
+  assigned_vendor_id:  string | null
+  name:                string
+  description:         string | null
+  schedule_type:       ScheduleType
+  frequency:           ScheduleFrequency | null
+  month_due:           number | null
+  day_of_month_due:    number | null
+  estimated_cost:      number | null
+  instructions:        string | null
+  auto_create_wo:      boolean
+  last_completed_date: string | null
+  next_due_date:       string | null
+  is_active:           boolean
+  created_at:          string
+  updated_at:          string
+}
+
+export interface GuestMessageTemplate {
+  id:          string
+  property_id: string
+  org_id:      string
+  trigger:     MessageTrigger
+  name:        string
+  subject:     string
+  body:        string
+  days_before: number
+  is_active:   boolean
+  created_at:  string
+  updated_at:  string
+}
+
+export interface GuestMessageSent {
+  id:                string
+  property_id:       string
+  org_id:            string
+  booking_id:        string | null
+  template_id:       string | null
+  trigger:           MessageTrigger
+  recipient_name:    string | null
+  recipient_email:   string
+  subject:           string
+  body_rendered:     string
+  sent_at:           string
+  resend_message_id: string | null
+  status:            MessageStatus
+  created_at:        string
+}
+
+export interface OwnerTransaction {
+  id:                string
+  property_id:       string
+  org_id:            string
+  transaction_type:  TxnType
+  category:          TxnCategory
+  amount:            number
+  description:       string
+  transaction_date:  string
+  work_order_id:     string | null
+  purchase_order_id: string | null
+  booking_id:        string | null
+  notes:             string | null
+  created_at:        string
+  updated_at:        string
+}
+
+export interface OrgMilestone {
+  id:             string
+  org_id:         string
+  milestone:      string
+  achieved_at:    string
+  prompted_at:    string | null
+  review_clicked: boolean
+  dismissed:      boolean
 }
 
 export interface QuoteRequest {
@@ -415,110 +510,95 @@ export interface QuoteRequest {
   created_at:             string
 }
 
-export interface MaintenanceSchedule {
-  id: string
-  property_id: string
-  org_id: string
-  assigned_vendor_id: string | null
-  name: string
-  description: string | null
-  schedule_type: ScheduleType
-  frequency: ScheduleFrequency | null
-  month_due: number | null
-  day_of_month_due: number | null
-  estimated_cost: number | null
-  instructions: string | null
-  auto_create_wo: boolean
-  last_completed_date: string | null
-  next_due_date: string | null
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface GuestMessageTemplate {
-  id: string
-  property_id: string
-  org_id: string
-  trigger: MessageTrigger
-  name: string
-  subject: string
-  body: string
-  days_before: number
-  is_active: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface GuestMessageSent {
-  id: string
-  property_id: string
-  org_id: string
-  booking_id: string | null
-  template_id: string | null
-  trigger: MessageTrigger
-  recipient_name: string | null
-  recipient_email: string
-  subject: string
-  body_rendered: string
-  sent_at: string
-  resend_message_id: string | null
-  status: MessageStatus
-  created_at: string
-}
-
-export interface OwnerTransaction {
-  id: string
-  property_id: string
-  org_id: string
-  transaction_type: TxnType
-  category: TxnCategory
-  amount: number
-  description: string
-  transaction_date: string
-  work_order_id: string | null
-  purchase_order_id: string | null
-  booking_id: string | null
-  notes: string | null
-  created_at: string
-  updated_at: string
-}
-
 export interface CommunicationLog {
-  id:                 string
-  org_id:             string
-  recipient_type:     CommRecipientType
-  vendor_id:          string | null
-  crew_member_id:     string | null
-  channel:            CommChannel
-  subject:            string | null
-  body:               string | null
-  property_id:        string | null
-  work_order_id:      string | null
-  source:             CommSource
-  logged_by_user_id:  string | null
-  communicated_at:    string
-  created_at:         string
+  id:                string
+  org_id:            string
+  recipient_type:    CommRecipientType
+  vendor_id:         string | null
+  crew_member_id:    string | null
+  channel:           CommChannel
+  subject:           string | null
+  body:              string | null
+  property_id:       string | null
+  work_order_id:     string | null
+  source:            CommSource
+  logged_by_user_id: string | null
+  communicated_at:   string
+  created_at:        string
 }
 
-export interface OrgMilestone {
-  id: string
-  org_id: string
-  milestone: string
-  achieved_at: string
-  prompted_at: string | null
-  review_clicked: boolean
-  dismissed: boolean
-  created_at: string
+export interface PushSubscription {
+  id:             string
+  crew_member_id: string
+  org_id:         string
+  endpoint:       string
+  p256dh:         string
+  auth:           string
+  created_at:     string
 }
 
-// ----------------------------------------------------------
+// ─────────────────────────────────────────────────────────────
+// Integration framework
+//
+// These three tables are SERVER-SIDE ONLY:
+//   - integration_connections and oauth_states must NEVER be
+//     added to PowerSync sync rules or the powersync publication
+//   - Token read/write/revoke functions are service_role only
+// ─────────────────────────────────────────────────────────────
+
+export interface IntegrationProvider {
+  /** Stable slug identifier: 'ownerrez' | 'hostaway' | 'guesty' */
+  id:           string
+  display_name: string
+  auth_type:    IntegrationAuthType
+  is_active:    boolean
+  created_at:   string
+}
+
+export interface IntegrationConnection {
+  id:               string
+  user_id:          string            // FK → auth.users.id
+  provider_id:      string            // FK → integration_providers.id
+  external_user_id: string | null     // Provider's own user/account identifier
+  /** FK → vault.secrets.id — null when revoked (secret physically destroyed) */
+  vault_secret_id:  string | null
+  scope:            string | null
+  status:           IntegrationStatus
+  /** Non-sensitive provider metadata (display info, plan details, etc.) */
+  metadata:         Record<string, unknown>
+  connected_at:     string
+  last_used_at:     string | null
+  created_at:       string
+  updated_at:       string
+}
+
+export interface OAuthState {
+  /** Random 64-char hex string used as CSRF protection token */
+  state:       string
+  /** null if user arrived unauthenticated (e.g. from OwnerRez marketplace) */
+  user_id:     string | null
+  provider_id: string
+  /** Path to redirect to after successful connection */
+  return_to:   string | null
+  created_at:  string
+  /** Expires after 10 minutes to match OwnerRez temporary code lifetime */
+  expires_at:  string
+}
+
+// ─────────────────────────────────────────────────────────────
 // Supabase Database interface — used by createClient()
-// ----------------------------------------------------------
+//
+// NOTE: Hand-written interfaces lack the index signatures required
+// by postgrest-js v2's GenericSchema constraint. The <Database>
+// type arg is omitted in lib/supabase/server.ts so .from() queries
+// default to `any`. Replace with CLI-generated types once connected:
+//   npx supabase gen types typescript --linked > types/database.ts
+// ─────────────────────────────────────────────────────────────
 
 export interface Database {
   public: {
     Tables: {
+      // ── Core platform ──────────────────────────────────────
       profiles:                    { Row: Profile;                  Insert: Partial<Profile>;                  Update: Partial<Profile>;                  Relationships: [] }
       organizations:               { Row: Organization;             Insert: Partial<Organization>;             Update: Partial<Organization>;             Relationships: [] }
       organization_members:        { Row: OrganizationMember;       Insert: Partial<OrganizationMember>;       Update: Partial<OrganizationMember>;       Relationships: [] }
@@ -545,12 +625,19 @@ export interface Database {
       work_orders:                 { Row: WorkOrder;                Insert: Partial<WorkOrder>;                Update: Partial<WorkOrder>;                Relationships: [] }
       work_order_updates:          { Row: WorkOrderUpdate;          Insert: Partial<WorkOrderUpdate>;          Update: Partial<WorkOrderUpdate>;          Relationships: [] }
       work_order_photos:           { Row: WorkOrderPhoto;           Insert: Partial<WorkOrderPhoto>;           Update: Partial<WorkOrderPhoto>;           Relationships: [] }
-      quote_requests:              { Row: QuoteRequest;             Insert: Partial<QuoteRequest>;             Update: Partial<QuoteRequest>;             Relationships: [] }
       maintenance_schedules:       { Row: MaintenanceSchedule;      Insert: Partial<MaintenanceSchedule>;      Update: Partial<MaintenanceSchedule>;      Relationships: [] }
       guest_message_templates:     { Row: GuestMessageTemplate;     Insert: Partial<GuestMessageTemplate>;     Update: Partial<GuestMessageTemplate>;     Relationships: [] }
       guest_messages_sent:         { Row: GuestMessageSent;         Insert: Partial<GuestMessageSent>;         Update: Partial<GuestMessageSent>;         Relationships: [] }
       owner_transactions:          { Row: OwnerTransaction;         Insert: Partial<OwnerTransaction>;         Update: Partial<OwnerTransaction>;         Relationships: [] }
       org_milestones:              { Row: OrgMilestone;             Insert: Partial<OrgMilestone>;             Update: Partial<OrgMilestone>;             Relationships: [] }
+      quote_requests:              { Row: QuoteRequest;             Insert: Partial<QuoteRequest>;             Update: Partial<QuoteRequest>;             Relationships: [] }
+      communication_logs:          { Row: CommunicationLog;         Insert: Partial<CommunicationLog>;         Update: Partial<CommunicationLog>;         Relationships: [] }
+      push_subscriptions:          { Row: PushSubscription;         Insert: Partial<PushSubscription>;         Update: Partial<PushSubscription>;         Relationships: [] }
+
+      // ── Integration framework (server-side only) ───────────
+      integration_providers:       { Row: IntegrationProvider;      Insert: Partial<IntegrationProvider>;      Update: Partial<IntegrationProvider>;      Relationships: [] }
+      integration_connections:     { Row: IntegrationConnection;    Insert: Partial<IntegrationConnection>;    Update: Partial<IntegrationConnection>;    Relationships: [] }
+      oauth_states:                { Row: OAuthState;               Insert: Partial<OAuthState>;               Update: Partial<OAuthState>;               Relationships: [] }
     }
     Views: Record<string, never>
     Functions: Record<string, never>

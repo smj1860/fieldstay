@@ -31,10 +31,16 @@ export async function createWorkOrder(
   const estimated_cost = formData.get('estimated_cost')
     ? parseFloat(formData.get('estimated_cost') as string)
     : null
-  const portal_enabled = formData.get('portal_enabled') === 'on' || formData.get('portal_enabled') === 'true'
+  const portal_enabled   = formData.get('portal_enabled') === 'on' || formData.get('portal_enabled') === 'true'
+  // Quote-request mode: create WO as quote_requested and send RFQs to selected vendors
+  const request_quotes   = formData.get('request_quotes') === 'true'
+  const quote_vendor_ids = formData.getAll('quote_vendor_ids') as string[]
 
   if (!title) return { error: 'Title is required' }
   if (!property_id) return { error: 'Property is required' }
+  if (request_quotes && !quote_vendor_ids.length) {
+    return { error: 'Select at least one vendor to request quotes from' }
+  }
 
   const { data: property } = await supabase
     .from('properties')
@@ -45,8 +51,11 @@ export async function createWorkOrder(
 
   if (!property) return { error: 'Property not found' }
 
-  const completion_token = portal_enabled ? crypto.randomUUID().replace(/-/g, '') : null
-  const completion_token_expires_at = portal_enabled
+  // In quote-request mode, WO starts as quote_requested with no vendor assigned yet
+  const woStatus            = request_quotes ? 'quote_requested' : (vendor_id ? 'assigned' : 'pending')
+  const usePortal           = portal_enabled && !request_quotes
+  const completion_token    = usePortal ? crypto.randomUUID().replace(/-/g, '') : null
+  const completion_token_expires_at = usePortal
     ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
     : null
 
@@ -55,15 +64,15 @@ export async function createWorkOrder(
     .insert({
       property_id,
       org_id:          membership.org_id,
-      vendor_id:       vendor_id || null,
+      vendor_id:       request_quotes ? null : (vendor_id || null),
       title,
       description,
       priority:        priority as never,
-      status:          vendor_id ? 'assigned' : 'pending',
+      status:          woStatus as never,
       source:          'manual',
       scheduled_date:  scheduled_date || null,
       estimated_cost,
-      portal_enabled,
+      portal_enabled:  usePortal,
       completion_token,
       completion_token_expires_at,
     })
@@ -72,14 +81,52 @@ export async function createWorkOrder(
 
   if (error) return { error: error.message }
 
-  if (portal_enabled) {
+  // Send RFQ emails to each selected vendor
+  if (request_quotes && quote_vendor_ids.length) {
+    for (const vendorId of quote_vendor_ids) {
+      const quote_token            = crypto.randomUUID().replace(/-/g, '')
+      const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+
+      const { data: qr, error: qrError } = await supabase
+        .from('quote_requests')
+        .insert({
+          work_order_id: wo.id,
+          org_id:        membership.org_id,
+          vendor_id:     vendorId,
+          quote_token,
+          quote_token_expires_at,
+          status:        'pending',
+        })
+        .select('id')
+        .single()
+
+      if (qrError || !qr) continue
+
+      await inngest.send({
+        name: 'work-order/quote-requested' as const,
+        data: {
+          work_order_id:    wo.id,
+          quote_request_id: qr.id,
+          property_id,
+          org_id:           membership.org_id,
+          vendor_id:        vendorId,
+          quote_token,
+        },
+      })
+    }
+
+    revalidatePath('/maintenance')
+    redirect(`/maintenance/${wo.id}`)
+  }
+
+  if (usePortal) {
     await inngest.send({
       name: 'work-order/created',
       data: {
-        work_order_id: wo.id,
+        work_order_id:  wo.id,
         property_id,
-        org_id:        membership.org_id,
-        vendor_id:     vendor_id ?? null,
+        org_id:         membership.org_id,
+        vendor_id:      vendor_id ?? null,
         portal_enabled: true,
       },
     })

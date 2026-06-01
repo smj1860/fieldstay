@@ -3,7 +3,7 @@
 import { Fragment, useState, useActionState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Plus, ClipboardList, ChevronDown, ChevronRight, X,
+  Plus, ClipboardList, ChevronDown, X,
   Package, AlertTriangle, ShoppingCart, Check, History,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
@@ -185,18 +185,13 @@ function AddItemsModal({
   const [categoryFilter, setCategoryFilter] = useState<InventoryCategory | 'all'>('all')
   const [selected, setSelected]   = useState<Map<string, SelectedCatalogItem>>(new Map())
 
-  // Custom item state
   const [customName,     setCustomName]     = useState('')
   const [customCategory, setCustomCategory] = useState<InventoryCategory>('other')
   const [customUnit,     setCustomUnit]     = useState('')
   const [customParLevel, setCustomParLevel] = useState('1')
   const [customNotes,    setCustomNotes]    = useState('')
 
-  if (state?.success) {
-    onSuccess()
-    onClose()
-    return null
-  }
+  if (state?.success) { onSuccess(); onClose(); return null }
 
   const addedCatalogIds = new Set(
     propertyItems.map((i) => i.catalog_item_id).filter(Boolean) as string[]
@@ -235,16 +230,14 @@ function AddItemsModal({
   const selectedArray = Array.from(selected.values())
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
       <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg flex flex-col max-h-[90vh]">
 
-        {/* Header */}
         <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
           <h3 className="text-lg font-semibold text-primary-themed">Add Inventory Items</h3>
           <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
         </div>
 
-        {/* Tabs */}
         <div className="flex gap-1 px-6 border-b border-themed flex-shrink-0">
           {(['catalog', 'custom'] as const).map((t) => (
             <button
@@ -269,11 +262,9 @@ function AddItemsModal({
           </div>
         )}
 
-        {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
           {tab === 'catalog' ? (
             <>
-              {/* Category filter chips */}
               <div className="flex gap-1.5 flex-wrap">
                 {(['all', ...CATEGORY_ORDER] as const).map((c) => (
                   <button
@@ -292,7 +283,6 @@ function AddItemsModal({
                 ))}
               </div>
 
-              {/* Catalog list */}
               <div className="border border-themed rounded-xl overflow-hidden">
                 {visibleCatalog.length === 0 ? (
                   <div className="px-4 py-6 text-center text-sm text-muted-themed">No items in this category.</div>
@@ -327,7 +317,6 @@ function AddItemsModal({
                 })}
               </div>
 
-              {/* Selected items with unit + par level inputs */}
               {selectedArray.length > 0 && (
                 <div className="border border-themed rounded-xl overflow-hidden">
                   <div className="px-4 py-2 bg-canvas-themed border-b border-themed">
@@ -337,7 +326,6 @@ function AddItemsModal({
                   </div>
                   {selectedArray.map(({ catalogItem, parLevel, unit }) => (
                     <div key={catalogItem.id} className="px-4 py-3 border-b border-themed last:border-0 space-y-2">
-                      {/* Name row */}
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-medium text-primary-themed truncate min-w-0">
                           {catalogItem.name}
@@ -350,7 +338,6 @@ function AddItemsModal({
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      {/* Inputs row */}
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs text-muted-themed block mb-1">Unit</label>
@@ -380,7 +367,6 @@ function AddItemsModal({
               )}
             </>
           ) : (
-            /* Custom item fields */
             <>
               <div>
                 <label className="label">Item Name <span className="text-red-500">*</span></label>
@@ -441,7 +427,6 @@ function AddItemsModal({
           )}
         </div>
 
-        {/* Footer with form + submit */}
         <div className="px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
           {tab === 'catalog' ? (
             <form action={action} className="flex gap-3">
@@ -510,18 +495,14 @@ function RunCountModal({
 }) {
   const [state, action, pending] = useActionState(submitInventoryCount, null)
 
-  if (state?.success) {
-    onSuccess()
-    onClose()
-    return null
-  }
+  if (state?.success) { onSuccess(); onClose(); return null }
 
   const byCategory = CATEGORY_ORDER
     .map((cat) => ({ cat, catItems: items.filter((i) => i.category === cat) }))
     .filter(({ catItems }) => catItems.length > 0)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 bg-black/40 overflow-y-auto">
+    <div className="fixed inset-0 z-[60] flex items-start justify-center p-4 pt-8 bg-black/40 overflow-y-auto">
       <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-2xl p-6 mb-8">
         <div className="flex items-center justify-between mb-5">
           <div>
@@ -615,243 +596,7 @@ function RunCountModal({
   )
 }
 
-// ── Property Inventory Card ───────────────────────────────────────────────────
-
-function PropertyInventoryCard({
-  property,
-  items,
-  catalogItems,
-  recentCounts,
-  purchaseOrders,
-  onRefresh,
-}: {
-  property: Property
-  items: InventoryItem[]
-  catalogItems: CatalogItem[]
-  recentCounts: InventoryCount[]
-  purchaseOrders: PurchaseOrder[]
-  onRefresh: () => void
-}) {
-  const [showAddItems,   setShowAddItems]   = useState(false)
-  const [showRunCount,   setShowRunCount]   = useState(false)
-  const [showCounts,     setShowCounts]     = useState(true)
-  const [showPOs,        setShowPOs]        = useState(false)
-  const [expandedPO,     setExpandedPO]     = useState<string | null>(null)
-
-  const criticalCount = items.filter((i) => getStockStatus(i) === 'critical').length
-  const lowCount      = items.filter((i) => getStockStatus(i) === 'low').length
-
-  const byCategory = CATEGORY_ORDER
-    .map((cat) => ({ cat, catItems: items.filter((i) => i.category === cat) }))
-    .filter(({ catItems }) => catItems.length > 0)
-
-  return (
-    <div className="card flex flex-col gap-0 p-0 overflow-hidden hover:shadow-card-md transition-shadow">
-
-      {/* Card header */}
-      <div className="flex items-start justify-between gap-3 p-5 border-b border-themed">
-        <div className="min-w-0">
-          <h3 className="font-semibold text-primary-themed">{property.name}</h3>
-          {(property.city || property.state) && (
-            <p className="text-sm text-muted-themed mt-0.5">
-              {[property.city, property.state].filter(Boolean).join(', ')}
-            </p>
-          )}
-          <div className="flex items-center gap-2 mt-2 flex-wrap">
-            <span className="badge badge-slate text-xs">{items.length} item{items.length !== 1 ? 's' : ''}</span>
-            {criticalCount > 0 && (
-              <span className="badge badge-red text-xs flex items-center gap-0.5">
-                <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
-              </span>
-            )}
-            {lowCount > 0 && criticalCount === 0 && (
-              <span className="badge badge-amber text-xs">{lowCount} low</span>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <button
-            onClick={() => setShowRunCount(true)}
-            disabled={items.length === 0}
-            className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
-          >
-            <ClipboardList className="w-3.5 h-3.5" />
-            Run Count
-          </button>
-          <button
-            onClick={() => setShowAddItems(true)}
-            className="btn-secondary text-xs px-3 py-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            Add Items
-          </button>
-        </div>
-      </div>
-
-      {/* Inventory list */}
-      {items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-10 text-muted-themed gap-3">
-          <Package className="w-8 h-8" />
-          <div className="text-center">
-            <p className="text-sm font-medium text-secondary-themed">No inventory items yet</p>
-            <p className="text-xs text-muted-themed mt-0.5">Add items to start tracking stock levels.</p>
-          </div>
-          <button onClick={() => setShowAddItems(true)} className="btn-primary text-xs px-3 py-1.5">
-            <Plus className="w-3.5 h-3.5" /> Add First Item
-          </button>
-        </div>
-      ) : (
-        <div className="divide-y divide-themed">
-          {/* Column header */}
-          <div className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
-            <span>Item</span>
-            <span className="text-right">Current</span>
-            <span className="text-right">Par</span>
-            <span className="text-right">Unit</span>
-            <span className="text-right">Status</span>
-          </div>
-          {byCategory.map(({ cat, catItems }) => (
-            <CategoryRows key={cat} category={cat} items={catItems} />
-          ))}
-        </div>
-      )}
-
-      {/* Prior counts — last 6, collapsible */}
-      <div className="border-t border-themed">
-        <button
-          onClick={() => setShowCounts((o) => !o)}
-          className="flex items-center gap-2 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
-        >
-          <History className="w-3.5 h-3.5 text-muted-themed" />
-          <span className="text-sm font-medium text-secondary-themed">Prior Counts</span>
-          {recentCounts.length > 0 && (
-            <span className="badge badge-slate text-xs">{Math.min(recentCounts.length, 6)}</span>
-          )}
-          <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', showCounts && 'rotate-180')} />
-        </button>
-        {showCounts && (
-          recentCounts.length === 0 ? (
-            <div className="px-5 py-4 text-sm text-muted-themed border-t border-themed">
-              No counts recorded yet. Use <strong>Run Count</strong> to log current quantities.
-            </div>
-          ) : (
-            <div className="border-t border-themed">
-              {/* Header row */}
-              <div className="grid grid-cols-[1fr_auto] gap-4 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
-                <span>Date</span>
-                <span>Notes</span>
-              </div>
-              <div className="divide-y divide-themed">
-                {recentCounts.slice(0, 6).map((count) => (
-                  <div key={count.id} className="flex items-start justify-between gap-4 px-5 py-3">
-                    <span className="text-sm font-medium text-secondary-themed whitespace-nowrap">
-                      {formatDate(count.submitted_at)}
-                    </span>
-                    <span className="text-sm text-muted-themed text-right truncate max-w-xs">
-                      {count.notes ?? '—'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )
-        )}
-      </div>
-
-      {/* Purchase Orders collapsible */}
-      {purchaseOrders.length > 0 && (
-        <div className="border-t border-themed">
-          <button
-            onClick={() => setShowPOs((o) => !o)}
-            className="flex items-center gap-2 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
-          >
-            <ShoppingCart className="w-3.5 h-3.5 text-muted-themed" />
-            <span className="text-sm font-medium text-secondary-themed">Purchase Orders</span>
-            <span className="badge badge-slate text-xs">{purchaseOrders.length}</span>
-            <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', showPOs && 'rotate-180')} />
-          </button>
-          {showPOs && (
-            <div className="border-t border-themed divide-y divide-themed">
-              {purchaseOrders.map((po) => {
-                const poItems = Array.isArray(po.purchase_order_items)
-                  ? po.purchase_order_items
-                  : po.purchase_order_items ? [po.purchase_order_items] : []
-                const isExpanded = expandedPO === po.id
-                return (
-                  <div key={po.id}>
-                    <button
-                      onClick={() => setExpandedPO(isExpanded ? null : po.id)}
-                      className="flex items-center gap-3 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
-                    >
-                      <span className={poBadgeClass(po.status)}>
-                        {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
-                      </span>
-                      <span className="text-sm text-secondary-themed">{formatDate(po.generated_at)}</span>
-                      {po.total_estimated_cost != null && (
-                        <span className="text-sm font-medium text-primary-themed ml-auto mr-2">
-                          ${po.total_estimated_cost.toFixed(2)}
-                        </span>
-                      )}
-                      <ChevronDown className={cn('w-3.5 h-3.5 text-muted-themed transition-transform', isExpanded && 'rotate-180')} />
-                    </button>
-                    {isExpanded && poItems.length > 0 && (
-                      <div className="px-5 pb-3">
-                        <div className="border border-themed rounded-lg overflow-hidden text-xs">
-                          <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 bg-canvas-themed font-medium text-muted-themed uppercase tracking-wide">
-                            <span>Item</span>
-                            <span className="text-right">Current</span>
-                            <span className="text-right">To Buy</span>
-                            <span className="text-right">Est. Cost</span>
-                          </div>
-                          {poItems.map((pi) => (
-                            <div
-                              key={pi.id}
-                              className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 border-t border-themed text-secondary-themed"
-                            >
-                              <span className="truncate">{pi.item_name}</span>
-                              <span className="text-right tabular-nums">{pi.current_quantity}</span>
-                              <span className="text-right tabular-nums font-medium">{pi.quantity_to_buy}</span>
-                              <span className="text-right tabular-nums">
-                                {pi.estimated_unit_cost != null
-                                  ? `$${(pi.estimated_unit_cost * pi.quantity_to_buy).toFixed(2)}`
-                                  : '—'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Modals */}
-      {showAddItems && (
-        <AddItemsModal
-          propertyId={property.id}
-          propertyItems={items}
-          catalogItems={catalogItems}
-          onClose={() => setShowAddItems(false)}
-          onSuccess={onRefresh}
-        />
-      )}
-      {showRunCount && (
-        <RunCountModal
-          propertyId={property.id}
-          items={items}
-          onClose={() => setShowRunCount(false)}
-          onSuccess={onRefresh}
-        />
-      )}
-    </div>
-  )
-}
-
-// ── Category rows (inline, no accordion — category label as divider) ──────────
+// ── Category rows (used in the detail modal) ──────────────────────────────────
 
 function CategoryRows({ category, items }: { category: InventoryCategory; items: InventoryItem[] }) {
   return (
@@ -892,6 +637,304 @@ function CategoryRows({ category, items }: { category: InventoryCategory; items:
   )
 }
 
+// ── Property Inventory Detail Modal ───────────────────────────────────────────
+// Full-screen modal containing the item table, prior counts, and POs.
+// Opened by clicking "View Inventory" on the compact PropertyInventoryCard below.
+
+function PropertyInventoryDetail({
+  property,
+  items,
+  catalogItems,
+  recentCounts,
+  purchaseOrders,
+  onClose,
+  onRefresh,
+}: {
+  property: Property
+  items: InventoryItem[]
+  catalogItems: CatalogItem[]
+  recentCounts: InventoryCount[]
+  purchaseOrders: PurchaseOrder[]
+  onClose: () => void
+  onRefresh: () => void
+}) {
+  const [showAddItems, setShowAddItems] = useState(false)
+  const [showRunCount, setShowRunCount] = useState(false)
+  const [showCounts,   setShowCounts]   = useState(true)
+  const [showPOs,      setShowPOs]      = useState(false)
+  const [expandedPO,   setExpandedPO]   = useState<string | null>(null)
+
+  const byCategory = CATEGORY_ORDER
+    .map((cat) => ({ cat, catItems: items.filter((i) => i.category === cat) }))
+    .filter(({ catItems }) => catItems.length > 0)
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-canvas-themed overflow-hidden">
+
+      {/* Sticky header */}
+      <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-themed bg-card-themed flex-shrink-0">
+        <div className="min-w-0">
+          <h2 className="font-semibold text-primary-themed truncate">{property.name}</h2>
+          {(property.city || property.state) && (
+            <p className="text-xs text-muted-themed mt-0.5">
+              {[property.city, property.state].filter(Boolean).join(', ')}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={() => setShowRunCount(true)}
+            disabled={items.length === 0}
+            className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            Run Count
+          </button>
+          <button
+            onClick={() => setShowAddItems(true)}
+            className="btn-secondary text-xs px-3 py-1.5"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add Items
+          </button>
+          <button onClick={onClose} className="btn-ghost p-2 ml-1">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+
+          {/* Inventory list */}
+          <div className="card flex flex-col gap-0 p-0 overflow-hidden">
+            {items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-muted-themed gap-3">
+                <Package className="w-8 h-8" />
+                <div className="text-center">
+                  <p className="text-sm font-medium text-secondary-themed">No inventory items yet</p>
+                  <p className="text-xs text-muted-themed mt-0.5">Add items to start tracking stock levels.</p>
+                </div>
+                <button onClick={() => setShowAddItems(true)} className="btn-primary text-xs px-3 py-1.5">
+                  <Plus className="w-3.5 h-3.5" /> Add First Item
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-themed">
+                <div className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
+                  <span>Item</span>
+                  <span className="text-right">Current</span>
+                  <span className="text-right">Par</span>
+                  <span className="text-right">Unit</span>
+                  <span className="text-right">Status</span>
+                </div>
+                {byCategory.map(({ cat, catItems }) => (
+                  <CategoryRows key={cat} category={cat} items={catItems} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Prior counts */}
+          <div className="card flex flex-col gap-0 p-0 overflow-hidden">
+            <button
+              onClick={() => setShowCounts((o) => !o)}
+              className="flex items-center gap-2 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
+            >
+              <History className="w-3.5 h-3.5 text-muted-themed" />
+              <span className="text-sm font-medium text-secondary-themed">Prior Counts</span>
+              {recentCounts.length > 0 && (
+                <span className="badge badge-slate text-xs">{Math.min(recentCounts.length, 6)}</span>
+              )}
+              <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', showCounts && 'rotate-180')} />
+            </button>
+            {showCounts && (
+              recentCounts.length === 0 ? (
+                <div className="px-5 py-4 text-sm text-muted-themed border-t border-themed">
+                  No counts recorded yet. Use <strong>Run Count</strong> to log current quantities.
+                </div>
+              ) : (
+                <div className="border-t border-themed">
+                  <div className="grid grid-cols-[1fr_auto] gap-4 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
+                    <span>Date</span>
+                    <span>Notes</span>
+                  </div>
+                  <div className="divide-y divide-themed">
+                    {recentCounts.slice(0, 6).map((count) => (
+                      <div key={count.id} className="flex items-start justify-between gap-4 px-5 py-3">
+                        <span className="text-sm font-medium text-secondary-themed whitespace-nowrap">
+                          {formatDate(count.submitted_at)}
+                        </span>
+                        <span className="text-sm text-muted-themed text-right truncate max-w-xs">
+                          {count.notes ?? '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Purchase Orders */}
+          {purchaseOrders.length > 0 && (
+            <div className="card flex flex-col gap-0 p-0 overflow-hidden">
+              <button
+                onClick={() => setShowPOs((o) => !o)}
+                className="flex items-center gap-2 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
+              >
+                <ShoppingCart className="w-3.5 h-3.5 text-muted-themed" />
+                <span className="text-sm font-medium text-secondary-themed">Purchase Orders</span>
+                <span className="badge badge-slate text-xs">{purchaseOrders.length}</span>
+                <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', showPOs && 'rotate-180')} />
+              </button>
+              {showPOs && (
+                <div className="border-t border-themed divide-y divide-themed">
+                  {purchaseOrders.map((po) => {
+                    const poItems = Array.isArray(po.purchase_order_items)
+                      ? po.purchase_order_items
+                      : po.purchase_order_items ? [po.purchase_order_items] : []
+                    const isExpanded = expandedPO === po.id
+                    return (
+                      <div key={po.id}>
+                        <button
+                          onClick={() => setExpandedPO(isExpanded ? null : po.id)}
+                          className="flex items-center gap-3 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
+                        >
+                          <span className={poBadgeClass(po.status)}>
+                            {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
+                          </span>
+                          <span className="text-sm text-secondary-themed">{formatDate(po.generated_at)}</span>
+                          {po.total_estimated_cost != null && (
+                            <span className="text-sm font-medium text-primary-themed ml-auto mr-2">
+                              ${po.total_estimated_cost.toFixed(2)}
+                            </span>
+                          )}
+                          <ChevronDown className={cn('w-3.5 h-3.5 text-muted-themed transition-transform', isExpanded && 'rotate-180')} />
+                        </button>
+                        {isExpanded && poItems.length > 0 && (
+                          <div className="px-5 pb-3">
+                            <div className="border border-themed rounded-lg overflow-hidden text-xs">
+                              <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 bg-canvas-themed font-medium text-muted-themed uppercase tracking-wide">
+                                <span>Item</span>
+                                <span className="text-right">Current</span>
+                                <span className="text-right">To Buy</span>
+                                <span className="text-right">Est. Cost</span>
+                              </div>
+                              {poItems.map((pi) => (
+                                <div
+                                  key={pi.id}
+                                  className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 border-t border-themed text-secondary-themed"
+                                >
+                                  <span className="truncate">{pi.item_name}</span>
+                                  <span className="text-right tabular-nums">{pi.current_quantity}</span>
+                                  <span className="text-right tabular-nums font-medium">{pi.quantity_to_buy}</span>
+                                  <span className="text-right tabular-nums">
+                                    {pi.estimated_unit_cost != null
+                                      ? `$${(pi.estimated_unit_cost * pi.quantity_to_buy).toFixed(2)}`
+                                      : '—'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Sub-modals rendered at z-[60] above this z-50 modal */}
+      {showAddItems && (
+        <AddItemsModal
+          propertyId={property.id}
+          propertyItems={items}
+          catalogItems={catalogItems}
+          onClose={() => setShowAddItems(false)}
+          onSuccess={onRefresh}
+        />
+      )}
+      {showRunCount && (
+        <RunCountModal
+          propertyId={property.id}
+          items={items}
+          onClose={() => setShowRunCount(false)}
+          onSuccess={onRefresh}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Compact Property Inventory Card ──────────────────────────────────────────
+// Matches the exact visual size and layout of cards on the Properties page.
+// "View Inventory" opens PropertyInventoryDetail as a full-screen modal.
+
+function PropertyInventoryCard({
+  property,
+  items,
+  onSelect,
+}: {
+  property: Property
+  items: InventoryItem[]
+  onSelect: () => void
+}) {
+  const criticalCount = items.filter((i) => getStockStatus(i) === 'critical').length
+  const lowCount      = items.filter((i) => getStockStatus(i) === 'low').length
+
+  return (
+    <div className="card flex flex-col gap-4 hover:shadow-card-md transition-shadow">
+
+      {/* Header — matches properties page card */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="font-semibold text-primary-themed truncate">{property.name}</h3>
+          {(property.city || property.state) && (
+            <p className="text-sm text-muted-themed mt-0.5">
+              {[property.city, property.state].filter(Boolean).join(', ')}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Stock summary badges */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="badge badge-slate">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+        {criticalCount > 0 && (
+          <span className="badge badge-red flex items-center gap-0.5">
+            <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
+          </span>
+        )}
+        {lowCount > 0 && criticalCount === 0 && (
+          <span className="badge badge-amber">{lowCount} low</span>
+        )}
+        {criticalCount === 0 && lowCount === 0 && items.length > 0 && (
+          <span className="badge badge-green">All healthy</span>
+        )}
+        {items.length === 0 && (
+          <span className="text-xs text-muted-themed">No items yet</span>
+        )}
+      </div>
+
+      {/* Actions — matches properties page card footer */}
+      <div className="flex gap-2 pt-1 border-t border-themed">
+        <button
+          onClick={onSelect}
+          className="btn-secondary text-xs px-3 py-1.5 flex-1 justify-center"
+        >
+          View Inventory
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Main InventoryManager ─────────────────────────────────────────────────────
 
 export function InventoryManager({
@@ -908,10 +951,13 @@ export function InventoryManager({
   recentCounts: InventoryCount[]
 }) {
   const router = useRouter()
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
 
   const totalItems    = items.length
   const totalCritical = items.filter((i) => getStockStatus(i) === 'critical').length
   const totalLow      = items.filter((i) => getStockStatus(i) === 'low').length
+
+  const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
 
   return (
     <>
@@ -939,19 +985,29 @@ export function InventoryManager({
           <p className="text-sm text-muted-themed">Add a property to start managing inventory.</p>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {properties.map((p) => (
             <PropertyInventoryCard
               key={p.id}
               property={p}
               items={items.filter((i) => i.property_id === p.id)}
-              catalogItems={catalogItems}
-              recentCounts={recentCounts.filter((c) => c.property_id === p.id)}
-              purchaseOrders={(purchaseOrders ?? []).filter((o) => o.property_id === p.id)}
-              onRefresh={() => router.refresh()}
+              onSelect={() => setSelectedPropertyId(p.id)}
             />
           ))}
         </div>
+      )}
+
+      {/* Full-screen detail modal for the selected property */}
+      {selectedProperty && (
+        <PropertyInventoryDetail
+          property={selectedProperty}
+          items={items.filter((i) => i.property_id === selectedProperty.id)}
+          catalogItems={catalogItems}
+          recentCounts={recentCounts.filter((c) => c.property_id === selectedProperty.id)}
+          purchaseOrders={(purchaseOrders ?? []).filter((o) => o.property_id === selectedProperty.id)}
+          onClose={() => setSelectedPropertyId(null)}
+          onRefresh={() => router.refresh()}
+        />
       )}
     </>
   )

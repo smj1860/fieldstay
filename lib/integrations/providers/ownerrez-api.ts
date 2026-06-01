@@ -11,7 +11,7 @@
  */
 
 import { createServiceClient }  from '@/lib/supabase/server'
-import { getIntegrationToken }  from '../vault'
+import { readIntegrationToken }  from '../vault'
 import { TokenRevokedError, RateLimitError } from '../types'
 import type {
   OwnerRezProperty,
@@ -36,7 +36,7 @@ export class OwnerRezApiClient {
     const clientId = process.env.OWNERREZ_CLIENT_ID
     if (!clientId) throw new Error('OWNERREZ_CLIENT_ID is not set')
 
-    const token = await getIntegrationToken(this.userId, PROVIDER)
+    const token = await readIntegrationToken(this.userId, PROVIDER)
     if (!token) {
       throw new TokenRevokedError(this.userId)
     }

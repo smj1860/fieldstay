@@ -1,67 +1,104 @@
+export type ProviderAuthType = 'oauth2' | 'api_key'
+export type ConnectionStatus = 'active' | 'revoked' | 'error'
+
 /**
- * Shared types for the FieldStay integration framework.
+ * Normalized token response returned by every OAuth provider adapter.
+ * Provider-specific raw responses are mapped to this shape inside each adapter.
  */
+export interface TokenResponse {
+  /** The access token to be stored in Vault */
+  accessToken: string
+  /** The provider's own user or account identifier */
+  externalUserId: string
+  /** Scopes granted (optional — not all providers return this) */
+  scope?: string
+  /** Any non-sensitive provider-specific metadata to persist in the connection row */
+  metadata?: Record<string, unknown>
+}
 
+/**
+ * The contract every integration provider adapter must satisfy.
+ * OAuth2 providers implement the oauth-prefixed methods.
+ * API-key providers can skip them and implement getApiHeaders directly.
+ */
 export interface IntegrationProvider {
-  id: string
-  name: string
-  description: string | null
-  oauth_authorization_url: string
-  oauth_token_url: string
-  is_active: boolean
-  created_at: string
+  /** Matches integration_providers.id in the database */
+  readonly id: string
+  readonly displayName: string
+  readonly authType: ProviderAuthType
+
+  // ── OAuth 2.0 methods (required when authType === 'oauth2') ──────────────
+
+  /**
+   * Build the full authorization URL to redirect the user to.
+   * Called by the /connect route handler.
+   */
+  getAuthorizationUrl?(params: {
+    state: string
+    redirectUri: string
+  }): string
+
+  /**
+   * Exchange a temporary authorization code for an access token.
+   * Called by the /callback route handler immediately after the redirect.
+   */
+  exchangeCodeForToken?(params: {
+    code: string
+    redirectUri: string
+  }): Promise<TokenResponse>
+
+  /**
+   * Refresh an expired access token using a refresh token.
+   * OwnerRez does NOT support this — tokens are long-lived and never expire.
+   * Implement this for providers that do (e.g. Guesty, Hostaway).
+   */
+  refreshAccessToken?(params: {
+    refreshToken: string
+  }): Promise<TokenResponse>
+
+  /**
+   * Revoke an access token on the provider's side.
+   * Called when a user disconnects FieldStay from within our app.
+   * The caller is responsible for also deleting the token from Vault.
+   */
+  revokeAccessToken?(params: {
+    token: string
+  }): Promise<void>
+
+  // ── Universal methods (all providers) ───────────────────────────────────
+
+  /**
+   * Return the HTTP headers required to authenticate API calls to this provider.
+   * Includes Authorization, User-Agent, Content-Type, etc.
+   */
+  getApiHeaders(token: string): Record<string, string>
+
+  /**
+   * Validate an incoming webhook request from this provider.
+   * Returns true if the request is authentic and should be processed.
+   * Each provider uses a different auth scheme (Basic Auth, HMAC, etc.)
+   */
+  validateWebhook(request: Request): Promise<boolean>
+
+  /**
+   * Process a validated webhook event payload.
+   * Generic revocation events are handled centrally by the route handler.
+   * Implement this for provider-specific event types (bookings, guests, etc.)
+   */
+  handleWebhookEvent(params: {
+    action: string
+    payload: unknown
+    externalUserId: string
+  }): Promise<void>
 }
 
-export interface IntegrationConnection {
-  id: string
-  user_id: string
-  org_id: string
-  provider_id: string
-  status: 'active' | 'error' | 'revoked'
-  vault_secret_id: string | null
-  external_user_id: string | null
-  metadata: Record<string, unknown> | null
-  created_at: string
-  updated_at: string
-}
-
-export interface OAuthTokenResponse {
-  access_token: string
-  token_type:   string
-  scope:        string
-  user_id:      number
-}
-
-export interface WebhookEvent {
-  event_type:  string
-  entity_type?: string
-  entity_id?:  string | number
-  [key: string]: unknown
-}
-
-// ── Typed errors ──────────────────────────────────────────────────────────────
-
-export class TokenRevokedError extends Error {
-  constructor(public readonly userId: string) {
-    super(`[OwnerRez:${userId}] Access token has been revoked`)
-    this.name = 'TokenRevokedError'
-  }
-}
-
-export class RateLimitError extends Error {
-  constructor(public readonly retryAfter: number) {
-    super(`Rate limited — retry after ${retryAfter}s`)
-    this.name = 'RateLimitError'
-  }
-}
-
-// ── OwnerRez API shapes ───────────────────────────────────────────────────────
+// ── OwnerRez API response shapes ─────────────────────────────────────────────
 
 export interface OwnerRezProperty {
-  id:           number
-  name:         string
-  bedrooms:     number
-  bathrooms:    number
+  id:            number
+  name:          string
+  bedrooms:      number
+  bathrooms:     number
   max_occupancy: number
 }
 
@@ -86,13 +123,27 @@ export interface OwnerRezBooking {
 export interface OwnerRezUser {
   id:       number
   username: string
-  email:    string | null
+  email:    string
 }
-
-// ── Generic paged response shape ─────────────────────────────────────────────
 
 export interface OwnerRezPagedResponse<T> {
   total_count:     number
   items:           T[]
   next_page_token?: string | null
+}
+
+// ── Error classes ─────────────────────────────────────────────────────────────
+
+export class TokenRevokedError extends Error {
+  constructor(public readonly userId: string) {
+    super(`Access token revoked for user ${userId}`)
+    this.name = 'TokenRevokedError'
+  }
+}
+
+export class RateLimitError extends Error {
+  constructor(public readonly retryAfter: number) {
+    super(`Rate limited — retry after ${retryAfter}s`)
+    this.name = 'RateLimitError'
+  }
 }

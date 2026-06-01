@@ -11,7 +11,7 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
-import { RateLimitError }       from '@/lib/integrations/types'
+import { RateLimitError, TokenRevokedError } from '@/lib/integrations/types'
 import type { OwnerRezProperty, OwnerRezBooking } from '@/lib/integrations/types'
 
 const PROVIDER = 'ownerrez'
