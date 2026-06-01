@@ -5,8 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
-// ── Feature tiles ──────────────────────────────────────────────────────────
-const FEATURES = [
+// ── Primary Core Features (The main product) ──────────────────────────────
+const CORE_FEATURES = [
   {
     number: '01',
     title:  'Automated Turnover Management',
@@ -14,13 +14,13 @@ const FEATURES = [
   },
   {
     number: '02',
-    title:  'RepuGuard Reputation Engine',
-    desc:   'AI-driven guest review responses built on live property context. Auto-pilot for 4 and 5-star reviews. Private human-in-the-loop validation queues for 1 to 3-star operational issues.',
+    title:  'Inventory & Asset Tracking',
+    desc:   'Set par levels for every property. Low-stock alerts trigger purchase orders automatically. Keep your field teams stocked without the spreadsheets.',
   },
   {
     number: '03',
-    title:  'Inventory & Maintenance',
-    desc:   'Set par levels for every property. Low-stock alerts trigger purchase orders automatically. Schedule recurring maintenance — seasonal or routine — with vendor assignments built in.',
+    title:  'Field Maintenance & Vendors',
+    desc:   'Schedule recurring seasonal maintenance or drop in unexpected work orders. Assign external vendors and track their progress entirely inside the system.',
   },
   {
     number: '04',
@@ -29,7 +29,7 @@ const FEATURES = [
   },
 ]
 
-// ── Sandbox Demo Dataset ───────────────────────────────────────────────────
+// ── Sandbox Demo Dataset (RepuGuard Optional Module) ───────────────────────
 const SANDBOX_SCENARIOS = {
   glowing: {
     label: '5-Star Review',
@@ -146,7 +146,7 @@ export default function OwnerRezLandingPage() {
                   OR
                 </span>
                 <span className="text-xs font-bold uppercase tracking-widest" style={{ color: '#FCD116' }}>
-                  Exclusive OwnerRez Launch Special
+                  Official OwnerRez Integration Partner
                 </span>
               </div>
 
@@ -157,13 +157,13 @@ export default function OwnerRezLandingPage() {
 
               <p className="mb-10 leading-relaxed"
                  style={{ fontSize: 17, color: 'rgba(255,255,255,0.6)', maxWidth: 500 }}>
-                FieldStay syncs seamlessly to your OwnerRez bookings to automate turnover management on the ground, while the new RepuGuard module drafts context-perfect responses to guest reviews entirely on autopilot.
+                FieldStay connects directly to your bookings to automate everything your team handles on the ground—turnover management, offline crew checklists, asset inventory tracking, and field maintenance schedules.
               </p>
 
               <div className="flex flex-wrap gap-6">
                 {[
-                  '3-Month RepuGuard Trial',
-                  '$15/mo Grandfathered Launch Price',
+                  'Free 14-day operations trial',
+                  'No credit card required',
                   'Connects in under 5 minutes',
                 ].map((signal) => (
                   <div key={signal} className="flex items-center gap-2">
@@ -200,7 +200,7 @@ export default function OwnerRezLandingPage() {
                       You&apos;re already signed in
                     </h2>
                     <p className="text-sm mb-7" style={{ color: '#6B7280', lineHeight: 1.6 }}>
-                      Click below to link your OwnerRez account to FieldStay and unlock your ecosystem perks.
+                      Click below to link your OwnerRez account and open your FieldStay command dashboard.
                     </p>
                     <a href="/api/integrations/ownerrez/connect"
                        className="block w-full text-center rounded-xl font-bold text-sm py-3.5 transition-opacity hover:opacity-90"
@@ -214,7 +214,7 @@ export default function OwnerRezLandingPage() {
                       Create your FieldStay account
                     </h2>
                     <p className="text-sm mb-6" style={{ color: '#6B7280' }}>
-                      Secure your $15/mo grandfathered partner rate.
+                      Sync your properties and team in the next step.
                     </p>
 
                     {error && (
@@ -249,20 +249,20 @@ export default function OwnerRezLandingPage() {
         </div>
       </section>
 
-      {/* ── Features ────────────────────────────────────────────────────── */}
+      {/* ── Core Operations Platform Features ───────────────────────────── */}
       <section className="px-8 py-20" style={{ background: '#0c1d3a' }}>
         <div className="mx-auto" style={{ maxWidth: 1100 }}>
           <div className="text-center mb-14">
             <h2 className="font-black tracking-tight mb-3" style={{ fontSize: 'clamp(26px, 3.5vw, 36px)', color: '#fff', letterSpacing: '-1px' }}>
-              Everything OwnerRez doesn&apos;t handle.
+              Everything OwnerRez doesn&apos;t handle on the ground.
             </h2>
             <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
-              Engineered exclusively for tactical field logistics and reputation management.
+              Built specifically for tactical field operations, turnover coordination, and asset tracking.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-            {FEATURES.map((f) => (
+            {CORE_FEATURES.map((f) => (
               <div key={f.number} className="rounded-2xl p-7" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
                 <div className="font-black mb-4 leading-none" style={{ fontSize: 36, color: 'rgba(252,209,22,0.2)', letterSpacing: '-2px' }}>
                   {f.number}
@@ -275,18 +275,19 @@ export default function OwnerRezLandingPage() {
         </div>
       </section>
 
-      {/* ── Interactive Simulated Sandbox ─────────────────────────────── */}
+      {/* ── Optional Add-On Feature: RepuGuard ──────────────────────────── */}
       <section className="px-8 py-20" style={{ background: '#102246', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
         <div className="mx-auto" style={{ maxWidth: 900 }}>
           <div className="text-center mb-12">
-            <span className="text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full" style={{ background: 'rgba(252,209,22,0.1)', color: '#FCD116' }}>
-              Module Preview
+            <span className="text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full" style={{ background: 'rgba(91,172,67,0.1)', color: '#5BAC43' }}>
+              Exclusive Optional Module
             </span>
             <h2 className="font-black tracking-tight mt-3 mb-4" style={{ fontSize: 32, color: '#fff', letterSpacing: '-1px' }}>
-              See RepuGuard in Action
+              Add-On: RepuGuard Reputation Engine
             </h2>
-            <p className="text-sm mx-auto" style={{ color: 'rgba(255,255,255,0.6)', maxWidth: 550 }}>
-              Select a real-world review scenario below to see how our engine creates non-defensive, context-aware, human responses without template strings.
+            <p className="text-sm mx-auto" style={{ color: 'rgba(255,255,255,0.6)', maxWidth: 580 }}>
+              Need help managing your reviews? Toggle on the optional RepuGuard module. It generates context-perfect, non-defensive guest responses on auto-pilot. 
+              <span className="block mt-2 font-semibold text-white">Year 1 Partner Special: 3 Months Free, then just $15/mo (Standard $29/mo).</span>
             </p>
           </div>
 
@@ -328,7 +329,7 @@ export default function OwnerRezLandingPage() {
                 RepuGuard Smart Output
               </span>
               <p className="text-xs font-semibold mt-1 mb-3" style={{ color: '#5BAC43' }}>
-                ✓ Operational Anchor Rule Active
+                ✓ Context Anchor Rule Applied
               </p>
               <div className="rounded-xl p-4 text-sm leading-relaxed" style={{ background: 'rgba(16,34,70,0.4)', color: '#fff', border: '1px solid rgba(252,209,22,0.1)' }}>
                 {SANDBOX_SCENARIOS[activeTab].reply}
@@ -341,17 +342,17 @@ export default function OwnerRezLandingPage() {
       {/* ── Bottom CTA ──────────────────────────────────────────────────── */}
       <section className="px-8 py-16 text-center" style={{ background: '#F8F9FA', borderTop: '1px solid #E5E7EB' }}>
         <p className="font-black mb-1 tracking-tight" style={{ fontSize: 'clamp(22px, 3vw, 30px)', color: '#102246', letterSpacing: '-0.75px' }}>
-          Lock In Your Year 1 Pricing
+          Streamline Your Field Operations
         </p>
         <p className="text-sm mb-7" style={{ color: '#6B7280' }}>
-          Enjoy a 3-month free trial of RepuGuard, grandfathered at $15/mo for life.
+          Get started with a 14-day free trial of our core features. Optional RepuGuard bundle available inside.
         </p>
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
           className="inline-block rounded-xl font-bold text-sm px-8 py-3.5 transition-opacity hover:opacity-90"
           style={{ background: '#102246', color: '#FCD116', border: 'none', cursor: 'pointer' }}
         >
-          Get Started Free →
+          Start Your Free Trial →
         </button>
       </section>
 
