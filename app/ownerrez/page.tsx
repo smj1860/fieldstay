@@ -161,7 +161,7 @@ export default function OwnerRezLandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-start">
             
             {/* Left Half: The Main Operations Product */}
-            <div style={{ borderRight: '1px solid rgba(255,255,255,0.08)', paddingRight: '1.5rem' }}>
+            <div className="lg:border-r lg:pr-6" style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
               <h1 className="font-black leading-[1.06] tracking-tight mb-6"
                   style={{ fontSize: 'clamp(30px, 4vw, 44px)', color: '#fff', letterSpacing: '-1.5px' }}>
                 The operations layer your <span style={{ color: '#FCD116' }}>OwnerRez account</span> is missing.
@@ -328,14 +328,16 @@ export default function OwnerRezLandingPage() {
               </div>
             </div>
 
-            <div className="md:border-l" style={{ borderColor: 'rgba(255,255,255,0.05)', mdPaddingLeft: '1rem' }}>
-              <span className="text-xs font-bold uppercase tracking-wider block md:pl-4" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            {/* FIXED: Removed invalid mdPaddingLeft property and integrated tailwind layout spacing */}
+            <div className="md:border-l md:pl-6" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+              <span className="text-xs font-bold uppercase tracking-wider block" style={{ color: 'rgba(255,255,255,0.4)' }}>
                 Automated System Analysis
               </span>
-              <p className="text-xs font-semibold mt-1 mb-3 md:pl-4" style={{ color: SANDBOX_SCENARIOS[activeTab].badgeColor }}>
+              <p className="text-xs font-semibold mt-1 mb-3" style={{ color: SANDBOX_SCENARIOS[activeTab].badgeColor }}>
                 {SANDBOX_SCENARIOS[activeTab].badge}
               </p>
-              <div className="rounded-xl p-4 text-sm leading-relaxed md:ml-4" style={{ background: 'rgba(16,34,70,0.4)', color: '#fff', border: '1px solid rgba(252,209,22,0.1)' }}>
+              {/* FIXED: Standardized style objects for secure, type-safe Next production building */}
+              <div className="rounded-xl p-4 text-sm leading-relaxed" style={{ background: 'rgba(16,34,70,0.4)', color: '#fff', border: '1px solid rgba(252,209,22,0.1)' }}>
                 {SANDBOX_SCENARIOS[activeTab].reply}
               </div>
             </div>
