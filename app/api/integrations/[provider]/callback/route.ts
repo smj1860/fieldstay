@@ -31,10 +31,11 @@ import { storeIntegrationToken }          from '@/lib/integrations/vault'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { provider: string } }
+  { params }: { params: Promise<{ provider: string }> }
 ) {
+  const { provider } = await params
   const appUrl     = process.env.NEXT_PUBLIC_APP_URL!
-  const providerId = params.provider.toLowerCase()
+  const providerId = provider.toLowerCase()
   const { searchParams } = request.nextUrl
 
   // Parameters sent back by the provider after the user acts on the auth screen
