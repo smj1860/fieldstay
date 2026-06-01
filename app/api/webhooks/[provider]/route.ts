@@ -1,0 +1,126 @@
+// src/app/api/webhooks/[provider]/route.ts
+// ============================================================
+// Incoming webhook handler for all integration providers.
+//
+// What happens here:
+//   1. Validate the webhook's authenticity (provider-specific)
+//   2. Parse the payload
+//   3. Handle the generic "authorization revoked" event universally
+//   4. Delegate everything else to the provider adapter
+//   5. Return 200 immediately — never make OwnerRez wait
+//
+// OwnerRez webhook format for revocation:
+//   POST body: { "action": "application_authorization_revoked", "user_id": 347311458 }
+//   Auth: HTTP Basic Auth with credentials you set in app registration
+//
+// This URL in your OwnerRez app settings should be:
+//   https://fieldstay.app/api/webhooks/ownerrez
+// ============================================================
+
+import { NextResponse, type NextRequest }            from 'next/server'
+import { getProvider }                               from '@/lib/integrations/registry'
+import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations/vault'
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ provider: string }> }
+) {
+  const { provider } = await params
+  const providerId = provider.toLowerCase()
+
+  // ── 1. Validate the provider exists ───────────────────────
+  let provider
+  try {
+    provider = getProvider(providerId)
+  } catch {
+    // Return 404 but don't reveal internals
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  // ── 2. Authenticate the webhook request ───────────────────
+  //    We must clone the request before reading it, because the body
+  //    stream can only be consumed once. We pass the clone to validateWebhook
+  //    so we can still read the JSON body afterward.
+  const clonedForValidation = request.clone()
+
+  let isAuthentic: boolean
+  try {
+    isAuthentic = await provider.validateWebhook(clonedForValidation)
+  } catch (err) {
+    console.error(`[Webhook:${providerId}] Validation error:`, err)
+    // Fail closed — if we can't validate, reject
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  if (!isAuthentic) {
+    console.warn(
+      `[Webhook:${providerId}] Rejected unauthenticated request from IP ` +
+      `${request.headers.get('x-forwarded-for') ?? 'unknown'}`
+    )
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  // ── 3. Parse the payload ───────────────────────────────────
+  let payload: Record<string, unknown>
+  try {
+    payload = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
+  // Extract standardized fields.
+  // OwnerRez revocation format: { "action": "application_authorization_revoked", "user_id": 12345 }
+  const action         = String(payload.action ?? payload.event_type ?? '')
+  const externalUserId = String(payload.user_id ?? payload.account_id ?? '')
+
+  console.log(`[Webhook:${providerId}] Received action: "${action}" for external user: ${externalUserId}`)
+
+  // ── 4. Handle generic "authorization revoked" universally ─
+  //    This event means the user disconnected our app from within OwnerRez.
+  //    We must destroy their stored token so future API calls don't fail silently.
+  if (action === 'application_authorization_revoked') {
+    try {
+      if (!externalUserId) {
+        console.error(`[Webhook:${providerId}] Revocation event missing user_id`)
+      } else {
+        const appUserId = await findUserByExternalId(providerId, externalUserId)
+
+        if (appUserId) {
+          await revokeIntegrationToken(appUserId, providerId)
+          console.log(
+            `[Webhook:${providerId}] Token revoked — FieldStay user ${appUserId} ` +
+            `(external user ${externalUserId})`
+          )
+          // TODO: Trigger an Inngest event here to notify the user via Resend email:
+          // await inngest.send({ name: 'integration/connection.revoked', data: { appUserId, providerId } })
+        } else {
+          console.warn(
+            `[Webhook:${providerId}] Revocation for unknown external user ${externalUserId} — ` +
+            `may have already been disconnected`
+          )
+        }
+      }
+    } catch (err) {
+      // Log but don't return 500 — OwnerRez must get a 200 or it will retry infinitely
+      console.error(`[Webhook:${providerId}] Failed to process revocation:`, err)
+    }
+
+    // Return 200 immediately after revocation
+    return NextResponse.json({ received: true }, { status: 200 })
+  }
+
+  // ── 5. Delegate provider-specific events ──────────────────
+  //    Future events: booking.created, booking.modified, guest.updated, etc.
+  //    These are fired via individual webhook subscriptions (POST /v2/webhooksubscriptions)
+  //    and have a different payload format than the global revocation event.
+  //
+  //    We always return 200 quickly and offload heavy processing to Inngest.
+  try {
+    await provider.handleWebhookEvent({ action, payload, externalUserId })
+  } catch (err) {
+    // Again: log, don't 500 — provider is not responsible for our processing errors
+    console.error(`[Webhook:${providerId}] Handler threw for action "${action}":`, err)
+  }
+
+  return NextResponse.json({ received: true }, { status: 200 })
+}
