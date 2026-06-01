@@ -30,14 +30,14 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
 ) {
-  const { provider } = await params
+  const resolvedParams = await params
   const appUrl     = process.env.NEXT_PUBLIC_APP_URL!
-  const providerId = provider.toLowerCase()
+  const providerId = resolvedParams.provider.toLowerCase()
 
   // ── 1. Validate the requested provider ────────────────────
-  let provider
+  let providerAdapter
   try {
-    provider = getProvider(providerId)
+    providerAdapter = getProvider(providerId)
   } catch {
     return NextResponse.json(
       { error: `Unknown integration provider: "${providerId}"` },
@@ -45,7 +45,7 @@ export async function GET(
     )
   }
 
-  if (provider.authType !== 'oauth2' || !provider.getAuthorizationUrl) {
+  if (providerAdapter.authType !== 'oauth2' || !providerAdapter.getAuthorizationUrl) {
     return NextResponse.json(
       { error: `Provider "${providerId}" does not support OAuth2` },
       { status: 400 }
@@ -129,7 +129,7 @@ export async function GET(
 
   // ── 6. Build the authorization URL and redirect ────────────
   const redirectUri      = `${appUrl}/api/integrations/${providerId}/callback`
-  const authorizationUrl = provider.getAuthorizationUrl({ state, redirectUri })
+  const authorizationUrl = providerAdapter.getAuthorizationUrl({ state, redirectUri })
 
   // makeRedirect carries any Supabase session cookies onto this response
   const response = makeRedirect(authorizationUrl)
