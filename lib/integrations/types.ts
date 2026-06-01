@@ -1,9 +1,3 @@
-// src/lib/integrations/types.ts
-// ============================================================
-// Core types for FieldStay's integration framework.
-// Every integration provider must implement IntegrationProvider.
-// ============================================================
-
 export type ProviderAuthType = 'oauth2' | 'api_key'
 export type ConnectionStatus = 'active' | 'revoked' | 'error'
 
@@ -96,4 +90,60 @@ export interface IntegrationProvider {
     payload: unknown
     externalUserId: string
   }): Promise<void>
+}
+
+// ── OwnerRez API response shapes ─────────────────────────────────────────────
+
+export interface OwnerRezProperty {
+  id:            number
+  name:          string
+  bedrooms:      number
+  bathrooms:     number
+  max_occupancy: number
+}
+
+export interface OwnerRezGuest {
+  id:    number
+  name:  string | null
+  email: string | null
+}
+
+export interface OwnerRezBooking {
+  id:           number
+  arrival:      string
+  departure:    string
+  status:       string
+  channel_name?: string
+  guest?: {
+    name:  string | null
+    email: string | null
+  }
+}
+
+export interface OwnerRezUser {
+  id:       number
+  username: string
+  email:    string
+}
+
+export interface OwnerRezPagedResponse<T> {
+  total_count:     number
+  items:           T[]
+  next_page_token?: string | null
+}
+
+// ── Error classes ─────────────────────────────────────────────────────────────
+
+export class TokenRevokedError extends Error {
+  constructor(public readonly userId: string) {
+    super(`Access token revoked for user ${userId}`)
+    this.name = 'TokenRevokedError'
+  }
+}
+
+export class RateLimitError extends Error {
+  constructor(public readonly retryAfter: number) {
+    super(`Rate limited — retry after ${retryAfter}s`)
+    this.name = 'RateLimitError'
+  }
 }
