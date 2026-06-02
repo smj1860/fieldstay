@@ -55,6 +55,25 @@ export async function POST(request: NextRequest) {
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
       const subscription = event.data.object
+
+      // RepuGuard-specific subscription update
+      if (subscription.metadata?.feature === 'repuguard') {
+        const orgId = subscription.metadata?.org_id
+        if (orgId) {
+          const repuguardStatus =
+            subscription.status === 'active'   ? 'active'
+          : subscription.status === 'trialing' ? 'trial'
+          : subscription.status === 'past_due' ? 'active'
+          : 'cancelled'
+
+          await supabase
+            .from('organizations')
+            .update({ repuguard_status: repuguardStatus })
+            .eq('id', orgId)
+        }
+        break
+      }
+
       const customerId   = subscription.customer as string
       const priceId      = subscription.items.data[0]?.price.id ?? ''
       const planKey      = getPlanByPriceId(priceId) ?? 'pro'
@@ -102,6 +121,18 @@ export async function POST(request: NextRequest) {
     case 'customer.subscription.deleted': {
       const subscription = event.data.object
       const customerId   = subscription.customer as string
+
+      // RepuGuard subscription deleted
+      if (subscription.metadata?.feature === 'repuguard') {
+        const orgId = subscription.metadata?.org_id
+        if (orgId) {
+          await supabase
+            .from('organizations')
+            .update({ repuguard_status: 'cancelled' })
+            .eq('id', orgId)
+        }
+        break
+      }
 
       const { data: org } = await supabase
         .from('organizations')

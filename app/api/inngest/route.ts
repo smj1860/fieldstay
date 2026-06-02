@@ -19,6 +19,7 @@ import { handleInventoryCountSubmitted } from '@/lib/inngest/functions/inventory
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
 import { ownerRezIncrementalSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
+import { ownerRezReviewsSync }     from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
 
 // Work orders
 import {
@@ -52,6 +53,7 @@ export const { GET, POST, PUT } = serve({
     // OwnerRez sync
     ownerRezInitialSync,
     ownerRezIncrementalSync,
+    ownerRezReviewsSync,
 
     // Work orders
     handleWorkOrderCreated,
