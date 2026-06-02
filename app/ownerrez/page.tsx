@@ -1,18 +1,7 @@
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
-import dynamic from 'next/dynamic'
-
-// Pre-baked sandbox — loaded client-side only, zero API calls, zero Anthropic SDK
-const RepuGuardSandbox = dynamic(
-  () => import('@/components/repuguard/RepuGuardSandbox'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="h-96 bg-[#0a1628] border border-[#0e2040] rounded-2xl animate-pulse" />
-    ),
-  }
-)
+import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 
 export default async function OwnerRezPage() {
   const cookieStore = await cookies()
@@ -152,7 +141,7 @@ export default async function OwnerRezPage() {
               Choose a review scenario and watch RepuGuard generate a response in real time.
             </p>
           </div>
-          <RepuGuardSandbox />
+          <RepuGuardWrapper />
         </div>
 
         {/* ─── Features ─── */}
@@ -194,7 +183,6 @@ export default async function OwnerRezPage() {
         </div>
 
         {/* ─── Pricing ─── */}
-        {/* TODO: Replace $XX placeholders with your actual plan names, prices, and feature lists */}
         <div className="mb-24">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold mb-3">Simple, transparent pricing</h2>
