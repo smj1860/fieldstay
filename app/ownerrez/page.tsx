@@ -1,18 +1,10 @@
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
-import dynamic from 'next/dynamic'
+import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/ownerrez/PricingSection'
 
-const RepuGuardWrapper = dynamic(
-  () => import('@/components/repuguard/RepuGuardWrapper'),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="h-96 bg-[#0c1e3a] border border-[#1e3a6e] rounded-2xl animate-pulse" />
-    ),
-  }
-)
+
 
 export default async function OwnerRezPage() {
   const cookieStore = await cookies()
