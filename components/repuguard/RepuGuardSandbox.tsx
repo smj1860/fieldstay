@@ -96,7 +96,7 @@ export default function RepuGuardSandbox() {
     if (timerRef.current) clearTimeout(timerRef.current);
   }
 
-  function runScenario(scenario: Scenario) {
+  function runScenario(scenario: SCENARIOS) {
     clearTimers();
     setSelected(scenario);
     setPhase("thinking");
