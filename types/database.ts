@@ -16,7 +16,7 @@
 
 export type OrgPlan             = 'starter' | 'growth' | 'pro' | 'enterprise'
 export type OrgPlanStatus       = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'paused'
-export type MemberRole          = 'admin' | 'manager' | 'crew' | 'viewer'
+export type MemberRole          = 'owner' | 'admin' | 'manager' | 'crew' | 'viewer'
 export type PropertyType        = 'house' | 'condo' | 'cabin' | 'cottage' | 'townhouse' | 'other'
 export type IcalSource          = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other'
 export type SyncStatus          = 'pending' | 'success' | 'error'

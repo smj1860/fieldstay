@@ -85,7 +85,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       let bookings: OwnerRezBooking[]
 
       try {
-        bookings = await client.getBookings({ propertyIds })
+        bookings = await client.getBookings({ propertyIds, includeGuest: true })
       } catch (err) {
         if (err instanceof RateLimitError) {
           throw err
@@ -108,30 +108,11 @@ export const ownerRezInitialSync = inngest.createFunction(
           (fsProps ?? []).map((p) => [p.external_id, p.id])
         )
 
-        const rows = bookings
-          .map((b) => {
-            const propertyId = externalToFsId[String(b.guest)] // Note: matching by booking's related property
-            return {
-              org_id,
-              property_id:     null as string | null,  // resolved below
-              guest_name:      b.guest?.name   ?? null,
-              guest_email:     b.guest?.email  ?? null,
-              checkin_date:    b.arrival,
-              checkout_date:   b.departure,
-              source:          mapChannelToSource(b.channel_name),
-              status:          mapBookingStatus(b.status),
-              external_id:     String(b.id),
-              external_source: PROVIDER,
-            }
-          })
-
-        // We need property_id from the booking itself, not from guest
-        // Rebuild with correct property_id mapping
         const bookingRows = bookings.map((b) => ({
           org_id,
-          property_id:     null as string | null,
-          guest_name:      b.guest?.name   ?? null,
-          guest_email:     b.guest?.email  ?? null,
+          property_id:     externalToFsId[String(b.property_id)] ?? null,
+          guest_name:      b.guest?.name  ?? null,
+          guest_email:     b.guest?.email ?? null,
           checkin_date:    b.arrival,
           checkout_date:   b.departure,
           source:          mapChannelToSource(b.channel_name),

@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import type { MemberRole } from '@/types/database'
 
@@ -67,6 +67,21 @@ export async function requireOrgMember(): Promise<
   }
 
   return { user, supabase, membership } as never
+}
+
+/**
+ * Return the current user's role in their org.
+ * Used to gate owner-only UI in settings pages.
+ */
+export async function getOrgMembership(userId: string, orgId: string) {
+  const admin = createServiceClient()
+  const { data } = await admin
+    .from('organization_members')
+    .select('role')
+    .eq('user_id', userId)
+    .eq('org_id', orgId)
+    .single()
+  return data ?? null
 }
 
 /**

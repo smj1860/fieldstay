@@ -25,6 +25,9 @@ const TOKEN_ROUTES = [
 // Skip auth middleware entirely. These routes either handle their own auth
 // or must be reachable by unauthenticated external parties.
 const BYPASS_ROUTES = [
+  // Team invite accept page — unauthenticated users arrive here from email links
+  '/accept-invite',
+
   // Internal event runners
   '/api/inngest',
 

@@ -17,7 +17,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
-import { RateLimitError, TokenRevokedError } from '@/lib/integrations/types'
+import { RateLimitError } from '@/lib/integrations/types'
 
 const PROVIDER = 'ownerrez'
 
@@ -56,15 +56,15 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         const client     = new OwnerRezApiClient(conn.user_id)
 
         try {
-          // Fetch bookings since cursor
-          const bookings = await client.getBookings({ sinceUtc })
+          // Fetch bookings since cursor (include_guest captures name/email directly)
+          const bookings = await client.getBookings({ sinceUtc, includeGuest: true })
 
           if (bookings.length) {
             const bookingRows = bookings.map((b) => ({
               org_id:          conn.org_id,
               property_id:     null as string | null,
-              guest_name:      b.guest?.name   ?? null,
-              guest_email:     b.guest?.email  ?? null,
+              guest_name:      b.guest?.name  ?? null,
+              guest_email:     b.guest?.email ?? null,
               checkin_date:    b.arrival,
               checkout_date:   b.departure,
               source:          mapChannelToSource(b.channel_name),
@@ -83,24 +83,6 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             }
           }
 
-          // Fetch guests since cursor (for guest record updates)
-          const guests = await client.getGuests({ sinceUtc })
-          // Guests sync: update guest_name/email on matching bookings
-          if (guests.length) {
-            for (const guest of guests) {
-              if (!guest.name && !guest.email) continue
-              await supabase
-                .from('bookings')
-                .update({
-                  guest_name:  guest.name  ?? undefined,
-                  guest_email: guest.email ?? undefined,
-                })
-                .eq('org_id', conn.org_id)
-                // Match by external booking that references this guest
-                // (best-effort — OwnerRez doesn't always include guest_id on bookings)
-            }
-          }
-
           // Update sync cursor
           await supabase
             .from('integration_connections')
@@ -114,7 +96,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             .eq('id', conn.id)
 
           logger.info(
-            `[OwnerRez:${conn.user_id}] sync complete — ${bookings.length} bookings, ${guests.length} guests`
+            `[OwnerRez:${conn.user_id}] sync complete — ${bookings.length} bookings`
           )
           syncedCount++
 
