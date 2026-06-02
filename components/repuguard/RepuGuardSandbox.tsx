@@ -89,7 +89,7 @@ export default function RepuGuardSandbox() {
   const [phase, setPhase] = useState("idle"); // idle | thinking | typing | done
   const [displayed, setDisplayed] = useState("");
   const [showMeta, setShowMeta] = useState(false);
-  const timerRef = useRef(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const indexRef = useRef(0);
 
   function clearTimers() {
@@ -110,7 +110,7 @@ export default function RepuGuardSandbox() {
     }, 1800);
   }
 
-  function typeNext(fullText) {
+  function typeNext(fullText: string) {
     const CHUNK = 4;
     const DELAY = 18;
 
