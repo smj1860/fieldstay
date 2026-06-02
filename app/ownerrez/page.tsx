@@ -192,24 +192,27 @@ export default async function OwnerRezPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             {[
               {
-                name: 'Starter',
-                price: '$XX',
+                name: 'Pro',
+                price: '$149',
                 description: 'For independent owners managing a small portfolio.',
                 features: [
-                  'Up to X properties',
+                  'Up to 15 properties',
                   'Turnover automation',
                   'Crew checklists',
                   'Email support',
+                  'Inventory & POs',
+                  'Maintenance schedules',
+                  'Owner portal',
                 ],
                 highlight: false,
               },
               {
                 name: 'Growth',
-                price: '$XX',
+                price: '$219',
                 description: 'For growing operations that need more scale.',
                 features: [
-                  'Up to X properties',
-                  'Everything in Starter',
+                  'Up to 45 properties',
+                  'Everything in Pro',
                   'Inventory & POs',
                   'Maintenance schedules',
                   'Owner portal',
@@ -217,12 +220,12 @@ export default async function OwnerRezPage() {
                 highlight: true,
               },
               {
-                name: 'Pro',
-                price: '$XX',
+                name: 'Enterprise',
+                price: 'Custom',
                 description: 'For professional managers running a full operation.',
                 features: [
                   'Unlimited properties',
-                  'Everything in Growth',
+                  'Everything in Pro & Growth',
                   'Priority support',
                   'API access',
                 ],
