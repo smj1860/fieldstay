@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useTransition, useActionState } from 'react'
+import { useState, useEffect, useTransition, useActionState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Loader2, Eye, EyeOff, Lock, Bell, BellOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Organization } from '@/types/database'
@@ -15,7 +16,7 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const TABS = ['Organization', 'Billing', 'Security', 'Notifications'] as const
+const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team'] as const
 type Tab = typeof TABS[number]
 
 const PLAN_INFO = {
@@ -75,6 +76,7 @@ export function SettingsTabs({ org }: Props) {
       {activeTab === 'Billing'       && <BillingTab org={org} />}
       {activeTab === 'Security'      && <SecurityTab />}
       {activeTab === 'Notifications' && <NotificationsTab />}
+      {activeTab === 'Team'          && <TeamTabRedirect />}
     </div>
   )
 }
@@ -366,6 +368,14 @@ function NotificationsTab() {
       </div>
     </div>
   )
+}
+
+// ── Team tab redirect ─────────────────────────────────────────────────────────
+
+function TeamTabRedirect() {
+  const router = useRouter()
+  useEffect(() => { router.push('/settings/team') }, [router])
+  return null
 }
 
 // ── Billing tab ───────────────────────────────────────────────────────────────

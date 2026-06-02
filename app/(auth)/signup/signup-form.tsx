@@ -1,14 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
 export function SignupForm() {
-  const router = useRouter()
+  const router       = useRouter()
+  const searchParams = useSearchParams()
+  const inviteToken  = searchParams.get('invite_token')
+  const prefillEmail = searchParams.get('email') ?? ''
 
   const [fullName, setFullName] = useState('')
-  const [email,    setEmail]    = useState('')
+  const [email,    setEmail]    = useState(prefillEmail)
   const [password, setPassword] = useState('')
   const [error,    setError]    = useState<string | null>(null)
   const [loading,  setLoading]  = useState(false)
@@ -19,11 +22,20 @@ export function SignupForm() {
     setLoading(true)
 
     const supabase = createClient()
+
+    // Build the emailRedirectTo URL — include invite_token so the callback
+    // can process the invite acceptance after email confirmation.
+    const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin
+    const nextParam = inviteToken
+      ? `/auth/callback?invite_token=${encodeURIComponent(inviteToken)}`
+      : '/auth/callback'
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { full_name: fullName },
+        data:            { full_name: fullName },
+        emailRedirectTo: `${appUrl}${nextParam}`,
       },
     })
 
@@ -33,7 +45,8 @@ export function SignupForm() {
       return
     }
 
-    router.push('/onboarding')
+    // If invite flow: show confirmation message (user needs to verify email)
+    router.push(inviteToken ? '/signup?check_email=1' : '/onboarding')
     router.refresh()
   }
 
@@ -42,6 +55,12 @@ export function SignupForm() {
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
           {error}
+        </div>
+      )}
+
+      {inviteToken && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-lg px-4 py-3">
+          You&apos;re creating an account to accept a team invitation.
         </div>
       )}
 

@@ -109,10 +109,11 @@ export interface OwnerRezGuest {
 }
 
 export interface OwnerRezBooking {
-  id:           number
-  arrival:      string
-  departure:    string
-  status:       string
+  id:            number
+  arrival:       string
+  departure:     string
+  status:        string
+  property_id?:  number
   channel_name?: string
   guest?: {
     name:  string | null

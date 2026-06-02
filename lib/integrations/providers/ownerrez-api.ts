@@ -113,14 +113,16 @@ export class OwnerRezApiClient {
   }
 
   async getBookings(params: {
-    propertyIds?: number[]
-    sinceUtc?: string
+    propertyIds?:  number[]
+    sinceUtc?:     string
+    includeGuest?: boolean
   }): Promise<OwnerRezBooking[]> {
     const queryParams: Record<string, string | number | undefined> = {}
     if (params.sinceUtc) queryParams['since_utc'] = params.sinceUtc
     if (params.propertyIds?.length) {
       queryParams['property_id'] = params.propertyIds.join(',')
     }
+    if (params.includeGuest) queryParams['include_guest'] = 'true'
     return this.fetchAllPages<OwnerRezBooking>('/v2/bookings', queryParams)
   }
 
