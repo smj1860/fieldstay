@@ -189,7 +189,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
       )}
 
       <form action={formAction} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="vendor-name" className="label">Vendor Name <span className="text-red-400">*</span></label>
             <input id="vendor-name" name="name" type="text" required className="input" placeholder="ABC Plumbing" />
@@ -200,7 +200,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="vendor-email" className="label">Email <span className="text-red-400">*</span></label>
             <input id="vendor-email" name="email" type="email" required className="input" placeholder="info@abcplumbing.com" />
@@ -211,7 +211,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="vendor-specialty" className="label">Specialty</label>
             <select id="vendor-specialty" name="specialty" className="input">

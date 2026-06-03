@@ -250,7 +250,7 @@ function AddTransactionForm({
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label text-xs">Date</label>
             <input
@@ -276,7 +276,7 @@ function AddTransactionForm({
           <input name="description" type="text" required className="input text-sm" placeholder="e.g. 4-night stay, HVAC repair" />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label text-xs">Amount ($) <span className="text-red-500">*</span></label>
             <input name="amount" type="number" required min="0.01" step="0.01" className="input text-sm" placeholder="0.00" />
@@ -345,7 +345,7 @@ function TransactionPanel({
       {expanded && (
         <div className="mt-3">
           {/* Summary */}
-          <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
             <div className="bg-green-50 rounded-lg p-2 text-center">
               <div className="text-xs text-green-600 mb-0.5">Revenue</div>
               <div className="text-sm font-semibold text-green-700">{formatCurrency(totalRevenue)}</div>
@@ -485,7 +485,7 @@ function AddOwnerModal({
             <input id="name" name="name" type="text" required className="input" placeholder="Jane Smith" />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="email" className="label">Email</label>
               <input id="email" name="email" type="email" className="input" placeholder="jane@example.com" />

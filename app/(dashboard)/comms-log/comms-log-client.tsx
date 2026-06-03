@@ -339,7 +339,7 @@ function AddEntryModal({
           </div>
 
           {/* Context links */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Property (optional)</label>
               <select name="property_id" className="input">

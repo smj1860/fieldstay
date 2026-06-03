@@ -11,20 +11,36 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
+import { BottomNav } from '@/components/bottom-nav'
 
 const NAV_ITEMS = [
   { href: '/ops',          label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin','manager','viewer'] },
   { href: '/properties',  label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'] },
-  { href: '/bookings', label: 'Bookings', icon: CalendarCheck, roles: ['admin','manager','viewer'] },
+  { href: '/bookings',    label: 'Bookings',      icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
   { href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
   { href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin','manager']          },
   { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager']          },
   { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager']          },
   { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager']          },
-  { href: '/comms-log', label: 'Comms Log',     icon: Mail,            roles: ['admin','manager']          },
+  { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager']          },
   { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager']          },
   { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin']                    },
 ] as const
+
+const PAGE_TITLES: Record<string, string> = {
+  '/ops':          'Ops Snapshot',
+  '/properties':   'Properties',
+  '/bookings':     'Bookings',
+  '/turnovers':    'Turnovers',
+  '/inventory':    'Inventory',
+  '/maintenance':  'Maintenance',
+  '/crew-manage':  'Crew',
+  '/vendors':      'Vendors',
+  '/comms-log':    'Comms Log',
+  '/owners':       'Owner Portal',
+  '/reviews':      'Reviews',
+  '/settings':     'Settings',
+}
 
 interface Props {
   role:            MemberRole
@@ -72,27 +88,35 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
     }
   }
 
+  // Task 1: map 'owner' to 'admin' so owners see the full nav
+  const effectiveRole = role === 'owner' ? 'admin' : role
+
   const REPUGUARD_NAV = repuguardActive
     ? [{ href: '/reviews', label: 'Reviews', icon: MessageSquareDot, roles: ['admin', 'manager'] as const }]
     : []
 
   const filteredNav = [
-    ...NAV_ITEMS.filter((item) => item.roles.includes(role as never)),
-    ...REPUGUARD_NAV.filter(item => item.roles.includes(role as 'admin' | 'manager')),
+    ...NAV_ITEMS.filter((item) => item.roles.includes(effectiveRole as never)),
+    ...REPUGUARD_NAV.filter(item => item.roles.includes(effectiveRole as 'admin' | 'manager')),
   ]
+
+  // Derive page title for mobile header
+  const pageTitle = Object.entries(PAGE_TITLES).find(([path]) =>
+    pathname === path || pathname.startsWith(path + '/')
+  )?.[1] ?? ''
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
     <aside
       className={cn(
         'flex flex-col h-full transition-all duration-300',
-        mobile ? 'w-64' : collapsed ? 'w-[68px]' : 'w-60'
+        mobile ? 'w-[min(256px,85vw)]' : collapsed ? 'w-[68px]' : 'w-60'
       )}
       style={{
         background:  'var(--bg-base)',
         borderRight: '1px solid var(--border)',
       }}
     >
-      {/* Logo */}
+      {/* Logo row — close button lives here on mobile */}
       <div
         className="flex items-center gap-3 px-4 py-5 flex-shrink-0"
         style={{ borderBottom: '1px solid var(--border)', minHeight: 72 }}
@@ -105,7 +129,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
           FS
         </div>
         {(!collapsed || mobile) && (
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <span className="font-display font-bold text-base leading-none"
                   style={{ color: 'var(--text-primary)' }}>
               FieldStay
@@ -115,6 +139,15 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
               {orgName}
             </p>
           </div>
+        )}
+        {mobile && (
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="ml-auto p-2 rounded-lg flex-shrink-0"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <X className="w-5 h-5" />
+          </button>
         )}
       </div>
 
@@ -208,13 +241,6 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
           <div className="relative z-10 h-full flex-shrink-0">
             <Sidebar mobile />
           </div>
-          <button
-            onClick={() => setMobileOpen(false)}
-            className="absolute top-4 right-4 z-20 p-2 rounded-lg"
-            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
       )}
 
@@ -223,7 +249,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
 
         {/* Top bar */}
         <header
-          className="h-[60px] flex items-center justify-between px-5 flex-shrink-0"
+          className="h-[60px] relative flex items-center justify-between px-5 flex-shrink-0"
           style={{
             background:   'var(--bg-base)',
             borderBottom: '1px solid var(--border)',
@@ -233,7 +259,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
           <div className="flex items-center gap-3">
             <button
               onClick={() => setMobileOpen(true)}
-              className="md:hidden p-2 rounded-lg transition-colors"
+              className="md:hidden w-11 h-11 flex items-center justify-center rounded-lg transition-colors"
               style={{ color: 'var(--text-muted)' }}
             >
               <Menu className="w-5 h-5" />
@@ -259,6 +285,16 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
             </button>
           </div>
 
+          {/* Mobile page title — centered absolutely */}
+          {pageTitle && (
+            <span
+              className="md:hidden absolute left-1/2 -translate-x-1/2 text-sm font-semibold pointer-events-none"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {pageTitle}
+            </span>
+          )}
+
           {/* Right: clock + theme toggle + notifications */}
           <div className="flex items-center gap-2">
             {time && (
@@ -276,7 +312,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
 
             <button
               onClick={toggleTheme}
-              className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
+              className="w-11 h-11 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all"
               style={{ color: 'var(--text-muted)' }}
               onMouseOver={(e) => {
                 e.currentTarget.style.background = 'var(--border)'
@@ -295,7 +331,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
             </button>
 
             <button
-              className="w-8 h-8 rounded-lg flex items-center justify-center
+              className="w-11 h-11 md:w-8 md:h-8 rounded-lg flex items-center justify-center
                          transition-all relative"
               style={{ color: 'var(--text-muted)' }}
               onMouseOver={(e) => {
@@ -317,11 +353,14 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
           className="flex-1 overflow-y-auto"
           style={{ background: 'var(--bg-canvas)' }}
         >
-          <div className="max-w-7xl mx-auto px-6 py-7">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 pb-24 md:pb-7">
             {children}
           </div>
         </main>
       </div>
+
+      {/* Bottom navigation (mobile only) */}
+      <BottomNav role={role} onMore={() => setMobileOpen(true)} />
     </div>
   )
 }

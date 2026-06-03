@@ -187,7 +187,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
       )}
 
       <form action={formAction} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="crew-name" className="label">Name <span className="text-red-400">*</span></label>
             <input id="crew-name" name="name" type="text" required className="input" placeholder="Alex Johnson" />
@@ -198,7 +198,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="crew-email" className="label">Email <span className="text-red-400">*</span></label>
             <input id="crew-email" name="email" type="email" required className="input" placeholder="alex@example.com" />

@@ -372,7 +372,7 @@ function AddBookingModal({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Check-in <span className="text-red-500">*</span></label>
               <input name="checkin_date" type="date" required className="input" />

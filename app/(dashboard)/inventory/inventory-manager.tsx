@@ -338,7 +338,7 @@ function AddItemsModal({
                           <X className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs text-muted-themed block mb-1">Unit</label>
                           <input
@@ -378,7 +378,7 @@ function AddItemsModal({
                   placeholder="e.g. Paper Towels"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="label">Category</label>
                   <select
@@ -534,7 +534,8 @@ function RunCountModal({
                 <h4 className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2">
                   {INVENTORY_CATEGORY_LABELS[cat]}
                 </h4>
-                <div className="border border-themed rounded-xl overflow-hidden">
+                <div className="border border-themed rounded-xl overflow-hidden overflow-x-auto">
+                  <div className="min-w-[480px]">
                   {catItems.map((item, idx) => (
                     <div
                       key={item.id}
@@ -569,6 +570,7 @@ function RunCountModal({
                       </div>
                     </div>
                   ))}
+                  </div>
                 </div>
               </div>
             ))}
@@ -721,7 +723,8 @@ function PropertyInventoryDetail({
                 </button>
               </div>
             ) : (
-              <div className="divide-y divide-themed">
+              <div className="overflow-x-auto">
+              <div className="divide-y divide-themed min-w-[480px]">
                 <div className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
                   <span>Item</span>
                   <span className="text-right">Current</span>
@@ -732,6 +735,7 @@ function PropertyInventoryDetail({
                 {byCategory.map(({ cat, catItems }) => (
                   <CategoryRows key={cat} category={cat} items={catItems} />
                 ))}
+              </div>
               </div>
             )}
           </div>
@@ -815,7 +819,8 @@ function PropertyInventoryDetail({
                         </button>
                         {isExpanded && poItems.length > 0 && (
                           <div className="px-5 pb-3">
-                            <div className="border border-themed rounded-lg overflow-hidden text-xs">
+                            <div className="border border-themed rounded-lg overflow-hidden text-xs overflow-x-auto">
+                              <div className="min-w-[320px]">
                               <div className="grid grid-cols-[1fr_70px_70px_80px] gap-2 px-3 py-1.5 bg-canvas-themed font-medium text-muted-themed uppercase tracking-wide">
                                 <span>Item</span>
                                 <span className="text-right">Current</span>
@@ -837,6 +842,7 @@ function PropertyInventoryDetail({
                                   </span>
                                 </div>
                               ))}
+                              </div>
                             </div>
                           </div>
                         )}
