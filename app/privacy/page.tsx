@@ -72,7 +72,56 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-gray-900 mb-3">6. Your Rights (GDPR / CPRA)</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">6. Sub-Processors &amp; Data Storage</h2>
+            <p className="mb-3">
+              FieldStay uses the following third-party services to operate the platform. Each acts as a
+              data processor on our behalf:
+            </p>
+            <dl className="space-y-4">
+              <div>
+                <dt className="font-semibold text-gray-800">Supabase, Inc. (United States)</dt>
+                <dd className="text-sm mt-0.5">
+                  Database and authentication. Your data is stored on servers operated by Supabase in
+                  the United States (us-east-1 region). Supabase is certified under the EU-US Data
+                  Privacy Framework, which provides an adequate level of protection for personal data
+                  transferred from the European Union to the United States.{' '}
+                  <a href="https://supabase.com/privacy" className="underline" target="_blank" rel="noopener noreferrer">
+                    Learn more
+                  </a>
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Stripe, Inc. (United States)</dt>
+                <dd className="text-sm mt-0.5">
+                  Payment processing. Stripe is PCI DSS compliant and certified under the EU-US Data
+                  Privacy Framework.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Resend, Inc. (United States)</dt>
+                <dd className="text-sm mt-0.5">Transactional email delivery.</dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Anthropic, PBC (United States)</dt>
+                <dd className="text-sm mt-0.5">
+                  AI-powered review response generation (RepuGuard feature). Review text is processed
+                  to generate responses and is not retained by Anthropic beyond the duration of the
+                  API call.
+                </dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Inngest, Inc. (United States)</dt>
+                <dd className="text-sm mt-0.5">Background job orchestration.</dd>
+              </div>
+              <div>
+                <dt className="font-semibold text-gray-800">Vercel, Inc. (United States)</dt>
+                <dd className="text-sm mt-0.5">Application hosting and delivery.</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">7. Your Rights (GDPR / CPRA)</h2>
             <p>Depending on your jurisdiction, you may have the right to:</p>
             <ul className="list-disc pl-6 space-y-2 mt-2">
               <li>Access the personal data we hold about you.</li>
@@ -89,7 +138,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-gray-900 mb-3">7. Data Retention</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">8. Data Retention</h2>
             <p>
               We retain your data for as long as your account is active. When you delete your account,
               we delete your personal data within 30 days, except where retention is required by law
@@ -98,7 +147,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-gray-900 mb-3">8. Security</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">9. Security</h2>
             <p>
               We use industry-standard measures including TLS encryption in transit, AES-256 encryption
               at rest for sensitive tokens, row-level security on all database tables, and role-based
@@ -107,7 +156,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-gray-900 mb-3">9. Contact</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">10. Contact</h2>
             <p>
               Questions about this policy? Email{' '}
               <a href="mailto:privacy@fieldstay.app" className="underline">privacy@fieldstay.app</a>.

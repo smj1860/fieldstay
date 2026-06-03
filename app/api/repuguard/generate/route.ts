@@ -140,9 +140,14 @@ export async function POST(request: NextRequest) {
   const starRating    = review.rating as number
   const internalNotes = (review.internal_notes as string | null) ?? null
 
-  // M-4: Wrap untrusted review text in XML delimiters to prevent prompt injection
+  // M-4: Encode angle brackets before wrapping to prevent delimiter escape
+  const sanitizedReview = reviewText
+    .replace(/&/g, '&amp;')   // must be first
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
   const userMessageParts = [
-    `<review_text>${reviewText}</review_text>`,
+    `<review_text>${sanitizedReview}</review_text>`,
     `star_rating: ${starRating}`,
     `property_name: ${propertyName}`,
     `guest_name: ${guestName}`,
