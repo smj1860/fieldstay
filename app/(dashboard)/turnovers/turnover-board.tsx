@@ -479,7 +479,7 @@ function AddTurnoverModal({
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Checkout Date</label>
               <input name="checkout_date" type="date" required className="input" />
@@ -489,7 +489,7 @@ function AddTurnoverModal({
               <input name="checkout_time" type="time" defaultValue="11:00" className="input" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Next Check-in Date</label>
               <input name="checkin_date" type="date" required className="input" />

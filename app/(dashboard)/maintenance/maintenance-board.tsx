@@ -301,7 +301,7 @@ function CreateWorkOrderModal({
           </div>
 
           {/* Scheduled date + cost */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="wo-date" className="label">Scheduled Date</label>
               <input id="wo-date" name="scheduled_date" type="date" className="input" />
@@ -484,7 +484,7 @@ function ScheduleFormFields({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="label">Next Due Date</label>
           <input name="next_due_date" type="date" className="input" defaultValue={defaults?.next_due_date ?? ''} />
