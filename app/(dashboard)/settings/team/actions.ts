@@ -25,6 +25,27 @@ export async function inviteTeamMember(
 
   const admin = createServiceClient()
 
+  // H-3: Check not already a member using targeted lookup (not listUsers).
+  // Supabase admin REST supports GET /auth/v1/admin/users?email=x for point lookups.
+  const userLookupRes = await fetch(
+    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(normalizedEmail)}&per_page=1`,
+    { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}` } }
+  )
+  if (userLookupRes.ok) {
+    const body = await userLookupRes.json() as { users?: { id: string }[] }
+    const existingUserId = body.users?.[0]?.id
+    if (existingUserId) {
+      const { data: alreadyMember } = await admin
+        .from('organization_members')
+        .select('id')
+        .eq('org_id', membership.org_id)
+        .eq('user_id', existingUserId)
+        .single()
+      if (alreadyMember) {
+        return { error: 'This person is already a member of your organization.' }
+      }
+    }
+  }
 
   // Check no active pending invite
   const { data: existingInvite } = await admin
