@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
+import { logAuditEvent } from '@/lib/audit'
 
 export type IcalState = { error?: string; success?: boolean }
 
@@ -30,17 +31,34 @@ export async function addIcalFeed(
 
   if (error) return { error: error.message }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    action:     'ical.feed.added',
+    targetType: 'property',
+    targetId:   propertyId,
+    metadata:   { name, source },
+  })
+
   revalidatePath(`/properties/${propertyId}/setup/ical`)
   return { success: true }
 }
 
 export async function deleteIcalFeed(feedId: string, propertyId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
   await supabase
     .from('ical_feeds')
     .delete()
     .eq('id', feedId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'ical.feed.deleted',
+    targetType: 'ical_feed',
+    targetId:   feedId,
+  })
+
   revalidatePath(`/properties/${propertyId}/setup/ical`)
 }
 

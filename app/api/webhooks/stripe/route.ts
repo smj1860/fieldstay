@@ -3,6 +3,7 @@ import { stripe } from '@/lib/stripe/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { PLANS, getPlanByPriceId, type PlanKey } from '@/lib/stripe/client'
+import { logAuditEvent } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
   const body      = await request.text()
@@ -114,6 +115,12 @@ export async function POST(request: NextRequest) {
             plan_status:            planStatus,
           },
         })
+
+        await logAuditEvent({
+          orgId:    org.id,
+          action:   'billing.subscription.updated',
+          metadata: { plan, planStatus, subscriptionId: subscription.id },
+        })
       }
       break
     }
@@ -145,6 +152,12 @@ export async function POST(request: NextRequest) {
           .from('organizations')
           .update({ plan_status: 'cancelled' })
           .eq('id', org.id)
+
+        await logAuditEvent({
+          orgId:    org.id,
+          action:   'billing.subscription.cancelled',
+          metadata: { subscriptionId: subscription.id },
+        })
       }
       break
     }

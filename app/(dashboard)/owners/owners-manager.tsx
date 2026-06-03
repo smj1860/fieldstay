@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import {
   addPropertyOwner,
   generatePortalToken,
+  revokeOwnerPortalToken,
   addOwnerTransaction,
   deleteOwnerTransaction,
   type OwnersActionState,
@@ -122,6 +123,35 @@ function CopyButton({ text }: { text: string }) {
         <><Copy className="w-3.5 h-3.5" /> Copy Link</>
       )}
     </button>
+  )
+}
+
+// ── Revoke Access Button ─────────────────────────────────────────────────────
+
+function RevokeAccessButton({ ownerId }: { ownerId: string }) {
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const handleRevoke = () => {
+    if (!confirm('Revoke this owner\'s portal access? They will no longer be able to view their portal.')) return
+    setError(null)
+    startTransition(async () => {
+      const result = await revokeOwnerPortalToken(ownerId)
+      if (result.error) setError(result.error)
+    })
+  }
+
+  return (
+    <div>
+      <button
+        onClick={handleRevoke}
+        disabled={pending}
+        className="btn-ghost py-1 px-2 text-xs flex items-center gap-1 text-red-600 hover:text-red-700 disabled:opacity-50"
+      >
+        {pending ? 'Revoking…' : 'Revoke Access'}
+      </button>
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+    </div>
   )
 }
 
@@ -526,6 +556,7 @@ function OwnerCard({
                 <ExternalLink className="w-3.5 h-3.5" /> View
               </a>
               <GenerateLinkButton ownerId={owner.id} />
+              <RevokeAccessButton ownerId={owner.id} />
             </>
           ) : (
             <>

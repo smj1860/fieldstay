@@ -2,11 +2,14 @@ import { NextResponse }        from 'next/server'
 import type { NextRequest }    from 'next/server'
 import { createClient }        from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent }       from '@/lib/audit'
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code        = searchParams.get('code')
-  const next        = searchParams.get('next') ?? '/onboarding'
+  const rawNext     = searchParams.get('next') ?? '/onboarding'
+  // C-1: only allow same-origin relative paths — reject protocol-relative and absolute URLs
+  const next        = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/onboarding'
   const inviteToken = searchParams.get('invite_token')
 
   if (code) {
@@ -51,12 +54,14 @@ async function handleInviteAccept(userId: string, userEmail: string, inviteToken
     .single()
 
   if (!existing) {
+    // C-2: record invite_accepted_at on the membership row
     await admin
       .from('organization_members')
       .insert({
-        org_id:  invite.org_id,
-        user_id: userId,
-        role:    invite.role,
+        org_id:             invite.org_id,
+        user_id:            userId,
+        role:               invite.role,
+        invite_accepted_at: new Date().toISOString(),
       })
   }
 
@@ -65,4 +70,13 @@ async function handleInviteAccept(userId: string, userEmail: string, inviteToken
     .from('org_invites')
     .update({ accepted_at: new Date().toISOString() })
     .eq('id', invite.id)
+
+  await logAuditEvent({
+    orgId:      invite.org_id,
+    actorId:    userId,
+    action:     'auth.invite.accepted',
+    targetType: 'org_invite',
+    targetId:   invite.id,
+    metadata:   { email: userEmail, role: invite.role },
+  })
 }

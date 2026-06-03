@@ -17,6 +17,7 @@
     "@powersync/web": "^1.10.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.47.0",
+    "@vercel/kv": "^3.0.0",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "ical.js": "^2.0.1",

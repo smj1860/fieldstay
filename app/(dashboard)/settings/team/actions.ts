@@ -1,9 +1,13 @@
 'use server'
 
+import { z }                        from 'zod'
 import { requireOrgMember }         from '@/lib/auth'
 import { createServiceClient }      from '@/lib/supabase/server'
 import { sendTeamInviteEmail }       from '@/lib/resend/client'
 import { revalidatePath }            from 'next/cache'
+import { logAuditEvent }             from '@/lib/audit'
+
+const EmailSchema = z.string().email('Invalid email address.')
 
 export async function inviteTeamMember(
   email: string
@@ -14,38 +18,13 @@ export async function inviteTeamMember(
     return { error: 'Only the account owner can invite team members.' }
   }
 
-  const normalizedEmail = email.trim().toLowerCase()
-  if (!normalizedEmail) return { error: 'Email is required.' }
+  // M-6: Zod email validation
+  const parsed = EmailSchema.safeParse(email.trim().toLowerCase())
+  if (!parsed.success) return { error: parsed.error.errors[0]?.message ?? 'Invalid email.' }
+  const normalizedEmail = parsed.data
 
   const admin = createServiceClient()
 
-  // Check not already a member
-  const { data: existing } = await admin
-    .from('organization_members')
-    .select('id')
-    .eq('org_id', membership.org_id)
-    .eq('user_id', (
-      await admin
-        .from('organization_members')
-        .select('user_id')
-        .eq('org_id', membership.org_id)
-    ).data?.map(m => m.user_id).join(',') ?? '')
-    .limit(1)
-
-  // Simpler: check via auth.users email
-  const { data: authUsers } = await admin.auth.admin.listUsers()
-  const matchingUser = authUsers?.users.find(u => u.email === normalizedEmail)
-  if (matchingUser) {
-    const { data: memberRow } = await admin
-      .from('organization_members')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .eq('user_id', matchingUser.id)
-      .single()
-    if (memberRow) {
-      return { error: 'This person is already a member of your organization.' }
-    }
-  }
 
   // Check no active pending invite
   const { data: existingInvite } = await admin
@@ -70,7 +49,7 @@ export async function inviteTeamMember(
       email:      normalizedEmail,
       role:       'admin',
     })
-    .select('token')
+    .select('token, id')
     .single()
 
   if (insertError || !invite) {
@@ -90,6 +69,16 @@ export async function inviteTeamMember(
     console.error(`[Team:${user.id}] invite email failed:`, err instanceof Error ? err.message : err)
     // Non-fatal — invite record exists, user can resend
   }
+
+  // M-2: Audit log
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'team.member.invited',
+    targetType: 'invite',
+    targetId:   invite.id,
+    metadata:   { email: normalizedEmail },
+  })
 
   revalidatePath('/settings/team')
   return { ok: true }
@@ -133,6 +122,15 @@ export async function removeMember(
     return { error: 'Failed to remove member. Please try again.' }
   }
 
+  // M-2: Audit log
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'team.member.removed',
+    targetType: 'user',
+    targetId:   targetUserId,
+  })
+
   revalidatePath('/settings/team')
   return { ok: true }
 }
@@ -157,6 +155,15 @@ export async function revokeInvite(
     console.error(`[Team:${user.id}] revoke invite failed:`, error.message)
     return { error: 'Failed to revoke invitation. Please try again.' }
   }
+
+  // M-2: Audit log
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'team.invite.revoked',
+    targetType: 'invite',
+    targetId:   inviteId,
+  })
 
   revalidatePath('/settings/team')
   return { ok: true }

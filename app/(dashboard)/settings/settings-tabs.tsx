@@ -16,7 +16,7 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team'] as const
+const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team', 'Account'] as const
 type Tab = typeof TABS[number]
 
 const PLAN_INFO = {
@@ -77,6 +77,7 @@ export function SettingsTabs({ org }: Props) {
       {activeTab === 'Security'      && <SecurityTab />}
       {activeTab === 'Notifications' && <NotificationsTab />}
       {activeTab === 'Team'          && <TeamTabRedirect />}
+      {activeTab === 'Account'       && <AccountTabRedirect />}
     </div>
   )
 }
@@ -375,6 +376,14 @@ function NotificationsTab() {
 function TeamTabRedirect() {
   const router = useRouter()
   useEffect(() => { router.push('/settings/team') }, [router])
+  return null
+}
+
+// ── Account tab redirect ──────────────────────────────────────────────────────
+
+function AccountTabRedirect() {
+  const router = useRouter()
+  useEffect(() => { router.push('/settings/account') }, [router])
   return null
 }
 

@@ -28,6 +28,7 @@ import { createServerClient }             from '@supabase/ssr'
 import { createClient }                   from '@supabase/supabase-js'
 import { getProvider }                    from '@/lib/integrations/registry'
 import { storeIntegrationToken }          from '@/lib/integrations/vault'
+import { logAuditEvent }                  from '@/lib/audit'
 
 export async function GET(
   request: NextRequest,
@@ -227,6 +228,14 @@ export async function GET(
     `[OAuth:${providerId}] Successfully connected — ` +
     `FieldStay user ${appUserId} / external user ${tokenData.externalUserId}`
   )
+
+  await logAuditEvent({
+    actorId:    appUserId,
+    action:     'integration.connected',
+    targetType: 'integration_provider',
+    targetId:   providerId,
+    metadata:   { externalUserId: tokenData.externalUserId },
+  })
 
   return makeRedirect(returnUrl)
 }

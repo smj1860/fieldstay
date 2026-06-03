@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
+import { logAuditEvent } from '@/lib/audit'
 import type { TxnCategory } from '@/types/database'
 
 export type OwnersActionState = { error?: string; success?: boolean; token?: string }
@@ -129,6 +130,41 @@ export async function addOwnerTransaction(
   })
 
   if (error) return { error: error.message }
+
+  revalidatePath('/owners')
+  return { success: true }
+}
+
+// ── Revoke portal token ───────────────────────────────────────────────────────
+
+export async function revokeOwnerPortalToken(ownerId: string): Promise<OwnersActionState> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  // Verify owner belongs to this org
+  const { data: owner } = await supabase
+    .from('property_owners')
+    .select('id')
+    .eq('id', ownerId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!owner) return { error: 'Owner not found' }
+
+  const { error } = await supabase
+    .from('owner_portal_tokens')
+    .update({ revoked_at: new Date().toISOString() })
+    .eq('property_owner_id', ownerId)
+    .is('revoked_at', null)
+
+  if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'owner_portal.token.revoked',
+    targetType: 'property_owner',
+    targetId:   ownerId,
+  })
 
   revalidatePath('/owners')
   return { success: true }
