@@ -38,7 +38,10 @@ export default async function OwnerRezPage() {
                 Dashboard
               </Link>
             ) : (
-              <Link href="/login" className="text-sm text-[#a0b4cc] hover:text-white transition-colors">
+              <Link
+                href="/login?next=/api/integrations/ownerrez/connect"
+                className="text-sm text-[#a0b4cc] hover:text-white transition-colors"
+              >
                 Log In
               </Link>
             )}

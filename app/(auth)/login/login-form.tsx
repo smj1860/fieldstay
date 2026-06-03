@@ -35,7 +35,7 @@ export function LoginForm() {
 
   return (
     <div className="space-y-4">
-      <GoogleSignInButton label="Sign in with Google" />
+      <GoogleSignInButton next={next} label="Sign in with Google" />
 
       <div className="relative my-4">
         <div className="absolute inset-0 flex items-center">

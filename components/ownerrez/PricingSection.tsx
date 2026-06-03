@@ -156,7 +156,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
               </p>
               <div className={`text-xs font-semibold mt-2 rounded-lg px-3 py-1.5 inline-block ${
                 plan.highlight
-                  ? "bg-[#0c1e3a] text-[#a0b4cc]"
+                  ? "bg-[#0e2a52] text-[#a0b4cc]"
                   : "bg-white border border-[#e2e8f0] text-[#0a1628]"
               }`}>
                 {plan.properties}
