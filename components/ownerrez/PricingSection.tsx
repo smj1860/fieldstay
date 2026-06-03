@@ -67,7 +67,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
   return (
     <div>
       <div className="text-center mb-10">
-        <h2 className="text-3xl font-bold mb-3 text-[#0a1628]">
+        <h2 className="text-3xl font-bold mb-3 text-[#0a1628] font-display">
           Simple, transparent pricing
         </h2>
         <p className="text-[#5a6a7a] mb-6">
@@ -80,7 +80,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
             onClick={() => setAnnual(false)}
             className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${
               !annual
-                ? "bg-[#0a1628] text-white shadow-sm"
+                ? "bg-[#102246] text-white shadow-sm"
                 : "text-[#5a6a7a] hover:text-[#0a1628]"
             }`}
           >
@@ -90,7 +90,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
             onClick={() => setAnnual(true)}
             className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all flex items-center gap-2 ${
               annual
-                ? "bg-[#0a1628] text-white shadow-sm"
+                ? "bg-[#102246] text-white shadow-sm"
                 : "text-[#5a6a7a] hover:text-[#0a1628]"
             }`}
           >
@@ -108,7 +108,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
             key={plan.name}
             className={`rounded-2xl p-6 border relative flex flex-col ${
               plan.highlight
-                ? "bg-[#0a1628] border-[#FCD116]"
+                ? "bg-[#102246] border-[#FCD116]"
                 : "bg-[#f8fafc] border-[#e2e8f0]"
             }`}
           >
@@ -182,7 +182,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
                 className={`block text-center py-3 rounded-xl text-sm font-bold transition-colors ${
                   plan.highlight
                     ? "bg-[#FCD116] text-[#0a1628] hover:bg-[#EAB800]"
-                    : "bg-[#0a1628] text-white hover:bg-[#162a4a]"
+                    : "bg-[#102246] text-white hover:bg-[#162a4a]"
                 }`}
               >
                 Start Free Trial
@@ -190,7 +190,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
             ) : (
               <a
                 href="mailto:hello@fieldstay.app"
-                className="block text-center py-3 rounded-xl text-sm font-bold transition-colors bg-[#0a1628] text-white hover:bg-[#162a4a]"
+                className="block text-center py-3 rounded-xl text-sm font-bold transition-colors bg-[#102246] text-white hover:bg-[#162a4a]"
               >
                 Contact Us
               </a>
