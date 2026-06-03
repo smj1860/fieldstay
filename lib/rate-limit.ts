@@ -1,4 +1,9 @@
-import { kv } from '@vercel/kv'
+import { Redis } from '@upstash/redis'
+
+const redis = new Redis({
+  url:   process.env.upstash_fieldstay_KV_REST_API_URL!,
+  token: process.env.upstash_fieldstay_KV_REST_API_TOKEN!,
+})
 
 interface RateLimitResult {
   allowed:   boolean
@@ -21,9 +26,9 @@ export async function checkRateLimit(
   const resetAt  = new Date(now + windowS * 1000)
 
   try {
-    const count = await kv.incr(key)
+    const count = await redis.incr(key)
     if (count === 1) {
-      await kv.expire(key, windowS)
+      await redis.expire(key, windowS)
     }
     return {
       allowed:   count <= limit,
