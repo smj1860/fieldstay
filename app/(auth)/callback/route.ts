@@ -22,7 +22,20 @@ export async function GET(request: NextRequest) {
         await handleInviteAccept(data.session.user.id, data.session.user.email ?? '', inviteToken)
         return NextResponse.redirect(`${origin}/ops`)
       }
-      return NextResponse.redirect(`${origin}${next}`)
+
+      // If next is still the default, check the OAuth cookie set by GoogleSignInButton
+      let finalNext = next
+      if (next === '/onboarding' && request.cookies.has('fs-oauth-next')) {
+        const cookieVal = decodeURIComponent(request.cookies.get('fs-oauth-next')!.value)
+        if (cookieVal.startsWith('/') && !cookieVal.startsWith('//')) {
+          finalNext = cookieVal
+        }
+      }
+
+      const response = NextResponse.redirect(`${origin}${finalNext}`)
+      // Always clear the OAuth next cookie on a successful callback
+      response.cookies.set('fs-oauth-next', '', { maxAge: 0, path: '/' })
+      return response
     }
   }
 

@@ -24,7 +24,7 @@ export default async function OwnerRezPage() {
           SECTION 1 — DARK NAVY
           Nav · Badge · Hero
       ══════════════════════════════════════════ */}
-      <div className="bg-[#0a1628] text-white">
+      <div className="bg-[#102246] text-white">
         <div className="max-w-6xl mx-auto px-6">
 
           {/* Nav */}
@@ -48,7 +48,7 @@ export default async function OwnerRezPage() {
           {/* NOTE: #3D8B4F is an approximation of OwnerRez brand green.
               Confirm exact hex with your OwnerRez partnership contact. */}
           <div className="flex justify-center mt-6 mb-10">
-            <div className="flex items-center gap-2 bg-[#0c1e3a] border border-[#1e3a6e] rounded-full px-4 py-2">
+            <div className="flex items-center gap-2 bg-[#0e2a52] border border-[#1e3a72] rounded-full px-4 py-2">
               <span
                 className="text-white text-xs font-bold px-2 py-0.5 rounded"
                 style={{ background: '#3D8B4F' }}
@@ -66,7 +66,7 @@ export default async function OwnerRezPage() {
 
             {/* Left */}
             <div>
-              <h1 className="text-4xl lg:text-5xl font-bold leading-tight mb-6">
+              <h1 className="text-4xl lg:text-5xl font-bold leading-tight mb-6 font-display">
                 The operations layer your{' '}
                 <span className="text-[#FCD116]">OwnerRez account</span>{' '}
                 is missing.
@@ -92,7 +92,7 @@ export default async function OwnerRezPage() {
             </div>
 
             {/* Right — RepuGuard */}
-            <div className="bg-[#0c1e3a] border border-[#1e3a6e] rounded-2xl p-8">
+            <div className="bg-[#0e2a52] border border-[#1e3a72] rounded-2xl p-8">
               <div className="flex items-center gap-3 mb-5">
                 <div className="bg-[#FCD116] text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
                   REPUGUARD
@@ -111,14 +111,14 @@ export default async function OwnerRezPage() {
                 response before it posts. You stay in control.
               </p>
               <div className="space-y-3">
-                <div className="flex items-start gap-3 bg-[#0a1628] rounded-xl p-4 border border-[#162a4a]">
+                <div className="flex items-start gap-3 bg-[#102246] rounded-xl p-4 border border-[#162a4a]">
                   <span className="text-xl leading-none mt-0.5">🎁</span>
                   <div>
                     <div className="font-bold text-white">3 Months Free</div>
                     <div className="text-sm text-[#6a8aaa]">included with every FieldStay subscription</div>
                   </div>
                 </div>
-                <div className="flex items-center justify-between bg-[#0a1628] rounded-xl px-4 py-3 border border-[#162a4a]">
+                <div className="flex items-center justify-between bg-[#102246] rounded-xl px-4 py-3 border border-[#162a4a]">
                   <div>
                     <span className="text-[#FCD116] font-bold text-lg">$15/mo for life</span>
                     <span className="text-[#6a8aaa] text-sm ml-2">if you activate before Jan 1</span>
@@ -146,10 +146,10 @@ export default async function OwnerRezPage() {
           SECTION 3 — DARK NAVY
           RepuGuard Sandbox Demo
       ══════════════════════════════════════════ */}
-      <div className="bg-[#0a1628] text-white">
+      <div className="bg-[#102246] text-white">
         <div className="max-w-6xl mx-auto px-6 py-20">
           <div className="text-center mb-10">
-            <h2 className="text-3xl font-bold mb-3">See RepuGuard in Action</h2>
+            <h2 className="text-3xl font-bold mb-3 font-display">See RepuGuard in Action</h2>
             <p className="text-[#6a8aaa] text-lg max-w-xl mx-auto">
               Choose a review scenario and watch RepuGuard generate a response in real time.
             </p>
@@ -164,7 +164,7 @@ export default async function OwnerRezPage() {
       ══════════════════════════════════════════ */}
       <div className="bg-white">
         <div className="max-w-6xl mx-auto px-6 py-20">
-          <h2 className="text-3xl font-bold mb-2 text-center text-[#0a1628]">
+          <h2 className="text-3xl font-bold mb-2 text-center text-[#0a1628] font-display">
             Everything OwnerRez doesn&apos;t handle.
           </h2>
           <p className="text-[#5a6a7a] text-center mb-12">
@@ -189,7 +189,7 @@ export default async function OwnerRezPage() {
               },
             ].map(f => (
               <div key={f.num} className="bg-[#f8fafc] border border-[#e2e8f0] rounded-2xl p-6">
-                <div className="text-[#FCD116] font-bold text-sm mb-3 bg-[#0a1628] inline-block px-2 py-0.5 rounded">
+                <div className="text-[#FCD116] font-bold text-sm mb-3 bg-[#102246] inline-block px-2 py-0.5 rounded">
                   {f.num}
                 </div>
                 <h3 className="font-bold text-lg mb-3 text-[#0a1628]">{f.title}</h3>
@@ -206,7 +206,7 @@ export default async function OwnerRezPage() {
       ══════════════════════════════════════════ */}
       <div className="bg-[#FCD116]">
         <div className="max-w-6xl mx-auto px-6 py-20 text-center">
-          <h2 className="text-3xl font-bold mb-3 text-[#0a1628]">
+          <h2 className="text-3xl font-bold mb-3 text-[#0a1628] font-display">
             Ready to connect?
           </h2>
           <p className="text-[#0a1628]/70 text-lg mb-10">
@@ -217,7 +217,7 @@ export default async function OwnerRezPage() {
             <div className="flex flex-col items-center gap-3">
               <Link
                 href="/api/integrations/ownerrez/connect"
-                className="inline-block bg-[#0a1628] text-white font-bold px-10 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg"
+                className="inline-block bg-[#102246] text-white font-bold px-10 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg"
               >
                 Connect OwnerRez →
               </Link>
@@ -229,7 +229,7 @@ export default async function OwnerRezPage() {
             <div className="max-w-sm mx-auto">
               <Link
                 href="/signup?provider=ownerrez&next=/api/integrations/ownerrez/connect"
-                className="block w-full bg-[#0a1628] text-white font-bold px-8 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg text-center mb-4"
+                className="block w-full bg-[#102246] text-white font-bold px-8 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg text-center mb-4"
               >
                 Create your FieldStay account
               </Link>
