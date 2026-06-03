@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent } from '@/lib/audit'
 import type { Metadata } from 'next'
 import type { TxnType, TxnCategory } from '@/types/database'
 import { formatDate } from '@/lib/utils'
@@ -44,6 +45,7 @@ export default async function OwnerPortalPage({ params }: Props) {
     .select(`
       id,
       expires_at,
+      revoked_at,
       last_accessed_at,
       property_owners (
         id,
@@ -65,6 +67,20 @@ export default async function OwnerPortalPage({ params }: Props) {
     .single()
 
   if (!portalToken) notFound()
+
+  // Check revocation (M-5)
+  if (portalToken.revoked_at) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center max-w-sm w-full">
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">Access Revoked</h2>
+          <p className="text-sm text-gray-500">
+            This portal link has been revoked. Please contact your property manager for a new link.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   // Check expiry
   if (portalToken.expires_at && new Date(portalToken.expires_at) < new Date()) {
@@ -91,6 +107,18 @@ export default async function OwnerPortalPage({ params }: Props) {
     .from('owner_portal_tokens')
     .update({ last_accessed_at: new Date().toISOString() })
     .eq('id', portalToken.id)
+
+  const ownerForAudit = Array.isArray(portalToken.property_owners)
+    ? portalToken.property_owners[0]
+    : portalToken.property_owners
+  if (ownerForAudit?.org_id) {
+    await logAuditEvent({
+      orgId:      ownerForAudit.org_id,
+      action:     'owner_portal.accessed',
+      targetType: 'owner_portal_token',
+      targetId:   portalToken.id,
+    })
+  }
 
   const ownerForMilestone = Array.isArray(portalToken.property_owners)
     ? portalToken.property_owners[0]

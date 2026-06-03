@@ -11,6 +11,8 @@ const PUBLIC_ROUTES = [
   '/forgot-password',
   '/reset-password',
   '/crew/accept-invite',
+  '/privacy',
+  '/terms',
 ]
 
 // ── Token routes ───────────────────────────────────────────────────────────
@@ -54,6 +56,9 @@ const BYPASS_ROUTES = [
 
   // Supabase auth callback (magic links, OAuth email confirmation)
   '/auth/callback',
+
+  // Account deletion — handles its own auth verification server-side
+  '/api/account/delete',
 ]
 
 export async function proxy(request: NextRequest) {

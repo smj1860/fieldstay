@@ -20,6 +20,7 @@
 import { NextResponse, type NextRequest }            from 'next/server'
 import { getProvider }                               from '@/lib/integrations/registry'
 import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations/vault'
+import { logAuditEvent }                             from '@/lib/audit'
 
 export async function POST(
   request: NextRequest,
@@ -91,6 +92,13 @@ export async function POST(
             `[Webhook:${providerId}] Token revoked — FieldStay user ${appUserId} ` +
             `(external user ${externalUserId})`
           )
+          await logAuditEvent({
+            actorId:    appUserId,
+            action:     'integration.revoked',
+            targetType: 'integration_provider',
+            targetId:   providerId,
+            metadata:   { externalUserId, trigger: 'webhook' },
+          })
           // TODO: Trigger an Inngest event here to notify the user via Resend email:
           // await inngest.send({ name: 'integration/connection.revoked', data: { appUserId, providerId } })
         } else {

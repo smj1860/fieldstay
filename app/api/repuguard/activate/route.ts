@@ -4,6 +4,7 @@ import { createServerClient } from '@supabase/ssr'
 import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvent } from '@/lib/audit'
 
 export async function POST(_request: NextRequest) {
   const cookieStore = await cookies()
@@ -116,6 +117,13 @@ export async function POST(_request: NextRequest) {
   await inngest.send({
     name: 'repuguard/activated',
     data: { org_id: orgId },
+  })
+
+  await logAuditEvent({
+    orgId:    orgId,
+    actorId:  user.id,
+    action:   'repuguard.activated',
+    metadata: { isFoundingMember, subscriptionId: subscription.id },
   })
 
   return NextResponse.json({ ok: true })

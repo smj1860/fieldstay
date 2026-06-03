@@ -83,6 +83,11 @@ export function IcalManager({
           )}
 
           <form action={(fd) => {
+            const url = (fd.get('url') as string)?.trim()
+            if (url && !url.startsWith('https://')) {
+              alert('iCal feed URLs must start with https://')
+              return
+            }
             formAction(fd)
             if (!state?.error) setShowForm(false)
           }} className="space-y-4">

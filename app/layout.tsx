@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Syne, DM_Sans } from 'next/font/google'
+import { CookieConsent } from '@/components/CookieConsent'
 import './globals.css'
 
 const syne = Syne({
@@ -55,7 +56,10 @@ export default function RootLayout({
           })();
         ` }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <CookieConsent />
+      </body>
     </html>
   )
 }

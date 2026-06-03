@@ -3,6 +3,30 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { parseIcalFeed, toDateString, toTimeString, isAllDay } from '@/lib/ical/parser'
 import { generateTurnoversForProperty, cancelTurnoversForBooking } from '@/lib/turnovers/generator'
 
+// H-2: Reject non-HTTPS URLs and private/loopback IP ranges to prevent SSRF
+function assertSafeIcalUrl(url: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error('Invalid iCal URL format')
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error('iCal feeds must use HTTPS')
+  }
+  const h = parsed.hostname.toLowerCase()
+  if (h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0') {
+    throw new Error('SSRF: loopback address not permitted')
+  }
+  if (/^10\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /^192\.168\./.test(h)) {
+    throw new Error('SSRF: private IP range not permitted')
+  }
+  // Block AWS metadata endpoint and link-local
+  if (/^169\.254\./.test(h)) {
+    throw new Error('SSRF: link-local address not permitted')
+  }
+}
+
 /**
  * SCHEDULED: runs every 4 hours.
  * Also triggered manually via `ical/sync.all.requested`.
@@ -93,6 +117,7 @@ export const syncIcalFeed = inngest.createFunction(
     let rawIcal: string
     try {
       rawIcal = await step.run('download-ical', async () => {
+        assertSafeIcalUrl(feedUrl)
         const response = await fetch(feedUrl, {
           headers: { 'User-Agent': 'FieldStay/1.0 iCal Sync' },
           signal:  AbortSignal.timeout(15_000),
