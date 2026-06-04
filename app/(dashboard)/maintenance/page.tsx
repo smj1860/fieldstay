@@ -17,13 +17,20 @@ export default async function MaintenancePage() {
       .from('work_orders')
       .select(`
         id, property_id, vendor_id, assigned_crew_id,
-        title, description, priority, status, source,
+        wo_number, title, description, category, priority, status, source,
         scheduled_date, completed_date,
-        estimated_cost, actual_cost,
-        portal_enabled, completion_notes,
+        estimated_cost, nte_amount, actual_cost,
+        access_notes, completion_notes, invoice_reference,
+        portal_enabled, completion_token,
+        vendor_acknowledged_at, vendor_acknowledged_by,
+        completion_verified_at, completion_verified_by,
         created_at, updated_at,
-        properties ( name ),
-        vendors ( name )
+        properties ( name, address, city, state, access_instructions ),
+        vendors ( id, name, specialty ),
+        work_order_line_items (
+          id, line_type, description, quantity, unit,
+          unit_cost, line_total, sort_order, created_at
+        )
       `)
       .eq('org_id', membership.org_id)
       .order('created_at', { ascending: false }),
@@ -63,6 +70,7 @@ export default async function MaintenancePage() {
       properties={properties ?? []}
       vendors={vendors ?? []}
       schedules={schedules ?? []}
+      role={membership.role}
     />
   )
 }
