@@ -32,6 +32,7 @@ interface ReviewRow {
   external_url: string | null
   created_at: string
   updated_at: string
+  days_remaining: number | null
   review_responses: ReviewResponseRow | null
   properties: { name: string } | null
 }
@@ -51,6 +52,31 @@ function StarRating({ rating }: { rating: number }) {
           ★
         </span>
       ))}
+    </span>
+  )
+}
+
+function DeadlineBadge({
+  daysRemaining,
+  status,
+}: {
+  daysRemaining: number | null
+  status:        string
+}) {
+  if (status === 'posted' || daysRemaining === null) return null
+
+  const [bg, color, text]: [string, string, string] =
+    daysRemaining < 0  ? ['rgba(127,29,29,0.15)',    '#991b1b',              'Overdue']                  :
+    daysRemaining <= 3 ? ['var(--accent-red-dim)',   'var(--accent-red)',    `${daysRemaining}d left`]   :
+    daysRemaining <= 7 ? ['var(--accent-amber-dim)', 'var(--accent-amber)', `${daysRemaining}d left`]   :
+                         ['var(--accent-green-dim)', 'var(--accent-green)', `${daysRemaining}d left`]
+
+  return (
+    <span
+      className="text-xs font-semibold px-2 py-0.5 rounded-full"
+      style={{ background: bg, color }}
+    >
+      {text}
     </span>
   )
 }
@@ -268,6 +294,10 @@ export function ReviewsClient({ reviews: initialReviews, repuguardStatus, trialE
                         ⚑ Flagged
                       </span>
                     )}
+                    <DeadlineBadge
+                      daysRemaining={review.days_remaining}
+                      status={review.response_status}
+                    />
                     <StatusBadge status={review.response_status} />
                   </div>
                 </div>

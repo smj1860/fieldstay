@@ -44,6 +44,7 @@ export type MessageStatus       = 'sent' | 'failed' | 'bounced'
 export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
+export type CrewRole            = 'cleaning' | 'landscaping' | 'maintenance' | 'general'
 
 // Communication logs
 export type CommRecipientType   = 'vendor' | 'crew'
@@ -188,6 +189,7 @@ export interface CrewMember {
   preferred_contact:  ContactPref
   sms_carrier:        string | null
   specialty:          string
+  role:               CrewRole
   is_active:          boolean
   notes:              string | null
   invite_token:       string | null

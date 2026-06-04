@@ -16,6 +16,7 @@ interface ReviewRow {
   external_url: string | null
   created_at: string
   updated_at: string
+  days_remaining: number | null
   review_responses: ReviewResponseRow | null
   properties: { name: string } | null
 }
@@ -103,9 +104,33 @@ export default async function ReviewsPage() {
 
   const trialEnd = org?.repuguard_trial_end as string | null
 
+  const RESPONSE_WINDOW_DAYS = 14
+
+  const reviewsWithDeadline = (reviews ?? []).map(r => {
+    const reviewDate = r.review_date ? new Date(r.review_date) : null
+    const deadline   = reviewDate
+      ? new Date(reviewDate.getTime() + RESPONSE_WINDOW_DAYS * 86_400_000)
+      : null
+    const daysRemaining = (deadline && r.response_status !== 'posted')
+      ? Math.ceil((deadline.getTime() - Date.now()) / 86_400_000)
+      : null
+
+    return { ...r, days_remaining: daysRemaining }
+  })
+
+  reviewsWithDeadline.sort((a, b) => {
+    const isPostedA = a.response_status === 'posted'
+    const isPostedB = b.response_status === 'posted'
+    if (isPostedA && !isPostedB) return 1
+    if (isPostedB && !isPostedA) return -1
+    const da = a.days_remaining ?? 999
+    const db = b.days_remaining ?? 999
+    return da - db
+  })
+
   return (
     <ReviewsClient
-      reviews={(reviews ?? []) as ReviewRow[]}
+      reviews={reviewsWithDeadline as ReviewRow[]}
       repuguardStatus={repuguardStatus as 'trial' | 'active'}
       trialEnd={trialEnd}
       orgId={membership.org_id}

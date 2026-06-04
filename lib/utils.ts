@@ -73,6 +73,19 @@ export const WO_STATUS_LABELS = {
   cancelled:       'Cancelled',
 } as const
 
+/** Duration between started_at and completed_at */
+export function formatDuration(startedAt: string | null, completedAt: string | null): string | null {
+  if (!startedAt || !completedAt) return null
+  const totalMins = Math.round(
+    (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60_000
+  )
+  if (totalMins < 1)  return '< 1m'
+  if (totalMins < 60) return `${totalMins}m`
+  const h = Math.floor(totalMins / 60)
+  const m = totalMins % 60
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
 /** Inventory category display labels */
 export const INVENTORY_CATEGORY_LABELS = {
   paper_goods: 'Paper Goods',

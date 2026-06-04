@@ -78,6 +78,16 @@ export type FieldStayEvents = {
     }
   }
 
+  'turnover/flagged': {
+    data: {
+      turnover_id: string
+      property_id: string
+      org_id:      string
+      flag_notes:  string
+      flagged_by:  string
+    }
+  }
+
   'turnover/unassigned-warning': {
     data: {
       turnover_id: string

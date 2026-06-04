@@ -21,6 +21,9 @@ import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initia
 import { ownerRezIncrementalSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
 import { ownerRezReviewsSync }     from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
 
+// Turnover flag → WO
+import { flaggedTurnoverToWO } from '@/lib/inngest/functions/flagged-turnover-wo'
+
 // Work orders
 import {
   handleWorkOrderCreated,
@@ -54,6 +57,9 @@ export const { GET, POST, PUT } = serve({
     ownerRezInitialSync,
     ownerRezIncrementalSync,
     ownerRezReviewsSync,
+
+    // Flagged turnover → WO
+    flaggedTurnoverToWO,
 
     // Work orders
     handleWorkOrderCreated,

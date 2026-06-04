@@ -105,11 +105,14 @@ export async function updateTurnoverStatus(
   status: 'in_progress' | 'completed' | 'flagged' | 'cancelled',
   notes?: string
 ): Promise<TurnoverActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const update: Record<string, unknown> = { status }
+  if (status === 'in_progress') {
+    update.started_at = new Date().toISOString()
+  }
   if (status === 'completed') {
-    update.completed_at    = new Date().toISOString()
+    update.completed_at     = new Date().toISOString()
     update.completion_notes = notes ?? null
   }
   if (notes && status === 'flagged') {
@@ -141,6 +144,28 @@ export async function updateTurnoverStatus(
           org_id:             t.org_id,
           completed_by_crew_id: '',
           completed_at:       new Date().toISOString(),
+        },
+      })
+    }
+  }
+
+  // Fire flagged event to auto-create draft work order
+  if (status === 'flagged' && notes) {
+    const { data: t } = await supabase
+      .from('turnovers')
+      .select('property_id')
+      .eq('id', turnover_id)
+      .single()
+
+    if (t) {
+      await inngest.send({
+        name: 'turnover/flagged',
+        data: {
+          turnover_id,
+          property_id: t.property_id,
+          org_id:      membership.org_id,
+          flag_notes:  notes,
+          flagged_by:  user.id,
         },
       })
     }
@@ -222,6 +247,97 @@ export async function createManualTurnover(
       window_minutes:    windowMinutes,
     },
   })
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}
+
+// ── Add crew to turnover (additive, no replace) ──────────────────────────────
+
+export async function addCrewToTurnover(
+  turnoverIds: string[],
+  crewMemberId: string
+): Promise<TurnoverActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: turnovers } = await supabase
+    .from('turnovers')
+    .select('id, status')
+    .in('id', turnoverIds)
+    .eq('org_id', membership.org_id)
+
+  if (!turnovers?.length) return { error: 'Turnovers not found' }
+
+  const { data: crew } = await supabase
+    .from('crew_members')
+    .select('id')
+    .eq('id', crewMemberId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!crew) return { error: 'Crew member not found' }
+
+  for (const turnover of turnovers) {
+    const { data: existing } = await supabase
+      .from('turnover_assignments')
+      .select('id')
+      .eq('turnover_id', turnover.id)
+      .eq('crew_member_id', crewMemberId)
+      .maybeSingle()
+
+    if (!existing) {
+      await supabase.from('turnover_assignments').insert({
+        turnover_id:    turnover.id,
+        crew_member_id: crewMemberId,
+      })
+    }
+
+    if (turnover.status === 'pending_assignment') {
+      await supabase
+        .from('turnovers')
+        .update({ status: 'assigned' })
+        .eq('id', turnover.id)
+    }
+  }
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}
+
+// ── Remove one crew member from a turnover ───────────────────────────────────
+
+export async function removeCrewFromTurnover(
+  turnoverId: string,
+  crewMemberId: string
+): Promise<TurnoverActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: turnover } = await supabase
+    .from('turnovers')
+    .select('id, status')
+    .eq('id', turnoverId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!turnover) return { error: 'Turnover not found' }
+
+  await supabase
+    .from('turnover_assignments')
+    .delete()
+    .eq('turnover_id', turnoverId)
+    .eq('crew_member_id', crewMemberId)
+
+  const { data: remaining } = await supabase
+    .from('turnover_assignments')
+    .select('id')
+    .eq('turnover_id', turnoverId)
+
+  if (!remaining?.length && turnover.status === 'assigned') {
+    await supabase
+      .from('turnovers')
+      .update({ status: 'pending_assignment' })
+      .eq('id', turnoverId)
+  }
 
   revalidatePath('/turnovers')
   return { success: true }
