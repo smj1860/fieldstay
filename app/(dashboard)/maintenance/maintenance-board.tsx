@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useTransition, useActionState } from 'react'
-import { useRouter } from 'next/navigation'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
@@ -13,6 +12,7 @@ import {
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency } from '@/types/database'
+import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -20,19 +20,35 @@ interface WorkOrderRow {
   id: string
   property_id: string
   vendor_id: string | null
+  wo_number: string | null
   title: string
   description: string | null
+  category: string | null
   priority: PriorityLevel
   status: WoStatus
   scheduled_date: string | null
   completed_date: string | null
   estimated_cost: number | null
+  nte_amount: number | null
   actual_cost: number | null
+  access_notes: string | null
   portal_enabled: boolean
+  completion_token: string | null
   completion_notes: string | null
+  invoice_reference: string | null
+  vendor_acknowledged_at: string | null
+  vendor_acknowledged_by: string | null
+  completion_verified_at: string | null
+  completion_verified_by: string | null
   created_at: string
-  properties: { name: string } | { name: string }[] | null
-  vendors: { name: string } | { name: string }[] | null
+  updated_at: string
+  properties: { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null } | { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null }[] | null
+  vendors: { id: string; name: string; specialty: string } | { id: string; name: string; specialty: string }[] | null
+  work_order_line_items?: Array<{
+    id: string; work_order_id?: string; line_type: string; description: string
+    quantity: number; unit: string | null; unit_cost: number; line_total: number
+    sort_order: number; created_at: string
+  }>
 }
 
 interface PropertyOption {
@@ -156,11 +172,16 @@ function WorkOrderCard({
     >
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          {/* Title + badges */}
+          {/* WO number + title + badges */}
           <div className="flex items-start gap-2 flex-wrap">
             <span className="font-semibold text-primary-themed text-sm leading-snug flex-1 min-w-0 truncate">
               {wo.title}
             </span>
+            {wo.wo_number && (
+              <span className="font-mono text-xs flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
+                {wo.wo_number}
+              </span>
+            )}
             <span className={priorityBadgeClass(wo.priority)}>
               {PRIORITY_LABELS[wo.priority]}
             </span>
@@ -823,17 +844,19 @@ export function MaintenanceBoard({
   properties,
   vendors,
   schedules,
+  role,
 }: {
   workOrders: WorkOrderRow[]
   properties: PropertyOption[]
   vendors: VendorOption[]
   schedules: ScheduleRow[]
+  role: string
 }) {
-  const router = useRouter()
   const [showCreate, setShowCreate] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('all')
   const [filterProperty, setFilterProperty] = useState<string>('all')
   const [filterPriority, setFilterPriority] = useState<string>('all')
+  const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
 
   // Filter work orders
   const filtered = workOrders.filter((wo) => {
@@ -959,13 +982,52 @@ export function MaintenanceBoard({
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((wo) => (
-            <WorkOrderCard
-              key={wo.id}
-              wo={wo}
-              onClick={() => router.push(`/maintenance/${wo.id}`)}
-            />
-          ))}
+          {filtered.map((wo) => {
+            const prop = getJoined(wo.properties)
+            const vend = getJoined(wo.vendors)
+            return (
+              <WorkOrderCard
+                key={wo.id}
+                wo={wo}
+                onClick={() => setSelectedWO({
+                  id:                     wo.id,
+                  wo_number:              wo.wo_number,
+                  org_id:                 '',
+                  property_id:            wo.property_id,
+                  title:                  wo.title,
+                  description:            wo.description,
+                  category:               wo.category as WorkOrderDetailData['category'],
+                  priority:               wo.priority,
+                  status:                 wo.status,
+                  source:                 '',
+                  scheduled_date:         wo.scheduled_date,
+                  completed_date:         wo.completed_date,
+                  estimated_cost:         wo.estimated_cost,
+                  nte_amount:             wo.nte_amount,
+                  actual_cost:            wo.actual_cost,
+                  access_notes:           wo.access_notes,
+                  completion_notes:       wo.completion_notes,
+                  invoice_reference:      wo.invoice_reference,
+                  vendor_acknowledged_at: wo.vendor_acknowledged_at,
+                  completion_verified_at: wo.completion_verified_at,
+                  created_at:             wo.created_at,
+                  properties: {
+                    name:                prop?.name ?? '',
+                    address:             prop?.address ?? null,
+                    city:                prop?.city ?? null,
+                    state:               prop?.state ?? null,
+                    access_instructions: prop?.access_instructions ?? null,
+                  },
+                  vendors: vend ? {
+                    id:        vend.id,
+                    name:      vend.name,
+                    specialty: vend.specialty as WorkOrderDetailData['vendors'] extends { specialty: infer S } | null ? S : never,
+                  } : null,
+                  work_order_line_items: (wo.work_order_line_items ?? []) as WorkOrderDetailData['work_order_line_items'],
+                })}
+              />
+            )
+          })}
         </div>
       )}
 
@@ -979,6 +1041,51 @@ export function MaintenanceBoard({
           vendors={vendors}
           onClose={() => setShowCreate(false)}
         />
+      )}
+
+      {/* Work Order Detail Slide-Over */}
+      {selectedWO && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-40"
+            style={{ background: 'rgba(0,0,0,0.5)' }}
+            onClick={() => setSelectedWO(null)}
+          />
+
+          {/* Panel */}
+          <div
+            className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl flex flex-col shadow-2xl"
+            style={{ background: 'var(--bg-base)' }}
+          >
+            {/* Panel header */}
+            <div
+              className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+              style={{ borderBottom: '1px solid var(--border)' }}
+            >
+              <span className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>
+                Work Order Detail
+              </span>
+              <button
+                onClick={() => setSelectedWO(null)}
+                className="p-2 rounded-lg transition-colors"
+                style={{ color: 'var(--text-muted)' }}
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto">
+              <WorkOrderDetail
+                workOrder={selectedWO}
+                userRole={role as 'admin' | 'manager' | 'crew' | 'viewer'}
+                onClose={() => setSelectedWO(null)}
+              />
+            </div>
+          </div>
+        </>
       )}
     </>
   )

@@ -31,6 +31,12 @@ export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' 
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
 export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report'
+export type WoCategory          =
+  | 'hvac' | 'plumbing' | 'electrical' | 'appliance' | 'cleaning'
+  | 'landscaping' | 'roofing' | 'flooring' | 'windows_doors'
+  | 'pest_control' | 'pool' | 'structural' | 'general' | 'other'
+export type LineItemType        =
+  | 'labor' | 'material' | 'equipment' | 'subcontractor' | 'other'
 export type ScheduleType        = 'routine' | 'seasonal'
 export type ScheduleFrequency   = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
 export type MessageTrigger      = 'booking_confirmed' | 'pre_checkout'
@@ -95,6 +101,7 @@ export interface Property {
   city:                    string | null
   state:                   string | null
   zip:                     string | null
+  access_instructions:     string | null
   property_type:           PropertyType
   bedrooms:                number
   bathrooms:               number
@@ -367,14 +374,30 @@ export interface PurchaseOrderItem {
   created_at:          string
 }
 
+export interface WorkOrderLineItem {
+  id:            string
+  work_order_id: string
+  org_id:        string
+  line_type:     LineItemType
+  description:   string
+  quantity:      number
+  unit:          string | null
+  unit_cost:     number
+  line_total:    number
+  sort_order:    number
+  created_at:    string
+}
+
 export interface WorkOrder {
   id:                          string
   property_id:                 string
   org_id:                      string
   vendor_id:                   string | null
   assigned_crew_id:            string | null
+  wo_number:                   string | null
   title:                       string
   description:                 string | null
+  category:                    WoCategory | null
   priority:                    PriorityLevel
   status:                      WoStatus
   source:                      WoSource
@@ -382,7 +405,9 @@ export interface WorkOrder {
   scheduled_date:              string | null
   completed_date:              string | null
   estimated_cost:              number | null
+  nte_amount:                  number | null
   actual_cost:                 number | null
+  access_notes:                string | null
   portal_enabled:              boolean
   completion_token:            string | null
   completion_token_expires_at: string | null
@@ -392,6 +417,10 @@ export interface WorkOrder {
   quote_token_expires_at:      string | null
   quoted_amount:               number | null
   quote_notes:                 string | null
+  vendor_acknowledged_at:      string | null
+  vendor_acknowledged_by:      string | null
+  completion_verified_at:      string | null
+  completion_verified_by:      string | null
   created_at:                  string
   updated_at:                  string
 }
@@ -623,6 +652,7 @@ export interface Database {
       purchase_orders:             { Row: PurchaseOrder;            Insert: Partial<PurchaseOrder>;            Update: Partial<PurchaseOrder>;            Relationships: [] }
       purchase_order_items:        { Row: PurchaseOrderItem;        Insert: Partial<PurchaseOrderItem>;        Update: Partial<PurchaseOrderItem>;        Relationships: [] }
       work_orders:                 { Row: WorkOrder;                Insert: Partial<WorkOrder>;                Update: Partial<WorkOrder>;                Relationships: [] }
+      work_order_line_items:       { Row: WorkOrderLineItem;        Insert: Partial<WorkOrderLineItem>;        Update: Partial<WorkOrderLineItem>;        Relationships: [] }
       work_order_updates:          { Row: WorkOrderUpdate;          Insert: Partial<WorkOrderUpdate>;          Update: Partial<WorkOrderUpdate>;          Relationships: [] }
       work_order_photos:           { Row: WorkOrderPhoto;           Insert: Partial<WorkOrderPhoto>;           Update: Partial<WorkOrderPhoto>;           Relationships: [] }
       maintenance_schedules:       { Row: MaintenanceSchedule;      Insert: Partial<MaintenanceSchedule>;      Update: Partial<MaintenanceSchedule>;      Relationships: [] }
