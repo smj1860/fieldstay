@@ -3,7 +3,7 @@
 import { useState, useTransition, useActionState, useRef } from 'react'
 import { Pencil, X, Check, Loader2, Upload, Users2, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { CrewMember } from '@/types/database'
+import type { CrewMember, CrewRole } from '@/types/database'
 import type { ContactPref } from '@/types/database'
 import {
   addCrewMember,
@@ -92,6 +92,15 @@ function parsePastedText(text: string): ParsedRow[] {
   }).filter((r) => r.name)
 }
 
+// ── Role badge ────────────────────────────────────────────────────────────────
+
+const ROLE_BADGE: Record<CrewRole, { label: string; cls: string }> = {
+  cleaning:    { label: 'Cleaning',    cls: 'badge badge-blue'  },
+  landscaping: { label: 'Landscaping', cls: 'badge badge-green' },
+  maintenance: { label: 'Maintenance', cls: 'badge badge-amber' },
+  general:     { label: 'General',     cls: 'badge badge-slate' },
+}
+
 // ── Root client component ─────────────────────────────────────────────────────
 
 interface Props { crew: CrewMember[] }
@@ -143,7 +152,7 @@ export function CrewManageClient({ crew }: Props) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-themed">
-                  {['Name','Specialty','Contact','Pref','App Access',''].map((h) => (
+                  {['Name','Role','Specialty','Contact','Pref','App Access',''].map((h) => (
                     <th key={h}
                         className={cn('py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide',
                                       h ? 'text-left' : 'text-right')}>
@@ -192,6 +201,17 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
             <label htmlFor="crew-name" className="label">Name <span className="text-red-400">*</span></label>
             <input id="crew-name" name="name" type="text" required className="input" placeholder="Alex Johnson" />
           </div>
+          <div>
+            <label htmlFor="crew-role" className="label">Role</label>
+            <select id="crew-role" name="role" className="input" defaultValue="general">
+              <option value="cleaning">Cleaning</option>
+              <option value="landscaping">Landscaping</option>
+              <option value="maintenance">Maintenance</option>
+              <option value="general">General</option>
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="crew-specialty" className="label">Specialty</label>
             <input id="crew-specialty" name="specialty" type="text" className="input" placeholder="e.g. Cleaning, HVAC" />
@@ -435,6 +455,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
 function CrewRow({ member }: { member: CrewMember }) {
   const [editing, setEditing]         = useState(false)
   const [name, setName]               = useState(member.name)
+  const [roleVal, setRoleVal]         = useState<CrewRole>(member.role ?? 'general')
   const [specialty, setSpecialty]     = useState(member.specialty)
   const [email, setEmail]             = useState(member.email ?? '')
   const [phone, setPhone]             = useState(member.phone ?? '')
@@ -460,7 +481,7 @@ function CrewRow({ member }: { member: CrewMember }) {
     startSave(async () => {
       const result = await updateCrewMember(member.id, {
         name, email: email || undefined, phone: phone || undefined, specialty,
-        preferred_contact: pref,
+        preferred_contact: pref, role: roleVal,
       })
       if (result.error) setRowError(result.error)
       else              setEditing(false)
@@ -477,6 +498,14 @@ function CrewRow({ member }: { member: CrewMember }) {
         <td className="py-2 pr-4">
           <input value={name} onChange={(e) => setName(e.target.value)} className="input py-1 text-sm" />
           {rowError && <p className="text-xs text-red-400 mt-1">{rowError}</p>}
+        </td>
+        <td className="py-2 pr-4">
+          <select value={roleVal} onChange={(e) => setRoleVal(e.target.value as CrewRole)} className="input py-1 text-sm">
+            <option value="cleaning">Cleaning</option>
+            <option value="landscaping">Landscaping</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="general">General</option>
+          </select>
         </td>
         <td className="py-2 pr-4">
           <input value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="input py-1 text-sm" placeholder="Specialty" />
@@ -512,6 +541,11 @@ function CrewRow({ member }: { member: CrewMember }) {
   return (
     <tr className="hover:bg-raised-themed transition-colors">
       <td className="py-2.5 pr-4 font-medium text-primary-themed">{member.name}</td>
+      <td className="py-2.5 pr-4">
+        <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>
+          {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
+        </span>
+      </td>
       <td className="py-2.5 pr-4 text-secondary-themed">{member.specialty || '—'}</td>
       <td className="py-2.5 pr-4 text-secondary-themed">
         <div className="space-y-0.5">

@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
-import type { ContactPref, VendorSpecialty } from '@/types/database'
+import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 
 export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
 
@@ -91,6 +91,7 @@ export async function addCrewMember(
   const phone             = (formData.get('phone') as string)?.trim() || null
   const specialty         = (formData.get('specialty') as string)?.trim() || ''
   const preferred_contact = (formData.get('preferred_contact') as ContactPref) || 'email'
+  const role              = ((formData.get('role') as CrewRole) || 'general') as CrewRole
 
   if (!name) return { error: 'Name is required' }
   if (!email && !phone) return { error: 'Email or phone is required' }
@@ -102,6 +103,7 @@ export async function addCrewMember(
     phone,
     specialty,
     preferred_contact,
+    role,
     is_active: true,
   })
 
@@ -121,6 +123,7 @@ export async function updateCrewMember(
     specialty: string
     preferred_contact: ContactPref
     notes: string
+    role: CrewRole
   }>
 ): Promise<SettingsActionState> {
   const { supabase, membership } = await requireOrgMember()

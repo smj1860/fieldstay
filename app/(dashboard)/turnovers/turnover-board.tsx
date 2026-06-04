@@ -1,13 +1,17 @@
 'use client'
 
 import { useState, useTransition, useActionState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
-  Plus, RefreshCw, CalendarCheck, Clock, User, ChevronDown,
-  AlertTriangle, CheckCircle2, Flag, X, Filter
+  Plus, RefreshCw, CalendarCheck, Clock, ChevronDown,
+  AlertTriangle, CheckCircle2, Flag, X, UserPlus,
 } from 'lucide-react'
-import { cn, formatWindow, TURNOVER_STATUS_LABELS, PRIORITY_COLORS } from '@/lib/utils'
-import { assignCrew, updateTurnoverStatus, createManualTurnover, triggerManualSync } from './actions'
+import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
+import {
+  assignCrew, addCrewToTurnover, removeCrewFromTurnover,
+  updateTurnoverStatus, createManualTurnover, triggerManualSync,
+} from './actions'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,6 +34,7 @@ interface Turnover {
   priority: string
   notes: string | null
   completed_at: string | null
+  started_at: string | null
   checklist_template_id: string | null
   turnover_assignments: TurnoverAssignment | TurnoverAssignment[] | null
 }
@@ -49,6 +54,18 @@ function isTomorrow(d: Date): boolean {
 
 function isPast(d: Date): boolean {
   return d < new Date()
+}
+
+function getAllAssignedCrew(t: Turnover): CrewMember[] {
+  const assignments = Array.isArray(t.turnover_assignments)
+    ? t.turnover_assignments
+    : t.turnover_assignments ? [t.turnover_assignments] : []
+
+  return assignments.flatMap(a => {
+    const cm = a.crew_members
+    if (!cm) return []
+    return Array.isArray(cm) ? cm : [cm]
+  })
 }
 
 function groupTurnovers(turnovers: Turnover[]) {
@@ -75,7 +92,6 @@ function groupTurnovers(turnovers: Turnover[]) {
       (t.priority === 'urgent' || t.priority === 'high') &&
       !isToday(checkout)
     ) {
-      // High priority upcoming — still put in their date bucket but flag them
       if (isToday(checkout)) groups.today.push(t)
       else if (isTomorrow(checkout)) groups.tomorrow.push(t)
       else groups.week.push(t)
@@ -93,16 +109,6 @@ function groupTurnovers(turnovers: Turnover[]) {
   return groups
 }
 
-function getAssignedCrew(t: Turnover): CrewMember | null {
-  const assignments = Array.isArray(t.turnover_assignments)
-    ? t.turnover_assignments
-    : t.turnover_assignments ? [t.turnover_assignments] : []
-
-  if (!assignments.length) return null
-  const first = assignments[0]
-  return Array.isArray(first.crew_members) ? first.crew_members[0] : first.crew_members
-}
-
 function statusBadge(status: string) {
   const map: Record<string, string> = {
     pending_assignment: 'badge badge-amber',
@@ -114,71 +120,108 @@ function statusBadge(status: string) {
   return map[status] ?? 'badge badge-slate'
 }
 
-// ── Crew Assign Dropdown ─────────────────────────────────────────────────────
+// ── Crew Assignment (chip-based) ─────────────────────────────────────────────
 
-function CrewAssignDropdown({
+function CrewAssignment({
   turnover,
   crewMembers,
   assignedCrew,
 }: {
-  turnover: Turnover
-  crewMembers: CrewMember[]
-  assignedCrew: CrewMember | null
+  turnover:     Turnover
+  crewMembers:  CrewMember[]
+  assignedCrew: CrewMember[]
 }) {
-  const [open, setOpen] = useState(false)
-  const [assigning, startAssign] = useTransition()
+  const [open,     setOpen]     = useState(false)
+  const [adding,   startAdd]    = useTransition()
+  const [removing, startRemove] = useTransition()
 
-  const handleAssign = (crewId: string) => {
+  const isDisabled = turnover.status === 'completed' || turnover.status === 'cancelled'
+  const available  = crewMembers.filter(c => !assignedCrew.find(a => a.id === c.id))
+
+  const handleAdd = (crewId: string) => {
     setOpen(false)
-    startAssign(async () => {
-      await assignCrew([turnover.id], crewId)
-    })
+    startAdd(async () => { await addCrewToTurnover([turnover.id], crewId) })
+  }
+
+  const handleRemove = (crewId: string) => {
+    startRemove(async () => { await removeCrewFromTurnover(turnover.id, crewId) })
   }
 
   return (
-    <div className="relative">
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}
-        disabled={assigning || turnover.status === 'completed' || turnover.status === 'cancelled'}
-        className={cn(
-          'flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-all',
-          assignedCrew
-            ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
-            : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100',
-          'disabled:opacity-50 disabled:cursor-default'
-        )}
-      >
-        <User className="w-3 h-3" />
-        {assigning ? 'Assigning…' : (assignedCrew?.name ?? 'Assign Crew')}
-        {!assigning && <ChevronDown className="w-3 h-3" />}
-      </button>
+    <div
+      className="flex items-center gap-1.5 flex-wrap"
+      onClick={e => e.stopPropagation()}
+    >
+      {assignedCrew.map(c => (
+        <span
+          key={c.id}
+          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+          style={{
+            background: 'rgba(59,130,246,0.1)',
+            border:     '1px solid rgba(59,130,246,0.3)',
+            color:      '#1d4ed8',
+          }}
+        >
+          {c.name}
+          {!isDisabled && (
+            <button
+              onClick={() => handleRemove(c.id)}
+              disabled={removing}
+              className="ml-0.5 hover:text-red-600 transition-colors disabled:opacity-50"
+              aria-label={`Remove ${c.name}`}
+            >
+              <X className="w-2.5 h-2.5" />
+            </button>
+          )}
+        </span>
+      ))}
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg py-1 min-w-[160px]">
-            {crewMembers.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-muted-themed">No crew members yet</p>
-            ) : (
-              crewMembers.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => handleAssign(c.id)}
-                  className={cn(
-                    'w-full text-left px-3 py-2 text-sm hover:bg-canvas-themed transition-colors flex items-center gap-2',
-                    assignedCrew?.id === c.id && 'text-brand-700 font-medium'
-                  )}
-                >
-                  <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center flex-shrink-0">
-                    {c.name[0]?.toUpperCase()}
-                  </span>
-                  {c.name}
-                  {assignedCrew?.id === c.id && <CheckCircle2 className="w-3 h-3 ml-auto text-brand-600" />}
-                </button>
-              ))
+      {!isDisabled && (
+        <div className="relative">
+          <button
+            onClick={() => setOpen(o => !o)}
+            disabled={adding}
+            className={cn(
+              'flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              assignedCrew.length === 0
+                ? 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+                : 'border-themed text-muted-themed hover:text-secondary-themed'
             )}
-          </div>
-        </>
+          >
+            <UserPlus className="w-3 h-3" />
+            {adding ? '…' : assignedCrew.length === 0 ? 'Assign' : '+ Add'}
+          </button>
+
+          {open && available.length > 0 && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+              <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg py-1 min-w-[160px]">
+                {available.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => handleAdd(c.id)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-canvas-themed transition-colors flex items-center gap-2"
+                  >
+                    <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                      {c.name[0]?.toUpperCase()}
+                    </span>
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {open && available.length === 0 && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+              <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg p-3 min-w-[140px]">
+                <p className="text-xs text-muted-themed">All crew assigned</p>
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   )
@@ -190,10 +233,14 @@ function TurnoverCard({
   turnover,
   property,
   crewMembers,
+  isSelected,
+  onToggle,
 }: {
   turnover: Turnover
   property: Property | undefined
   crewMembers: CrewMember[]
+  isSelected: boolean
+  onToggle: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [updating, startUpdate] = useTransition()
@@ -202,13 +249,15 @@ function TurnoverCard({
 
   const checkout     = new Date(turnover.checkout_datetime)
   const checkin      = new Date(turnover.checkin_datetime)
-  const assignedCrew = getAssignedCrew(turnover)
+  const assignedCrew = getAllAssignedCrew(turnover)
   const isOverdue    = isPast(checkout) && turnover.status !== 'completed' && turnover.status !== 'in_progress'
   const windowMins   = turnover.window_minutes ?? 0
   const windowColor  =
     windowMins < 120 ? 'text-red-600'   :
     windowMins < 240 ? 'text-amber-600' :
     windowMins < 480 ? 'text-blue-600'  : 'text-green-600'
+
+  const duration = formatDuration(turnover.started_at, turnover.completed_at)
 
   const handleStatus = (status: 'in_progress' | 'completed' | 'flagged' | 'cancelled') => {
     if (status === 'flagged' && !flagNotes) {
@@ -238,6 +287,16 @@ function TurnoverCard({
         className="flex items-start gap-3 p-4 cursor-pointer"
         onClick={() => setExpanded((e) => !e)}
       >
+        {/* Bulk-select checkbox */}
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={onToggle}
+          onClick={e => e.stopPropagation()}
+          className="w-4 h-4 rounded border-themed text-brand-600 focus:ring-brand-500 mt-0.5 flex-shrink-0 cursor-pointer"
+          aria-label="Select turnover"
+        />
+
         {/* Priority / overdue indicator */}
         <div className={cn(
           'w-1 self-stretch rounded-full flex-shrink-0',
@@ -290,9 +349,9 @@ function TurnoverCard({
           </div>
         </div>
 
-        {/* Crew + expand */}
-        <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-          <CrewAssignDropdown
+        {/* Crew chips + expand */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <CrewAssignment
             turnover={turnover}
             crewMembers={crewMembers}
             assignedCrew={assignedCrew}
@@ -373,10 +432,20 @@ function TurnoverCard({
           )}
 
           {turnover.status === 'completed' && turnover.completed_at && (
-            <p className="text-xs text-green-600 flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Completed {new Date(turnover.completed_at).toLocaleString()}
-            </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <p className="text-xs flex items-center gap-1 text-green-600">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Completed {new Date(turnover.completed_at).toLocaleString()}
+              </p>
+              {duration && (
+                <span
+                  className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}
+                >
+                  ⏱ {duration}
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -393,6 +462,8 @@ function BoardSection({
   crewMembers,
   defaultOpen = true,
   variant = 'default',
+  selectedIds,
+  onToggle,
 }: {
   label: string
   turnovers: Turnover[]
@@ -400,6 +471,8 @@ function BoardSection({
   crewMembers: CrewMember[]
   defaultOpen?: boolean
   variant?: 'default' | 'urgent' | 'muted'
+  selectedIds: Set<string>
+  onToggle: (id: string) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
   if (!turnovers.length) return null
@@ -434,6 +507,8 @@ function BoardSection({
               turnover={t}
               property={propertyMap[t.property_id]}
               crewMembers={crewMembers}
+              isSelected={selectedIds.has(t.id)}
+              onToggle={() => onToggle(t.id)}
             />
           ))}
         </div>
@@ -530,18 +605,57 @@ export function TurnoverBoard({
   properties: Property[]
   orgId: string
 }) {
-  const [showAdd, setShowAdd]     = useState(false)
-  const [syncing, startSync]      = useTransition()
-  const [filterProp, setFilterProp] = useState<string>('all')
-  const [filterStatus, setFilterStatus] = useState<string>('active')
+  const searchParams = useSearchParams()
+  const urlStatus    = searchParams.get('status')
+
+  const [showAdd,       setShowAdd]       = useState(false)
+  const [syncing,       startSync]        = useTransition()
+  const [filterProp,    setFilterProp]    = useState<string>('all')
+  const [filterStatus,  setFilterStatus]  = useState<string>(
+    urlStatus === 'pending_assignment' ? 'active' : 'active'
+  )
+  const [filterCrew,    setFilterCrew]    = useState<string>('all')
+  const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set())
+  const [bulkAssigning, startBulkAssign]  = useTransition()
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const clearSelection = () => setSelectedIds(new Set())
 
   // Filter
   const filtered = turnovers.filter((t) => {
     if (filterProp !== 'all' && t.property_id !== filterProp) return false
     if (filterStatus === 'active'    && (t.status === 'completed' || t.status === 'cancelled')) return false
-    if (filterStatus === 'completed' && t.status !== 'completed') return false
+    if (filterStatus === 'completed' &&  t.status !== 'completed') return false
+
+    if (filterCrew !== 'all') {
+      const assignments = Array.isArray(t.turnover_assignments)
+        ? t.turnover_assignments
+        : t.turnover_assignments ? [t.turnover_assignments] : []
+      const crewIds = assignments.map(a => a.crew_member_id)
+
+      if (filterCrew === 'unassigned') {
+        if (t.status !== 'pending_assignment') return false
+      } else {
+        if (!crewIds.includes(filterCrew)) return false
+      }
+    }
+
     return true
   })
+
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every(t => selectedIds.has(t.id))
+
+  const toggleSelectAll = () =>
+    allVisibleSelected
+      ? clearSelection()
+      : setSelectedIds(new Set(filtered.map(t => t.id)))
 
   const groups = groupTurnovers(filtered)
 
@@ -587,7 +701,7 @@ export function TurnoverBoard({
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 mb-6 flex-wrap">
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="flex items-center gap-1.5 bg-card-themed border border-themed rounded-lg px-1 py-1">
           {(['active', 'completed', 'all'] as const).map((s) => (
             <button
@@ -617,7 +731,39 @@ export function TurnoverBoard({
             ))}
           </select>
         )}
+
+        {crewMembers.length > 0 && (
+          <select
+            value={filterCrew}
+            onChange={e => setFilterCrew(e.target.value)}
+            className="input text-sm py-1.5 w-auto"
+          >
+            <option value="all">All Crew</option>
+            <option value="unassigned">🔴 Unassigned only</option>
+            {crewMembers.map(c => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        )}
       </div>
+
+      {/* Select-all row */}
+      {filtered.length > 1 && (
+        <div className="flex items-center gap-3 mb-2">
+          <label className="flex items-center gap-2 text-xs cursor-pointer"
+                 style={{ color: 'var(--text-muted)' }}>
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              onChange={toggleSelectAll}
+              className="w-4 h-4 rounded border-themed text-brand-600"
+            />
+            {allVisibleSelected
+              ? `Deselect all (${filtered.length})`
+              : `Select all visible (${filtered.length})`}
+          </label>
+        </div>
+      )}
 
       {/* Board */}
       {filtered.length === 0 ? (
@@ -639,24 +785,32 @@ export function TurnoverBoard({
             propertyMap={propertyMap}
             crewMembers={crewMembers}
             variant="urgent"
+            selectedIds={selectedIds}
+            onToggle={toggleSelect}
           />
           <BoardSection
             label="Today"
             turnovers={groups.today}
             propertyMap={propertyMap}
             crewMembers={crewMembers}
+            selectedIds={selectedIds}
+            onToggle={toggleSelect}
           />
           <BoardSection
             label="Tomorrow"
             turnovers={groups.tomorrow}
             propertyMap={propertyMap}
             crewMembers={crewMembers}
+            selectedIds={selectedIds}
+            onToggle={toggleSelect}
           />
           <BoardSection
             label="This Week"
             turnovers={groups.week}
             propertyMap={propertyMap}
             crewMembers={crewMembers}
+            selectedIds={selectedIds}
+            onToggle={toggleSelect}
           />
           <BoardSection
             label="Upcoming"
@@ -664,6 +818,8 @@ export function TurnoverBoard({
             propertyMap={propertyMap}
             crewMembers={crewMembers}
             defaultOpen={false}
+            selectedIds={selectedIds}
+            onToggle={toggleSelect}
           />
           {filterStatus !== 'active' && (
             <BoardSection
@@ -673,8 +829,61 @@ export function TurnoverBoard({
               crewMembers={crewMembers}
               defaultOpen={false}
               variant="muted"
+              selectedIds={selectedIds}
+              onToggle={toggleSelect}
             />
           )}
+        </div>
+      )}
+
+      {/* Sticky bulk assignment bar */}
+      {selectedIds.size > 0 && (
+        <div
+          className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:w-auto z-30 flex items-center justify-between gap-3 px-4 py-3 rounded-2xl shadow-xl"
+          style={{
+            background: 'var(--bg-card)',
+            border:     '1px solid var(--border)',
+            maxWidth:   '480px',
+            margin:     '0 auto',
+          }}
+        >
+          <span className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--text-primary)' }}>
+            {selectedIds.size} selected
+          </span>
+
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
+              Assign to:
+            </span>
+            <select
+              className="input text-sm py-1.5 flex-1"
+              defaultValue=""
+              disabled={bulkAssigning}
+              onChange={async e => {
+                if (!e.target.value) return
+                const crewId = e.target.value
+                e.target.value = ''
+                startBulkAssign(async () => {
+                  await assignCrew([...selectedIds], crewId)
+                  clearSelection()
+                })
+              }}
+            >
+              <option value="" disabled>Choose crew member…</option>
+              {crewMembers.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={clearSelection}
+            className="btn-ghost text-xs flex-shrink-0 flex items-center gap-1"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            <X className="w-3.5 h-3.5" />
+            Clear
+          </button>
         </div>
       )}
 

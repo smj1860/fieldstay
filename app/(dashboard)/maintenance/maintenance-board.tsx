@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useActionState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
@@ -852,10 +853,16 @@ export function MaintenanceBoard({
   schedules: ScheduleRow[]
   role: string
 }) {
+  const searchParams  = useSearchParams()
+  const urlFilter     = searchParams.get('filter')
+
   const [showCreate, setShowCreate] = useState(false)
   const [activeTab, setActiveTab] = useState<string>('all')
   const [filterProperty, setFilterProperty] = useState<string>('all')
-  const [filterPriority, setFilterPriority] = useState<string>('all')
+  const [filterPriority, setFilterPriority] = useState<string>(
+    urlFilter === 'urgent' ? 'high' : 'all'
+  )
+
   const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
 
   // Filter work orders

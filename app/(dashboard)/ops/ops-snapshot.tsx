@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import {
-  Clock, User, Wrench, Package, ChevronRight,
+  Clock, User, Wrench, Package, ChevronDown,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -31,10 +31,13 @@ interface WorkOrder   { id: string; title: string; property_id: string; priority
 interface LowStockItem { id: string; name: string; property_id: string; current_quantity: number; par_level: number }
 
 interface KPIs {
-  turnoversToday: number
-  unassigned:     number
-  openWorkOrders: number
-  belowPar:       number
+  turnoversToday:   number
+  todayAssigned:    number
+  todayUnassigned:  number
+  unassigned:       number
+  openWorkOrders:   number
+  urgentWorkOrders: number
+  belowPar:         number
 }
 
 // ── KPI Card ───────────────────────────────────────────────────
@@ -44,23 +47,34 @@ function KpiCard({
   value,
   accentColor = 'var(--accent-gold)',
   alert = false,
+  href,
+  breakdown,
 }: {
   label:        string
   value:        number
   accentColor?: string
   alert?:       boolean
+  href?:        string
+  breakdown?:   React.ReactNode
 }) {
-  return (
+  const inner = (
     <div
-      className="kpi-card"
+      className={cn('kpi-card', href && 'cursor-pointer hover:shadow-md transition-shadow')}
       style={{ '--kpi-accent': accentColor } as React.CSSProperties}
     >
       <div className="kpi-value" style={alert && value > 0 ? { color: accentColor } : undefined}>
         {value}
       </div>
-      <div className="kpi-label mt-2">{label}</div>
+      <div className="kpi-label mt-1">{label}</div>
+      {breakdown && (
+        <div className="mt-1.5 text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>
+          {breakdown}
+        </div>
+      )}
     </div>
   )
+
+  return href ? <Link href={href}>{inner}</Link> : inner
 }
 
 // ── Turnover Card ──────────────────────────────────────────────
@@ -151,69 +165,95 @@ function TurnoverCard({
   )
 }
 
-// ── Day Column ─────────────────────────────────────────────────
+// ── Day Accordion ──────────────────────────────────────────────
 
-function DayColumn({
+function DayAccordion({
   label,
   isToday,
   turnovers,
   propertyMap,
+  defaultOpen,
 }: {
   label:       string
   isToday:     boolean
   turnovers:   Turnover[]
   propertyMap: Record<string, string>
+  defaultOpen: boolean
 }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const hasAlert = turnovers.some(
+    t => t.status === 'pending_assignment' || t.priority === 'urgent'
+  )
+
   return (
-    <div className="flex flex-col min-w-0">
-      <div
-        className="flex items-center justify-between px-4 py-3 rounded-xl mb-3"
-        style={{
-          background: isToday ? 'var(--bg-raised)' : 'var(--border)',
-          border:     isToday ? '1px solid var(--accent-gold)' : '1px solid transparent',
-        }}
+    <div
+      className="rounded-xl overflow-hidden"
+      style={{ border: isToday ? '1px solid var(--accent-gold)' : '1px solid var(--border)' }}
+    >
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 transition-colors"
+        style={{ background: isToday ? 'var(--bg-raised)' : 'var(--bg-card)' }}
       >
         <span
-          className="font-display font-bold text-sm"
+          className="font-semibold text-sm"
           style={{ color: isToday ? 'var(--accent-gold)' : 'var(--text-secondary)' }}
         >
           {label}
         </span>
-        <span
-          className="text-xs font-semibold px-2 py-0.5 rounded-full"
-          style={{
-            background: isToday ? 'var(--accent-gold-dim)' : 'var(--border)',
-            color:      isToday ? 'var(--accent-gold)'     : 'var(--text-muted)',
-          }}
-        >
-          {turnovers.length}
-        </span>
-      </div>
+        <div className="flex items-center gap-2">
+          {turnovers.length > 0 ? (
+            <span
+              className="text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{
+                background: hasAlert ? 'var(--accent-amber-dim)' : 'var(--border)',
+                color:      hasAlert ? 'var(--accent-amber)'     : 'var(--text-muted)',
+              }}
+            >
+              {turnovers.length}
+            </span>
+          ) : (
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Clear
+            </span>
+          )}
+          <ChevronDown
+            className={cn('w-4 h-4 transition-transform', open && 'rotate-180')}
+            style={{ color: 'var(--text-muted)' }}
+          />
+        </div>
+      </button>
 
-      <div className="flex-1">
-        {turnovers.length === 0 ? (
-          <div
-            className="rounded-xl p-6 text-center text-sm"
-            style={{
-              background: 'var(--bg-card)',
-              border:     '1px solid var(--border)',
-              color:      'var(--text-muted)',
-            }}
-          >
-            No turnovers
-          </div>
-        ) : (
-          turnovers.map((t) => (
-            <TurnoverCard
-              key={t.id}
-              turnover={t}
-              propertyName={propertyMap[t.property_id] ?? 'Unknown property'}
-            />
-          ))
-        )}
-      </div>
+      {open && (
+        <div className="px-3 pb-3 pt-1" style={{ background: 'var(--bg-canvas)' }}>
+          {turnovers.length === 0 ? (
+            <p className="text-sm text-center py-4" style={{ color: 'var(--text-muted)' }}>
+              No turnovers
+            </p>
+          ) : (
+            turnovers.map(t => (
+              <TurnoverCard
+                key={t.id}
+                turnover={t}
+                propertyName={propertyMap[t.property_id] ?? 'Unknown'}
+              />
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
+}
+
+function getDayLabel(day: string, todayDate: string): string {
+  const yesterday = new Date(todayDate + 'T12:00:00')
+  yesterday.setDate(yesterday.getDate() - 1)
+  const yesterdayIso = yesterday.toISOString().split('T')[0]!
+  if (day === todayDate)    return 'Today'
+  if (day === yesterdayIso) return 'Yesterday'
+  return new Date(day + 'T12:00:00').toLocaleDateString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+  })
 }
 
 // ── Main Component ─────────────────────────────────────────────
@@ -224,26 +264,31 @@ export function OpsSnapshot({
   openWorkOrders,
   lowStockItems,
   kpis,
-  dates,
+  todayDate,
 }: {
   turnovers:      Turnover[]
   properties:     Property[]
   openWorkOrders: WorkOrder[]
   lowStockItems:  LowStockItem[]
   kpis:           KPIs
-  dates:          { yesterday: string; today: string; tomorrow: string }
+  todayDate:      string
 }) {
-  const [mobileDay, setMobileDay] = useState<'yesterday' | 'today' | 'tomorrow'>('today')
+  const [windowDays, setWindowDays] = useState<7 | 14 | 30>(7)
 
   const propertyMap = Object.fromEntries(properties.map((p) => [p.id, p.name]))
 
-  const byDay = {
-    yesterday: turnovers.filter((t) => t.checkout_datetime.startsWith(dates.yesterday)),
-    today:     turnovers.filter((t) => t.checkout_datetime.startsWith(dates.today)),
-    tomorrow:  turnovers.filter((t) => t.checkout_datetime.startsWith(dates.tomorrow)),
-  }
+  const days = Array.from({ length: windowDays + 1 }, (_, i) => {
+    const d = new Date(todayDate + 'T12:00:00')
+    d.setDate(d.getDate() + i - 1)
+    return d.toISOString().split('T')[0]!
+  })
 
-  const dayLabels = { yesterday: 'Yesterday', today: 'Today', tomorrow: 'Tomorrow' }
+  const byDay = Object.fromEntries(
+    days.map((day) => [
+      day,
+      turnovers.filter((t) => t.checkout_datetime.startsWith(day)),
+    ])
+  )
 
   return (
     <div>
@@ -258,60 +303,103 @@ export function OpsSnapshot({
           </p>
         </div>
         <Link href="/turnovers" className="btn-secondary text-xs gap-1.5">
-          Full board <ChevronRight className="w-3.5 h-3.5" />
+          Full board <ChevronDown className="w-3.5 h-3.5 -rotate-90" />
         </Link>
+      </div>
+
+      {/* Window selector */}
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+          Showing
+        </span>
+        <div className="flex items-center gap-1 rounded-lg px-1 py-1"
+             style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+          {([7, 14, 30] as const).map((d) => (
+            <button
+              key={d}
+              onClick={() => setWindowDays(d)}
+              className={cn(
+                'px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                windowDays === d
+                  ? 'bg-brand-800 text-white'
+                  : 'text-muted-themed hover:text-secondary-themed'
+              )}
+            >
+              {d}d
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <KpiCard label="Turnovers Today"  value={kpis.turnoversToday} accentColor="var(--accent-gold)" />
-        <KpiCard label="Unassigned"       value={kpis.unassigned}     accentColor="var(--accent-amber)" alert />
-        <KpiCard label="Open Work Orders" value={kpis.openWorkOrders} accentColor="var(--accent-blue)"  alert />
-        <KpiCard label="Below Par"        value={kpis.belowPar}       accentColor="var(--accent-red)"   alert />
-      </div>
-
-      {/* Desktop: 3-column layout */}
-      <div className="hidden md:grid grid-cols-3 gap-5">
-        {(['yesterday', 'today', 'tomorrow'] as const).map((day) => (
-          <DayColumn
-            key={day}
-            label={dayLabels[day]}
-            isToday={day === 'today'}
-            turnovers={byDay[day]}
-            propertyMap={propertyMap}
-          />
-        ))}
-      </div>
-
-      {/* Mobile: tab switcher + single column */}
-      <div className="md:hidden">
-        <div
-          className="flex rounded-xl p-1 mb-4 gap-1"
-          style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-        >
-          {(['yesterday', 'today', 'tomorrow'] as const).map((day) => (
-            <button
-              key={day}
-              onClick={() => setMobileDay(day)}
-              className="flex-1 py-2 rounded-lg text-sm font-semibold transition-all"
-              style={{
-                background: mobileDay === day ? 'var(--bg-raised)' : 'transparent',
-                color:      mobileDay === day ? 'var(--accent-gold)' : 'var(--text-muted)',
-                border:     mobileDay === day ? '1px solid var(--border-strong)' : '1px solid transparent',
-              }}
-            >
-              {dayLabels[day]}
-              <span className="ml-1.5 text-xs opacity-70">({byDay[day].length})</span>
-            </button>
-          ))}
-        </div>
-
-        <DayColumn
-          label={dayLabels[mobileDay]}
-          isToday={mobileDay === 'today'}
-          turnovers={byDay[mobileDay]}
-          propertyMap={propertyMap}
+        <KpiCard
+          label="Turnovers Today"
+          value={kpis.turnoversToday}
+          accentColor="var(--accent-gold)"
+          href="/turnovers"
+          breakdown={
+            kpis.turnoversToday === 0 ? 'No turnovers today' :
+            kpis.todayUnassigned > 0 ? (
+              <span>
+                <span style={{ color: 'var(--accent-green)' }}>{kpis.todayAssigned} assigned</span>
+                {' · '}
+                <span style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>
+                  🔴 {kpis.todayUnassigned} unassigned
+                </span>
+              </span>
+            ) : `All ${kpis.turnoversToday} assigned ✓`
+          }
         />
+        <KpiCard
+          label="Unassigned"
+          value={kpis.unassigned}
+          accentColor="var(--accent-amber)"
+          alert
+          href="/turnovers?status=pending_assignment"
+          breakdown={kpis.unassigned > 0 ? 'Tap to assign crew' : undefined}
+        />
+        <KpiCard
+          label="Open Work Orders"
+          value={kpis.openWorkOrders}
+          accentColor="var(--accent-blue)"
+          alert
+          href="/maintenance?filter=urgent"
+          breakdown={
+            kpis.urgentWorkOrders > 0
+              ? <span style={{ color: 'var(--accent-red)' }}>{kpis.urgentWorkOrders} urgent / high</span>
+              : undefined
+          }
+        />
+        <KpiCard
+          label="Below Par"
+          value={kpis.belowPar}
+          accentColor="var(--accent-red)"
+          alert
+          href="/inventory?filter=below_par"
+          breakdown={kpis.belowPar > 0 ? 'Tap to view inventory' : undefined}
+        />
+      </div>
+
+      {/* Accordion list */}
+      <div className="space-y-2">
+        {days.map((day) => {
+          const dayTurnovers = byDay[day] ?? []
+          const isToday      = day === todayDate
+          const hasUrgent    = dayTurnovers.some(t =>
+            t.priority === 'urgent' || t.status === 'pending_assignment'
+          )
+          return (
+            <DayAccordion
+              key={day}
+              label={getDayLabel(day, todayDate)}
+              isToday={isToday}
+              turnovers={dayTurnovers}
+              propertyMap={propertyMap}
+              defaultOpen={isToday || hasUrgent}
+            />
+          )
+        })}
       </div>
 
       {/* Bottom panels: Work orders + Low stock */}

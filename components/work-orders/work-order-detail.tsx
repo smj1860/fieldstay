@@ -122,6 +122,7 @@ function fmtDate(iso: string | null) {
 export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
   const [isPending, startTransition] = useTransition()
   const [actionError, setActionError] = useState<string | null>(null)
+  const [nteOverrideConfirmed, setNteOverrideConfirmed] = useState(false)
 
   const canEdit  = userRole === 'admin' || userRole === 'manager'
   const priority = PRIORITY_STYLES[wo.priority]
@@ -130,6 +131,10 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
   const lineItems      = wo.work_order_line_items ?? []
   const hasAccess      = !!(wo.properties.access_instructions || wo.access_notes)
   const lineItemsTotal = lineItems.reduce((s, i) => s + i.line_total, 0)
+
+  const nteSet      = wo.nte_amount != null && wo.nte_amount > 0
+  const nteExceeded = nteSet && lineItemsTotal > wo.nte_amount!
+  const nteOverage  = nteExceeded ? lineItemsTotal - wo.nte_amount! : 0
 
   // ── Action handlers ──────────────────────────────────────────
 
@@ -398,6 +403,37 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
             items={lineItems}
             canEdit={canEdit && wo.status !== 'completed' && wo.status !== 'cancelled'}
           />
+
+          {nteSet && (
+            <div
+              className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm mt-2',
+                nteExceeded ? 'border border-red-200' : 'border border-green-200'
+              )}
+              style={{
+                background: nteExceeded ? 'rgba(220,38,38,0.07)' : 'rgba(16,185,129,0.07)',
+              }}
+            >
+              {nteExceeded ? (
+                <>
+                  <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                  <span className="font-medium text-red-700">
+                    Exceeds NTE by{' '}
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(nteOverage)}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                  <span className="text-green-700">
+                    Within NTE (
+                    {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(wo.nte_amount! - lineItemsTotal)}{' '}
+                    remaining)
+                  </span>
+                </>
+              )}
+            </div>
+          )}
         </Section>
 
         {/* ── Completion & Sign-Off ─────────────────────────────── */}
@@ -417,11 +453,33 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
               actionLabel="Mark Acknowledged"
             />
 
+            {/* NTE override checkbox */}
+            {nteExceeded && canEdit && !wo.completion_verified_at && (
+              <label
+                className="flex items-start gap-2 text-sm cursor-pointer p-3 rounded-lg"
+                style={{
+                  background: 'rgba(220,38,38,0.07)',
+                  border:     '1px solid rgba(220,38,38,0.25)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={nteOverrideConfirmed}
+                  onChange={e => setNteOverrideConfirmed(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded text-red-600 focus:ring-red-500"
+                />
+                <span style={{ color: '#991b1b', fontWeight: 500 }}>
+                  I authorize this work order to exceed the NTE amount and confirm the additional cost of{' '}
+                  {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(nteOverage)}.
+                </span>
+              </label>
+            )}
+
             {/* PM verified */}
             <SignOffRow
               label="Work Verified Complete"
               timestamp={wo.completion_verified_at}
-              canAction={canEdit && !wo.completion_verified_at && !!wo.vendor_acknowledged_at}
+              canAction={canEdit && !wo.completion_verified_at && !!wo.vendor_acknowledged_at && (!nteExceeded || nteOverrideConfirmed)}
               isPending={isPending}
               onAction={handleVerify}
               actionLabel="Mark Verified"
