@@ -160,7 +160,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
       <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
         {!onboardingComplete && (!collapsed || mobile) && (
           <Link
-            href="/onboarding"
+            href="/setup"
             onClick={() => setMobileOpen(false)}
             className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all mb-2"
             style={{

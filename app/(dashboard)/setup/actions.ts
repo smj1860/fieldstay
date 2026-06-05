@@ -24,7 +24,7 @@ export async function markStepComplete(
     .update({ onboarding_steps_completed: completed })
     .eq('id', membership.org_id)
 
-  revalidatePath('/onboarding')
+  revalidatePath('/setup')
 
   if (nextHref) {
     redirect(nextHref)
@@ -32,7 +32,7 @@ export async function markStepComplete(
     // Find next incomplete step
     const next = ONBOARDING_STEPS.find((s) => !completed[s.key])
     if (next) {
-      redirect(`/onboarding/${next.href}`)
+      redirect(`/setup/${next.href}`)
     } else {
       redirect('/ops')
     }

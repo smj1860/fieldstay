@@ -40,7 +40,7 @@ export async function saveMasterMaintenanceSchedules(
 
   if (error) return { error: error.message, saved: 0 }
 
-  revalidatePath('/onboarding')
+  revalidatePath('/setup')
   revalidatePath('/maintenance')
   return { saved: items.length }
 }

@@ -14,7 +14,7 @@ export default async function OnboardingChecklistTemplatePage() {
 
   async function continueAction() {
     'use server'
-    await markStepComplete('checklist_template', '/onboarding/maintenance-template')
+    await markStepComplete('checklist_template', '/setup/maintenance-template')
   }
 
   return (

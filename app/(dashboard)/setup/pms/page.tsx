@@ -24,7 +24,7 @@ export default async function OnboardingPmsPage() {
 
   async function continueAction() {
     'use server'
-    await markStepComplete('pms', '/onboarding/crew')
+    await markStepComplete('pms', '/setup/crew')
   }
 
   return (
