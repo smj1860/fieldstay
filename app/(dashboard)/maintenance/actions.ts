@@ -32,6 +32,9 @@ export async function createWorkOrder(
   const estimated_cost         = formData.get('estimated_cost')
     ? parseFloat(formData.get('estimated_cost') as string)
     : null
+  const nte_amount             = formData.get('nte_amount')
+    ? parseFloat(formData.get('nte_amount') as string)
+    : null
   const portal_enabled   = formData.get('portal_enabled') === 'on' || formData.get('portal_enabled') === 'true'
   // Quote-request mode: create WO as quote_requested and send RFQs to selected vendors
   const request_quotes   = formData.get('request_quotes') === 'true'
@@ -74,6 +77,7 @@ export async function createWorkOrder(
       source:                  'manual',
       scheduled_date:          scheduled_date || null,
       estimated_cost,
+      nte_amount,
       portal_enabled:          usePortal,
       completion_token,
       completion_token_expires_at,
