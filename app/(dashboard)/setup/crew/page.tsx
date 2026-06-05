@@ -14,7 +14,7 @@ export default async function OnboardingCrewPage() {
 
   async function continueAction() {
     'use server'
-    await markStepComplete('crew', '/onboarding/vendors')
+    await markStepComplete('crew', '/setup/vendors')
   }
 
   return (

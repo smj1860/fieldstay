@@ -31,7 +31,7 @@ export default async function OnboardingInventoryTemplatePage() {
 
   async function continueAction() {
     'use server'
-    await markStepComplete('inventory_template', '/onboarding/checklist-template')
+    await markStepComplete('inventory_template', '/setup/checklist-template')
   }
 
   return (

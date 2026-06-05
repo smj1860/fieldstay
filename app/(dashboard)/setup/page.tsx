@@ -14,5 +14,5 @@ export default async function OnboardingIndexPage() {
   const completed = (org?.onboarding_steps_completed ?? {}) as Record<string, boolean>
   const href      = firstIncompleteOnboardingStep(completed)
 
-  redirect(`/onboarding/${href}`)
+  redirect(`/setup/${href}`)
 }

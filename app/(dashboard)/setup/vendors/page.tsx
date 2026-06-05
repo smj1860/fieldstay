@@ -15,7 +15,7 @@ export default async function OnboardingVendorsPage() {
 
   async function continueAction() {
     'use server'
-    await markStepComplete('vendors', '/onboarding/inventory-template')
+    await markStepComplete('vendors', '/setup/inventory-template')
   }
 
   return (

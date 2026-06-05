@@ -37,7 +37,7 @@ export async function saveMasterChecklistItems(
 
   if (error) return { error: error.message, saved: 0 }
 
-  revalidatePath('/onboarding')
+  revalidatePath('/setup')
   revalidatePath('/inventory')
   return { saved: items.length }
 }
