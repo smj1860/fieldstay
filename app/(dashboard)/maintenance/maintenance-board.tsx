@@ -219,10 +219,13 @@ function WorkOrderCard({
                 {formatDate(wo.scheduled_date)}
               </span>
             )}
-            {wo.estimated_cost != null && (
+            {(wo.nte_amount != null || wo.estimated_cost != null) && (
               <span className="flex items-center gap-1">
                 <DollarSign className="w-3 h-3" />
-                {wo.estimated_cost.toFixed(0)}
+                {(wo.nte_amount ?? wo.estimated_cost ?? 0).toFixed(0)}
+                {wo.nte_amount != null && (
+                  <span className="text-xs opacity-60">NTE</span>
+                )}
               </span>
             )}
           </div>
@@ -373,14 +376,19 @@ function CreateWorkOrderModal({
           {/* Scheduled date + cost */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label htmlFor="wo-date" className="label">Scheduled Date</label>
+              <label htmlFor="wo-date" className="label">Completed By Date</label>
               <input id="wo-date" name="scheduled_date" type="date" className="input" />
             </div>
             <div>
-              <label htmlFor="wo-cost" className="label">Est. Cost ($)</label>
+              <label htmlFor="wo-nte" className="label">
+                Not to Exceed — NTE ($)
+                <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                  optional ceiling
+                </span>
+              </label>
               <input
-                id="wo-cost"
-                name="estimated_cost"
+                id="wo-nte"
+                name="nte_amount"
                 type="number"
                 min="0"
                 step="0.01"
