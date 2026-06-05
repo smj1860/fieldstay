@@ -23,6 +23,7 @@
     "ical.js": "^2.0.1",
     "inngest": "^3.22.0",
     "lucide-react": "^0.454.0",
+    "mammoth": "^1.12.0",
     "next": "^16.2.6",
     "react": "19.0.0",
     "react-dom": "19.0.0",

@@ -182,7 +182,6 @@ export function MasterChecklistBuilder({
 
     if (file.name.endsWith('.docx')) {
       try {
-        // @ts-expect-error mammoth loaded via CDN / dynamic
         const mammoth = await import('mammoth')
         const buf = await file.arrayBuffer()
         const result = await mammoth.extractRawText({ arrayBuffer: buf })
