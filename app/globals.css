@@ -38,33 +38,40 @@
 
 /* ── Light theme override ─────────────────────────────────────── */
 :root.light {
-  --bg-base:        #eef2f7;
-  --bg-canvas:      #F8F9FA;
-  --bg-card:        #ffffff;
-  --bg-raised:      #f0f4f8;
-  --bg-hover:       #e8eef5;
+  /* Brand navy backgrounds */
+  --bg-base:        #0a1628;
+  --bg-canvas:      #102246;
+  --bg-card:        #162d5c;
+  --bg-raised:      #1e3872;
+  --bg-hover:       #243f88;
 
-  --border:         rgba(0, 0, 0, 0.08);
-  --border-strong:  rgba(0, 0, 0, 0.15);
+  --border:         rgba(255, 255, 255, 0.10);
+  --border-strong:  rgba(255, 255, 255, 0.20);
 
-  --text-primary:   #0a1628;
-  --text-secondary: #3d5a80;
-  --text-muted:     #8299b0;
-  --text-inverse:   #ffffff;
+  /* White text on navy */
+  --text-primary:   #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.75);
+  --text-muted:     rgba(255, 255, 255, 0.45);
+  --text-inverse:   #0a1628;
 
-  --accent-gold:       #e8a325;
-  --accent-gold-dim:   rgba(232, 163, 37, 0.12);
-  --accent-green:      #16a34a;
-  --accent-green-dim:  rgba(22, 163, 74, 0.10);
-  --accent-red:        #dc2626;
-  --accent-red-dim:    rgba(220, 38, 38, 0.10);
-  --accent-amber:      #d97706;
-  --accent-amber-dim:  rgba(217, 119, 6, 0.10);
-  --accent-blue:       #2563eb;
-  --accent-blue-dim:   rgba(37, 99, 235, 0.10);
+  /* Brand gold accents */
+  --accent-gold:       #FCD116;
+  --accent-gold-dim:   rgba(252, 209, 22, 0.18);
+  --accent-green:      #22c55e;
+  --accent-green-dim:  rgba(34, 197, 94, 0.15);
+  --accent-red:        #f87171;
+  --accent-red-dim:    rgba(248, 113, 113, 0.15);
+  --accent-amber:      #fbbf24;
+  --accent-amber-dim:  rgba(251, 191, 36, 0.15);
+  --accent-blue:       #60a5fa;
+  --accent-blue-dim:   rgba(96, 165, 250, 0.15);
 
-  --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
-  --shadow-lg:   0 8px 24px rgba(0,0,0,0.12);
+  /* Sidebar uses brand gold */
+  --bg-sidebar:     #FCD116;
+  --sidebar-text:   #0a1628;
+
+  --shadow-card: 0 2px 8px rgba(0,0,0,0.30);
+  --shadow-lg:   0 8px 32px rgba(0,0,0,0.40);
 }
 
 /* ── Base ─────────────────────────────────────────────────────── */
@@ -206,6 +213,18 @@
     border:     1px solid var(--border-strong);
   }
   .btn-primary:hover { background: #1a3464; }
+
+  :root.light .page-title {
+    color: var(--accent-gold);
+  }
+  :root.light .btn-primary {
+    background: rgba(255,255,255,0.12);
+    color:      var(--accent-gold);
+    border:     1px solid rgba(255,255,255,0.25);
+  }
+  :root.light .btn-primary:hover {
+    background: rgba(255,255,255,0.20);
+  }
 
   .btn-cta {
     @apply btn;

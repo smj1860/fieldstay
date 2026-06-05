@@ -112,7 +112,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
         mobile ? 'w-[min(256px,85vw)]' : collapsed ? 'w-[68px]' : 'w-60'
       )}
       style={{
-        background:  'var(--bg-base)',
+        background:  theme === 'light' ? 'var(--bg-sidebar, #FCD116)' : 'var(--bg-base)',
         borderRight: '1px solid var(--border)',
       }}
     >
@@ -124,14 +124,17 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
         <div
           className="w-8 h-8 rounded-lg flex-shrink-0 flex items-center
                      justify-center font-black text-sm"
-          style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+          style={{
+            background: theme === 'light' ? '#0a1628' : 'var(--accent-gold)',
+            color:      theme === 'light' ? '#FCD116'  : 'var(--text-inverse)',
+          }}
         >
           FS
         </div>
         {(!collapsed || mobile) && (
           <div className="min-w-0 flex-1">
             <span className="font-display font-bold text-base leading-none"
-                  style={{ color: 'var(--text-primary)' }}>
+                  style={{ color: theme === 'light' ? '#0a1628' : 'var(--text-primary)' }}>
               FieldStay
             </span>
             <p className="text-xs truncate mt-0.5"
@@ -169,17 +172,21 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
                 'font-medium transition-all relative'
               )}
               style={{
-                background: active ? 'var(--bg-raised)' : 'transparent',
-                color:      active ? 'var(--text-primary)' : 'var(--text-muted)',
+                background: active
+                  ? (theme === 'light' ? 'rgba(10,22,40,0.12)' : 'var(--bg-raised)')
+                  : 'transparent',
+                color: theme === 'light'
+                  ? (active ? '#0a1628' : 'rgba(10,22,40,0.65)')
+                  : (active ? 'var(--text-primary)' : 'var(--text-muted)'),
                 borderLeft: active
-                  ? '2px solid var(--accent-gold)'
+                  ? `2px solid ${theme === 'light' ? '#0a1628' : 'var(--accent-gold)'}`
                   : '2px solid transparent',
               }}
               onMouseOver={(e) => {
-                if (!active) e.currentTarget.style.color = 'var(--text-primary)'
+                if (!active) e.currentTarget.style.color = theme === 'light' ? '#0a1628' : 'var(--text-primary)'
               }}
               onMouseOut={(e) => {
-                if (!active) e.currentTarget.style.color = 'var(--text-muted)'
+                if (!active) e.currentTarget.style.color = theme === 'light' ? 'rgba(10,22,40,0.65)' : 'var(--text-muted)'
               }}
             >
               <Icon className="w-4 h-4 flex-shrink-0" />
@@ -251,7 +258,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
         <header
           className="h-[60px] relative flex items-center justify-between px-5 flex-shrink-0"
           style={{
-            background:   'var(--bg-base)',
+            background:   'var(--bg-card)',
             borderBottom: '1px solid var(--border)',
           }}
         >

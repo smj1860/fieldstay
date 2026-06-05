@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { Plus, X, Loader2, Check } from 'lucide-react'
+import { useState, useTransition, useRef } from 'react'
+import { Plus, X, Loader2, Check, Upload } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import {
   createOrGetTemplate,
@@ -31,33 +31,73 @@ interface Property {
   name: string
 }
 
+interface CatalogItem {
+  id:           string
+  name:         string
+  category:     string
+  default_unit: string
+}
+
 const CATEGORY_ORDER: InventoryCategory[] = [
   'paper_goods', 'cleaning', 'kitchen', 'bath', 'laundry', 'bedroom', 'outdoor', 'other',
 ]
+
+function parseSimpleCsv(text: string) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  if (lines.length < 2) return []
+  const headers = lines[0].toLowerCase().split(',').map(h => h.trim())
+  const nameIdx = headers.findIndex(h => h.includes('name'))
+  const catIdx  = headers.findIndex(h => h.includes('cat'))
+  const unitIdx = headers.findIndex(h => h.includes('unit'))
+  const parIdx  = headers.findIndex(h => h.includes('par') || h.includes('level'))
+  return lines.slice(1).map(line => {
+    const cols = line.split(',').map(c => c.trim().replace(/^"|"$/g, ''))
+    return {
+      name:      nameIdx >= 0 ? cols[nameIdx] ?? '' : '',
+      category:  catIdx  >= 0 ? cols[catIdx]  ?? 'other' : 'other',
+      unit:      unitIdx >= 0 ? cols[unitIdx]  ?? 'units' : 'units',
+      par_level: parIdx  >= 0 ? parseFloat(cols[parIdx] ?? '1') || 1 : 1,
+    }
+  }).filter(r => r.name)
+}
 
 export function TemplateManager({
   template,
   properties,
   orgId,
+  catalogItems = [],
 }: {
-  template: Template | null
-  properties: Property[]
-  orgId: string
+  template:     Template | null
+  properties:   Property[]
+  orgId:        string
+  catalogItems: CatalogItem[]
 }) {
   const [currentTemplate, setCurrentTemplate] = useState<Template | null>(template)
   const [creating, setCreating]               = useState(false)
   const [applyModal, setApplyModal]           = useState(false)
   const [selectedProps, setSelectedProps]     = useState<Set<string>>(new Set())
-  const [applyResult, setApplyResult]         = useState<{ added: number; skipped: number } | null>(null)
   const [isPending, startTransition]          = useTransition()
   const [error, setError]                     = useState<string | null>(null)
   const [success, setSuccess]                 = useState<string | null>(null)
 
-  // Add item form
+  // Add item tabs
+  const [addTab, setAddTab] = useState<'catalog' | 'custom' | 'csv'>('catalog')
+
+  // Catalog tab state
+  const [catalogFilter, setCatalogFilter]     = useState<InventoryCategory | 'all'>('all')
+  const [catalogSelected, setCatalogSelected] = useState<Set<string>>(new Set())
+
+  // Custom tab state
   const [newName,     setNewName]     = useState('')
   const [newCategory, setNewCategory] = useState<InventoryCategory>('other')
   const [newUnit,     setNewUnit]     = useState('')
   const [newPar,      setNewPar]      = useState('1')
+
+  // CSV tab state
+  const csvInputRef = useRef<HTMLInputElement | null>(null)
+  const [csvPreview, setCsvPreview] = useState<
+    { name: string; category: string; unit: string; par_level: number }[]
+  >([])
 
   const handleCreateTemplate = () => {
     setCreating(true)
@@ -104,10 +144,72 @@ export function TemplateManager({
     })
   }
 
+  const handleAddCatalogItems = () => {
+    if (!currentTemplate) return
+    setError(null)
+    const itemsToAdd = catalogItems.filter(c => catalogSelected.has(c.id))
+    startTransition(async () => {
+      const newItems: TemplateItem[] = []
+      for (const c of itemsToAdd) {
+        const result = await addTemplateItem(currentTemplate.id, {
+          name:      c.name,
+          category:  c.category,
+          unit:      c.default_unit,
+          par_level: 1,
+        })
+        if (result.item) newItems.push(result.item as TemplateItem)
+      }
+      setCurrentTemplate(prev => prev ? {
+        ...prev,
+        inventory_template_items: [
+          ...(prev.inventory_template_items ?? []),
+          ...newItems,
+        ],
+      } : prev)
+      setCatalogSelected(new Set())
+    })
+  }
+
+  const handleCsvSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      setCsvPreview(parseSimpleCsv(text))
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
+  const handleImportCsv = () => {
+    if (!currentTemplate || !csvPreview.length) return
+    startTransition(async () => {
+      const newItems: TemplateItem[] = []
+      for (const row of csvPreview) {
+        const result = await addTemplateItem(currentTemplate.id, {
+          name:      row.name,
+          category:  row.category,
+          unit:      row.unit,
+          par_level: row.par_level,
+        })
+        if (result.item) newItems.push(result.item as TemplateItem)
+      }
+      setCurrentTemplate(prev => prev ? {
+        ...prev,
+        inventory_template_items: [
+          ...(prev.inventory_template_items ?? []),
+          ...newItems,
+        ],
+      } : prev)
+      setCsvPreview([])
+      setAddTab('catalog')
+    })
+  }
+
   const handleApply = () => {
     if (!currentTemplate || selectedProps.size === 0) return
     setError(null)
-    setApplyResult(null)
     startTransition(async () => {
       let totalAdded = 0, totalSkipped = 0
       for (const propId of selectedProps) {
@@ -117,9 +219,9 @@ export function TemplateManager({
           totalSkipped += result.skipped
         }
       }
-      setApplyResult({ added: totalAdded, skipped: totalSkipped })
+      const count = selectedProps.size
       setSelectedProps(new Set())
-      setSuccess(`Applied to ${selectedProps.size} propert${selectedProps.size !== 1 ? 'ies' : 'y'}. ${totalAdded} items added, ${totalSkipped} skipped.`)
+      setSuccess(`Applied to ${count} propert${count !== 1 ? 'ies' : 'y'}. ${totalAdded} items added, ${totalSkipped} skipped.`)
       setTimeout(() => setSuccess(null), 5000)
       setApplyModal(false)
     })
@@ -208,57 +310,228 @@ export function TemplateManager({
         </div>
       )}
 
-      {/* Add item form */}
+      {/* Add item — tabbed */}
       <div className="card p-4 space-y-3">
-        <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide">Add Item</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="label">Name *</label>
-            <input
-              type="text"
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              className="input"
-              placeholder="e.g. Paper Towels"
-            />
-          </div>
-          <div>
-            <label className="label">Unit *</label>
-            <input
-              type="text"
-              value={newUnit}
-              onChange={e => setNewUnit(e.target.value)}
-              className="input"
-              placeholder="rolls, boxes…"
-            />
-          </div>
-          <div>
-            <label className="label">Category</label>
-            <select value={newCategory} onChange={e => setNewCategory(e.target.value as InventoryCategory)} className="input">
-              {CATEGORY_ORDER.map(c => (
-                <option key={c} value={c}>{INVENTORY_CATEGORY_LABELS[c]}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label">Par Level</label>
-            <input
-              type="number" min={0} step={0.5}
-              value={newPar}
-              onChange={e => setNewPar(e.target.value)}
-              className="input"
-            />
-          </div>
+        {/* Tab bar */}
+        <div className="flex gap-1 rounded-lg p-1 w-fit" style={{ background: 'var(--bg-raised)' }}>
+          {(['catalog', 'custom', 'csv'] as const).map(tab => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setAddTab(tab)}
+              className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors capitalize"
+              style={addTab === tab
+                ? { background: 'var(--bg-card)', color: 'var(--text-primary)' }
+                : { color: 'var(--text-muted)' }}
+            >
+              {tab === 'catalog' ? 'From Catalog' : tab === 'csv' ? 'Upload CSV' : 'Custom'}
+            </button>
+          ))}
         </div>
-        {error && <p className="text-xs text-red-500">{error}</p>}
-        <button
-          onClick={handleAddItem}
-          disabled={isPending || !newName.trim() || !newUnit.trim()}
-          className="btn-primary text-sm"
-        >
-          {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-          Add to Template
-        </button>
+
+        {/* From Catalog tab */}
+        {addTab === 'catalog' && (
+          <div className="space-y-3">
+            <div className="flex gap-1.5 flex-wrap">
+              {(['all', ...CATEGORY_ORDER] as const).map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setCatalogFilter(c)}
+                  className={cn(
+                    'px-2.5 py-1 text-xs rounded-full border transition-colors',
+                    catalogFilter === c
+                      ? 'bg-brand-800 text-white border-brand-800'
+                      : 'border-themed text-secondary-themed hover:text-primary-themed'
+                  )}
+                >
+                  {c === 'all' ? 'All' : INVENTORY_CATEGORY_LABELS[c]}
+                </button>
+              ))}
+            </div>
+
+            {catalogItems.length === 0 ? (
+              <p className="text-xs text-muted-themed py-4 text-center">
+                No catalog items found. Add items to a property first, or use the Custom tab.
+              </p>
+            ) : (
+              <div className="border border-themed rounded-xl overflow-hidden max-h-52 overflow-y-auto">
+                {catalogItems
+                  .filter(c => catalogFilter === 'all' || c.category === catalogFilter)
+                  .map(c => {
+                    const alreadyInTemplate = templateItems.some(t => t.name.toLowerCase() === c.name.toLowerCase())
+                    const isSelected        = catalogSelected.has(c.id)
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        disabled={alreadyInTemplate}
+                        onClick={() => {
+                          setCatalogSelected(prev => {
+                            const next = new Set(prev)
+                            next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                            return next
+                          })
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm border-b border-themed last:border-0 transition-colors',
+                          alreadyInTemplate ? 'opacity-40 cursor-not-allowed' : isSelected ? 'bg-brand-50' : 'hover:bg-canvas-themed'
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          readOnly
+                          disabled={alreadyInTemplate}
+                          className="w-4 h-4 rounded"
+                        />
+                        <span className="flex-1 font-medium text-primary-themed">{c.name}</span>
+                        <span className="text-xs text-muted-themed capitalize">
+                          {c.category.replace('_', ' ')} · {c.default_unit}
+                        </span>
+                        {alreadyInTemplate && (
+                          <span className="text-xs text-muted-themed italic">in template</span>
+                        )}
+                      </button>
+                    )
+                  })}
+              </div>
+            )}
+
+            {catalogSelected.size > 0 && (
+              <button
+                onClick={handleAddCatalogItems}
+                disabled={isPending}
+                className="btn-primary text-sm w-full"
+              >
+                {isPending
+                  ? 'Adding…'
+                  : `Add ${catalogSelected.size} item${catalogSelected.size !== 1 ? 's' : ''} to Template`}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Custom tab */}
+        {addTab === 'custom' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="label">Name *</label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  className="input"
+                  placeholder="e.g. Paper Towels"
+                />
+              </div>
+              <div>
+                <label className="label">Unit *</label>
+                <input
+                  type="text"
+                  value={newUnit}
+                  onChange={e => setNewUnit(e.target.value)}
+                  className="input"
+                  placeholder="rolls, boxes…"
+                />
+              </div>
+              <div>
+                <label className="label">Category</label>
+                <select value={newCategory} onChange={e => setNewCategory(e.target.value as InventoryCategory)} className="input">
+                  {CATEGORY_ORDER.map(c => (
+                    <option key={c} value={c}>{INVENTORY_CATEGORY_LABELS[c]}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Par Level</label>
+                <input
+                  type="number" min={0} step={0.5}
+                  value={newPar}
+                  onChange={e => setNewPar(e.target.value)}
+                  className="input"
+                />
+              </div>
+            </div>
+            {error && <p className="text-xs text-red-500">{error}</p>}
+            <button
+              onClick={handleAddItem}
+              disabled={isPending || !newName.trim() || !newUnit.trim()}
+              className="btn-primary text-sm"
+            >
+              {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              Add to Template
+            </button>
+          </div>
+        )}
+
+        {/* CSV Upload tab */}
+        {addTab === 'csv' && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-themed">
+              Upload a CSV with columns: <code className="font-mono">Name, Category, Unit, Par Level</code>.
+              Category must be one of: {CATEGORY_ORDER.join(', ')}.
+            </p>
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls"
+              ref={csvInputRef}
+              className="hidden"
+              onChange={handleCsvSelect}
+            />
+            {csvPreview.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => csvInputRef.current?.click()}
+                className="w-full border-2 border-dashed border-themed rounded-xl py-6 text-sm text-muted-themed hover:border-brand-400 transition-colors flex flex-col items-center gap-2"
+              >
+                <Upload className="w-5 h-5" />
+                Click to upload CSV or spreadsheet
+              </button>
+            ) : (
+              <>
+                <div className="border border-themed rounded-xl overflow-hidden max-h-40 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr style={{ background: 'var(--bg-canvas)' }}>
+                        <th className="text-left px-3 py-2 text-muted-themed">Name</th>
+                        <th className="text-left px-3 py-2 text-muted-themed">Category</th>
+                        <th className="text-left px-3 py-2 text-muted-themed">Unit</th>
+                        <th className="text-right px-3 py-2 text-muted-themed">Par</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvPreview.map((row, i) => (
+                        <tr key={i} className="border-t border-themed">
+                          <td className="px-3 py-1.5 text-primary-themed">{row.name}</td>
+                          <td className="px-3 py-1.5 text-secondary-themed">{row.category}</td>
+                          <td className="px-3 py-1.5 text-secondary-themed">{row.unit}</td>
+                          <td className="px-3 py-1.5 text-right text-secondary-themed">{row.par_level}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleImportCsv}
+                    disabled={isPending}
+                    className="btn-primary flex-1 text-sm"
+                  >
+                    {isPending ? 'Importing…' : `Import ${csvPreview.length} items`}
+                  </button>
+                  <button
+                    onClick={() => setCsvPreview([])}
+                    className="btn-ghost text-sm"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Apply to property modal */}

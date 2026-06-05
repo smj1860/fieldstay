@@ -31,11 +31,19 @@ export function MaintenanceCalendar({
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
+  const [calView, setCalView] = useState<'month' | 'week'>('month')
+  const [month, setMonth]     = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
+  const [weekStart, setWeekStart] = useState(() => {
+    const d = new Date(today)
+    d.setDate(d.getDate() - d.getDay())
+    return d
+  })
 
+  const isoOf = (d: Date) => d.toISOString().split('T')[0]!
+
+  // Month grid data
   const firstDay    = month.getDay()
   const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate()
-
   const cells: (Date | null)[] = [
     ...Array(firstDay).fill(null),
     ...Array.from({ length: daysInMonth }, (_, i) =>
@@ -44,139 +52,260 @@ export function MaintenanceCalendar({
   ]
   while (cells.length % 7 !== 0) cells.push(null)
 
-  const isoOf = (d: Date) => d.toISOString().split('T')[0]!
-
   return (
     <div className="mb-8">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-4">
-        <button
-          onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-          className="btn-ghost p-1.5"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-        <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-          {month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-        </h3>
-        <button
-          onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-          className="btn-ghost p-1.5"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => setMonth(new Date(today.getFullYear(), today.getMonth(), 1))}
-          className="btn-secondary text-xs py-1"
-        >
-          Today
-        </button>
-      </div>
-
-      {/* Day headers */}
-      <div className="grid grid-cols-7 mb-1">
-        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-          <div key={d} className="text-center text-xs font-semibold py-1"
-               style={{ color: 'var(--text-muted)' }}>
-            {d}
-          </div>
-        ))}
-      </div>
-
-      {/* Cells */}
-      <div className="grid grid-cols-7 gap-px rounded-xl overflow-hidden"
-           style={{ background: 'var(--border)' }}>
-        {cells.map((day, idx) => {
-          if (!day) {
-            return (
-              <div key={idx} style={{ background: 'var(--bg-canvas)', minHeight: 80 }} />
-            )
-          }
-
-          const iso       = isoOf(day)
-          const isToday   = day.toDateString() === today.toDateString()
-          const isPast    = day < today
-          const dayWOs    = workOrders.filter(wo => wo.scheduled_date === iso)
-          const dayScheds = schedules.filter(s  => s.next_due_date  === iso)
-          const total     = dayWOs.length + dayScheds.length
-
-          return (
-            <div
-              key={iso}
-              className="p-1.5"
-              style={{
-                background:   isToday ? 'var(--bg-raised)' : 'var(--bg-card)',
-                minHeight:    80,
-                outline:      isToday ? '2px solid var(--accent-gold)' : undefined,
-                outlineOffset: -2,
-              }}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        {calView === 'month' ? (
+          <>
+            <button
+              onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+              className="btn-ghost p-1.5"
             >
-              <div className="text-xs font-semibold mb-1">
-                <span style={{
-                  color: isToday ? 'var(--accent-gold)'
-                       : isPast  ? 'var(--text-muted)'
-                                 : 'var(--text-primary)',
-                }}>
-                  {day.getDate()}
-                </span>
-              </div>
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              {month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            </h3>
+            <button
+              onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+              className="btn-ghost p-1.5"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setMonth(new Date(today.getFullYear(), today.getMonth(), 1))}
+              className="btn-secondary text-xs py-1"
+            >
+              Today
+            </button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => setWeekStart(d => {
+              const n = new Date(d); n.setDate(n.getDate() - 7); return n
+            })} className="btn-ghost p-1.5">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              {weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              {' – '}
+              {new Date(weekStart.getTime() + 6 * 86_400_000)
+                .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </span>
+            <button onClick={() => setWeekStart(d => {
+              const n = new Date(d); n.setDate(n.getDate() + 7); return n
+            })} className="btn-ghost p-1.5">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => {
+                const d = new Date(today)
+                d.setDate(d.getDate() - d.getDay())
+                setWeekStart(d)
+              }}
+              className="btn-secondary text-xs py-1"
+            >
+              This Week
+            </button>
+          </>
+        )}
 
-              {dayWOs.slice(0, 3).map(wo => {
-                const isOverdue = isPast && wo.status !== 'completed'
-                const isUrgent  = wo.priority === 'urgent' || wo.priority === 'high'
-                return (
-                  <div
-                    key={wo.id}
-                    className="text-xs px-1 py-0.5 rounded mb-0.5 truncate"
-                    style={{
-                      background: isOverdue ? 'var(--accent-red-dim)'
-                                : isUrgent  ? 'var(--accent-amber-dim)'
-                                            : 'var(--accent-blue-dim)',
-                      color:      isOverdue ? 'var(--accent-red)'
-                                : isUrgent  ? 'var(--accent-amber)'
-                                            : 'var(--accent-blue)',
-                      border:     isOverdue ? '1px solid var(--accent-red)' : undefined,
-                      fontSize:   10,
-                    }}
-                    title={wo.title}
-                  >
-                    {wo.title}
-                  </div>
-                )
-              })}
-
-              {dayScheds.slice(0, 2).map(s => (
-                <div
-                  key={s.id}
-                  className="text-xs px-1 py-0.5 rounded mb-0.5 truncate"
-                  style={{
-                    background: 'var(--accent-gold-dim)',
-                    color:      'var(--accent-gold)',
-                    fontSize:   10,
-                  }}
-                  title={s.name}
-                >
-                  📋 {s.name}
-                </div>
-              ))}
-
-              {total > 3 && (
-                <div className="text-xs" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
-                  +{total - 3} more
-                </div>
+        {/* View toggle — pinned to the right */}
+        <div className="flex items-center gap-1 border border-themed rounded-lg px-1 py-1 ml-auto"
+             style={{ background: 'var(--bg-card)' }}>
+          {(['month', 'week'] as const).map(v => (
+            <button
+              key={v}
+              onClick={() => setCalView(v)}
+              className={cn(
+                'px-3 py-1 text-xs font-medium rounded-md transition-colors capitalize',
+                calView === v ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
               )}
-            </div>
-          )
-        })}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* ── Month view ── */}
+      {calView === 'month' && (
+        <>
+          <div className="grid grid-cols-7 mb-1">
+            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+              <div key={d} className="text-center text-xs font-semibold py-1"
+                   style={{ color: 'var(--text-muted)' }}>
+                {d}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-px rounded-xl overflow-hidden"
+               style={{ background: 'var(--border)' }}>
+            {cells.map((day, idx) => {
+              if (!day) {
+                return (
+                  <div key={idx} style={{ background: 'var(--bg-canvas)', minHeight: 80 }} />
+                )
+              }
+
+              const iso       = isoOf(day)
+              const isToday   = day.toDateString() === today.toDateString()
+              const isPast    = day < today
+              const dayWOs    = workOrders.filter(wo => wo.scheduled_date === iso)
+              const dayScheds = schedules.filter(s  => s.next_due_date  === iso)
+              const total     = dayWOs.length + dayScheds.length
+
+              return (
+                <div
+                  key={iso}
+                  className="p-1.5"
+                  style={{
+                    background:   isToday ? 'var(--bg-raised)' : 'var(--bg-card)',
+                    minHeight:    80,
+                    outline:      isToday ? '2px solid var(--accent-gold)' : undefined,
+                    outlineOffset: -2,
+                  }}
+                >
+                  <div className="text-xs font-semibold mb-1">
+                    <span style={{
+                      color: isToday ? 'var(--accent-gold)'
+                           : isPast  ? 'var(--text-muted)'
+                                     : 'var(--text-primary)',
+                    }}>
+                      {day.getDate()}
+                    </span>
+                  </div>
+
+                  {dayWOs.slice(0, 3).map(wo => {
+                    const isOverdue = isPast && wo.status !== 'completed'
+                    const isUrgent  = wo.priority === 'urgent' || wo.priority === 'high'
+                    return (
+                      <div
+                        key={wo.id}
+                        className="text-xs px-1 py-0.5 rounded mb-0.5 truncate"
+                        style={{
+                          background: isOverdue ? 'var(--accent-red-dim)'
+                                    : isUrgent  ? 'var(--accent-amber-dim)'
+                                                : 'var(--accent-blue-dim)',
+                          color:      isOverdue ? 'var(--accent-red)'
+                                    : isUrgent  ? 'var(--accent-amber)'
+                                                : 'var(--accent-blue)',
+                          border:     isOverdue ? '1px solid var(--accent-red)' : undefined,
+                          fontSize:   10,
+                        }}
+                        title={wo.title}
+                      >
+                        {wo.title}
+                      </div>
+                    )
+                  })}
+
+                  {dayScheds.slice(0, 2).map(s => (
+                    <div
+                      key={s.id}
+                      className="text-xs px-1 py-0.5 rounded mb-0.5 truncate"
+                      style={{
+                        background: 'var(--accent-gold-dim)',
+                        color:      'var(--accent-gold)',
+                        fontSize:   10,
+                      }}
+                      title={s.name}
+                    >
+                      📋 {s.name}
+                    </div>
+                  ))}
+
+                  {total > 3 && (
+                    <div className="text-xs" style={{ color: 'var(--text-muted)', fontSize: 10 }}>
+                      +{total - 3} more
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {/* ── Week view ── */}
+      {calView === 'week' && (
+        <>
+          <div className="grid grid-cols-7 gap-px" style={{ background: 'var(--border)' }}>
+            {Array.from({ length: 7 }, (_, i) => {
+              const day       = new Date(weekStart.getTime() + i * 86_400_000)
+              const iso       = isoOf(day)
+              const isToday   = day.toDateString() === today.toDateString()
+              const dayWOs    = workOrders.filter(wo => wo.scheduled_date === iso)
+              const dayScheds = schedules.filter(s => s.next_due_date === iso)
+
+              return (
+                <div
+                  key={iso}
+                  className="p-2"
+                  style={{
+                    background: isToday ? 'var(--bg-raised)' : 'var(--bg-card)',
+                    minHeight:  180,
+                    outline:    isToday ? '2px solid var(--accent-gold)' : undefined,
+                    outlineOffset: -2,
+                  }}
+                >
+                  <div className="text-xs font-semibold mb-1.5">
+                    <span style={{ color: isToday ? 'var(--accent-gold)' : 'var(--text-secondary)' }}>
+                      {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                    </span>
+                    <span className="ml-1" style={{ color: isToday ? 'var(--accent-gold)' : 'var(--text-muted)' }}>
+                      {day.getDate()}
+                    </span>
+                  </div>
+
+                  {dayWOs.map(wo => {
+                    const isOverdue = day < today && wo.status !== 'completed'
+                    const isUrgent  = wo.priority === 'urgent' || wo.priority === 'high'
+                    return (
+                      <div
+                        key={wo.id}
+                        className="text-xs px-1.5 py-1 rounded mb-1 truncate"
+                        style={{
+                          background: isOverdue ? 'var(--accent-red-dim)'
+                                    : isUrgent  ? 'var(--accent-amber-dim)'
+                                                : 'var(--accent-blue-dim)',
+                          color:      isOverdue ? 'var(--accent-red)'
+                                    : isUrgent  ? 'var(--accent-amber)'
+                                                : 'var(--accent-blue)',
+                        }}
+                        title={wo.title}
+                      >
+                        {wo.title}
+                      </div>
+                    )
+                  })}
+
+                  {dayScheds.map(s => (
+                    <div
+                      key={s.id}
+                      className="text-xs px-1.5 py-1 rounded mb-1 truncate"
+                      style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}
+                      title={s.name}
+                    >
+                      📋 {s.name}
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
 
       {/* Legend */}
       <div className="flex items-center gap-4 mt-3 flex-wrap">
         {[
-          { bg: 'var(--accent-blue-dim)',  color: 'var(--accent-blue)',  label: 'Scheduled WO'             },
-          { bg: 'var(--accent-gold-dim)',  color: 'var(--accent-gold)',  label: 'Schedule Due'             },
-          { bg: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', label: 'High Priority'            },
-          { bg: 'var(--accent-red-dim)',   color: 'var(--accent-red)',   label: 'Overdue'                  },
+          { bg: 'var(--accent-blue-dim)',  color: 'var(--accent-blue)',  label: 'Scheduled WO'  },
+          { bg: 'var(--accent-gold-dim)',  color: 'var(--accent-gold)',  label: 'Schedule Due'  },
+          { bg: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', label: 'High Priority' },
+          { bg: 'var(--accent-red-dim)',   color: 'var(--accent-red)',   label: 'Overdue'       },
         ].map(item => (
           <div key={item.label} className="flex items-center gap-1.5 text-xs"
                style={{ color: 'var(--text-muted)' }}>

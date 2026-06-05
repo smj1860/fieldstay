@@ -17,7 +17,6 @@ export async function createBooking(
 
   const property_id   = formData.get('property_id')  as string
   const guest_name    = (formData.get('guest_name')  as string)?.trim() || null
-  const guest_email   = (formData.get('guest_email') as string)?.trim() || null
   const checkin_date  = formData.get('checkin_date') as string
   const checkout_date = formData.get('checkout_date') as string
   const source        = (formData.get('source') as BookingSource) || 'manual'
@@ -44,7 +43,6 @@ export async function createBooking(
       property_id,
       org_id:       membership.org_id,
       guest_name,
-      guest_email,
       checkin_date,
       checkout_date,
       checkin_time:  property.checkin_time  ?? null,
@@ -66,7 +64,7 @@ export async function createBooking(
       property_id,
       org_id:        membership.org_id,
       guest_name:    guest_name ?? null,
-      guest_email:   guest_email ?? null,
+      guest_email:   null,
       checkin_date,
       checkout_date,
     },

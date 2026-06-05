@@ -237,6 +237,14 @@ function AddEntryModal({
           </button>
         </div>
 
+        {vendors.length === 0 && crew.length === 0 && (
+          <div className="mb-4 px-3 py-2 rounded-lg text-sm"
+               style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}>
+            You need at least one vendor or crew member to log a communication.
+            Add crew in the Crew section or vendors in the Vendors section first.
+          </div>
+        )}
+
         {state?.error && (
           <div
             className="text-sm rounded-lg px-3 py-2 mb-4"

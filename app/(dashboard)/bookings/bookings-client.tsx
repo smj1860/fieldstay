@@ -17,7 +17,6 @@ interface BookingRow {
   id:            string
   property_id:   string
   guest_name:    string | null
-  guest_email:   string | null
   checkin_date:  string
   checkout_date: string
   checkin_time:  string | null
@@ -240,7 +239,6 @@ function BookingCard({
             <Detail label="Check-in"  value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ` at ${booking.checkin_time}` : ''}`} />
             <Detail label="Check-out" value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ` at ${booking.checkout_time}` : ''}`} />
             <Detail label="Nights"    value={`${nights} night${nights !== 1 ? 's' : ''}`} />
-            {booking.guest_email && <Detail label="Guest email" value={booking.guest_email} />}
             {property && (
               <Detail
                 label="Property"
@@ -345,9 +343,9 @@ function AddBookingModal({
         className="rounded-2xl w-full max-w-lg p-6 my-4"
         style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-lg)' }}
       >
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Add Booking
+            Log Non-Synced Booking
           </h3>
           <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
         </div>
@@ -360,6 +358,11 @@ function AddBookingModal({
             {state.error}
           </div>
         )}
+
+        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+          Use this form for bookings that won&apos;t appear via your iCal feed
+          (direct reservations, social media enquiries, etc.). A turnover will be automatically created.
+        </p>
 
         <form action={action} className="space-y-4">
           <div>
@@ -386,11 +389,6 @@ function AddBookingModal({
           <div>
             <label className="label">Guest Name</label>
             <input name="guest_name" type="text" className="input" placeholder="Optional" />
-          </div>
-
-          <div>
-            <label className="label">Guest Email</label>
-            <input name="guest_email" type="email" className="input" placeholder="Optional" />
           </div>
 
           <div>
@@ -484,7 +482,8 @@ export function BookingsClient({
         <div>
           <h1 className="page-title">Bookings</h1>
           <p className="page-subtitle">
-            {upcoming.length} upcoming confirmed booking{upcoming.length !== 1 ? 's' : ''}
+            Log bookings not synced via iCal — direct, social media, or phone.
+            Calendar syncs automatically every hour.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -499,7 +498,7 @@ export function BookingsClient({
           </button>
           <button onClick={() => setShowAdd(true)} className="btn-primary">
             <Plus className="w-4 h-4" />
-            Add Booking
+            Log Booking
           </button>
         </div>
       </div>

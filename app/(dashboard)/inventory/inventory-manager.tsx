@@ -1147,7 +1147,7 @@ export function InventoryManager({
 }) {
   const router = useRouter()
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<InventoryTab>('property')
+  const [activeTab, setActiveTab] = useState<InventoryTab>('portfolio')
 
   const totalItems    = items.length
   const totalCritical = items.filter((i) => getStockStatus(i) === 'critical').length
@@ -1238,6 +1238,7 @@ export function InventoryManager({
           template={template}
           properties={properties}
           orgId={orgId}
+          catalogItems={catalogItems}
         />
       )}
 

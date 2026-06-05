@@ -103,7 +103,8 @@ interface Props { vendors: Vendor[] }
 type ViewMode = 'list' | 'add' | 'bulk'
 
 export function VendorsClient({ vendors }: Props) {
-  const [view, setView] = useState<ViewMode>('list')
+  const [view, setView]                 = useState<ViewMode>('list')
+  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null)
 
   return (
     <div className="space-y-6">
@@ -156,12 +157,95 @@ export function VendorsClient({ vendors }: Props) {
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-themed">
-                {vendors.map((v) => <VendorRow key={v.id} vendor={v} />)}
+              <tbody>
+                {Object.entries(
+                  vendors.reduce<Record<string, (typeof vendors)>>((acc, v) => {
+                    const key = v.specialty ?? 'other'
+                    ;(acc[key] ??= []).push(v)
+                    return acc
+                  }, {})
+                ).map(([specialty, group]) => (
+                  <>
+                    <tr key={`hdr-${specialty}`} style={{ background: 'var(--bg-raised)' }}>
+                      <td colSpan={5} className="py-1.5 pr-4 pl-1 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
+                        {VENDOR_SPECIALTY_LABELS[specialty as VendorSpecialty] ?? specialty}
+                      </td>
+                    </tr>
+                    {group.map((v) => <VendorRow key={v.id} vendor={v} onSelect={setSelectedVendor} />)}
+                  </>
+                ))}
               </tbody>
             </table>
           </div>
         )}
+      </div>
+      {selectedVendor && (
+        <VendorCardModal vendor={selectedVendor} onClose={() => setSelectedVendor(null)} />
+      )}
+    </div>
+  )
+}
+
+// ── Vendor card modal ─────────────────────────────────────────────────────────
+
+function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+         onClick={onClose}>
+      <div
+        className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm"
+        style={{ background: 'var(--bg-card)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="font-semibold text-base text-primary-themed">{vendor.name}</h3>
+            <span className="badge badge-blue mt-1">
+              {VENDOR_SPECIALTY_LABELS[vendor.specialty]}
+            </span>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-2 text-sm">
+          {vendor.contact_name && (
+            <div className="flex justify-between">
+              <span className="text-muted-themed">Contact</span>
+              <span className="text-secondary-themed">{vendor.contact_name}</span>
+            </div>
+          )}
+          {vendor.phone && (
+            <div className="flex justify-between">
+              <span className="text-muted-themed">Phone</span>
+              <a href={`tel:${vendor.phone}`} className="text-accent-blue hover:underline">
+                {vendor.phone}
+              </a>
+            </div>
+          )}
+          {vendor.email && (
+            <div className="flex justify-between">
+              <span className="text-muted-themed">Email</span>
+              <a href={`mailto:${vendor.email}`}
+                 className="text-accent-blue hover:underline truncate max-w-[180px]">
+                {vendor.email}
+              </a>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-muted-themed">Vendor Portal</span>
+            <span style={{ color: vendor.portal_enabled ? 'var(--accent-green)' : 'var(--text-muted)' }}>
+              {vendor.portal_enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </div>
+          {vendor.notes && (
+            <div>
+              <p className="text-muted-themed mb-1">Notes</p>
+              <p className="text-secondary-themed text-xs">{vendor.notes}</p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -225,6 +309,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
               <input
                 type="checkbox"
                 name="portal_enabled"
+                defaultChecked
                 className="w-4 h-4 rounded"
                 style={{ accentColor: 'var(--accent-gold)' }}
               />
@@ -412,7 +497,7 @@ function StarRating({ rating, count }: { rating: number; count: number }) {
 
 // ── Vendor row ────────────────────────────────────────────────────────────────
 
-function VendorRow({ vendor }: { vendor: Vendor & { work_orders?: Array<{ vendor_rating: number | null }> } }) {
+function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Array<{ vendor_rating: number | null }> }; onSelect?: (v: Vendor) => void }) {
   const [portalEnabled, setPortalEnabled] = useState(vendor.portal_enabled)
   const [togglingPortal, startToggle]     = useTransition()
   const [deactivating,   startDeact]      = useTransition()
@@ -433,7 +518,7 @@ function VendorRow({ vendor }: { vendor: Vendor & { work_orders?: Array<{ vendor
     : 0
 
   return (
-    <tr className="hover:bg-raised-themed transition-colors">
+    <tr className="hover:bg-raised-themed transition-colors cursor-pointer" onClick={() => onSelect?.(vendor)}>
       <td className="py-2.5 pr-4">
         <div className="font-medium text-primary-themed">{vendor.name}</div>
         {vendor.contact_name && <div className="text-xs text-muted-themed">{vendor.contact_name}</div>}
@@ -449,7 +534,7 @@ function VendorRow({ vendor }: { vendor: Vendor & { work_orders?: Array<{ vendor
           {!vendor.email && !vendor.phone && <span className="text-muted-themed">—</span>}
         </div>
       </td>
-      <td className="py-2.5 pr-4">
+      <td className="py-2.5 pr-4" onClick={e => e.stopPropagation()}>
         <button
           onClick={handleTogglePortal}
           disabled={togglingPortal}
@@ -468,7 +553,7 @@ function VendorRow({ vendor }: { vendor: Vendor & { work_orders?: Array<{ vendor
           />
         </button>
       </td>
-      <td className="py-2.5 text-right">
+      <td className="py-2.5 text-right" onClick={e => e.stopPropagation()}>
         <button onClick={handleDeactivate} disabled={deactivating} className="btn-danger py-1 px-2 text-xs" title="Deactivate vendor">
           {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
         </button>

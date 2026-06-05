@@ -40,7 +40,7 @@ export const syncAllIcalFeeds = inngest.createFunction(
     concurrency: { limit: 1 },  // only one full sync at a time
   },
   [
-    { cron: '0 */4 * * *' },                     // every 4 hours
+    { cron: '0 * * * *' },                        // every hour
     { event: 'ical/sync.all.requested' as const },
   ],
   async ({ step, logger }) => {
@@ -59,17 +59,28 @@ export const syncAllIcalFeeds = inngest.createFunction(
 
     if (feeds.length === 0) return { synced: 0 }
 
-    // Fan out — one event per feed, processed concurrently
+    // Fan out — one event per feed, spread across 55-minute window to prevent thundering herd
+    const JITTER_WINDOW_MS = 55 * 60 * 1000
+
     await step.sendEvent(
       'fan-out-feed-syncs',
-      feeds.map((feed) => ({
-        name: 'ical/sync.requested' as const,
-        data: {
-          feed_id:     feed.id,
-          property_id: feed.property_id,
-          org_id:      feed.org_id,
-        },
-      }))
+      feeds.map((feed, index) => {
+        const baseDelay    = feeds.length > 1
+          ? Math.floor((index / (feeds.length - 1)) * JITTER_WINDOW_MS)
+          : 0
+        const randomJitter = Math.floor(Math.random() * 30_000)
+        const scheduledTs  = Date.now() + baseDelay + randomJitter
+
+        return {
+          name: 'ical/sync.requested' as const,
+          data: {
+            feed_id:     feed.id,
+            property_id: feed.property_id,
+            org_id:      feed.org_id,
+          },
+          ts: scheduledTs,
+        }
+      })
     )
 
     return { synced: feeds.length }
