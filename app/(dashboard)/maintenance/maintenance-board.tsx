@@ -301,7 +301,7 @@ function CreateWorkOrderModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h3 className="text-lg font-semibold text-primary-themed">New Work Order</h3>
           <button onClick={onClose} className="btn-ghost p-1.5">
@@ -322,85 +322,91 @@ function CreateWorkOrderModal({
             <input key={id} type="hidden" name="quote_vendor_ids" value={id} />
           ))}
 
-          {/* Title */}
-          <div>
-            <label htmlFor="wo-title" className="label">
-              Title <span className="text-red-500">*</span>
-            </label>
-            <input
-              id="wo-title"
-              name="title"
-              type="text"
-              required
-              className="input"
-              placeholder="e.g. Fix leaking faucet in master bath"
-            />
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Left column */}
+            <div className="space-y-4">
+              {/* Title */}
+              <div>
+                <label htmlFor="wo-title" className="label">
+                  Title <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="wo-title"
+                  name="title"
+                  type="text"
+                  required
+                  className="input"
+                  placeholder="e.g. Fix leaking faucet in master bath"
+                />
+              </div>
 
-          {/* Property */}
-          <div>
-            <label htmlFor="wo-property" className="label">
-              Property <span className="text-red-500">*</span>
-            </label>
-            <select id="wo-property" name="property_id" required className="input">
-              <option value="">Select property…</option>
-              {properties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
+              {/* Property */}
+              <div>
+                <label htmlFor="wo-property" className="label">
+                  Property <span className="text-red-500">*</span>
+                </label>
+                <select id="wo-property" name="property_id" required className="input">
+                  <option value="">Select property…</option>
+                  {properties.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Description */}
-          <div>
-            <label htmlFor="wo-desc" className="label">Description</label>
-            <textarea
-              id="wo-desc"
-              name="description"
-              rows={3}
-              className="input resize-none"
-              placeholder="Details about the issue or task…"
-            />
-          </div>
-
-          {/* Priority */}
-          <div>
-            <label htmlFor="wo-priority" className="label">Priority</label>
-            <select id="wo-priority" name="priority" defaultValue="medium" className="input">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
-            </select>
-          </div>
-
-          {/* Scheduled date + cost */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="wo-date" className="label">Completed By Date</label>
-              <input id="wo-date" name="scheduled_date" type="date" className="input" />
+              {/* Description */}
+              <div>
+                <label htmlFor="wo-desc" className="label">Description</label>
+                <textarea
+                  id="wo-desc"
+                  name="description"
+                  rows={4}
+                  className="input resize-none"
+                  placeholder="Details about the issue or task…"
+                />
+              </div>
             </div>
-            <div>
-              <label htmlFor="wo-nte" className="label">
-                Not to Exceed — NTE ($)
-                <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
-                  optional ceiling
-                </span>
-              </label>
-              <input
-                id="wo-nte"
-                name="nte_amount"
-                type="number"
-                min="0"
-                step="0.01"
-                className="input"
-                placeholder="0.00"
-              />
-            </div>
-          </div>
 
-          {/* Assignment mode */}
-          <div>
-            <label className="label">Assign To</label>
+            {/* Right column */}
+            <div className="space-y-4">
+              {/* Priority */}
+              <div>
+                <label htmlFor="wo-priority" className="label">Priority</label>
+                <select id="wo-priority" name="priority" defaultValue="medium" className="input">
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+
+              {/* Scheduled date + NTE */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="wo-date" className="label">Completed By Date</label>
+                  <input id="wo-date" name="scheduled_date" type="date" className="input" />
+                </div>
+                <div>
+                  <label htmlFor="wo-nte" className="label">
+                    NTE ($)
+                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                      ceiling
+                    </span>
+                  </label>
+                  <input
+                    id="wo-nte"
+                    name="nte_amount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="input"
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+
+              {/* Assignment mode */}
+              <div>
+                <label className="label">Assign To</label>
             <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3">
               {vendors.length > 0 && (
                 <button
@@ -508,7 +514,9 @@ function CreateWorkOrderModal({
               )}
             </>
           )}
-          </div>
+              </div>{/* /Assign To */}
+            </div>{/* /right column */}
+          </div>{/* /two-col grid */}
 
           {/* Photo attachments */}
           <div>
@@ -985,7 +993,7 @@ export function MaintenanceBoard({
   const [filterPriority, setFilterPriority] = useState<string>(
     urlFilter === 'urgent' ? 'high' : 'all'
   )
-  const [viewMode,       setViewMode]       = useState<'list' | 'calendar'>('list')
+  const [viewMode,       setViewMode]       = useState<'list' | 'calendar'>('calendar')
 
   const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
 

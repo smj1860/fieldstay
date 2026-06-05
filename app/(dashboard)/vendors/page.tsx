@@ -13,6 +13,7 @@ export default async function VendorsPage() {
     .select('id, name, contact_name, email, phone, specialty, portal_enabled, is_active, notes, work_orders(vendor_rating)')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
+    .order('specialty')
     .order('name')
 
   return (

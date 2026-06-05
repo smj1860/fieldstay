@@ -108,7 +108,8 @@ interface Props { crew: CrewMember[] }
 type ViewMode = 'list' | 'add' | 'bulk'
 
 export function CrewManageClient({ crew }: Props) {
-  const [view, setView] = useState<ViewMode>('list')
+  const [view, setView]                 = useState<ViewMode>('list')
+  const [selectedMember, setSelectedMember] = useState<CrewMember | null>(null)
 
   return (
     <div className="space-y-6">
@@ -163,12 +164,79 @@ export function CrewManageClient({ crew }: Props) {
               </thead>
               <tbody className="divide-y divide-themed">
                 {crew.map((member) => (
-                  <CrewRow key={member.id} member={member} />
+                  <CrewRow key={member.id} member={member} onSelect={setSelectedMember} />
                 ))}
               </tbody>
             </table>
           </div>
         )}
+      </div>
+      {selectedMember && (
+        <CrewCardModal member={selectedMember} onClose={() => setSelectedMember(null)} />
+      )}
+    </div>
+  )
+}
+
+// ── Crew card modal ───────────────────────────────────────────────────────────
+
+function CrewCardModal({ member, onClose }: { member: CrewMember; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+         onClick={onClose}>
+      <div
+        className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm"
+        style={{ background: 'var(--bg-card)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0"
+                 style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}>
+              {member.name[0]?.toUpperCase()}
+            </div>
+            <div>
+              <h3 className="font-semibold text-base text-primary-themed">{member.name}</h3>
+              <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>
+                {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
+              </span>
+            </div>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-2 text-sm">
+          {member.specialty && (
+            <div className="flex justify-between">
+              <span className="text-muted-themed">Specialty</span>
+              <span className="text-secondary-themed">{member.specialty}</span>
+            </div>
+          )}
+          {member.phone && (
+            <div className="flex justify-between">
+              <span className="text-muted-themed">Phone</span>
+              <a href={`tel:${member.phone}`} className="text-accent-blue hover:underline">
+                {member.phone}
+              </a>
+            </div>
+          )}
+          {member.email && (
+            <div className="flex justify-between">
+              <span className="text-muted-themed">Email</span>
+              <a href={`mailto:${member.email}`} className="text-accent-blue hover:underline truncate max-w-[200px]">
+                {member.email}
+              </a>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-muted-themed">App Access</span>
+            <span className="text-secondary-themed">
+              {member.user_id ? 'Active' : member.invite_sent_at ? 'Invited' : 'Not invited'}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -452,7 +520,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
 
 // ── Crew row ──────────────────────────────────────────────────────────────────
 
-function CrewRow({ member }: { member: CrewMember }) {
+function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewMember) => void }) {
   const [editing, setEditing]         = useState(false)
   const [name, setName]               = useState(member.name)
   const [roleVal, setRoleVal]         = useState<CrewRole>(member.role ?? 'general')
@@ -539,7 +607,7 @@ function CrewRow({ member }: { member: CrewMember }) {
   }
 
   return (
-    <tr className="hover:bg-raised-themed transition-colors">
+    <tr className="hover:bg-raised-themed transition-colors cursor-pointer" onClick={() => onSelect(member)}>
       <td className="py-2.5 pr-4 font-medium text-primary-themed">{member.name}</td>
       <td className="py-2.5 pr-4">
         <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>

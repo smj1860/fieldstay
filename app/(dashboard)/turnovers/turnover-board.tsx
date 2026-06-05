@@ -765,7 +765,7 @@ export function TurnoverBoard({
   const [filterCrew,        setFilterCrew]        = useState<string>('all')
   const [selectedIds,       setSelectedIds]       = useState<Set<string>>(new Set())
   const [bulkAssigning,     startBulkAssign]      = useTransition()
-  const [viewMode,          setViewMode]          = useState<'list' | 'gantt'>('list')
+  const [viewMode,          setViewMode]          = useState<'list' | 'gantt'>('gantt')
   const [assignmentWarning, setAssignmentWarning] = useState<string | null>(null)
 
   useEffect(() => {

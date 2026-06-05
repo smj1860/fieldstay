@@ -18,12 +18,6 @@ export const WIZARD_STEPS = [
     href:        'inventory',
   },
   {
-    key:         'messages',
-    label:       'Guest Messages',
-    description: 'Booking confirmation and checkout emails',
-    href:        'messages',
-  },
-  {
     key:         'checklist',
     label:       'Cleaning Checklist',
     description: 'Tasks for your cleaning crew',
@@ -34,12 +28,6 @@ export const WIZARD_STEPS = [
     label:       'Maintenance',
     description: 'Routine and seasonal schedules',
     href:        'maintenance',
-  },
-  {
-    key:         'crew',
-    label:       'Crew',
-    description: 'Cleaning and maintenance crew members',
-    href:        'crew',
   },
 ] as const
 

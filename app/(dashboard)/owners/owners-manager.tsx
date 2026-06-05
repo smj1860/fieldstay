@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useActionState } from 'react'
+import { useState, useTransition, useActionState, useEffect } from 'react'
 import { Plus, X, Link2, RefreshCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -444,10 +444,10 @@ function AddOwnerModal({
 }) {
   const [state, formAction, pending] = useActionState(addPropertyOwner, null)
 
-  if (state?.success) {
-    onClose()
-    return null
-  }
+  useEffect(() => {
+    if (state?.success) onClose()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.success])
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
@@ -533,6 +533,33 @@ function OwnerCard({
   const expired   = token ? isTokenExpired(token) : false
   const portalUrl = token && !expired ? `${baseUrl}/owner/${token.token}` : null
 
+  const [monthlyRevenue, setMonthlyRevenue] = useState('')
+  const [revSuccess, setRevSuccess]         = useState<string | null>(null)
+  const [, startRev]                        = useTransition()
+
+  const handleSaveMonthlyRevenue = () => {
+    if (!monthlyRevenue || isNaN(parseFloat(monthlyRevenue))) return
+    const amount = parseFloat(monthlyRevenue)
+    if (amount <= 0) return
+    startRev(async () => {
+      const today = new Date()
+      const monthLabel = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+      const formData = new FormData()
+      formData.set('property_id',      owner.property_id)
+      formData.set('transaction_type', 'revenue')
+      formData.set('category',         'booking_revenue')
+      formData.set('amount',           String(amount))
+      formData.set('description',      `Monthly revenue — ${monthLabel} (manual entry)`)
+      formData.set('transaction_date', today.toISOString().split('T')[0]!)
+      const result = await addOwnerTransaction(null, formData)
+      if (!result?.error) {
+        setMonthlyRevenue('')
+        setRevSuccess(`$${amount.toFixed(2)} recorded for ${monthLabel}`)
+        setTimeout(() => setRevSuccess(null), 4000)
+      }
+    })
+  }
+
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -566,6 +593,36 @@ function OwnerCard({
             </>
           )}
         </div>
+      </div>
+
+      {/* Monthly revenue quick entry */}
+      <div className="mt-3 pt-3 border-t border-themed">
+        <label className="label text-xs">
+          Monthly Revenue ($)
+          <span className="text-muted-themed font-normal ml-1">— enter before sharing portal link</span>
+        </label>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            min={0}
+            step={0.01}
+            value={monthlyRevenue}
+            onChange={e => setMonthlyRevenue(e.target.value)}
+            className="input text-sm py-1.5"
+            placeholder="e.g. 4200.00"
+          />
+          {monthlyRevenue && parseFloat(monthlyRevenue) > 0 && (
+            <button onClick={handleSaveMonthlyRevenue} className="btn-secondary text-xs px-3">
+              Save
+            </button>
+          )}
+        </div>
+        {revSuccess && (
+          <p className="text-xs mt-1" style={{ color: 'var(--accent-green)' }}>{revSuccess}</p>
+        )}
+        <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+          Creates a revenue entry for the current month. OwnerRez integration will auto-populate when connected.
+        </p>
       </div>
 
       <TransactionPanel propertyId={owner.property_id} transactions={transactions} />
