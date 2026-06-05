@@ -8,6 +8,7 @@ import {
   addTemplateItem,
   removeTemplateItem,
   applyTemplateToProperty,
+  applyTemplateToProperties,
 } from './actions'
 import type { InventoryCategory } from '@/types/database'
 
@@ -86,6 +87,8 @@ export function TemplateManager({
   // Catalog tab state
   const [catalogFilter, setCatalogFilter]     = useState<InventoryCategory | 'all'>('all')
   const [catalogSelected, setCatalogSelected] = useState<Set<string>>(new Set())
+  const [catalogParLevels, setCatalogParLevels] = useState<Record<string, number>>({})
+  const [catalogUnits, setCatalogUnits]         = useState<Record<string, string>>({})
 
   // Custom tab state
   const [newName,     setNewName]     = useState('')
@@ -154,8 +157,8 @@ export function TemplateManager({
         const result = await addTemplateItem(currentTemplate.id, {
           name:      c.name,
           category:  c.category,
-          unit:      c.default_unit,
-          par_level: 1,
+          unit:      catalogUnits[c.id] ?? c.default_unit,
+          par_level: catalogParLevels[c.id] ?? 1,
         })
         if (result.item) newItems.push(result.item as TemplateItem)
       }
@@ -167,6 +170,8 @@ export function TemplateManager({
         ],
       } : prev)
       setCatalogSelected(new Set())
+      setCatalogParLevels({})
+      setCatalogUnits({})
     })
   }
 
@@ -211,18 +216,15 @@ export function TemplateManager({
     if (!currentTemplate || selectedProps.size === 0) return
     setError(null)
     startTransition(async () => {
-      let totalAdded = 0, totalSkipped = 0
-      for (const propId of selectedProps) {
-        const result = await applyTemplateToProperty(currentTemplate.id, propId)
-        if (!result.error) {
-          totalAdded   += result.added
-          totalSkipped += result.skipped
-        }
-      }
+      const result = await applyTemplateToProperties(currentTemplate.id, Array.from(selectedProps))
       const count = selectedProps.size
       setSelectedProps(new Set())
-      setSuccess(`Applied to ${count} propert${count !== 1 ? 'ies' : 'y'}. ${totalAdded} items added, ${totalSkipped} skipped.`)
-      setTimeout(() => setSuccess(null), 5000)
+      if (result.error) {
+        setError(result.error)
+      } else {
+        setSuccess(`Applied to ${count} propert${count !== 1 ? 'ies' : 'y'}. ${result.applied} items added.`)
+        setTimeout(() => setSuccess(null), 5000)
+      }
       setApplyModal(false)
     })
   }
@@ -354,49 +356,102 @@ export function TemplateManager({
               <p className="text-xs text-muted-themed py-4 text-center">
                 No catalog items found. Add items to a property first, or use the Custom tab.
               </p>
-            ) : (
-              <div className="border border-themed rounded-xl overflow-hidden max-h-52 overflow-y-auto">
-                {catalogItems
-                  .filter(c => catalogFilter === 'all' || c.category === catalogFilter)
-                  .map(c => {
-                    const alreadyInTemplate = templateItems.some(t => t.name.toLowerCase() === c.name.toLowerCase())
-                    const isSelected        = catalogSelected.has(c.id)
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        disabled={alreadyInTemplate}
-                        onClick={() => {
-                          setCatalogSelected(prev => {
-                            const next = new Set(prev)
-                            next.has(c.id) ? next.delete(c.id) : next.add(c.id)
-                            return next
-                          })
-                        }}
-                        className={cn(
-                          'w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm border-b border-themed last:border-0 transition-colors',
-                          alreadyInTemplate ? 'opacity-40 cursor-not-allowed' : isSelected ? 'bg-brand-50' : 'hover:bg-canvas-themed'
-                        )}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          readOnly
-                          disabled={alreadyInTemplate}
-                          className="w-4 h-4 rounded"
-                        />
-                        <span className="flex-1 font-medium text-primary-themed">{c.name}</span>
-                        <span className="text-xs text-muted-themed capitalize">
-                          {c.category.replace('_', ' ')} · {c.default_unit}
-                        </span>
-                        {alreadyInTemplate && (
-                          <span className="text-xs text-muted-themed italic">in template</span>
-                        )}
-                      </button>
-                    )
-                  })}
-              </div>
-            )}
+            ) : (() => {
+              const visibleItems = catalogItems.filter(c => catalogFilter === 'all' || c.category === catalogFilter)
+              const selectableItems = visibleItems.filter(c => !templateItems.some(t => t.name.toLowerCase() === c.name.toLowerCase()))
+              const allSelected = selectableItems.length > 0 && selectableItems.every(c => catalogSelected.has(c.id))
+              return (
+                <div className="border border-themed rounded-xl overflow-hidden">
+                  {/* Select all header */}
+                  <div className="flex items-center gap-3 px-4 py-2 border-b border-themed"
+                       style={{ background: 'var(--bg-raised)' }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={() => {
+                        setCatalogSelected(prev => {
+                          const next = new Set(prev)
+                          if (allSelected) {
+                            selectableItems.forEach(c => next.delete(c.id))
+                          } else {
+                            selectableItems.forEach(c => next.add(c.id))
+                          }
+                          return next
+                        })
+                      }}
+                      className="w-4 h-4 rounded"
+                    />
+                    <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                      Select all ({selectableItems.length})
+                    </span>
+                  </div>
+                  <div className="max-h-52 overflow-y-auto">
+                    {visibleItems.map(c => {
+                      const alreadyInTemplate = templateItems.some(t => t.name.toLowerCase() === c.name.toLowerCase())
+                      const isSelected        = catalogSelected.has(c.id)
+                      return (
+                        <div
+                          key={c.id}
+                          className={cn('border-b border-themed last:border-0 transition-colors', alreadyInTemplate ? 'opacity-40' : '')}
+                          style={isSelected ? { background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold)' } : {}}
+                        >
+                          <div
+                            className={cn('flex items-center gap-3 px-4 py-2.5', alreadyInTemplate ? 'cursor-not-allowed' : 'cursor-pointer')}
+                            onClick={() => {
+                              if (alreadyInTemplate) return
+                              setCatalogSelected(prev => {
+                                const next = new Set(prev)
+                                next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                                return next
+                              })
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              readOnly
+                              disabled={alreadyInTemplate}
+                              className="w-4 h-4 rounded flex-shrink-0"
+                            />
+                            <span className="flex-1 text-sm font-medium text-primary-themed">{c.name}</span>
+                            <span className="text-xs text-muted-themed capitalize">
+                              {c.category.replace('_', ' ')}
+                            </span>
+                            {alreadyInTemplate && (
+                              <span className="text-xs text-muted-themed italic ml-1">in template</span>
+                            )}
+                          </div>
+                          {isSelected && !alreadyInTemplate && (
+                            <div className="flex items-center gap-2 px-4 pb-2.5" onClick={e => e.stopPropagation()}>
+                              <div className="flex items-center gap-1.5">
+                                <label className="text-xs text-muted-themed whitespace-nowrap">Par:</label>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={catalogParLevels[c.id] ?? 1}
+                                  onChange={e => setCatalogParLevels(prev => ({ ...prev, [c.id]: parseInt(e.target.value) || 1 }))}
+                                  className="input w-16 py-0.5 text-xs"
+                                />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <label className="text-xs text-muted-themed whitespace-nowrap">Unit:</label>
+                                <input
+                                  type="text"
+                                  value={catalogUnits[c.id] ?? c.default_unit}
+                                  onChange={e => setCatalogUnits(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                  className="input w-20 py-0.5 text-xs"
+                                  placeholder={c.default_unit}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
 
             {catalogSelected.size > 0 && (
               <button
@@ -545,6 +600,19 @@ export function TemplateManager({
               </button>
             </div>
             <div className="px-5 py-4 space-y-2 max-h-60 overflow-y-auto">
+              <label className="flex items-center gap-3 cursor-pointer py-1.5 border-b border-themed pb-3 mb-1">
+                <input
+                  type="checkbox"
+                  checked={properties.length > 0 && properties.every(p => selectedProps.has(p.id))}
+                  onChange={e => {
+                    const next = new Set<string>()
+                    if (e.target.checked) properties.forEach(p => next.add(p.id))
+                    setSelectedProps(next)
+                  }}
+                  className="w-4 h-4 rounded"
+                />
+                <span className="text-sm font-medium text-primary-themed">Select all properties</span>
+              </label>
               {properties.map(p => (
                 <label key={p.id} className="flex items-center gap-3 cursor-pointer py-1.5">
                   <input

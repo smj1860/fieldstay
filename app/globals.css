@@ -38,40 +38,51 @@
 
 /* ── Light theme override ─────────────────────────────────────── */
 :root.light {
-  /* Brand navy backgrounds */
-  --bg-base:        #0a1628;
-  --bg-canvas:      #102246;
-  --bg-card:        #162d5c;
-  --bg-raised:      #1e3872;
-  --bg-hover:       #243f88;
+  /* Blue canvas — white cards float on it */
+  --bg-base:        #c8d9ee;
+  --bg-canvas:      #d4e2f0;
+  --bg-card:        #ffffff;
+  --bg-raised:      #eaf1f8;
+  --bg-hover:       #dceaf5;
 
-  --border:         rgba(255, 255, 255, 0.10);
-  --border-strong:  rgba(255, 255, 255, 0.20);
+  --border:         rgba(10, 22, 40, 0.10);
+  --border-strong:  rgba(10, 22, 40, 0.20);
 
-  /* White text on navy */
-  --text-primary:   #ffffff;
-  --text-secondary: rgba(255, 255, 255, 0.75);
-  --text-muted:     rgba(255, 255, 255, 0.45);
-  --text-inverse:   #0a1628;
+  /* Dark text on light canvas */
+  --text-primary:   #0a1628;
+  --text-secondary: #2d4a6e;
+  --text-muted:     #6b8cae;
+  --text-inverse:   #ffffff;
 
   /* Brand gold accents */
-  --accent-gold:       #FCD116;
-  --accent-gold-dim:   rgba(252, 209, 22, 0.18);
-  --accent-green:      #22c55e;
-  --accent-green-dim:  rgba(34, 197, 94, 0.15);
-  --accent-red:        #f87171;
-  --accent-red-dim:    rgba(248, 113, 113, 0.15);
-  --accent-amber:      #fbbf24;
-  --accent-amber-dim:  rgba(251, 191, 36, 0.15);
-  --accent-blue:       #60a5fa;
-  --accent-blue-dim:   rgba(96, 165, 250, 0.15);
+  --accent-gold:       #b8900a;
+  --accent-gold-dim:   rgba(184, 144, 10, 0.12);
+  --accent-green:      #16a34a;
+  --accent-green-dim:  rgba(22, 163, 74, 0.12);
+  --accent-red:        #dc2626;
+  --accent-red-dim:    rgba(220, 38, 38, 0.10);
+  --accent-amber:      #d97706;
+  --accent-amber-dim:  rgba(217, 119, 6, 0.12);
+  --accent-blue:       #1d6fa4;
+  --accent-blue-dim:   rgba(29, 111, 164, 0.12);
 
-  /* Sidebar uses brand gold */
-  --bg-sidebar:     #FCD116;
-  --sidebar-text:   #0a1628;
+  --shadow-card: 0 1px 4px rgba(10,22,40,0.10), 0 4px 16px rgba(10,22,40,0.08);
+  --shadow-lg:   0 8px 32px rgba(10,22,40,0.18);
+}
 
-  --shadow-card: 0 2px 8px rgba(0,0,0,0.30);
-  --shadow-lg:   0 8px 32px rgba(0,0,0,0.40);
+/* ── Light mode: brand-gold page titles ─────────────────────── */
+:root.light .page-title {
+  color: #b8900a;
+}
+
+/* ── Light mode: sidebar stays dark — anchor the "blue frame" ── */
+:root.light aside {
+  background: #0a1628 !important;
+}
+:root.light aside a,
+:root.light aside span,
+:root.light aside p {
+  /* sidebar text uses inline styles — nav overrides handle this */
 }
 
 /* ── Base ─────────────────────────────────────────────────────── */

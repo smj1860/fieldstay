@@ -43,14 +43,16 @@ const PAGE_TITLES: Record<string, string> = {
 }
 
 interface Props {
-  role:            MemberRole
-  orgName:         string
-  userEmail:       string
-  repuguardActive?: boolean
-  children:        React.ReactNode
+  role:                       MemberRole
+  orgName:                    string
+  userEmail:                  string
+  repuguardActive?:           boolean
+  onboardingComplete?:        boolean
+  onboardingPct?:             number
+  children:                   React.ReactNode
 }
 
-export function DashboardShell({ role, orgName, userEmail, repuguardActive = false, children }: Props) {
+export function DashboardShell({ role, orgName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, children }: Props) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -156,6 +158,22 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
 
       {/* Nav links */}
       <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+        {!onboardingComplete && (!collapsed || mobile) && (
+          <Link
+            href="/onboarding"
+            onClick={() => setMobileOpen(false)}
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all mb-2"
+            style={{
+              background: 'var(--accent-gold-dim)',
+              color:      'var(--accent-gold)',
+              border:     '1px solid rgba(252,209,22,0.2)',
+            }}
+          >
+            <span>⚡</span>
+            <span>Complete Setup</span>
+            <span className="ml-auto text-xs opacity-70">{onboardingPct}%</span>
+          </Link>
+        )}
         {filteredNav.map((item) => {
           const Icon   = item.icon
           const active = pathname === item.href ||

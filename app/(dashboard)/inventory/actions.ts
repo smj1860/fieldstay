@@ -280,6 +280,87 @@ export async function applyTemplateToProperty(
   return { added, skipped }
 }
 
+export async function applyTemplateToProperties(
+  templateId: string,
+  propertyIds: string[]
+): Promise<{ error?: string; applied: number }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: items, error: itemsErr } = await supabase
+    .from('inventory_template_items')
+    .select('*')
+    .eq('template_id', templateId)
+
+  if (itemsErr || !items?.length) {
+    return { error: itemsErr?.message ?? 'No items in template', applied: 0 }
+  }
+
+  let applied = 0
+
+  for (const propertyId of propertyIds) {
+    const { data: existing } = await supabase
+      .from('inventory_items')
+      .select('catalog_item_id, name')
+      .eq('property_id', propertyId)
+
+    const existingCatalogIds = new Set(
+      (existing ?? []).map((e) => e.catalog_item_id).filter(Boolean)
+    )
+    const existingNames = new Set(
+      (existing ?? []).map((e) => e.name.toLowerCase())
+    )
+
+    const toInsert = items
+      .filter((item) => {
+        if (item.catalog_item_id && existingCatalogIds.has(item.catalog_item_id)) return false
+        if (existingNames.has(item.name.toLowerCase())) return false
+        return true
+      })
+      .map((item) => ({
+        property_id:             propertyId,
+        org_id:                  membership.org_id,
+        catalog_item_id:         item.catalog_item_id ?? null,
+        name:                    item.name,
+        category:                item.category,
+        unit:                    item.unit,
+        par_level:               item.par_level,
+        current_quantity:        0,
+        low_stock_threshold_pct: 20,
+        is_active:               true,
+      }))
+
+    if (toInsert.length > 0) {
+      await supabase.from('inventory_items').insert(toInsert)
+      applied += toInsert.length
+    }
+  }
+
+  revalidatePath('/inventory')
+  return { applied }
+}
+
+export async function bulkAddTemplateItemsFromCSV(
+  templateId: string,
+  rows: Array<{ name: string; category: string; unit: string; par_level: number }>
+): Promise<{ error?: string; added: number }> {
+  const { supabase } = await requireOrgMember()
+
+  const toInsert = rows.map((row, i) => ({
+    template_id: templateId,
+    name:        row.name,
+    category:    row.category,
+    unit:        row.unit,
+    par_level:   row.par_level,
+    sort_order:  i,
+  }))
+
+  const { error } = await supabase.from('inventory_template_items').insert(toInsert)
+  if (error) return { error: error.message, added: 0 }
+
+  revalidatePath('/inventory')
+  return { added: toInsert.length }
+}
+
 // ── Count approval actions ────────────────────────────────────────────────────
 
 export async function approveInventoryCount(draftId: string): Promise<{ error?: string }> {

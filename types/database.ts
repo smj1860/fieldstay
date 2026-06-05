@@ -69,18 +69,19 @@ export interface Profile {
 }
 
 export interface Organization {
-  id:                     string
-  name:                   string
-  slug:                   string
-  billing_email:          string | null
-  stripe_customer_id:     string | null
-  stripe_subscription_id: string | null
-  plan:                   OrgPlan
-  plan_status:            OrgPlanStatus
-  trial_ends_at:          string | null
-  max_properties:         number
-  created_at:             string
-  updated_at:             string
+  id:                           string
+  name:                         string
+  slug:                         string
+  billing_email:                string | null
+  stripe_customer_id:           string | null
+  stripe_subscription_id:       string | null
+  plan:                         OrgPlan
+  plan_status:                  OrgPlanStatus
+  trial_ends_at:                string | null
+  max_properties:               number
+  onboarding_steps_completed:   Record<string, boolean>
+  created_at:                   string
+  updated_at:                   string
 }
 
 export interface OrganizationMember {
@@ -210,6 +211,8 @@ export interface Vendor {
   portal_enabled: boolean
   notes:          string | null
   is_active:      boolean
+  avg_rating:     number | null
+  rating_count:   number
   created_at:     string
   updated_at:     string
 }
@@ -558,6 +561,49 @@ export interface CommunicationLog {
   created_at:        string
 }
 
+// ── Inventory template item ──────────────────────────────────────────────────
+export interface InventoryTemplateItem {
+  id:              string
+  template_id:     string
+  catalog_item_id: string | null
+  name:            string
+  category:        InventoryCategory
+  unit:            string
+  par_level:       number
+  sort_order:      number
+  notes:           string | null
+  created_at:      string
+}
+
+// ── Portfolio-level master checklist item ───────────────────────────────────
+export interface OrgMasterChecklistItem {
+  id:         string
+  org_id:     string
+  section:    string
+  task:       string
+  sort_order: number
+  source:     'catalog' | 'custom' | 'upload'
+  created_at: string
+  updated_at: string
+}
+
+// ── Portfolio-level master maintenance schedule ──────────────────────────────
+export interface OrgMasterMaintenanceSchedule {
+  id:             string
+  org_id:         string
+  title:          string
+  description:    string | null
+  frequency:      'weekly' | 'monthly' | 'quarterly' | 'annually'
+  month_day:      number | null
+  week_day:       number | null
+  estimated_cost: number | null
+  specialty:      string | null
+  notes:          string | null
+  is_active:      boolean
+  created_at:     string
+  updated_at:     string
+}
+
 export interface PushSubscription {
   id:             string
   crew_member_id: string
@@ -663,8 +709,10 @@ export interface Database {
       owner_transactions:          { Row: OwnerTransaction;         Insert: Partial<OwnerTransaction>;         Update: Partial<OwnerTransaction>;         Relationships: [] }
       org_milestones:              { Row: OrgMilestone;             Insert: Partial<OrgMilestone>;             Update: Partial<OrgMilestone>;             Relationships: [] }
       quote_requests:              { Row: QuoteRequest;             Insert: Partial<QuoteRequest>;             Update: Partial<QuoteRequest>;             Relationships: [] }
-      communication_logs:          { Row: CommunicationLog;         Insert: Partial<CommunicationLog>;         Update: Partial<CommunicationLog>;         Relationships: [] }
-      push_subscriptions:          { Row: PushSubscription;         Insert: Partial<PushSubscription>;         Update: Partial<PushSubscription>;         Relationships: [] }
+      communication_logs:          { Row: CommunicationLog;              Insert: Partial<CommunicationLog>;              Update: Partial<CommunicationLog>;              Relationships: [] }
+      push_subscriptions:          { Row: PushSubscription;              Insert: Partial<PushSubscription>;              Update: Partial<PushSubscription>;              Relationships: [] }
+      org_master_checklist_items:      { Row: OrgMasterChecklistItem;        Insert: Partial<OrgMasterChecklistItem>;        Update: Partial<OrgMasterChecklistItem>;        Relationships: [] }
+      org_master_maintenance_schedules:{ Row: OrgMasterMaintenanceSchedule;  Insert: Partial<OrgMasterMaintenanceSchedule>;  Update: Partial<OrgMasterMaintenanceSchedule>;  Relationships: [] }
 
       // ── Integration framework (server-side only) ───────────
       integration_providers:       { Row: IntegrationProvider;      Insert: Partial<IntegrationProvider>;      Update: Partial<IntegrationProvider>;      Relationships: [] }
