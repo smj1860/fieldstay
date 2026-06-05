@@ -22,12 +22,14 @@ export default function CrewTurnoverPage() {
   const db       = usePowerSync()
   const supabase = createClient()
 
-  const [uploadingItemId, setUploadingItemId] = useState<string | null>(null)
-  const [uploadError,     setUploadError]     = useState<string | null>(null)
-  const [completing,      setCompleting]      = useState(false)
-  const [showFlagModal,   setShowFlagModal]   = useState(false)
-  const [counts,          setCounts]          = useState<Record<string, number>>({})
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const [uploadingItemId,   setUploadingItemId]   = useState<string | null>(null)
+  const [uploadError,       setUploadError]       = useState<string | null>(null)
+  const [completing,        setCompleting]        = useState(false)
+  const [showFlagModal,     setShowFlagModal]     = useState(false)
+  const [counts,            setCounts]            = useState<Record<string, number>>({})
+  const [sectionPhotoPrompt, setSectionPhotoPrompt] = useState<string | null>(null)
+  const fileInputRefs      = useRef<Record<string, HTMLInputElement | null>>({})
+  const sectionPhotoRefs   = useRef<Record<string, HTMLInputElement | null>>({})
 
   const turnovers      = usePowerSyncQuery<TurnoverRow>('SELECT * FROM turnovers WHERE id = ?', [id])
   const turnover       = turnovers?.[0]
@@ -74,7 +76,7 @@ export default function CrewTurnoverPage() {
     {}
   )
 
-  const toggleItem = async (itemId: string, current: number, requiresPhoto: number, photoPath: string | null) => {
+  const toggleItem = async (itemId: string, current: number, requiresPhoto: number, photoPath: string | null, sectionName: string) => {
     if (!current && requiresPhoto && !photoPath) {
       fileInputRefs.current[itemId]?.click()
       return
@@ -83,6 +85,26 @@ export default function CrewTurnoverPage() {
       'UPDATE checklist_instance_items SET is_completed = ? WHERE id = ?',
       [current ? 0 : 1, itemId]
     )
+    // Check if section is now fully complete
+    if (!current) {
+      const sectionItems = sections[sectionName] ?? []
+      const allComplete = sectionItems.every(i => (i.id === itemId ? 1 : i.is_completed))
+      if (allComplete && sectionItems.length > 0) {
+        setSectionPhotoPrompt(sectionName)
+      }
+    }
+  }
+
+  const handleSectionPhoto = async (sectionName: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const ext  = file.name.split('.').pop() ?? 'jpg'
+    const path = `turnover-${id}/section-${sectionName.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.${ext}`
+    await supabase.storage
+      .from('turnover-photos')
+      .upload(path, file, { contentType: file.type, upsert: true })
+    setSectionPhotoPrompt(null)
+    e.target.value = ''
   }
 
   const handlePhotoCapture = async (itemId: string, file: File) => {
@@ -252,7 +274,7 @@ export default function CrewTurnoverPage() {
                 {sectionName}
               </h3>
               <div className="bg-white rounded-xl border border-accent-200 divide-y divide-accent-100 overflow-hidden">
-                {sectionItems.map((item) => {
+                {sectionItems.map((item: ChecklistItem) => {
                   const needsPhoto = item.requires_photo && !item.photo_storage_path
                   const uploading  = uploadingItemId === item.id
 
@@ -260,7 +282,7 @@ export default function CrewTurnoverPage() {
                     <div key={item.id} className={cn('flex items-start gap-3 px-4 py-3', item.is_completed ? 'bg-green-50' : 'bg-white')}>
                       <button
                         className="flex-shrink-0 mt-0.5"
-                        onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path)}
+                        onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
                       >
                         {item.is_completed
                           ? <CheckCircle2 className="w-5 h-5 text-green-500" />
@@ -315,6 +337,40 @@ export default function CrewTurnoverPage() {
                   )
                 })}
               </div>
+
+              {/* Section-complete photo prompt */}
+              {sectionPhotoPrompt === sectionName && (
+                <div
+                  className="flex items-center gap-3 mt-2 p-3 rounded-xl border-2 border-dashed"
+                  style={{ borderColor: '#FCD116', background: 'rgba(252,209,22,0.08)' }}
+                >
+                  <Camera className="w-5 h-5 flex-shrink-0" style={{ color: '#B8961A' }} />
+                  <div className="flex-1 text-sm font-medium" style={{ color: '#B8961A' }}>
+                    Section complete — add a final photo
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    ref={r => { sectionPhotoRefs.current[sectionName] = r }}
+                    onChange={e => handleSectionPhoto(sectionName, e)}
+                  />
+                  <button
+                    onClick={() => sectionPhotoRefs.current[sectionName]?.click()}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg"
+                    style={{ background: '#FCD116', color: '#1a1a1a' }}
+                  >
+                    Take Photo
+                  </button>
+                  <button
+                    onClick={() => setSectionPhotoPrompt(null)}
+                    className="text-xs px-2 py-1.5 rounded-lg text-accent-500 hover:bg-accent-100"
+                  >
+                    Skip
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </>

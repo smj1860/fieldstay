@@ -1,14 +1,17 @@
 'use client'
 
-import { Fragment, useState, useActionState } from 'react'
+import { Fragment, useState, useActionState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, ClipboardList, ChevronDown, X,
   Package, AlertTriangle, ShoppingCart, Check, History,
+  BarChart2, FileText, Layers,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
-import { updateParLevel, addInventoryItems, submitInventoryCount } from './actions'
+import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount } from './actions'
 import type { InventoryCategory, PoStatus } from '@/types/database'
+import { PortfolioInventoryView } from './portfolio-view'
+import { TemplateManager } from './template-manager'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -39,6 +42,50 @@ interface InventoryCount {
   property_id: string
   submitted_at: string
   notes: string | null
+}
+
+interface DraftItem {
+  id: string
+  inventory_item_id: string
+  previous_quantity: number
+  submitted_quantity: number
+  inventory_items: { name: string; unit: string } | null
+}
+
+interface PendingDraft {
+  id: string
+  property_id: string
+  status: string
+  submitted_at: string | null
+  notes: string | null
+  crew_members: { name: string } | null
+  inventory_count_draft_items: DraftItem[] | DraftItem | null
+}
+
+interface PortfolioItem {
+  id: string
+  name: string
+  category: InventoryCategory
+  unit: string
+  par_level: number
+  current_quantity: number
+  property_id: string
+  properties: { name: string } | { name: string }[] | null
+}
+
+interface TemplateItem {
+  id: string
+  name: string
+  category: string
+  unit: string
+  par_level: number
+  notes: string | null
+}
+
+interface Template {
+  id: string
+  name: string
+  inventory_template_items: TemplateItem[] | null
 }
 
 interface PurchaseOrderItem {
@@ -941,7 +988,141 @@ function PropertyInventoryCard({
   )
 }
 
+// ── Pending Count Review ──────────────────────────────────────────────────────
+
+function PendingCountReview({
+  drafts,
+  properties,
+  onRefresh,
+}: {
+  drafts: PendingDraft[]
+  properties: Property[]
+  onRefresh: () => void
+}) {
+  const [isPending, startTransition] = useTransition()
+  const [expanded, setExpanded]      = useState<string | null>(drafts[0]?.id ?? null)
+
+  if (drafts.length === 0) return null
+
+  const propName = (id: string) => properties.find(p => p.id === id)?.name ?? '—'
+
+  const handleApprove = (draftId: string) => {
+    startTransition(async () => {
+      await approveInventoryCount(draftId)
+      onRefresh()
+    })
+  }
+  const handleReject = (draftId: string) => {
+    startTransition(async () => {
+      await rejectInventoryCount(draftId)
+      onRefresh()
+    })
+  }
+
+  return (
+    <div className="card p-0 overflow-hidden mb-6">
+      <div className="px-5 py-3 border-b border-themed bg-canvas-themed flex items-center gap-2">
+        <AlertTriangle className="w-4 h-4" style={{ color: 'var(--accent-amber)' }} />
+        <span className="text-sm font-semibold text-primary-themed">Pending Count Review</span>
+        <span className="badge badge-amber">{drafts.length}</span>
+      </div>
+      {drafts.map(draft => {
+        const draftItems = Array.isArray(draft.inventory_count_draft_items)
+          ? draft.inventory_count_draft_items
+          : draft.inventory_count_draft_items ? [draft.inventory_count_draft_items] : []
+        const isOpen = expanded === draft.id
+        return (
+          <div key={draft.id} className="border-b border-themed last:border-0">
+            <button
+              onClick={() => setExpanded(isOpen ? null : draft.id)}
+              className="w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-canvas-themed transition-colors"
+            >
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium text-primary-themed">{propName(draft.property_id)}</span>
+                {draft.crew_members && (
+                  <span className="text-xs text-muted-themed ml-2">by {draft.crew_members.name}</span>
+                )}
+                {draft.submitted_at && (
+                  <span className="text-xs text-muted-themed ml-2">· {formatDate(draft.submitted_at)}</span>
+                )}
+              </div>
+              <span className="text-xs text-muted-themed">{draftItems.length} items</span>
+              <ChevronDown className={cn('w-4 h-4 text-muted-themed transition-transform', isOpen && 'rotate-180')} />
+            </button>
+
+            {isOpen && (
+              <div className="px-5 pb-4">
+                <div className="border border-themed rounded-xl overflow-hidden mb-3 overflow-x-auto">
+                  <div className="min-w-[400px]">
+                    <div className="grid grid-cols-[1fr_80px_80px_80px] gap-2 px-4 py-2 bg-canvas-themed text-xs font-semibold text-muted-themed uppercase tracking-wide border-b border-themed">
+                      <span>Item</span>
+                      <span className="text-right">Previous</span>
+                      <span className="text-right">Submitted</span>
+                      <span className="text-right">Change</span>
+                    </div>
+                    {draftItems.map(di => {
+                      const diff = di.submitted_quantity - di.previous_quantity
+                      return (
+                        <div key={di.id} className="grid grid-cols-[1fr_80px_80px_80px] gap-2 px-4 py-2.5 border-b border-themed last:border-0 text-sm items-center">
+                          <div>
+                            <span className="font-medium text-primary-themed">
+                              {di.inventory_items?.name ?? '—'}
+                            </span>
+                            {di.inventory_items?.unit && (
+                              <span className="text-xs text-muted-themed ml-1">({di.inventory_items.unit})</span>
+                            )}
+                          </div>
+                          <span className="text-right text-muted-themed tabular-nums">{di.previous_quantity}</span>
+                          <span
+                            className="text-right tabular-nums font-medium"
+                            style={{
+                              color: diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--accent-amber)',
+                            }}
+                          >
+                            {di.submitted_quantity}
+                          </span>
+                          <span
+                            className="text-right text-xs tabular-nums"
+                            style={{
+                              color: diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--text-muted)',
+                            }}
+                          >
+                            {diff > 0 ? `+${diff}` : diff === 0 ? '—' : String(diff)}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleApprove(draft.id)}
+                    disabled={isPending}
+                    className="btn-primary text-sm flex-1"
+                  >
+                    Approve & Commit
+                  </button>
+                  <button
+                    onClick={() => handleReject(draft.id)}
+                    disabled={isPending}
+                    className="btn-ghost text-sm"
+                    style={{ color: 'var(--accent-red)' }}
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Main InventoryManager ─────────────────────────────────────────────────────
+
+type InventoryTab = 'property' | 'portfolio' | 'template'
 
 export function InventoryManager({
   properties,
@@ -949,21 +1130,36 @@ export function InventoryManager({
   purchaseOrders,
   catalogItems,
   recentCounts,
+  allInventoryItems,
+  template,
+  pendingDrafts,
+  orgId,
 }: {
   properties: Property[]
   items: InventoryItem[]
   purchaseOrders: PurchaseOrder[]
   catalogItems: CatalogItem[]
   recentCounts: InventoryCount[]
+  allInventoryItems: PortfolioItem[]
+  template: Template | null
+  pendingDrafts: PendingDraft[]
+  orgId: string
 }) {
   const router = useRouter()
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<InventoryTab>('property')
 
   const totalItems    = items.length
   const totalCritical = items.filter((i) => getStockStatus(i) === 'critical').length
   const totalLow      = items.filter((i) => getStockStatus(i) === 'low').length
 
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
+
+  const tabs: Array<{ id: InventoryTab; label: string; icon: React.ReactNode }> = [
+    { id: 'property',  label: 'By Property', icon: <Package className="w-3.5 h-3.5" /> },
+    { id: 'portfolio', label: 'Portfolio',   icon: <BarChart2 className="w-3.5 h-3.5" /> },
+    { id: 'template',  label: 'Template',    icon: <Layers className="w-3.5 h-3.5" /> },
+  ]
 
   return (
     <>
@@ -984,23 +1180,65 @@ export function InventoryManager({
         </div>
       </div>
 
-      {properties.length === 0 ? (
-        <div className="card text-center py-16 max-w-md mx-auto mt-4">
-          <Package className="w-10 h-10 text-muted-themed mx-auto mb-3" />
-          <h3 className="font-semibold text-secondary-themed mb-1">No properties yet</h3>
-          <p className="text-sm text-muted-themed">Add a property to start managing inventory.</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {properties.map((p) => (
-            <PropertyInventoryCard
-              key={p.id}
-              property={p}
-              items={items.filter((i) => i.property_id === p.id)}
-              onSelect={() => setSelectedPropertyId(p.id)}
-            />
-          ))}
-        </div>
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 mb-5 border-b border-themed">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
+              activeTab === tab.id
+                ? 'border-brand-700 text-brand-800'
+                : 'border-transparent text-muted-themed hover:text-secondary-themed'
+            )}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Pending count reviews — show on property tab */}
+      {activeTab === 'property' && pendingDrafts.length > 0 && (
+        <PendingCountReview
+          drafts={pendingDrafts}
+          properties={properties}
+          onRefresh={() => router.refresh()}
+        />
+      )}
+
+      {activeTab === 'property' && (
+        properties.length === 0 ? (
+          <div className="card text-center py-16 max-w-md mx-auto mt-4">
+            <Package className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+            <h3 className="font-semibold text-secondary-themed mb-1">No properties yet</h3>
+            <p className="text-sm text-muted-themed">Add a property to start managing inventory.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {properties.map((p) => (
+              <PropertyInventoryCard
+                key={p.id}
+                property={p}
+                items={items.filter((i) => i.property_id === p.id)}
+                onSelect={() => setSelectedPropertyId(p.id)}
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      {activeTab === 'portfolio' && (
+        <PortfolioInventoryView items={allInventoryItems} />
+      )}
+
+      {activeTab === 'template' && (
+        <TemplateManager
+          template={template}
+          properties={properties}
+          orgId={orgId}
+        />
       )}
 
       {/* Full-screen detail modal for the selected property */}

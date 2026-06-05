@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useTransition, useActionState } from 'react'
+import { useState, useTransition, useActionState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
-  Pencil, Trash2,
+  Pencil, Trash2, Camera, List, BarChart2,
 } from 'lucide-react'
 import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
 import {
@@ -14,6 +14,8 @@ import {
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency } from '@/types/database'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
+import { MaintenanceCalendar } from './maintenance-calendar'
+import { createClient } from '@/lib/supabase/client'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -63,6 +65,12 @@ interface VendorOption {
   id: string
   name: string
   specialty: VendorSpecialty
+}
+
+interface CrewMemberOption {
+  id: string
+  name: string
+  role: string
 }
 
 interface ScheduleRow {
@@ -231,16 +239,56 @@ function WorkOrderCard({
 function CreateWorkOrderModal({
   properties,
   vendors,
+  crewMembers = [],
+  orgId = '',
   onClose,
 }: {
-  properties: PropertyOption[]
-  vendors: VendorOption[]
-  onClose: () => void
+  properties:   PropertyOption[]
+  vendors:      VendorOption[]
+  crewMembers?: CrewMemberOption[]
+  orgId?:       string
+  onClose:      () => void
 }) {
-  const [state, action, pending] = useActionState(createWorkOrder, null)
-  const [assignMode,         setAssignMode]         = useState<'assign' | 'quotes'>('assign')
+  const [state, action, pending]          = useActionState(createWorkOrder, null)
+  const [assignMode,         setAssignMode]         = useState<'vendor' | 'crew' | 'quotes'>('vendor')
   const [selectedVendor,     setSelectedVendor]     = useState('')
   const [selectedQuoteVendors, setSelectedQuoteVendors] = useState<string[]>([])
+  const [photoFiles,         setPhotoFiles]         = useState<File[]>([])
+  const photoInputRef = useRef<HTMLInputElement | null>(null)
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    setPhotoFiles(prev => [...prev, ...files])
+    e.target.value = ''
+  }
+
+  const removePhoto = (i: number) =>
+    setPhotoFiles(prev => prev.filter((_, idx) => idx !== i))
+
+  // After successful WO creation, upload photos
+  useEffect(() => {
+    if (!state?.success || !state.workOrderId || !photoFiles.length) return
+    const workOrderId = state.workOrderId
+    ;(async () => {
+      const supabase = createClient()
+      for (const file of photoFiles) {
+        const ext  = file.name.split('.').pop() ?? 'jpg'
+        const path = `wo-${workOrderId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { error: uploadErr } = await supabase.storage
+          .from('work-order-photos')
+          .upload(path, file, { contentType: file.type })
+        if (!uploadErr) {
+          await supabase.from('work_order_photos').insert({
+            work_order_id: workOrderId,
+            org_id:        orgId,
+            storage_path:  path,
+          })
+        }
+      }
+      onClose()
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.success, state?.workOrderId])
 
   const toggleQuoteVendor = (id: string) => {
     setSelectedQuoteVendors((prev) =>
@@ -265,7 +313,7 @@ function CreateWorkOrderModal({
         )}
 
         <form action={action} className="space-y-4">
-          {/* Hidden fields for quote mode */}
+          {/* Hidden fields for mode */}
           <input type="hidden" name="request_quotes" value={assignMode === 'quotes' ? 'true' : 'false'} />
           {assignMode === 'quotes' && selectedQuoteVendors.map((id) => (
             <input key={id} type="hidden" name="quote_vendor_ids" value={id} />
@@ -342,24 +390,39 @@ function CreateWorkOrderModal({
             </div>
           </div>
 
-          {/* Vendor assignment mode — only shown when vendors exist */}
-          {vendors.length > 0 && (
-            <div>
-              <label className="label">Vendor</label>
-              {/* Mode toggle */}
-              <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3">
+          {/* Assignment mode */}
+          <div>
+            <label className="label">Assign To</label>
+            <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3">
+              {vendors.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setAssignMode('assign')}
+                  onClick={() => setAssignMode('vendor')}
                   className={cn(
                     'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
-                    assignMode === 'assign'
+                    assignMode === 'vendor'
                       ? 'bg-brand-800 text-white'
                       : 'text-muted-themed hover:text-secondary-themed'
                   )}
                 >
-                  Assign directly
+                  Vendor
                 </button>
+              )}
+              {crewMembers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setAssignMode('crew')}
+                  className={cn(
+                    'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
+                    assignMode === 'crew'
+                      ? 'bg-brand-800 text-white'
+                      : 'text-muted-themed hover:text-secondary-themed'
+                  )}
+                >
+                  Internal Crew
+                </button>
+              )}
+              {vendors.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setAssignMode('quotes')}
@@ -370,11 +433,22 @@ function CreateWorkOrderModal({
                       : 'text-muted-themed hover:text-secondary-themed'
                   )}
                 >
-                  Request quotes first
+                  Request quotes
                 </button>
-              </div>
+              )}
+            </div>
 
-              {assignMode === 'assign' ? (
+          {assignMode === 'crew' ? (
+            <select name="assigned_crew_member_id" className="input">
+              <option value="">Select crew member…</option>
+              {crewMembers.map(c => (
+                <option key={c.id} value={c.id}>{c.name}{c.role ? ` — ${c.role}` : ''}</option>
+              ))}
+            </select>
+          ) : (
+            <>
+
+              {assignMode !== 'quotes' ? (
                 <>
                   <select
                     id="wo-vendor"
@@ -424,8 +498,45 @@ function CreateWorkOrderModal({
                   ))}
                 </div>
               )}
-            </div>
+            </>
           )}
+          </div>
+
+          {/* Photo attachments */}
+          <div>
+            <label className="label">Photos (optional)</label>
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handlePhotoSelect}
+            />
+            <div className="flex flex-wrap gap-2">
+              {photoFiles.map((file, i) => (
+                <div key={i} className="relative w-16 h-16 rounded-lg overflow-hidden border border-themed">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={URL.createObjectURL(file)} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removePhoto(i)}
+                    className="absolute top-0.5 right-0.5 w-4 h-4 bg-black/60 rounded-full flex items-center justify-center"
+                  >
+                    <X className="w-2.5 h-2.5 text-white" />
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="w-16 h-16 rounded-lg border-2 border-dashed border-themed flex items-center justify-center transition-colors hover:border-brand-400"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <Camera className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
 
           <div className="flex gap-3 pt-2 border-t border-themed">
             <button type="submit" disabled={pending} className="btn-primary flex-1">
@@ -845,23 +956,28 @@ export function MaintenanceBoard({
   properties,
   vendors,
   schedules,
+  crewMembers = [],
+  orgId = '',
   role,
 }: {
-  workOrders: WorkOrderRow[]
-  properties: PropertyOption[]
-  vendors: VendorOption[]
-  schedules: ScheduleRow[]
-  role: string
+  workOrders:   WorkOrderRow[]
+  properties:   PropertyOption[]
+  vendors:      VendorOption[]
+  schedules:    ScheduleRow[]
+  crewMembers?: CrewMemberOption[]
+  orgId?:       string
+  role:         string
 }) {
   const searchParams  = useSearchParams()
   const urlFilter     = searchParams.get('filter')
 
-  const [showCreate, setShowCreate] = useState(false)
-  const [activeTab, setActiveTab] = useState<string>('all')
+  const [showCreate,     setShowCreate]     = useState(false)
+  const [activeTab,      setActiveTab]      = useState<string>('all')
   const [filterProperty, setFilterProperty] = useState<string>('all')
   const [filterPriority, setFilterPriority] = useState<string>(
     urlFilter === 'urgent' ? 'high' : 'all'
   )
+  const [viewMode,       setViewMode]       = useState<'list' | 'calendar'>('list')
 
   const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
 
@@ -967,10 +1083,40 @@ export function MaintenanceBoard({
             <X className="w-3 h-3" /> Clear filters
           </button>
         )}
+
+        {/* View toggle */}
+        <div className="flex items-center gap-1 ml-auto bg-card-themed border border-themed rounded-lg px-1 py-1">
+          <button
+            onClick={() => setViewMode('list')}
+            className={cn(
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+              viewMode === 'list' ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
+            )}
+          >
+            <List className="w-3.5 h-3.5" /> List
+          </button>
+          <button
+            onClick={() => setViewMode('calendar')}
+            className={cn(
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+              viewMode === 'calendar' ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
+            )}
+          >
+            <BarChart2 className="w-3.5 h-3.5" /> Calendar
+          </button>
+        </div>
       </div>
 
+      {/* Calendar View */}
+      {viewMode === 'calendar' && (
+        <MaintenanceCalendar
+          workOrders={workOrders.filter(wo => wo.scheduled_date)}
+          schedules={schedules}
+        />
+      )}
+
       {/* Work Orders List */}
-      {filtered.length === 0 ? (
+      {viewMode === 'list' && (filtered.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
           <Wrench className="w-10 h-10 text-muted-themed mx-auto mb-3" />
           <h3 className="font-semibold text-secondary-themed mb-1">No work orders found</h3>
@@ -1036,7 +1182,7 @@ export function MaintenanceBoard({
             )
           })}
         </div>
-      )}
+      ))}
 
       {/* Maintenance Schedules */}
       <SchedulesSection schedules={schedules} properties={properties} vendors={vendors} />
@@ -1046,6 +1192,8 @@ export function MaintenanceBoard({
         <CreateWorkOrderModal
           properties={properties}
           vendors={vendors}
+          crewMembers={crewMembers}
+          orgId={orgId}
           onClose={() => setShowCreate(false)}
         />
       )}

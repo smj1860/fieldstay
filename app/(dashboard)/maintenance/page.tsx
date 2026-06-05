@@ -12,6 +12,7 @@ export default async function MaintenancePage() {
     { data: properties },
     { data: vendors },
     { data: schedules },
+    { data: crewMembers },
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -62,6 +63,13 @@ export default async function MaintenancePage() {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('next_due_date', { ascending: true, nullsFirst: false }),
+
+    supabase
+      .from('crew_members')
+      .select('id, name, role')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   return (
@@ -70,6 +78,9 @@ export default async function MaintenancePage() {
       properties={properties ?? []}
       vendors={vendors ?? []}
       schedules={schedules ?? []}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      crewMembers={(crewMembers ?? []) as any}
+      orgId={membership.org_id}
       role={membership.role}
     />
   )

@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { saveChecklistTemplate, completeChecklistStep } from './actions'
-import { Plus, Trash2, ChevronUp, ChevronDown, Camera } from 'lucide-react'
+import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate } from './actions'
+import { Plus, Trash2, ChevronUp, ChevronDown, Camera, X, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
@@ -74,18 +74,26 @@ function buildInitialSections(template: { checklist_template_sections?: Array<{ 
     }))
 }
 
+interface OtherProperty { id: string; name: string }
+
 export function ChecklistBuilder({
   propertyId,
   template,
+  otherProperties = [],
 }: {
   propertyId: string
   template: { id: string; name: string; checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null
+  otherProperties?: OtherProperty[]
 }) {
   const [sections, setSections] = useState<Section[]>(() => buildInitialSections(template))
   const [saving, startSave] = useTransition()
   const [completing, startComplete] = useTransition()
+  const [broadcasting, startBroadcast] = useTransition()
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [broadcastModal, setBroadcastModal] = useState(false)
+  const [broadcastTargets, setBroadcastTargets] = useState<Set<string>>(new Set())
+  const [broadcastResult, setBroadcastResult] = useState<string | null>(null)
 
   const toggleAllPhotos = () => {
     const totalItems = sections.reduce((n, s) => n + s.items.length, 0)
@@ -159,6 +167,21 @@ export function ChecklistBuilder({
       [next[idx], next[swap]] = [next[swap], next[idx]]
       return { ...s, items: next }
     }))
+  }
+
+  const handleBroadcast = () => {
+    if (broadcastTargets.size === 0) return
+    startBroadcast(async () => {
+      const result = await broadcastChecklistTemplate(propertyId, Array.from(broadcastTargets))
+      if (result.error) {
+        setError(result.error)
+      } else {
+        setBroadcastResult(`Applied to ${result.broadcast} propert${result.broadcast !== 1 ? 'ies' : 'y'}.`)
+        setTimeout(() => setBroadcastResult(null), 4000)
+      }
+      setBroadcastModal(false)
+      setBroadcastTargets(new Set())
+    })
   }
 
   const save = () => {
@@ -313,7 +336,14 @@ export function ChecklistBuilder({
         <Plus className="w-4 h-4" /> Add Section
       </button>
 
-      <div className="flex items-center gap-3 pt-4 border-t border-accent-100">
+      {broadcastResult && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm bg-green-50 border border-green-200 text-green-800">
+          <Check className="w-4 h-4 flex-shrink-0" />
+          {broadcastResult}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 pt-4 border-t border-accent-100 flex-wrap">
         <button onClick={save} disabled={saving} className="btn-secondary">
           {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Checklist'}
         </button>
@@ -324,7 +354,60 @@ export function ChecklistBuilder({
         >
           {completing ? 'Saving…' : 'Save & Continue →'}
         </button>
+        {otherProperties.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setBroadcastModal(true)}
+            className="btn-secondary text-xs ml-auto"
+          >
+            📋 Apply to Other Properties
+          </button>
+        )}
       </div>
+
+      {broadcastModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-accent-100">
+              <h3 className="font-semibold text-accent-900">Apply to Other Properties</h3>
+              <button onClick={() => setBroadcastModal(false)} className="p-1.5 rounded-lg text-accent-400 hover:text-accent-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4 space-y-2 max-h-60 overflow-y-auto">
+              <p className="text-xs text-accent-500 mb-3">
+                This will replace the existing checklist at each selected property.
+              </p>
+              {otherProperties.map(p => (
+                <label key={p.id} className="flex items-center gap-3 cursor-pointer py-1">
+                  <input
+                    type="checkbox"
+                    checked={broadcastTargets.has(p.id)}
+                    onChange={e => {
+                      const next = new Set(broadcastTargets)
+                      if (e.target.checked) next.add(p.id)
+                      else next.delete(p.id)
+                      setBroadcastTargets(next)
+                    }}
+                    className="w-4 h-4 rounded text-brand-700"
+                  />
+                  <span className="text-sm text-accent-800">{p.name}</span>
+                </label>
+              ))}
+            </div>
+            <div className="px-5 pb-5 pt-3 border-t border-accent-100 flex gap-3">
+              <button
+                onClick={handleBroadcast}
+                disabled={broadcasting || broadcastTargets.size === 0}
+                className="btn-primary flex-1 text-sm"
+              >
+                {broadcasting ? 'Applying…' : `Apply to ${broadcastTargets.size} propert${broadcastTargets.size !== 1 ? 'ies' : 'y'}`}
+              </button>
+              <button onClick={() => setBroadcastModal(false)} className="btn-ghost text-sm">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

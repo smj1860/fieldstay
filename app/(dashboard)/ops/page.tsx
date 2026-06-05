@@ -55,6 +55,20 @@ export default async function OpsSnapshotPage() {
       .limit(200),
   ])
 
+  // Occupancy for current month
+  const monthStart  = new Date(today.getFullYear(), today.getMonth(), 1)
+  const monthEnd    = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+  const monthStartIso = monthStart.toISOString().split('T')[0]!
+  const monthEndIso   = monthEnd.toISOString().split('T')[0]!
+
+  const { data: monthBookings } = await supabase
+    .from('bookings')
+    .select('id, property_id, checkin_date, checkout_date, status')
+    .eq('org_id', membership.org_id)
+    .eq('status', 'confirmed')
+    .gte('checkout_date', monthStartIso)
+    .lte('checkin_date',  monthEndIso)
+
   const lowStockItems = (inventoryItems ?? []).filter(
     (i) => i.current_quantity <= i.par_level
   )
@@ -71,6 +85,19 @@ export default async function OpsSnapshotPage() {
   const urgentWorkOrders = openWorkOrders.filter(
     w => w.priority === 'urgent' || w.priority === 'high'
   ).length
+
+  // Occupancy computation
+  const daysInMonth    = monthEnd.getDate()
+  const propCount      = (properties ?? []).length
+  const totalNights    = propCount * daysInMonth
+  const occupiedNights = (monthBookings ?? []).reduce((sum, b) => {
+    const cin  = new Date(Math.max(new Date(b.checkin_date).getTime(),  monthStart.getTime()))
+    const cout = new Date(Math.min(new Date(b.checkout_date).getTime(), monthEnd.getTime()))
+    return sum + Math.max(0, Math.ceil((cout.getTime() - cin.getTime()) / 86_400_000))
+  }, 0)
+  const occupancyRate      = totalNights > 0 ? Math.round((occupiedNights / totalNights) * 100) : 0
+  const confirmedBookings  = (monthBookings ?? []).length
+  const turnoversCompleted = allTurnovers.filter(t => t.status === 'completed').length
 
   return (
     <OpsSnapshot
@@ -92,6 +119,7 @@ export default async function OpsSnapshotPage() {
         urgentWorkOrders,
         belowPar:         lowStockItems.length,
       }}
+      metrics={{ occupancyRate, confirmedBookings, turnoversCompleted }}
     />
   )
 }

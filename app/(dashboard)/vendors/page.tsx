@@ -10,7 +10,7 @@ export default async function VendorsPage() {
 
   const { data: vendors } = await supabase
     .from('vendors')
-    .select('id, name, contact_name, email, phone, specialty, portal_enabled, is_active, notes')
+    .select('id, name, contact_name, email, phone, specialty, portal_enabled, is_active, notes, work_orders(vendor_rating)')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .order('name')

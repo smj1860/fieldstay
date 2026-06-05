@@ -29,16 +29,11 @@ export default function CrewInventoryPage() {
 
   const handleSubmit = async () => {
     setSubmitting(true)
-    for (const [itemId, qty] of Object.entries(counts)) {
-      await db.execute(
-        'UPDATE inventory_items SET current_quantity = ? WHERE id = ?',
-        [qty, itemId]
-      )
-    }
+    // Submit as draft for manager review instead of immediately committing
     await fetch('/api/crew/inventory-count', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ propertyId, counts, notes }),
+      body:    JSON.stringify({ propertyId, counts, notes, submitAsDraft: true }),
     })
     router.push('/crew')
   }
