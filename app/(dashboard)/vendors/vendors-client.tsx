@@ -478,20 +478,58 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
 
 // ── Star rating ───────────────────────────────────────────────────────────────
 
-function StarRating({ rating, count }: { rating: number; count: number }) {
-  if (!count) {
-    return <span className="text-xs" style={{ color: 'var(--text-muted)' }}>No ratings</span>
+const STAR_PATH = 'M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.563.563 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z'
+
+function StarRating({ rating, count }: { rating: number | null; count: number }) {
+  if (!rating || count === 0) {
+    return (
+      <span className="text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+        <span className="flex">
+          {[1,2,3,4,5].map((s) => (
+            <svg key={s} className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"
+                 style={{ color: 'var(--border-strong)' }}>
+              <path strokeLinecap="round" strokeLinejoin="round" d={STAR_PATH} />
+            </svg>
+          ))}
+        </span>
+        <span>No ratings</span>
+      </span>
+    )
   }
-  const rounded = Math.round(rating)
+
+  const full  = Math.floor(rating)
+  const half  = rating - full >= 0.5
+  const empty = 5 - full - (half ? 1 : 0)
+
   return (
-    <div className="flex items-center gap-1">
-      <span className="text-sm" style={{ color: '#FCD116' }}>
-        {'★'.repeat(rounded)}{'☆'.repeat(5 - rounded)}
+    <span className="text-xs flex items-center gap-1">
+      <span className="flex">
+        {Array.from({ length: full }).map((_, i) => (
+          <svg key={`f${i}`} className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"
+               style={{ color: 'var(--accent-gold)' }}>
+            <path d={STAR_PATH} />
+          </svg>
+        ))}
+        {half && (
+          <svg key="half" className="w-3 h-3" viewBox="0 0 24 24" style={{ color: 'var(--accent-gold)' }}>
+            <defs>
+              <linearGradient id="halfGrad">
+                <stop offset="50%" stopColor="currentColor"/>
+                <stop offset="50%" stopColor="transparent"/>
+              </linearGradient>
+            </defs>
+            <path fill="url(#halfGrad)" stroke="currentColor" strokeWidth={1.5} d={STAR_PATH} />
+          </svg>
+        )}
+        {Array.from({ length: empty }).map((_, i) => (
+          <svg key={`e${i}`} className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24"
+               style={{ color: 'var(--border-strong)' }}>
+            <path strokeLinecap="round" strokeLinejoin="round" d={STAR_PATH} />
+          </svg>
+        ))}
       </span>
-      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-        {rating.toFixed(1)} ({count})
-      </span>
-    </div>
+      <span style={{ color: 'var(--text-muted)' }}>{rating.toFixed(1)} ({count})</span>
+    </span>
   )
 }
 
@@ -512,17 +550,12 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
     startDeact(async () => { await deactivateVendor(vendor.id) })
   }
 
-  const ratings     = (vendor.work_orders ?? []).filter(wo => wo.vendor_rating != null)
-  const avgRating   = ratings.length
-    ? ratings.reduce((acc, wo) => acc + (wo.vendor_rating ?? 0), 0) / ratings.length
-    : 0
-
   return (
     <tr className="hover:bg-raised-themed transition-colors cursor-pointer" onClick={() => onSelect?.(vendor)}>
       <td className="py-2.5 pr-4">
         <div className="font-medium text-primary-themed">{vendor.name}</div>
         {vendor.contact_name && <div className="text-xs text-muted-themed">{vendor.contact_name}</div>}
-        <StarRating rating={avgRating} count={ratings.length} />
+        <StarRating rating={vendor.avg_rating ?? null} count={vendor.rating_count ?? 0} />
       </td>
       <td className="py-2.5 pr-4">
         <span className="badge badge-blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>

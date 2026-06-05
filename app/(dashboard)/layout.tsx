@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { ReviewPrompt } from '@/components/review-prompt'
+import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 
 const MILESTONE_MESSAGES: Record<string, string> = {
   first_ical_sync:            'Your first bookings are syncing.',
@@ -25,7 +26,7 @@ export default async function DashboardLayout({
 
   const { data: membership } = await supabase
     .from('organization_members')
-    .select('org_id, role, organizations(name, plan, plan_status, max_properties, trial_ends_at, repuguard_status)')
+    .select('org_id, role, organizations(name, plan, plan_status, max_properties, trial_ends_at, repuguard_status, onboarding_steps_completed)')
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
     .single()
@@ -38,6 +39,10 @@ export default async function DashboardLayout({
 
   const repuguardActive =
     org?.repuguard_status === 'trial' || org?.repuguard_status === 'active'
+
+  const completedSteps  = (org?.onboarding_steps_completed ?? {}) as Record<string, boolean>
+  const onboardingPct   = calcOnboardingProgress(completedSteps)
+  const onboardingComplete = ONBOARDING_STEPS.every((s) => completedSteps[s.key])
 
   // ── Billing gate ──────────────────────────────────────────────────────────
   const planStatus  = org?.plan_status  ?? 'trialing'
@@ -82,6 +87,8 @@ export default async function DashboardLayout({
       orgName={org?.name ?? 'FieldStay'}
       userEmail={user.email ?? ''}
       repuguardActive={repuguardActive}
+      onboardingComplete={onboardingComplete}
+      onboardingPct={onboardingPct}
     >
       {isPastDue && (
         <div
