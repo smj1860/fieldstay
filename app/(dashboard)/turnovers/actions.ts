@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 
-export type TurnoverActionState = { error?: string; success?: boolean }
+export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
 // ── Crew assignment ──────────────────────────────────────────────────────────
 
@@ -262,7 +262,7 @@ export async function addCrewToTurnover(
 
   const { data: turnovers } = await supabase
     .from('turnovers')
-    .select('id, status')
+    .select('id, status, checkout_datetime, checkin_datetime')
     .in('id', turnoverIds)
     .eq('org_id', membership.org_id)
 
@@ -270,7 +270,7 @@ export async function addCrewToTurnover(
 
   const { data: crew } = await supabase
     .from('crew_members')
-    .select('id')
+    .select('id, name')
     .eq('id', crewMemberId)
     .eq('org_id', membership.org_id)
     .single()
@@ -300,7 +300,34 @@ export async function addCrewToTurnover(
     }
   }
 
+  // Conflict detection — check for overlapping assignments for this crew member
+  const { data: existingAssignments } = await supabase
+    .from('turnover_assignments')
+    .select('turnover_id, turnovers!inner(checkout_datetime, checkin_datetime, status)')
+    .eq('crew_member_id', crewMemberId)
+    .not('turnovers.status', 'in', '("completed","cancelled")')
+
+  let conflictCount = 0
+  for (const newT of turnovers) {
+    const newStart = new Date((newT as unknown as { checkout_datetime: string }).checkout_datetime).getTime()
+    const newEnd   = new Date((newT as unknown as { checkin_datetime: string }).checkin_datetime ?? (newT as unknown as { checkout_datetime: string }).checkout_datetime).getTime()
+    for (const a of (existingAssignments ?? [])) {
+      if (a.turnover_id === newT.id) continue
+      const existing_turnovers = Array.isArray(a.turnovers) ? a.turnovers[0] : a.turnovers
+      if (!existing_turnovers) continue
+      const existStart = new Date(existing_turnovers.checkout_datetime).getTime()
+      const existEnd   = new Date(existing_turnovers.checkin_datetime).getTime()
+      if (newStart < existEnd && newEnd > existStart) conflictCount++
+    }
+  }
+
   revalidatePath('/turnovers')
+  if (conflictCount > 0) {
+    return {
+      success: true,
+      warning: `${crew.name} may have a scheduling conflict with ${conflictCount} other turnover(s).`,
+    }
+  }
   return { success: true }
 }
 

@@ -391,9 +391,28 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
   )
 }
 
+// ── Star rating ───────────────────────────────────────────────────────────────
+
+function StarRating({ rating, count }: { rating: number; count: number }) {
+  if (!count) {
+    return <span className="text-xs" style={{ color: 'var(--text-muted)' }}>No ratings</span>
+  }
+  const rounded = Math.round(rating)
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-sm" style={{ color: '#FCD116' }}>
+        {'★'.repeat(rounded)}{'☆'.repeat(5 - rounded)}
+      </span>
+      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        {rating.toFixed(1)} ({count})
+      </span>
+    </div>
+  )
+}
+
 // ── Vendor row ────────────────────────────────────────────────────────────────
 
-function VendorRow({ vendor }: { vendor: Vendor }) {
+function VendorRow({ vendor }: { vendor: Vendor & { work_orders?: Array<{ vendor_rating: number | null }> } }) {
   const [portalEnabled, setPortalEnabled] = useState(vendor.portal_enabled)
   const [togglingPortal, startToggle]     = useTransition()
   const [deactivating,   startDeact]      = useTransition()
@@ -408,11 +427,17 @@ function VendorRow({ vendor }: { vendor: Vendor }) {
     startDeact(async () => { await deactivateVendor(vendor.id) })
   }
 
+  const ratings     = (vendor.work_orders ?? []).filter(wo => wo.vendor_rating != null)
+  const avgRating   = ratings.length
+    ? ratings.reduce((acc, wo) => acc + (wo.vendor_rating ?? 0), 0) / ratings.length
+    : 0
+
   return (
     <tr className="hover:bg-raised-themed transition-colors">
       <td className="py-2.5 pr-4">
         <div className="font-medium text-primary-themed">{vendor.name}</div>
         {vendor.contact_name && <div className="text-xs text-muted-themed">{vendor.contact_name}</div>}
+        <StarRating rating={avgRating} count={ratings.length} />
       </td>
       <td className="py-2.5 pr-4">
         <span className="badge badge-blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>

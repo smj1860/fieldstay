@@ -8,7 +8,7 @@ import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import type { WoStatus, ScheduleFrequency, ScheduleType } from '@/types/database'
 
-export type MaintenanceActionState = { error?: string; success?: boolean }
+export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -22,13 +22,14 @@ export async function createWorkOrder(
 ): Promise<MaintenanceActionState> {
   const { supabase, membership } = await requireOrgMember()
 
-  const title          = (formData.get('title') as string)?.trim()
-  const property_id    = formData.get('property_id') as string
-  const description    = (formData.get('description') as string)?.trim() || null
-  const priority       = (formData.get('priority') as string) || 'medium'
-  const vendor_id      = (formData.get('vendor_id') as string) || null
-  const scheduled_date = (formData.get('scheduled_date') as string) || null
-  const estimated_cost = formData.get('estimated_cost')
+  const title                  = (formData.get('title') as string)?.trim()
+  const property_id            = formData.get('property_id') as string
+  const description            = (formData.get('description') as string)?.trim() || null
+  const priority               = (formData.get('priority') as string) || 'medium'
+  const vendor_id              = (formData.get('vendor_id') as string) || null
+  const assigned_crew_member_id = (formData.get('assigned_crew_member_id') as string) || null
+  const scheduled_date         = (formData.get('scheduled_date') as string) || null
+  const estimated_cost         = formData.get('estimated_cost')
     ? parseFloat(formData.get('estimated_cost') as string)
     : null
   const portal_enabled   = formData.get('portal_enabled') === 'on' || formData.get('portal_enabled') === 'true'
@@ -63,16 +64,17 @@ export async function createWorkOrder(
     .from('work_orders')
     .insert({
       property_id,
-      org_id:          membership.org_id,
-      vendor_id:       request_quotes ? null : (vendor_id || null),
+      org_id:                  membership.org_id,
+      vendor_id:               request_quotes ? null : (vendor_id || null),
+      assigned_crew_member_id: assigned_crew_member_id || null,
       title,
       description,
-      priority:        priority as never,
-      status:          woStatus as never,
-      source:          'manual',
-      scheduled_date:  scheduled_date || null,
+      priority:                priority as never,
+      status:                  woStatus as never,
+      source:                  'manual',
+      scheduled_date:          scheduled_date || null,
       estimated_cost,
-      portal_enabled:  usePortal,
+      portal_enabled:          usePortal,
       completion_token,
       completion_token_expires_at,
     })
@@ -133,7 +135,53 @@ export async function createWorkOrder(
   }
 
   revalidatePath('/maintenance')
-  redirect('/maintenance')
+  return { success: true, workOrderId: wo.id }
+}
+
+// ── Rate Work Order Vendor ────────────────────────────────────────────────────
+
+export async function rateWorkOrderVendor(
+  workOrderId: string,
+  rating: 1 | 2 | 3 | 4 | 5,
+  ratingNotes: string | null
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({
+      vendor_rating:       rating,
+      vendor_rating_notes: ratingNotes ?? null,
+    })
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/maintenance')
+  revalidatePath('/vendors')
+  return {}
+}
+
+// ── Assign Crew to Work Order ─────────────────────────────────────────────────
+
+export async function assignCrewToWorkOrder(
+  workOrderId: string,
+  crewMemberId: string | null
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({
+      assigned_crew_member_id: crewMemberId || null,
+      vendor_id:               crewMemberId ? null : undefined,
+    })
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+  revalidatePath('/maintenance')
+  return {}
 }
 
 // ── Update Work Order ────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import {
   MapPin, Wrench, Calendar, AlertTriangle, CheckCircle2,
   Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight,
-  ShieldAlert, ClipboardList, User,
+  ShieldAlert, ClipboardList, User, Star, Camera,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LineItemsEditor, type WorkOrderLineItem } from './line-items-editor'
@@ -12,6 +12,7 @@ import {
   markVendorAcknowledged,
   markWorkVerified,
 } from '@/app/(dashboard)/maintenance/work-order-actions'
+import { rateWorkOrderVendor } from '@/app/(dashboard)/maintenance/actions'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -59,6 +60,8 @@ export interface WorkOrderDetailData {
     name:      string
     specialty: VendorSpecialty
   } | null
+  vendor_rating?:       number | null
+  vendor_rating_notes?: string | null
   work_order_photos?: Array<{
     id:           string
     storage_path: string
@@ -123,6 +126,12 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
   const [isPending, startTransition] = useTransition()
   const [actionError, setActionError] = useState<string | null>(null)
   const [nteOverrideConfirmed, setNteOverrideConfirmed] = useState(false)
+  const [hoverRating, setHoverRating] = useState(0)
+  const [savedRating, setSavedRating] = useState<number | null>(wo.vendor_rating ?? null)
+  const [ratingNotes, setRatingNotes] = useState(wo.vendor_rating_notes ?? '')
+  const [ratingPending, startRatingTransition] = useTransition()
+  const [ratingError, setRatingError] = useState<string | null>(null)
+  const [ratingSuccess, setRatingSuccess] = useState(false)
 
   const canEdit  = userRole === 'admin' || userRole === 'manager'
   const priority = PRIORITY_STYLES[wo.priority]
@@ -152,6 +161,25 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
       try { await markWorkVerified(wo.id) }
       catch (e) { setActionError(e instanceof Error ? e.message : 'Failed.') }
     })
+  }
+
+  function handleRating(star: number) {
+    setSavedRating(star)
+    setRatingError(null)
+    setRatingSuccess(false)
+    startRatingTransition(async () => {
+      try {
+        await rateWorkOrderVendor(wo.id, star as 1 | 2 | 3 | 4 | 5, ratingNotes)
+        setRatingSuccess(true)
+      } catch (e) {
+        setRatingError(e instanceof Error ? e.message : 'Failed to save rating.')
+      }
+    })
+  }
+
+  function handleRatingNotesSave() {
+    if (!savedRating) return
+    handleRating(savedRating)
   }
 
   // ── Render ───────────────────────────────────────────────────
@@ -504,6 +532,98 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
             )}
           </div>
         </Section>
+
+        {/* ── Photos ────────────────────────────────────────────── */}
+        {(wo.work_order_photos ?? []).length > 0 && (
+          <Section icon={<Camera className="w-4 h-4" />} title="Photos">
+            <div className="flex flex-wrap gap-2">
+              {wo.work_order_photos!.map(photo => {
+                const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/work-order-photos/${photo.storage_path}`
+                return (
+                  <a
+                    key={photo.id}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block w-20 h-20 rounded-lg overflow-hidden flex-shrink-0"
+                    style={{ border: '1px solid var(--border)' }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={url}
+                      alt="Work order photo"
+                      className="w-full h-full object-cover"
+                    />
+                  </a>
+                )
+              })}
+            </div>
+          </Section>
+        )}
+
+        {/* ── Vendor Rating ─────────────────────────────────────── */}
+        {wo.status === 'completed' && wo.vendors && canEdit && (
+          <Section icon={<Star className="w-4 h-4" />} title="Vendor Rating">
+            <div className="space-y-3">
+              <div className="flex items-center gap-1">
+                {[1, 2, 3, 4, 5].map(star => (
+                  <button
+                    key={star}
+                    type="button"
+                    onClick={() => handleRating(star)}
+                    onMouseEnter={() => setHoverRating(star)}
+                    onMouseLeave={() => setHoverRating(0)}
+                    disabled={ratingPending}
+                    className="p-0.5 transition-transform hover:scale-110"
+                  >
+                    <Star
+                      className="w-6 h-6"
+                      style={{
+                        color: star <= (hoverRating || savedRating || 0)
+                          ? 'var(--accent-gold)'
+                          : 'var(--border)',
+                        fill: star <= (hoverRating || savedRating || 0)
+                          ? 'var(--accent-gold)'
+                          : 'transparent',
+                      }}
+                    />
+                  </button>
+                ))}
+                {savedRating && (
+                  <span className="ml-2 text-sm" style={{ color: 'var(--text-muted)' }}>
+                    {savedRating}/5
+                  </span>
+                )}
+                {ratingPending && <Loader2 className="w-4 h-4 ml-2 animate-spin" style={{ color: 'var(--text-muted)' }} />}
+              </div>
+
+              <div className="space-y-1.5">
+                <textarea
+                  value={ratingNotes}
+                  onChange={e => setRatingNotes(e.target.value)}
+                  placeholder="Optional notes about the vendor's performance…"
+                  rows={2}
+                  className="input w-full text-sm resize-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleRatingNotesSave}
+                  disabled={ratingPending || !savedRating}
+                  className="btn-secondary text-xs py-1 px-3"
+                >
+                  Save Notes
+                </button>
+              </div>
+
+              {ratingSuccess && (
+                <p className="text-xs" style={{ color: 'var(--accent-green)' }}>Rating saved.</p>
+              )}
+              {ratingError && (
+                <p className="text-xs text-red-400">{ratingError}</p>
+              )}
+            </div>
+          </Section>
+        )}
       </div>
     </div>
   )

@@ -13,6 +13,9 @@ export default async function InventoryPage() {
     { data: purchaseOrders },
     { data: catalogItems },
     { data: recentCounts },
+    { data: allInventoryItems },
+    { data: templates },
+    { data: pendingDrafts },
   ] = await Promise.all([
     supabase
       .from('properties')
@@ -49,7 +52,34 @@ export default async function InventoryPage() {
       .eq('org_id', membership.org_id)
       .order('submitted_at', { ascending: false })
       .limit(50),
+    supabase
+      .from('inventory_items')
+      .select('id, name, category, unit, par_level, current_quantity, property_id, properties(name)')
+      .eq('org_id', membership.org_id)
+      .order('property_id')
+      .order('category')
+      .order('name'),
+    supabase
+      .from('inventory_templates')
+      .select('id, name, inventory_template_items(id, name, category, unit, par_level, notes, sort_order)')
+      .eq('org_id', membership.org_id)
+      .limit(1),
+    supabase
+      .from('inventory_count_drafts')
+      .select(`
+        id, property_id, status, submitted_at, notes,
+        crew_members(name),
+        inventory_count_draft_items(
+          id, inventory_item_id, previous_quantity, submitted_quantity,
+          inventory_items(name, unit)
+        )
+      `)
+      .eq('org_id', membership.org_id)
+      .eq('status', 'pending_review')
+      .order('submitted_at', { ascending: false }),
   ])
+
+  const template = templates?.[0] ?? null
 
   return (
     <div>
@@ -59,6 +89,13 @@ export default async function InventoryPage() {
         purchaseOrders={purchaseOrders ?? []}
         catalogItems={catalogItems ?? []}
         recentCounts={recentCounts ?? []}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        allInventoryItems={(allInventoryItems ?? []) as any}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        template={template as any}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        pendingDrafts={(pendingDrafts ?? []) as any}
+        orgId={membership.org_id}
       />
     </div>
   )

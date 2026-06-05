@@ -170,3 +170,189 @@ export async function submitInventoryCount(
   revalidatePath('/inventory')
   return { success: true }
 }
+
+// ── Template actions ──────────────────────────────────────────────────────────
+
+export async function createOrGetTemplate(): Promise<{
+  template?: { id: string; name: string; inventory_template_items: null }
+  error?: string
+}> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: existing } = await supabase
+    .from('inventory_templates')
+    .select('id, name, inventory_template_items(*)')
+    .eq('org_id', membership.org_id)
+    .limit(1)
+    .single()
+
+  if (existing) return { template: existing as unknown as { id: string; name: string; inventory_template_items: null } }
+
+  const { data: created, error } = await supabase
+    .from('inventory_templates')
+    .insert({ org_id: membership.org_id, name: 'Master Inventory List' })
+    .select('id, name')
+    .single()
+
+  if (error) return { error: error.message }
+  revalidatePath('/inventory')
+  return { template: { ...created!, inventory_template_items: null } }
+}
+
+export async function addTemplateItem(
+  templateId: string,
+  item: { name: string; category: string; unit: string; par_level: number }
+): Promise<{ item?: { id: string; name: string; category: string; unit: string; par_level: number; notes: null }; error?: string }> {
+  const { supabase } = await requireOrgMember()
+
+  const { data, error } = await supabase
+    .from('inventory_template_items')
+    .insert({
+      template_id: templateId,
+      name:        item.name,
+      category:    item.category,
+      unit:        item.unit,
+      par_level:   item.par_level,
+    })
+    .select('id, name, category, unit, par_level, notes')
+    .single()
+
+  if (error) return { error: error.message }
+  revalidatePath('/inventory')
+  return { item: data! as { id: string; name: string; category: string; unit: string; par_level: number; notes: null } }
+}
+
+export async function removeTemplateItem(itemId: string): Promise<{ error?: string }> {
+  const { supabase } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('inventory_template_items')
+    .delete()
+    .eq('id', itemId)
+
+  if (error) return { error: error.message }
+  revalidatePath('/inventory')
+  return {}
+}
+
+export async function applyTemplateToProperty(
+  templateId: string,
+  propertyId: string
+): Promise<{ added: number; skipped: number; error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: templateItems } = await supabase
+    .from('inventory_template_items')
+    .select('*')
+    .eq('template_id', templateId)
+
+  if (!templateItems?.length) return { added: 0, skipped: 0 }
+
+  const { data: existingItems } = await supabase
+    .from('inventory_items')
+    .select('name')
+    .eq('property_id', propertyId)
+    .eq('org_id', membership.org_id)
+
+  const existingNames = new Set((existingItems ?? []).map(i => i.name.toLowerCase()))
+
+  let added = 0, skipped = 0
+
+  for (const item of templateItems) {
+    if (existingNames.has(item.name.toLowerCase())) { skipped++; continue }
+    await supabase.from('inventory_items').insert({
+      property_id:      propertyId,
+      org_id:           membership.org_id,
+      name:             item.name,
+      category:         item.category,
+      unit:             item.unit,
+      par_level:        item.par_level,
+      current_quantity: 0,
+      notes:            item.notes,
+      catalog_item_id:  item.catalog_item_id,
+      is_active:        true,
+      low_stock_threshold_pct: 20,
+    })
+    added++
+  }
+
+  revalidatePath('/inventory')
+  return { added, skipped }
+}
+
+// ── Count approval actions ────────────────────────────────────────────────────
+
+export async function approveInventoryCount(draftId: string): Promise<{ error?: string }> {
+  const { supabase, user } = await requireOrgMember()
+
+  const { data: draftItems } = await supabase
+    .from('inventory_count_draft_items')
+    .select('inventory_item_id, submitted_quantity')
+    .eq('draft_id', draftId)
+
+  if (!draftItems) return { error: 'Draft not found' }
+
+  for (const item of draftItems) {
+    await supabase
+      .from('inventory_items')
+      .update({ current_quantity: item.submitted_quantity })
+      .eq('id', item.inventory_item_id)
+  }
+
+  await supabase
+    .from('inventory_count_drafts')
+    .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: user.id })
+    .eq('id', draftId)
+
+  revalidatePath('/inventory')
+  return {}
+}
+
+export async function rejectInventoryCount(draftId: string): Promise<{ error?: string }> {
+  const { supabase, user } = await requireOrgMember()
+
+  await supabase
+    .from('inventory_count_drafts')
+    .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: user.id })
+    .eq('id', draftId)
+
+  revalidatePath('/inventory')
+  return {}
+}
+
+// ── Aggregated purchase list ──────────────────────────────────────────────────
+
+export interface AggregatedItem {
+  name: string
+  unit: string
+  totalNeeded: number
+  properties: Array<{ name: string; needed: number }>
+}
+
+export async function generateAggregatedPurchaseList(): Promise<{ items: AggregatedItem[]; error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: items, error } = await supabase
+    .from('inventory_items')
+    .select('name, unit, current_quantity, par_level, property_id, properties(name)')
+    .eq('org_id', membership.org_id)
+    .filter('current_quantity', 'lte', 'par_level')
+
+  if (error) return { items: [], error: error.message }
+
+  const grouped: Record<string, AggregatedItem> = {}
+  for (const item of items ?? []) {
+    const key = item.name.toLowerCase()
+    if (!grouped[key]) {
+      grouped[key] = { name: item.name, unit: item.unit, totalNeeded: 0, properties: [] }
+    }
+    const needed = Math.max(0, item.par_level - item.current_quantity)
+    grouped[key]!.totalNeeded += needed
+    const pName = Array.isArray(item.properties)
+      ? (item.properties[0] as { name: string } | undefined)?.name ?? '—'
+      : (item.properties as { name: string } | null)?.name ?? '—'
+    grouped[key]!.properties.push({ name: pName, needed })
+  }
+
+  return { items: Object.values(grouped).sort((a, b) => a.name.localeCompare(b.name)) }
+}

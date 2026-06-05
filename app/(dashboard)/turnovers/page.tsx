@@ -13,10 +13,14 @@ export default async function TurnoversPage() {
   const until = new Date()
   until.setDate(until.getDate() + 60)
 
+  const rangeStart = since.toISOString().split('T')[0]!
+  const rangeEnd   = until.toISOString().split('T')[0]!
+
   const [
     { data: turnovers },
     { data: properties },
     { data: crew },
+    { data: bookings },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -41,6 +45,14 @@ export default async function TurnoversPage() {
       .eq('is_active', true)
       .order('name'),
     supabase
+      .from('bookings')
+      .select('id, property_id, checkin_date, checkout_date, guest_name, status, source')
+      .eq('org_id', membership.org_id)
+      .gte('checkout_date', rangeStart)
+      .lte('checkin_date',  rangeEnd)
+      .in('status', ['confirmed', 'tentative'])
+      .order('checkin_date', { ascending: true }),
+    supabase
       .from('crew_members')
       .select('id, name, phone, email, specialty')
       .eq('org_id', membership.org_id)
@@ -62,6 +74,8 @@ export default async function TurnoversPage() {
         crewMembers={(crew ?? []) as any}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         properties={(properties ?? []) as any}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        bookings={(bookings ?? []) as any}
         orgId={membership.org_id}
       />
     </div>

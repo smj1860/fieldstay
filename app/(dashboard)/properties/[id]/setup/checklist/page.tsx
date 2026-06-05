@@ -1,4 +1,4 @@
-import { requireProperty } from '@/lib/auth'
+import { requireProperty, requireOrgMember } from '@/lib/auth'
 import { ChecklistBuilder } from './checklist-builder'
 import type { Metadata } from 'next'
 
@@ -8,13 +8,23 @@ interface Props { params: Promise<{ id: string }> }
 export default async function ChecklistPage({ params }: Props) {
   const { id } = await params
   const { property, supabase } = await requireProperty(id)
+  const { membership } = await requireOrgMember()
 
-  const { data: template } = await supabase
-    .from('checklist_templates')
-    .select(`id, name, checklist_template_sections ( id, name, sort_order, checklist_template_items ( id, task, requires_photo, notes, sort_order ) )`)
-    .eq('property_id', property.id)
-    .eq('is_default', true)
-    .single()
+  const [{ data: template }, { data: otherProperties }] = await Promise.all([
+    supabase
+      .from('checklist_templates')
+      .select(`id, name, checklist_template_sections ( id, name, sort_order, checklist_template_items ( id, task, requires_photo, notes, sort_order ) )`)
+      .eq('property_id', property.id)
+      .eq('is_default', true)
+      .single(),
+    supabase
+      .from('properties')
+      .select('id, name')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .neq('id', property.id)
+      .order('name'),
+  ])
 
   return (
     <div className="card">
@@ -23,7 +33,11 @@ export default async function ChecklistPage({ params }: Props) {
         Build the checklist your crew follows for every turnover. Organize by room or area.
         Flag items that require a photo for accountability.
       </p>
-      <ChecklistBuilder propertyId={property.id} template={template ?? null} />
+      <ChecklistBuilder
+        propertyId={property.id}
+        template={template ?? null}
+        otherProperties={otherProperties ?? []}
+      />
     </div>
   )
 }

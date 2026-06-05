@@ -7,10 +7,11 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { propertyId, counts, notes } = await request.json() as {
+  const { propertyId, counts, notes, submitAsDraft } = await request.json() as {
     propertyId: string
     counts: Record<string, number>
     notes: string
+    submitAsDraft?: boolean
   }
 
   const { data: crew } = await supabase
@@ -21,6 +22,46 @@ export async function POST(request: NextRequest) {
 
   if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 403 })
 
+  if (submitAsDraft) {
+    // Fetch previous quantities for the diff
+    const itemIds = Object.keys(counts)
+    const { data: currentItems } = await supabase
+      .from('inventory_items')
+      .select('id, current_quantity')
+      .in('id', itemIds)
+
+    const prevMap = Object.fromEntries((currentItems ?? []).map(i => [i.id, i.current_quantity]))
+
+    const { data: draft } = await supabase
+      .from('inventory_count_drafts')
+      .insert({
+        org_id:         crew.org_id,
+        property_id:    propertyId,
+        crew_member_id: crew.id,
+        status:         'pending_review',
+        submitted_at:   new Date().toISOString(),
+        notes:          notes || null,
+      })
+      .select('id')
+      .single()
+
+    if (!draft) return NextResponse.json({ error: 'Failed to create draft' }, { status: 500 })
+
+    const draftItems = Object.entries(counts).map(([id, qty]) => ({
+      draft_id:           draft.id,
+      inventory_item_id:  id,
+      previous_quantity:  prevMap[id] ?? 0,
+      submitted_quantity: qty,
+    }))
+
+    if (draftItems.length > 0) {
+      await supabase.from('inventory_count_draft_items').insert(draftItems)
+    }
+
+    return NextResponse.json({ success: true, draftId: draft.id })
+  }
+
+  // Legacy direct-commit path
   const { data: count } = await supabase
     .from('inventory_counts')
     .insert({

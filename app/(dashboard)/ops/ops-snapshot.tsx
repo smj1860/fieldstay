@@ -40,6 +40,12 @@ interface KPIs {
   belowPar:         number
 }
 
+interface Metrics {
+  occupancyRate:     number
+  confirmedBookings: number
+  turnoversCompleted: number
+}
+
 // ── KPI Card ───────────────────────────────────────────────────
 
 function KpiCard({
@@ -265,6 +271,7 @@ export function OpsSnapshot({
   lowStockItems,
   kpis,
   todayDate,
+  metrics,
 }: {
   turnovers:      Turnover[]
   properties:     Property[]
@@ -272,6 +279,7 @@ export function OpsSnapshot({
   lowStockItems:  LowStockItem[]
   kpis:           KPIs
   todayDate:      string
+  metrics?:       Metrics
 }) {
   const [windowDays, setWindowDays] = useState<7 | 14 | 30>(7)
 
@@ -380,6 +388,47 @@ export function OpsSnapshot({
           breakdown={kpis.belowPar > 0 ? 'Tap to view inventory' : undefined}
         />
       </div>
+
+      {/* This Month metrics */}
+      {metrics && (
+        <div
+          className="rounded-xl p-4 mb-6"
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+        >
+          <p
+            className="text-xs font-semibold uppercase tracking-wide mb-3"
+            style={{ color: 'var(--text-muted)' }}
+          >
+            {new Date().toLocaleDateString('en-US', { month: 'long' })} at a glance
+          </p>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                {metrics.occupancyRate}%
+              </div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Portfolio Occupancy
+              </div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                {metrics.confirmedBookings}
+              </div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Confirmed Bookings
+              </div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
+                {metrics.turnoversCompleted}
+              </div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Turnovers Completed
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Accordion list */}
       <div className="space-y-2">

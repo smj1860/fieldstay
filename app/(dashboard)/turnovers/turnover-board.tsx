@@ -1,22 +1,33 @@
 'use client'
 
-import { useState, useTransition, useActionState } from 'react'
+import { useState, useTransition, useActionState, useRef, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, RefreshCw, CalendarCheck, Clock, ChevronDown,
-  AlertTriangle, CheckCircle2, Flag, X, UserPlus,
+  AlertTriangle, CheckCircle2, Flag, X, UserPlus, List, BarChart2, Camera,
 } from 'lucide-react'
 import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
 import {
   assignCrew, addCrewToTurnover, removeCrewFromTurnover,
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
 } from './actions'
+import { TurnoverGantt } from './turnover-gantt'
+import { createClient } from '@/lib/supabase/client'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface CrewMember { id: string; name: string; phone: string | null; email: string | null; specialty: string }
 interface Property   { id: string; name: string; city: string | null; state: string | null }
+
+interface BookingRow {
+  id: string
+  property_id: string
+  checkin_date: string
+  checkout_date: string
+  guest_name: string | null
+  status: string
+}
 
 interface TurnoverAssignment {
   id: string
@@ -126,10 +137,12 @@ function CrewAssignment({
   turnover,
   crewMembers,
   assignedCrew,
+  onWarning,
 }: {
   turnover:     Turnover
   crewMembers:  CrewMember[]
   assignedCrew: CrewMember[]
+  onWarning?:   (msg: string) => void
 }) {
   const [open,     setOpen]     = useState(false)
   const [adding,   startAdd]    = useTransition()
@@ -140,7 +153,10 @@ function CrewAssignment({
 
   const handleAdd = (crewId: string) => {
     setOpen(false)
-    startAdd(async () => { await addCrewToTurnover([turnover.id], crewId) })
+    startAdd(async () => {
+      const result = await addCrewToTurnover([turnover.id], crewId)
+      if (result?.warning) onWarning?.(result.warning)
+    })
   }
 
   const handleRemove = (crewId: string) => {
@@ -235,17 +251,54 @@ function TurnoverCard({
   crewMembers,
   isSelected,
   onToggle,
+  onWarning,
 }: {
   turnover: Turnover
   property: Property | undefined
   crewMembers: CrewMember[]
   isSelected: boolean
   onToggle: () => void
+  onWarning?: (msg: string) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
-  const [updating, startUpdate] = useTransition()
-  const [flagNotes, setFlagNotes] = useState('')
-  const [showFlagInput, setShowFlagInput] = useState(false)
+  const [expanded,        setExpanded]        = useState(false)
+  const [updating,        startUpdate]        = useTransition()
+  const [flagNotes,       setFlagNotes]       = useState('')
+  const [showFlagInput,   setShowFlagInput]   = useState(false)
+  const [showQuickFlag,   setShowQuickFlag]   = useState(false)
+  const [quickFlagNotes,  setQuickFlagNotes]  = useState('')
+  const [flagPhotoFile,   setFlagPhotoFile]   = useState<File | null>(null)
+  const [flagPhotoPreview,setFlagPhotoPreview]= useState<string | null>(null)
+  const [quickFlagging,   setQuickFlagging]   = useState(false)
+  const flagPhotoRef = useRef<HTMLInputElement | null>(null)
+
+  const propertyName = property?.name ?? 'Unknown Property'
+
+  const handleFlagPhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null
+    if (!file) return
+    setFlagPhotoFile(file)
+    setFlagPhotoPreview(URL.createObjectURL(file))
+  }
+
+  const handleQuickFlag = async () => {
+    if (!quickFlagNotes.trim()) return
+    setQuickFlagging(true)
+    try {
+      if (flagPhotoFile) {
+        const supabase = createClient()
+        const ext  = flagPhotoFile.name.split('.').pop() ?? 'jpg'
+        const path = `turnover-${turnover.id}/flag-${Date.now()}.${ext}`
+        await supabase.storage.from('turnover-photos').upload(path, flagPhotoFile, { upsert: true })
+      }
+      await updateTurnoverStatus(turnover.id, 'flagged', quickFlagNotes)
+      setShowQuickFlag(false)
+      setQuickFlagNotes('')
+      setFlagPhotoFile(null)
+      setFlagPhotoPreview(null)
+    } finally {
+      setQuickFlagging(false)
+    }
+  }
 
   const checkout     = new Date(turnover.checkout_datetime)
   const checkin      = new Date(turnover.checkin_datetime)
@@ -349,16 +402,106 @@ function TurnoverCard({
           </div>
         </div>
 
-        {/* Crew chips + expand */}
+        {/* Crew chips + quick-flag + expand */}
         <div className="flex items-center gap-2 flex-shrink-0">
           <CrewAssignment
             turnover={turnover}
             crewMembers={crewMembers}
             assignedCrew={assignedCrew}
+            onWarning={onWarning}
           />
+          {turnover.status !== 'completed' && turnover.status !== 'cancelled' && (
+            <button
+              onClick={e => { e.stopPropagation(); setShowQuickFlag(true) }}
+              className="p-1.5 rounded-lg transition-colors flex-shrink-0"
+              style={{ color: 'var(--text-muted)' }}
+              title="Flag an issue"
+              aria-label="Flag issue"
+            >
+              <Flag className="w-4 h-4" />
+            </button>
+          )}
           <ChevronDown className={cn('w-4 h-4 text-muted-themed transition-transform', expanded && 'rotate-180')} />
         </div>
       </div>
+
+      {/* Quick-flag bottom sheet */}
+      {showQuickFlag && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setShowQuickFlag(false)}
+        >
+          <div
+            className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 pb-8 sm:pb-5"
+            style={{ background: 'var(--bg-card)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                Flag Issue — {propertyName}
+              </h4>
+              <button onClick={() => setShowQuickFlag(false)} className="btn-ghost p-1.5">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <textarea
+              value={quickFlagNotes}
+              onChange={e => setQuickFlagNotes(e.target.value)}
+              rows={3}
+              className="input resize-none w-full text-sm"
+              placeholder="Describe the issue…"
+              autoFocus
+            />
+
+            <div className="mt-3">
+              <input
+                ref={flagPhotoRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleFlagPhotoSelect}
+              />
+              {flagPhotoPreview ? (
+                <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-themed">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={flagPhotoPreview} alt="Flag photo" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => { setFlagPhotoPreview(null); setFlagPhotoFile(null) }}
+                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
+                  >
+                    <X className="w-3 h-3 text-white" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => flagPhotoRef.current?.click()}
+                  className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border-dashed border-2 border-themed w-full justify-center transition-colors"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  <Camera className="w-4 h-4" />
+                  Add Photo (optional)
+                </button>
+              )}
+            </div>
+
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={handleQuickFlag}
+                disabled={!quickFlagNotes.trim() || quickFlagging}
+                className="btn-danger flex-1 text-sm"
+              >
+                {quickFlagging ? 'Flagging…' : 'Flag Issue'}
+              </button>
+              <button onClick={() => setShowQuickFlag(false)} className="btn-ghost text-sm">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Expanded detail */}
       {expanded && (
@@ -464,6 +607,7 @@ function BoardSection({
   variant = 'default',
   selectedIds,
   onToggle,
+  onWarning,
 }: {
   label: string
   turnovers: Turnover[]
@@ -473,6 +617,7 @@ function BoardSection({
   variant?: 'default' | 'urgent' | 'muted'
   selectedIds: Set<string>
   onToggle: (id: string) => void
+  onWarning?: (msg: string) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
   if (!turnovers.length) return null
@@ -509,6 +654,7 @@ function BoardSection({
               crewMembers={crewMembers}
               isSelected={selectedIds.has(t.id)}
               onToggle={() => onToggle(t.id)}
+              onWarning={onWarning}
             />
           ))}
         </div>
@@ -597,26 +743,36 @@ export function TurnoverBoard({
   propertyMap,
   crewMembers,
   properties,
+  bookings = [],
   orgId,
 }: {
   turnovers: Turnover[]
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
   properties: Property[]
+  bookings?: BookingRow[]
   orgId: string
 }) {
   const searchParams = useSearchParams()
   const urlStatus    = searchParams.get('status')
 
-  const [showAdd,       setShowAdd]       = useState(false)
-  const [syncing,       startSync]        = useTransition()
-  const [filterProp,    setFilterProp]    = useState<string>('all')
-  const [filterStatus,  setFilterStatus]  = useState<string>(
+  const [showAdd,           setShowAdd]           = useState(false)
+  const [syncing,           startSync]            = useTransition()
+  const [filterProp,        setFilterProp]        = useState<string>('all')
+  const [filterStatus,      setFilterStatus]      = useState<string>(
     urlStatus === 'pending_assignment' ? 'active' : 'active'
   )
-  const [filterCrew,    setFilterCrew]    = useState<string>('all')
-  const [selectedIds,   setSelectedIds]   = useState<Set<string>>(new Set())
-  const [bulkAssigning, startBulkAssign]  = useTransition()
+  const [filterCrew,        setFilterCrew]        = useState<string>('all')
+  const [selectedIds,       setSelectedIds]       = useState<Set<string>>(new Set())
+  const [bulkAssigning,     startBulkAssign]      = useTransition()
+  const [viewMode,          setViewMode]          = useState<'list' | 'gantt'>('list')
+  const [assignmentWarning, setAssignmentWarning] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!assignmentWarning) return
+    const t = setTimeout(() => setAssignmentWarning(null), 5000)
+    return () => clearTimeout(t)
+  }, [assignmentWarning])
 
   const toggleSelect = (id: string) =>
     setSelectedIds(prev => {
@@ -669,6 +825,24 @@ export function TurnoverBoard({
 
   return (
     <>
+      {/* Conflict warning toast */}
+      {assignmentWarning && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm"
+          style={{
+            background: 'var(--accent-amber-dim)',
+            border:     '1px solid var(--accent-amber)',
+            color:      'var(--accent-amber)',
+          }}
+        >
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          {assignmentWarning}
+          <button onClick={() => setAssignmentWarning(null)} className="ml-2">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Page header */}
       <div className="page-header flex items-start justify-between">
         <div>
@@ -700,7 +874,7 @@ export function TurnoverBoard({
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filters + view toggle */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         <div className="flex items-center gap-1.5 bg-card-themed border border-themed rounded-lg px-1 py-1">
           {(['active', 'completed', 'all'] as const).map((s) => (
@@ -745,6 +919,28 @@ export function TurnoverBoard({
             ))}
           </select>
         )}
+
+        {/* View toggle */}
+        <div className="flex items-center gap-1 ml-auto bg-card-themed border border-themed rounded-lg px-1 py-1">
+          <button
+            onClick={() => setViewMode('list')}
+            className={cn(
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+              viewMode === 'list' ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
+            )}
+          >
+            <List className="w-3.5 h-3.5" /> List
+          </button>
+          <button
+            onClick={() => setViewMode('gantt')}
+            className={cn(
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+              viewMode === 'gantt' ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
+            )}
+          >
+            <BarChart2 className="w-3.5 h-3.5" /> Calendar
+          </button>
+        </div>
       </div>
 
       {/* Select-all row */}
@@ -766,7 +962,14 @@ export function TurnoverBoard({
       )}
 
       {/* Board */}
-      {filtered.length === 0 ? (
+      {viewMode === 'gantt' ? (
+        <TurnoverGantt
+          turnovers={filtered}
+          bookings={bookings}
+          properties={properties}
+          windowDays={14}
+        />
+      ) : filtered.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
           <CalendarCheck className="w-10 h-10 text-muted-themed mx-auto mb-3" />
           <h3 className="font-semibold text-secondary-themed mb-1">No turnovers found</h3>
@@ -787,6 +990,7 @@ export function TurnoverBoard({
             variant="urgent"
             selectedIds={selectedIds}
             onToggle={toggleSelect}
+            onWarning={setAssignmentWarning}
           />
           <BoardSection
             label="Today"
@@ -795,6 +999,7 @@ export function TurnoverBoard({
             crewMembers={crewMembers}
             selectedIds={selectedIds}
             onToggle={toggleSelect}
+            onWarning={setAssignmentWarning}
           />
           <BoardSection
             label="Tomorrow"
@@ -803,6 +1008,7 @@ export function TurnoverBoard({
             crewMembers={crewMembers}
             selectedIds={selectedIds}
             onToggle={toggleSelect}
+            onWarning={setAssignmentWarning}
           />
           <BoardSection
             label="This Week"
@@ -811,6 +1017,7 @@ export function TurnoverBoard({
             crewMembers={crewMembers}
             selectedIds={selectedIds}
             onToggle={toggleSelect}
+            onWarning={setAssignmentWarning}
           />
           <BoardSection
             label="Upcoming"
@@ -820,6 +1027,7 @@ export function TurnoverBoard({
             defaultOpen={false}
             selectedIds={selectedIds}
             onToggle={toggleSelect}
+            onWarning={setAssignmentWarning}
           />
           {filterStatus !== 'active' && (
             <BoardSection
@@ -831,6 +1039,7 @@ export function TurnoverBoard({
               variant="muted"
               selectedIds={selectedIds}
               onToggle={toggleSelect}
+              onWarning={setAssignmentWarning}
             />
           )}
         </div>
