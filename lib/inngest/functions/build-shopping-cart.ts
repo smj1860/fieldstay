@@ -36,37 +36,37 @@ export const buildShoppingCart = inngest.createFunction(
     const supabase = createServiceClient()
 
     // ── Step 1: Load org settings + below-par items ─────────────
-    const { orgSettings, belowParItems } = await step.run('load-inventory-data', async () => {
-      const [{ data: org }, { data: items }] = await Promise.all([
-        supabase
-          .from('organizations')
-          .select(`
-            id, preferred_retailer, kroger_location_id, kroger_location_name,
-            kroger_customer_token, kroger_token_expires_at, kroger_refresh_token
-          `)
-          .eq('id', org_id)
-          .single(),
+   const { orgSettings, belowParItems } = await step.run('load-inventory-data', async () => {
+  const [{ data: org }, { data: items }] = await Promise.all([
+    supabase
+      .from('organizations')
+      .select(`
+        id, preferred_retailer, kroger_location_id, kroger_location_name,
+        kroger_customer_token, kroger_token_expires_at, kroger_refresh_token
+      `)
+      .eq('id', org_id)
+      .single(),
 
-        supabase
-          .from('inventory_items')
-          .select(`
-            id, name, current_quantity, par_level, unit,
-            preferred_brand,
-            property_id,
-            properties!inner ( id, name, zip )
-          `)
-          .eq('org_id', org_id)
-          .lt('current_quantity', supabase.raw('par_level'))
-          .modify((q: any) => {
-            if (property_ids?.length) q.in('property_id', property_ids)
-          }),
-      ])
+    supabase
+      .from('inventory_items')
+      .select(`
+        id, name, current_quantity, par_level, unit,
+        preferred_brand,
+        property_id,
+        properties!inner ( id, name, zip )
+      `)
+      .eq('org_id', org_id)
+      .lt('current_quantity', supabase.raw('par_level'))
+      .modify((q: any) => {
+        if (property_ids?.length) q.in('property_id', property_ids)
+      }),
+  ])
 
-      if (!org) throw new Error(`Org ${org_id} not found`)
-      if (!items?.length) return { orgSettings: org, belowParItems: [] }
+  if (!org) throw new Error(`Org ${org_id} not found`)
+  if (!items?.length) return { orgSettings: org, belowParItems: [] }
 
-      return { orgSettings: org, belowParItems: items }
-    })
+  return { orgSettings: org, belowParItems: items }
+})
 
     if (!belowParItems.length) {
       return { status: 'nothing_below_par', items_checked: 0 }
