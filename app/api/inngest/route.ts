@@ -33,6 +33,9 @@ import {
   handleWorkOrderQuoteSubmitted,
 } from '@/lib/inngest/functions/work-order-events'
 
+// Shopping cart
+import { buildShoppingCart } from '@/lib/inngest/functions/build-shopping-cart'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -67,15 +70,8 @@ export const { GET, POST, PUT } = serve({
     handleWorkOrderOverdue,
     handleWorkOrderQuoteRequested,
     handleWorkOrderQuoteSubmitted,
+
+    // Shopping cart
+    buildShoppingCart,
   ],
 })
-
-import { buildShoppingCart } from '@/inngest/functions/build-shopping-cart'
-
- export const { GET, POST, PUT } = serve({
-   client: inngest,
-   functions: [
-     ...existingFunctions,
-     buildShoppingCart,   
-   ],
- })
