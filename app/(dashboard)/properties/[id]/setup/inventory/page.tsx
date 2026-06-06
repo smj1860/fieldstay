@@ -1,5 +1,4 @@
 import { requireProperty } from '@/lib/auth'
-import { createClient } from '@/lib/supabase/server'
 import { InventorySetup } from './inventory-setup'
 import type { Metadata } from 'next'
 
@@ -9,9 +8,9 @@ interface Props { params: Promise<{ id: string }> }
 
 export default async function InventoryPage({ params }: Props) {
   const { id } = await params
-  const { property, supabase } = await requireProperty(id)
+  const { property, supabase, membership } = await requireProperty(id)
 
-  const [{ data: catalogItems }, { data: propertyItems }] = await Promise.all([
+  const [{ data: catalogItems }, { data: propertyItems }, { data: templateItems }] = await Promise.all([
     supabase
       .from('inventory_catalog')
       .select('*')
@@ -25,7 +24,20 @@ export default async function InventoryPage({ params }: Props) {
       .eq('is_active', true)
       .order('category')
       .order('name'),
+    supabase
+      .from('inventory_templates')
+      .select('inventory_template_items(name, preferred_brand)')
+      .eq('org_id', membership.org_id)
+      .limit(1)
+      .maybeSingle(),
   ])
+
+  const templateBrands: Record<string, string | null> = {}
+  const rawItems = (templateItems as { inventory_template_items?: { name: string; preferred_brand: string | null }[] } | null)
+    ?.inventory_template_items ?? []
+  for (const ti of rawItems) {
+    templateBrands[ti.name.toLowerCase()] = ti.preferred_brand
+  }
 
   return (
     <div className="card">
@@ -38,6 +50,7 @@ export default async function InventoryPage({ params }: Props) {
         propertyId={property.id}
         catalogItems={catalogItems ?? []}
         existingItems={propertyItems ?? []}
+        templateBrands={templateBrands}
       />
     </div>
   )

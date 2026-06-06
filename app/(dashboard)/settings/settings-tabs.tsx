@@ -152,6 +152,33 @@ function OrgTab({ org }: { org: Organization }) {
           </div>
         </form>
       </div>
+
+      {/* Kroger */}
+      <div className="card">
+        <h2 className="text-base font-semibold text-primary-themed mb-1">Kroger Integration</h2>
+        <p className="text-xs text-muted-themed mb-4">
+          Connect your Kroger account to build shopping carts automatically from below-par inventory.
+        </p>
+        {org.kroger_location_name ? (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                <span style={{ color: 'var(--accent-green)' }}>●</span>
+                Connected — {org.kroger_location_name}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Below-par items are added to your cart automatically when you click Build Cart.
+              </p>
+            </div>
+            <a href="/api/kroger/connect" className="btn-secondary text-sm flex-shrink-0">Reconnect</a>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Not connected</p>
+            <a href="/api/kroger/connect" className="btn-primary text-sm flex-shrink-0">Connect Kroger Account</a>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

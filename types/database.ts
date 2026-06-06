@@ -80,6 +80,8 @@ export interface Organization {
   trial_ends_at:                string | null
   max_properties:               number
   onboarding_steps_completed:   Record<string, boolean>
+  preferred_retailer:           string | null
+  kroger_location_name:         string | null
   created_at:                   string
   updated_at:                   string
 }
@@ -335,6 +337,7 @@ export interface InventoryItem {
   current_quantity:        number
   low_stock_threshold_pct: number
   is_active:               boolean
+  preferred_brand:         string | null
   notes:                   string | null
   created_at:              string
   updated_at:              string

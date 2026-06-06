@@ -201,25 +201,42 @@ export async function createOrGetTemplate(): Promise<{
 
 export async function addTemplateItem(
   templateId: string,
-  item: { name: string; category: string; unit: string; par_level: number }
-): Promise<{ item?: { id: string; name: string; category: string; unit: string; par_level: number; notes: null }; error?: string }> {
+  item: { name: string; category: string; unit: string; par_level: number; preferred_brand?: string | null }
+): Promise<{ item?: { id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null }; error?: string }> {
   const { supabase } = await requireOrgMember()
 
   const { data, error } = await supabase
     .from('inventory_template_items')
     .insert({
-      template_id: templateId,
-      name:        item.name,
-      category:    item.category,
-      unit:        item.unit,
-      par_level:   item.par_level,
+      template_id:     templateId,
+      name:            item.name,
+      category:        item.category,
+      unit:            item.unit,
+      par_level:       item.par_level,
+      preferred_brand: item.preferred_brand ?? null,
     })
-    .select('id, name, category, unit, par_level, notes')
+    .select('id, name, category, unit, par_level, notes, preferred_brand')
     .single()
 
   if (error) return { error: error.message }
   revalidatePath('/inventory')
-  return { item: data! as { id: string; name: string; category: string; unit: string; par_level: number; notes: null } }
+  return { item: data! as { id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null } }
+}
+
+export async function updateTemplateItemBrand(
+  itemId: string,
+  brand:  string | null
+): Promise<{ error?: string }> {
+  const { supabase } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('inventory_template_items')
+    .update({ preferred_brand: brand || null })
+    .eq('id', itemId)
+
+  if (error) return { error: error.message }
+  revalidatePath('/inventory')
+  return {}
 }
 
 export async function removeTemplateItem(itemId: string): Promise<{ error?: string }> {
@@ -261,17 +278,18 @@ export async function applyTemplateToProperty(
   for (const item of templateItems) {
     if (existingNames.has(item.name.toLowerCase())) { skipped++; continue }
     await supabase.from('inventory_items').insert({
-      property_id:      propertyId,
-      org_id:           membership.org_id,
-      name:             item.name,
-      category:         item.category,
-      unit:             item.unit,
-      par_level:        item.par_level,
-      current_quantity: 0,
-      notes:            item.notes,
-      catalog_item_id:  item.catalog_item_id,
-      is_active:        true,
+      property_id:             propertyId,
+      org_id:                  membership.org_id,
+      name:                    item.name,
+      category:                item.category,
+      unit:                    item.unit,
+      par_level:               item.par_level,
+      current_quantity:        0,
+      notes:                   item.notes,
+      catalog_item_id:         item.catalog_item_id,
+      is_active:               true,
       low_stock_threshold_pct: 20,
+      preferred_brand:         (item as { preferred_brand?: string | null }).preferred_brand ?? null,
     })
     added++
   }
@@ -327,6 +345,7 @@ export async function applyTemplateToProperties(
         current_quantity:        0,
         low_stock_threshold_pct: 20,
         is_active:               true,
+        preferred_brand:         (item as { preferred_brand?: string | null }).preferred_brand ?? null,
       }))
 
     if (toInsert.length > 0) {
