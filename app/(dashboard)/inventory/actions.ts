@@ -437,3 +437,28 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
 
   return { items: Object.values(grouped).sort((a, b) => a.name.localeCompare(b.name)) }
 }
+
+// ── Shopping Cart ──────────────────────────────────────────────────
+
+export async function triggerShoppingCart(
+  propertyIds?: string[],
+  modality: 'PICKUP' | 'DELIVERY' | 'IN_STORE' = 'PICKUP'
+): Promise<{ success: boolean; error?: string }> {
+  const { membership } = await requireOrgMember()
+
+  try {
+    await inngest.send({
+      name: 'inventory/cart_requested',
+      data: {
+        org_id:       membership.org_id,
+        requested_by: membership.user_id,
+        property_ids: propertyIds,
+        modality,
+      },
+    })
+    return { success: true }
+  } catch (err) {
+    console.error('[triggerShoppingCart]', err)
+    return { success: false, error: 'Failed to start cart build. Try again.' }
+  }
+}
