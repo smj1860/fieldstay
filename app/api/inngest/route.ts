@@ -69,3 +69,13 @@ export const { GET, POST, PUT } = serve({
     handleWorkOrderQuoteSubmitted,
   ],
 })
+
+import { buildShoppingCart } from '@/inngest/functions/build-shopping-cart'
+
+ export const { GET, POST, PUT } = serve({
+   client: inngest,
+   functions: [
+     ...existingFunctions,
+     buildShoppingCart,   
+   ],
+ })
