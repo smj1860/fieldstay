@@ -109,7 +109,7 @@ export function InventorySetup({
                   item.isDirty ? 'border-amber-200 bg-amber-50' : 'border-accent-100 bg-accent-50'
                 )}
               >
-                <div className="flex-1 grid grid-cols-4 gap-2 items-center min-w-0">
+                <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-2 items-center min-w-0">
                   <p className="text-sm font-medium text-accent-800 truncate col-span-2">{item.name}</p>
                   <div className="flex items-center gap-1">
                     <span className="text-xs text-accent-400">Par:</span>
@@ -169,7 +169,7 @@ export function InventorySetup({
                   </div>
                 </button>
                 {isOpen && (
-                  <div className="px-4 pb-3 grid grid-cols-2 gap-1.5">
+                  <div className="px-4 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {catItems.map((ci) => {
                       const added = addedIds.has(ci.id)
                       return (
@@ -202,7 +202,7 @@ export function InventorySetup({
       {showCustomForm ? (
         <div className="border border-accent-200 rounded-xl p-4 space-y-3">
           <p className="text-sm font-semibold text-accent-700">Custom Item</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Item Name</label>
               <input value={customItem.name} onChange={(e) => setCustomItem((p) => ({ ...p, name: e.target.value }))} className="input" placeholder="e.g. Propane Tank" />
