@@ -438,6 +438,50 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
   return { items: Object.values(grouped).sort((a, b) => a.name.localeCompare(b.name)) }
 }
 
+// ── Purchase Order Status ─────────────────────────────────────────────────────
+
+export async function updatePurchaseOrderStatus(
+  purchaseOrderId: string,
+  status: 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: po } = await supabase
+    .from('purchase_orders')
+    .select('id, property_id, total_estimated_cost, status')
+    .eq('id', purchaseOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!po) return { error: 'Purchase order not found' }
+
+  const statusUpdate: Record<string, unknown> = { status }
+  if (status === 'sent') statusUpdate.sent_at = new Date().toISOString()
+
+  const { error } = await supabase
+    .from('purchase_orders')
+    .update(statusUpdate)
+    .eq('id', purchaseOrderId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  if (status === 'ordered') {
+    await inngest.send({
+      name: 'purchase-order/approved',
+      data: {
+        purchase_order_id:    purchaseOrderId,
+        property_id:          po.property_id,
+        org_id:               membership.org_id,
+        total_estimated_cost: po.total_estimated_cost,
+      },
+    })
+  }
+
+  revalidatePath('/inventory')
+  return {}
+}
+
 // ── Shopping Cart ──────────────────────────────────────────────────
 
 export async function triggerShoppingCart(

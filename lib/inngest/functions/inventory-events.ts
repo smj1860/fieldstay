@@ -2,6 +2,48 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 
+// ── Purchase Order Approved ───────────────────────────────────────────────────
+
+export const handlePurchaseOrderApproved = inngest.createFunction(
+  { id: 'purchase-order-approved', name: 'Purchase Order Approved — Post Expense', retries: 3 },
+  { event: 'purchase-order/approved' as const },
+  async ({ event, step }) => {
+    const { purchase_order_id, property_id, org_id, total_estimated_cost } = event.data
+
+    await step.run('post-inventory-expense', async () => {
+      if (!total_estimated_cost || total_estimated_cost <= 0) return { skipped: true }
+
+      const supabase = createServiceClient()
+
+      const { data: existing } = await supabase
+        .from('owner_transactions')
+        .select('id')
+        .eq('source_reference_id', purchase_order_id)
+        .eq('source', 'inventory_purchase')
+        .maybeSingle()
+
+      if (existing) return { skipped: true }
+
+      await supabase.from('owner_transactions').insert({
+        property_id,
+        org_id,
+        source:               'inventory_purchase',
+        source_reference_id:  purchase_order_id,
+        transaction_type:     'expense',
+        category:             'restock',
+        amount:               total_estimated_cost,
+        description:          'Inventory restock',
+        transaction_date:     new Date().toISOString().split('T')[0],
+        visible_to_owner:     false,
+      })
+
+      return { posted: total_estimated_cost }
+    })
+
+    return { purchase_order_id }
+  }
+)
+
 /**
  * Triggered when a crew member submits an inventory count.
  *

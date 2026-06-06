@@ -509,20 +509,23 @@ export interface GuestMessageSent {
 }
 
 export interface OwnerTransaction {
-  id:                string
-  property_id:       string
-  org_id:            string
-  transaction_type:  TxnType
-  category:          TxnCategory
-  amount:            number
-  description:       string
-  transaction_date:  string
-  work_order_id:     string | null
-  purchase_order_id: string | null
-  booking_id:        string | null
-  notes:             string | null
-  created_at:        string
-  updated_at:        string
+  id:                   string
+  property_id:          string
+  org_id:               string
+  transaction_type:     TxnType
+  category:             TxnCategory
+  amount:               number
+  description:          string
+  transaction_date:     string
+  source:               string | null
+  source_reference_id:  string | null
+  visible_to_owner:     boolean
+  work_order_id:        string | null
+  purchase_order_id:    string | null
+  booking_id:           string | null
+  notes:                string | null
+  created_at:           string
+  updated_at:           string
 }
 
 export interface OrgMilestone {

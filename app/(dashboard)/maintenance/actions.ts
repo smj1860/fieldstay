@@ -290,30 +290,17 @@ export async function updateWorkOrderStatus(
 
   if (error) return { error: error.message }
 
-  // Auto-create expense when completed with a cost
   if (status === 'completed') {
-    const cost = current.actual_cost ?? current.estimated_cost
-    if (cost && cost > 0) {
-      const { count } = await supabase
-        .from('owner_transactions')
-        .select('id', { count: 'exact', head: true })
-        .eq('work_order_id', workOrderId)
+    await inngest.send({
+      name: 'work-order/completed',
+      data: {
+        work_order_id: workOrderId,
+        property_id:   current.property_id,
+        org_id:        membership.org_id,
+        actual_cost:   current.actual_cost ?? current.estimated_cost ?? null,
+      },
+    })
 
-      if ((count ?? 0) === 0) {
-        await supabase.from('owner_transactions').insert({
-          property_id:      current.property_id,
-          org_id:           membership.org_id,
-          work_order_id:    workOrderId,
-          transaction_type: 'expense',
-          category:         'maintenance',
-          amount:           cost,
-          description:      current.title,
-          transaction_date: isoDate(),
-        })
-      }
-    }
-
-    // Feature 4: Advance recurring schedule when linked WO is completed
     if (current.source_schedule_id) {
       await advanceScheduleAfterCompletion(supabase, current.source_schedule_id, membership.org_id)
     }
