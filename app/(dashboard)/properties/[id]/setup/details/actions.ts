@@ -41,6 +41,7 @@ export async function saveDetails(
   const square_footage     = formData.get('square_footage')
     ? parseInt(formData.get('square_footage') as string)
     : null
+  const cleaning_cost_visible_to_owner = formData.get('cleaning_cost_visible_to_owner') === 'on'
 
   if (!name) return { error: 'Property name is required' }
 
@@ -51,6 +52,7 @@ export async function saveDetails(
       bedrooms, bathrooms, max_guests, checkin_time,
       checkout_time, wifi_name, wifi_password, door_code, internal_notes,
       avg_nightly_rate, cleaning_cost, same_day_premium_pct, square_footage,
+      cleaning_cost_visible_to_owner,
     })
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)

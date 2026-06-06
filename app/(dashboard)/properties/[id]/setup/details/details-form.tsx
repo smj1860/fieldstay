@@ -143,6 +143,18 @@ export function DetailsForm({ property }: { property: Property }) {
         </div>
       </div>
 
+      <label className="flex items-center gap-2 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          name="cleaning_cost_visible_to_owner"
+          defaultChecked={property.cleaning_cost_visible_to_owner}
+          className="w-4 h-4 rounded"
+        />
+        <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          Show cleaning fees to property owner
+        </span>
+      </label>
+
       <div>
         <label htmlFor="internal_notes" className="label">Internal Notes</label>
         <textarea id="internal_notes" name="internal_notes" rows={3} defaultValue={property.internal_notes ?? ''} className="input resize-none" placeholder="Anything crew or vendors should know…" />
