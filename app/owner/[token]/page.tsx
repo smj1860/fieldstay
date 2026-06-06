@@ -143,11 +143,12 @@ export default async function OwnerPortalPage({ params }: Props) {
 
   if (!property) notFound()
 
-  // Fetch transactions for this property
+  // Fetch transactions for this property — only rows the owner is allowed to see
   const { data: transactions } = await supabase
     .from('owner_transactions')
     .select('id, transaction_type, category, amount, description, transaction_date, notes')
     .eq('property_id', owner.property_id)
+    .eq('visible_to_owner', true)
     .order('transaction_date', { ascending: false })
 
   const txns = transactions ?? []

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useActionState, useEffect } from 'react'
-import { Plus, X, Link2, RefreshCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
+import { Plus, X, Link2, RefreshCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Trash2, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   addPropertyOwner,
@@ -9,6 +9,7 @@ import {
   revokeOwnerPortalToken,
   addOwnerTransaction,
   deleteOwnerTransaction,
+  toggleTransactionVisibility,
   type OwnersActionState,
 } from './actions'
 
@@ -47,6 +48,8 @@ interface Transaction {
   notes: string | null
   work_order_id: string | null
   booking_id: string | null
+  visible_to_owner: boolean
+  source: string | null
 }
 
 const REVENUE_CATEGORIES = [
@@ -300,6 +303,32 @@ function AddTransactionForm({
   )
 }
 
+// ── Visibility Toggle ────────────────────────────────────────────────────────
+
+function VisibilityToggle({ txn }: { txn: Transaction }) {
+  const [pending, startTransition] = useTransition()
+
+  const toggle = () => {
+    startTransition(async () => {
+      await toggleTransactionVisibility(txn.id, !txn.visible_to_owner)
+    })
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      disabled={pending}
+      title={txn.visible_to_owner ? 'Visible to owner — click to hide' : 'Hidden from owner — click to show'}
+      className={cn(
+        'btn-ghost p-1 disabled:opacity-40',
+        txn.visible_to_owner ? 'text-green-600 hover:text-green-700' : 'text-muted-themed hover:text-secondary-themed'
+      )}
+    >
+      {txn.visible_to_owner ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+    </button>
+  )
+}
+
 // ── Transaction Panel ────────────────────────────────────────────────────────
 
 function TransactionPanel({
@@ -372,6 +401,9 @@ function TransactionPanel({
                     <th className="text-left px-3 py-2 text-muted-themed font-medium">Description</th>
                     <th className="text-left px-3 py-2 text-muted-themed font-medium">Category</th>
                     <th className="text-right px-3 py-2 text-muted-themed font-medium">Amount</th>
+                    <th className="px-2 py-2 text-muted-themed font-medium" title="Visible to owner">
+                      <Eye className="w-3.5 h-3.5 mx-auto" />
+                    </th>
                     <th className="px-2 py-2" />
                   </tr>
                 </thead>
@@ -393,6 +425,9 @@ function TransactionPanel({
                         txn.transaction_type === 'revenue' ? 'text-green-600' : 'text-red-600'
                       )}>
                         {txn.transaction_type === 'revenue' ? '+' : '−'}{formatCurrency(txn.amount)}
+                      </td>
+                      <td className="px-2 py-2">
+                        <VisibilityToggle txn={txn} />
                       </td>
                       <td className="px-2 py-2">
                         {!txn.work_order_id && !txn.booking_id && (
@@ -533,7 +568,13 @@ function OwnerCard({
   const expired   = token ? isTokenExpired(token) : false
   const portalUrl = token && !expired ? `${baseUrl}/owner/${token.token}` : null
 
+  const currentMonthIso = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  }
+
   const [monthlyRevenue, setMonthlyRevenue] = useState('')
+  const [monthlyMonth, setMonthlyMonth]     = useState(currentMonthIso)
   const [revSuccess, setRevSuccess]         = useState<string | null>(null)
   const [, startRev]                        = useTransition()
 
@@ -541,16 +582,18 @@ function OwnerCard({
     if (!monthlyRevenue || isNaN(parseFloat(monthlyRevenue))) return
     const amount = parseFloat(monthlyRevenue)
     if (amount <= 0) return
+    const [year, month] = monthlyMonth.split('-')
+    const txnDate  = `${year}-${month}-01`
+    const d        = new Date(txnDate + 'T00:00:00')
+    const monthLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
     startRev(async () => {
-      const today = new Date()
-      const monthLabel = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
       const formData = new FormData()
       formData.set('property_id',      owner.property_id)
       formData.set('transaction_type', 'revenue')
       formData.set('category',         'booking_revenue')
       formData.set('amount',           String(amount))
       formData.set('description',      `Monthly revenue — ${monthLabel} (manual entry)`)
-      formData.set('transaction_date', today.toISOString().split('T')[0]!)
+      formData.set('transaction_date', txnDate)
       const result = await addOwnerTransaction(null, formData)
       if (!result?.error) {
         setMonthlyRevenue('')
@@ -601,14 +644,20 @@ function OwnerCard({
           Monthly Revenue ($)
           <span className="text-muted-themed font-normal ml-1">— enter before sharing portal link</span>
         </label>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <input
+            type="month"
+            value={monthlyMonth}
+            onChange={e => setMonthlyMonth(e.target.value)}
+            className="input text-sm py-1.5 w-36 flex-shrink-0"
+          />
           <input
             type="number"
             min={0}
             step={0.01}
             value={monthlyRevenue}
             onChange={e => setMonthlyRevenue(e.target.value)}
-            className="input text-sm py-1.5"
+            className="input text-sm py-1.5 flex-1 min-w-[120px]"
             placeholder="e.g. 4200.00"
           />
           {monthlyRevenue && parseFloat(monthlyRevenue) > 0 && (
@@ -621,7 +670,7 @@ function OwnerCard({
           <p className="text-xs mt-1" style={{ color: 'var(--accent-green)' }}>{revSuccess}</p>
         )}
         <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-          Creates a revenue entry for the current month. OwnerRez integration will auto-populate when connected.
+          Visible to owner on the portal. OwnerRez integration will auto-populate when connected.
         </p>
       </div>
 

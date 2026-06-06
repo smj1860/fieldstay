@@ -127,12 +127,34 @@ export async function addOwnerTransaction(
     description,
     transaction_date,
     notes,
+    source:           'manual',
+    visible_to_owner: true,
   })
 
   if (error) return { error: error.message }
 
   revalidatePath('/owners')
   return { success: true }
+}
+
+// ── Toggle transaction visibility ────────────────────────────────────────────
+
+export async function toggleTransactionVisibility(
+  txnId:   string,
+  visible: boolean
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('owner_transactions')
+    .update({ visible_to_owner: visible })
+    .eq('id', txnId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/owners')
+  return {}
 }
 
 // ── Revoke portal token ───────────────────────────────────────────────────────

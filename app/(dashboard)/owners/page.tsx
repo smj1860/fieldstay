@@ -41,7 +41,7 @@ export default async function OwnersPage() {
   // Fetch transactions for the P&L panels
   const { data: transactions } = await supabase
     .from('owner_transactions')
-    .select('id, property_id, transaction_type, category, amount, description, transaction_date, notes, work_order_id, booking_id')
+    .select('id, property_id, transaction_type, category, amount, description, transaction_date, notes, work_order_id, booking_id, visible_to_owner, source')
     .eq('org_id', membership.org_id)
     .order('transaction_date', { ascending: false })
 
