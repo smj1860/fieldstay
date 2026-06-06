@@ -30,7 +30,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
           description: flag_notes,
           priority:    'high',
           status:      'pending',
-          source:      'turnover_flag',
+          source:      'crew_flag',
         })
         .select('id, wo_number')
         .single()
@@ -43,7 +43,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
       const supabase = createServiceClient()
 
       const { data: managers } = await supabase
-        .from('memberships')
+        .from('organization_members')
         .select('user_id')
         .eq('org_id', org_id)
         .in('role', ['admin', 'owner', 'manager'])
