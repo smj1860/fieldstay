@@ -132,10 +132,19 @@ export default async function PropertyDetailPage({ params }: Props) {
         <div className="grid grid-cols-2 gap-y-3 text-sm">
           <DetailRow label="Type" value={property.property_type} className="capitalize" />
           <DetailRow label="Beds / Baths" value={`${property.bedrooms} bed · ${property.bathrooms} bath`} />
+          {property.square_footage != null && (
+            <DetailRow label="Sq Footage" value={`${property.square_footage.toLocaleString()} sqft`} />
+          )}
           <DetailRow label="Check-in"  value={property.checkin_time} />
           <DetailRow label="Check-out" value={property.checkout_time} />
           {property.wifi_name  && <DetailRow label="Wi-Fi" value={`${property.wifi_name} / ${property.wifi_password}`} />}
           {property.door_code  && <DetailRow label="Door Code" value={property.door_code} />}
+          {property.cleaning_cost != null && (
+            <DetailRow label="Cleaning Fee" value={`$${property.cleaning_cost.toFixed(2)}`} />
+          )}
+          {property.same_day_premium_pct != null && (
+            <DetailRow label="Same-Day Premium" value={`+${property.same_day_premium_pct}%`} />
+          )}
         </div>
       </div>
 

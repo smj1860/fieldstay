@@ -28,7 +28,7 @@ export function DetailsForm({ property }: { property: Property }) {
         <input id="name" name="name" type="text" required defaultValue={property.name} className="input" />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div>
           <label htmlFor="property_type" className="label">Type</label>
           <select id="property_type" name="property_type" defaultValue={property.property_type} className="input">
@@ -42,6 +42,10 @@ export function DetailsForm({ property }: { property: Property }) {
         <div>
           <label htmlFor="bathrooms" className="label">Bathrooms</label>
           <input id="bathrooms" name="bathrooms" type="number" min="0.5" max="20" step="0.5" defaultValue={property.bathrooms} className="input" />
+        </div>
+        <div>
+          <label htmlFor="square_footage" className="label">Sq Footage</label>
+          <input id="square_footage" name="square_footage" type="number" min="0" defaultValue={property.square_footage ?? ''} className="input" placeholder="e.g. 1400" />
         </div>
       </div>
 
@@ -105,6 +109,38 @@ export function DetailsForm({ property }: { property: Property }) {
           placeholder="e.g. 285.00"
         />
         <p className="text-xs text-accent-400 mt-1">Used to automatically estimate booking revenue in the owner portal. You can always adjust individually.</p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label htmlFor="cleaning_cost" className="label">Cleaning Fee ($)</label>
+          <input
+            id="cleaning_cost"
+            name="cleaning_cost"
+            type="number"
+            min="0"
+            step="0.01"
+            defaultValue={property.cleaning_cost ?? ''}
+            className="input"
+            placeholder="e.g. 150.00"
+          />
+          <p className="text-xs text-accent-400 mt-1">Auto-posted as an expense when a turnover is completed.</p>
+        </div>
+        <div>
+          <label htmlFor="same_day_premium_pct" className="label">Same-Day Premium (%)</label>
+          <input
+            id="same_day_premium_pct"
+            name="same_day_premium_pct"
+            type="number"
+            min="0"
+            max="200"
+            step="1"
+            defaultValue={property.same_day_premium_pct ?? ''}
+            className="input"
+            placeholder="e.g. 25"
+          />
+          <p className="text-xs text-accent-400 mt-1">Added to cleaning fee when check-out and check-in are on the same day.</p>
+        </div>
       </div>
 
       <div>

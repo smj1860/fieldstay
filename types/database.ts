@@ -119,6 +119,12 @@ export interface Property {
   setup_steps_completed:   Record<string, boolean>
   is_active:               boolean
   avg_nightly_rate:        number | null
+  cleaning_cost:           number | null
+  same_day_premium_pct:    number | null
+  cleaning_cost_visible_to_owner: boolean
+  square_footage:          number | null
+  lat:                     number | null
+  lng:                     number | null
   created_at:              string
   updated_at:              string
 }

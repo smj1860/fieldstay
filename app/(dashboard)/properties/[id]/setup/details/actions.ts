@@ -29,8 +29,17 @@ export async function saveDetails(
   const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
   const door_code     = (formData.get('door_code') as string)?.trim() || null
   const internal_notes    = (formData.get('internal_notes') as string)?.trim() || null
-  const avg_nightly_rate  = formData.get('avg_nightly_rate')
+  const avg_nightly_rate   = formData.get('avg_nightly_rate')
     ? parseFloat(formData.get('avg_nightly_rate') as string)
+    : null
+  const cleaning_cost      = formData.get('cleaning_cost')
+    ? parseFloat(formData.get('cleaning_cost') as string)
+    : null
+  const same_day_premium_pct = formData.get('same_day_premium_pct')
+    ? parseFloat(formData.get('same_day_premium_pct') as string)
+    : null
+  const square_footage     = formData.get('square_footage')
+    ? parseInt(formData.get('square_footage') as string)
     : null
 
   if (!name) return { error: 'Property name is required' }
@@ -41,7 +50,7 @@ export async function saveDetails(
       name, address, city, state, zip, property_type,
       bedrooms, bathrooms, max_guests, checkin_time,
       checkout_time, wifi_name, wifi_password, door_code, internal_notes,
-      avg_nightly_rate,
+      avg_nightly_rate, cleaning_cost, same_day_premium_pct, square_footage,
     })
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
