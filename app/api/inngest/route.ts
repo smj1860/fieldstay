@@ -5,7 +5,7 @@ import { inngest } from '@/lib/inngest/client'
 import { syncAllIcalFeeds, syncIcalFeed } from '@/lib/inngest/functions/ical-sync'
 
 // Booking events
-import { handleBookingDetected } from '@/lib/inngest/functions/booking-events'
+import { handleBookingDetected, handleBookingConfirmed } from '@/lib/inngest/functions/booking-events'
 
 // Turnover events
 import { handleTurnoverCreated, handleTurnoverCompleted } from '@/lib/inngest/functions/turnover-events'
@@ -14,7 +14,7 @@ import { handleTurnoverCreated, handleTurnoverCompleted } from '@/lib/inngest/fu
 import { dailyMaintenanceCheck } from '@/lib/inngest/functions/maintenance-check'
 
 // Inventory
-import { handleInventoryCountSubmitted } from '@/lib/inngest/functions/inventory-events'
+import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
 
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
@@ -27,6 +27,7 @@ import { flaggedTurnoverToWO } from '@/lib/inngest/functions/flagged-turnover-wo
 // Work orders
 import {
   handleWorkOrderCreated,
+  handleWorkOrderCompleted,
   handleWorkOrderCompletedViaPortal,
   handleWorkOrderOverdue,
   handleWorkOrderQuoteRequested,
@@ -45,6 +46,7 @@ export const { GET, POST, PUT } = serve({
 
     // Booking downstream
     handleBookingDetected,
+    handleBookingConfirmed,
 
     // Turnover lifecycle
     handleTurnoverCreated,
@@ -55,6 +57,7 @@ export const { GET, POST, PUT } = serve({
 
     // Inventory → PO
     handleInventoryCountSubmitted,
+    handlePurchaseOrderApproved,
 
     // OwnerRez sync
     ownerRezInitialSync,
@@ -66,6 +69,7 @@ export const { GET, POST, PUT } = serve({
 
     // Work orders
     handleWorkOrderCreated,
+    handleWorkOrderCompleted,
     handleWorkOrderCompletedViaPortal,
     handleWorkOrderOverdue,
     handleWorkOrderQuoteRequested,

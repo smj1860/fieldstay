@@ -100,6 +100,55 @@ export const handleWorkOrderCreated = inngest.createFunction(
   }
 )
 
+// ── Work Order Completed (PM-side) ───────────────────────────────────────────
+
+export const handleWorkOrderCompleted = inngest.createFunction(
+  { id: 'work-order-completed', name: 'Work Order Completed — Post Expense', retries: 3 },
+  { event: 'work-order/completed' as const },
+  async ({ event, step }) => {
+    const { work_order_id, property_id, org_id } = event.data
+
+    await step.run('post-wo-expense', async () => {
+      const supabase = createServiceClient()
+
+      const { data: wo } = await supabase
+        .from('work_orders')
+        .select('title, actual_cost, estimated_cost')
+        .eq('id', work_order_id)
+        .single()
+
+      const cost = wo?.actual_cost ?? wo?.estimated_cost ?? null
+      if (!cost || cost <= 0) return { skipped: true }
+
+      const { data: existing } = await supabase
+        .from('owner_transactions')
+        .select('id')
+        .eq('source_reference_id', work_order_id)
+        .eq('source', 'wo_completion')
+        .maybeSingle()
+
+      if (existing) return { skipped: true }
+
+      await supabase.from('owner_transactions').insert({
+        property_id,
+        org_id,
+        source:               'wo_completion',
+        source_reference_id:  work_order_id,
+        transaction_type:     'expense',
+        category:             'maintenance',
+        amount:               cost,
+        description:          wo?.title ?? 'Work order expense',
+        transaction_date:     new Date().toISOString().split('T')[0],
+        visible_to_owner:     false,
+      })
+
+      return { posted: cost }
+    })
+
+    return { work_order_id }
+  }
+)
+
 // ── Work Order Completed via Portal ──────────────────────────────────────────
 
 export const handleWorkOrderCompletedViaPortal = inngest.createFunction(

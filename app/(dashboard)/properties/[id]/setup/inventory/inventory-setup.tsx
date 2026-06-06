@@ -13,6 +13,7 @@ interface EditableItem {
   category: string
   unit: string
   par_level: number
+  preferred_brand: string | null
   notes: string
   isNew?: boolean
   isDirty?: boolean
@@ -24,16 +25,19 @@ export function InventorySetup({
   propertyId,
   catalogItems,
   existingItems,
+  templateBrands = {},
 }: {
   propertyId: string
   catalogItems: InventoryCatalogItem[]
   existingItems: InventoryItem[]
+  templateBrands?: Record<string, string | null>
 }) {
   const [items, setItems] = useState<EditableItem[]>(
     existingItems.map((i) => ({
       id: i.id, catalog_item_id: i.catalog_item_id,
       name: i.name, category: i.category, unit: i.unit,
-      par_level: i.par_level, notes: i.notes ?? '', isDirty: false,
+      par_level: i.par_level, preferred_brand: (i as { preferred_brand?: string | null }).preferred_brand ?? null,
+      notes: i.notes ?? '', isDirty: false,
     }))
   )
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(['paper_goods']))
@@ -53,10 +57,12 @@ export function InventorySetup({
 
   const addFromCatalog = (catalogItem: InventoryCatalogItem) => {
     if (items.some((i) => i.catalog_item_id === catalogItem.id)) return
+    const templateBrand = templateBrands[catalogItem.name.toLowerCase()] ?? null
     setItems((prev) => [...prev, {
       catalog_item_id: catalogItem.id,
       name: catalogItem.name, category: catalogItem.category,
-      unit: catalogItem.default_unit, par_level: 2, notes: '', isNew: true, isDirty: true,
+      unit: catalogItem.default_unit, par_level: 2, preferred_brand: templateBrand,
+      notes: '', isNew: true, isDirty: true,
     }])
   }
 
@@ -75,7 +81,7 @@ export function InventorySetup({
 
   const addCustom = () => {
     if (!customItem.name.trim()) return
-    setItems((prev) => [...prev, { ...customItem, isNew: true, isDirty: true }])
+    setItems((prev) => [...prev, { ...customItem, preferred_brand: null, isNew: true, isDirty: true }])
     setCustomItem({ name: '', category: 'other', unit: 'units', par_level: 1, notes: '' })
     setShowCustomForm(false)
   }
@@ -103,35 +109,54 @@ export function InventorySetup({
         <div>
           <p className="section-header">Your Inventory ({items.length} items)</p>
           <div className="space-y-2">
-            {items.map((item, idx) => (
-              <div key={item.id ?? `new-${idx}`}
-                className={cn('flex items-center gap-3 px-3 py-2.5 rounded-lg border',
-                  item.isDirty ? 'border-amber-200 bg-amber-50' : 'border-accent-100 bg-accent-50'
-                )}
-              >
-                <div className="flex-1 grid grid-cols-4 gap-2 items-center min-w-0">
-                  <p className="text-sm font-medium text-accent-800 truncate col-span-2">{item.name}</p>
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-accent-400">Par:</span>
-                    <input
-                      type="number" min="0" value={item.par_level}
-                      onChange={(e) => updateItem(idx, 'par_level', parseInt(e.target.value) || 0)}
-                      className="w-14 text-center text-sm border border-accent-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                    />
+            {items.map((item, idx) => {
+              const templateBrand = templateBrands[item.name.toLowerCase()] ?? null
+              const isOverride = item.preferred_brand !== null && item.preferred_brand !== '' &&
+                templateBrand !== null && item.preferred_brand !== templateBrand
+              return (
+                <div key={item.id ?? `new-${idx}`}
+                  className={cn('flex items-start gap-3 px-3 py-2.5 rounded-lg border',
+                    item.isDirty ? 'border-amber-200 bg-amber-50' : 'border-accent-100 bg-accent-50'
+                  )}
+                >
+                  <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-2 items-center min-w-0">
+                    <p className="text-sm font-medium text-accent-800 truncate col-span-2">{item.name}</p>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-accent-400">Par:</span>
+                      <input
+                        type="number" min="0" value={item.par_level}
+                        onChange={(e) => updateItem(idx, 'par_level', parseInt(e.target.value) || 0)}
+                        className="w-14 text-center text-sm border border-accent-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                    <select
+                      value={item.unit}
+                      onChange={(e) => updateItem(idx, 'unit', e.target.value)}
+                      className="text-xs border border-accent-200 rounded px-1 py-0.5 text-accent-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    >
+                      {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                    <div className="col-span-2 sm:col-span-4 flex items-center gap-2 flex-wrap">
+                      <input
+                        type="text"
+                        value={item.preferred_brand ?? ''}
+                        onChange={(e) => updateItem(idx, 'preferred_brand', e.target.value.trim() || null)}
+                        placeholder={templateBrand ? `Template: ${templateBrand}` : 'Brand (optional)'}
+                        className="text-xs border border-accent-200 rounded px-2 py-0.5 text-accent-700 focus:outline-none focus:ring-1 focus:ring-brand-500 w-40"
+                      />
+                      {isOverride && (
+                        <span className="text-xs font-medium" style={{ color: 'var(--accent-amber)' }}>
+                          ⚡ Property override
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <select
-                    value={item.unit}
-                    onChange={(e) => updateItem(idx, 'unit', e.target.value)}
-                    className="text-xs border border-accent-200 rounded px-1 py-0.5 text-accent-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  >
-                    {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                  </select>
+                  <button onClick={() => removeItem(item, idx)} className="text-accent-300 hover:text-red-500 transition-colors mt-0.5">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
-                <button onClick={() => removeItem(item, idx)} className="text-accent-300 hover:text-red-500 transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </div>
           {dirtyCount > 0 && (
             <button onClick={saveAll} disabled={saving} className="btn-secondary text-sm mt-3">
@@ -169,7 +194,7 @@ export function InventorySetup({
                   </div>
                 </button>
                 {isOpen && (
-                  <div className="px-4 pb-3 grid grid-cols-2 gap-1.5">
+                  <div className="px-4 pb-3 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     {catItems.map((ci) => {
                       const added = addedIds.has(ci.id)
                       return (
@@ -202,7 +227,7 @@ export function InventorySetup({
       {showCustomForm ? (
         <div className="border border-accent-200 rounded-xl p-4 space-y-3">
           <p className="text-sm font-semibold text-accent-700">Custom Item</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Item Name</label>
               <input value={customItem.name} onChange={(e) => setCustomItem((p) => ({ ...p, name: e.target.value }))} className="input" placeholder="e.g. Propane Tank" />

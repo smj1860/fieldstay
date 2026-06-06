@@ -45,9 +45,9 @@ export default async function SetupLayout({ children, params }: Props) {
         </div>
       </div>
 
-      <div className="flex gap-8">
+      <div className="flex flex-col sm:flex-row gap-8">
         {/* Step nav */}
-        <aside className="w-52 flex-shrink-0">
+        <aside className="w-full sm:w-52 sm:flex-shrink-0">
           <nav className="space-y-0.5">
             {WIZARD_STEPS.map((step, idx) => {
               const done = completed[step.key] === true

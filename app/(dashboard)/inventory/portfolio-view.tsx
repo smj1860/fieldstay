@@ -14,6 +14,7 @@ interface PortfolioItem {
   par_level: number
   current_quantity: number
   property_id: string
+  preferred_brand: string | null
   properties: { name: string } | { name: string }[] | null
 }
 
@@ -168,6 +169,7 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
               <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Item</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Property</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Category</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Brand</th>
               <th className="text-right px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Stock</th>
               <th className="text-right px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Par</th>
               <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Status</th>
@@ -183,6 +185,11 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
                   <td className="px-4 py-2.5 text-secondary-themed">{propName(item) ?? '—'}</td>
                   <td className="px-4 py-2.5 text-secondary-themed capitalize">
                     {INVENTORY_CATEGORY_LABELS[item.category] ?? item.category.replace(/_/g, ' ')}
+                  </td>
+                  <td className="px-4 py-2.5 text-sm">
+                    {item.preferred_brand
+                      ? <span style={{ color: 'var(--text-secondary)' }}>{item.preferred_brand}</span>
+                      : <span style={{ color: 'var(--text-muted)' }}>Any</span>}
                   </td>
                   <td
                     className="px-4 py-2.5 text-right font-mono font-semibold"
@@ -201,7 +208,7 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
             })}
             {items.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-muted-themed text-sm">
+                <td colSpan={7} className="px-4 py-10 text-center text-muted-themed text-sm">
                   No inventory items found across all properties.
                 </td>
               </tr>

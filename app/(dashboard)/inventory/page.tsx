@@ -1,6 +1,7 @@
 import { requireOrgMember } from '@/lib/auth'
 import { InventoryManager } from './inventory-manager'
 import type { Metadata } from 'next'
+import type { CartBuildResult } from '@/lib/kroger/types'
 
 export const metadata: Metadata = { title: 'Inventory' }
 
@@ -54,14 +55,14 @@ export default async function InventoryPage() {
       .limit(50),
     supabase
       .from('inventory_items')
-      .select('id, name, category, unit, par_level, current_quantity, property_id, properties(name)')
+      .select('id, name, category, unit, par_level, current_quantity, preferred_brand, property_id, properties(name)')
       .eq('org_id', membership.org_id)
       .order('property_id')
       .order('category')
       .order('name'),
     supabase
       .from('inventory_templates')
-      .select('id, name, inventory_template_items(id, name, category, unit, par_level, notes, sort_order)')
+      .select('id, name, inventory_template_items(id, name, category, unit, par_level, notes, sort_order, preferred_brand)')
       .eq('org_id', membership.org_id)
       .limit(1),
     supabase
@@ -79,7 +80,15 @@ export default async function InventoryPage() {
       .order('submitted_at', { ascending: false }),
   ])
 
-  const template = templates?.[0] ?? null
+  const { data: cartMilestone } = await supabase
+    .from('org_milestones')
+    .select('value')
+    .eq('org_id', membership.org_id)
+    .eq('key', 'last_cart_build')
+    .maybeSingle()
+
+  const template  = templates?.[0] ?? null
+  const cartData  = (cartMilestone?.value ?? null) as (CartBuildResult & { built_at: string; location_name: string }) | null
 
   return (
     <div>
@@ -96,6 +105,7 @@ export default async function InventoryPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         pendingDrafts={(pendingDrafts ?? []) as any}
         orgId={membership.org_id}
+        cartData={cartData}
       />
     </div>
   )

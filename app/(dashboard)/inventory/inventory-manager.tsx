@@ -5,13 +5,15 @@ import { useRouter } from 'next/navigation'
 import {
   Plus, ClipboardList, ChevronDown, X,
   Package, AlertTriangle, ShoppingCart, Check, History,
-  BarChart2, FileText, Layers,
+  BarChart2, FileText, Layers, Loader2,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
-import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount } from './actions'
+import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount, triggerShoppingCart } from './actions'
 import type { InventoryCategory, PoStatus } from '@/types/database'
 import { PortfolioInventoryView } from './portfolio-view'
 import { TemplateManager } from './template-manager'
+import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
+import type { CartBuildResult } from '@/lib/kroger/types'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -70,6 +72,7 @@ interface PortfolioItem {
   par_level: number
   current_quantity: number
   property_id: string
+  preferred_brand: string | null
   properties: { name: string } | { name: string }[] | null
 }
 
@@ -1135,6 +1138,7 @@ export function InventoryManager({
   template,
   pendingDrafts,
   orgId,
+  cartData,
 }: {
   properties: Property[]
   items: InventoryItem[]
@@ -1145,10 +1149,13 @@ export function InventoryManager({
   template: Template | null
   pendingDrafts: PendingDraft[]
   orgId: string
+  cartData: (CartBuildResult & { built_at: string; location_name: string }) | null
 }) {
   const router = useRouter()
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<InventoryTab>('portfolio')
+  const [cartPending, startCartTransition] = useTransition()
+  const [cartTriggered, setCartTriggered]  = useState(false)
 
   const totalItems    = items.length
   const totalCritical = items.filter((i) => getStockStatus(i) === 'critical').length
@@ -1231,7 +1238,30 @@ export function InventoryManager({
       )}
 
       {activeTab === 'portfolio' && (
-        <PortfolioInventoryView items={allInventoryItems} />
+        <>
+          <div className="flex justify-end mb-4">
+            <button
+              onClick={() => startCartTransition(async () => {
+                const result = await triggerShoppingCart()
+                if (result.success) setCartTriggered(true)
+              })}
+              disabled={cartPending}
+              className="btn-secondary flex items-center gap-2"
+            >
+              {cartPending
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Building…</>
+                : <><ShoppingCart className="w-4 h-4" /> Build Cart 🛒</>}
+            </button>
+          </div>
+          {cartTriggered && !cartData && (
+            <div className="mb-4 text-sm rounded-xl px-4 py-3 border border-themed"
+                 style={{ color: 'var(--text-muted)', background: 'var(--bg-canvas)' }}>
+              Building your Kroger cart… refresh in a moment to see the result.
+            </div>
+          )}
+          {cartData && <CartReadyBanner cartData={cartData} />}
+          <PortfolioInventoryView items={allInventoryItems} />
+        </>
       )}
 
       {activeTab === 'template' && (

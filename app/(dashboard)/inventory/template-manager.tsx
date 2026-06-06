@@ -7,6 +7,7 @@ import {
   createOrGetTemplate,
   addTemplateItem,
   removeTemplateItem,
+  updateTemplateItemBrand,
   applyTemplateToProperty,
   applyTemplateToProperties,
 } from './actions'
@@ -19,6 +20,7 @@ interface TemplateItem {
   unit: string
   par_level: number
   notes: string | null
+  preferred_brand: string | null
 }
 
 interface Template {
@@ -42,6 +44,30 @@ interface CatalogItem {
 const CATEGORY_ORDER: InventoryCategory[] = [
   'paper_goods', 'cleaning', 'kitchen', 'bath', 'laundry', 'bedroom', 'outdoor', 'other',
 ]
+
+function TemplateBrandInput({ itemId, defaultBrand }: { itemId: string; defaultBrand: string | null }) {
+  const [value, setValue]       = useState(defaultBrand ?? '')
+  const [, startTransition]     = useTransition()
+
+  const handleBlur = () => {
+    const brand = value.trim() || null
+    startTransition(async () => {
+      await updateTemplateItemBrand(itemId, brand)
+    })
+  }
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={e => setValue(e.target.value)}
+      onBlur={handleBlur}
+      placeholder="Any brand"
+      className="input py-0.5 px-2 text-xs w-28 flex-shrink-0"
+      title="Preferred brand — used when building Kroger cart"
+    />
+  )
+}
 
 function parseSimpleCsv(text: string) {
   const lines = text.split(/\r?\n/).filter(l => l.trim())
@@ -89,12 +115,14 @@ export function TemplateManager({
   const [catalogSelected, setCatalogSelected] = useState<Set<string>>(new Set())
   const [catalogParLevels, setCatalogParLevels] = useState<Record<string, number>>({})
   const [catalogUnits, setCatalogUnits]         = useState<Record<string, string>>({})
+  const [catalogBrands, setCatalogBrands]       = useState<Record<string, string>>({})
 
   // Custom tab state
   const [newName,     setNewName]     = useState('')
   const [newCategory, setNewCategory] = useState<InventoryCategory>('other')
   const [newUnit,     setNewUnit]     = useState('')
   const [newPar,      setNewPar]      = useState('1')
+  const [newBrand,    setNewBrand]    = useState('')
 
   // CSV tab state
   const csvInputRef = useRef<HTMLInputElement | null>(null)
@@ -120,10 +148,11 @@ export function TemplateManager({
     setError(null)
     startTransition(async () => {
       const result = await addTemplateItem(currentTemplate.id, {
-        name: newName.trim(),
-        category: newCategory,
-        unit: newUnit.trim(),
-        par_level: parseFloat(newPar) || 1,
+        name:            newName.trim(),
+        category:        newCategory,
+        unit:            newUnit.trim(),
+        par_level:       parseFloat(newPar) || 1,
+        preferred_brand: newBrand.trim() || null,
       })
       if (result.error) {
         setError(result.error)
@@ -132,7 +161,7 @@ export function TemplateManager({
           ...prev,
           inventory_template_items: [...(prev.inventory_template_items ?? []), result.item!],
         } : prev)
-        setNewName(''); setNewUnit(''); setNewPar('1')
+        setNewName(''); setNewUnit(''); setNewPar('1'); setNewBrand('')
       }
     })
   }
@@ -155,10 +184,11 @@ export function TemplateManager({
       const newItems: TemplateItem[] = []
       for (const c of itemsToAdd) {
         const result = await addTemplateItem(currentTemplate.id, {
-          name:      c.name,
-          category:  c.category,
-          unit:      catalogUnits[c.id] ?? c.default_unit,
-          par_level: catalogParLevels[c.id] ?? 1,
+          name:            c.name,
+          category:        c.category,
+          unit:            catalogUnits[c.id]   ?? c.default_unit,
+          par_level:       catalogParLevels[c.id] ?? 1,
+          preferred_brand: catalogBrands[c.id]?.trim() || null,
         })
         if (result.item) newItems.push(result.item as TemplateItem)
       }
@@ -172,6 +202,7 @@ export function TemplateManager({
       setCatalogSelected(new Set())
       setCatalogParLevels({})
       setCatalogUnits({})
+      setCatalogBrands({})
     })
   }
 
@@ -294,6 +325,7 @@ export function TemplateManager({
                       Par {item.par_level} {item.unit}
                     </span>
                   </div>
+                  <TemplateBrandInput itemId={item.id} defaultBrand={item.preferred_brand} />
                   <button
                     onClick={() => handleRemoveItem(item.id)}
                     disabled={isPending}
@@ -334,6 +366,9 @@ export function TemplateManager({
         {/* From Catalog tab */}
         {addTab === 'catalog' && (
           <div className="space-y-3">
+            <div className="px-3 py-2.5 rounded-lg text-xs" style={{ background: 'var(--bg-raised)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              If you always buy a specific brand — Bounty paper towels, Dawn dish soap, Tide pods — enter it in the Brand field. Without it, the cart may pull in a store brand and you'll have to swap it out manually every time.
+            </div>
             <div className="flex gap-1.5 flex-wrap">
               {(['all', ...CATEGORY_ORDER] as const).map(c => (
                 <button
@@ -422,7 +457,7 @@ export function TemplateManager({
                             )}
                           </div>
                           {isSelected && !alreadyInTemplate && (
-                            <div className="flex items-center gap-2 px-4 pb-2.5" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-2 px-4 pb-2.5 flex-wrap" onClick={e => e.stopPropagation()}>
                               <div className="flex items-center gap-1.5">
                                 <label className="text-xs text-muted-themed whitespace-nowrap">Par:</label>
                                 <input
@@ -441,6 +476,16 @@ export function TemplateManager({
                                   onChange={e => setCatalogUnits(prev => ({ ...prev, [c.id]: e.target.value }))}
                                   className="input w-20 py-0.5 text-xs"
                                   placeholder={c.default_unit}
+                                />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <label className="text-xs text-muted-themed whitespace-nowrap">Brand:</label>
+                                <input
+                                  type="text"
+                                  value={catalogBrands[c.id] ?? ''}
+                                  onChange={e => setCatalogBrands(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                  className="input w-28 py-0.5 text-xs"
+                                  placeholder="Any"
                                 />
                               </div>
                             </div>
@@ -506,6 +551,16 @@ export function TemplateManager({
                   value={newPar}
                   onChange={e => setNewPar(e.target.value)}
                   className="input"
+                />
+              </div>
+              <div>
+                <label className="label">Brand <span className="text-muted-themed font-normal">(optional)</span></label>
+                <input
+                  type="text"
+                  value={newBrand}
+                  onChange={e => setNewBrand(e.target.value)}
+                  className="input"
+                  placeholder="e.g. Bounty, Dawn, Tide"
                 />
               </div>
             </div>

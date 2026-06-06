@@ -80,6 +80,8 @@ export interface Organization {
   trial_ends_at:                string | null
   max_properties:               number
   onboarding_steps_completed:   Record<string, boolean>
+  preferred_retailer:           string | null
+  kroger_location_name:         string | null
   created_at:                   string
   updated_at:                   string
 }
@@ -119,6 +121,12 @@ export interface Property {
   setup_steps_completed:   Record<string, boolean>
   is_active:               boolean
   avg_nightly_rate:        number | null
+  cleaning_cost:           number | null
+  same_day_premium_pct:    number | null
+  cleaning_cost_visible_to_owner: boolean
+  square_footage:          number | null
+  lat:                     number | null
+  lng:                     number | null
   created_at:              string
   updated_at:              string
 }
@@ -329,6 +337,7 @@ export interface InventoryItem {
   current_quantity:        number
   low_stock_threshold_pct: number
   is_active:               boolean
+  preferred_brand:         string | null
   notes:                   string | null
   created_at:              string
   updated_at:              string
@@ -503,20 +512,23 @@ export interface GuestMessageSent {
 }
 
 export interface OwnerTransaction {
-  id:                string
-  property_id:       string
-  org_id:            string
-  transaction_type:  TxnType
-  category:          TxnCategory
-  amount:            number
-  description:       string
-  transaction_date:  string
-  work_order_id:     string | null
-  purchase_order_id: string | null
-  booking_id:        string | null
-  notes:             string | null
-  created_at:        string
-  updated_at:        string
+  id:                   string
+  property_id:          string
+  org_id:               string
+  transaction_type:     TxnType
+  category:             TxnCategory
+  amount:               number
+  description:          string
+  transaction_date:     string
+  source:               string | null
+  source_reference_id:  string | null
+  visible_to_owner:     boolean
+  work_order_id:        string | null
+  purchase_order_id:    string | null
+  booking_id:           string | null
+  notes:                string | null
+  created_at:           string
+  updated_at:           string
 }
 
 export interface OrgMilestone {

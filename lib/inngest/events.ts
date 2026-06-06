@@ -29,6 +29,15 @@ export type FieldStayEvents = {
   // Bookings
   // ----------------------------------------------------------
 
+  'booking/confirmed': {
+    data: {
+      booking_id:  string
+      property_id: string
+      org_id:      string
+      source:      'ownerrez' | 'uplisting'
+    }
+  }
+
   'booking/detected': {
     data: {
       booking_id: string
@@ -135,6 +144,15 @@ export type FieldStayEvents = {
     }
   }
 
+  'purchase-order/approved': {
+    data: {
+      purchase_order_id:    string
+      property_id:          string
+      org_id:               string
+      total_estimated_cost: number | null
+    }
+  }
+
   // ----------------------------------------------------------
   // Work Orders
   // ----------------------------------------------------------
@@ -146,6 +164,15 @@ export type FieldStayEvents = {
       org_id: string
       vendor_id: string | null
       portal_enabled: boolean
+    }
+  }
+
+  'work-order/completed': {
+    data: {
+      work_order_id: string
+      property_id:   string
+      org_id:        string
+      actual_cost:   number | null
     }
   }
 

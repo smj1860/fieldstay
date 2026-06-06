@@ -226,6 +226,57 @@ export const handleTurnoverCompleted = inngest.createFunction(
       }
     })
 
+    await step.run('post-cleaning-fee-expense', async () => {
+      const supabase = createServiceClient()
+
+      const { data: existing } = await supabase
+        .from('owner_transactions')
+        .select('id')
+        .eq('source_reference_id', turnover_id)
+        .eq('source', 'cleaning_fee')
+        .maybeSingle()
+
+      if (existing) return { skipped: true }
+
+      const [{ data: property }, { data: turnover }] = await Promise.all([
+        supabase
+          .from('properties')
+          .select('cleaning_cost, same_day_premium_pct')
+          .eq('id', property_id)
+          .single(),
+        supabase
+          .from('turnovers')
+          .select('is_same_day_turnover')
+          .eq('id', turnover_id)
+          .single(),
+      ])
+
+      if (!property?.cleaning_cost) return { skipped: true }
+
+      const base    = property.cleaning_cost
+      const premium = (turnover?.is_same_day_turnover && property.same_day_premium_pct)
+        ? base * (property.same_day_premium_pct / 100)
+        : 0
+      const amount  = parseFloat((base + premium).toFixed(2))
+
+      await supabase.from('owner_transactions').insert({
+        property_id,
+        org_id,
+        source:               'cleaning_fee',
+        source_reference_id:  turnover_id,
+        transaction_type:     'expense',
+        category:             'cleaning_fee',
+        amount,
+        description:          (premium > 0)
+          ? `Cleaning fee + ${property.same_day_premium_pct}% same-day premium`
+          : 'Cleaning fee',
+        transaction_date:     new Date().toISOString().split('T')[0],
+        visible_to_owner:     false,
+      })
+
+      return { posted: amount }
+    })
+
     return { turnover_id, notified: true }
   }
 )

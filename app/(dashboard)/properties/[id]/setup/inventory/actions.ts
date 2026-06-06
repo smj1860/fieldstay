@@ -17,6 +17,7 @@ export async function upsertInventoryItems(
     unit: string
     par_level: number
     notes?: string | null
+    preferred_brand?: string | null
   }>
 ): Promise<InventoryState> {
   const { supabase, membership } = await requireOrgMember()
@@ -27,26 +28,28 @@ export async function upsertInventoryItems(
       await supabase
         .from('inventory_items')
         .update({
-          name:       item.name,
-          category:   item.category as never,
-          unit:       item.unit,
-          par_level:  item.par_level,
-          notes:      item.notes ?? null,
+          name:            item.name,
+          category:        item.category as never,
+          unit:            item.unit,
+          par_level:       item.par_level,
+          notes:           item.notes ?? null,
+          preferred_brand: item.preferred_brand ?? null,
         })
         .eq('id', item.id)
         .eq('org_id', membership.org_id)
     } else {
       // Insert new
       await supabase.from('inventory_items').insert({
-        property_id:     propertyId,
-        org_id:          membership.org_id,
-        catalog_item_id: item.catalog_item_id ?? null,
-        name:            item.name,
-        category:        item.category as never,
-        unit:            item.unit,
-        par_level:       item.par_level,
+        property_id:      propertyId,
+        org_id:           membership.org_id,
+        catalog_item_id:  item.catalog_item_id ?? null,
+        name:             item.name,
+        category:         item.category as never,
+        unit:             item.unit,
+        par_level:        item.par_level,
         current_quantity: 0,
-        notes:           item.notes ?? null,
+        notes:            item.notes ?? null,
+        preferred_brand:  item.preferred_brand ?? null,
       })
     }
   }
