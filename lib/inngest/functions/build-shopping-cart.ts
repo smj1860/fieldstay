@@ -1,7 +1,3 @@
-// inngest/functions/build-shopping-cart.ts
-// Place at: inngest/functions/build-shopping-cart.ts
-// Register in: app/api/inngest/route.ts
-
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import {
@@ -36,37 +32,46 @@ export const buildShoppingCart = inngest.createFunction(
     const supabase = createServiceClient()
 
     // ── Step 1: Load org settings + below-par items ─────────────
-   const { orgSettings, belowParItems } = await step.run('load-inventory-data', async () => {
-  const [{ data: org }, { data: items }] = await Promise.all([
-    supabase
-      .from('organizations')
-      .select(`
-        id, preferred_retailer, kroger_location_id, kroger_location_name,
-        kroger_customer_token, kroger_token_expires_at, kroger_refresh_token
-      `)
-      .eq('id', org_id)
-      .single(),
+    const { orgSettings, belowParItems } = await step.run('load-inventory-data', async () => {
+      const [{ data: org }, { data: allItems }] = await Promise.all([
+        supabase
+          .from('organizations')
+          .select(`
+            id, preferred_retailer, kroger_location_id, kroger_location_name,
+            kroger_customer_token, kroger_token_expires_at, kroger_refresh_token
+          `)
+          .eq('id', org_id)
+          .single(),
 
-    supabase
-      .from('inventory_items')
-      .select(`
-        id, name, current_quantity, par_level, unit,
-        preferred_brand,
-        property_id,
-        properties!inner ( id, name, zip )
-      `)
-      .eq('org_id', org_id)
-      .lt('current_quantity', supabase.raw('par_level'))
-      .modify((q: any) => {
-        if (property_ids?.length) q.in('property_id', property_ids)
-      }),
-  ])
+        (async () => {
+          let query = supabase
+            .from('inventory_items')
+            .select(`
+              id, name, current_quantity, par_level, unit,
+              preferred_brand,
+              property_id,
+              properties!inner ( id, name, zip )
+            `)
+            .eq('org_id', org_id)
 
-  if (!org) throw new Error(`Org ${org_id} not found`)
-  if (!items?.length) return { orgSettings: org, belowParItems: [] }
+          if (property_ids?.length) {
+            query = query.in('property_id', property_ids)
+          }
 
-  return { orgSettings: org, belowParItems: items }
-})
+          return query
+        })(),
+      ])
+
+      if (!org) throw new Error(`Org ${org_id} not found`)
+
+      const items = (allItems ?? []).filter(
+        item => (item.current_quantity ?? 0) < (item.par_level ?? 1)
+      )
+
+      if (!items.length) return { orgSettings: org, belowParItems: [] }
+
+      return { orgSettings: org, belowParItems: items }
+    })
 
     if (!belowParItems.length) {
       return { status: 'nothing_below_par', items_checked: 0 }
@@ -127,7 +132,7 @@ export const buildShoppingCart = inngest.createFunction(
         }
       }
 
-      const uniqueNames         = [...itemBrandMap.keys()]
+      const uniqueNames           = [...itemBrandMap.keys()]
       const itemsForNormalization = uniqueNames.map(name => ({
         name,
         brand: itemBrandMap.get(name) ?? null,
@@ -233,7 +238,6 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
       const unmatchedItems: string[]      = []
       const cartItems: { upc: string; quantity: number; modality: typeof modality }[] = []
 
-      // Aggregate deficits across properties for the same item
       const quantityMap = new Map<string, number>()
       for (const item of belowParItems) {
         const key    = item.name.toLowerCase().trim()
