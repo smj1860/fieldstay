@@ -118,6 +118,15 @@ export type FieldStayEvents = {
     }
   }
 
+  'inventory/cart_requested': {
+    data: {
+      org_id:        string
+      requested_by:  string
+      property_ids?: string[]
+      modality:      'PICKUP' | 'DELIVERY' | 'IN_STORE'
+    }
+  }
+
   'purchase-order/created': {
     data: {
       purchase_order_id: string
