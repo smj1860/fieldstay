@@ -41,7 +41,7 @@ export function DetailsForm({ property }: { property: Property }) {
         </div>
         <div>
           <label htmlFor="bathrooms" className="label">Bathrooms</label>
-          <input id="bathrooms" name="bathrooms" type="number" min="0.5" max="20" step="0.5" defaultValue={property.bathrooms ?? undefined} className="input" />
+          <input id="bathrooms" name="bathrooms" type="number" min="0.5" max="20" step="0.5" defaultValue={property.bathrooms ?? ''} className="input" />
         </div>
         <div>
           <label htmlFor="square_footage" className="label">Sq Footage</label>

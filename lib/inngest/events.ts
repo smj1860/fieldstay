@@ -361,7 +361,23 @@ export type FieldStayEvents = {
     }
   }
 
-}
+  // ----------------------------------------------------------
+  // Asset Health — CapEx & Depreciation
+  // ----------------------------------------------------------
+
+  'asset/capex-projection-generated': {
+    data: {
+      org_id:   string
+      tax_year: number
+    }
+  }
+
+  'asset/depreciation-ledger-requested': {
+    data: {
+      org_id:   string
+      tax_year: number
+    }
+  }
 
   // ----------------------------------------------------------
   // Work order lifecycle extensions
