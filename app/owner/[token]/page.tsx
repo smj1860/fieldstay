@@ -2,44 +2,92 @@ import { notFound } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import type { Metadata } from 'next'
-import type { TxnType, TxnCategory } from '@/types/database'
-import { formatDate } from '@/lib/utils'
+import type { TxnType } from '@/types/database'
 
 export const metadata: Metadata = { title: 'Owner Portal — FieldStay' }
 
 interface Props {
-  params: Promise<{ token: string }>
+  params:       Promise<{ token: string }>
+  searchParams: Promise<{ month?: string }>
 }
 
-const CATEGORY_LABELS: Record<TxnCategory, string> = {
-  booking_revenue: 'Booking Revenue',
-  cleaning_fee:    'Cleaning Fee',
-  maintenance:     'Maintenance',
-  restock:         'Restock',
-  utility:         'Utility',
-  insurance:       'Insurance',
-  supplies:        'Supplies',
-  other:           'Other',
-}
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
+    style:                 'currency',
+    currency:              'USD',
     minimumFractionDigits: 2,
   }).format(amount)
 }
 
-function getMonthKey(dateStr: string): string {
+function toMonthParam(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00')
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-export default async function OwnerPortalPage({ params }: Props) {
+function formatMonthLabel(monthParam: string): string {
+  const [year, month] = monthParam.split('-')
+  return new Date(Number(year), Number(month) - 1, 1)
+    .toLocaleDateString('en-US', { year: 'numeric', month: 'long' })
+}
+
+function formatDate(dateStr: string): string {
+  return new Date(dateStr + 'T00:00:00')
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function getLastSixMonths(): string[] {
+  const months: string[] = []
+  const now = new Date()
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return months
+}
+
+// ── Source badge config ───────────────────────────────────────────────────────
+
+type BadgeColor = 'blue' | 'amber'
+
+interface SourceBadge {
+  label:    string
+  color:    BadgeColor
+  tooltip?: string
+}
+
+const SOURCE_BADGES: Record<string, SourceBadge | null> = {
+  manual:             null,
+  booking_revenue:    { label: 'Booking',        color: 'blue'  },
+  uplisting_booking:  { label: 'Booking (Est.)', color: 'blue',  tooltip: 'Estimated from average nightly rate' },
+  wo_completion:      { label: 'Work Order',      color: 'amber' },
+  cleaning_fee:       { label: 'Cleaning',        color: 'amber' },
+  inventory_purchase: { label: 'Supplies',        color: 'amber' },
+}
+
+const SOURCE_FALLBACK_LABELS: Record<string, string> = {
+  booking_revenue:    'Booking Revenue',
+  uplisting_booking:  'Booking (Uplisting)',
+  wo_completion:      'Work Order Completion',
+  cleaning_fee:       'Cleaning Fee',
+  inventory_purchase: 'Supply Purchase',
+  manual:             'Manual Entry',
+}
+
+const BADGE_STYLES: Record<BadgeColor, string> = {
+  blue:  'bg-blue-50 text-blue-700 border border-blue-200',
+  amber: 'bg-amber-50 text-amber-700 border border-amber-200',
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+
+export default async function OwnerPortalPage({ params, searchParams }: Props) {
   const { token } = await params
+  const { month: monthParam } = await searchParams
   const supabase = createServiceClient()
 
-  // Validate the token + fetch owner + property in one query
+  // Validate token + fetch owner + property
   const { data: portalToken } = await supabase
     .from('owner_portal_tokens')
     .select(`
@@ -68,7 +116,6 @@ export default async function OwnerPortalPage({ params }: Props) {
 
   if (!portalToken) notFound()
 
-  // Check revocation (M-5)
   if (portalToken.revoked_at) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -82,7 +129,6 @@ export default async function OwnerPortalPage({ params }: Props) {
     )
   }
 
-  // Check expiry
   if (portalToken.expires_at && new Date(portalToken.expires_at) < new Date()) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -108,78 +154,68 @@ export default async function OwnerPortalPage({ params }: Props) {
     .update({ last_accessed_at: new Date().toISOString() })
     .eq('id', portalToken.id)
 
-  const ownerForAudit = Array.isArray(portalToken.property_owners)
+  const ownerRaw = Array.isArray(portalToken.property_owners)
     ? portalToken.property_owners[0]
     : portalToken.property_owners
-  if (ownerForAudit?.org_id) {
-    await logAuditEvent({
-      orgId:      ownerForAudit.org_id,
-      action:     'owner_portal.accessed',
-      targetType: 'owner_portal_token',
-      targetId:   portalToken.id,
-    })
+
+  if (!ownerRaw) notFound()
+
+  if (ownerRaw.org_id) {
+    await Promise.all([
+      logAuditEvent({
+        orgId:      ownerRaw.org_id,
+        action:     'owner_portal.accessed',
+        targetType: 'owner_portal_token',
+        targetId:   portalToken.id,
+      }),
+      supabase.from('org_milestones').upsert(
+        { org_id: ownerRaw.org_id, milestone: 'first_owner_portal_view' },
+        { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+      ),
+    ])
   }
 
-  const ownerForMilestone = Array.isArray(portalToken.property_owners)
-    ? portalToken.property_owners[0]
-    : portalToken.property_owners
-
-  if (ownerForMilestone?.org_id) {
-    await supabase.from('org_milestones').upsert(
-      { org_id: ownerForMilestone.org_id, milestone: 'first_owner_portal_view' },
-      { onConflict: 'org_id,milestone', ignoreDuplicates: true }
-    )
-  }
-
-  const owner = Array.isArray(portalToken.property_owners)
-    ? portalToken.property_owners[0]
-    : portalToken.property_owners
-
-  if (!owner) notFound()
-
-  const property = Array.isArray(owner.properties)
-    ? owner.properties[0]
-    : owner.properties
+  const property = Array.isArray(ownerRaw.properties)
+    ? ownerRaw.properties[0]
+    : ownerRaw.properties
 
   if (!property) notFound()
 
-  // Fetch transactions for this property — only rows the owner is allowed to see
+  // Fetch all visible transactions (last 12 months to cover 6-month picker)
+  const since = new Date()
+  since.setMonth(since.getMonth() - 11)
+  since.setDate(1)
+
   const { data: transactions } = await supabase
     .from('owner_transactions')
-    .select('id, transaction_type, category, amount, description, transaction_date, notes')
-    .eq('property_id', owner.property_id)
+    .select('id, transaction_type, category, source, amount, description, transaction_date, notes')
+    .eq('property_id', ownerRaw.property_id)
     .eq('visible_to_owner', true)
+    .gte('transaction_date', since.toISOString().split('T')[0]!)
     .order('transaction_date', { ascending: false })
 
-  const txns = transactions ?? []
+  const allTxns = transactions ?? []
 
-  // Compute summary
-  const totalRevenue  = txns
-    .filter((t) => t.transaction_type === 'revenue')
-    .reduce((sum, t) => sum + t.amount, 0)
-  const totalExpenses = txns
-    .filter((t) => t.transaction_type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0)
+  // Month filter
+  const availableMonths  = getLastSixMonths()
+  const defaultMonth     = availableMonths[0]!
+  const selectedMonth    = availableMonths.includes(monthParam ?? '') ? (monthParam ?? defaultMonth) : defaultMonth
+
+  const filteredTxns = allTxns.filter(
+    (t) => toMonthParam(t.transaction_date) === selectedMonth
+  )
+
+  // Summary from filtered transactions
+  const totalRevenue  = filteredTxns
+    .filter((t) => (t.transaction_type as TxnType) === 'revenue')
+    .reduce((s, t) => s + t.amount, 0)
+  const totalExpenses = filteredTxns
+    .filter((t) => (t.transaction_type as TxnType) === 'expense')
+    .reduce((s, t) => s + t.amount, 0)
   const netIncome = totalRevenue - totalExpenses
 
-  // Group by month
-  const byMonth = txns.reduce<Record<string, typeof txns>>((acc, t) => {
-    const key = getMonthKey(t.transaction_date)
-    if (!acc[key]) acc[key] = []
-    acc[key].push(t)
-    return acc
-  }, {})
-
-  const monthKeys = Object.keys(byMonth) // already sorted desc from DB
-
-  // Address display
-  const addressParts = [
-    property.address,
-    property.city,
-    property.state,
-    property.zip,
-  ].filter(Boolean)
-  const addressDisplay = addressParts.length > 0 ? addressParts.join(', ') : null
+  const addressParts = [property.address, property.city, property.state, property.zip].filter(Boolean)
+  const addressDisplay = addressParts.length ? addressParts.join(', ') : null
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -197,9 +233,9 @@ export default async function OwnerPortalPage({ params }: Props) {
               )}
             </div>
             <div className="text-right flex-shrink-0">
-              <p className="text-sm font-medium text-gray-700">{owner.name}</p>
-              {owner.revenue_share_pct != null && (
-                <p className="text-xs text-gray-400 mt-0.5">{owner.revenue_share_pct}% revenue share</p>
+              <p className="text-sm font-medium text-gray-700">{ownerRaw.name}</p>
+              {ownerRaw.revenue_share_pct != null && (
+                <p className="text-xs text-gray-400 mt-0.5">{ownerRaw.revenue_share_pct}% revenue share</p>
               )}
             </div>
           </div>
@@ -208,96 +244,105 @@ export default async function OwnerPortalPage({ params }: Props) {
 
       <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6">
 
+        {/* Month filter */}
+        <div className="flex gap-2 overflow-x-auto pb-1 mb-6 -mx-1 px-1">
+          {availableMonths.map((m) => (
+            <a
+              key={m}
+              href={`/owner/${token}?month=${m}`}
+              className={[
+                'px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors',
+                m === selectedMonth
+                  ? 'bg-gray-900 text-white'
+                  : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-400',
+              ].join(' ')}
+            >
+              {formatMonthLabel(m)}
+            </a>
+          ))}
+        </div>
+
         {/* Summary cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-          {/* Revenue */}
           <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
-              Total Revenue
-            </p>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Total Revenue</p>
             <p className="text-2xl font-bold text-green-600">{formatCurrency(totalRevenue)}</p>
           </div>
 
-          {/* Expenses */}
           <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
-              Total Expenses
-            </p>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Total Expenses</p>
             <p className="text-2xl font-bold text-red-600">{formatCurrency(totalExpenses)}</p>
           </div>
 
-          {/* Net income */}
           <div className={`rounded-xl border p-5 ${
-            netIncome >= 0
-              ? 'bg-green-50 border-green-200'
-              : 'bg-red-50 border-red-200'
+            netIncome >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
           }`}>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
-              Net Income
-            </p>
-            <p className={`text-2xl font-bold ${
-              netIncome >= 0 ? 'text-green-700' : 'text-red-700'
-            }`}>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Net Income</p>
+            <p className={`text-2xl font-bold ${netIncome >= 0 ? 'text-green-700' : 'text-red-700'}`}>
               {formatCurrency(netIncome)}
             </p>
           </div>
         </div>
 
-        {/* Transactions */}
-        {txns.length === 0 ? (
+        {/* Transaction list */}
+        {filteredTxns.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
-            <p className="text-gray-400 text-sm">No transactions recorded yet.</p>
+            <p className="text-gray-400 text-sm">No transactions for {formatMonthLabel(selectedMonth)}.</p>
           </div>
         ) : (
-          <div className="space-y-6">
-            {monthKeys.map((month) => {
-              const monthTxns = byMonth[month]
-              const monthRevenue  = monthTxns.filter((t) => t.transaction_type === 'revenue').reduce((s, t) => s + t.amount, 0)
-              const monthExpenses = monthTxns.filter((t) => t.transaction_type === 'expense').reduce((s, t) => s + t.amount, 0)
-              const monthNet = monthRevenue - monthExpenses
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
+              <h2 className="font-semibold text-gray-700 text-sm">{formatMonthLabel(selectedMonth)}</h2>
+            </div>
 
-              return (
-                <div key={month} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                  {/* Month header */}
-                  <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-200">
-                    <h2 className="font-semibold text-gray-700 text-sm">{month}</h2>
-                    <div className="flex items-center gap-4 text-sm">
-                      <span className="text-green-600 font-medium">+{formatCurrency(monthRevenue)}</span>
-                      <span className="text-red-600 font-medium">−{formatCurrency(monthExpenses)}</span>
-                      <span className={`font-semibold ${monthNet >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                        = {formatCurrency(monthNet)}
-                      </span>
+            <div className="divide-y divide-gray-100">
+              {filteredTxns.map((txn) => {
+                const isRevenue = (txn.transaction_type as TxnType) === 'revenue'
+                const badge     = SOURCE_BADGES[txn.source ?? ''] ?? null
+                const desc      = txn.description || SOURCE_FALLBACK_LABELS[txn.source ?? ''] || txn.category
+
+                return (
+                  <div key={txn.id} className="flex items-center gap-4 px-5 py-3.5">
+                    {/* Date */}
+                    <div className="w-16 flex-shrink-0 text-xs text-gray-400 tabular-nums">
+                      {formatDate(txn.transaction_date)}
+                    </div>
+
+                    {/* Description + source badge */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-medium text-gray-800">{desc}</p>
+                        {badge && (
+                          <span
+                            className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${BADGE_STYLES[badge.color]}`}
+                          >
+                            {badge.label}
+                            {badge.tooltip && (
+                              <span
+                                title={badge.tooltip}
+                                className="cursor-help text-xs leading-none opacity-60 hover:opacity-100"
+                              >
+                                ⓘ
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                      {txn.notes && (
+                        <p className="text-xs text-gray-400 mt-0.5 truncate">{txn.notes}</p>
+                      )}
+                    </div>
+
+                    {/* Amount */}
+                    <div className={`text-sm font-semibold flex-shrink-0 tabular-nums ${
+                      isRevenue ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {isRevenue ? '+' : '−'}{formatCurrency(txn.amount)}
                     </div>
                   </div>
-
-                  {/* Transactions for this month */}
-                  <div className="divide-y divide-gray-100">
-                    {monthTxns.map((txn) => {
-                      const isRevenue = txn.transaction_type === 'revenue'
-                      return (
-                        <div key={txn.id} className="flex items-center gap-4 px-5 py-3">
-                          <div className="w-20 flex-shrink-0 text-xs text-gray-400">
-                            {formatDate(txn.transaction_date)}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-800 truncate">{txn.description}</p>
-                            <p className="text-xs text-gray-400 mt-0.5">
-                              {CATEGORY_LABELS[txn.category as TxnCategory] ?? txn.category}
-                              {txn.notes ? ` · ${txn.notes}` : ''}
-                            </p>
-                          </div>
-                          <div className={`text-sm font-semibold flex-shrink-0 ${
-                            isRevenue ? 'text-green-600' : 'text-red-600'
-                          }`}>
-                            {isRevenue ? '+' : '−'}{formatCurrency(txn.amount)}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
           </div>
         )}
 
