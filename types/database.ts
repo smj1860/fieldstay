@@ -600,6 +600,7 @@ export interface InventoryTemplateItem {
   par_level:       number
   sort_order:      number
   notes:           string | null
+  preferred_brand: string | null
   created_at:      string
 }
 
