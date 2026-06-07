@@ -315,7 +315,7 @@ export type FieldStayEvents = {
       crew_needed:   number
       crew_found:    number
     }
-  }
+  },
 
   // ----------------------------------------------------------
   // Work order lifecycle extensions
@@ -329,7 +329,7 @@ export type FieldStayEvents = {
       days_open:     number
       new_priority:  string
     }
-  }
+  },
 
   // ----------------------------------------------------------
   // Maintenance analytics
