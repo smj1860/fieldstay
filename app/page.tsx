@@ -330,12 +330,13 @@ export default function LandingPage() {
           </div>
 
           {/* Plan cards */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {[
               {
-                name: 'Pro',
+                name: 'Starter',
+                description: 'For independent managers with a focused portfolio.',
                 props: 'Up to 15 properties',
-                monthly: 149, annual: 1490,
+                monthly: 199, annual: 1990,
                 highlight: false,
                 features: [
                   'iCal sync (Airbnb, VRBO)',
@@ -351,28 +352,45 @@ export default function LandingPage() {
               },
               {
                 name: 'Growth',
-                props: '16–45 properties',
-                monthly: 219, annual: 2190,
+                description: 'For expanding operations that need more scale.',
+                props: '16–50 properties',
+                monthly: 379, annual: 3790,
                 highlight: true,
                 badge: 'Most Popular',
                 features: [
-                  'Everything in Pro',
-                  'Up to 45 properties',
+                  'Everything in Starter',
+                  'Up to 50 properties',
                   'Priority support',
                 ],
                 cta: 'Start Free Trial',
                 ctaHref: '/signup',
               },
               {
-                name: 'Enterprise',
-                props: '45+ properties',
-                monthly: null, annual: null,
+                name: 'Portfolio',
+                description: 'For professional managers running a full operation.',
+                props: '51–100 properties',
+                monthly: 599, annual: 5990,
                 highlight: false,
                 features: [
                   'Everything in Growth',
-                  'Unlimited properties',
+                  'Up to 100 properties',
                   'Custom onboarding',
                   'Dedicated account support',
+                ],
+                cta: 'Start Free Trial',
+                ctaHref: '/signup',
+              },
+              {
+                name: 'Enterprise',
+                description: 'For large portfolios and multi-location operations.',
+                props: '100+ properties',
+                monthly: null, annual: null,
+                highlight: false,
+                features: [
+                  'Everything in Portfolio',
+                  'Unlimited properties',
+                  'SLA-backed uptime',
+                  'Volume pricing',
                 ],
                 cta: 'Contact Us',
                 ctaHref: 'mailto:hello@fieldstay.app',
@@ -394,6 +412,7 @@ export default function LandingPage() {
                 <p className="font-black mb-1" style={{ fontSize: 18, color: '#111827' }}>
                   {plan.name}
                 </p>
+                <p className="text-xs mb-1" style={{ color: '#6B7280' }}>{plan.description}</p>
                 <p className="text-sm mb-5" style={{ color: '#9CA3AF' }}>{plan.props}</p>
 
                 {/* Price */}
