@@ -292,9 +292,8 @@ export type FieldStayEvents = {
     data: {
       org_id: string
     }
-  }
+  },
 
-}
 
   // ----------------------------------------------------------
   // Geocode Backfill
@@ -302,4 +301,6 @@ export type FieldStayEvents = {
 
 'geocoding/backfill-requested': {
   data: Record<string, never>
+}
+
 }
