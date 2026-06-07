@@ -295,3 +295,12 @@ export type FieldStayEvents = {
   }
 
 }
+
+  //
+----------------------------------------------------------
+  // Geocoding
+  // ----------------------------------------------------------
+
+'geocoding/backfill-requested': {
+  data: Record<string, never>
+}
