@@ -418,6 +418,38 @@ export async function myAction(input: MyInput): Promise<ActionResult> {
 }
 ```
 
+### types/database.ts — Keep in Sync With Every Migration
+
+**This is the most important housekeeping rule in the codebase.**
+
+Whenever a DB migration adds or changes a column, update `types/database.ts`
+in the same commit. The Supabase TypeScript client infers return types from
+this file — not from the live database schema. A column that exists in the DB
+but not in `types/database.ts` causes TypeScript build failures even when
+the SQL query and select string are perfectly correct.
+
+Pattern for every migration:
+```typescript
+// types/database.ts — find the matching interface and add the field
+
+// For a nullable column added via migration:
+export interface MyTable {
+  // ... existing fields
+  new_column: string | null    // ← add here, matching DB nullability
+}
+
+// For a required column with a default:
+export interface MyTable {
+  new_column: string           // ← non-null if DB has NOT NULL DEFAULT
+}
+```
+
+Tables most likely to need updates as new features are built:
+- `property_assets` — all asset health fields
+- `vendor_compliance_documents` — compliance vault fields
+- `asset_depreciation_entries` — CapEx/depreciation fields
+- `organization_members`, `organizations` — any new org-level settings
+
 ### Geocoding (Mapbox) — One Call on Save
 ```typescript
 // Called in createProperty and updateProperty server actions
@@ -557,6 +589,8 @@ Current state summary:
 | `assigned_crew_id` on work_orders | `assigned_crew_member_id` (old column deprecated) |
 | `membership.user_id` in server actions | `user.id` — OrgMembership has no user_id field. Destructure `user` from `requireOrgMember()` |
 | `supabase.raw('column_name')` | Does not exist on Supabase JS client. For column-to-column comparisons (e.g. `current_quantity < par_level`), fetch the rows and filter in JavaScript |
+| Adding a DB column via migration without updating `types/database.ts` | Every migration that adds a column must also add that column to the matching interface in `types/database.ts` in the same commit. Supabase's TS client infers return types from this file, not from the live DB. Missing columns here cause build failures even when the query and select string are correct |
+| Adding a new event to `events.ts` outside the closing `}` of `FieldStayEvents` | The final `}` in `events.ts` closes the `FieldStayEvents` type. Every new event entry must be placed before it, with a comma after the preceding entry's closing brace |
 | `.modify(q => ...)` on a Supabase query | Not a real method. Build the query conditionally with `if` blocks before awaiting it |
 | Direct Supabase reads in client components | PowerSync hooks + local SQLite |
 | Service role key in client code | Server Actions and Inngest steps only |
