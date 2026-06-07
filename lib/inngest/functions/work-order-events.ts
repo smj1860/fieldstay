@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
+import { WorkOrderVendorEmail } from '@/lib/resend/emails/work-order-vendor'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -21,9 +22,11 @@ export const handleWorkOrderCreated = inngest.createFunction(
         const { data: wo } = await supabase
           .from('work_orders')
           .select(`
-            id, title, description, scheduled_date, completion_token,
+            id, title, description, wo_number, wo_category, priority_level,
+            scheduled_date, estimated_cost, nte_amount, completion_token,
+            completion_token_expires_at,
             vendors ( name, email ),
-            properties ( name, city, state )
+            properties ( name, address_line1, city, state, zip )
           `)
           .eq('id', work_order_id)
           .single()
@@ -47,25 +50,28 @@ export const handleWorkOrderCreated = inngest.createFunction(
           .update({ completion_token_expires_at: expiresAt.toISOString() })
           .eq('id', work_order_id)
 
+        const EXPIRES_IN_DAYS = 30
         await resend.emails.send({
           from:    FROM,
           to:      vendor.email,
-          subject: `Work order: ${wo.title} — ${property?.name}`,
-          html: `
-            <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-              <h2>Work Order</h2>
-              <p>You've been assigned a work order at <strong>${property?.name}</strong>.</p>
-              <table style="border-collapse:collapse;width:100%;margin:16px 0">
-                <tr><td style="padding:8px;color:#64748b">Job</td><td style="padding:8px;font-weight:600">${wo.title}</td></tr>
-                ${wo.description ? `<tr><td style="padding:8px;color:#64748b">Details</td><td style="padding:8px">${wo.description}</td></tr>` : ''}
-                ${wo.scheduled_date ? `<tr><td style="padding:8px;color:#64748b">Scheduled</td><td style="padding:8px;font-weight:600">${new Date(wo.scheduled_date).toLocaleDateString()}</td></tr>` : ''}
-                <tr><td style="padding:8px;color:#64748b">Property</td><td style="padding:8px">${property?.name}${property?.city ? `, ${property.city}` : ''}</td></tr>
-              </table>
-              <p>When the job is complete, click below to submit your completion confirmation:</p>
-              <p><a href="${portalUrl}" style="background:#FCD116;color:#0a1628;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">Mark as Complete →</a></p>
-              <p style="color:#94a3b8;font-size:12px;margin-top:24px">This link expires in 30 days.</p>
-            </div>
-          `,
+          subject: `Work Order${wo.wo_number ? ` #${wo.wo_number}` : ''}: ${wo.title} — ${property?.name}`,
+          react:   WorkOrderVendorEmail({
+            wo_number:       wo.wo_number ?? null,
+            title:           wo.title,
+            description:     wo.description ?? null,
+            wo_category:     wo.wo_category ?? null,
+            priority_level:  wo.priority_level ?? null,
+            scheduled_date:  wo.scheduled_date ?? null,
+            nte_amount:      (wo as { nte_amount?: number | null }).nte_amount ?? null,
+            property_name:   property?.name ?? '',
+            address_line1:   (property as { address_line1?: string | null } | null)?.address_line1 ?? null,
+            city:            property?.city ?? null,
+            state:           property?.state ?? null,
+            zip:             (property as { zip?: string | null } | null)?.zip ?? null,
+            portal_url:      portalUrl,
+            portal_type:     'complete',
+            expires_in_days: EXPIRES_IN_DAYS,
+          }),
         })
 
         logger.info(`Sent vendor portal link to ${vendor.email} for WO ${work_order_id}`)
@@ -313,8 +319,9 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
         .select(`
           id, quote_token, status,
           work_orders (
-            id, title, description, scheduled_date, estimated_cost,
-            properties (name, city, state)
+            id, title, description, wo_number, wo_category, priority_level,
+            scheduled_date, estimated_cost, nte_amount,
+            properties (name, address_line1, city, state, zip)
           ),
           vendors (name, email)
         `)
@@ -334,25 +341,28 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
 
       const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/work-orders/${qr.quote_token}/quote`
 
+      const QUOTE_EXPIRES_DAYS = 14
       await resend.emails.send({
         from:    FROM,
         to:      vendor.email,
-        subject: `Quote requested — ${wo?.title} at ${property?.name}`,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2>Quote Request</h2>
-            <p>You've been asked to submit a quote for a job at <strong>${property?.name}</strong>.</p>
-            <table style="border-collapse:collapse;width:100%;margin:16px 0">
-              <tr><td style="padding:8px;color:#64748b">Job</td><td style="padding:8px;font-weight:600">${wo?.title}</td></tr>
-              ${wo?.description ? `<tr><td style="padding:8px;color:#64748b">Details</td><td style="padding:8px">${wo.description}</td></tr>` : ''}
-              ${wo?.scheduled_date ? `<tr><td style="padding:8px;color:#64748b">Target Date</td><td style="padding:8px;font-weight:600">${new Date(wo.scheduled_date).toLocaleDateString()}</td></tr>` : ''}
-              ${wo?.estimated_cost ? `<tr><td style="padding:8px;color:#64748b">Budget Est.</td><td style="padding:8px">$${wo.estimated_cost}</td></tr>` : ''}
-            </table>
-            <p>Click below to view the job details and submit your quote:</p>
-            <p><a href="${quoteUrl}" style="background:#FCD116;color:#0a1628;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">Submit Quote →</a></p>
-            <p style="color:#94a3b8;font-size:12px;margin-top:24px">This link expires in 14 days.</p>
-          </div>
-        `,
+        subject: `Quote Request${wo?.wo_number ? ` #${wo.wo_number}` : ''}: ${wo?.title} — ${property?.name}`,
+        react:   WorkOrderVendorEmail({
+          wo_number:       (wo as { wo_number?: string | null } | null)?.wo_number ?? null,
+          title:           wo?.title ?? '',
+          description:     wo?.description ?? null,
+          wo_category:     (wo as { wo_category?: string | null } | null)?.wo_category ?? null,
+          priority_level:  (wo as { priority_level?: string | null } | null)?.priority_level ?? null,
+          scheduled_date:  wo?.scheduled_date ?? null,
+          nte_amount:      (wo as { nte_amount?: number | null } | null)?.nte_amount ?? null,
+          property_name:   property?.name ?? '',
+          address_line1:   (property as { address_line1?: string | null } | null)?.address_line1 ?? null,
+          city:            property?.city ?? null,
+          state:           property?.state ?? null,
+          zip:             (property as { zip?: string | null } | null)?.zip ?? null,
+          portal_url:      quoteUrl,
+          portal_type:     'quote',
+          expires_in_days: QUOTE_EXPIRES_DAYS,
+        }),
       })
 
       logger.info(`Sent quote request to ${vendor.email} for WO ${work_order_id}`)

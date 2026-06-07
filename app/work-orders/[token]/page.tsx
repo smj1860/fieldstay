@@ -20,7 +20,8 @@ export default async function VendorPortalPage({
     .select(`
       id, title, description, status, portal_enabled,
       scheduled_date, estimated_cost, completion_token_expires_at,
-      properties ( name, city, state )
+      wo_number, wo_category, priority_level, nte_amount,
+      properties ( name, address_line1, city, state, zip )
     `)
     .eq('completion_token', token)
     .eq('portal_enabled', true)
@@ -43,10 +44,14 @@ export default async function VendorPortalPage({
       workOrder={{
         id:             workOrder.id,
         title:          workOrder.title,
-        description:    workOrder.description,
+        description:    workOrder.description ?? null,
         status:         workOrder.status as string,
-        scheduled_date: workOrder.scheduled_date,
-        estimated_cost: workOrder.estimated_cost,
+        scheduled_date: workOrder.scheduled_date ?? null,
+        estimated_cost: workOrder.estimated_cost ?? null,
+        wo_number:      workOrder.wo_number ?? null,
+        wo_category:    workOrder.wo_category ?? null,
+        priority_level: workOrder.priority_level ?? null,
+        nte_amount:     (workOrder as { nte_amount?: number | null }).nte_amount ?? null,
       }}
       property={property ?? null}
       expired={!!expired}
