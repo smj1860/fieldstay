@@ -332,20 +332,6 @@ export type FieldStayEvents = {
   }
 
   // ----------------------------------------------------------
-  // Maintenance analytics
-  // ----------------------------------------------------------
-
-  'maintenance/repeat-issue-detected': {
-    data: {
-      org_id:       string
-      property_id:  string
-      wo_category:  string
-      count:        number
-      window_days:  number
-    }
-  }
-
-  // ----------------------------------------------------------
   // Vendor Compliance
   // ----------------------------------------------------------
 
