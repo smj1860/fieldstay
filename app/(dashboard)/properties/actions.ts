@@ -359,6 +359,73 @@ export async function deactivateAsset(assetId: string, propertyId: string): Prom
   revalidatePath(`/properties/${propertyId}`)
 }
 
+// ── Bulk CSV asset import ─────────────────────────────────────
+
+export interface CsvAssetRow {
+  name:                      string
+  asset_type:                string
+  make:                      string | null
+  model:                     string | null
+  serial_number:             string | null
+  installation_date:         string | null
+  purchase_price:            number | null
+  estimated_replacement_cost: number | null
+  warranty_expiry_date:      string | null
+  warranty_provider:         string | null
+  notes:                     string | null
+}
+
+export async function bulkImportAssets(
+  propertyId: string,
+  rows:       CsvAssetRow[],
+): Promise<{ imported: number; error?: string }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const { data: standards } = await supabase
+      .from('asset_type_standards')
+      .select('asset_type, macrs_class_default, lifespan_min_years, lifespan_max_years')
+
+    const stdMap = Object.fromEntries((standards ?? []).map((s) => [s.asset_type, s]))
+
+    const insertRows = rows.map((row) => {
+      const std = stdMap[row.asset_type]
+      return {
+        org_id:                     membership.org_id,
+        property_id:                propertyId,
+        name:                       row.name,
+        asset_type:                 row.asset_type,
+        make:                       row.make,
+        model:                      row.model,
+        serial_number:              row.serial_number,
+        installation_date:          row.installation_date,
+        purchase_price:             row.purchase_price,
+        estimated_replacement_cost: row.estimated_replacement_cost,
+        warranty_expiry_date:       row.warranty_expiry_date,
+        warranty_provider:          row.warranty_provider,
+        notes:                      row.notes,
+        macrs_class:                std?.macrs_class_default ?? '5_year',
+        expected_lifespan_years:    std
+          ? Math.round((std.lifespan_min_years + std.lifespan_max_years) / 2)
+          : null,
+        depreciation_method:       'macrs',
+        salvage_value:             0,
+        is_active:                 true,
+        setup_steps_completed:     {},
+      }
+    })
+
+    const { error } = await supabase.from('property_assets').insert(insertRows)
+    if (error) return { imported: 0, error: error.message }
+
+    revalidatePath(`/properties/${propertyId}`)
+    return { imported: rows.length }
+  } catch (err) {
+    console.error('[bulkImportAssets]', err)
+    return { imported: 0, error: 'Import failed — please try again' }
+  }
+}
+
 // ── Archive ──────────────────────────────────────────────────
 
 export async function archiveProperty(propertyId: string): Promise<void> {

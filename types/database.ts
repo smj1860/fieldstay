@@ -747,6 +747,23 @@ export interface AssetTypeStandard {
   notes:                     string | null
 }
 
+// ── Asset Depreciation ────────────────────────────────────────────────────────
+
+export interface AssetDepreciationEntry {
+  id:                            string
+  org_id:                        string
+  asset_id:                      string
+  tax_year:                      number
+  macrs_class:                   MacrsClass
+  cost_basis:                    number
+  prior_cumulative_depreciation: number
+  current_year_depreciation:     number
+  ending_adjusted_basis:         number
+  depreciation_rate:             number | null
+  notes:                         string | null
+  generated_at:                  string
+}
+
 // ── Vendor Compliance ─────────────────────────────────────────────────────────
 
 export interface VendorComplianceDocument {
@@ -840,6 +857,7 @@ export interface Database {
       // ── Asset Health ───────────────────────────────────────
       property_assets:             { Row: PropertyAsset;            Insert: Partial<PropertyAsset>;            Update: Partial<PropertyAsset>;            Relationships: [] }
       asset_type_standards:        { Row: AssetTypeStandard;        Insert: Partial<AssetTypeStandard>;        Update: Partial<AssetTypeStandard>;        Relationships: [] }
+      asset_depreciation_entries:  { Row: AssetDepreciationEntry;   Insert: Partial<AssetDepreciationEntry>;   Update: Partial<AssetDepreciationEntry>;   Relationships: [] }
 
       // ── Vendor Compliance ──────────────────────────────────
       vendor_compliance_documents: { Row: VendorComplianceDocument; Insert: Partial<VendorComplianceDocument>; Update: Partial<VendorComplianceDocument>; Relationships: [] }

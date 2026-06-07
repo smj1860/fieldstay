@@ -43,6 +43,10 @@ import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
 // Crew auto-assignment
 import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
 
+// Asset Health — CapEx & Depreciation
+import { generateCapexProjections }   from '@/lib/inngest/functions/capex-projections'
+import { generateDepreciationLedger } from '@/lib/inngest/functions/depreciation-ledger'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -89,5 +93,9 @@ export const { GET, POST, PUT } = serve({
 
     // Crew auto-assignment
     autoAssignTurnover,
+
+    // Asset Health — CapEx projections + depreciation ledger
+    generateCapexProjections,
+    generateDepreciationLedger,
   ],
 })

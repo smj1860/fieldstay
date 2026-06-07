@@ -13,7 +13,8 @@ export default async function QuotePortalPage({ params }: Props) {
       id, status, quote_token_expires_at,
       work_orders (
         id, title, description, scheduled_date, estimated_cost,
-        properties (name, city, state)
+        wo_number, wo_category, priority_level, nte_amount,
+        properties (name, address_line1, city, state, zip)
       )
     `)
     .eq('quote_token', token)
@@ -44,6 +45,10 @@ export default async function QuotePortalPage({ params }: Props) {
         description:    wo?.description ?? null,
         scheduled_date: wo?.scheduled_date ?? null,
         estimated_cost: wo?.estimated_cost ?? null,
+        wo_number:      (wo as { wo_number?: string | null } | null)?.wo_number ?? null,
+        wo_category:    (wo as { wo_category?: string | null } | null)?.wo_category ?? null,
+        priority_level: (wo as { priority_level?: string | null } | null)?.priority_level ?? null,
+        nte_amount:     (wo as { nte_amount?: number | null } | null)?.nte_amount ?? null,
       }}
       property={property ?? null}
       expired={expired}
