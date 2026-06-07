@@ -100,6 +100,9 @@ export interface OwnerRezProperty {
   bedrooms:      number
   bathrooms:     number
   max_occupancy: number
+  sqft?:         number
+  square_feet?:  number
+  size?:         number
 }
 
 export interface OwnerRezGuest {

@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
+import { geocodeZip } from '@/lib/geocoding'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 
 export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
@@ -198,10 +199,11 @@ export async function addVendor(
   const phone          = (formData.get('phone') as string)?.trim() || null
   const specialty      = (formData.get('specialty') as string) || 'general'
   const portal_enabled = formData.get('portal_enabled') === 'on'
+  const service_zip    = (formData.get('service_zip') as string)?.trim() || null
 
   if (!name) return { error: 'Vendor name is required' }
 
-  const { error } = await supabase.from('vendors').insert({
+  const { data: vendor, error } = await supabase.from('vendors').insert({
     org_id: membership.org_id,
     name,
     contact_name,
@@ -209,10 +211,66 @@ export async function addVendor(
     phone,
     specialty: specialty as VendorSpecialty,
     portal_enabled,
+    service_zip,
     is_active: true,
-  })
+  }).select('id').single()
 
   if (error) return { error: error.message }
+
+  if (service_zip) {
+    const coords = await geocodeZip(service_zip)
+    if (coords) {
+      await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendor.id)
+    } else {
+      console.warn('[addVendor] geocodeZip returned null for service_zip:', service_zip)
+    }
+  }
+
+  revalidatePath('/vendors')
+  revalidatePath('/settings')
+  return { success: true }
+}
+
+export async function updateVendor(
+  vendorId: string,
+  _prev: SettingsActionState | null,
+  formData: FormData
+): Promise<SettingsActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const name         = (formData.get('name') as string)?.trim()
+  const contact_name = (formData.get('contact_name') as string)?.trim() || null
+  const email        = (formData.get('email') as string)?.trim() || null
+  const phone        = (formData.get('phone') as string)?.trim() || null
+  const specialty    = (formData.get('specialty') as string) || 'general'
+  const service_zip  = (formData.get('service_zip') as string)?.trim() || null
+  const notes        = (formData.get('notes') as string)?.trim() || null
+
+  if (!name) return { error: 'Vendor name is required' }
+
+  const { data: existing } = await supabase
+    .from('vendors')
+    .select('service_zip')
+    .eq('id', vendorId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  const { error } = await supabase
+    .from('vendors')
+    .update({ name, contact_name, email, phone, specialty: specialty as VendorSpecialty, service_zip, notes })
+    .eq('id', vendorId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  if (service_zip && service_zip !== (existing?.service_zip ?? '')) {
+    const coords = await geocodeZip(service_zip)
+    if (coords) {
+      await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendorId)
+    } else {
+      console.warn('[updateVendor] geocodeZip returned null for service_zip:', service_zip)
+    }
+  }
 
   revalidatePath('/vendors')
   revalidatePath('/settings')
@@ -361,6 +419,22 @@ export async function inviteCrewMember(
     .eq('id', crewMemberId)
 
   revalidatePath('/crew-manage')
+  revalidatePath('/settings')
+  return { success: true }
+}
+
+export async function updateAutoAssignMode(
+  mode: 'suggest' | 'autopilot' | 'disabled'
+): Promise<SettingsActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({ auto_assign_mode: mode })
+    .eq('id', membership.org_id)
+
+  if (error) return { error: error.message }
+
   revalidatePath('/settings')
   return { success: true }
 }

@@ -35,6 +35,7 @@ export async function createWorkOrder(
   const nte_amount             = formData.get('nte_amount')
     ? parseFloat(formData.get('nte_amount') as string)
     : null
+  const asset_id         = (formData.get('asset_id') as string) || null
   const portal_enabled   = formData.get('portal_enabled') === 'on' || formData.get('portal_enabled') === 'true'
   // Quote-request mode: create WO as quote_requested and send RFQs to selected vendors
   const request_quotes   = formData.get('request_quotes') === 'true'
@@ -70,6 +71,7 @@ export async function createWorkOrder(
       org_id:                  membership.org_id,
       vendor_id:               request_quotes ? null : (vendor_id || null),
       assigned_crew_member_id: assigned_crew_member_id || null,
+      asset_id:                asset_id || null,
       title,
       description,
       priority:                priority as never,

@@ -37,6 +37,12 @@ import {
 // Shopping cart
 import { buildShoppingCart } from '@/lib/inngest/functions/build-shopping-cart'
 
+// Geocoding backfill (one-time manual trigger)
+import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
+
+// Crew auto-assignment
+import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -77,5 +83,11 @@ export const { GET, POST, PUT } = serve({
 
     // Shopping cart
     buildShoppingCart,
+
+    // Geocoding backfill
+    geocodingBackfill,
+
+    // Crew auto-assignment
+    autoAssignTurnover,
   ],
 })

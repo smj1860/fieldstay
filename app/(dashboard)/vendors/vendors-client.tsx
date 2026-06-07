@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useTransition, useActionState, useRef } from 'react'
+import Link from 'next/link'
 import { X, Loader2, Upload, Briefcase, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Vendor, VendorSpecialty } from '@/types/database'
 import {
   addVendor,
+  updateVendor,
   updateVendorPortal,
   deactivateVendor,
   bulkImportVendors,
@@ -189,6 +191,12 @@ export function VendorsClient({ vendors }: Props) {
 // ── Vendor card modal ─────────────────────────────────────────────────────────
 
 function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const boundUpdate = updateVendor.bind(null, vendor.id)
+  const [state, formAction, pending] = useActionState(boundUpdate, null)
+
+  if (state?.success) { onClose(); return null }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
          onClick={onClose}>
@@ -200,52 +208,111 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
         <div className="flex items-start justify-between mb-4">
           <div>
             <h3 className="font-semibold text-base text-primary-themed">{vendor.name}</h3>
-            <span className="badge badge-blue mt-1">
-              {VENDOR_SPECIALTY_LABELS[vendor.specialty]}
-            </span>
+            {!editing && <span className="badge badge-blue mt-1">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>}
           </div>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            {!editing && (
+              <button onClick={() => setEditing(true)} className="btn-ghost p-1.5 text-xs">Edit</button>
+            )}
+            <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+          </div>
         </div>
 
-        <div className="space-y-2 text-sm">
-          {vendor.contact_name && (
-            <div className="flex justify-between">
-              <span className="text-muted-themed">Contact</span>
-              <span className="text-secondary-themed">{vendor.contact_name}</span>
-            </div>
-          )}
-          {vendor.phone && (
-            <div className="flex justify-between">
-              <span className="text-muted-themed">Phone</span>
-              <a href={`tel:${vendor.phone}`} className="text-accent-blue hover:underline">
-                {vendor.phone}
-              </a>
-            </div>
-          )}
-          {vendor.email && (
-            <div className="flex justify-between">
-              <span className="text-muted-themed">Email</span>
-              <a href={`mailto:${vendor.email}`}
-                 className="text-accent-blue hover:underline truncate max-w-[180px]">
-                {vendor.email}
-              </a>
-            </div>
-          )}
-          <div className="flex justify-between">
-            <span className="text-muted-themed">Vendor Portal</span>
-            <span style={{ color: vendor.portal_enabled ? 'var(--accent-green)' : 'var(--text-muted)' }}>
-              {vendor.portal_enabled ? 'Enabled' : 'Disabled'}
-            </span>
+        {state?.error && (
+          <div className="text-sm rounded-lg px-3 py-2 mb-3"
+               style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}>
+            {state.error}
           </div>
-          {vendor.notes && (
+        )}
+
+        {editing ? (
+          <form action={formAction} className="space-y-3">
             <div>
-              <p className="text-muted-themed mb-1">Notes</p>
-              <p className="text-secondary-themed text-xs">{vendor.notes}</p>
+              <label className="label">Vendor Name</label>
+              <input name="name" type="text" required defaultValue={vendor.name} className="input" />
             </div>
-          )}
-        </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Contact Name</label>
+                <input name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} className="input" />
+              </div>
+              <div>
+                <label className="label">Specialty</label>
+                <select name="specialty" defaultValue={vendor.specialty} className="input">
+                  {VENDOR_SPECIALTIES.map((s) => (
+                    <option key={s} value={s}>{VENDOR_SPECIALTY_LABELS[s]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">Email</label>
+                <input name="email" type="email" defaultValue={vendor.email ?? ''} className="input" />
+              </div>
+              <div>
+                <label className="label">Phone</label>
+                <input name="phone" type="tel" defaultValue={vendor.phone ?? ''} className="input" />
+              </div>
+            </div>
+            <div>
+              <label className="label">Service ZIP</label>
+              <input name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} className="input" placeholder="e.g. 30301" maxLength={10} />
+            </div>
+            <div>
+              <label className="label">Notes</label>
+              <textarea name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button type="submit" disabled={pending} className="btn-primary text-sm flex-1">
+                {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
+              </button>
+              <button type="button" onClick={() => setEditing(false)} className="btn-ghost text-sm">Cancel</button>
+            </div>
+          </form>
+        ) : (
+          <div className="space-y-2 text-sm">
+            {vendor.contact_name && (
+              <div className="flex justify-between">
+                <span className="text-muted-themed">Contact</span>
+                <span className="text-secondary-themed">{vendor.contact_name}</span>
+              </div>
+            )}
+            {vendor.phone && (
+              <div className="flex justify-between">
+                <span className="text-muted-themed">Phone</span>
+                <a href={`tel:${vendor.phone}`} className="text-accent-blue hover:underline">{vendor.phone}</a>
+              </div>
+            )}
+            {vendor.email && (
+              <div className="flex justify-between">
+                <span className="text-muted-themed">Email</span>
+                <a href={`mailto:${vendor.email}`}
+                   className="text-accent-blue hover:underline truncate max-w-[180px]">
+                  {vendor.email}
+                </a>
+              </div>
+            )}
+            {vendor.service_zip && (
+              <div className="flex justify-between">
+                <span className="text-muted-themed">Service ZIP</span>
+                <span className="text-secondary-themed">{vendor.service_zip}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-muted-themed">Vendor Portal</span>
+              <span style={{ color: vendor.portal_enabled ? 'var(--accent-green)' : 'var(--text-muted)' }}>
+                {vendor.portal_enabled ? 'Enabled' : 'Disabled'}
+              </span>
+            </div>
+            {vendor.notes && (
+              <div>
+                <p className="text-muted-themed mb-1">Notes</p>
+                <p className="text-secondary-themed text-xs">{vendor.notes}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -304,18 +371,23 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
               ))}
             </select>
           </div>
-          <div className="flex items-end pb-2">
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-secondary-themed">
-              <input
-                type="checkbox"
-                name="portal_enabled"
-                defaultChecked
-                className="w-4 h-4 rounded"
-                style={{ accentColor: 'var(--accent-gold)' }}
-              />
-              Enable vendor portal
-            </label>
+          <div>
+            <label htmlFor="vendor-zip" className="label">Service ZIP</label>
+            <input id="vendor-zip" name="service_zip" type="text" className="input" placeholder="e.g. 30301" maxLength={10} />
           </div>
+        </div>
+
+        <div className="flex items-center pb-1">
+          <label className="flex items-center gap-2 cursor-pointer text-sm text-secondary-themed">
+            <input
+              type="checkbox"
+              name="portal_enabled"
+              defaultChecked
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--accent-gold)' }}
+            />
+            Enable vendor portal
+          </label>
         </div>
 
         <div className="flex gap-2 pt-1">
@@ -587,9 +659,18 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
         </button>
       </td>
       <td className="py-2.5 text-right" onClick={e => e.stopPropagation()}>
-        <button onClick={handleDeactivate} disabled={deactivating} className="btn-danger py-1 px-2 text-xs" title="Deactivate vendor">
-          {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-        </button>
+        <div className="flex items-center gap-1 justify-end">
+          <Link
+            href={`/vendors/${vendor.id}`}
+            className="btn-secondary py-1 px-2 text-xs"
+            title="View compliance docs"
+          >
+            Details
+          </Link>
+          <button onClick={handleDeactivate} disabled={deactivating} className="btn-danger py-1 px-2 text-xs" title="Deactivate vendor">
+            {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+          </button>
+        </div>
       </td>
     </tr>
   )

@@ -2,9 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { requireOrgMember } from '@/lib/auth'
 import { slugify } from '@/lib/utils'
+import { geocodeZip } from '@/lib/geocoding'
+import { calculateHealthScore } from '@/lib/assets/health-score'
+import type { AssetType } from '@/types/database'
 
 export type PropertyActionState = {
   error?: string
@@ -81,6 +83,15 @@ export async function createProperty(
 
   if (error) return { error: error.message }
 
+  if (zip) {
+    const coords = await geocodeZip(zip)
+    if (coords) {
+      await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', property.id)
+    } else {
+      console.warn('[createProperty] geocodeZip returned null for zip:', zip)
+    }
+  }
+
   revalidatePath('/properties')
   redirect(`/properties/${property.id}/setup/ical`)
 }
@@ -112,6 +123,13 @@ export async function updateProperty(
 
   if (!name) return { error: 'Property name is required' }
 
+  const { data: existing } = await supabase
+    .from('properties')
+    .select('zip')
+    .eq('id', propertyId)
+    .eq('org_id', membership.org_id)
+    .single()
+
   const { error } = await supabase
     .from('properties')
     .update({
@@ -125,6 +143,15 @@ export async function updateProperty(
     .eq('org_id', membership.org_id)
 
   if (error) return { error: error.message }
+
+  if (zip && zip !== (existing?.zip ?? '')) {
+    const coords = await geocodeZip(zip)
+    if (coords) {
+      await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', propertyId)
+    } else {
+      console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
+    }
+  }
 
   revalidatePath(`/properties/${propertyId}`)
   return { success: true }
@@ -178,6 +205,157 @@ export async function markStepComplete(
     }
   }
 
+  revalidatePath(`/properties/${propertyId}`)
+}
+
+// ── Asset CRUD ───────────────────────────────────────────────
+
+export type AssetActionState = { error?: string; success?: boolean }
+
+export async function createAsset(
+  propertyId: string,
+  _prev: AssetActionState | null,
+  formData: FormData
+): Promise<AssetActionState> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const name              = (formData.get('name') as string)?.trim()
+    const asset_type        = formData.get('asset_type') as AssetType
+    const make              = (formData.get('make') as string)?.trim() || null
+    const model             = (formData.get('model') as string)?.trim() || null
+    const serial_number     = (formData.get('serial_number') as string)?.trim() || null
+    const installation_date = (formData.get('installation_date') as string) || null
+    const purchase_price    = formData.get('purchase_price')
+      ? parseFloat(formData.get('purchase_price') as string) : null
+    const estimated_replacement_cost = formData.get('estimated_replacement_cost')
+      ? parseFloat(formData.get('estimated_replacement_cost') as string) : null
+    const warranty_expiry_date = (formData.get('warranty_expiry_date') as string) || null
+    const warranty_provider    = (formData.get('warranty_provider') as string)?.trim() || null
+    const notes                = (formData.get('notes') as string)?.trim() || null
+    const lifespan_raw         = formData.get('expected_lifespan_years')
+    const expected_lifespan_years = lifespan_raw ? parseInt(lifespan_raw as string) : null
+
+    if (!name)       return { error: 'Asset name is required' }
+    if (!asset_type) return { error: 'Asset type is required' }
+
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { error: 'Property not found' }
+
+    const { data: standards } = await supabase
+      .from('asset_type_standards')
+      .select('lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, macrs_class_default')
+      .eq('asset_type', asset_type)
+      .single()
+
+    const lifespan = expected_lifespan_years ?? (
+      standards
+        ? Math.round((standards.lifespan_min_years + standards.lifespan_max_years) / 2)
+        : null
+    )
+
+    let health_score: number | null = null
+    if (standards && installation_date) {
+      health_score = calculateHealthScore(
+        { installation_date, expected_lifespan_years: lifespan, estimated_replacement_cost },
+        standards,
+        { total_repairs: 0, total_repair_cost: 0, last_serviced_at: null },
+      )
+    }
+
+    const { error } = await supabase
+      .from('property_assets')
+      .insert({
+        property_id:               propertyId,
+        org_id:                    membership.org_id,
+        name,
+        asset_type,
+        make,
+        model,
+        serial_number,
+        installation_date,
+        purchase_price,
+        estimated_replacement_cost,
+        expected_lifespan_years:   lifespan,
+        warranty_expiry_date,
+        warranty_provider,
+        notes,
+        health_score,
+        health_score_updated_at:   health_score != null ? new Date().toISOString() : null,
+        macrs_class:               standards?.macrs_class_default ?? '5_year',
+        depreciation_method:       'macrs',
+        salvage_value:             0,
+      })
+
+    if (error) return { error: error.message }
+
+    revalidatePath(`/properties/${propertyId}`)
+    return { success: true }
+  } catch (err) {
+    console.error('[createAsset]', err)
+    return { error: 'Failed to save asset' }
+  }
+}
+
+export async function updateAsset(
+  assetId: string,
+  propertyId: string,
+  _prev: AssetActionState | null,
+  formData: FormData
+): Promise<AssetActionState> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const name              = (formData.get('name') as string)?.trim()
+    const make              = (formData.get('make') as string)?.trim() || null
+    const model             = (formData.get('model') as string)?.trim() || null
+    const serial_number     = (formData.get('serial_number') as string)?.trim() || null
+    const installation_date = (formData.get('installation_date') as string) || null
+    const purchase_price    = formData.get('purchase_price')
+      ? parseFloat(formData.get('purchase_price') as string) : null
+    const estimated_replacement_cost = formData.get('estimated_replacement_cost')
+      ? parseFloat(formData.get('estimated_replacement_cost') as string) : null
+    const warranty_expiry_date = (formData.get('warranty_expiry_date') as string) || null
+    const warranty_provider    = (formData.get('warranty_provider') as string)?.trim() || null
+    const notes                = (formData.get('notes') as string)?.trim() || null
+    const lifespan_raw         = formData.get('expected_lifespan_years')
+    const expected_lifespan_years = lifespan_raw ? parseInt(lifespan_raw as string) : null
+
+    if (!name) return { error: 'Asset name is required' }
+
+    const { error } = await supabase
+      .from('property_assets')
+      .update({
+        name, make, model, serial_number,
+        installation_date, purchase_price, estimated_replacement_cost,
+        expected_lifespan_years, warranty_expiry_date, warranty_provider, notes,
+      })
+      .eq('id', assetId)
+      .eq('org_id', membership.org_id)
+
+    if (error) return { error: error.message }
+
+    revalidatePath(`/properties/${propertyId}`)
+    return { success: true }
+  } catch (err) {
+    console.error('[updateAsset]', err)
+    return { error: 'Failed to update asset' }
+  }
+}
+
+export async function deactivateAsset(assetId: string, propertyId: string): Promise<void> {
+  const { supabase, membership } = await requireOrgMember()
+  await supabase
+    .from('property_assets')
+    .update({ is_active: false })
+    .eq('id', assetId)
+    .eq('org_id', membership.org_id)
   revalidatePath(`/properties/${propertyId}`)
 }
 

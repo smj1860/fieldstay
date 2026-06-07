@@ -10,7 +10,7 @@ export default async function SettingsPage() {
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, billing_email, plan, plan_status, trial_ends_at, max_properties, stripe_customer_id, kroger_location_name')
+    .select('id, name, billing_email, plan, plan_status, trial_ends_at, max_properties, stripe_customer_id, kroger_location_name, auto_assign_mode')
     .eq('id', membership.org_id)
     .single()
 

@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Building2, CalendarCheck, Package,
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Bell, Sun, Moon,
-  Users2, Briefcase, MessageSquareDot,
+  Users2, Briefcase, MessageSquareDot, ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
   { href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin','manager']          },
   { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager']          },
+  { href: '/assets',     label: 'Asset Health', icon: ShieldCheck,     roles: ['admin','manager']          },
   { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager']          },
   { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager']          },
   { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager']          },
@@ -34,6 +35,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/turnovers':    'Turnovers',
   '/inventory':    'Inventory',
   '/maintenance':  'Maintenance',
+  '/assets':       'Asset Health',
   '/crew-manage':  'Crew',
   '/vendors':      'Vendors',
   '/comms-log':    'Comms Log',

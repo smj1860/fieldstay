@@ -45,6 +45,19 @@ export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 export type CrewRole            = 'cleaning' | 'landscaping' | 'maintenance' | 'general'
+export type AutoAssignMode     = 'suggest' | 'autopilot' | 'disabled'
+export type SuggestionStatus   = 'pending' | 'accepted' | 'dismissed'
+
+// Asset Health
+export type AssetType =
+  | 'hvac' | 'water_heater' | 'roof' | 'refrigerator' | 'washer'
+  | 'dryer' | 'dishwasher' | 'microwave' | 'oven_range' | 'pool_pump'
+  | 'hot_tub' | 'garage_door' | 'smart_lock' | 'deck_structure'
+  | 'electrical_panel' | 'plumbing_system' | 'septic_system' | 'well_pump'
+  | 'generator' | 'solar_system' | 'other'
+export type MacrsClass        = '5_year' | '15_year' | '27_5_year' | '39_year' | 'section_179'
+export type ComplianceDocType = 'coi' | 'workers_comp' | 'business_license' | 'contractor_license' | 'bonding' | 'other'
+export type ComplianceStatus  = 'compliant' | 'expiring_soon' | 'grace_period' | 'hard_blocked' | 'no_documents'
 
 // Communication logs
 export type CommRecipientType   = 'vendor' | 'crew'
@@ -82,6 +95,7 @@ export interface Organization {
   onboarding_steps_completed:   Record<string, boolean>
   preferred_retailer:           string | null
   kroger_location_name:         string | null
+  auto_assign_mode:             AutoAssignMode
   created_at:                   string
   updated_at:                   string
 }
@@ -108,7 +122,7 @@ export interface Property {
   access_instructions:     string | null
   property_type:           PropertyType
   bedrooms:                number
-  bathrooms:               number
+  bathrooms:               number | null
   max_guests:              number
   avg_stay_length:         number
   avg_turnovers_per_month: number
@@ -201,6 +215,10 @@ export interface CrewMember {
   role:               CrewRole
   is_active:          boolean
   notes:              string | null
+  home_lat:           number | null
+  home_lng:           number | null
+  reliability_score:  number | null
+  capacity_score:     number | null
   invite_token:       string | null
   invite_sent_at:     string | null
   invite_accepted_at: string | null
@@ -209,20 +227,24 @@ export interface CrewMember {
 }
 
 export interface Vendor {
-  id:             string
-  org_id:         string
-  name:           string
-  contact_name:   string | null
-  email:          string | null
-  phone:          string | null
-  specialty:      VendorSpecialty
-  portal_enabled: boolean
-  notes:          string | null
-  is_active:      boolean
-  avg_rating:     number | null
-  rating_count:   number
-  created_at:     string
-  updated_at:     string
+  id:                   string
+  org_id:               string
+  name:                 string
+  contact_name:         string | null
+  email:                string | null
+  phone:                string | null
+  specialty:            VendorSpecialty
+  portal_enabled:       boolean
+  notes:                string | null
+  is_active:            boolean
+  avg_rating:           number | null
+  rating_count:         number
+  service_zip:          string | null
+  service_radius_miles: number | null
+  lat:                  number | null
+  lng:                  number | null
+  created_at:           string
+  updated_at:           string
 }
 
 export interface ChecklistTemplate {
@@ -269,8 +291,13 @@ export interface Turnover {
   checklist_template_id: string | null
   notes:                 string | null
   completion_notes:      string | null
+  started_at:            string | null
   completed_at:          string | null
   auto_generated:        boolean
+  is_same_day_turnover:  boolean
+  suggested_crew_ids:    string[] | null
+  suggestion_reasoning:  string | null
+  suggestion_status:     SuggestionStatus | null
   created_at:            string
   updated_at:            string
 }
@@ -416,6 +443,7 @@ export interface WorkOrder {
   status:                      WoStatus
   source:                      WoSource
   source_schedule_id:          string | null
+  asset_id:                    string | null
   scheduled_date:              string | null
   completed_date:              string | null
   estimated_cost:              number | null
@@ -584,6 +612,7 @@ export interface InventoryTemplateItem {
   par_level:       number
   sort_order:      number
   notes:           string | null
+  preferred_brand: string | null
   created_at:      string
 }
 
@@ -674,6 +703,88 @@ export interface OAuthState {
   expires_at:  string
 }
 
+// ── Asset Health ─────────────────────────────────────────────────────────────
+
+export interface PropertyAsset {
+  id:                         string
+  org_id:                     string
+  property_id:                string
+  name:                       string
+  asset_type:                 AssetType
+  make:                       string | null
+  model:                      string | null
+  serial_number:              string | null
+  installation_date:          string | null
+  manufacture_date:           string | null
+  purchase_price:             number | null
+  estimated_replacement_cost: number | null
+  expected_lifespan_years:    number | null
+  warranty_expiry_date:       string | null
+  warranty_provider:          string | null
+  warranty_notes:             string | null
+  placed_in_service_date:     string | null
+  macrs_class:                MacrsClass
+  depreciation_method:        string
+  salvage_value:              number
+  health_score:               number | null
+  health_score_updated_at:    string | null
+  is_active:                  boolean
+  replaced_by_asset_id:       string | null
+  notes:                      string | null
+  created_at:                 string
+  updated_at:                 string
+}
+
+export interface AssetTypeStandard {
+  asset_type:                AssetType
+  display_name:              string
+  lifespan_min_years:        number
+  lifespan_max_years:        number
+  avg_replacement_cost_low:  number | null
+  avg_replacement_cost_high: number | null
+  macrs_class_default:       MacrsClass
+  vendor_specialty_default:  string | null
+  notes:                     string | null
+}
+
+// ── Vendor Compliance ─────────────────────────────────────────────────────────
+
+export interface VendorComplianceDocument {
+  id:                 string
+  org_id:             string
+  vendor_id:          string
+  document_type:      ComplianceDocType
+  document_name:      string
+  policy_number:      string | null
+  issuer_name:        string | null
+  effective_date:     string | null
+  expiry_date:        string | null
+  coverage_amount:    number | null
+  document_url:       string | null
+  is_verified:        boolean
+  verification_notes: string | null
+  first_warned_at:    string | null
+  hard_blocked_at:    string | null
+  is_active:          boolean
+  created_at:         string
+  updated_at:         string
+}
+
+export interface VendorComplianceStatus {
+  vendor_id:            string
+  org_id:               string
+  vendor_name:          string
+  lat:                  number | null
+  lng:                  number | null
+  service_zip:          string | null
+  service_radius_miles: number | null
+  active_doc_count:     number
+  expired_doc_count:    number
+  expiring_soon_count:  number
+  days_past_expiry:     number | null
+  compliance_status:    ComplianceStatus
+}
+
 // ─────────────────────────────────────────────────────────────
 // Supabase Database interface — used by createClient()
 //
@@ -726,12 +837,21 @@ export interface Database {
       org_master_checklist_items:      { Row: OrgMasterChecklistItem;        Insert: Partial<OrgMasterChecklistItem>;        Update: Partial<OrgMasterChecklistItem>;        Relationships: [] }
       org_master_maintenance_schedules:{ Row: OrgMasterMaintenanceSchedule;  Insert: Partial<OrgMasterMaintenanceSchedule>;  Update: Partial<OrgMasterMaintenanceSchedule>;  Relationships: [] }
 
+      // ── Asset Health ───────────────────────────────────────
+      property_assets:             { Row: PropertyAsset;            Insert: Partial<PropertyAsset>;            Update: Partial<PropertyAsset>;            Relationships: [] }
+      asset_type_standards:        { Row: AssetTypeStandard;        Insert: Partial<AssetTypeStandard>;        Update: Partial<AssetTypeStandard>;        Relationships: [] }
+
+      // ── Vendor Compliance ──────────────────────────────────
+      vendor_compliance_documents: { Row: VendorComplianceDocument; Insert: Partial<VendorComplianceDocument>; Update: Partial<VendorComplianceDocument>; Relationships: [] }
+
       // ── Integration framework (server-side only) ───────────
       integration_providers:       { Row: IntegrationProvider;      Insert: Partial<IntegrationProvider>;      Update: Partial<IntegrationProvider>;      Relationships: [] }
       integration_connections:     { Row: IntegrationConnection;    Insert: Partial<IntegrationConnection>;    Update: Partial<IntegrationConnection>;    Relationships: [] }
       oauth_states:                { Row: OAuthState;               Insert: Partial<OAuthState>;               Update: Partial<OAuthState>;               Relationships: [] }
     }
-    Views: Record<string, never>
+    Views: {
+      vendor_compliance_status: { Row: VendorComplianceStatus }
+    }
     Functions: Record<string, never>
     Enums: Record<string, never>
   }

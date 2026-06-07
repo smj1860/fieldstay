@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
 import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Clock, DollarSign, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { AssetSection } from './asset-section'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Property' }
@@ -24,6 +25,8 @@ export default async function PropertyDetailPage({ params }: Props) {
     { data: feeds },
     { data: recentWOs },
     { data: upcomingSchedules },
+    { data: assets },
+    { data: standards },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -59,6 +62,18 @@ export default async function PropertyDetailPage({ params }: Props) {
       .eq('is_active', true)
       .order('next_due_date', { ascending: true })
       .limit(5),
+
+    supabase
+      .from('property_assets')
+      .select('*')
+      .eq('property_id', property.id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false }),
+
+    supabase
+      .from('asset_type_standards')
+      .select('*')
+      .order('display_name'),
   ])
 
   // Calculate YTD maintenance spend
@@ -131,7 +146,10 @@ export default async function PropertyDetailPage({ params }: Props) {
         <h3 className="font-semibold text-primary-themed mb-4">Property Details</h3>
         <div className="grid grid-cols-2 gap-y-3 text-sm">
           <DetailRow label="Type" value={property.property_type} className="capitalize" />
-          <DetailRow label="Beds / Baths" value={`${property.bedrooms} bed · ${property.bathrooms} bath`} />
+          <DetailRow label="Bedrooms" value={`${property.bedrooms}`} />
+          {property.bathrooms != null && (
+            <DetailRow label="Bathrooms" value={`${property.bathrooms}`} />
+          )}
           {property.square_footage != null && (
             <DetailRow label="Sq Footage" value={`${property.square_footage.toLocaleString()} sqft`} />
           )}
@@ -147,6 +165,12 @@ export default async function PropertyDetailPage({ params }: Props) {
           )}
         </div>
       </div>
+
+      <AssetSection
+        assets={assets ?? []}
+        standards={standards ?? []}
+        propertyId={property.id}
+      />
 
       {/* ── Feature 6: Maintenance History ─────────────────────────────── */}
       <div className="card mb-4">

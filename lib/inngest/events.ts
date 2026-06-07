@@ -315,7 +315,53 @@ export type FieldStayEvents = {
       crew_needed:   number
       crew_found:    number
     }
-  },
+  }
+
+  // ----------------------------------------------------------
+  // Work order lifecycle extensions
+  // ----------------------------------------------------------
+
+  'work-order/aging-escalated': {
+    data: {
+      work_order_id: string
+      org_id:        string
+      property_id:   string
+      days_open:     number
+      new_priority:  string
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Maintenance analytics
+  // ----------------------------------------------------------
+
+  'maintenance/repeat-issue-detected': {
+    data: {
+      org_id:       string
+      property_id:  string
+      wo_category:  string
+      count:        number
+      window_days:  number
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Vendor Compliance
+  // ----------------------------------------------------------
+
+  'vendor-compliance/expiry-warning': {
+    data: {
+      document_id:   string
+      vendor_id:     string
+      org_id:        string
+      document_type: string
+      vendor_name:   string
+      expiry_date:   string
+      days_until:    number
+    }
+  }
+
+}
 
   // ----------------------------------------------------------
   // Work order lifecycle extensions

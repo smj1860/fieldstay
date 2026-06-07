@@ -11,6 +11,7 @@ import {
   updateNotificationPrefs,
   openBillingPortal,
   createCheckoutSession,
+  updateAutoAssignMode,
   type SettingsActionState,
 } from './actions'
 
@@ -179,6 +180,88 @@ function OrgTab({ org }: { org: Organization }) {
           </div>
         )}
       </div>
+
+      {/* Crew Auto-Assignment */}
+      <div className="card">
+        <h2 className="text-base font-semibold text-primary-themed mb-1">Crew Auto-Assignment</h2>
+        <p className="text-xs text-muted-themed mb-4">
+          Score crew members for new turnovers based on proximity, availability, familiarity, and reliability.
+        </p>
+        <AutoAssignToggle mode={org.auto_assign_mode ?? 'disabled'} />
+      </div>
+    </div>
+  )
+}
+
+// ── Auto-Assignment mode toggle ───────────────────────────────────────────────
+
+const AUTO_ASSIGN_OPTIONS = [
+  {
+    value:  'disabled' as const,
+    label:  'Off',
+    desc:   'No automatic suggestions or assignments.',
+  },
+  {
+    value:  'suggest' as const,
+    label:  'Suggest',
+    desc:   'Shows the best-matched crew on each new turnover — you accept or change.',
+  },
+  {
+    value:  'autopilot' as const,
+    label:  'Autopilot',
+    desc:   'Best-matched crew is assigned automatically.',
+  },
+]
+
+function AutoAssignToggle({ mode }: { mode: string }) {
+  const [current,  setCurrent]  = useState(mode)
+  const [saving,   startSave]   = useTransition()
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const handleChange = (value: 'disabled' | 'suggest' | 'autopilot') => {
+    setCurrent(value)
+    setSaveError(null)
+    startSave(async () => {
+      const result = await updateAutoAssignMode(value)
+      if (result.error) setSaveError(result.error)
+    })
+  }
+
+  return (
+    <div>
+      {saveError && (
+        <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-3 py-2 mb-3">
+          {saveError}
+        </div>
+      )}
+
+      <div className="flex gap-2 flex-wrap">
+        {AUTO_ASSIGN_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => handleChange(opt.value)}
+            disabled={saving}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
+              current === opt.value
+                ? 'border-brand-600'
+                : 'border-themed hover:border-brand-700',
+              saving && 'opacity-60 cursor-not-allowed'
+            )}
+            style={
+              current === opt.value
+                ? { background: 'var(--bg-raised)', color: 'var(--text-primary)' }
+                : { color: 'var(--text-muted)' }
+            }
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+        {AUTO_ASSIGN_OPTIONS.find((o) => o.value === current)?.desc}
+      </p>
     </div>
   )
 }
