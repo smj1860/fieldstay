@@ -345,6 +345,22 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Vendor Compliance
+  // ----------------------------------------------------------
+
+  'vendor-compliance/expiry-warning': {
+    data: {
+      document_id:   string
+      vendor_id:     string
+      org_id:        string
+      document_type: string
+      vendor_name:   string
+      expiry_date:   string
+      days_until:    number
+    }
+  }
+
 }
 
 }

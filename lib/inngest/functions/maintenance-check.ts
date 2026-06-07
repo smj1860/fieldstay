@@ -669,12 +669,104 @@ export const dailyMaintenanceCheck = inngest.createFunction(
       }
     }
 
+    // ── 8.13: COI & License Expiry Escalation ────────────────────────────────
+    // Alert thresholds (days relative to expiry): positive = before, negative = after
+    const COMPLIANCE_ALERT_THRESHOLDS = [30, 14, 7, 0, -14, -30]
+
+    const expiringDocs = await step.run('find-expiring-compliance-docs', async () => {
+      const { data } = await supabase
+        .from('vendor_compliance_documents')
+        .select(`
+          id, org_id, vendor_id, document_type, document_name, expiry_date,
+          vendors ( name )
+        `)
+        .eq('is_active', true)
+        .not('expiry_date', 'is', null)
+      return data ?? []
+    })
+
+    logger.info(`Checking ${expiringDocs.length} compliance docs for expiry alerts`)
+
+    for (const doc of expiringDocs) {
+      if (!doc.expiry_date) continue
+
+      const daysUntil = Math.floor(
+        (new Date(doc.expiry_date).getTime() - today.getTime()) / 86_400_000
+      )
+
+      // Find if this doc falls within ±1 day of any alert threshold
+      const hitThreshold = COMPLIANCE_ALERT_THRESHOLDS.find(
+        (t) => Math.abs(daysUntil - t) <= 1
+      )
+      if (hitThreshold === undefined) continue
+
+      await step.run(`compliance-alert-${doc.id}-t${hitThreshold}`, async () => {
+        const thresholdKey = hitThreshold >= 0
+          ? `${hitThreshold}d_before`
+          : `${Math.abs(hitThreshold)}d_after`
+        const milestoneKey = `compliance_warning:${doc.id}:${thresholdKey}`
+
+        // Dedup: skip if we already sent this threshold alert for this doc
+        const { data: existing } = await supabase
+          .from('org_milestones')
+          .select('id')
+          .eq('org_id', doc.org_id)
+          .eq('milestone', milestoneKey)
+          .maybeSingle()
+
+        if (existing) return { skipped: true }
+
+        const vendor   = Array.isArray(doc.vendors) ? doc.vendors[0] : doc.vendors
+        const pmEmail  = await getPmEmail(supabase, doc.org_id)
+
+        if (pmEmail) {
+          const isPast  = hitThreshold < 0
+          const daysAbs = Math.abs(hitThreshold)
+          const daysText = hitThreshold === 0
+            ? 'expires <strong>today</strong>'
+            : isPast
+            ? `expired <strong>${daysAbs} day${daysAbs !== 1 ? 's' : ''} ago</strong>`
+            : `expires in <strong>${daysAbs} day${daysAbs !== 1 ? 's' : ''}</strong>`
+
+          const subject = isPast
+            ? `⛔ Compliance doc expired — ${vendor?.name} (${daysAbs}d overdue)`
+            : hitThreshold === 0
+            ? `⚠️ Compliance doc expires TODAY — ${vendor?.name}`
+            : `⚠️ Compliance expiring in ${daysAbs}d — ${vendor?.name}`
+
+          await resend.emails.send({
+            from:    FROM,
+            to:      pmEmail,
+            subject,
+            html: buildScheduleEmail({
+              heading:  isPast ? 'Compliance document expired' : 'Compliance document expiring soon',
+              name:     `${doc.document_name} (${doc.document_type.replace(/_/g, ' ')})`,
+              daysText,
+              vendor:   vendor?.name,
+              dueDate:  doc.expiry_date,
+              url:      `${process.env.NEXT_PUBLIC_APP_URL}/vendors/${doc.vendor_id}`,
+              cta:      'Update Compliance Docs →',
+            }),
+          })
+        }
+
+        // Record dedup so this threshold isn't re-sent
+        await supabase.from('org_milestones').insert({
+          org_id:    doc.org_id,
+          milestone: milestoneKey,
+        })
+
+        return { sent: true, threshold: hitThreshold, vendor: vendor?.name }
+      })
+    }
+
     return {
       checked:             dueSchedules.length,
       escalated:           overdueSchedules.length,
       aging_escalated:     agingWOs.length,
       auto_wos_attempted:  autoWOSchedules.length,
       assets_scored:       activeAssets.length,
+      compliance_checked:  expiringDocs.length,
     }
   }
 )
