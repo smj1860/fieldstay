@@ -3,9 +3,10 @@
  *
  * Triggered by: integration/ownerrez.connected
  * Steps (each independently retried):
- *  1. fetch-properties  — getProperties(), upsert into public.properties
- *  2. fetch-bookings    — getBookings({ propertyIds }), upsert into public.bookings
- *  3. update-last-synced — write sync_cursor + last_synced_at to integration_connections
+ *  1. fetch-properties      — getProperties(), upsert into public.properties
+ *  1b. patch-property-fields — fill null bedrooms/bathrooms/sqft from OwnerRez data
+ *  2. fetch-bookings         — getBookings(), upsert into public.bookings
+ *  3. update-last-synced     — write sync_cursor + last_synced_at to integration_connections
  */
 
 import { inngest }              from '@/lib/inngest/client'
@@ -29,7 +30,7 @@ export const ownerRezInitialSync = inngest.createFunction(
 
     // ── Step 1: Fetch and upsert properties ─────────────────────────────────
 
-    const propertyIds = await step.run('fetch-properties', async () => {
+    const fetchPropsResult = await step.run('fetch-properties', async () => {
       let properties: OwnerRezProperty[]
 
       try {
@@ -41,7 +42,14 @@ export const ownerRezInitialSync = inngest.createFunction(
         throw err
       }
 
-      if (!properties.length) return []
+      if (!properties.length) return { ids: [] as number[], patchData: [] as typeof patchData }
+
+      const patchData = properties.map((p) => ({
+        externalId: String(p.id),
+        bedrooms:   p.bedrooms,
+        bathrooms:  p.bathrooms,
+        sqft:       p.sqft ?? p.square_feet ?? p.size ?? null,
+      }))
 
       const supabase = createServiceClient()
       const rows = properties.map((p) => ({
@@ -73,19 +81,62 @@ export const ownerRezInitialSync = inngest.createFunction(
 
       logger.info(`[OwnerRez:${user_id}] Upserted ${rows.length} properties`)
 
-      // Return OwnerRez property IDs for the bookings step
-      return properties.map((p) => p.id)
+      return { ids: properties.map((p) => p.id), patchData }
+    })
+
+    // ── Step 1b: Patch null property fields from OwnerRez data ───────────────
+    // Only fills fields that are currently NULL — never overwrites PM-entered data
+
+    await step.run('patch-property-fields', async () => {
+      if (!fetchPropsResult.patchData.length) return
+
+      const supabase    = createServiceClient()
+      const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
+
+      const { data: existingProps } = await supabase
+        .from('properties')
+        .select('id, external_id, bedrooms, bathrooms, square_footage')
+        .eq('org_id', org_id)
+        .eq('external_source', PROVIDER)
+        .in('external_id', externalIds)
+
+      if (!existingProps?.length) return
+
+      for (const existing of existingProps) {
+        const orData = fetchPropsResult.patchData.find((p) => p.externalId === existing.external_id)
+        if (!orData) continue
+
+        const patch: Record<string, unknown> = {}
+
+        if (orData.bedrooms  != null && !existing.bedrooms)
+          patch.bedrooms = orData.bedrooms
+
+        if (orData.bathrooms != null && existing.bathrooms == null)
+          patch.bathrooms = orData.bathrooms
+
+        if (orData.sqft != null && !existing.square_footage)
+          patch.square_footage = orData.sqft
+
+        if (Object.keys(patch).length > 0) {
+          await supabase
+            .from('properties')
+            .update(patch)
+            .eq('id', existing.id)
+        }
+      }
+
+      logger.info(`[OwnerRez:${user_id}] Patched null fields on ${existingProps.length} properties`)
     })
 
     // ── Step 2: Fetch and upsert bookings ────────────────────────────────────
 
     const syncCursor = await step.run('fetch-bookings', async () => {
-      if (!propertyIds.length) return new Date().toISOString()
+      if (!fetchPropsResult.ids.length) return new Date().toISOString()
 
       let bookings: OwnerRezBooking[]
 
       try {
-        bookings = await client.getBookings({ propertyIds, includeGuest: true })
+        bookings = await client.getBookings({ propertyIds: fetchPropsResult.ids, includeGuest: true })
       } catch (err) {
         if (err instanceof RateLimitError) {
           throw err
@@ -102,7 +153,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           .select('id, external_id')
           .eq('org_id', org_id)
           .eq('external_source', PROVIDER)
-          .in('external_id', propertyIds.map(String))
+          .in('external_id', fetchPropsResult.ids.map(String))
 
         const externalToFsId = Object.fromEntries(
           (fsProps ?? []).map((p) => [p.external_id, p.id])

@@ -146,7 +146,10 @@ export default async function PropertyDetailPage({ params }: Props) {
         <h3 className="font-semibold text-primary-themed mb-4">Property Details</h3>
         <div className="grid grid-cols-2 gap-y-3 text-sm">
           <DetailRow label="Type" value={property.property_type} className="capitalize" />
-          <DetailRow label="Beds / Baths" value={`${property.bedrooms} bed · ${property.bathrooms} bath`} />
+          <DetailRow label="Bedrooms" value={`${property.bedrooms}`} />
+          {property.bathrooms != null && (
+            <DetailRow label="Bathrooms" value={`${property.bathrooms}`} />
+          )}
           {property.square_footage != null && (
             <DetailRow label="Sq Footage" value={`${property.square_footage.toLocaleString()} sqft`} />
           )}

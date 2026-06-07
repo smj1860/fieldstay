@@ -21,7 +21,7 @@ export async function saveDetails(
   const zip           = (formData.get('zip') as string)?.trim() || null
   const property_type = formData.get('property_type') as string || 'house'
   const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
-  const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
+  const bathrooms     = formData.get('bathrooms') ? parseFloat(formData.get('bathrooms') as string) : null
   const max_guests    = parseInt(formData.get('max_guests') as string) || 2
   const checkin_time  = formData.get('checkin_time') as string || '15:00'
   const checkout_time = formData.get('checkout_time') as string || '11:00'

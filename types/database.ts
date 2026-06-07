@@ -122,7 +122,7 @@ export interface Property {
   access_instructions:     string | null
   property_type:           PropertyType
   bedrooms:                number
-  bathrooms:               number
+  bathrooms:               number | null
   max_guests:              number
   avg_stay_length:         number
   avg_turnovers_per_month: number
