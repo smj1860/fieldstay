@@ -423,6 +423,22 @@ export async function inviteCrewMember(
   return { success: true }
 }
 
+export async function updateAutoAssignMode(
+  mode: 'suggest' | 'autopilot' | 'disabled'
+): Promise<SettingsActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({ auto_assign_mode: mode })
+    .eq('id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/settings')
+  return { success: true }
+}
+
 export async function createCheckoutSession(
   planKey: 'pro' | 'growth',
   interval: 'monthly' | 'annual'

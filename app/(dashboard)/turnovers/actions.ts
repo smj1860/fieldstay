@@ -376,3 +376,75 @@ export async function triggerManualSync(orgId: string): Promise<void> {
   await inngest.send({ name: 'ical/sync.all.requested', data: {} })
   revalidatePath('/turnovers')
 }
+
+// ── Accept auto-assignment suggestion ────────────────────────────────────────
+
+export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: turnover } = await supabase
+    .from('turnovers')
+    .select('id, status, suggested_crew_ids')
+    .eq('id', turnoverId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!turnover) return { error: 'Turnover not found' }
+
+  const crewIds = (turnover.suggested_crew_ids as string[] | null) ?? []
+  if (!crewIds.length) return { error: 'No suggestion to accept' }
+
+  for (const crewId of crewIds) {
+    const { data: existing } = await supabase
+      .from('turnover_assignments')
+      .select('id')
+      .eq('turnover_id', turnoverId)
+      .eq('crew_member_id', crewId)
+      .maybeSingle()
+
+    if (!existing) {
+      await supabase.from('turnover_assignments').insert({
+        turnover_id:    turnoverId,
+        crew_member_id: crewId,
+      })
+    }
+  }
+
+  await supabase
+    .from('turnovers')
+    .update({ status: 'assigned', suggestion_status: 'accepted' })
+    .eq('id', turnoverId)
+
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const service = createServiceClient()
+    for (const crewId of crewIds) {
+      await service.from('assignment_outcomes').upsert(
+        { turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: true },
+        { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
+      )
+    }
+  } catch {
+    // Outcome recording must not break the acceptance flow
+  }
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}
+
+// ── Dismiss auto-assignment suggestion ───────────────────────────────────────
+
+export async function dismissSuggestion(turnoverId: string): Promise<TurnoverActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('turnovers')
+    .update({ suggestion_status: 'dismissed' })
+    .eq('id', turnoverId)
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}

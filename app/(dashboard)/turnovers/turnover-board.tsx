@@ -11,6 +11,7 @@ import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/
 import {
   assignCrew, addCrewToTurnover, removeCrewFromTurnover,
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
+  acceptSuggestion, dismissSuggestion,
 } from './actions'
 import { TurnoverGantt } from './turnover-gantt'
 import { createClient } from '@/lib/supabase/client'
@@ -47,6 +48,10 @@ interface Turnover {
   completed_at: string | null
   started_at: string | null
   checklist_template_id: string | null
+  is_same_day_turnover: boolean | null
+  suggested_crew_ids: string[] | null
+  suggestion_reasoning: string | null
+  suggestion_status: 'pending' | 'accepted' | 'dismissed' | null
   turnover_assignments: TurnoverAssignment | TurnoverAssignment[] | null
 }
 
@@ -262,6 +267,8 @@ function TurnoverCard({
 }) {
   const [expanded,        setExpanded]        = useState(false)
   const [updating,        startUpdate]        = useTransition()
+  const [accepting,       startAccept]        = useTransition()
+  const [dismissing,      startDismiss]       = useTransition()
   const [flagNotes,       setFlagNotes]       = useState('')
   const [showFlagInput,   setShowFlagInput]   = useState(false)
   const [showQuickFlag,   setShowQuickFlag]   = useState(false)
@@ -270,6 +277,20 @@ function TurnoverCard({
   const [flagPhotoPreview,setFlagPhotoPreview]= useState<string | null>(null)
   const [quickFlagging,   setQuickFlagging]   = useState(false)
   const flagPhotoRef = useRef<HTMLInputElement | null>(null)
+
+  const suggestedNames = (turnover.suggested_crew_ids ?? [])
+    .map((id) => crewMembers.find((c) => c.id === id)?.name)
+    .filter(Boolean) as string[]
+
+  const handleAcceptSuggestion = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    startAccept(async () => { await acceptSuggestion(turnover.id) })
+  }
+
+  const handleDismissSuggestion = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    startDismiss(async () => { await dismissSuggestion(turnover.id) })
+  }
 
   const propertyName = property?.name ?? 'Unknown Property'
 
@@ -400,6 +421,42 @@ function TurnoverCard({
               {formatWindow(windowMins)}
             </span>
           </div>
+
+          {/* Auto-assignment suggestion banner */}
+          {turnover.suggestion_status === 'pending' && suggestedNames.length > 0 && (
+            <div
+              className="mt-2 flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg"
+              style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                ✨ Suggested: <strong style={{ color: 'var(--text-primary)' }}>{suggestedNames.join(', ')}</strong>
+              </span>
+              {turnover.suggestion_reasoning && (
+                <span className="text-xs hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
+                  — {turnover.suggestion_reasoning}
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  onClick={handleAcceptSuggestion}
+                  disabled={accepting || dismissing}
+                  className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50 transition-colors"
+                  style={{ background: 'var(--accent-green)', color: '#fff' }}
+                >
+                  {accepting ? '…' : '✓ Accept'}
+                </button>
+                <button
+                  onClick={handleDismissSuggestion}
+                  disabled={accepting || dismissing}
+                  className="text-xs px-2 py-1 rounded-lg transition-colors disabled:opacity-50"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  {dismissing ? '…' : 'Dismiss'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Crew chips + quick-flag + expand */}

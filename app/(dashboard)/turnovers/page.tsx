@@ -26,8 +26,9 @@ export default async function TurnoversPage() {
       .from('turnovers')
       .select(`
         id, property_id, checkout_datetime, checkin_datetime,
-        window_minutes, status, priority, notes, completed_at,
-        checklist_template_id,
+        window_minutes, status, priority, notes, completed_at, started_at,
+        checklist_template_id, is_same_day_turnover,
+        suggested_crew_ids, suggestion_reasoning, suggestion_status,
         turnover_assignments (
           id, crew_member_id,
           crew_members ( id, name, phone, email )

@@ -45,6 +45,8 @@ export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 export type CrewRole            = 'cleaning' | 'landscaping' | 'maintenance' | 'general'
+export type AutoAssignMode     = 'suggest' | 'autopilot' | 'disabled'
+export type SuggestionStatus   = 'pending' | 'accepted' | 'dismissed'
 
 // Communication logs
 export type CommRecipientType   = 'vendor' | 'crew'
@@ -82,6 +84,7 @@ export interface Organization {
   onboarding_steps_completed:   Record<string, boolean>
   preferred_retailer:           string | null
   kroger_location_name:         string | null
+  auto_assign_mode:             AutoAssignMode
   created_at:                   string
   updated_at:                   string
 }
@@ -201,6 +204,10 @@ export interface CrewMember {
   role:               CrewRole
   is_active:          boolean
   notes:              string | null
+  home_lat:           number | null
+  home_lng:           number | null
+  reliability_score:  number | null
+  capacity_score:     number | null
   invite_token:       string | null
   invite_sent_at:     string | null
   invite_accepted_at: string | null
@@ -273,8 +280,13 @@ export interface Turnover {
   checklist_template_id: string | null
   notes:                 string | null
   completion_notes:      string | null
+  started_at:            string | null
   completed_at:          string | null
   auto_generated:        boolean
+  is_same_day_turnover:  boolean
+  suggested_crew_ids:    string[] | null
+  suggestion_reasoning:  string | null
+  suggestion_status:     SuggestionStatus | null
   created_at:            string
   updated_at:            string
 }

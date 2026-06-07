@@ -302,4 +302,19 @@ export type FieldStayEvents = {
     data: Record<string, never>
   }
 
+  // ----------------------------------------------------------
+  // Crew auto-assignment
+  // ----------------------------------------------------------
+
+  'crew/assignment-gap': {
+    data: {
+      turnover_id:   string
+      property_id:   string
+      org_id:        string
+      turnover_date: string
+      crew_needed:   number
+      crew_found:    number
+    }
+  }
+
 }
