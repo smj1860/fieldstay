@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useActionState, useRef } from 'react'
+import Link from 'next/link'
 import { X, Loader2, Upload, Briefcase, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Vendor, VendorSpecialty } from '@/types/database'
@@ -658,9 +659,18 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
         </button>
       </td>
       <td className="py-2.5 text-right" onClick={e => e.stopPropagation()}>
-        <button onClick={handleDeactivate} disabled={deactivating} className="btn-danger py-1 px-2 text-xs" title="Deactivate vendor">
-          {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-        </button>
+        <div className="flex items-center gap-1 justify-end">
+          <Link
+            href={`/vendors/${vendor.id}`}
+            className="btn-secondary py-1 px-2 text-xs"
+            title="View compliance docs"
+          >
+            Details
+          </Link>
+          <button onClick={handleDeactivate} disabled={deactivating} className="btn-danger py-1 px-2 text-xs" title="Deactivate vendor">
+            {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+          </button>
+        </div>
       </td>
     </tr>
   )
