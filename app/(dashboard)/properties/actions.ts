@@ -2,9 +2,9 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { requireOrgMember } from '@/lib/auth'
 import { slugify } from '@/lib/utils'
+import { geocodeZip } from '@/lib/geocoding'
 
 export type PropertyActionState = {
   error?: string
@@ -81,6 +81,15 @@ export async function createProperty(
 
   if (error) return { error: error.message }
 
+  if (zip) {
+    const coords = await geocodeZip(zip)
+    if (coords) {
+      await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', property.id)
+    } else {
+      console.warn('[createProperty] geocodeZip returned null for zip:', zip)
+    }
+  }
+
   revalidatePath('/properties')
   redirect(`/properties/${property.id}/setup/ical`)
 }
@@ -112,6 +121,13 @@ export async function updateProperty(
 
   if (!name) return { error: 'Property name is required' }
 
+  const { data: existing } = await supabase
+    .from('properties')
+    .select('zip')
+    .eq('id', propertyId)
+    .eq('org_id', membership.org_id)
+    .single()
+
   const { error } = await supabase
     .from('properties')
     .update({
@@ -125,6 +141,15 @@ export async function updateProperty(
     .eq('org_id', membership.org_id)
 
   if (error) return { error: error.message }
+
+  if (zip && zip !== (existing?.zip ?? '')) {
+    const coords = await geocodeZip(zip)
+    if (coords) {
+      await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', propertyId)
+    } else {
+      console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
+    }
+  }
 
   revalidatePath(`/properties/${propertyId}`)
   return { success: true }

@@ -209,20 +209,24 @@ export interface CrewMember {
 }
 
 export interface Vendor {
-  id:             string
-  org_id:         string
-  name:           string
-  contact_name:   string | null
-  email:          string | null
-  phone:          string | null
-  specialty:      VendorSpecialty
-  portal_enabled: boolean
-  notes:          string | null
-  is_active:      boolean
-  avg_rating:     number | null
-  rating_count:   number
-  created_at:     string
-  updated_at:     string
+  id:                   string
+  org_id:               string
+  name:                 string
+  contact_name:         string | null
+  email:                string | null
+  phone:                string | null
+  specialty:            VendorSpecialty
+  portal_enabled:       boolean
+  notes:                string | null
+  is_active:            boolean
+  avg_rating:           number | null
+  rating_count:         number
+  service_zip:          string | null
+  service_radius_miles: number | null
+  lat:                  number | null
+  lng:                  number | null
+  created_at:           string
+  updated_at:           string
 }
 
 export interface ChecklistTemplate {

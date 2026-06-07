@@ -294,4 +294,12 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Geocoding backfill (one-time, manual trigger)
+  // ----------------------------------------------------------
+
+  'geocoding/backfill-requested': {
+    data: Record<string, never>
+  }
+
 }
