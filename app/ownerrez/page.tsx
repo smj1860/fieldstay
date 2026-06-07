@@ -1,10 +1,10 @@
+// app/ownerrez/page.tsx  —  full replacement
+
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/ownerrez/PricingSection'
-
-
 
 export default async function OwnerRezPage() {
   const cookieStore = await cookies()
@@ -47,9 +47,7 @@ export default async function OwnerRezPage() {
             )}
           </nav>
 
-          {/* Badge */}
-          {/* NOTE: #3D8B4F is an approximation of OwnerRez brand green.
-              Confirm exact hex with your OwnerRez partnership contact. */}
+          {/* OwnerRez Partner Badge */}
           <div className="flex justify-center mt-6 mb-10">
             <div className="flex items-center gap-2 bg-[#0e2a52] border border-[#1e3a72] rounded-full px-4 py-2">
               <span
@@ -67,7 +65,7 @@ export default async function OwnerRezPage() {
           {/* Hero — two equal columns */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-start pb-20">
 
-            {/* Left */}
+            {/* Left — copy */}
             <div>
               <h1 className="text-4xl lg:text-5xl font-bold leading-tight mb-6 font-display">
                 The operations layer your{' '}
@@ -76,16 +74,26 @@ export default async function OwnerRezPage() {
               </h1>
               <p className="text-[#8a9bb0] text-lg leading-relaxed mb-8">
                 FieldStay connects directly to your OwnerRez bookings to automate
-                everything your team handles on the ground — fully operational offline
-                automated turnover management, crew checklists, asset inventory tracking
-                with par levels, and field maintenance schedules and work orders.
+                everything your team handles on the ground — offline-ready turnover
+                management, crew checklists, asset inventory with par-level alerts,
+                field maintenance scheduling, and built-in reputation management.
               </p>
               <div className="flex flex-wrap gap-5">
-                {['Free 14-day trial', 'No credit card required', 'Connects in minutes'].map(item => (
+                {[
+                  'Free 14-day trial',
+                  'No credit card required',
+                  'Connects in minutes',
+                ].map(item => (
                   <div key={item} className="flex items-center gap-2">
                     <div className="w-5 h-5 bg-[#FCD116] rounded-full flex items-center justify-center flex-shrink-0">
                       <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                        <path d="M1 4l3 3 5-6" stroke="#0a1628" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        <path
+                          d="M1 4l3 3 5-6"
+                          stroke="#0a1628"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
                       </svg>
                     </div>
                     <span className="text-sm font-medium text-[#c8d8e8]">{item}</span>
@@ -94,40 +102,69 @@ export default async function OwnerRezPage() {
               </div>
             </div>
 
-            {/* Right — RepuGuard */}
+            {/* Right — RepuGuard: bundled exclusive, no add-on pricing */}
             <div className="bg-[#0e2a52] border border-[#1e3a72] rounded-2xl p-8">
-              <div className="flex items-center gap-3 mb-5">
-                <div className="bg-[#FCD116] text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
-                  REPUGUARD
+
+              {/* Header row */}
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="bg-[#FCD116] text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
+                    REPUGUARD
+                  </div>
+                  {/* "Included" pill — replaces the old trial/price framing */}
+                  <span className="bg-[#1a3a2a] border border-[#2a5a3a] text-[#4ade80] text-xs font-semibold px-2.5 py-1 rounded-full">
+                    Included in every plan
+                  </span>
                 </div>
-                <span className="text-[#FCD116] text-sm italic font-medium">
-                  Exclusively for OwnerRez users
-                </span>
               </div>
-              <h2 className="text-2xl font-bold text-white mb-4 leading-snug">
+
+              <h2 className="text-2xl font-bold text-white mb-3 leading-snug">
                 RepuGuard Reputation Engine
               </h2>
-              <p className="text-[#8a9bb0] leading-relaxed mb-7">
+              <p className="text-[#8a9bb0] leading-relaxed mb-6">
                 Every review deserves a response. RepuGuard reads the context of each
                 guest review and generates calm, professional replies that protect your
-                reputation without ever sounding defensive — automatically. Review every
-                response before it posts. You stay in control.
+                reputation without ever sounding defensive. Review every response before
+                it posts — you stay in control.
               </p>
-              <div className="space-y-3">
-                <div className="flex items-start gap-3 bg-[#102246] rounded-xl p-4 border border-[#162a4a]">
-                  <span className="text-xl leading-none mt-0.5">🎁</span>
-                  <div>
-                    <div className="font-bold text-white">3 Months Free</div>
-                    <div className="text-sm text-[#6a8aaa]">included with every FieldStay subscription</div>
+
+              {/* Feature bullets — replaces old trial/price boxes */}
+              <div className="space-y-2.5 mb-6">
+                {[
+                  'AI-generated responses tuned to review tone & context',
+                  'Urgency scoring with response-deadline badges',
+                  'You approve before anything posts — always',
+                ].map(feat => (
+                  <div key={feat} className="flex items-start gap-3">
+                    <div className="w-5 h-5 bg-[#FCD116] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                        <path
+                          d="M1 4l3 3 5-6"
+                          stroke="#0a1628"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                    <span className="text-sm text-[#c8d8e8] leading-snug">{feat}</span>
                   </div>
-                </div>
-                <div className="flex items-center justify-between bg-[#102246] rounded-xl px-4 py-3 border border-[#162a4a]">
-                  <div>
-                    <span className="text-[#FCD116] font-bold text-lg">$15/mo for life</span>
-                    <span className="text-[#6a8aaa] text-sm ml-2">if you activate before Jan 1</span>
-                  </div>
-                  <span className="text-sm text-[#2a4060] line-through">$29/mo</span>
-                </div>
+                ))}
+              </div>
+
+              {/* OwnerRez-exclusive callout — replaces old pricing rows */}
+              <div className="flex items-center gap-3 bg-[#102246] border border-[#1e3a72] rounded-xl px-4 py-3">
+                <span
+                  className="text-white text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
+                  style={{ background: '#3D8B4F' }}
+                >
+                  OR
+                </span>
+                <p className="text-sm text-[#8a9bb0]">
+                  RepuGuard is{' '}
+                  <span className="text-white font-semibold">exclusive to OwnerRez users</span>
+                  {' '}— included in your FieldStay subscription at no extra cost.
+                </p>
               </div>
             </div>
 
@@ -138,6 +175,10 @@ export default async function OwnerRezPage() {
       {/* ══════════════════════════════════════════
           SECTION 2 — WHITE
           Pricing
+          NOTE: Update PricingSection component separately with new
+          price IDs: Starter $199, Growth $379, Portfolio $599.
+          RepuGuard should appear as a checkmark in ALL tier feature
+          lists — not as an add-on line item.
       ══════════════════════════════════════════ */}
       <div className="bg-white">
         <div className="max-w-6xl mx-auto px-6 py-20">
@@ -147,14 +188,25 @@ export default async function OwnerRezPage() {
 
       {/* ══════════════════════════════════════════
           SECTION 3 — DARK NAVY
-          RepuGuard Sandbox Demo
+          RepuGuard Live Demo
+          Reframed: "see what's built in" not "try before you buy"
       ══════════════════════════════════════════ */}
       <div className="bg-[#102246] text-white">
         <div className="max-w-6xl mx-auto px-6 py-20">
           <div className="text-center mb-10">
-            <h2 className="text-3xl font-bold mb-3 font-display">See RepuGuard in Action</h2>
+            {/* Section label */}
+            <div className="inline-flex items-center gap-2 mb-4">
+              <div className="bg-[#FCD116] text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
+                REPUGUARD
+              </div>
+              <span className="text-[#6a8aaa] text-sm">Included with every plan</span>
+            </div>
+            <h2 className="text-3xl font-bold mb-3 font-display">
+              See RepuGuard in Action
+            </h2>
             <p className="text-[#6a8aaa] text-lg max-w-xl mx-auto">
-              Choose a review scenario and watch RepuGuard generate a response in real time.
+              Choose a review scenario below and watch your built-in reputation
+              engine generate a response in real time.
             </p>
           </div>
           <RepuGuardWrapper />
@@ -163,7 +215,7 @@ export default async function OwnerRezPage() {
 
       {/* ══════════════════════════════════════════
           SECTION 4 — WHITE
-          Features
+          Features — now 4 cards, RepuGuard as 04
       ══════════════════════════════════════════ */}
       <div className="bg-white">
         <div className="max-w-6xl mx-auto px-6 py-20">
@@ -173,7 +225,9 @@ export default async function OwnerRezPage() {
           <p className="text-[#5a6a7a] text-center mb-12">
             Built specifically for the field operations side of short-term rentals.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+          {/* 2×2 grid to accommodate 4 features cleanly */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {[
               {
                 num: '01',
@@ -190,13 +244,56 @@ export default async function OwnerRezPage() {
                 title: 'Owner Reporting Portal',
                 body: 'Property owners get a secure, tokenized P&L portal showing revenue, expenses, and net returns by period. You share one link. They check it themselves.',
               },
+              {
+                num: '04',
+                title: 'RepuGuard — Reputation Management',
+                body: 'AI-generated review responses tuned to each guest\'s tone and context. Urgency scoring surfaces overdue responses before they cost you your rating. Included in every FieldStay plan — exclusive to OwnerRez users.',
+                // Visual distinction: highlight this card subtly to signal it's exclusive/bonus
+                highlight: true,
+              },
             ].map(f => (
-              <div key={f.num} className="bg-[#f8fafc] border border-[#e2e8f0] rounded-2xl p-6">
-                <div className="text-[#FCD116] font-bold text-sm mb-3 bg-[#102246] inline-block px-2 py-0.5 rounded">
+              <div
+                key={f.num}
+                className={
+                  f.highlight
+                    ? 'bg-[#0e2a52] border border-[#1e3a72] rounded-2xl p-6'
+                    : 'bg-[#f8fafc] border border-[#e2e8f0] rounded-2xl p-6'
+                }
+              >
+                <div
+                  className={`text-xs font-bold mb-3 inline-block px-2 py-0.5 rounded ${
+                    f.highlight
+                      ? 'bg-[#FCD116] text-[#0a1628]'
+                      : 'bg-[#102246] text-[#FCD116]'
+                  }`}
+                >
                   {f.num}
                 </div>
-                <h3 className="font-bold text-lg mb-3 text-[#0a1628]">{f.title}</h3>
-                <p className="text-[#5a6a7a] text-sm leading-relaxed">{f.body}</p>
+                <h3
+                  className={`font-bold text-lg mb-3 ${
+                    f.highlight ? 'text-white' : 'text-[#0a1628]'
+                  }`}
+                >
+                  {f.title}
+                </h3>
+                <p
+                  className={`text-sm leading-relaxed ${
+                    f.highlight ? 'text-[#8a9bb0]' : 'text-[#5a6a7a]'
+                  }`}
+                >
+                  {f.body}
+                </p>
+                {f.highlight && (
+                  <div className="mt-4 flex items-center gap-2">
+                    <span
+                      className="text-white text-xs font-bold px-2 py-0.5 rounded"
+                      style={{ background: '#3D8B4F' }}
+                    >
+                      OR
+                    </span>
+                    <span className="text-xs text-[#6a8aaa]">OwnerRez exclusive · included free</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -238,7 +335,10 @@ export default async function OwnerRezPage() {
               </Link>
               <p className="text-sm text-[#0a1628]/60">
                 Already have an account?{' '}
-                <Link href="/login" className="text-[#0a1628] font-semibold underline hover:no-underline transition-all">
+                <Link
+                  href="/login"
+                  className="text-[#0a1628] font-semibold underline hover:no-underline transition-all"
+                >
                   Log in
                 </Link>
               </p>
@@ -247,7 +347,10 @@ export default async function OwnerRezPage() {
 
           <p className="mt-10 text-sm text-[#0a1628]/50">
             Questions?{' '}
-            <a href="mailto:hello@fieldstay.app" className="text-[#0a1628]/70 hover:text-[#0a1628] transition-colors">
+            <a
+              href="mailto:hello@fieldstay.app"
+              className="text-[#0a1628]/70 hover:text-[#0a1628] transition-colors"
+            >
               hello@fieldstay.app
             </a>
           </p>
