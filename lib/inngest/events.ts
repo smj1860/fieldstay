@@ -317,4 +317,32 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Work order lifecycle extensions
+  // ----------------------------------------------------------
+
+  'work-order/aging-escalated': {
+    data: {
+      work_order_id: string
+      org_id:        string
+      property_id:   string
+      days_open:     number
+      new_priority:  string
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Maintenance analytics
+  // ----------------------------------------------------------
+
+  'maintenance/repeat-issue-detected': {
+    data: {
+      org_id:       string
+      property_id:  string
+      wo_category:  string
+      count:        number
+      window_days:  number
+    }
+  }
+
 }
