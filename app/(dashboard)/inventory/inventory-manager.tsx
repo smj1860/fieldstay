@@ -83,6 +83,7 @@ interface TemplateItem {
   unit: string
   par_level: number
   notes: string | null
+  preferred_brand: string | null
 }
 
 interface Template {

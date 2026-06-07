@@ -292,7 +292,7 @@ export type FieldStayEvents = {
     data: {
       org_id: string
     }
-  }
+  },
 
   // ----------------------------------------------------------
   // Geocoding backfill (one-time, manual trigger)
@@ -344,5 +344,7 @@ export type FieldStayEvents = {
       window_days:  number
     }
   }
+
+}
 
 }
