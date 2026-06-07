@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
+import { calculateHealthScore } from '@/lib/assets/health-score'
 
 const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
 const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
@@ -533,11 +534,147 @@ export const dailyMaintenanceCheck = inngest.createFunction(
       })
     }
 
+    // ── 8.4: Daily Asset Health Score Recalculation ──────────────────────────
+    const activeAssets = await step.run('find-assets-for-scoring', async () => {
+      const { data } = await supabase
+        .from('property_assets')
+        .select(`
+          id, org_id, property_id, asset_type,
+          installation_date, expected_lifespan_years,
+          estimated_replacement_cost, health_score
+        `)
+        .eq('is_active', true)
+      return data ?? []
+    })
+
+    logger.info(`Found ${activeAssets.length} active assets to score`)
+
+    if (activeAssets.length > 0) {
+      const standards = await step.run('fetch-asset-standards', async () => {
+        const { data } = await supabase
+          .from('asset_type_standards')
+          .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high')
+        return data ?? []
+      })
+
+      const repairWOs = await step.run('fetch-asset-repair-history', async () => {
+        const { data } = await supabase
+          .from('work_orders')
+          .select('asset_id, actual_cost, estimated_cost, completed_date')
+          .not('asset_id', 'is', null)
+          .eq('status', 'completed')
+        return data ?? []
+      })
+
+      // Aggregate repair history per asset
+      const repairByAsset: Record<string, {
+        total_repairs: number
+        total_repair_cost: number
+        last_serviced_at: string | null
+      }> = {}
+      for (const wo of repairWOs) {
+        if (!wo.asset_id) continue
+        const r = repairByAsset[wo.asset_id]
+        if (!r) {
+          repairByAsset[wo.asset_id] = {
+            total_repairs:     1,
+            total_repair_cost: wo.actual_cost ?? wo.estimated_cost ?? 0,
+            last_serviced_at:  wo.completed_date ?? null,
+          }
+        } else {
+          r.total_repairs++
+          r.total_repair_cost += wo.actual_cost ?? wo.estimated_cost ?? 0
+          if (wo.completed_date && (!r.last_serviced_at || wo.completed_date > r.last_serviced_at)) {
+            r.last_serviced_at = wo.completed_date
+          }
+        }
+      }
+
+      // Group assets by org for batched updates + threshold alerts
+      const assetsByOrg = activeAssets.reduce<Record<string, typeof activeAssets>>((acc, a) => {
+        ;(acc[a.org_id] ??= []).push(a)
+        return acc
+      }, {})
+
+      for (const [orgId, orgAssets] of Object.entries(assetsByOrg)) {
+        await step.run(`score-org-assets-${orgId}`, async () => {
+          type Crossing = { asset_type: string; property_id: string; oldScore: number; newScore: number }
+          const crossings: Crossing[] = []
+
+          for (const asset of orgAssets) {
+            const std = standards.find((s) => s.asset_type === asset.asset_type)
+            if (!std) continue
+
+            const repair = repairByAsset[asset.id] ?? {
+              total_repairs: 0, total_repair_cost: 0, last_serviced_at: null,
+            }
+
+            const newScore = calculateHealthScore(
+              {
+                installation_date:          asset.installation_date,
+                expected_lifespan_years:    asset.expected_lifespan_years,
+                estimated_replacement_cost: asset.estimated_replacement_cost,
+              },
+              std,
+              repair
+            )
+
+            await supabase
+              .from('property_assets')
+              .update({
+                health_score:            newScore,
+                health_score_updated_at: new Date().toISOString(),
+              })
+              .eq('id', asset.id)
+
+            // 8.5: detect threshold crossings (old > threshold >= new)
+            const oldScore = asset.health_score
+            if (oldScore !== null && newScore !== oldScore) {
+              for (const threshold of [60, 40, 20]) {
+                if (oldScore > threshold && newScore <= threshold) {
+                  crossings.push({
+                    asset_type:  asset.asset_type,
+                    property_id: asset.property_id,
+                    oldScore,
+                    newScore,
+                  })
+                  break
+                }
+              }
+            }
+          }
+
+          if (crossings.length > 0) {
+            const pmEmail = await getPmEmail(supabase, orgId)
+            if (pmEmail) {
+              for (const c of crossings) {
+                const label = c.newScore < 20 ? 'Critical' : c.newScore < 40 ? 'Poor' : 'Fair'
+                await resend.emails.send({
+                  from:    FROM,
+                  to:      pmEmail,
+                  subject: `Asset health alert — ${c.asset_type.replace(/_/g, ' ')} dropped to ${label}`,
+                  html: buildScheduleEmail({
+                    heading:  'Asset health score dropped',
+                    name:     c.asset_type.replace(/_/g, ' '),
+                    daysText: `score dropped from <strong>${c.oldScore}</strong> to <strong>${c.newScore}/100 (${label})</strong>`,
+                    dueDate:  'As of today',
+                    url:      `${process.env.NEXT_PUBLIC_APP_URL}/properties/${c.property_id}`,
+                    cta:      'View Property →',
+                  }),
+                })
+              }
+            }
+          }
+        })
+      }
+    }
+
     return {
       checked:             dueSchedules.length,
       escalated:           overdueSchedules.length,
       aging_escalated:     agingWOs.length,
       auto_wos_attempted:  autoWOSchedules.length,
+      assets_scored:       activeAssets.length,
     }
   }
 )
