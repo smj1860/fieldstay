@@ -12,7 +12,8 @@ import {
   createWorkOrder, createWorkOrderFromSchedule,
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
 } from './actions'
-import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency } from '@/types/database'
+import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency, ComplianceStatus } from '@/types/database'
+import { distanceMiles } from '@/lib/geocoding'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { createClient } from '@/lib/supabase/client'
@@ -71,6 +72,28 @@ interface CrewMemberOption {
   id: string
   name: string
   role: string
+}
+
+interface AssetOption {
+  id:          string
+  name:        string
+  asset_type:  string
+  property_id: string
+}
+
+interface VendorComplianceRow {
+  vendor_id:         string
+  compliance_status: ComplianceStatus
+}
+
+interface PropertyOptionWithCoords extends PropertyOption {
+  lat: number | null
+  lng: number | null
+}
+
+interface VendorOptionWithCoords extends VendorOption {
+  lat: number | null
+  lng: number | null
 }
 
 interface ScheduleRow {
@@ -243,21 +266,41 @@ function CreateWorkOrderModal({
   properties,
   vendors,
   crewMembers = [],
+  propertyAssets = [],
+  vendorCompliance = [],
   orgId = '',
   onClose,
 }: {
-  properties:   PropertyOption[]
-  vendors:      VendorOption[]
-  crewMembers?: CrewMemberOption[]
-  orgId?:       string
-  onClose:      () => void
+  properties:       PropertyOptionWithCoords[]
+  vendors:          VendorOptionWithCoords[]
+  crewMembers?:     CrewMemberOption[]
+  propertyAssets?:  AssetOption[]
+  vendorCompliance?: VendorComplianceRow[]
+  orgId?:           string
+  onClose:          () => void
 }) {
   const [state, action, pending]          = useActionState(createWorkOrder, null)
   const [assignMode,         setAssignMode]         = useState<'vendor' | 'crew' | 'quotes'>('vendor')
   const [selectedVendor,     setSelectedVendor]     = useState('')
+  const [selectedPropertyId, setSelectedPropertyId] = useState('')
   const [selectedQuoteVendors, setSelectedQuoteVendors] = useState<string[]>([])
   const [photoFiles,         setPhotoFiles]         = useState<File[]>([])
   const photoInputRef = useRef<HTMLInputElement | null>(null)
+
+  const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
+  const assetsForProperty = propertyAssets.filter((a) => a.property_id === selectedPropertyId)
+
+  const complianceFor = (vendorId: string): ComplianceStatus | null =>
+    vendorCompliance.find((c) => c.vendor_id === vendorId)?.compliance_status ?? null
+
+  const vendorDistance = (vendorId: string): number | null => {
+    if (!selectedProperty?.lat || !selectedProperty?.lng) return null
+    const v = vendors.find((vv) => vv.id === vendorId)
+    if (!v?.lat || !v?.lng) return null
+    return distanceMiles(selectedProperty.lat, selectedProperty.lng, v.lat, v.lng)
+  }
+
+  const selectedCompliance = selectedVendor ? complianceFor(selectedVendor) : null
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
@@ -345,13 +388,35 @@ function CreateWorkOrderModal({
                 <label htmlFor="wo-property" className="label">
                   Property <span className="text-red-500">*</span>
                 </label>
-                <select id="wo-property" name="property_id" required className="input">
+                <select
+                  id="wo-property"
+                  name="property_id"
+                  required
+                  className="input"
+                  value={selectedPropertyId}
+                  onChange={(e) => setSelectedPropertyId(e.target.value)}
+                >
                   <option value="">Select property…</option>
                   {properties.map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
               </div>
+
+              {/* Linked Asset */}
+              {assetsForProperty.length > 0 && (
+                <div>
+                  <label htmlFor="wo-asset" className="label">Linked Asset</label>
+                  <select id="wo-asset" name="asset_id" className="input">
+                    <option value="">None</option>
+                    {assetsForProperty.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} — {a.asset_type.replace(/_/g, ' ')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Description */}
               <div>
@@ -472,11 +537,50 @@ function CreateWorkOrderModal({
                     onChange={(e) => setSelectedVendor(e.target.value)}
                   >
                     <option value="">Unassigned</option>
-                    {vendors.map((v) => (
-                      <option key={v.id} value={v.id}>{v.name}</option>
-                    ))}
+                    {vendors.map((v) => {
+                      const status = complianceFor(v.id)
+                      const dist   = vendorDistance(v.id)
+                      const blocked = status === 'hard_blocked'
+                      const label  = [
+                        v.name,
+                        dist != null ? `${dist.toFixed(1)} mi` : null,
+                        blocked ? '⛔ Blocked' : status === 'expiring_soon' ? '⚠️ Expiring' : null,
+                      ].filter(Boolean).join(' · ')
+                      return (
+                        <option key={v.id} value={v.id} disabled={blocked}>
+                          {label}
+                        </option>
+                      )
+                    })}
                   </select>
-                  {selectedVendor && (
+
+                  {/* Compliance banner */}
+                  {selectedCompliance === 'hard_blocked' && (
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                         style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
+                      ⛔ This vendor has expired compliance documents (31+ days). Assignment is blocked.
+                    </div>
+                  )}
+                  {selectedCompliance === 'grace_period' && (
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                         style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                      ⚠️ Compliance docs expired recently (grace period). You can assign but should follow up with the vendor.
+                    </div>
+                  )}
+                  {selectedCompliance === 'expiring_soon' && (
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                         style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                      ⚠️ COI or license expires soon — assign now but remind vendor to renew.
+                    </div>
+                  )}
+                  {selectedCompliance === 'no_documents' && (
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                         style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
+                      ℹ️ No compliance documents on file for this vendor.
+                    </div>
+                  )}
+
+                  {selectedVendor && selectedCompliance !== 'hard_blocked' && (
                     <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer mt-2">
                       <input
                         type="checkbox"
@@ -555,7 +659,11 @@ function CreateWorkOrderModal({
           </div>
 
           <div className="flex gap-3 pt-2 border-t border-themed">
-            <button type="submit" disabled={pending} className="btn-primary flex-1">
+            <button
+              type="submit"
+              disabled={pending || selectedCompliance === 'hard_blocked'}
+              className="btn-primary flex-1"
+            >
               {pending
                 ? 'Creating…'
                 : assignMode === 'quotes' && selectedQuoteVendors.length > 0
@@ -973,16 +1081,20 @@ export function MaintenanceBoard({
   vendors,
   schedules,
   crewMembers = [],
+  propertyAssets = [],
+  vendorCompliance = [],
   orgId = '',
   role,
 }: {
-  workOrders:   WorkOrderRow[]
-  properties:   PropertyOption[]
-  vendors:      VendorOption[]
-  schedules:    ScheduleRow[]
-  crewMembers?: CrewMemberOption[]
-  orgId?:       string
-  role:         string
+  workOrders:       WorkOrderRow[]
+  properties:       PropertyOptionWithCoords[]
+  vendors:          VendorOptionWithCoords[]
+  schedules:        ScheduleRow[]
+  crewMembers?:     CrewMemberOption[]
+  propertyAssets?:  AssetOption[]
+  vendorCompliance?: VendorComplianceRow[]
+  orgId?:           string
+  role:             string
 }) {
   const searchParams  = useSearchParams()
   const urlFilter     = searchParams.get('filter')
@@ -1209,6 +1321,8 @@ export function MaintenanceBoard({
           properties={properties}
           vendors={vendors}
           crewMembers={crewMembers}
+          propertyAssets={propertyAssets}
+          vendorCompliance={vendorCompliance}
           orgId={orgId}
           onClose={() => setShowCreate(false)}
         />

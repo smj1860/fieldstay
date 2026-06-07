@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
 import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Clock, DollarSign, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { AssetSection } from './asset-section'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Property' }
@@ -24,6 +25,8 @@ export default async function PropertyDetailPage({ params }: Props) {
     { data: feeds },
     { data: recentWOs },
     { data: upcomingSchedules },
+    { data: assets },
+    { data: standards },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -59,6 +62,18 @@ export default async function PropertyDetailPage({ params }: Props) {
       .eq('is_active', true)
       .order('next_due_date', { ascending: true })
       .limit(5),
+
+    supabase
+      .from('property_assets')
+      .select('*')
+      .eq('property_id', property.id)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false }),
+
+    supabase
+      .from('asset_type_standards')
+      .select('*')
+      .order('display_name'),
   ])
 
   // Calculate YTD maintenance spend
@@ -147,6 +162,12 @@ export default async function PropertyDetailPage({ params }: Props) {
           )}
         </div>
       </div>
+
+      <AssetSection
+        assets={assets ?? []}
+        standards={standards ?? []}
+        propertyId={property.id}
+      />
 
       {/* ── Feature 6: Maintenance History ─────────────────────────────── */}
       <div className="card mb-4">

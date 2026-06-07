@@ -13,6 +13,8 @@ export default async function MaintenancePage() {
     { data: vendors },
     { data: schedules },
     { data: crewMembers },
+    { data: propertyAssets },
+    { data: vendorCompliance },
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -38,14 +40,14 @@ export default async function MaintenancePage() {
 
     supabase
       .from('properties')
-      .select('id, name, city, state')
+      .select('id, name, city, state, lat, lng')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
 
     supabase
       .from('vendors')
-      .select('id, name, specialty')
+      .select('id, name, specialty, lat, lng')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
@@ -70,6 +72,18 @@ export default async function MaintenancePage() {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
+
+    supabase
+      .from('property_assets')
+      .select('id, name, asset_type, property_id')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('name'),
+
+    supabase
+      .from('vendor_compliance_status')
+      .select('vendor_id, compliance_status')
+      .eq('org_id', membership.org_id),
   ])
 
   return (
@@ -80,6 +94,8 @@ export default async function MaintenancePage() {
       schedules={schedules ?? []}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       crewMembers={(crewMembers ?? []) as any}
+      propertyAssets={propertyAssets ?? []}
+      vendorCompliance={vendorCompliance ?? []}
       orgId={membership.org_id}
       role={membership.role}
     />
