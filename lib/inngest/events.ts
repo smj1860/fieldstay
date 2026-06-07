@@ -294,13 +294,55 @@ export type FieldStayEvents = {
     }
   },
 
+  // ----------------------------------------------------------
+  // Geocoding backfill (one-time, manual trigger)
+  // ----------------------------------------------------------
+
+  'geocoding/backfill-requested': {
+    data: Record<string, never>
+  }
 
   // ----------------------------------------------------------
-  // Geocode Backfill
+  // Crew auto-assignment
   // ----------------------------------------------------------
 
-'geocoding/backfill-requested': {
-  data: Record<string, never>
-}
+  'crew/assignment-gap': {
+    data: {
+      turnover_id:   string
+      property_id:   string
+      org_id:        string
+      turnover_date: string
+      crew_needed:   number
+      crew_found:    number
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Work order lifecycle extensions
+  // ----------------------------------------------------------
+
+  'work-order/aging-escalated': {
+    data: {
+      work_order_id: string
+      org_id:        string
+      property_id:   string
+      days_open:     number
+      new_priority:  string
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Maintenance analytics
+  // ----------------------------------------------------------
+
+  'maintenance/repeat-issue-detected': {
+    data: {
+      org_id:       string
+      property_id:  string
+      wo_category:  string
+      count:        number
+      window_days:  number
+    }
+  }
 
 }
