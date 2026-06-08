@@ -12,6 +12,7 @@ import {
   openBillingPortal,
   createCheckoutSession,
   updateAutoAssignMode,
+  updateCommsRetention,
   type SettingsActionState,
 } from './actions'
 
@@ -189,6 +190,62 @@ function OrgTab({ org }: { org: Organization }) {
         </p>
         <AutoAssignToggle mode={org.auto_assign_mode ?? 'disabled'} />
       </div>
+
+      {/* Communications Log */}
+      <div className="card">
+        <h2 className="text-base font-semibold text-primary-themed mb-1">Communications Log</h2>
+        <p className="text-xs text-muted-themed mb-4">
+          How long PM ↔ vendor/crew messages are kept before being removed.
+          Records are soft-deleted at the end of the retention period and
+          permanently purged 30 days later.
+        </p>
+        <CommsRetentionSelector days={org.comms_log_retention_days ?? 365} />
+      </div>
+    </div>
+  )
+}
+
+// ── Comms log retention selector ─────────────────────────────────────────────
+
+const COMMS_RETENTION_OPTIONS = [
+  { value: 90,  label: '90 days' },
+  { value: 180, label: '6 months (180 days)' },
+  { value: 365, label: '12 months (365 days) — default' },
+  { value: 730, label: '24 months (730 days)' },
+]
+
+function CommsRetentionSelector({ days }: { days: number }) {
+  const [current,   setCurrent]   = useState(days)
+  const [saving,    startSave]    = useTransition()
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const handleChange = (value: number) => {
+    setCurrent(value)
+    setSaveError(null)
+    startSave(async () => {
+      const result = await updateCommsRetention(value)
+      if (result.error) setSaveError(result.error)
+    })
+  }
+
+  return (
+    <div>
+      {saveError && (
+        <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-3 py-2 mb-3">
+          {saveError}
+        </div>
+      )}
+
+      <select
+        value={current}
+        onChange={(e) => handleChange(Number(e.target.value))}
+        disabled={saving}
+        className="input text-sm w-auto"
+      >
+        {COMMS_RETENTION_OPTIONS.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
     </div>
   )
 }

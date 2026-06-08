@@ -439,6 +439,20 @@ export async function updateAutoAssignMode(
   return { success: true }
 }
 
+export async function updateCommsRetention(days: number): Promise<SettingsActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({ comms_log_retention_days: days })
+    .eq('id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/settings')
+  return { success: true }
+}
+
 export async function createCheckoutSession(
   planKey: 'pro' | 'growth',
   interval: 'monthly' | 'annual'

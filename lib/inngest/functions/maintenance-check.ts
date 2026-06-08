@@ -760,6 +760,47 @@ export const dailyMaintenanceCheck = inngest.createFunction(
       })
     }
 
+    // ── 6.14: Comms Log Retention ────────────────────────────────────────────
+    const retentionOrgs = await step.run('find-comms-retention-orgs', async () => {
+      const { data } = await supabase
+        .from('organizations')
+        .select('id, comms_log_retention_days')
+
+      return data ?? []
+    })
+
+    let commsSoftDeleted = 0
+    let commsHardPurged  = 0
+
+    for (const org of retentionOrgs) {
+      await step.run(`comms-log-retention-${org.id}`, async () => {
+        // Step A — soft-delete logs older than the retention window
+        const { data: softDeleted } = await supabase
+          .from('communication_logs')
+          .update({ deleted_at: new Date().toISOString() })
+          .eq('org_id', org.id)
+          .is('deleted_at', null)
+          .lt('created_at', new Date(today.getTime() - org.comms_log_retention_days * 86_400_000).toISOString())
+          .select('id')
+
+        // Step B — hard purge logs soft-deleted more than 30 days ago
+        const { data: hardPurged } = await supabase
+          .from('communication_logs')
+          .delete()
+          .eq('org_id', org.id)
+          .not('deleted_at', 'is', null)
+          .lt('deleted_at', new Date(today.getTime() - 30 * 86_400_000).toISOString())
+          .select('id')
+
+        commsSoftDeleted += softDeleted?.length ?? 0
+        commsHardPurged  += hardPurged?.length ?? 0
+
+        return { soft_deleted: softDeleted?.length ?? 0, hard_purged: hardPurged?.length ?? 0 }
+      })
+    }
+
+    logger.info(`Comms log retention — soft-deleted ${commsSoftDeleted}, hard-purged ${commsHardPurged}`)
+
     return {
       checked:             dueSchedules.length,
       escalated:           overdueSchedules.length,
@@ -767,6 +808,8 @@ export const dailyMaintenanceCheck = inngest.createFunction(
       auto_wos_attempted:  autoWOSchedules.length,
       assets_scored:       activeAssets.length,
       compliance_checked:  expiringDocs.length,
+      comms_soft_deleted:  commsSoftDeleted,
+      comms_hard_purged:   commsHardPurged,
     }
   }
 )

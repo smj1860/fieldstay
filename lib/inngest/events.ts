@@ -379,4 +379,28 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Uplisting Integration
+  // ----------------------------------------------------------
+
+  'integration/uplisting.sync.requested': {
+    data: {
+      org_id:    string
+      sync_type: 'initial' | 'incremental'
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Maintenance Schedule Template Broadcasting
+  // ----------------------------------------------------------
+
+  'maintenance/template-broadcast': {
+    data: {
+      org_id:       string
+      template_id:  string
+      property_ids: string[]
+      triggered_by: string
+    }
+  }
+
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useActionState, useRef, useEffect } from 'react'
+import { useState, useTransition, useActionState, useRef, useEffect, useMemo, useContext, createContext } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -29,6 +29,16 @@ interface BookingRow {
   guest_name: string | null
   status: string
 }
+
+interface CrewAvailabilityRow {
+  crew_member_id: string
+  available_date: string
+  is_available:   boolean
+}
+
+// Lookup map keyed by `${crew_member_id}::${YYYY-MM-DD}` → is_available.
+// Days with no entry mean "no preference" and carry no badge.
+const CrewAvailabilityContext = createContext<Record<string, boolean>>({})
 
 interface TurnoverAssignment {
   id: string
@@ -153,8 +163,21 @@ function CrewAssignment({
   const [adding,   startAdd]    = useTransition()
   const [removing, startRemove] = useTransition()
 
+  const availabilityMap = useContext(CrewAvailabilityContext)
+  const turnoverDate    = turnover.checkout_datetime.split('T')[0]
+
   const isDisabled = turnover.status === 'completed' || turnover.status === 'cancelled'
   const available  = crewMembers.filter(c => !assignedCrew.find(a => a.id === c.id))
+
+  const availabilityBadge = (crewId: string) => {
+    const entry = availabilityMap[`${crewId}::${turnoverDate}`]
+    if (entry === undefined) return null
+    return (
+      <span title={entry ? 'Marked available that day' : 'Marked unavailable that day'}>
+        {entry ? '🟢' : '🔴'}
+      </span>
+    )
+  }
 
   const handleAdd = (crewId: string) => {
     setOpen(false)
@@ -183,6 +206,7 @@ function CrewAssignment({
             color:      '#1d4ed8',
           }}
         >
+          {availabilityBadge(c.id)}
           {c.name}
           {!isDisabled && (
             <button
@@ -228,6 +252,7 @@ function CrewAssignment({
                       {c.name[0]?.toUpperCase()}
                     </span>
                     {c.name}
+                    {availabilityBadge(c.id)}
                   </button>
                 ))}
               </div>
@@ -801,6 +826,7 @@ export function TurnoverBoard({
   crewMembers,
   properties,
   bookings = [],
+  crewAvailability = [],
   orgId,
 }: {
   turnovers: Turnover[]
@@ -808,6 +834,7 @@ export function TurnoverBoard({
   crewMembers: CrewMember[]
   properties: Property[]
   bookings?: BookingRow[]
+  crewAvailability?: CrewAvailabilityRow[]
   orgId: string
 }) {
   const searchParams = useSearchParams()
@@ -839,6 +866,14 @@ export function TurnoverBoard({
     })
 
   const clearSelection = () => setSelectedIds(new Set())
+
+  const availabilityMap = useMemo(() => {
+    const map: Record<string, boolean> = {}
+    for (const row of crewAvailability) {
+      map[`${row.crew_member_id}::${row.available_date}`] = row.is_available
+    }
+    return map
+  }, [crewAvailability])
 
   // Filter
   const filtered = turnovers.filter((t) => {
@@ -881,7 +916,7 @@ export function TurnoverBoard({
   ).length
 
   return (
-    <>
+    <CrewAvailabilityContext.Provider value={availabilityMap}>
       {/* Conflict warning toast */}
       {assignmentWarning && (
         <div
@@ -1160,6 +1195,6 @@ export function TurnoverBoard({
           onClose={() => setShowAdd(false)}
         />
       )}
-    </>
+    </CrewAvailabilityContext.Provider>
   )
 }

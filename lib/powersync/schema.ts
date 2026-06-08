@@ -43,10 +43,19 @@ const properties = new Table({
   state:   column.text,
 })
 
+const crew_availability = new Table({
+  org_id:          column.text,
+  crew_member_id:  column.text,
+  available_date:  column.text,
+  is_available:    column.integer,
+  notes:           column.text,
+})
+
 export const AppSchema = new Schema({
   turnovers,
   checklist_instances,
   checklist_instance_items,
   inventory_items,
   properties,
+  crew_availability,
 })

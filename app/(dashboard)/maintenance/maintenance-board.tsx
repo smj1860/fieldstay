@@ -5,12 +5,13 @@ import { useSearchParams } from 'next/navigation'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
-  Pencil, Trash2, Camera, List, BarChart2,
+  Pencil, Trash2, Camera, List, BarChart2, Send,
 } from 'lucide-react'
 import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
 import {
   createWorkOrder, createWorkOrderFromSchedule,
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
+  broadcastMaintenanceTemplate, type BroadcastResult,
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency, ComplianceStatus } from '@/types/database'
 import { distanceMiles } from '@/lib/geocoding'
@@ -113,6 +114,26 @@ interface ScheduleRow {
   instructions: string | null
   properties: { name: string } | { name: string }[] | null
   vendors: { id: string; name: string } | { id: string; name: string }[] | null
+}
+
+interface TemplateItemRow {
+  id:                    string
+  name:                  string
+  description:           string | null
+  schedule_frequency:    ScheduleFrequency
+  vendor_specialty_hint: VendorSpecialty | null
+  estimated_cost:        number | null
+  is_optional_flag:      string | null
+  sort_order:            number
+}
+
+interface TemplateRow {
+  id:          string
+  org_id:      string
+  name:        string
+  description: string | null
+  is_system:   boolean
+  maintenance_schedule_template_items: TemplateItemRow[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1073,6 +1094,273 @@ function SchedulesSection({
   )
 }
 
+// ── Template Broadcast Modal ──────────────────────────────────────────────────
+
+function TemplateBroadcastModal({
+  template,
+  properties,
+  onClose,
+}: {
+  template: TemplateRow
+  properties: PropertyOption[]
+  onClose: () => void
+}) {
+  const [step, setStep]                       = useState<1 | 2 | 3>(1)
+  const [selectedPropertyIds, setSelectedIds] = useState<string[]>([])
+  const [broadcasting, setBroadcasting]       = useState(false)
+  const [error, setError]                     = useState<string | null>(null)
+  const [result, setResult]                   = useState<BroadcastResult | null>(null)
+
+  const items        = template.maintenance_schedule_template_items
+  const allSelected  = properties.length > 0 && selectedPropertyIds.length === properties.length
+  const totalItems   = items.length * selectedPropertyIds.length
+
+  const toggleProperty = (id: string) => {
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id])
+  }
+
+  const toggleAll = () => {
+    setSelectedIds(allSelected ? [] : properties.map((p) => p.id))
+  }
+
+  const handleBroadcast = async () => {
+    setBroadcasting(true)
+    setError(null)
+    const res = await broadcastMaintenanceTemplate(template.id, selectedPropertyIds)
+    setBroadcasting(false)
+    if (res.error) { setError(res.error); return }
+    setResult(res)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h3 className="text-lg font-semibold text-primary-themed">Broadcast Template</h3>
+            <p className="text-xs text-muted-themed mt-0.5">{template.name} · {items.length} item{items.length !== 1 ? 's' : ''}</p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+        </div>
+
+        {!result && (
+          <div className="flex items-center gap-2 mb-5">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="flex items-center gap-2 flex-1">
+                <div className={cn(
+                  'w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0',
+                  step === n ? 'bg-brand-800 text-white' : step > n ? 'bg-green-100 text-green-700' : 'bg-raised-themed text-muted-themed'
+                )}>
+                  {step > n ? <CheckCircle2 className="w-3.5 h-3.5" /> : n}
+                </div>
+                {n < 3 && <div className={cn('h-0.5 flex-1', step > n ? 'bg-green-300' : 'bg-themed')} />}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
+        )}
+
+        {result ? (
+          <div className="space-y-4">
+            <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">
+              <p className="font-medium">Broadcast complete</p>
+              <p className="mt-1">
+                Created {result.created} schedule{result.created !== 1 ? 's' : ''} across{' '}
+                {selectedPropertyIds.length} propert{selectedPropertyIds.length !== 1 ? 'ies' : 'y'}.
+              </p>
+              {(result.skipped ?? 0) > 0 && (
+                <p className="mt-1 text-green-600">
+                  {result.skipped} item{result.skipped !== 1 ? 's' : ''} skipped — already existed by name.
+                </p>
+              )}
+            </div>
+            <button onClick={onClose} className="btn-primary w-full">Done</button>
+          </div>
+        ) : (
+          <>
+            {step === 1 && (
+              <div>
+                <p className="text-sm font-medium text-secondary-themed mb-3">This template includes:</p>
+                <ul className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                  {items.map((item) => (
+                    <li key={item.id} className="flex items-center justify-between gap-2 text-sm bg-canvas-themed rounded-lg px-3 py-2">
+                      <span className="text-secondary-themed truncate">{item.name}</span>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        {item.is_optional_flag && (
+                          <span className="badge badge-amber text-xs">⚠️ {item.is_optional_flag}</span>
+                        )}
+                        <span className="badge badge-slate text-xs">
+                          {FREQUENCY_LABELS[item.schedule_frequency] ?? item.schedule_frequency}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                <div className="flex gap-3 pt-4 mt-2 border-t border-themed">
+                  <button onClick={() => setStep(2)} className="btn-primary flex-1">Continue</button>
+                  <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-medium text-secondary-themed">Select properties</p>
+                  <button onClick={toggleAll} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
+                    {allSelected ? 'Deselect all' : 'Select all'}
+                  </button>
+                </div>
+                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                  {properties.map((p) => (
+                    <label key={p.id} className="flex items-center gap-2.5 text-sm bg-canvas-themed rounded-lg px-3 py-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedPropertyIds.includes(p.id)}
+                        onChange={() => toggleProperty(p.id)}
+                        className="w-4 h-4 rounded"
+                      />
+                      <span className="text-secondary-themed">{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-3 pt-4 mt-2 border-t border-themed">
+                  <button onClick={() => setStep(1)} className="btn-ghost">Back</button>
+                  <button
+                    onClick={() => setStep(3)}
+                    disabled={selectedPropertyIds.length === 0}
+                    className="btn-primary flex-1"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div>
+                <div className="bg-canvas-themed border border-themed rounded-lg px-4 py-3 text-sm text-secondary-themed mb-4">
+                  <p>
+                    Broadcasting <span className="font-semibold text-primary-themed">{items.length}</span> schedule
+                    {items.length !== 1 ? 's' : ''} to <span className="font-semibold text-primary-themed">{selectedPropertyIds.length}</span> propert
+                    {selectedPropertyIds.length !== 1 ? 'ies' : 'y'} = up to{' '}
+                    <span className="font-semibold text-primary-themed">{totalItems}</span> schedule items.
+                  </p>
+                  <p className="mt-1.5 text-xs text-muted-themed">
+                    Items that already exist by name on a property will be skipped — safe to re-run.
+                  </p>
+                </div>
+                <div className="flex gap-3 pt-2 border-t border-themed">
+                  <button onClick={() => setStep(2)} disabled={broadcasting} className="btn-ghost">Back</button>
+                  <button
+                    onClick={handleBroadcast}
+                    disabled={broadcasting}
+                    className="btn-primary flex-1 flex items-center justify-center gap-2"
+                  >
+                    {broadcasting ? <Clock className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                    {broadcasting ? 'Broadcasting…' : 'Broadcast'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Templates Section ─────────────────────────────────────────────────────────
+
+function TemplatesSection({
+  templates,
+  properties,
+}: {
+  templates: TemplateRow[]
+  properties: PropertyOption[]
+}) {
+  const [open, setOpen]                             = useState(false)
+  const [broadcastTemplateId, setBroadcastTemplateId] = useState<string | null>(null)
+
+  const broadcastTemplate = templates.find((t) => t.id === broadcastTemplateId) ?? null
+
+  return (
+    <>
+      <div className="mt-8">
+        <div className="flex items-center gap-2 mb-1">
+          <button
+            onClick={() => setOpen((o) => !o)}
+            className="flex items-center gap-2 flex-1 text-left group"
+          >
+            <span className="text-sm font-semibold text-secondary-themed group-hover:text-primary-themed transition-colors">
+              Schedule Templates
+            </span>
+            <span className="badge badge-slate">{templates.length}</span>
+            <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
+          </button>
+        </div>
+        <p className="text-xs text-muted-themed mb-3">
+          Broadcast a curated set of recurring maintenance schedules to multiple properties at once
+        </p>
+
+        {open && templates.length === 0 && (
+          <div className="text-center py-8 text-sm text-muted-themed border border-themed rounded-xl">
+            No templates available yet.
+          </div>
+        )}
+
+        {open && templates.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {templates.map((t) => {
+              const items   = t.maintenance_schedule_template_items
+              const preview = items.slice(0, 4)
+              return (
+                <div key={t.id} className="bg-card-themed rounded-xl border border-themed p-4 flex flex-col">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <span className="font-medium text-primary-themed text-sm">{t.name}</span>
+                    {t.is_system && <span className="badge badge-blue flex-shrink-0">FieldStay</span>}
+                  </div>
+                  {t.description && (
+                    <p className="text-xs text-muted-themed mb-2 truncate">{t.description}</p>
+                  )}
+                  <span className="badge badge-slate w-fit mb-2">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+                  <ul className="text-xs text-secondary-themed space-y-0.5 mb-3 flex-1">
+                    {preview.map((item) => (
+                      <li key={item.id} className="truncate">• {item.name}</li>
+                    ))}
+                    {items.length > preview.length && (
+                      <li className="text-muted-themed">+ {items.length - preview.length} more…</li>
+                    )}
+                  </ul>
+                  <button
+                    onClick={() => setBroadcastTemplateId(t.id)}
+                    disabled={properties.length === 0}
+                    className="btn-secondary text-xs py-1.5 px-3 w-full flex items-center justify-center gap-1.5"
+                  >
+                    <Send className="w-3 h-3" />
+                    Broadcast to Properties
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {broadcastTemplate && (
+        <TemplateBroadcastModal
+          template={broadcastTemplate}
+          properties={properties}
+          onClose={() => setBroadcastTemplateId(null)}
+        />
+      )}
+    </>
+  )
+}
+
 // ── Main Board ────────────────────────────────────────────────────────────────
 
 export function MaintenanceBoard({
@@ -1080,6 +1368,7 @@ export function MaintenanceBoard({
   properties,
   vendors,
   schedules,
+  templates = [],
   crewMembers = [],
   propertyAssets = [],
   vendorCompliance = [],
@@ -1090,6 +1379,7 @@ export function MaintenanceBoard({
   properties:       PropertyOptionWithCoords[]
   vendors:          VendorOptionWithCoords[]
   schedules:        ScheduleRow[]
+  templates?:       TemplateRow[]
   crewMembers?:     CrewMemberOption[]
   propertyAssets?:  AssetOption[]
   vendorCompliance?: VendorComplianceRow[]
@@ -1314,6 +1604,9 @@ export function MaintenanceBoard({
 
       {/* Maintenance Schedules */}
       <SchedulesSection schedules={schedules} properties={properties} vendors={vendors} />
+
+      {/* Schedule Templates */}
+      <TemplatesSection templates={templates} properties={properties} />
 
       {/* Create Modal */}
       {showCreate && (

@@ -25,6 +25,7 @@ export default async function CommsLogPage() {
         work_order_id,   work_orders  ( id, title )
       `)
       .eq('org_id', membership.org_id)
+      .is('deleted_at', null)
       .order('communicated_at', { ascending: false })
       .limit(500),
 

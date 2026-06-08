@@ -70,6 +70,7 @@ export async function deleteCommunicationLog(
     .delete()
     .eq('id', logId)
     .eq('org_id', membership.org_id)
+    .is('deleted_at', null)
 
   if (error) return { error: error.message }
 
