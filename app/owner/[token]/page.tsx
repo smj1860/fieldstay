@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: 'Owner Portal — FieldStay' }
 
 interface Props {
   params:       Promise<{ token: string }>
-  searchParams: Promise<{ month?: string }>
+  searchParams: Promise<{ month?: string; property?: string }>
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -80,11 +80,69 @@ const BADGE_STYLES: Record<BadgeColor, string> = {
   amber: 'bg-amber-50 text-amber-700 border border-amber-200',
 }
 
+interface TxnRowData {
+  id:               string
+  transaction_type: string
+  category:         string
+  source:           string | null
+  amount:           number
+  description:      string | null
+  transaction_date: string
+  notes:            string | null
+}
+
+function TransactionRow({ txn }: { txn: TxnRowData }) {
+  const isRevenue = (txn.transaction_type as TxnType) === 'revenue'
+  const badge     = SOURCE_BADGES[txn.source ?? ''] ?? null
+  const desc      = txn.description || SOURCE_FALLBACK_LABELS[txn.source ?? ''] || txn.category
+
+  return (
+    <div className="flex items-center gap-4 px-5 py-3.5">
+      {/* Date */}
+      <div className="w-16 flex-shrink-0 text-xs text-gray-400 tabular-nums">
+        {formatDate(txn.transaction_date)}
+      </div>
+
+      {/* Description + source badge */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-sm font-medium text-gray-800">{desc}</p>
+          {badge && (
+            <span
+              className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${BADGE_STYLES[badge.color]}`}
+            >
+              {badge.label}
+              {badge.tooltip && (
+                <span
+                  title={badge.tooltip}
+                  className="cursor-help text-xs leading-none opacity-60 hover:opacity-100"
+                >
+                  ⓘ
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+        {txn.notes && (
+          <p className="text-xs text-gray-400 mt-0.5 truncate">{txn.notes}</p>
+        )}
+      </div>
+
+      {/* Amount */}
+      <div className={`text-sm font-semibold flex-shrink-0 tabular-nums ${
+        isRevenue ? 'text-green-600' : 'text-red-600'
+      }`}>
+        {isRevenue ? '+' : '−'}{formatCurrency(txn.amount)}
+      </div>
+    </div>
+  )
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function OwnerPortalPage({ params, searchParams }: Props) {
   const { token } = await params
-  const { month: monthParam } = await searchParams
+  const { month: monthParam, property: propertyParam } = await searchParams
   const supabase = createServiceClient()
 
   // Validate token + fetch owner + property
@@ -95,6 +153,8 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
       expires_at,
       revoked_at,
       last_accessed_at,
+      is_multi,
+      property_ids,
       property_owners (
         id,
         org_id,
@@ -181,15 +241,43 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
 
   if (!property) notFound()
 
+  // ── Multi-property portfolio setup ──────────────────────────────────────────
+  const isMulti = !!portalToken.is_multi
+    && Array.isArray(portalToken.property_ids)
+    && portalToken.property_ids.length > 1
+
+  let portfolioProperties: (typeof property)[] = [property]
+
+  if (isMulti) {
+    const { data: props } = await supabase
+      .from('properties')
+      .select('id, name, address, city, state, zip')
+      .in('id', portalToken.property_ids!)
+      .order('name')
+
+    if (props && props.length > 0) portfolioProperties = props
+  }
+
+  const propertyIds      = portfolioProperties.map((p) => p.id)
+  const selectedProperty = isMulti
+    ? ((propertyParam === 'all' || propertyIds.includes(propertyParam ?? '')) ? (propertyParam ?? 'all') : 'all')
+    : property.id
+
+  const viewProperty = isMulti
+    ? (portfolioProperties.find((p) => p.id === selectedProperty) ?? null)
+    : property
+
   // Fetch all visible transactions (last 12 months to cover 6-month picker)
   const since = new Date()
   since.setMonth(since.getMonth() - 11)
   since.setDate(1)
 
+  const txnPropertyIds = selectedProperty === 'all' ? propertyIds : [(viewProperty ?? property).id]
+
   const { data: transactions } = await supabase
     .from('owner_transactions')
-    .select('id, transaction_type, category, source, amount, description, transaction_date, notes')
-    .eq('property_id', ownerRaw.property_id)
+    .select('id, property_id, transaction_type, category, source, amount, description, transaction_date, notes')
+    .in('property_id', txnPropertyIds)
     .eq('visible_to_owner', true)
     .gte('transaction_date', since.toISOString().split('T')[0]!)
     .order('transaction_date', { ascending: false })
@@ -214,7 +302,23 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
     .reduce((s, t) => s + t.amount, 0)
   const netIncome = totalRevenue - totalExpenses
 
-  const addressParts = [property.address, property.city, property.state, property.zip].filter(Boolean)
+  const txnsByProperty = new Map<string, typeof filteredTxns>()
+  for (const t of filteredTxns) {
+    const list = txnsByProperty.get(t.property_id) ?? []
+    list.push(t)
+    txnsByProperty.set(t.property_id, list)
+  }
+
+  function portalHref(overrides: { month?: string; property?: string }): string {
+    const params = new URLSearchParams()
+    params.set('month', overrides.month ?? selectedMonth)
+    if (isMulti) params.set('property', overrides.property ?? selectedProperty)
+    return `/owner/${token}?${params.toString()}`
+  }
+
+  const addressParts = viewProperty
+    ? [viewProperty.address, viewProperty.city, viewProperty.state, viewProperty.zip].filter(Boolean)
+    : []
   const addressDisplay = addressParts.length ? addressParts.join(', ') : null
 
   return (
@@ -227,13 +331,31 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1">
                 FieldStay Owner Portal
               </p>
-              <h1 className="text-2xl font-bold text-gray-900">{property.name}</h1>
-              {addressDisplay && (
-                <p className="text-sm text-gray-500 mt-0.5">{addressDisplay}</p>
+              {isMulti ? (
+                <>
+                  <h1 className="text-2xl font-bold text-gray-900">{ownerRaw.name}</h1>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {selectedProperty === 'all'
+                      ? `Portfolio overview · ${portfolioProperties.length} properties`
+                      : viewProperty?.name}
+                  </p>
+                  {selectedProperty !== 'all' && addressDisplay && (
+                    <p className="text-sm text-gray-500 mt-0.5">{addressDisplay}</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <h1 className="text-2xl font-bold text-gray-900">{viewProperty?.name}</h1>
+                  {addressDisplay && (
+                    <p className="text-sm text-gray-500 mt-0.5">{addressDisplay}</p>
+                  )}
+                </>
               )}
             </div>
             <div className="text-right flex-shrink-0">
-              <p className="text-sm font-medium text-gray-700">{ownerRaw.name}</p>
+              {!isMulti && (
+                <p className="text-sm font-medium text-gray-700">{ownerRaw.name}</p>
+              )}
               {ownerRaw.revenue_share_pct != null && (
                 <p className="text-xs text-gray-400 mt-0.5">{ownerRaw.revenue_share_pct}% revenue share</p>
               )}
@@ -244,12 +366,43 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
 
       <div className="max-w-4xl mx-auto px-4 py-8 sm:px-6">
 
+        {/* Property selector (multi-property portfolios only) */}
+        {isMulti && (
+          <div className="flex gap-2 overflow-x-auto pb-1 mb-3 -mx-1 px-1">
+            <a
+              href={portalHref({ property: 'all' })}
+              className={[
+                'px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors',
+                selectedProperty === 'all'
+                  ? 'bg-gray-900 text-white'
+                  : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-400',
+              ].join(' ')}
+            >
+              All Properties
+            </a>
+            {portfolioProperties.map((p) => (
+              <a
+                key={p.id}
+                href={portalHref({ property: p.id })}
+                className={[
+                  'px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors',
+                  selectedProperty === p.id
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:border-gray-400',
+                ].join(' ')}
+              >
+                {p.name}
+              </a>
+            ))}
+          </div>
+        )}
+
         {/* Month filter */}
         <div className="flex gap-2 overflow-x-auto pb-1 mb-6 -mx-1 px-1">
           {availableMonths.map((m) => (
             <a
               key={m}
-              href={`/owner/${token}?month=${m}`}
+              href={portalHref({ month: m })}
               className={[
                 'px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors',
                 m === selectedMonth
@@ -289,6 +442,26 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
           <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
             <p className="text-gray-400 text-sm">No transactions for {formatMonthLabel(selectedMonth)}.</p>
           </div>
+        ) : selectedProperty === 'all' ? (
+          <div className="space-y-4">
+            {portfolioProperties
+              .filter((p) => (txnsByProperty.get(p.id)?.length ?? 0) > 0)
+              .map((p) => (
+                <div key={p.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
+                    <h2 className="font-semibold text-gray-700 text-sm">
+                      {p.name}
+                      <span className="text-gray-400 font-normal"> · {formatMonthLabel(selectedMonth)}</span>
+                    </h2>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {txnsByProperty.get(p.id)!.map((txn) => (
+                      <TransactionRow key={txn.id} txn={txn} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
         ) : (
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
@@ -296,52 +469,9 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
             </div>
 
             <div className="divide-y divide-gray-100">
-              {filteredTxns.map((txn) => {
-                const isRevenue = (txn.transaction_type as TxnType) === 'revenue'
-                const badge     = SOURCE_BADGES[txn.source ?? ''] ?? null
-                const desc      = txn.description || SOURCE_FALLBACK_LABELS[txn.source ?? ''] || txn.category
-
-                return (
-                  <div key={txn.id} className="flex items-center gap-4 px-5 py-3.5">
-                    {/* Date */}
-                    <div className="w-16 flex-shrink-0 text-xs text-gray-400 tabular-nums">
-                      {formatDate(txn.transaction_date)}
-                    </div>
-
-                    {/* Description + source badge */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-medium text-gray-800">{desc}</p>
-                        {badge && (
-                          <span
-                            className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium ${BADGE_STYLES[badge.color]}`}
-                          >
-                            {badge.label}
-                            {badge.tooltip && (
-                              <span
-                                title={badge.tooltip}
-                                className="cursor-help text-xs leading-none opacity-60 hover:opacity-100"
-                              >
-                                ⓘ
-                              </span>
-                            )}
-                          </span>
-                        )}
-                      </div>
-                      {txn.notes && (
-                        <p className="text-xs text-gray-400 mt-0.5 truncate">{txn.notes}</p>
-                      )}
-                    </div>
-
-                    {/* Amount */}
-                    <div className={`text-sm font-semibold flex-shrink-0 tabular-nums ${
-                      isRevenue ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {isRevenue ? '+' : '−'}{formatCurrency(txn.amount)}
-                    </div>
-                  </div>
-                )
-              })}
+              {filteredTxns.map((txn) => (
+                <TransactionRow key={txn.id} txn={txn} />
+              ))}
             </div>
           </div>
         )}

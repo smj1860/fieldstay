@@ -277,6 +277,45 @@ export const handleTurnoverCompleted = inngest.createFunction(
       return { posted: amount }
     })
 
+    await step.run('record-crew-duration', async () => {
+      const supabase = createServiceClient()
+
+      const { data: instance } = await supabase
+        .from('checklist_instances')
+        .select('id')
+        .eq('turnover_id', turnover_id)
+        .maybeSingle()
+
+      if (!instance) return { skipped: 'no_checklist_instance' }
+
+      const { data: items } = await supabase
+        .from('checklist_instance_items')
+        .select('completed_at')
+        .eq('instance_id', instance.id)
+        .not('completed_at', 'is', null)
+        .order('completed_at', { ascending: true })
+
+      if (!items?.length) return { skipped: 'no_completed_items' }
+
+      const startedAt   = items[0]!.completed_at!
+      const completedAt = items[items.length - 1]!.completed_at!
+
+      const durationMinutes = (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60_000
+
+      if (durationMinutes > 480) {
+        console.warn(`[record-crew-duration] Anomalous duration ${durationMinutes}m for turnover ${turnover_id} — skipping`)
+        return { skipped: 'anomalous_duration', duration_minutes: durationMinutes }
+      }
+
+      const { data: updatedRows } = await supabase
+        .from('assignment_outcomes')
+        .update({ started_at: startedAt, completed_at: completedAt, duration_minutes: Math.round(durationMinutes) })
+        .eq('turnover_id', turnover_id)
+        .select('id')
+
+      return { updated_rows: updatedRows?.length ?? 0, duration_minutes: Math.round(durationMinutes) }
+    })
+
     return { turnover_id, notified: true }
   }
 )

@@ -14,5 +14,5 @@ export default async function CrewLayout({ children }: { children: React.ReactNo
     .single()
   if (!crew) redirect('/login')
 
-  return <CrewShell crewName={crew.name}>{children}</CrewShell>
+  return <CrewShell crewName={crew.name} userId={user.id}>{children}</CrewShell>
 }

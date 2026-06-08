@@ -403,4 +403,18 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // In-App Messaging
+  // ----------------------------------------------------------
+
+  'message/sent': {
+    data: {
+      message_id:    string
+      org_id:        string
+      sender_id:     string
+      recipient_id:  string
+      is_crew_to_pm: boolean
+    }
+  }
+
 }

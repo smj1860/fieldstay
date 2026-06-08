@@ -88,6 +88,52 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
   return { success: true, token }
 }
 
+// ── Generate combined portfolio portal token (multi-property owners) ─────────
+
+export async function generateCombinedPortalToken(ownerIds: string[]): Promise<OwnersActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (ownerIds.length < 2) return { error: 'Combined links require at least two properties' }
+
+  // Verify every owner row belongs to this org and collect their properties
+  const { data: owners } = await supabase
+    .from('property_owners')
+    .select('id, property_id')
+    .eq('org_id', membership.org_id)
+    .in('id', ownerIds)
+
+  if (!owners || owners.length !== ownerIds.length) return { error: 'Owner not found' }
+
+  const propertyIds = [...new Set(owners.map((o) => o.property_id))]
+  if (propertyIds.length < 2) return { error: 'Combined links require at least two properties' }
+
+  // Anchor the token on the first owner row (sorted for determinism)
+  const anchorOwnerId = [...owners].map((o) => o.id).sort()[0]!
+
+  const token     = crypto.randomUUID()
+  const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 days
+
+  // Replace any existing combined token anchored on this owner row
+  await supabase
+    .from('owner_portal_tokens')
+    .delete()
+    .eq('property_owner_id', anchorOwnerId)
+    .eq('is_multi', true)
+
+  const { error } = await supabase.from('owner_portal_tokens').insert({
+    property_owner_id: anchorOwnerId,
+    token,
+    expires_at:   expiresAt,
+    property_ids: propertyIds,
+    is_multi:     true,
+  })
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/owners')
+  return { success: true, token }
+}
+
 // ── Add manual transaction ────────────────────────────────────────────────────
 
 export async function addOwnerTransaction(

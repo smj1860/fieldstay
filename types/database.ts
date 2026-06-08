@@ -97,6 +97,7 @@ export interface Organization {
   kroger_location_name:         string | null
   auto_assign_mode:             AutoAssignMode
   comms_log_retention_days:     number
+  slack_webhook_url:            string | null
   created_at:                   string
   updated_at:                   string
 }
@@ -165,6 +166,8 @@ export interface OwnerPortalToken {
   token:             string
   expires_at:        string | null
   last_accessed_at:  string | null
+  property_ids:      string[] | null
+  is_multi:          boolean
   created_at:        string
 }
 
@@ -635,6 +638,18 @@ export interface CommunicationLog {
   deleted_at:        string | null
 }
 
+export interface Message {
+  id:            string
+  org_id:        string
+  sender_id:     string
+  recipient_id:  string
+  content:       string
+  read_at:       string | null
+  turnover_id:   string | null
+  work_order_id: string | null
+  created_at:    string
+}
+
 // ── Inventory template item ──────────────────────────────────────────────────
 export interface InventoryTemplateItem {
   id:              string
@@ -887,6 +902,7 @@ export interface Database {
       org_milestones:              { Row: OrgMilestone;             Insert: Partial<OrgMilestone>;             Update: Partial<OrgMilestone>;             Relationships: [] }
       quote_requests:              { Row: QuoteRequest;             Insert: Partial<QuoteRequest>;             Update: Partial<QuoteRequest>;             Relationships: [] }
       communication_logs:          { Row: CommunicationLog;              Insert: Partial<CommunicationLog>;              Update: Partial<CommunicationLog>;              Relationships: [] }
+      messages:                    { Row: Message;                       Insert: Partial<Message>;                       Update: Partial<Message>;                       Relationships: [] }
       push_subscriptions:          { Row: PushSubscription;              Insert: Partial<PushSubscription>;              Update: Partial<PushSubscription>;              Relationships: [] }
       org_master_checklist_items:      { Row: OrgMasterChecklistItem;        Insert: Partial<OrgMasterChecklistItem>;        Update: Partial<OrgMasterChecklistItem>;        Relationships: [] }
       org_master_maintenance_schedules:{ Row: OrgMasterMaintenanceSchedule;  Insert: Partial<OrgMasterMaintenanceSchedule>;  Update: Partial<OrgMasterMaintenanceSchedule>;  Relationships: [] }

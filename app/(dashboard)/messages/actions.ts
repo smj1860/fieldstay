@@ -1,0 +1,184 @@
+'use server'
+
+import { requireOrgMember } from '@/lib/auth'
+import { createClient } from '@/lib/supabase/server'
+import { inngest } from '@/lib/inngest/client'
+import { sendPushToUser } from '@/lib/push/send-push'
+
+export interface MessageActionResult {
+  success: boolean
+  error?: string
+}
+
+// PM → crew message. Sends a push notification to the crew member's device.
+export async function sendMessageToCrew(
+  crewMemberId: string,
+  crewUserId: string,
+  content: string,
+  contextId?: string
+): Promise<MessageActionResult> {
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
+    const trimmed = content.trim()
+    if (!trimmed) return { success: false, error: 'Message cannot be empty' }
+
+    const { data: message, error } = await supabase
+      .from('messages')
+      .insert({
+        org_id:        membership.org_id,
+        sender_id:     user.id,
+        recipient_id:  crewUserId,
+        content:       trimmed,
+        turnover_id:   contextId ?? null,
+      })
+      .select('id, created_at')
+      .single()
+
+    if (error || !message) {
+      console.error('[sendMessageToCrew]', error)
+      return { success: false, error: 'Failed to send message' }
+    }
+
+    await inngest.send({
+      name: 'message/sent' as const,
+      data: {
+        message_id:    message.id,
+        org_id:        membership.org_id,
+        sender_id:     user.id,
+        recipient_id:  crewUserId,
+        is_crew_to_pm: false,
+      },
+    })
+
+    await sendPushToUser(crewUserId, {
+      title: 'New message from your operations team',
+      body:  trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed,
+      url:   '/crew/messages',
+    })
+
+    return { success: true }
+  } catch (err) {
+    console.error('[sendMessageToCrew]', err)
+    return { success: false, error: 'Failed to send message' }
+  }
+}
+
+// Crew → PM message. Routes to an admin/manager/owner in the crew member's org.
+export async function sendMessageToPM(content: string): Promise<MessageActionResult> {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'Not authenticated' }
+
+    const trimmed = content.trim()
+    if (!trimmed) return { success: false, error: 'Message cannot be empty' }
+
+    const { data: crewMember } = await supabase
+      .from('crew_members')
+      .select('id, org_id, name')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (!crewMember) return { success: false, error: 'Crew profile not found' }
+
+    const { data: recipient } = await supabase
+      .from('organization_members')
+      .select('user_id')
+      .eq('org_id', crewMember.org_id)
+      .in('role', ['owner', 'admin', 'manager'])
+      .not('invite_accepted_at', 'is', null)
+      .limit(1)
+      .maybeSingle()
+
+    if (!recipient) return { success: false, error: 'No operations contact found' }
+
+    const { data: message, error } = await supabase
+      .from('messages')
+      .insert({
+        org_id:       crewMember.org_id,
+        sender_id:    user.id,
+        recipient_id: recipient.user_id,
+        content:      trimmed,
+      })
+      .select('id, created_at')
+      .single()
+
+    if (error || !message) {
+      console.error('[sendMessageToPM]', error)
+      return { success: false, error: 'Failed to send message' }
+    }
+
+    await inngest.send({
+      name: 'message/sent' as const,
+      data: {
+        message_id:    message.id,
+        org_id:        crewMember.org_id,
+        sender_id:     user.id,
+        recipient_id:  recipient.user_id,
+        is_crew_to_pm: true,
+      },
+    })
+
+    await postToSlack(supabase, crewMember.org_id, crewMember.name, trimmed)
+
+    return { success: true }
+  } catch (err) {
+    console.error('[sendMessageToPM]', err)
+    return { success: false, error: 'Failed to send message' }
+  }
+}
+
+// Marks every unread message from `otherUserId` to the current user as read.
+export async function markConversationRead(otherUserId: string): Promise<MessageActionResult> {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { success: false, error: 'Not authenticated' }
+
+    const { error } = await supabase
+      .from('messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('sender_id', otherUserId)
+      .eq('recipient_id', user.id)
+      .is('read_at', null)
+
+    if (error) {
+      console.error('[markConversationRead]', error)
+      return { success: false, error: 'Failed to mark messages read' }
+    }
+
+    return { success: true }
+  } catch (err) {
+    console.error('[markConversationRead]', err)
+    return { success: false, error: 'Failed to mark messages read' }
+  }
+}
+
+// Posts a non-fatal Slack notification when a crew member messages the PM,
+// if the org has configured an Incoming Webhook URL.
+async function postToSlack(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  crewMemberName: string,
+  content: string
+): Promise<void> {
+  try {
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('slack_webhook_url')
+      .eq('id', orgId)
+      .maybeSingle()
+
+    if (!org?.slack_webhook_url) return
+
+    await fetch(org.slack_webhook_url, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        text: `\u{1F4AC} *${crewMemberName}* sent you a message on FieldStay:\n>${content}`,
+      }),
+    })
+  } catch (err) {
+    console.error('[postToSlack]', err)
+  }
+}

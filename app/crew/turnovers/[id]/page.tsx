@@ -12,7 +12,7 @@ import { createClient }       from '@/lib/supabase/client'
 
 type TurnoverRow   = { id: string; status: string; priority: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number; notes: string | null; property_id: string; org_id: string }
 type InstanceRow   = { id: string; turnover_id: string; status: string }
-type ChecklistItem = { id: string; instance_id: string; section_name: string; task: string; notes: string | null; is_completed: number; requires_photo: number; photo_storage_path: string | null; crew_notes: string | null; sort_order: number }
+type ChecklistItem = { id: string; instance_id: string; section_name: string; task: string; notes: string | null; is_completed: number; completed_at: string | null; requires_photo: number; photo_storage_path: string | null; crew_notes: string | null; sort_order: number }
 type InvRow        = { id: string; name: string; category: string; unit: string; par_level: number; current_quantity: number; property_id: string }
 type PropertyRow   = { id: string; name: string; address: string | null; city: string | null; state: string | null }
 
@@ -82,8 +82,8 @@ export default function CrewTurnoverPage() {
       return
     }
     await db.execute(
-      'UPDATE checklist_instance_items SET is_completed = ? WHERE id = ?',
-      [current ? 0 : 1, itemId]
+      'UPDATE checklist_instance_items SET is_completed = ?, completed_at = ? WHERE id = ?',
+      [current ? 0 : 1, current ? null : new Date().toISOString(), itemId]
     )
     // Check if section is now fully complete
     if (!current) {
