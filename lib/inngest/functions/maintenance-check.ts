@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { calculateHealthScore } from '@/lib/assets/health-score'
+import { getPmEmail } from '@/lib/inngest/helpers'
 
 const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
 const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
@@ -815,20 +816,6 @@ export const dailyMaintenanceCheck = inngest.createFunction(
 )
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function getPmEmail(supabase: ReturnType<typeof createServiceClient>, orgId: string): Promise<string | null> {
-  const { data: adminMember } = await supabase
-    .from('organization_members')
-    .select('user_id')
-    .eq('org_id', orgId)
-    .eq('role', 'admin')
-    .single()
-
-  if (!adminMember?.user_id) return null
-
-  const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-  return user?.email ?? null
-}
 
 function buildScheduleEmail(opts: {
   heading: string

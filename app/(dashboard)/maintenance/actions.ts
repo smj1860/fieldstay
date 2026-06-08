@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import type { WoStatus, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
+import { PriorityLevelSchema, WoStatusSchema } from '@/lib/schemas/work-order'
 
 export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string }
 
@@ -25,7 +26,8 @@ export async function createWorkOrder(
   const title                  = (formData.get('title') as string)?.trim()
   const property_id            = formData.get('property_id') as string
   const description            = (formData.get('description') as string)?.trim() || null
-  const priority               = (formData.get('priority') as string) || 'medium'
+  const priorityInput          = (formData.get('priority') as string) || 'medium'
+  const priority               = PriorityLevelSchema.safeParse(priorityInput).data ?? 'medium'
   const vendor_id              = (formData.get('vendor_id') as string) || null
   const assigned_crew_member_id = (formData.get('assigned_crew_member_id') as string) || null
   const scheduled_date         = (formData.get('scheduled_date') as string) || null
@@ -57,7 +59,9 @@ export async function createWorkOrder(
   if (!property) return { error: 'Property not found' }
 
   // In quote-request mode, WO starts as quote_requested with no vendor assigned yet
-  const woStatus            = request_quotes ? 'quote_requested' : (vendor_id ? 'assigned' : 'pending')
+  const woStatus            = WoStatusSchema.parse(
+    request_quotes ? 'quote_requested' : (vendor_id ? 'assigned' : 'pending')
+  )
   const usePortal           = portal_enabled && !request_quotes
   const completion_token    = usePortal ? crypto.randomUUID().replace(/-/g, '') : null
   const completion_token_expires_at = usePortal
@@ -74,8 +78,8 @@ export async function createWorkOrder(
       asset_id:                asset_id || null,
       title,
       description,
-      priority:                priority as never,
-      status:                  woStatus as never,
+      priority,
+      status:                  woStatus,
       source:                  'manual',
       scheduled_date:          scheduled_date || null,
       estimated_cost,
@@ -206,12 +210,14 @@ export async function updateWorkOrder(
 ): Promise<{ error?: string }> {
   const { supabase, membership } = await requireOrgMember()
 
+  const priority = PriorityLevelSchema.safeParse(data.priority).data ?? 'medium'
+
   const { error } = await supabase
     .from('work_orders')
     .update({
       title:          data.title,
       description:    data.description || null,
-      priority:       data.priority as never,
+      priority,
       vendor_id:      data.vendor_id || null,
       scheduled_date: data.scheduled_date || null,
       estimated_cost: data.estimated_cost || null,
@@ -717,8 +723,8 @@ export async function createWorkOrderFromSchedule(
       vendor_id:          schedule.assigned_vendor_id,
       title:              schedule.name,
       description:        schedule.description,
-      priority:           'medium' as never,
-      status:             schedule.assigned_vendor_id ? 'assigned' : 'pending',
+      priority:           PriorityLevelSchema.parse('medium'),
+      status:             WoStatusSchema.parse(schedule.assigned_vendor_id ? 'assigned' : 'pending'),
       source:             'maintenance_schedule',
       source_schedule_id: schedule.id,
       scheduled_date:     schedule.next_due_date,

@@ -10,8 +10,11 @@ import { handleBookingDetected, handleBookingConfirmed } from '@/lib/inngest/fun
 // Turnover events
 import { handleTurnoverCreated, handleTurnoverCompleted } from '@/lib/inngest/functions/turnover-events'
 
-// Maintenance
-import { dailyMaintenanceCheck } from '@/lib/inngest/functions/maintenance-check'
+// Maintenance — split from the old dailyMaintenanceCheck god function into 4 focused crons
+import { dailyMaintenanceScheduleCheck } from '@/lib/inngest/functions/cron/maintenance-schedules'
+import { dailyWorkOrderOps }             from '@/lib/inngest/functions/cron/work-order-ops'
+import { dailyAssetHealth }              from '@/lib/inngest/functions/cron/asset-health'
+import { dailyCommsRetention }           from '@/lib/inngest/functions/cron/comms-retention'
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
@@ -65,8 +68,11 @@ export const { GET, POST, PUT } = serve({
     handleTurnoverCreated,
     handleTurnoverCompleted,
 
-    // Maintenance
-    dailyMaintenanceCheck,
+    // Maintenance crons (replaces dailyMaintenanceCheck)
+    dailyMaintenanceScheduleCheck,
+    dailyWorkOrderOps,
+    dailyAssetHealth,
+    dailyCommsRetention,
 
     // Inventory → PO
     handleInventoryCountSubmitted,

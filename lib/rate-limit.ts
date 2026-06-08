@@ -12,3 +12,10 @@ export const repuguardLimiter = new Ratelimit({
   analytics: true,
   prefix:    'repuguard',
 })
+
+export const scanLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '24 h'),  // 20 scans/user/day
+  analytics: true,
+  prefix:    'scan-data-plate',
+})

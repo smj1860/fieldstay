@@ -1,7 +1,9 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
+import { getPmEmail } from '@/lib/inngest/helpers'
 import { formatDateTime } from '@/lib/utils'
+import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 /**
  * Triggered when a new turnover is created (from iCal sync or manual).
@@ -27,7 +29,7 @@ export const handleTurnoverCreated = inngest.createFunction(
     const { turnover, property, pmEmail } = await step.run('fetch-turnover-data', async () => {
       const supabase = createServiceClient()
 
-      const [{ data: turnover }, { data: property }, { data: adminMember }] = await Promise.all([
+      const [{ data: turnover }, { data: property }, pmEmail] = await Promise.all([
         supabase
           .from('turnovers')
           .select(`
@@ -41,19 +43,8 @@ export const handleTurnoverCreated = inngest.createFunction(
           .select('name, city, state')
           .eq('id', property_id)
           .single(),
-        supabase
-          .from('organization_members')
-          .select('user_id')
-          .eq('org_id', org_id)
-          .eq('role', 'admin')
-          .single(),
+        getPmEmail(supabase, org_id),
       ])
-
-      let pmEmail: string | null = null
-      if (adminMember?.user_id) {
-        const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-        pmEmail = user?.email ?? null
-      }
 
       return { turnover, property, pmEmail }
     })
@@ -85,16 +76,19 @@ export const handleTurnoverCreated = inngest.createFunction(
             from:    FROM,
             to:      crew.email,
             subject: `Turnover assigned — ${property.name} on ${checkoutDT.toLocaleDateString()}`,
-            html: `
-              <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-                <h2>You've been assigned a turnover</h2>
-                <p><strong>Property:</strong> ${property.name}</p>
-                <p><strong>Checkout:</strong> ${formatDateTime(turnover.checkout_datetime)}</p>
-                <p><strong>Next Check-in:</strong> ${formatDateTime(turnover.checkin_datetime)}</p>
-                <p><strong>Window:</strong> ${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m</p>
-                <p><strong>Priority:</strong> ${turnover.priority.toUpperCase()}</p>
-              </div>
-            `,
+            html: await renderPmAlert({
+              heading:  "You've been assigned a turnover",
+              body:     `You're on the schedule for a turnover at ${property.name}.`,
+              details: [
+                { label: 'Property',      value: property.name },
+                { label: 'Checkout',      value: formatDateTime(turnover.checkout_datetime) },
+                { label: 'Next Check-in', value: formatDateTime(turnover.checkin_datetime) },
+                { label: 'Window',        value: `${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m` },
+                { label: 'Priority',      value: turnover.priority.toUpperCase() },
+              ],
+              ctaLabel: 'View Turnover →',
+              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers`,
+            }),
           })
         }
       })
@@ -137,22 +131,18 @@ export const handleTurnoverCreated = inngest.createFunction(
           from:    FROM,
           to:      pmEmail!,
           subject: `⚠️ Turnover needs crew — ${property.name} in ${hoursUntil}h`,
-          html: `
-            <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-              <h2 style="color:#b45309">Turnover needs crew assigned</h2>
-              <p>
-                <strong>${property.name}</strong> has a turnover in 
-                <strong>${hoursUntil} hours</strong> with no crew assigned.
-              </p>
-              <table style="border-collapse:collapse;width:100%;margin:16px 0">
-                <tr><td style="padding:8px;color:#64748b">Checkout</td><td style="padding:8px;font-weight:600">${formatDateTime(turnover.checkout_datetime)}</td></tr>
-                <tr><td style="padding:8px;color:#64748b">Check-in</td><td style="padding:8px;font-weight:600">${formatDateTime(turnover.checkin_datetime)}</td></tr>
-                <tr><td style="padding:8px;color:#64748b">Window</td><td style="padding:8px;font-weight:600">${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m</td></tr>
-                <tr><td style="padding:8px;color:#64748b">Priority</td><td style="padding:8px;font-weight:600;color:#b45309">${turnover.priority.toUpperCase()}</td></tr>
-              </table>
-              <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/turnovers" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">Assign Crew →</a></p>
-            </div>
-          `,
+          html: await renderPmAlert({
+            heading:  'Turnover needs crew assigned',
+            body:     `${property.name} has a turnover in ${hoursUntil} hours with no crew assigned.`,
+            details: [
+              { label: 'Checkout',  value: formatDateTime(turnover.checkout_datetime) },
+              { label: 'Check-in',  value: formatDateTime(turnover.checkin_datetime) },
+              { label: 'Window',    value: `${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m` },
+              { label: 'Priority',  value: turnover.priority.toUpperCase() },
+            ],
+            ctaLabel: 'Assign Crew →',
+            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers`,
+          }),
         })
       })
     }
@@ -178,27 +168,23 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('notify-pm-of-completion', async () => {
       const supabase = createServiceClient()
 
-      const [{ data: property }, { data: adminMember }] = await Promise.all([
+      const [{ data: property }, pmEmail] = await Promise.all([
         supabase.from('properties').select('name').eq('id', property_id).single(),
-        supabase.from('organization_members').select('user_id').eq('org_id', org_id).eq('role', 'admin').single(),
+        getPmEmail(supabase, org_id),
       ])
 
-      if (!adminMember?.user_id) return
-
-      const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-      if (!user?.email) return
+      if (!pmEmail) return
 
       await resend.emails.send({
         from:    FROM,
-        to:      user.email,
+        to:      pmEmail,
         subject: `✅ Turnover complete — ${property?.name}`,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2 style="color:#15803d">Turnover marked complete</h2>
-            <p><strong>${property?.name}</strong> is ready for guests.</p>
-            <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/turnovers/${turnover_id}" style="color:#093b31">View turnover →</a></p>
-          </div>
-        `,
+        html: await renderPmAlert({
+          heading:  'Turnover marked complete',
+          body:     `${property?.name} is ready for guests.`,
+          ctaLabel: 'View Turnover →',
+          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers/${turnover_id}`,
+        }),
       })
     })
 

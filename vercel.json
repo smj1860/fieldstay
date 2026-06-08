@@ -10,6 +10,12 @@
     },
     "app/api/work-orders/[token]/complete/route.ts": {
       "maxDuration": 30
+    },
+    "app/api/assets/scan-data-plate/route.ts": {
+      "maxDuration": 30
+    },
+    "app/api/repuguard/generate/route.ts": {
+      "maxDuration": 60
     }
   },
   "headers": [
