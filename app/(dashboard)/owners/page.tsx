@@ -24,7 +24,9 @@ export default async function OwnersPage() {
         id,
         token,
         expires_at,
-        last_accessed_at
+        last_accessed_at,
+        is_multi,
+        property_ids
       )
     `)
     .eq('org_id', membership.org_id)

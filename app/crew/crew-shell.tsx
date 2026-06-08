@@ -2,9 +2,9 @@
 import { useEffect }           from 'react'
 import Link                    from 'next/link'
 import { usePathname }         from 'next/navigation'
-import { CalendarCheck, CalendarDays } from 'lucide-react'
+import { CalendarCheck, CalendarDays, MessageSquare } from 'lucide-react'
 import { PowerSyncContext }    from '@powersync/react'
-import { usePowerSync }        from '@powersync/react'
+import { usePowerSync, usePowerSyncQuery } from '@powersync/react'
 import { getPowerSyncDb }      from '@/lib/powersync/client'
 import { cn }                  from '@/lib/utils'
 
@@ -17,9 +17,11 @@ function urlBase64ToUint8Array(base64String: string) {
 
 export function CrewShell({
   crewName,
+  userId,
   children,
 }: {
   crewName: string
+  userId:   string
   children: React.ReactNode
 }) {
   const db = getPowerSyncDb()
@@ -73,34 +75,48 @@ export function CrewShell({
           <SyncStatus />
         </header>
         <main className="flex-1 px-4 py-6">{children}</main>
-        <CrewBottomNav />
+        <CrewBottomNav userId={userId} />
       </div>
     </PowerSyncContext.Provider>
   )
 }
 
-function CrewBottomNav() {
+function CrewBottomNav({ userId }: { userId: string }) {
   const pathname = usePathname()
 
+  const unread = usePowerSyncQuery<{ count: number }>(
+    `SELECT COUNT(*) as count FROM messages WHERE recipient_id = ? AND read_at IS NULL`,
+    [userId]
+  )
+  const unreadCount = unread?.[0]?.count ?? 0
+
   const tabs = [
-    { href: '/crew',              label: 'Assignments', icon: CalendarCheck },
+    { href: '/crew',              label: 'Assignments',  icon: CalendarCheck },
     { href: '/crew/availability', label: 'Availability', icon: CalendarDays },
+    { href: '/crew/messages',     label: 'Messages',     icon: MessageSquare, badge: unreadCount },
   ]
 
   return (
     <nav className="sticky bottom-0 bg-white border-t border-accent-200 flex items-center">
-      {tabs.map(({ href, label, icon: Icon }) => {
+      {tabs.map(({ href, label, icon: Icon, badge }) => {
         const active = href === '/crew' ? pathname === '/crew' : pathname.startsWith(href)
         return (
           <Link
             key={href}
             href={href}
             className={cn(
-              'flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors',
+              'relative flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors',
               active ? 'text-brand-800' : 'text-accent-400 hover:text-accent-600'
             )}
           >
-            <Icon className="w-5 h-5" />
+            <span className="relative">
+              <Icon className="w-5 h-5" />
+              {!!badge && badge > 0 && (
+                <span className="absolute -top-1.5 -right-2 bg-red-500 text-white text-[10px] leading-none rounded-full min-w-[16px] h-4 px-1 flex items-center justify-center">
+                  {badge > 9 ? '9+' : badge}
+                </span>
+              )}
+            </span>
             {label}
           </Link>
         )

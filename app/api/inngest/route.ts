@@ -47,6 +47,9 @@ import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover
 import { generateCapexProjections }   from '@/lib/inngest/functions/capex-projections'
 import { generateDepreciationLedger } from '@/lib/inngest/functions/depreciation-ledger'
 
+// In-app messaging
+import { logMessageCommunication } from '@/lib/inngest/functions/log-message-comm'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -97,5 +100,8 @@ export const { GET, POST, PUT } = serve({
     // Asset Health — CapEx projections + depreciation ledger
     generateCapexProjections,
     generateDepreciationLedger,
+
+    // In-app messaging
+    logMessageCommunication,
   ],
 })

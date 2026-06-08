@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useActionState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, Eye, EyeOff, Lock, Bell, BellOff } from 'lucide-react'
+import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Organization } from '@/types/database'
 import {
@@ -13,6 +13,7 @@ import {
   createCheckoutSession,
   updateAutoAssignMode,
   updateCommsRetention,
+  updateSlackWebhook,
   type SettingsActionState,
 } from './actions'
 
@@ -77,7 +78,7 @@ export function SettingsTabs({ org }: Props) {
       {activeTab === 'Organization'  && <OrgTab org={org} />}
       {activeTab === 'Billing'       && <BillingTab org={org} />}
       {activeTab === 'Security'      && <SecurityTab />}
-      {activeTab === 'Notifications' && <NotificationsTab />}
+      {activeTab === 'Notifications' && <NotificationsTab org={org} />}
       {activeTab === 'Team'          && <TeamTabRedirect />}
       {activeTab === 'Account'       && <AccountTabRedirect />}
     </div>
@@ -438,8 +439,9 @@ const EMAIL_PREFS = [
   { key: 'email_weekly_report', label: 'Weekly report',       desc: 'Full ops report every Monday morning'       },
 ] as const
 
-function NotificationsTab() {
+function NotificationsTab({ org }: { org: Organization }) {
   const [state, formAction, pending] = useActionState(updateNotificationPrefs, null)
+  const [slackState, slackAction, slackPending] = useActionState(updateSlackWebhook, null)
 
   return (
     <div className="max-w-xl space-y-6">
@@ -532,6 +534,60 @@ function NotificationsTab() {
               }
             </button>
           </div>
+        </form>
+      </div>
+
+      {/* Slack Notifications */}
+      <div className="card">
+        <div className="flex items-center gap-3 mb-4">
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+            style={{ background: 'var(--accent-blue-dim)' }}
+          >
+            <Webhook className="w-4 h-4" style={{ color: 'var(--accent-blue)' }} />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-primary-themed">Slack Notifications</h2>
+            <p className="text-xs text-muted-themed">Get pinged in Slack when crew message you</p>
+          </div>
+        </div>
+
+        {slackState?.success && (
+          <div className="bg-green-950 border border-green-800 text-green-400 text-sm rounded-lg px-4 py-3 mb-4">
+            Webhook saved.
+          </div>
+        )}
+        {slackState?.error && (
+          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
+            {slackState.error}
+          </div>
+        )}
+
+        <form action={slackAction} className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-muted-themed mb-1.5">
+              Slack Incoming Webhook URL
+            </label>
+            <input
+              type="url"
+              name="slack_webhook_url"
+              defaultValue={org.slack_webhook_url ?? ''}
+              placeholder="https://hooks.slack.com/services/..."
+              className="input w-full"
+            />
+            <p className="text-xs text-muted-themed mt-1.5">
+              When a crew member sends you a message, it will also be posted to this Slack channel.
+              Leave blank to disable. Create one at{' '}
+              <span className="font-mono">api.slack.com/apps</span> → Incoming Webhooks.
+            </p>
+          </div>
+
+          <button type="submit" disabled={slackPending} className="btn-primary">
+            {slackPending
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+              : 'Save Webhook'
+            }
+          </button>
         </form>
       </div>
     </div>

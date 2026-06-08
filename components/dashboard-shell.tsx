@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Building2, CalendarCheck, Package,
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Bell, Sun, Moon,
-  Users2, Briefcase, MessageSquareDot, ShieldCheck, TrendingUp,
+  Users2, Briefcase, MessageSquareDot, ShieldCheck, TrendingUp, MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin','manager'] },
   { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager']          },
   { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager']          },
+  { href: '/messages',    label: 'Messages',     icon: MessageSquare,   roles: ['admin','manager']          },
   { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager']          },
   { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager']          },
   { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin']                    },
@@ -40,6 +41,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/capital-planning':  'Capital Planning',
   '/crew-manage':  'Crew',
   '/vendors':      'Vendors',
+  '/messages':     'Messages',
   '/comms-log':    'Comms Log',
   '/owners':       'Owner Portal',
   '/reviews':      'Reviews',

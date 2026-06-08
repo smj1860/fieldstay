@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import {
   addPropertyOwner,
   generatePortalToken,
+  generateCombinedPortalToken,
   revokeOwnerPortalToken,
   addOwnerTransaction,
   deleteOwnerTransaction,
@@ -23,6 +24,8 @@ interface PortalToken {
   token: string
   expires_at: string | null
   last_accessed_at: string | null
+  is_multi: boolean
+  property_ids: string[] | null
 }
 
 interface Owner {
@@ -83,11 +86,53 @@ function getPropertyName(owner: Owner): string {
   return p?.name ?? '—'
 }
 
+function getTokens(owner: Owner): PortalToken[] {
+  const t = owner.owner_portal_tokens
+  if (!t) return []
+  return Array.isArray(t) ? t : [t]
+}
+
 function getToken(owner: Owner): PortalToken | null {
-  const t = Array.isArray(owner.owner_portal_tokens)
-    ? owner.owner_portal_tokens[0]
-    : owner.owner_portal_tokens
-  return t ?? null
+  return getTokens(owner).find((t) => !t.is_multi) ?? null
+}
+
+function getCombinedToken(owner: Owner): PortalToken | null {
+  return getTokens(owner).find((t) => t.is_multi) ?? null
+}
+
+interface OwnerGroup {
+  email:        string
+  name:         string
+  ownerIds:     string[]
+  propertyIds:  string[]
+  anchor:       Owner
+}
+
+// Groups property_owners rows that represent the same human (matched by email)
+// across more than one property — these are candidates for a combined portal link.
+function groupMultiPropertyOwners(owners: Owner[]): OwnerGroup[] {
+  const byEmail = new Map<string, Owner[]>()
+  for (const owner of owners) {
+    if (!owner.email) continue
+    const key = owner.email.trim().toLowerCase()
+    const list = byEmail.get(key) ?? []
+    list.push(owner)
+    byEmail.set(key, list)
+  }
+
+  const groups: OwnerGroup[] = []
+  for (const [email, rows] of byEmail) {
+    const propertyIds = [...new Set(rows.map((o) => o.property_id))]
+    if (propertyIds.length < 2) continue
+    groups.push({
+      email,
+      name:        rows[0]!.name,
+      ownerIds:    rows.map((o) => o.id),
+      propertyIds,
+      anchor:      [...rows].sort((a, b) => a.id.localeCompare(b.id))[0]!,
+    })
+  }
+  return groups
 }
 
 function isTokenExpired(token: PortalToken): boolean {
@@ -553,6 +598,89 @@ function AddOwnerModal({
   )
 }
 
+// ── Combined Portfolio Link Button ───────────────────────────────────────────
+
+function GenerateCombinedLinkButton({ ownerIds }: { ownerIds: string[] }) {
+  const [pending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const handleGenerate = () => {
+    setError(null)
+    startTransition(async () => {
+      const result = await generateCombinedPortalToken(ownerIds)
+      if (result.error) setError(result.error)
+    })
+  }
+
+  return (
+    <div>
+      <button
+        onClick={handleGenerate}
+        disabled={pending}
+        className="btn-secondary py-1 px-2 text-xs flex items-center gap-1 disabled:opacity-50"
+      >
+        <RefreshCw className={cn('w-3.5 h-3.5', pending && 'animate-spin')} />
+        {pending ? 'Generating…' : 'Generate Combined Link'}
+      </button>
+      {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
+    </div>
+  )
+}
+
+// ── Multi-Property Owner Card (combined portfolio link) ──────────────────────
+
+function MultiPropertyOwnerCard({
+  group,
+  baseUrl,
+  properties,
+}: {
+  group:      OwnerGroup
+  baseUrl:    string
+  properties: Property[]
+}) {
+  const combinedToken = getCombinedToken(group.anchor)
+  const expired       = combinedToken ? isTokenExpired(combinedToken) : false
+  const portalUrl     = combinedToken && !expired ? `${baseUrl}/owner/${combinedToken.token}` : null
+
+  const propertyNames = group.propertyIds
+    .map((id) => properties.find((p) => p.id === id)?.name)
+    .filter((n): n is string => !!n)
+
+  return (
+    <div className="card p-4 border-dashed">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="font-semibold text-primary-themed">{group.name}</div>
+          <div className="text-xs text-muted-themed mt-0.5">{group.email}</div>
+          <div className="text-sm text-muted-themed mt-1">
+            Manages {group.propertyIds.length} properties: {propertyNames.join(', ')}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 flex-wrap">
+          {portalUrl ? (
+            <>
+              <span className="badge badge-green text-xs flex items-center gap-1">
+                <Link2 className="w-3 h-3" /> Combined Link Active
+              </span>
+              <CopyButton text={portalUrl} />
+              <a href={portalUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost py-1 px-2 text-xs flex items-center gap-1">
+                <ExternalLink className="w-3.5 h-3.5" /> View
+              </a>
+              <GenerateCombinedLinkButton ownerIds={group.ownerIds} />
+            </>
+          ) : (
+            <>
+              {combinedToken && expired && <span className="badge badge-amber text-xs">Expired</span>}
+              <GenerateCombinedLinkButton ownerIds={group.ownerIds} />
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Owner Card ───────────────────────────────────────────────────────────────
 
 function OwnerCard({
@@ -693,6 +821,7 @@ export function OwnersManager({
   baseUrl: string
 }) {
   const [showAdd, setShowAdd] = useState(false)
+  const multiPropertyGroups = groupMultiPropertyOwners(owners)
 
   return (
     <>
@@ -708,6 +837,24 @@ export function OwnersManager({
           Add Owner
         </button>
       </div>
+
+      {multiPropertyGroups.length > 0 && (
+        <div className="mb-6">
+          <h2 className="text-sm font-semibold text-secondary-themed mb-2">
+            Multi-Property Owners — Combined Portfolio Links
+          </h2>
+          <div className="space-y-3">
+            {multiPropertyGroups.map((group) => (
+              <MultiPropertyOwnerCard
+                key={group.email}
+                group={group}
+                baseUrl={baseUrl}
+                properties={properties}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {owners.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto">

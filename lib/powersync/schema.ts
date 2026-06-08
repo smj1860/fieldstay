@@ -21,6 +21,7 @@ const checklist_instance_items = new Table({
   section_name:       column.text,
   task:               column.text,
   is_completed:       column.integer,
+  completed_at:       column.text,
   requires_photo:     column.integer,
   photo_storage_path: column.text,
   crew_notes:         column.text,
@@ -51,6 +52,16 @@ const crew_availability = new Table({
   notes:           column.text,
 })
 
+const messages = new Table({
+  org_id:       column.text,
+  sender_id:    column.text,
+  recipient_id: column.text,
+  content:      column.text,
+  read_at:      column.text,
+  turnover_id:  column.text,
+  created_at:   column.text,
+})
+
 export const AppSchema = new Schema({
   turnovers,
   checklist_instances,
@@ -58,4 +69,5 @@ export const AppSchema = new Schema({
   inventory_items,
   properties,
   crew_availability,
+  messages,
 })

@@ -34,6 +34,31 @@ export async function updateOrgSettings(
   return { success: true }
 }
 
+// ── Slack Notifications ───────────────────────────────────────
+
+export async function updateSlackWebhook(
+  _prev: SettingsActionState | null,
+  formData: FormData
+): Promise<SettingsActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const url = (formData.get('slack_webhook_url') as string)?.trim() || null
+
+  if (url && !url.startsWith('https://hooks.slack.com/')) {
+    return { error: 'That doesn\'t look like a Slack Incoming Webhook URL' }
+  }
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({ slack_webhook_url: url })
+    .eq('id', membership.org_id)
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/settings')
+  return { success: true }
+}
+
 // ── Security / Password ───────────────────────────────────────
 
 export async function changePassword(
