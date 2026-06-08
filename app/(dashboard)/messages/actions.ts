@@ -13,7 +13,6 @@ export interface MessageActionResult {
 // PM → crew message. Sends a push notification to the crew member's device.
 export async function sendMessageToCrew(
   crewMemberId: string,
-  crewUserId: string,
   content: string,
   contextId?: string
 ): Promise<MessageActionResult> {
@@ -22,12 +21,27 @@ export async function sendMessageToCrew(
     const trimmed = content.trim()
     if (!trimmed) return { success: false, error: 'Message cannot be empty' }
 
+    // Verify the crew member belongs to this org and derive the recipient from the DB —
+    // never trust a client-supplied user_id for the recipient
+    const { data: crewMember } = await supabase
+      .from('crew_members')
+      .select('id, user_id')
+      .eq('id', crewMemberId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!crewMember?.user_id) {
+      return { success: false, error: 'Crew member not found' }
+    }
+
+    const recipientId = crewMember.user_id
+
     const { data: message, error } = await supabase
       .from('messages')
       .insert({
         org_id:        membership.org_id,
         sender_id:     user.id,
-        recipient_id:  crewUserId,
+        recipient_id:  recipientId,
         content:       trimmed,
         turnover_id:   contextId ?? null,
       })
@@ -45,12 +59,12 @@ export async function sendMessageToCrew(
         message_id:    message.id,
         org_id:        membership.org_id,
         sender_id:     user.id,
-        recipient_id:  crewUserId,
+        recipient_id:  recipientId,
         is_crew_to_pm: false,
       },
     })
 
-    await sendPushToUser(crewUserId, {
+    await sendPushToUser(recipientId, {
       title: 'New message from your operations team',
       body:  trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed,
       url:   '/crew/messages',

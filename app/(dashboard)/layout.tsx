@@ -115,7 +115,6 @@ export default async function DashboardLayout({
         <ReviewPrompt
           milestone={pendingMilestone.milestone}
           message={MILESTONE_MESSAGES[pendingMilestone.milestone]!}
-          orgId={membership.org_id}
         />
       )}
       {children}

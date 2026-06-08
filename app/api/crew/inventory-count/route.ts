@@ -22,6 +22,18 @@ export async function POST(request: NextRequest) {
 
   if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 403 })
 
+  // Verify the property belongs to this crew member's org — never trust a client-supplied propertyId
+  const { data: property } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('id', propertyId)
+    .eq('org_id', crew.org_id)
+    .single()
+
+  if (!property) {
+    return NextResponse.json({ error: 'Property not found' }, { status: 404 })
+  }
+
   if (submitAsDraft) {
     // Fetch previous quantities for the diff
     const itemIds = Object.keys(counts)

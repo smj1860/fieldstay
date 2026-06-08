@@ -201,22 +201,26 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
 
       const cost = wo.actual_cost
       if (property && cost && cost > 0) {
-        const { count } = await supabase
+        const { data: existing } = await supabase
           .from('owner_transactions')
-          .select('id', { count: 'exact', head: true })
-          .eq('work_order_id', work_order_id)
+          .select('id')
+          .eq('source_reference_id', work_order_id)
+          .eq('source', 'wo_completion')
+          .maybeSingle()
 
-        if ((count ?? 0) === 0) {
+        if (!existing) {
           await supabase.from('owner_transactions').insert({
-            property_id:      (property as { id: string }).id,
-            org_id:           wo.org_id,
+            property_id:          (property as { id: string }).id,
+            org_id:               wo.org_id,
             work_order_id,
-            transaction_type: 'expense',
-            category:         'maintenance',
-            amount:           cost,
-            description:      wo.title,
-            transaction_date: new Date().toISOString().split('T')[0],
-            notes:            'Auto-created from vendor portal completion',
+            source:               'wo_completion',
+            source_reference_id:  work_order_id,
+            transaction_type:     'expense',
+            category:             'maintenance',
+            amount:               cost,
+            description:          wo.title,
+            transaction_date:     new Date().toISOString().split('T')[0],
+            notes:                'Auto-created from vendor portal completion',
           })
         }
       }

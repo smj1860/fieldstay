@@ -1,13 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
-  if (!body?.token || !body?.userId) {
-    return NextResponse.json({ error: 'Missing token or userId' }, { status: 400 })
+  if (!body?.token) {
+    return NextResponse.json({ error: 'Missing token' }, { status: 400 })
   }
 
-  const { token, userId } = body as { token: string; userId: string }
+  const { token } = body as { token: string }
+
+  // Derive the binding user from the authenticated session — never from the client body
+  const supabaseAuth = await createClient()
+  const { data: { user } } = await supabaseAuth.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Must be signed in to accept an invite' }, { status: 401 })
+  }
+
   const supabase = createServiceClient()
 
   const { data: crew } = await supabase
@@ -27,10 +35,11 @@ export async function POST(request: NextRequest) {
   const { error } = await supabase
     .from('crew_members')
     .update({
-      user_id:            userId,
+      user_id:            user.id,
       invite_accepted_at: new Date().toISOString(),
     })
     .eq('id', crew.id)
+    .is('user_id', null)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })

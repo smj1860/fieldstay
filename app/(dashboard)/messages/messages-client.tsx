@@ -119,7 +119,7 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
     if (!content || !selectedThread) return
     setDraft('')
     startSend(async () => {
-      await sendMessageToCrew(selectedThread.crew.id, selectedThread.crew.user_id, content)
+      await sendMessageToCrew(selectedThread.crew.id, content)
     })
   }
 

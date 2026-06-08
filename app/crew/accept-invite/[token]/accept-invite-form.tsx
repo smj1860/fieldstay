@@ -49,7 +49,7 @@ export function AcceptInviteForm({
       const res = await fetch('/api/crew/accept-invite', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ token, userId: data.user.id }),
+        body:    JSON.stringify({ token }),
       })
 
       if (!res.ok) {
