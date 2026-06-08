@@ -253,6 +253,7 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
       .from('properties')
       .select('id, name, address, city, state, zip')
       .in('id', portalToken.property_ids!)
+      .eq('org_id', ownerRaw.org_id)   // scope to token's org
       .order('name')
 
     if (props && props.length > 0) portfolioProperties = props

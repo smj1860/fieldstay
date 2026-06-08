@@ -40,6 +40,13 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: 'Unsupported image type' }, { status: 400 })
   }
 
+  const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024 // 5 MB decoded limit
+  // base64 string length * 0.75 approximates decoded byte count
+  const estimatedBytes = imageBase64.length * 0.75
+  if (estimatedBytes > MAX_IMAGE_SIZE_BYTES) {
+    return Response.json({ error: 'Image too large. Maximum 5 MB.' }, { status: 413 })
+  }
+
   const client = new Anthropic()
 
   const message = await client.messages.create({

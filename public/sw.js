@@ -15,7 +15,9 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const url = event.notification.data?.url ?? '/crew'
+  const rawUrl = event.notification.data?.url ?? '/crew'
+  // Only allow same-origin paths — reject absolute URLs and protocol-relative
+  const url = rawUrl.startsWith('/') && !rawUrl.startsWith('//') ? rawUrl : '/crew'
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {

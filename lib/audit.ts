@@ -8,6 +8,7 @@ export type AuditAction =
   | 'integration.connected'
   | 'integration.revoked'
   | 'repuguard.activated'
+  | 'repuguard.response.generated'
   | 'owner_portal.accessed'
   | 'owner_portal.token.revoked'
   | 'account.deleted'

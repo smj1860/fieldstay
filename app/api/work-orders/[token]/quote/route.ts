@@ -63,8 +63,16 @@ export async function POST(
   const quoted_amount = parseFloat(String(body.amount ?? 0))
   const quote_notes   = (body.notes as string | undefined)?.trim() || null
 
-  if (!quoted_amount || quoted_amount <= 0) {
+  if (!Number.isFinite(quoted_amount) || quoted_amount <= 0) {
     return NextResponse.json({ error: 'A valid quote amount is required' }, { status: 400 })
+  }
+
+  const MAX_QUOTE_AMOUNT = 1_000_000 // $1M reasonable upper bound
+  if (quoted_amount > MAX_QUOTE_AMOUNT) {
+    return NextResponse.json(
+      { error: 'Quote amount exceeds maximum allowed value.' },
+      { status: 400 }
+    )
   }
 
   await supabase
