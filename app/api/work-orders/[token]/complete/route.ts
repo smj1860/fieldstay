@@ -51,6 +51,33 @@ export async function POST(
   const photoFiles  = formData.getAll('photos') as File[]
   const photosPaths: string[] = []
 
+  const MAX_PHOTOS     = 10
+  const MAX_FILE_BYTES = 10 * 1024 * 1024  // 10 MB per photo
+  const ALLOWED_TYPES  = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
+
+  if (photoFiles.length > MAX_PHOTOS) {
+    return NextResponse.json(
+      { error: `Maximum ${MAX_PHOTOS} photos allowed.` },
+      { status: 400 }
+    )
+  }
+
+  for (const file of photoFiles) {
+    if (!(file instanceof File)) continue
+    if (!ALLOWED_TYPES.has(file.type)) {
+      return NextResponse.json(
+        { error: 'Only JPEG, PNG, WebP, and HEIC photos are accepted.' },
+        { status: 400 }
+      )
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      return NextResponse.json(
+        { error: 'Each photo must be under 10 MB.' },
+        { status: 400 }
+      )
+    }
+  }
+
   // Upload photos to Supabase Storage
   for (const file of photoFiles) {
     if (!(file instanceof File)) continue

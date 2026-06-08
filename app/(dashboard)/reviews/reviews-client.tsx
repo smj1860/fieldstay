@@ -40,7 +40,7 @@ interface ReviewRow {
 interface Props {
   reviews: ReviewRow[]
   repuguardStatus: 'trial' | 'active'
-  trialEnd: string | null
+  trialEnd?: string | null
   orgId: string
 }
 
@@ -220,11 +220,6 @@ export function ReviewsClient({ reviews: initialReviews, repuguardStatus, trialE
           >
             Reviews
           </h1>
-          {repuguardStatus === 'trial' && trialEnd && (
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              RepuGuard trial ends {new Date(trialEnd).toLocaleDateString()}
-            </p>
-          )}
         </div>
         <span
           className="text-xs font-semibold px-3 py-1 rounded-full"

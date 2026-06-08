@@ -52,9 +52,10 @@ export default function PrivacyPage() {
           <section>
             <h2 className="text-xl font-semibold text-gray-900 mb-3">4. Cookies and Local Storage</h2>
             <p>
-              We use essential cookies to maintain your authenticated session. We also use
-              <code className="bg-gray-100 px-1 rounded text-sm">localStorage</code> to remember your
-              theme preference and cookie consent. No advertising or cross-site tracking cookies are used.
+              Session cookies are set automatically as a technical necessity to keep you logged in.
+              They are not used for advertising or tracking and do not require consent under GDPR or CPRA.
+              We also use <code className="bg-gray-100 px-1 rounded text-sm">localStorage</code> to remember
+              your theme preference. No advertising or cross-site tracking cookies are used.
             </p>
           </section>
 

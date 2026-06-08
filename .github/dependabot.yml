@@ -5,5 +5,5 @@ updates:
     schedule:
       interval: "weekly"
     ignore:
-      - dependency-name: "*"
+      - dependency-name: "tailwindcss"
         update-types: ["version-update:semver-major"]

@@ -1,10 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { cookies } from 'next/headers'
-import { createServerClient } from '@supabase/ssr'
-import { createServiceClient } from '@/lib/supabase/server'
-import { stripe } from '@/lib/stripe/client'
-import { inngest } from '@/lib/inngest/client'
-import { logAuditEvent } from '@/lib/audit'
+import { NextRequest, NextResponse }  from 'next/server'
+import { cookies }                    from 'next/headers'
+import { createServerClient }         from '@supabase/ssr'
+import { createServiceClient }        from '@/lib/supabase/server'
+import { inngest }                    from '@/lib/inngest/client'
+import { logAuditEvent }              from '@/lib/audit'
 
 export async function POST(_request: NextRequest) {
   const cookieStore = await cookies()
@@ -21,10 +20,10 @@ export async function POST(_request: NextRequest) {
 
   const admin = createServiceClient()
 
-  // Get org membership
+  // 1. Resolve membership with role
   const { data: membership } = await admin
     .from('organization_members')
-    .select('org_id')
+    .select('org_id, role')
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
     .single()
@@ -33,12 +32,20 @@ export async function POST(_request: NextRequest) {
     return NextResponse.json({ error: 'No organization found' }, { status: 403 })
   }
 
+  // 2. Owner-only gate — only org owners can enable features
+  if (membership.role !== 'owner') {
+    return NextResponse.json(
+      { error: 'Only the account owner can activate RepuGuard.' },
+      { status: 403 }
+    )
+  }
+
   const orgId = membership.org_id as string
 
-  // Fetch org info
+  // 3. Check org exists and RepuGuard is not already active
   const { data: org } = await admin
     .from('organizations')
-    .select('repuguard_status, stripe_customer_id')
+    .select('repuguard_status')
     .eq('id', orgId)
     .single()
 
@@ -46,12 +53,11 @@ export async function POST(_request: NextRequest) {
     return NextResponse.json({ error: 'Organization not found' }, { status: 404 })
   }
 
-  // Check not already active
-  if (org.repuguard_status === 'trial' || org.repuguard_status === 'active') {
-    return NextResponse.json({ error: 'RepuGuard already activated' }, { status: 409 })
+  if (org.repuguard_status === 'active') {
+    return NextResponse.json({ error: 'RepuGuard is already active.' }, { status: 409 })
   }
 
-  // Verify active OwnerRez connection
+  // 4. Require active OwnerRez connection (RepuGuard is OR-exclusive)
   const { data: connection } = await admin
     .from('integration_connections')
     .select('user_id')
@@ -62,58 +68,22 @@ export async function POST(_request: NextRequest) {
 
   if (!connection) {
     return NextResponse.json(
-      { error: 'Active OwnerRez connection required to activate RepuGuard' },
+      { error: 'An active OwnerRez connection is required to use RepuGuard.' },
       { status: 400 }
     )
   }
 
-  // Determine if founding member (before Jan 1, 2027)
-  const foundingCutoff = new Date('2027-01-01T00:00:00Z')
-  const isFoundingMember = new Date() < foundingCutoff
-
-  const priceId = isFoundingMember
-    ? (process.env.REPUGUARD_FOUNDING_PRICE_ID ?? '')
-    : (process.env.REPUGUARD_STANDARD_PRICE_ID ?? '')
-
-  if (!priceId) {
-    return NextResponse.json({ error: 'RepuGuard price not configured' }, { status: 500 })
-  }
-
-  // 90-day trial = 90 days from now
-  const trialEnd = Math.floor(Date.now() / 1000) + 90 * 24 * 60 * 60
-
-  const customerId = org.stripe_customer_id as string | null
-  if (!customerId) {
-    return NextResponse.json({ error: 'No Stripe customer on file — complete checkout first' }, { status: 400 })
-  }
-
-  // Create Stripe subscription
-  const subscription = await stripe.subscriptions.create({
-    customer:        customerId,
-    items:           [{ price: priceId }],
-    trial_end:       trialEnd,
-    metadata: {
-      org_id:  orgId,
-      feature: 'repuguard',
-    },
-  })
-
-  const trialStartDate = new Date()
-  const trialEndDate   = new Date(trialEnd * 1000)
-
-  // Update org
-  await admin
+  // 5. Activate — set status to active, no Stripe sub, no trial dates
+  const { error: updateErr } = await admin
     .from('organizations')
-    .update({
-      repuguard_status:                'trial',
-      repuguard_trial_start:           trialStartDate.toISOString(),
-      repuguard_trial_end:             trialEndDate.toISOString(),
-      repuguard_stripe_subscription_id: subscription.id,
-      repuguard_founding_member:       isFoundingMember,
-    })
+    .update({ repuguard_status: 'active' })
     .eq('id', orgId)
 
-  // Dispatch Inngest event
+  if (updateErr) {
+    console.error('[RepuGuard:activate] DB update failed:', updateErr)
+    return NextResponse.json({ error: 'Failed to activate RepuGuard' }, { status: 500 })
+  }
+
   await inngest.send({
     name: 'repuguard/activated',
     data: { org_id: orgId },
@@ -123,7 +93,7 @@ export async function POST(_request: NextRequest) {
     orgId:    orgId,
     actorId:  user.id,
     action:   'repuguard.activated',
-    metadata: { isFoundingMember, subscriptionId: subscription.id },
+    metadata: { method: 'ownerrez_bundled' },
   })
 
   return NextResponse.json({ ok: true })

@@ -56,7 +56,7 @@ export default async function ReviewsPage() {
           className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-6"
           style={{ background: 'var(--accent-gold-dim)' }}
         >
-          <span style={{ fontSize: 28 }}>★</span>
+          <span style={{ fontSize: 28 }}>&#9733;</span>
         </div>
         <h1
           className="font-black text-3xl mb-3 tracking-tight"
@@ -65,27 +65,43 @@ export default async function ReviewsPage() {
           RepuGuard Reputation Engine
         </h1>
         <p
-          className="text-base mb-2 leading-relaxed"
-          style={{ color: 'var(--text-muted)', maxWidth: 480, margin: '0 auto 12px' }}
+          className="text-base mb-4 leading-relaxed"
+          style={{ color: 'var(--text-muted)', maxWidth: 480, margin: '0 auto 16px' }}
         >
-          Every review deserves a professional response. RepuGuard reads the context of each
-          guest review and generates calm, on-brand replies that protect your reputation —
-          automatically drafted and ready for your approval before anything posts.
+          Every review deserves a professional response. RepuGuard reads the context of
+          each guest review and generates calm, on-brand replies &mdash; automatically
+          drafted and ready for your approval before anything posts.
         </p>
-        <p className="text-sm mb-8" style={{ color: 'var(--text-muted)' }}>
-          🎁 3 Months Free · Then $15/mo founding price (regular $29/mo)
-        </p>
+        <div
+          className="inline-flex items-center gap-2 mb-8 px-4 py-2 rounded-full"
+          style={{ background: 'rgba(61,139,79,0.12)', border: '1px solid rgba(61,139,79,0.3)' }}
+        >
+          <span
+            className="text-white text-xs font-bold px-1.5 py-0.5 rounded"
+            style={{ background: '#3D8B4F' }}
+          >
+            OR
+          </span>
+          <span className="text-sm font-medium" style={{ color: '#4ade80' }}>
+            Included in your FieldStay subscription &middot; OwnerRez exclusive
+          </span>
+        </div>
         <form action="/api/repuguard/activate" method="POST">
           <button
             type="submit"
             className="inline-block rounded-xl font-bold text-sm px-8 py-3.5 transition-opacity hover:opacity-90"
-            style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)', border: 'none', cursor: 'pointer' }}
+            style={{
+              background: 'var(--accent-gold)',
+              color:      'var(--text-inverse)',
+              border:     'none',
+              cursor:     'pointer',
+            }}
           >
-            Activate RepuGuard — Free for 90 Days →
+            Enable RepuGuard &rarr;
           </button>
         </form>
         <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
-          Requires an active OwnerRez connection.
+          Requires an active OwnerRez connection. No additional charge.
         </p>
       </div>
     )
@@ -101,8 +117,6 @@ export default async function ReviewsPage() {
     `)
     .eq('org_id', membership.org_id)
     .order('review_date', { ascending: false })
-
-  const trialEnd = org?.repuguard_trial_end as string | null
 
   const RESPONSE_WINDOW_DAYS = 14
 
@@ -132,7 +146,6 @@ export default async function ReviewsPage() {
     <ReviewsClient
       reviews={reviewsWithDeadline as ReviewRow[]}
       repuguardStatus={repuguardStatus as 'trial' | 'active'}
-      trialEnd={trialEnd}
       orgId={membership.org_id}
     />
   )
