@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM, renderTemplate } from '@/lib/resend/client'
+import { getPmEmail } from '@/lib/inngest/helpers'
 
 // ── Booking Confirmed (OwnerRez / Uplisting) ─────────────────────────────────
 
@@ -95,7 +96,7 @@ export const handleBookingDetected = inngest.createFunction(
           { data: booking },
           { data: property },
           { data: templates },
-          { data: adminMember },
+          pmEmail,
         ] = await Promise.all([
           supabase
             .from('bookings')
@@ -112,20 +113,8 @@ export const handleBookingDetected = inngest.createFunction(
             .select('*')
             .eq('property_id', property_id)
             .eq('is_active', true),
-          supabase
-            .from('organization_members')
-            .select('user_id')
-            .eq('org_id', org_id)
-            .eq('role', 'admin')
-            .single(),
+          getPmEmail(supabase, org_id),
         ])
-
-        // Get PM email from Supabase Auth
-        let pmEmail: string | null = null
-        if (adminMember?.user_id) {
-          const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-          pmEmail = user?.email ?? null
-        }
 
         return {
           booking,

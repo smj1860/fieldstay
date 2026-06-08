@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
+import { getPmEmail } from '@/lib/inngest/helpers'
 
 // ── Purchase Order Approved ───────────────────────────────────────────────────
 
@@ -166,16 +167,10 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // ── Email PM with PO summary ─────────────────────────────────────────────
 
     await step.run('email-po-to-pm', async () => {
-      const [{ data: property }, { data: adminMember }] = await Promise.all([
+      const [{ data: property }, pmEmail] = await Promise.all([
         supabase.from('properties').select('name').eq('id', property_id).single(),
-        supabase.from('organization_members').select('user_id').eq('org_id', org_id).eq('role', 'admin').single(),
+        getPmEmail(supabase, org_id),
       ])
-
-      let pmEmail: string | null = null
-      if (adminMember?.user_id) {
-        const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-        pmEmail = user?.email ?? null
-      }
 
       if (!pmEmail) return
 

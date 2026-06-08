@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
+import { getPmEmail } from '@/lib/inngest/helpers'
 import { formatDateTime } from '@/lib/utils'
 
 /**
@@ -27,7 +28,7 @@ export const handleTurnoverCreated = inngest.createFunction(
     const { turnover, property, pmEmail } = await step.run('fetch-turnover-data', async () => {
       const supabase = createServiceClient()
 
-      const [{ data: turnover }, { data: property }, { data: adminMember }] = await Promise.all([
+      const [{ data: turnover }, { data: property }, pmEmail] = await Promise.all([
         supabase
           .from('turnovers')
           .select(`
@@ -41,19 +42,8 @@ export const handleTurnoverCreated = inngest.createFunction(
           .select('name, city, state')
           .eq('id', property_id)
           .single(),
-        supabase
-          .from('organization_members')
-          .select('user_id')
-          .eq('org_id', org_id)
-          .eq('role', 'admin')
-          .single(),
+        getPmEmail(supabase, org_id),
       ])
-
-      let pmEmail: string | null = null
-      if (adminMember?.user_id) {
-        const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-        pmEmail = user?.email ?? null
-      }
 
       return { turnover, property, pmEmail }
     })
@@ -178,19 +168,16 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('notify-pm-of-completion', async () => {
       const supabase = createServiceClient()
 
-      const [{ data: property }, { data: adminMember }] = await Promise.all([
+      const [{ data: property }, pmEmail] = await Promise.all([
         supabase.from('properties').select('name').eq('id', property_id).single(),
-        supabase.from('organization_members').select('user_id').eq('org_id', org_id).eq('role', 'admin').single(),
+        getPmEmail(supabase, org_id),
       ])
 
-      if (!adminMember?.user_id) return
-
-      const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-      if (!user?.email) return
+      if (!pmEmail) return
 
       await resend.emails.send({
         from:    FROM,
-        to:      user.email,
+        to:      pmEmail,
         subject: `✅ Turnover complete — ${property?.name}`,
         html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto">

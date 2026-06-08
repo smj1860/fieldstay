@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { WorkOrderVendorEmail } from '@/lib/resend/emails/work-order-vendor'
+import { getPmEmail } from '@/lib/inngest/helpers'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -183,17 +184,8 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
 
       if (!wo) return
 
-      const { data: adminMember } = await supabase
-        .from('organization_members')
-        .select('user_id')
-        .eq('org_id', wo.org_id)
-        .eq('role', 'admin')
-        .single()
-
-      if (!adminMember?.user_id) return
-
-      const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-      if (!user?.email) return
+      const pmEmail = await getPmEmail(supabase, wo.org_id)
+      if (!pmEmail) return
 
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
@@ -227,7 +219,7 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
 
       await resend.emails.send({
         from:    FROM,
-        to:      user.email,
+        to:      pmEmail,
         subject: `✅ Work order complete — ${wo.title} at ${property?.name}`,
         html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
@@ -269,24 +261,15 @@ export const handleWorkOrderOverdue = inngest.createFunction(
 
       if (!wo || wo.status === 'completed' || wo.status === 'cancelled') return
 
-      const { data: adminMember } = await supabase
-        .from('organization_members')
-        .select('user_id')
-        .eq('org_id', org_id)
-        .eq('role', 'admin')
-        .single()
-
-      if (!adminMember?.user_id) return
-
-      const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-      if (!user?.email) return
+      const pmEmail = await getPmEmail(supabase, org_id)
+      if (!pmEmail) return
 
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
       await resend.emails.send({
         from:    FROM,
-        to:      user.email,
+        to:      pmEmail,
         subject: `⚠️ Work order overdue — ${wo.title} at ${property?.name}`,
         html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
@@ -402,21 +385,12 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
-      const { data: adminMember } = await supabase
-        .from('organization_members')
-        .select('user_id')
-        .eq('org_id', org_id)
-        .eq('role', 'admin')
-        .single()
-
-      if (!adminMember?.user_id) return
-
-      const { data: { user } } = await supabase.auth.admin.getUserById(adminMember.user_id)
-      if (!user?.email) return
+      const pmEmail = await getPmEmail(supabase, org_id)
+      if (!pmEmail) return
 
       await resend.emails.send({
         from:    FROM,
-        to:      user.email,
+        to:      pmEmail,
         subject: `💬 Quote received — ${wo.title} at ${property?.name}`,
         html: `
           <div style="font-family:sans-serif;max-width:600px;margin:0 auto">

@@ -11,7 +11,10 @@
 
 import 'server-only'
 import { requireOrgMember } from '@/lib/auth'
+import { scanLimiter } from '@/lib/rate-limit'
 import Anthropic from '@anthropic-ai/sdk'
+
+export const maxDuration = 30  // prevents Vercel 10s default timeout
 
 interface ScanResponse {
   make:             string | null
@@ -24,7 +27,13 @@ interface ScanResponse {
 
 export async function POST(req: Request): Promise<Response> {
   // Verify auth — any org member may scan
-  await requireOrgMember()
+  const { user } = await requireOrgMember()
+
+  // Rate limit — 20 scans per user per day
+  const { success } = await scanLimiter.limit(user.id)
+  if (!success) {
+    return Response.json({ error: 'Daily scan limit reached. Try again tomorrow.' }, { status: 429 })
+  }
 
   const { imageBase64, mediaType } = (await req.json()) as {
     imageBase64: string
