@@ -143,10 +143,13 @@ export const handleBookingDetected = inngest.createFunction(
 
       if (!prop?.avg_nightly_rate) return
 
+      // Check by source + source_reference_id so the DB UNIQUE constraint is
+      // the backstop — unlike the old booking_id-only check this survives retries
       const { count } = await supabase
         .from('owner_transactions')
         .select('id', { count: 'exact', head: true })
-        .eq('booking_id', booking_id)
+        .eq('source_reference_id', booking_id)
+        .eq('source', 'booking_revenue')
 
       if ((count ?? 0) > 0) return
 
@@ -163,12 +166,14 @@ export const handleBookingDetected = inngest.createFunction(
         property_id,
         org_id,
         booking_id,
-        transaction_type: 'revenue',
-        category:         'booking_revenue',
+        source:              'booking_revenue',
+        source_reference_id: booking_id,
+        transaction_type:    'revenue',
+        category:            'booking_revenue',
         amount,
         description,
-        transaction_date: booking.checkin_date,
-        notes:            `iCal · ${booking.checkin_date} to ${booking.checkout_date}`,
+        transaction_date:    booking.checkin_date,
+        notes:               `iCal · ${booking.checkin_date} to ${booking.checkout_date}`,
       })
     })
 
