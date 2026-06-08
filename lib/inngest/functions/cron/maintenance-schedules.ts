@@ -2,7 +2,8 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { getPmEmail, buildScheduleEmail } from '@/lib/inngest/helpers'
+import { getPmEmail } from '@/lib/inngest/helpers'
+import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
 const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
@@ -90,16 +91,17 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
               from:    FROM,
               to:      pmEmail,
               subject: `Work order created — ${schedule.name} at ${property?.name}`,
-              html: buildScheduleEmail({
+              html: await renderPmAlert({
                 heading:  'Scheduled maintenance work order created',
-                name:     schedule.name,
-                daysText: `due in <strong>${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}</strong>`,
-                property: property?.name,
-                dueDate:  dueDate.toLocaleDateString(),
-                cost:     schedule.estimated_cost,
-                vendor:   vendor?.name,
-                url:      `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-                cta:      'View Work Order →',
+                body:     `${schedule.name} is due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''} — a work order has been created.`,
+                details: [
+                  { label: 'Property',  value: property?.name ?? null },
+                  { label: 'Due Date',  value: dueDate.toLocaleDateString() },
+                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
+                  { label: 'Vendor',    value: vendor?.name ?? null },
+                ],
+                ctaLabel: 'View Work Order →',
+                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
               }),
             })
           }
@@ -122,16 +124,17 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
               from:    FROM,
               to:      pmEmail,
               subject: `🔧 Maintenance due soon — ${schedule.name} at ${property?.name}`,
-              html: buildScheduleEmail({
+              html: await renderPmAlert({
                 heading:  'Scheduled maintenance coming up',
-                name:     schedule.name,
-                daysText: `due in <strong>${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}</strong>`,
-                property: property?.name,
-                dueDate:  dueDate.toLocaleDateString(),
-                cost:     schedule.estimated_cost,
-                vendor:   vendor?.name,
-                url:      `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-                cta:      'Create Work Order →',
+                body:     `${schedule.name} is due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}.`,
+                details: [
+                  { label: 'Property',  value: property?.name ?? null },
+                  { label: 'Due Date',  value: dueDate.toLocaleDateString() },
+                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
+                  { label: 'Vendor',    value: vendor?.name ?? null },
+                ],
+                ctaLabel: 'Create Work Order →',
+                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
               }),
             })
           }
@@ -211,16 +214,17 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
               from:    FROM,
               to:      pmEmail,
               subject: `🚨 Overdue maintenance escalated — ${schedule.name} at ${property?.name}`,
-              html: buildScheduleEmail({
-                heading:  `Overdue maintenance escalated to Urgent`,
-                name:     schedule.name,
-                daysText: `<strong>${daysLate} day${daysLate !== 1 ? 's' : ''} overdue</strong>`,
-                property: property?.name,
-                dueDate:  dueDate.toLocaleDateString(),
-                cost:     schedule.estimated_cost,
-                vendor:   vendor?.name,
-                url:      `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-                cta:      'Review Work Order →',
+              html: await renderPmAlert({
+                heading:  'Overdue maintenance escalated to Urgent',
+                body:     `${schedule.name} is ${daysLate} day${daysLate !== 1 ? 's' : ''} overdue. The linked work order has been escalated to Urgent priority.`,
+                details: [
+                  { label: 'Property',  value: property?.name ?? null },
+                  { label: 'Due Date',  value: dueDate.toLocaleDateString() },
+                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
+                  { label: 'Vendor',    value: vendor?.name ?? null },
+                ],
+                ctaLabel: 'Review Work Order →',
+                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
               }),
             })
           }
@@ -250,16 +254,17 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
               from:    FROM,
               to:      pmEmail,
               subject: `🚨 Overdue maintenance — urgent WO created — ${schedule.name} at ${property?.name}`,
-              html: buildScheduleEmail({
+              html: await renderPmAlert({
                 heading:  'Overdue maintenance — urgent work order created',
-                name:     schedule.name,
-                daysText: `<strong>${daysLate} day${daysLate !== 1 ? 's' : ''} overdue</strong> — marked Urgent`,
-                property: property?.name,
-                dueDate:  dueDate.toLocaleDateString(),
-                cost:     schedule.estimated_cost,
-                vendor:   vendor?.name,
-                url:      `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-                cta:      'Assign Work Order →',
+                body:     `${schedule.name} is ${daysLate} day${daysLate !== 1 ? 's' : ''} overdue — a new work order has been created and marked Urgent.`,
+                details: [
+                  { label: 'Property',  value: property?.name ?? null },
+                  { label: 'Due Date',  value: dueDate.toLocaleDateString() },
+                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
+                  { label: 'Vendor',    value: vendor?.name ?? null },
+                ],
+                ctaLabel: 'Assign Work Order →',
+                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
               }),
             })
           }

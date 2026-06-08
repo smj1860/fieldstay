@@ -64,33 +64,3 @@ export async function getPmEmailsByOrgIds(
 
   return result
 }
-
-/**
- * Shared HTML email body for maintenance/asset/compliance cron alerts.
- * Used across the cron/* functions split out of the old maintenance-daily-check.
- */
-export function buildScheduleEmail(opts: {
-  heading: string
-  name: string
-  daysText: string
-  property?: string
-  dueDate: string
-  cost?: number | null
-  vendor?: string | null
-  url: string
-  cta: string
-}): string {
-  return `
-    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-      <h2 style="margin-bottom:8px">${opts.heading}</h2>
-      <p><strong>${opts.name}</strong> is ${opts.daysText}.</p>
-      <table style="border-collapse:collapse;width:100%;margin:16px 0">
-        ${opts.property ? `<tr><td style="padding:8px;color:#64748b">Property</td><td style="padding:8px;font-weight:600">${opts.property}</td></tr>` : ''}
-        <tr><td style="padding:8px;color:#64748b">Due Date</td><td style="padding:8px;font-weight:600">${opts.dueDate}</td></tr>
-        ${opts.cost ? `<tr><td style="padding:8px;color:#64748b">Est. Cost</td><td style="padding:8px;font-weight:600">$${opts.cost}</td></tr>` : ''}
-        ${opts.vendor ? `<tr><td style="padding:8px;color:#64748b">Vendor</td><td style="padding:8px;font-weight:600">${opts.vendor}</td></tr>` : ''}
-      </table>
-      <p><a href="${opts.url}" style="background:#FCD116;color:#0a1628;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">${opts.cta}</a></p>
-    </div>
-  `
-}

@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { WorkOrderVendorEmail } from '@/lib/resend/emails/work-order-vendor'
 import { getPmEmail } from '@/lib/inngest/helpers'
+import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -217,20 +218,25 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
         }
       }
 
+      const photoNote = photos.length > 0
+        ? `${photos.length} photo${photos.length !== 1 ? 's' : ''} attached to the work order.`
+        : undefined
+
       await resend.emails.send({
         from:    FROM,
         to:      pmEmail,
         subject: `✅ Work order complete — ${wo.title} at ${property?.name}`,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2 style="color:#15803d">Work order marked complete</h2>
-            <p><strong>${vendor?.name ?? 'Your vendor'}</strong> has completed: <strong>${wo.title}</strong></p>
-            <p>Property: ${property?.name}</p>
-            ${wo.completion_notes ? `<p><strong>Notes:</strong> ${wo.completion_notes}</p>` : ''}
-            ${photos.length > 0 ? `<p>${photos.length} photo${photos.length !== 1 ? 's' : ''} attached to the work order.</p>` : ''}
-            <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance?wo=${work_order_id}" style="background:#FCD116;color:#0a1628;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">View Work Order →</a></p>
-          </div>
-        `,
+        html: await renderPmAlert({
+          heading:  'Work order marked complete',
+          body:     `${vendor?.name ?? 'Your vendor'} has completed: ${wo.title}.`,
+          details: [
+            { label: 'Property', value: property?.name ?? null },
+            { label: 'Notes',    value: wo.completion_notes ?? null },
+          ],
+          note:     photoNote,
+          ctaLabel: 'View Work Order →',
+          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance?wo=${work_order_id}`,
+        }),
       })
     })
 
@@ -271,14 +277,15 @@ export const handleWorkOrderOverdue = inngest.createFunction(
         from:    FROM,
         to:      pmEmail,
         subject: `⚠️ Work order overdue — ${wo.title} at ${property?.name}`,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2 style="color:#b45309">Work order ${days_overdue} day${days_overdue !== 1 ? 's' : ''} overdue</h2>
-            <p><strong>${wo.title}</strong> was scheduled for ${new Date(wo.scheduled_date!).toLocaleDateString()} and hasn't been completed.</p>
-            ${vendor ? `<p>Assigned to: <strong>${vendor.name}</strong></p>` : ''}
-            <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#FCD116;color:#0a1628;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">Review Work Orders →</a></p>
-          </div>
-        `,
+        html: await renderPmAlert({
+          heading:  `Work order ${days_overdue} day${days_overdue !== 1 ? 's' : ''} overdue`,
+          body:     `${wo.title} was scheduled for ${new Date(wo.scheduled_date!).toLocaleDateString()} and hasn't been completed.`,
+          details: [
+            { label: 'Assigned To', value: vendor?.name ?? null },
+          ],
+          ctaLabel: 'Review Work Orders →',
+          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
+        }),
       })
     })
 
@@ -392,18 +399,17 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
         from:    FROM,
         to:      pmEmail,
         subject: `💬 Quote received — ${wo.title} at ${property?.name}`,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2>Quote received</h2>
-            <p><strong>${vendor?.name ?? 'Your vendor'}</strong> has submitted a quote for <strong>${wo.title}</strong>.</p>
-            <table style="border-collapse:collapse;width:100%;margin:16px 0">
-              <tr><td style="padding:8px;color:#64748b">Property</td><td style="padding:8px;font-weight:600">${property?.name}</td></tr>
-              <tr style="background:#f8fafc"><td style="padding:8px;color:#64748b">Quoted Amount</td><td style="padding:8px;font-weight:600;font-size:18px">$${quoted_amount.toFixed(2)}</td></tr>
-              ${quote_notes ? `<tr><td style="padding:8px;color:#64748b">Vendor Notes</td><td style="padding:8px">${quote_notes}</td></tr>` : ''}
-            </table>
-            <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#FCD116;color:#0a1628;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:700">Review Quote →</a></p>
-          </div>
-        `,
+        html: await renderPmAlert({
+          heading:  'Quote received',
+          body:     `${vendor?.name ?? 'Your vendor'} has submitted a quote for ${wo.title}.`,
+          details: [
+            { label: 'Property',      value: property?.name ?? null },
+            { label: 'Quoted Amount', value: `$${quoted_amount.toFixed(2)}` },
+            { label: 'Vendor Notes',  value: quote_notes ?? null },
+          ],
+          ctaLabel: 'Review Quote →',
+          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
+        }),
       })
     })
 

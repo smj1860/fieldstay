@@ -2,7 +2,8 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { getPmEmail, buildScheduleEmail } from '@/lib/inngest/helpers'
+import { getPmEmail } from '@/lib/inngest/helpers'
+import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 /**
  * SCHEDULED: runs every morning at 8am CT (independent of maintenance-schedules cron).
@@ -75,13 +76,14 @@ export const dailyWorkOrderOps = inngest.createFunction(
             from:    FROM,
             to:      pmEmail,
             subject: `Work order escalated to Urgent — open ${daysOpen} days`,
-            html:    buildScheduleEmail({
+            html:    await renderPmAlert({
               heading:  'Work order auto-escalated to Urgent',
-              name:     wo.category.replace(/_/g, ' '),
-              daysText: `open for <strong>${daysOpen} day${daysOpen !== 1 ? 's' : ''}</strong> without update`,
-              dueDate:  `Opened ${new Date(wo.created_at).toLocaleDateString()}`,
-              url:      `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
-              cta:      'Review Work Order →',
+              body:     `${wo.category.replace(/_/g, ' ')} has been open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without an update and was auto-escalated to Urgent priority.`,
+              details: [
+                { label: 'Opened', value: new Date(wo.created_at).toLocaleDateString() },
+              ],
+              ctaLabel: 'Review Work Order →',
+              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
             }),
           })
         }
@@ -140,13 +142,14 @@ export const dailyWorkOrderOps = inngest.createFunction(
             from:    FROM,
             to:      pmEmail,
             subject: `Repeat maintenance issue — ${group.category.replace(/_/g, ' ')} (${group.count}x in 90 days)`,
-            html:    buildScheduleEmail({
+            html:    await renderPmAlert({
               heading:  'Repeat maintenance issue detected',
-              name:     group.category.replace(/_/g, ' '),
-              daysText: `<strong>${group.count} work orders</strong> in the last 90 days`,
-              dueDate:  'Last 90 days',
-              url:      `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
-              cta:      'View Work Orders →',
+              body:     `${group.category.replace(/_/g, ' ')} has come up ${group.count} times in the last 90 days at this property — this may indicate a recurring problem worth investigating.`,
+              details: [
+                { label: 'Work Orders', value: `${group.count} in the last 90 days` },
+              ],
+              ctaLabel: 'View Work Orders →',
+              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
             }),
           })
         }
@@ -259,15 +262,16 @@ export const dailyWorkOrderOps = inngest.createFunction(
               from:    FROM,
               to:      pmEmail,
               subject: `Work order auto-created — ${schedule.name} at ${property?.name}`,
-              html:    buildScheduleEmail({
+              html:    await renderPmAlert({
                 heading:  'Scheduled maintenance work order created',
-                name:     schedule.name,
-                daysText: 'due today',
-                property: property?.name,
-                dueDate:  new Date(schedule.next_due_date! + 'T00:00:00').toLocaleDateString(),
-                cost:     schedule.estimated_cost,
-                url:      `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
-                cta:      'View Work Order →',
+                body:     `${schedule.name} is due today — a work order has been created.`,
+                details: [
+                  { label: 'Property',  value: property?.name ?? null },
+                  { label: 'Due Date',  value: new Date(schedule.next_due_date! + 'T00:00:00').toLocaleDateString() },
+                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
+                ],
+                ctaLabel: 'View Work Order →',
+                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
               }),
             })
           }

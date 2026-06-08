@@ -2,7 +2,8 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calculateHealthScore } from '@/lib/assets/health-score'
-import { getPmEmail, buildScheduleEmail } from '@/lib/inngest/helpers'
+import { getPmEmail } from '@/lib/inngest/helpers'
+import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 // Alert thresholds (days relative to expiry): positive = before, negative = after
 const COMPLIANCE_ALERT_THRESHOLDS = [30, 14, 7, 0, -14, -30]
@@ -143,13 +144,15 @@ export const dailyAssetHealth = inngest.createFunction(
                   from:    FROM,
                   to:      pmEmail,
                   subject: `Asset health alert — ${c.asset_type.replace(/_/g, ' ')} dropped to ${label}`,
-                  html: buildScheduleEmail({
+                  html: await renderPmAlert({
                     heading:  'Asset health score dropped',
-                    name:     c.asset_type.replace(/_/g, ' '),
-                    daysText: `score dropped from <strong>${c.oldScore}</strong> to <strong>${c.newScore}/100 (${label})</strong>`,
-                    dueDate:  'As of today',
-                    url:      `${process.env.NEXT_PUBLIC_APP_URL}/properties/${c.property_id}`,
-                    cta:      'View Property →',
+                    body:     `${c.asset_type.replace(/_/g, ' ')} health score dropped from ${c.oldScore} to ${c.newScore}/100 (${label}).`,
+                    details: [
+                      { label: 'Previous Score', value: `${c.oldScore}/100` },
+                      { label: 'Current Score',  value: `${c.newScore}/100 (${label})` },
+                    ],
+                    ctaLabel: 'View Property →',
+                    ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/properties/${c.property_id}`,
                   }),
                 })
               }
@@ -210,10 +213,10 @@ export const dailyAssetHealth = inngest.createFunction(
           const isPast  = hitThreshold < 0
           const daysAbs = Math.abs(hitThreshold)
           const daysText = hitThreshold === 0
-            ? 'expires <strong>today</strong>'
+            ? 'expires today'
             : isPast
-            ? `expired <strong>${daysAbs} day${daysAbs !== 1 ? 's' : ''} ago</strong>`
-            : `expires in <strong>${daysAbs} day${daysAbs !== 1 ? 's' : ''}</strong>`
+            ? `expired ${daysAbs} day${daysAbs !== 1 ? 's' : ''} ago`
+            : `expires in ${daysAbs} day${daysAbs !== 1 ? 's' : ''}`
 
           const subject = isPast
             ? `⛔ Compliance doc expired — ${vendor?.name} (${daysAbs}d overdue)`
@@ -221,18 +224,21 @@ export const dailyAssetHealth = inngest.createFunction(
             ? `⚠️ Compliance doc expires TODAY — ${vendor?.name}`
             : `⚠️ Compliance expiring in ${daysAbs}d — ${vendor?.name}`
 
+          const docLabel = `${doc.document_name} (${doc.document_type.replace(/_/g, ' ')})`
+
           await resend.emails.send({
             from:    FROM,
             to:      pmEmail,
             subject,
-            html: buildScheduleEmail({
+            html: await renderPmAlert({
               heading:  isPast ? 'Compliance document expired' : 'Compliance document expiring soon',
-              name:     `${doc.document_name} (${doc.document_type.replace(/_/g, ' ')})`,
-              daysText,
-              vendor:   vendor?.name,
-              dueDate:  doc.expiry_date,
-              url:      `${process.env.NEXT_PUBLIC_APP_URL}/vendors/${doc.vendor_id}`,
-              cta:      'Update Compliance Docs →',
+              body:     `${docLabel} for ${vendor?.name ?? 'this vendor'} ${daysText}.`,
+              details: [
+                { label: 'Vendor',      value: vendor?.name ?? null },
+                { label: 'Expiry Date', value: doc.expiry_date },
+              ],
+              ctaLabel: 'Update Compliance Docs →',
+              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/vendors/${doc.vendor_id}`,
             }),
           })
         }

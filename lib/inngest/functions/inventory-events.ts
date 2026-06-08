@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { getPmEmail } from '@/lib/inngest/helpers'
+import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 // ── Purchase Order Approved ───────────────────────────────────────────────────
 
@@ -174,40 +175,26 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
       if (!pmEmail) return
 
-      const itemRows = belowParItems
-        .map((item) => `
-          <tr>
-            <td style="padding:8px;border-bottom:1px solid #e2e8f0">${item.name}</td>
-            <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center">${item.current_quantity} ${item.unit}</td>
-            <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center">${item.par_level} ${item.unit}</td>
-            <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:600;color:#093b31">${item.quantity_to_buy} ${item.unit}</td>
-          </tr>
-        `)
-        .join('')
-
       await resend.emails.send({
         from:    FROM,
         to:      pmEmail,
         subject: `📦 Restock needed — ${property?.name} (${belowParItems.length} item${belowParItems.length !== 1 ? 's' : ''})`,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2>Inventory below par at ${property?.name}</h2>
-            <p>A crew member just submitted an inventory count. The following items need restocking:</p>
-            <table style="border-collapse:collapse;width:100%;margin:16px 0">
-              <thead>
-                <tr style="background:#f1f5f9">
-                  <th style="padding:10px 8px;text-align:left;font-size:12px;color:#64748b;text-transform:uppercase">Item</th>
-                  <th style="padding:10px 8px;text-align:center;font-size:12px;color:#64748b;text-transform:uppercase">In Stock</th>
-                  <th style="padding:10px 8px;text-align:center;font-size:12px;color:#64748b;text-transform:uppercase">Par Level</th>
-                  <th style="padding:10px 8px;text-align:center;font-size:12px;color:#64748b;text-transform:uppercase">Need to Buy</th>
-                </tr>
-              </thead>
-              <tbody>${itemRows}</tbody>
-            </table>
-            <p style="color:#64748b;font-size:14px">Order however works best for you — Amazon, local store, or your usual supplier.</p>
-            <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/inventory?property=${property_id}&po=${purchaseOrderId}" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">View Purchase Order →</a></p>
-          </div>
-        `,
+        html: await renderPmAlert({
+          heading:  `Inventory below par at ${property?.name}`,
+          body:     'A crew member just submitted an inventory count. The following items need restocking:',
+          table: {
+            headers: ['Item', 'In Stock', 'Par Level', 'Need to Buy'],
+            rows: belowParItems.map((item) => [
+              item.name,
+              `${item.current_quantity} ${item.unit}`,
+              `${item.par_level} ${item.unit}`,
+              `${item.quantity_to_buy} ${item.unit}`,
+            ]),
+          },
+          note:     'Order however works best for you — Amazon, local store, or your usual supplier.',
+          ctaLabel: 'View Purchase Order →',
+          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/inventory?property=${property_id}&po=${purchaseOrderId}`,
+        }),
       })
     })
 
