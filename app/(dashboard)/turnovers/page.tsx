@@ -21,6 +21,7 @@ export default async function TurnoversPage() {
     { data: properties },
     { data: crew },
     { data: bookings },
+    { data: crewAvailability },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -59,6 +60,12 @@ export default async function TurnoversPage() {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
+    supabase
+      .from('crew_availability')
+      .select('crew_member_id, available_date, is_available')
+      .eq('org_id', membership.org_id)
+      .gte('available_date', rangeStart)
+      .lte('available_date', rangeEnd),
   ])
 
   const propertyMap = Object.fromEntries(
@@ -77,6 +84,8 @@ export default async function TurnoversPage() {
         properties={(properties ?? []) as any}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         bookings={(bookings ?? []) as any}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        crewAvailability={(crewAvailability ?? []) as any}
         orgId={membership.org_id}
       />
     </div>

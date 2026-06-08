@@ -15,6 +15,7 @@ export default async function MaintenancePage() {
     { data: crewMembers },
     { data: propertyAssets },
     { data: vendorCompliance },
+    { data: templates },
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -84,6 +85,19 @@ export default async function MaintenancePage() {
       .from('vendor_compliance_status')
       .select('vendor_id, compliance_status')
       .eq('org_id', membership.org_id),
+
+    supabase
+      .from('maintenance_schedule_templates')
+      .select(`
+        id, org_id, name, description, is_system,
+        maintenance_schedule_template_items (
+          id, name, description, schedule_frequency, vendor_specialty_hint,
+          estimated_cost, is_optional_flag, sort_order
+        )
+      `)
+      .order('is_system', { ascending: false })
+      .order('name')
+      .order('sort_order', { referencedTable: 'maintenance_schedule_template_items', ascending: true }),
   ])
 
   return (
@@ -92,6 +106,8 @@ export default async function MaintenancePage() {
       properties={properties ?? []}
       vendors={vendors ?? []}
       schedules={schedules ?? []}
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      templates={(templates ?? []) as any}
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       crewMembers={(crewMembers ?? []) as any}
       propertyAssets={propertyAssets ?? []}

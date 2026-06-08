@@ -1,8 +1,12 @@
 'use client'
 import { useEffect }           from 'react'
+import Link                    from 'next/link'
+import { usePathname }         from 'next/navigation'
+import { CalendarCheck, CalendarDays } from 'lucide-react'
 import { PowerSyncContext }    from '@powersync/react'
 import { usePowerSync }        from '@powersync/react'
 import { getPowerSyncDb }      from '@/lib/powersync/client'
+import { cn }                  from '@/lib/utils'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -69,8 +73,39 @@ export function CrewShell({
           <SyncStatus />
         </header>
         <main className="flex-1 px-4 py-6">{children}</main>
+        <CrewBottomNav />
       </div>
     </PowerSyncContext.Provider>
+  )
+}
+
+function CrewBottomNav() {
+  const pathname = usePathname()
+
+  const tabs = [
+    { href: '/crew',              label: 'Assignments', icon: CalendarCheck },
+    { href: '/crew/availability', label: 'Availability', icon: CalendarDays },
+  ]
+
+  return (
+    <nav className="sticky bottom-0 bg-white border-t border-accent-200 flex items-center">
+      {tabs.map(({ href, label, icon: Icon }) => {
+        const active = href === '/crew' ? pathname === '/crew' : pathname.startsWith(href)
+        return (
+          <Link
+            key={href}
+            href={href}
+            className={cn(
+              'flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors',
+              active ? 'text-brand-800' : 'text-accent-400 hover:text-accent-600'
+            )}
+          >
+            <Icon className="w-5 h-5" />
+            {label}
+          </Link>
+        )
+      })}
+    </nav>
   )
 }
 

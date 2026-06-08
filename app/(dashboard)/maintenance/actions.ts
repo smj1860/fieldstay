@@ -6,7 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import type { WoStatus, ScheduleFrequency, ScheduleType } from '@/types/database'
+import type { WoStatus, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
 
 export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string }
 
@@ -863,4 +863,119 @@ export async function deleteMaintenanceSchedule(
 
   revalidatePath('/maintenance')
   return { success: true }
+}
+
+// ── Maintenance Schedule Template Broadcasting ───────────────────────────────
+
+export type BroadcastResult = {
+  error?: string
+  success?: boolean
+  created?: number
+  skipped?: number
+}
+
+// Idempotent: skip if a maintenance_schedule with the same name
+// already exists on the property
+export async function broadcastMaintenanceTemplate(
+  templateId:  string,
+  propertyIds: string[],
+): Promise<BroadcastResult> {
+  const { supabase, user, membership } = await requireOrgMember()
+
+  if (propertyIds.length === 0) return { error: 'Select at least one property' }
+
+  const { data: template } = await supabase
+    .from('maintenance_schedule_templates')
+    .select('id, org_id, is_system')
+    .eq('id', templateId)
+    .single()
+
+  if (!template || (!template.is_system && template.org_id !== membership.org_id)) {
+    return { error: 'Template not found' }
+  }
+
+  const { data: items } = await supabase
+    .from('maintenance_schedule_template_items')
+    .select('name, description, schedule_frequency, vendor_specialty_hint, estimated_cost, sort_order')
+    .eq('template_id', templateId)
+    .order('sort_order', { ascending: true })
+
+  if (!items || items.length === 0) return { error: 'Template has no items' }
+
+  const { data: properties } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('org_id', membership.org_id)
+    .in('id', propertyIds)
+
+  if (!properties || properties.length === 0) return { error: 'No matching properties found' }
+
+  const { data: existingSchedules } = await supabase
+    .from('maintenance_schedules')
+    .select('property_id, name')
+    .in('property_id', properties.map((p) => p.id))
+
+  const existingNames = new Set((existingSchedules ?? []).map((s) => `${s.property_id}::${s.name}`))
+
+  const nextDueDate = new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]
+
+  const rowsToInsert: Array<{
+    property_id:           string
+    org_id:                string
+    name:                  string
+    description:           string | null
+    schedule_type:         ScheduleType
+    frequency:             ScheduleFrequency
+    vendor_specialty_hint: VendorSpecialty | null
+    estimated_cost:        number | null
+    auto_create_wo:        boolean
+    next_due_date:         string
+    is_active:             boolean
+  }> = []
+  let skipped = 0
+
+  for (const property of properties) {
+    for (const item of items) {
+      const key = `${property.id}::${item.name}`
+      if (existingNames.has(key)) {
+        skipped++
+        continue
+      }
+
+      rowsToInsert.push({
+        property_id:           property.id,
+        org_id:                membership.org_id,
+        name:                  item.name,
+        description:           item.description,
+        schedule_type:         'routine',
+        frequency:             item.schedule_frequency,
+        vendor_specialty_hint: item.vendor_specialty_hint,
+        estimated_cost:        item.estimated_cost,
+        auto_create_wo:        true,
+        next_due_date:         nextDueDate,
+        is_active:             true,
+      })
+    }
+  }
+
+  if (rowsToInsert.length > 0) {
+    const { error } = await supabase.from('maintenance_schedules').insert(rowsToInsert)
+    if (error) {
+      console.error('[broadcastMaintenanceTemplate]', error)
+      return { error: 'Failed to broadcast template' }
+    }
+  }
+
+  await inngest.send({
+    name: 'maintenance/template-broadcast' as const,
+    data: {
+      org_id:       membership.org_id,
+      template_id:  templateId,
+      property_ids: properties.map((p) => p.id),
+      triggered_by: user.id,
+    },
+  })
+
+  revalidatePath('/maintenance')
+  return { success: true, created: rowsToInsert.length, skipped }
 }

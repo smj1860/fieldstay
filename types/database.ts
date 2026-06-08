@@ -96,6 +96,7 @@ export interface Organization {
   preferred_retailer:           string | null
   kroger_location_name:         string | null
   auto_assign_mode:             AutoAssignMode
+  comms_log_retention_days:     number
   created_at:                   string
   updated_at:                   string
 }
@@ -224,6 +225,16 @@ export interface CrewMember {
   invite_accepted_at: string | null
   created_at:         string
   updated_at:         string
+}
+
+export interface CrewAvailability {
+  id:             string
+  org_id:         string
+  crew_member_id: string
+  available_date: string
+  is_available:   boolean
+  notes:          string | null
+  created_at:     string
 }
 
 export interface Vendor {
@@ -508,6 +519,28 @@ export interface MaintenanceSchedule {
   updated_at:          string
 }
 
+export interface MaintenanceScheduleTemplate {
+  id:          string
+  org_id:      string
+  name:        string
+  description: string | null
+  is_system:   boolean
+  created_at:  string
+}
+
+export interface MaintenanceScheduleTemplateItem {
+  id:                    string
+  template_id:           string
+  name:                  string
+  description:           string | null
+  schedule_frequency:    ScheduleFrequency
+  vendor_specialty_hint: VendorSpecialty | null
+  estimated_cost:        number | null
+  is_optional_flag:      string | null
+  sort_order:            number
+  created_at:            string
+}
+
 export interface GuestMessageTemplate {
   id:          string
   property_id: string
@@ -599,6 +632,7 @@ export interface CommunicationLog {
   logged_by_user_id: string | null
   communicated_at:   string
   created_at:        string
+  deleted_at:        string | null
 }
 
 // ── Inventory template item ──────────────────────────────────────────────────
@@ -825,6 +859,7 @@ export interface Database {
       ical_feeds:                  { Row: IcalFeed;                 Insert: Partial<IcalFeed>;                 Update: Partial<IcalFeed>;                 Relationships: [] }
       bookings:                    { Row: Booking;                  Insert: Partial<Booking>;                  Update: Partial<Booking>;                  Relationships: [] }
       crew_members:                { Row: CrewMember;               Insert: Partial<CrewMember>;               Update: Partial<CrewMember>;               Relationships: [] }
+      crew_availability:           { Row: CrewAvailability;         Insert: Partial<CrewAvailability>;         Update: Partial<CrewAvailability>;         Relationships: [] }
       vendors:                     { Row: Vendor;                   Insert: Partial<Vendor>;                   Update: Partial<Vendor>;                   Relationships: [] }
       checklist_templates:         { Row: ChecklistTemplate;        Insert: Partial<ChecklistTemplate>;        Update: Partial<ChecklistTemplate>;        Relationships: [] }
       checklist_template_sections: { Row: ChecklistTemplateSection; Insert: Partial<ChecklistTemplateSection>; Update: Partial<ChecklistTemplateSection>; Relationships: [] }
@@ -844,6 +879,8 @@ export interface Database {
       work_order_updates:          { Row: WorkOrderUpdate;          Insert: Partial<WorkOrderUpdate>;          Update: Partial<WorkOrderUpdate>;          Relationships: [] }
       work_order_photos:           { Row: WorkOrderPhoto;           Insert: Partial<WorkOrderPhoto>;           Update: Partial<WorkOrderPhoto>;           Relationships: [] }
       maintenance_schedules:       { Row: MaintenanceSchedule;      Insert: Partial<MaintenanceSchedule>;      Update: Partial<MaintenanceSchedule>;      Relationships: [] }
+      maintenance_schedule_templates:      { Row: MaintenanceScheduleTemplate;      Insert: Partial<MaintenanceScheduleTemplate>;      Update: Partial<MaintenanceScheduleTemplate>;      Relationships: [] }
+      maintenance_schedule_template_items: { Row: MaintenanceScheduleTemplateItem;  Insert: Partial<MaintenanceScheduleTemplateItem>;  Update: Partial<MaintenanceScheduleTemplateItem>;  Relationships: [] }
       guest_message_templates:     { Row: GuestMessageTemplate;     Insert: Partial<GuestMessageTemplate>;     Update: Partial<GuestMessageTemplate>;     Relationships: [] }
       guest_messages_sent:         { Row: GuestMessageSent;         Insert: Partial<GuestMessageSent>;         Update: Partial<GuestMessageSent>;         Relationships: [] }
       owner_transactions:          { Row: OwnerTransaction;         Insert: Partial<OwnerTransaction>;         Update: Partial<OwnerTransaction>;         Relationships: [] }
