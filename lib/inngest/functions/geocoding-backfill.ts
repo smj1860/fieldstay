@@ -12,6 +12,14 @@ async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+// ⚠️ Cross-tenant by design: scans and updates lat/lng for every org's properties
+// and vendors in a single run, since geocoding only writes non-sensitive coordinate
+// data and batching per-org would multiply Mapbox API calls. This must remain an
+// internal admin/ops operation — it must NEVER be triggerable from the PM dashboard
+// UI or any org-scoped route handler/server action. Only fire `geocoding/backfill-requested`
+// from internal admin tooling that bypasses normal org auth (e.g. a one-off ops script
+// or a service-role-gated route). If this function is ever extended to read or expose
+// fields beyond id/zip/lat/lng, it must be re-scoped to a single org_id first.
 export const geocodingBackfill = inngest.createFunction(
   { id: 'geocoding-backfill', name: 'Backfill Property & Vendor Geocodes', retries: 1 },
   { event: 'geocoding/backfill-requested' },

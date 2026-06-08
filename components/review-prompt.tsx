@@ -9,10 +9,9 @@ const REVIEW_URL = 'mailto:feedback@fieldstay.app?subject=FieldStay Feedback'
 interface ReviewPromptProps {
   milestone: string
   message:   string
-  orgId:     string
 }
 
-export function ReviewPrompt({ milestone, message, orgId }: ReviewPromptProps) {
+export function ReviewPrompt({ milestone, message }: ReviewPromptProps) {
   const [hidden, setHidden] = useState(false)
 
   if (hidden) return null
@@ -21,7 +20,7 @@ export function ReviewPrompt({ milestone, message, orgId }: ReviewPromptProps) {
     await fetch('/api/milestones/review-clicked', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ milestone, orgId }),
+      body:    JSON.stringify({ milestone }),
     }).catch(() => {})
     window.open(REVIEW_URL, '_blank', 'noopener,noreferrer')
     setHidden(true)
@@ -31,7 +30,7 @@ export function ReviewPrompt({ milestone, message, orgId }: ReviewPromptProps) {
     await fetch('/api/milestones/dismiss', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ milestone, orgId }),
+      body:    JSON.stringify({ milestone }),
     }).catch(() => {})
     setHidden(true)
   }
