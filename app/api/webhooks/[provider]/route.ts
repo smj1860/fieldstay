@@ -21,6 +21,7 @@ import { NextResponse, type NextRequest }            from 'next/server'
 import { getProvider }                               from '@/lib/integrations/registry'
 import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations/vault'
 import { logAuditEvent }                             from '@/lib/audit'
+import { createServiceClient }                       from '@/lib/supabase/server'
 
 export async function POST(
   request: NextRequest,
@@ -115,6 +116,37 @@ export async function POST(
 
     // Return 200 immediately after revocation
     return NextResponse.json({ received: true }, { status: 200 })
+  }
+
+  // ── 5a. Dedup OwnerRez webhooks using payload.id ──────────
+  //    OwnerRez retries failed webhooks up to 10 times (exponential backoff).
+  //    A successful DB write that times out before the 2-second response window
+  //    generates retries — all of which we must discard after the first success.
+  if (providerId === 'ownerrez') {
+    const webhookId = payload.id != null ? String(payload.id) : null
+
+    if (webhookId) {
+      const admin = createServiceClient()
+
+      // Cleanup old records (>72 hours) before inserting — TTL maintenance
+      await admin
+        .from('ownerrez_processed_webhooks')
+        .delete()
+        .lt('processed_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
+
+      const { error: dedupErr } = await admin
+        .from('ownerrez_processed_webhooks')
+        .insert({ webhook_id: webhookId })
+
+      if (dedupErr) {
+        if (dedupErr.code === '23505') {
+          // Unique constraint violation — already processed; discard the retry
+          return NextResponse.json({ received: true, duplicate: true }, { status: 200 })
+        }
+        // Non-fatal dedup failure — log and continue to avoid losing the event
+        console.error(`[Webhook:ownerrez] Dedup insert failed: ${dedupErr.message}`)
+      }
+    }
   }
 
   // ── 5. Delegate provider-specific events ──────────────────

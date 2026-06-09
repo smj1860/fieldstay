@@ -10,6 +10,7 @@
  *  - Paginates automatically — all list methods return a complete array
  */
 
+import { Redis }               from '@upstash/redis'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { readIntegrationToken }  from '../vault'
 import { TokenRevokedError, RateLimitError } from '../types'
@@ -24,6 +25,50 @@ import type {
 const BASE_URL   = 'https://api.ownerrez.com'
 const PROVIDER   = 'ownerrez'
 
+// ── Shared IP rate-limit budget tracker ──────────────────────────────────────
+//
+// OwnerRez limits 300 requests per 5-minute rolling window per IP address —
+// not per OAuth token. All FieldStay tenants share a single Vercel deployment
+// IP. A single large tenant triggering an initial sync can exhaust the pool
+// mid-loop, causing 429s for every other tenant in the same cron tick.
+//
+// This Upstash counter proactively throws RateLimitError at 270/300 (10%
+// headroom) before OwnerRez issues a real 429, keeping us below the hard limit.
+
+const RATE_LIMIT_KEY    = 'ownerrez:ip:request_count'
+const RATE_LIMIT_WINDOW = 5 * 60   // 5 minutes in seconds
+const RATE_LIMIT_BUDGET = 270      // 270/300 — 10% headroom before auto-disable
+
+let _redis: Redis | null = null
+function getRedis(): Redis {
+  if (!_redis) {
+    _redis = new Redis({
+      url:   process.env.upstash_fieldstay_KV_REST_API_URL!,
+      token: process.env.upstash_fieldstay_KV_REST_API_TOKEN!,
+    })
+  }
+  return _redis
+}
+
+async function checkAndIncrementRequestBudget(): Promise<void> {
+  const redis    = getRedis()
+  const pipeline = redis.pipeline()
+  pipeline.incr(RATE_LIMIT_KEY)
+  pipeline.ttl(RATE_LIMIT_KEY)
+  const [count, ttl] = await pipeline.exec() as [number, number]
+
+  // Set window expiry only on the first request (ttl = -1 means no expiry set yet)
+  if (ttl === -1) {
+    await redis.expire(RATE_LIMIT_KEY, RATE_LIMIT_WINDOW)
+  }
+
+  if (count > RATE_LIMIT_BUDGET) {
+    // Proactive throw — tell callers how long to wait for the window to expire
+    const remainingSeconds = ttl > 0 ? ttl : RATE_LIMIT_WINDOW
+    throw new RateLimitError(remainingSeconds)
+  }
+}
+
 export class OwnerRezApiClient {
   constructor(private readonly userId: string) {}
 
@@ -33,6 +78,11 @@ export class OwnerRezApiClient {
     path: string,
     params?: Record<string, string | number | undefined>
   ): Promise<T> {
+    // HIGH-2: check shared IP budget before making the request.
+    // Throws RateLimitError proactively at 270/300 to prevent exhausting the pool
+    // shared by all tenants on the same Vercel deployment IP.
+    await checkAndIncrementRequestBudget()
+
     const clientId = process.env.OWNERREZ_CLIENT_ID
     if (!clientId) throw new Error('OWNERREZ_CLIENT_ID is not set')
 

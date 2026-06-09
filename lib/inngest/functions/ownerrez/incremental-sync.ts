@@ -8,24 +8,26 @@
  * For each active OwnerRez connection:
  *  1. Read sync_cursor from metadata
  *  2. Fetch bookings + guests since cursor using since_utc
- *  3. Upsert results
- *  4. Update sync_cursor and last_synced_at
+ *  3. Resolve FieldStay property_id from OwnerRez property external IDs
+ *  4. Upsert results
+ *  5. Update sync_cursor (using pre-fetch timestamp) and last_synced_at
  *
  * Each user runs in its own step.run() so failures are isolated.
+ * step.sleep() is called at the TOP LEVEL only — never inside step.run().
  */
 
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
-import { RateLimitError } from '@/lib/integrations/types'
+import { RateLimitError }      from '@/lib/integrations/types'
 
 const PROVIDER = 'ownerrez'
 
 export const ownerRezIncrementalSync = inngest.createFunction(
   {
-    id:      'ownerrez-incremental-sync',
-    name:    'OwnerRez Incremental Sync',
-    retries: 3,
+    id:          'ownerrez-incremental-sync',
+    name:        'OwnerRez Incremental Sync',
+    retries:     3,
     concurrency: { limit: 5 },
   },
   [
@@ -35,7 +37,6 @@ export const ownerRezIncrementalSync = inngest.createFunction(
   async ({ step, logger }) => {
     const supabase = createServiceClient()
 
-    // Fetch all active OwnerRez connections
     const { data: connections } = await supabase
       .from('integration_connections')
       .select('id, user_id, org_id, metadata')
@@ -50,19 +51,56 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     let syncedCount = 0
 
     for (const conn of connections) {
+      // HIGH-1: rateLimited flag set inside step.run; sleep called outside
+      let rateLimited       = false
+      let retryAfterSeconds = 60
+
       await step.run(`sync-user-${conn.user_id}`, async () => {
-        const metadata   = (conn.metadata ?? {}) as Record<string, unknown>
-        const sinceUtc   = (metadata['sync_cursor'] as string | undefined) ?? undefined
-        const client     = new OwnerRezApiClient(conn.user_id)
+        const metadata = (conn.metadata ?? {}) as Record<string, unknown>
+        const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
+        const client   = new OwnerRezApiClient(conn.user_id)
+
+        // MEDIUM-3: capture timestamp BEFORE the fetch to close the race window.
+        // Bookings modified during the fetch have a modified_at between fetchStartedAt
+        // and the end of the fetch. Using fetchStartedAt as the new cursor ensures
+        // they are re-fetched on the next incremental run.
+        const fetchStartedAt = new Date().toISOString()
 
         try {
-          // Fetch bookings since cursor (include_guest captures name/email directly)
           const bookings = await client.getBookings({ sinceUtc, includeGuest: true })
 
           if (bookings.length) {
+            // CRITICAL-2: resolve FieldStay property IDs from OwnerRez external IDs.
+            // The previous code hardcoded property_id: null, overwriting the resolved
+            // ID set by the initial sync on every incremental pass.
+            const externalPropertyIds = [
+              ...new Set(
+                bookings
+                  .map((b) => b.property_id)
+                  .filter((id): id is number => id != null)
+                  .map(String)
+              ),
+            ]
+
+            const externalToFsId: Record<string, string> = {}
+            if (externalPropertyIds.length) {
+              const { data: fsProps } = await supabase
+                .from('properties')
+                .select('id, external_id')
+                .eq('org_id', conn.org_id)
+                .eq('external_source', PROVIDER)
+                .in('external_id', externalPropertyIds)
+
+              for (const p of fsProps ?? []) {
+                if (p.external_id) externalToFsId[p.external_id] = p.id
+              }
+            }
+
             const bookingRows = bookings.map((b) => ({
               org_id:          conn.org_id,
-              property_id:     null as string | null,
+              property_id:     b.property_id != null
+                                 ? (externalToFsId[String(b.property_id)] ?? null)
+                                 : null,
               guest_name:      b.guest?.name  ?? null,
               guest_email:     b.guest?.email ?? null,
               checkin_date:    b.arrival,
@@ -83,39 +121,52 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             }
           }
 
-          // Update sync cursor
-          await supabase
+          // MEDIUM-3: use pre-fetch timestamp as cursor — not post-fetch
+          const { error: cursorErr } = await supabase
             .from('integration_connections')
             .update({
               metadata: {
                 ...metadata,
-                sync_cursor:    new Date().toISOString(),
+                sync_cursor:    fetchStartedAt,
                 last_synced_at: new Date().toISOString(),
               },
             })
             .eq('id', conn.id)
 
-          logger.info(
-            `[OwnerRez:${conn.user_id}] sync complete — ${bookings.length} bookings`
-          )
+          if (cursorErr) {
+            // Non-fatal: data was written correctly; log and continue
+            logger.error(`[OwnerRez:${conn.user_id}] cursor update failed: ${cursorErr.message}`)
+          }
+
+          logger.info(`[OwnerRez:${conn.user_id}] sync complete — ${bookings.length} bookings`)
           syncedCount++
 
         } catch (err) {
           if (err instanceof RateLimitError) {
-            logger.warn(`[OwnerRez:${conn.user_id}] Rate limited — retry after ${err.retryAfter}s`)
-            await step.sleep(`rate-limit-${conn.user_id}`, `${err.retryAfter}s`)
-            throw err // Inngest will retry this step
+            // HIGH-1: do NOT call step.sleep here — step primitives cannot be nested
+            // inside step.run. Set a flag; sleep is called at the top level below.
+            rateLimited       = true
+            retryAfterSeconds = err.retryAfter
+            logger.warn(`[OwnerRez:${conn.user_id}] Rate limited — sleeping ${err.retryAfter}s`)
+            return  // exit this step cleanly without failing it
           }
           logger.error(
             `[OwnerRez:${conn.user_id}] sync failed: ${err instanceof Error ? err.message : String(err)}`
           )
-          // Mark connection as error so UI reflects the issue
           await supabase
             .from('integration_connections')
             .update({ status: 'error' })
             .eq('id', conn.id)
         }
       })
+
+      // HIGH-1: step.sleep called at top level — NOT inside step.run
+      if (rateLimited) {
+        await step.sleep(
+          `rate-limit-backoff-${conn.user_id}`,
+          `${retryAfterSeconds}s`   // string duration, NOT milliseconds
+        )
+      }
     }
 
     return { synced: syncedCount, total: connections.length }
@@ -126,16 +177,16 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
 function mapBookingStatus(status: string): string {
   const s = status.toLowerCase()
-  if (s === 'confirmed') return 'confirmed'
+  if (s === 'confirmed')                     return 'confirmed'
   if (s === 'cancelled' || s === 'canceled') return 'cancelled'
-  if (s === 'tentative') return 'tentative'
+  if (s === 'tentative')                     return 'tentative'
   return 'confirmed'
 }
 
 function mapChannelToSource(channel?: string): string {
   if (!channel) return 'other'
   const c = channel.toLowerCase()
-  if (c.includes('airbnb'))                         return 'airbnb'
+  if (c.includes('airbnb'))                          return 'airbnb'
   if (c.includes('vrbo') || c.includes('homeaway')) return 'vrbo'
   if (c.includes('booking'))                        return 'booking_com'
   if (c.includes('direct'))                         return 'direct'
