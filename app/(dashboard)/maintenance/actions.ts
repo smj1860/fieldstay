@@ -218,7 +218,7 @@ export async function updateWorkOrder(
     portal_enabled:  boolean
   }
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const priority = PriorityLevelSchema.safeParse(data.priority).data ?? 'medium'
 
@@ -237,6 +237,14 @@ export async function updateWorkOrder(
     .eq('org_id', membership.org_id)
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.updated',
+    targetType: 'work_order',
+    targetId:   workOrderId,
+  })
 
   revalidatePath(`/maintenance/${workOrderId}`)
   revalidatePath('/maintenance')

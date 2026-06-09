@@ -236,7 +236,7 @@ export async function createAsset(
   formData: FormData
 ): Promise<AssetActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgMember()
 
     const name              = (formData.get('name') as string)?.trim()
     const asset_type        = formData.get('asset_type') as AssetType
@@ -287,7 +287,7 @@ export async function createAsset(
       )
     }
 
-    const { error } = await supabase
+    const { data: asset, error } = await supabase
       .from('property_assets')
       .insert({
         property_id:               propertyId,
@@ -310,8 +310,19 @@ export async function createAsset(
         depreciation_method:       'macrs',
         salvage_value:             0,
       })
+      .select('id')
+      .single()
 
     if (error) return { error: error.message }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.created',
+      targetType: 'property_asset',
+      targetId:   asset?.id,
+      metadata:   { property_id: propertyId, asset_type },
+    })
 
     revalidatePath(`/properties/${propertyId}`)
     return { success: true }
@@ -328,7 +339,7 @@ export async function updateAsset(
   formData: FormData
 ): Promise<AssetActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgMember()
 
     const name              = (formData.get('name') as string)?.trim()
     const make              = (formData.get('make') as string)?.trim() || null
@@ -358,6 +369,15 @@ export async function updateAsset(
       .eq('org_id', membership.org_id)
 
     if (error) return { error: error.message }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.updated',
+      targetType: 'property_asset',
+      targetId:   assetId,
+      metadata:   { property_id: propertyId },
+    })
 
     revalidatePath(`/properties/${propertyId}`)
     return { success: true }
@@ -398,7 +418,7 @@ export async function bulkImportAssets(
   rows:       CsvAssetRow[],
 ): Promise<{ imported: number; error?: string }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgMember()
 
     const { data: standards } = await supabase
       .from('asset_type_standards')
@@ -435,6 +455,15 @@ export async function bulkImportAssets(
 
     const { error } = await supabase.from('property_assets').insert(insertRows)
     if (error) return { imported: 0, error: error.message }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.bulk_imported',
+      targetType: 'property_asset',
+      targetId:   propertyId,
+      metadata:   { count: rows.length, property_id: propertyId },
+    })
 
     revalidatePath(`/properties/${propertyId}`)
     return { imported: rows.length }

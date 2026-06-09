@@ -188,7 +188,7 @@ export async function toggleTransactionVisibility(
   txnId:   string,
   visible: boolean
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { error } = await supabase
     .from('owner_transactions')
@@ -197,6 +197,15 @@ export async function toggleTransactionVisibility(
     .eq('org_id', membership.org_id)
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'owner.transaction.visibility_changed',
+    targetType: 'owner_transaction',
+    targetId:   txnId,
+    metadata:   { visible },
+  })
 
   revalidatePath('/owners')
   return {}
