@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
+import { inngest } from '@/lib/inngest/client'
 
 export type ChecklistState = { error?: string; success?: boolean }
 
@@ -90,76 +91,20 @@ export async function broadcastChecklistTemplate(
   sourcePropertyId: string,
   targetPropertyIds: string[]
 ): Promise<{ broadcast: number; error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, membership } = await requireOrgMember()
 
-  const { data: sourceTemplate } = await supabase
-    .from('checklist_templates')
-    .select(`
-      id, name,
-      checklist_template_sections(
-        name, sort_order, requires_section_photo,
-        checklist_template_items(task, requires_photo, notes, sort_order)
-      )
-    `)
-    .eq('property_id', sourcePropertyId)
-    .eq('org_id', membership.org_id)
-    .eq('is_default', true)
-    .single()
+  if (!targetPropertyIds.length) return { broadcast: 0 }
 
-  if (!sourceTemplate) return { broadcast: 0, error: 'Source template not found' }
-
-  let broadcast = 0
-
-  for (const targetId of targetPropertyIds) {
-    // Upsert template for target property
-    const { data: newTemplate } = await supabase
-      .from('checklist_templates')
-      .upsert({
-        property_id: targetId,
-        org_id:      membership.org_id,
-        name:        sourceTemplate.name,
-        is_default:  true,
-      }, { onConflict: 'property_id,org_id' })
-      .select('id')
-      .single()
-
-    if (!newTemplate) continue
-
-    // Delete existing sections (full replace)
-    await supabase
-      .from('checklist_template_sections')
-      .delete()
-      .eq('template_id', newTemplate.id)
-
-    // Re-insert sections and items
-    for (const section of (sourceTemplate.checklist_template_sections ?? [])) {
-      const { data: newSection } = await supabase
-        .from('checklist_template_sections')
-        .insert({
-          template_id:            newTemplate.id,
-          name:                   section.name,
-          sort_order:             section.sort_order,
-          requires_section_photo: section.requires_section_photo ?? false,
-        })
-        .select('id')
-        .single()
-
-      if (!newSection) continue
-
-      for (const item of (section.checklist_template_items ?? [])) {
-        await supabase.from('checklist_template_items').insert({
-          section_id:     newSection.id,
-          template_id:    newTemplate.id,
-          task:           item.task,
-          requires_photo: item.requires_photo,
-          notes:          item.notes,
-          sort_order:     item.sort_order,
-        })
-      }
-    }
-    broadcast++
-  }
+  await inngest.send({
+    name: 'checklist/template-broadcast',
+    data: {
+      org_id:              membership.org_id,
+      source_property_id:  sourcePropertyId,
+      target_property_ids: targetPropertyIds,
+      triggered_by:        user.id,
+    },
+  })
 
   revalidatePath('/properties')
-  return { broadcast }
+  return { broadcast: targetPropertyIds.length }
 }

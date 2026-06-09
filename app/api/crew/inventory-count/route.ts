@@ -109,13 +109,15 @@ export async function POST(request: NextRequest) {
   if (items.length > 0) {
     await supabase.from('inventory_count_items').insert(items)
 
-    for (const { inventory_item_id, quantity_counted } of items) {
-      await supabase
-        .from('inventory_items')
-        .update({ current_quantity: quantity_counted })
-        .eq('id', inventory_item_id)
-        .eq('org_id', crew.org_id)
-    }
+    await Promise.all(
+      items.map(({ inventory_item_id, quantity_counted }) =>
+        supabase
+          .from('inventory_items')
+          .update({ current_quantity: quantity_counted })
+          .eq('id', inventory_item_id)
+          .eq('org_id', crew.org_id)
+      )
+    )
   }
 
   await inngest.send({

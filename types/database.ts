@@ -168,6 +168,7 @@ export interface OwnerPortalToken {
   last_accessed_at:  string | null
   property_ids:      string[] | null
   is_multi:          boolean
+  revoked_at:        string | null
   created_at:        string
 }
 
@@ -402,6 +403,29 @@ export interface InventoryCountItem {
   created_at:        string
 }
 
+export interface InventoryCountDraft {
+  id:             string
+  org_id:         string
+  property_id:    string
+  crew_member_id: string | null
+  status:         'pending_review' | 'approved' | 'rejected'
+  submitted_at:   string | null
+  reviewed_at:    string | null
+  reviewed_by:    string | null
+  notes:          string | null
+  created_at:     string
+  updated_at:     string
+}
+
+export interface InventoryCountDraftItem {
+  id:                 string
+  draft_id:           string
+  inventory_item_id:  string
+  previous_quantity:  number
+  submitted_quantity: number
+  created_at:         string
+}
+
 export interface PurchaseOrder {
   id:                   string
   property_id:          string
@@ -604,6 +628,35 @@ export interface OrgMilestone {
   prompted_at:    string | null
   review_clicked: boolean
   dismissed:      boolean
+}
+
+export interface AuditEvent {
+  id:          string
+  org_id:      string | null
+  actor_id:    string | null
+  action:      string
+  target_type: string | null
+  target_id:   string | null
+  metadata:    Record<string, unknown> | null
+  ip_address:  string | null
+  created_at:  string
+}
+
+export interface OrgInvite {
+  id:          string
+  org_id:      string
+  invited_by:  string
+  email:       string
+  role:        string
+  token:       string
+  expires_at:  string
+  accepted_at: string | null
+  created_at:  string
+}
+
+export interface StripeProcessedEvent {
+  stripe_event_id: string
+  processed_at:    string
 }
 
 export interface QuoteRequest {
@@ -888,6 +941,8 @@ export interface Database {
       inventory_items:             { Row: InventoryItem;            Insert: Partial<InventoryItem>;            Update: Partial<InventoryItem>;            Relationships: [] }
       inventory_counts:            { Row: InventoryCount;           Insert: Partial<InventoryCount>;           Update: Partial<InventoryCount>;           Relationships: [] }
       inventory_count_items:       { Row: InventoryCountItem;       Insert: Partial<InventoryCountItem>;       Update: Partial<InventoryCountItem>;       Relationships: [] }
+      inventory_count_drafts:      { Row: InventoryCountDraft;      Insert: Partial<InventoryCountDraft>;      Update: Partial<InventoryCountDraft>;      Relationships: [] }
+      inventory_count_draft_items: { Row: InventoryCountDraftItem;  Insert: Partial<InventoryCountDraftItem>;  Update: Partial<InventoryCountDraftItem>;  Relationships: [] }
       purchase_orders:             { Row: PurchaseOrder;            Insert: Partial<PurchaseOrder>;            Update: Partial<PurchaseOrder>;            Relationships: [] }
       purchase_order_items:        { Row: PurchaseOrderItem;        Insert: Partial<PurchaseOrderItem>;        Update: Partial<PurchaseOrderItem>;        Relationships: [] }
       work_orders:                 { Row: WorkOrder;                Insert: Partial<WorkOrder>;                Update: Partial<WorkOrder>;                Relationships: [] }
@@ -901,6 +956,9 @@ export interface Database {
       guest_messages_sent:         { Row: GuestMessageSent;         Insert: Partial<GuestMessageSent>;         Update: Partial<GuestMessageSent>;         Relationships: [] }
       owner_transactions:          { Row: OwnerTransaction;         Insert: Partial<OwnerTransaction>;         Update: Partial<OwnerTransaction>;         Relationships: [] }
       org_milestones:              { Row: OrgMilestone;             Insert: Partial<OrgMilestone>;             Update: Partial<OrgMilestone>;             Relationships: [] }
+      audit_events:                { Row: AuditEvent;               Insert: Partial<AuditEvent>;               Update: Partial<AuditEvent>;               Relationships: [] }
+      stripe_processed_events:     { Row: StripeProcessedEvent;     Insert: Partial<StripeProcessedEvent>;     Update: Partial<StripeProcessedEvent>;     Relationships: [] }
+      org_invites:                 { Row: OrgInvite;                Insert: Partial<OrgInvite>;                Update: Partial<OrgInvite>;                Relationships: [] }
       quote_requests:              { Row: QuoteRequest;             Insert: Partial<QuoteRequest>;             Update: Partial<QuoteRequest>;             Relationships: [] }
       communication_logs:          { Row: CommunicationLog;              Insert: Partial<CommunicationLog>;              Update: Partial<CommunicationLog>;              Relationships: [] }
       messages:                    { Row: Message;                       Insert: Partial<Message>;                       Update: Partial<Message>;                       Relationships: [] }

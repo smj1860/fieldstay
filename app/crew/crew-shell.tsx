@@ -1,12 +1,13 @@
 'use client'
-import { useEffect }           from 'react'
-import Link                    from 'next/link'
-import { usePathname }         from 'next/navigation'
-import { CalendarCheck, CalendarDays, MessageSquare } from 'lucide-react'
-import { PowerSyncContext }    from '@powersync/react'
+import { useEffect, useTransition } from 'react'
+import Link                         from 'next/link'
+import { usePathname, useRouter }   from 'next/navigation'
+import { CalendarCheck, CalendarDays, MessageSquare, LogOut } from 'lucide-react'
+import { PowerSyncContext }         from '@powersync/react'
 import { usePowerSync, usePowerSyncQuery } from '@powersync/react'
-import { getPowerSyncDb }      from '@/lib/powersync/client'
-import { cn }                  from '@/lib/utils'
+import { getPowerSyncDb, disconnectPowerSync } from '@/lib/powersync/client'
+import { createClient }             from '@/lib/supabase/client'
+import { cn }                       from '@/lib/utils'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -24,7 +25,16 @@ export function CrewShell({
   userId:   string
   children: React.ReactNode
 }) {
-  const db = getPowerSyncDb()
+  const db     = getPowerSyncDb(userId)
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+
+  async function handleLogout() {
+    await disconnectPowerSync()
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    startTransition(() => router.push('/crew/login'))
+  }
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -72,7 +82,17 @@ export function CrewShell({
             <span className="font-bold text-lg">FieldStay Crew</span>
             <p className="text-brand-200 text-xs">{crewName}</p>
           </div>
-          <SyncStatus />
+          <div className="flex items-center gap-3">
+            <SyncStatus />
+            <button
+              onClick={handleLogout}
+              disabled={isPending}
+              aria-label="Log out"
+              className="text-brand-200 hover:text-white transition-colors disabled:opacity-50"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
         </header>
         <main className="flex-1 px-4 py-6">{children}</main>
         <CrewBottomNav userId={userId} />

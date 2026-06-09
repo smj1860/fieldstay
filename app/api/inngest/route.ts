@@ -53,6 +53,9 @@ import { generateDepreciationLedger } from '@/lib/inngest/functions/depreciation
 // In-app messaging
 import { logMessageCommunication } from '@/lib/inngest/functions/log-message-comm'
 
+// Checklist broadcasting
+import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist-broadcast'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -109,5 +112,8 @@ export const { GET, POST, PUT } = serve({
 
     // In-app messaging
     logMessageCommunication,
+
+    // Checklist broadcasting
+    broadcastChecklistTemplateJob,
   ],
 })

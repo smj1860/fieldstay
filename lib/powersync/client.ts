@@ -27,7 +27,6 @@ class SupabaseConnector {
             is_completed:       op.opData?.is_completed,
             crew_notes:         op.opData?.crew_notes,
             photo_storage_path: op.opData?.photo_storage_path ?? null,
-            updated_at:         new Date().toISOString(),
           })
           .eq('id', op.id)
       }
@@ -49,14 +48,29 @@ class SupabaseConnector {
 }
 
 let db: PowerSyncDatabase | null = null
+let dbUserId: string | null = null
 
-export function getPowerSyncDb(): PowerSyncDatabase {
-  if (!db) {
+export function getPowerSyncDb(userId: string): PowerSyncDatabase {
+  if (!db || dbUserId !== userId) {
+    if (db) {
+      // Disconnect old db before creating a new one for a different user
+      void db.disconnect()
+      db = null
+    }
+    dbUserId = userId
     db = new PowerSyncDatabase({
       schema:   AppSchema,
-      database: { dbFilename: 'fieldstay-crew.db' },
+      database: { dbFilename: `fieldstay-crew-${userId}.db` },
     })
     db.connect(new SupabaseConnector())
   }
   return db
+}
+
+export async function disconnectPowerSync(): Promise<void> {
+  if (db) {
+    await db.disconnect()
+    db = null
+    dbUserId = null
+  }
 }
