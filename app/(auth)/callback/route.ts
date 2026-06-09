@@ -17,6 +17,16 @@ export async function GET(request: NextRequest) {
     const { error, data } = await supabase.auth.exchangeCodeForSession(code)
 
     if (!error && data.session) {
+      // Audit every successful OAuth callback for SOC2 compliance
+      // Fire-and-forget: audit failure must never block authentication
+      logAuditEvent({
+        actorId:    data.session.user.id,
+        action:     'auth.oauth.callback',
+        targetType: 'user',
+        targetId:   data.session.user.id,
+        metadata:   { provider: data.session.user.app_metadata?.provider ?? 'unknown' },
+      }).catch(() => {})
+
       // Handle team invite token if present
       if (inviteToken) {
         await handleInviteAccept(data.session.user.id, data.session.user.email ?? '', inviteToken)

@@ -132,6 +132,12 @@ export function MaintenanceCalendar({
       {/* ── Month view ── */}
       {calView === 'month' && (
         <>
+          {workOrders.length === 0 && schedules.length === 0 && (
+            <div className="text-center py-10 text-sm border border-themed rounded-xl mb-4"
+                 style={{ color: 'var(--text-muted)', background: 'var(--bg-card)' }}>
+              No items scheduled — add a date to a work order or maintenance schedule to see it here.
+            </div>
+          )}
           <div className="grid grid-cols-7 mb-1">
             {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
               <div key={d} className="text-center text-xs font-semibold py-1"
@@ -232,6 +238,12 @@ export function MaintenanceCalendar({
       {/* ── Week view ── */}
       {calView === 'week' && (
         <>
+          {workOrders.length === 0 && schedules.length === 0 && (
+            <div className="text-center py-10 text-sm border border-themed rounded-xl mb-4"
+                 style={{ color: 'var(--text-muted)', background: 'var(--bg-card)' }}>
+              No items scheduled — add a date to a work order or maintenance schedule to see it here.
+            </div>
+          )}
           <div className="grid grid-cols-7 gap-px" style={{ background: 'var(--border)' }}>
             {Array.from({ length: 7 }, (_, i) => {
               const day       = new Date(weekStart.getTime() + i * 86_400_000)

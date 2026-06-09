@@ -275,6 +275,9 @@ export async function addVendor(
   const phone          = (formData.get('phone') as string)?.trim() || null
   const specialty      = (formData.get('specialty') as string) || 'general'
   const portal_enabled = formData.get('portal_enabled') === 'on'
+  const address        = (formData.get('address') as string)?.trim() || null
+  const city           = (formData.get('city') as string)?.trim() || null
+  const state          = (formData.get('state') as string)?.trim() || null
   const service_zip    = (formData.get('service_zip') as string)?.trim() || null
 
   if (!name) return { error: 'Vendor name is required' }
@@ -287,18 +290,21 @@ export async function addVendor(
     phone,
     specialty: specialty as VendorSpecialty,
     portal_enabled,
+    address,
+    city,
+    state,
     service_zip,
     is_active: true,
   }).select('id').single()
 
   if (error) return { error: error.message }
 
-  if (service_zip) {
-    const coords = await geocodeZip(service_zip)
+  // Geocode using full address if available, fall back to zip
+  const geocodeInput = [address, city, state, service_zip].filter(Boolean).join(', ')
+  if (geocodeInput) {
+    const coords = await geocodeZip(service_zip ?? geocodeInput)
     if (coords) {
       await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendor.id)
-    } else {
-      console.warn('[addVendor] geocodeZip returned null for service_zip:', service_zip)
     }
   }
 
@@ -328,6 +334,9 @@ export async function updateVendor(
   const email        = (formData.get('email') as string)?.trim() || null
   const phone        = (formData.get('phone') as string)?.trim() || null
   const specialty    = (formData.get('specialty') as string) || 'general'
+  const address      = (formData.get('address') as string)?.trim() || null
+  const city         = (formData.get('city') as string)?.trim() || null
+  const state        = (formData.get('state') as string)?.trim() || null
   const service_zip  = (formData.get('service_zip') as string)?.trim() || null
   const notes        = (formData.get('notes') as string)?.trim() || null
 
@@ -335,25 +344,33 @@ export async function updateVendor(
 
   const { data: existing } = await supabase
     .from('vendors')
-    .select('service_zip')
+    .select('service_zip, address, city, state')
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
     .single()
 
   const { error } = await supabase
     .from('vendors')
-    .update({ name, contact_name, email, phone, specialty: specialty as VendorSpecialty, service_zip, notes })
+    .update({ name, contact_name, email, phone, specialty: specialty as VendorSpecialty, address, city, state, service_zip, notes })
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
 
   if (error) return { error: error.message }
 
-  if (service_zip && service_zip !== (existing?.service_zip ?? '')) {
-    const coords = await geocodeZip(service_zip)
-    if (coords) {
-      await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendorId)
-    } else {
-      console.warn('[updateVendor] geocodeZip returned null for service_zip:', service_zip)
+  // Re-geocode when address-related fields change
+  const addressChanged =
+    service_zip !== (existing?.service_zip ?? null) ||
+    address     !== (existing?.address     ?? null) ||
+    city        !== (existing?.city        ?? null) ||
+    state       !== (existing?.state       ?? null)
+
+  if (addressChanged) {
+    const geocodeInput = service_zip ?? [address, city, state].filter(Boolean).join(', ')
+    if (geocodeInput) {
+      const coords = await geocodeZip(geocodeInput)
+      if (coords) {
+        await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendorId)
+      }
     }
   }
 
@@ -363,8 +380,8 @@ export async function updateVendor(
     action:     'vendor.updated',
     targetType: 'vendor',
     targetId:   vendorId,
+    metadata:   { name, specialty },
   })
-
 
   revalidatePath('/vendors')
   revalidatePath('/settings')

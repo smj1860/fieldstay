@@ -254,6 +254,9 @@ export interface Vendor {
   is_active:            boolean
   avg_rating:           number | null
   rating_count:         number
+  address:              string | null
+  city:                 string | null
+  state:                string | null
   service_zip:          string | null
   service_radius_miles: number | null
   lat:                  number | null

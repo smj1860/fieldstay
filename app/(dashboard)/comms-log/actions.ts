@@ -1,7 +1,9 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
-import { requireOrgMember } from '@/lib/auth'
+import { revalidatePath }     from 'next/cache'
+import { requireOrgMember }   from '@/lib/auth'
+import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent }      from '@/lib/audit'
 import type { CommChannel, CommRecipientType } from '@/types/database'
 
 export type CommsActionState = { error?: string; success?: boolean }
@@ -12,8 +14,7 @@ export async function createCommunicationLog(
   _prev: CommsActionState | null,
   formData: FormData
 ): Promise<CommsActionState> {
-  const { supabase, membership } = await requireOrgMember()
-  const { data: { user } }       = await supabase.auth.getUser()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const recipient_type  = formData.get('recipient_type') as CommRecipientType
   const vendor_id       = (formData.get('vendor_id') as string)    || null
@@ -33,7 +34,7 @@ export async function createCommunicationLog(
   if (!body && !subject)
     return { error: 'Add a subject or message body' }
 
-  const { error } = await supabase
+  const { data: logEntry, error } = await supabase
     .from('communication_logs')
     .insert({
       org_id:             membership.org_id,
@@ -46,13 +47,24 @@ export async function createCommunicationLog(
       property_id:        property_id    || null,
       work_order_id:      work_order_id  || null,
       source:             'manual',
-      logged_by_user_id:  user?.id       ?? null,
+      logged_by_user_id:  user.id,
       communicated_at:    communicated_at
         ? new Date(communicated_at).toISOString()
         : new Date().toISOString(),
     })
+    .select('id')
+    .single()
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'comms.log.created',
+    targetType: 'communication_log',
+    targetId:   logEntry?.id ?? undefined,
+    metadata:   { recipient_type, channel, source: 'manual' },
+  })
 
   revalidatePath('/comms-log')
   return { success: true }
@@ -63,7 +75,7 @@ export async function createCommunicationLog(
 export async function deleteCommunicationLog(
   logId: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { error } = await supabase
     .from('communication_logs')
@@ -74,12 +86,20 @@ export async function deleteCommunicationLog(
 
   if (error) return { error: error.message }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'comms.log.deleted',
+    targetType: 'communication_log',
+    targetId:   logId,
+  })
+
   revalidatePath('/comms-log')
   return {}
 }
 
 // ── System log (called by Inngest when sending vendor/crew emails) ────────────
-// Wire this up in work-order-events.ts whenever a vendor email is sent.
+// Uses service client since Inngest has no user session.
 
 export async function logSystemCommunication(data: {
   org_id:          string
@@ -92,9 +112,9 @@ export async function logSystemCommunication(data: {
   property_id?:    string | null
   work_order_id?:  string | null
 }): Promise<void> {
-  const { supabase } = await requireOrgMember()
+  const admin = createServiceClient()
 
-  await supabase.from('communication_logs').insert({
+  await admin.from('communication_logs').insert({
     org_id:            data.org_id,
     recipient_type:    data.recipient_type,
     vendor_id:         data.vendor_id         ?? null,
