@@ -5,12 +5,13 @@ import { requireOrgMember }              from '@/lib/auth'
 import { createServiceClient }           from '@/lib/supabase/server'
 import { readIntegrationToken, revokeIntegrationToken } from '@/lib/integrations/vault'
 import { getProvider }                   from '@/lib/integrations/registry'
+import { logAuditEvent }                 from '@/lib/audit'
 
 export async function disconnectIntegration(
   providerId: string
 ): Promise<{ error?: string }> {
-  const { supabase } = await requireOrgMember()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, membership, user: authUser } = await requireOrgMember()
+  const user = authUser
   if (!user) return { error: 'Not authenticated' }
 
   try {
@@ -32,6 +33,14 @@ export async function disconnectIntegration(
 
     // 3. Revoke in Vault (marks connection revoked + deletes secret)
     await revokeIntegrationToken(user.id, providerId)
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'integration.disconnected',
+      targetType: 'integration',
+      targetId:   providerId,
+    })
 
     revalidatePath('/settings/integrations')
     return {}

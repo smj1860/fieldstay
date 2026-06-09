@@ -7,6 +7,7 @@ export type AuditAction =
   | 'team.invite.revoked'
   | 'integration.connected'
   | 'integration.revoked'
+  | 'integration.disconnected'
   | 'repuguard.activated'
   | 'repuguard.response.generated'
   | 'owner_portal.accessed'
@@ -16,6 +17,20 @@ export type AuditAction =
   | 'billing.subscription.cancelled'
   | 'ical.feed.added'
   | 'ical.feed.deleted'
+  | 'crew.member.deactivated'
+  | 'crew.member.role_changed'
+  | 'vendor.created'
+  | 'vendor.updated'
+  | 'vendor.deactivated'
+  | 'property.created'
+  | 'property.updated'
+  | 'property.archived'
+  | 'work_order.created'
+  | 'work_order.cancelled'
+  | 'work_order.cost.logged'
+  | 'owner.transaction.created'
+  | 'owner.transaction.deleted'
+  | 'gdpr.data_export.requested'
 
 interface AuditParams {
   orgId?:      string

@@ -130,7 +130,7 @@ export async function addOwnerTransaction(
   _prev: OwnersActionState | null,
   formData: FormData
 ): Promise<OwnersActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const property_id      = formData.get('property_id') as string
   const transaction_type = formData.get('transaction_type') as 'revenue' | 'expense'
@@ -154,7 +154,7 @@ export async function addOwnerTransaction(
 
   if (!property) return { error: 'Property not found' }
 
-  const { error } = await supabase.from('owner_transactions').insert({
+  const { data: txn, error } = await supabase.from('owner_transactions').insert({
     property_id,
     org_id:           membership.org_id,
     transaction_type,
@@ -165,9 +165,18 @@ export async function addOwnerTransaction(
     notes,
     source:           'manual',
     visible_to_owner: true,
-  })
+  }).select('id').single()
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'owner.transaction.created',
+    targetType: 'owner_transaction',
+    targetId:   txn?.id,
+    metadata:   { transaction_type, amount, property_id },
+  })
 
   revalidatePath('/owners')
   return { success: true }
@@ -231,11 +240,20 @@ export async function revokeOwnerPortalToken(ownerId: string): Promise<OwnersAct
 // ── Delete transaction ────────────────────────────────────────────────────────
 
 export async function deleteOwnerTransaction(txnId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
   await supabase
     .from('owner_transactions')
     .delete()
     .eq('id', txnId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'owner.transaction.deleted',
+    targetType: 'owner_transaction',
+    targetId:   txnId,
+  })
+
   revalidatePath('/owners')
 }

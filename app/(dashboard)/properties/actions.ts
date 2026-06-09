@@ -6,6 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { slugify } from '@/lib/utils'
 import { geocodeZip } from '@/lib/geocoding'
 import { calculateHealthScore } from '@/lib/assets/health-score'
+import { logAuditEvent } from '@/lib/audit'
 import type { AssetType } from '@/types/database'
 
 export type PropertyActionState = {
@@ -20,7 +21,7 @@ export async function createProperty(
   _prev: PropertyActionState | null,
   formData: FormData
 ): Promise<PropertyActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name          = (formData.get('name') as string)?.trim()
   const address       = (formData.get('address') as string)?.trim()
@@ -92,6 +93,15 @@ export async function createProperty(
     }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.created',
+    targetType: 'property',
+    targetId:   property.id,
+    metadata:   { name },
+  })
+
   revalidatePath('/properties')
   redirect(`/properties/${property.id}/setup/ical`)
 }
@@ -103,7 +113,7 @@ export async function updateProperty(
   _prev: PropertyActionState | null,
   formData: FormData
 ): Promise<PropertyActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name          = (formData.get('name') as string)?.trim()
   const address       = (formData.get('address') as string)?.trim()
@@ -152,6 +162,14 @@ export async function updateProperty(
       console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
     }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.updated',
+    targetType: 'property',
+    targetId:   propertyId,
+  })
 
   revalidatePath(`/properties/${propertyId}`)
   return { success: true }
@@ -429,13 +447,21 @@ export async function bulkImportAssets(
 // ── Archive ──────────────────────────────────────────────────
 
 export async function archiveProperty(propertyId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   await supabase
     .from('properties')
     .update({ is_active: false })
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.archived',
+    targetType: 'property',
+    targetId:   propertyId,
+  })
 
   revalidatePath('/properties')
   redirect('/properties')

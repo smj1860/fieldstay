@@ -6,6 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
 import { geocodeZip } from '@/lib/geocoding'
+import { logAuditEvent } from '@/lib/audit'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 
 export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
@@ -152,7 +153,7 @@ export async function updateCrewMember(
     role: CrewRole
   }>
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { error } = await supabase
     .from('crew_members')
@@ -162,19 +163,38 @@ export async function updateCrewMember(
 
   if (error) return { error: error.message }
 
+  if (data.role !== undefined) {
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'crew.member.role_changed',
+      targetType: 'crew_member',
+      targetId:   crewId,
+      metadata:   { new_role: data.role },
+    })
+  }
+
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
   return { success: true }
 }
 
 export async function deactivateCrewMember(crewId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   await supabase
     .from('crew_members')
     .update({ is_active: false })
     .eq('id', crewId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'crew.member.deactivated',
+    targetType: 'crew_member',
+    targetId:   crewId,
+  })
 
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
@@ -216,7 +236,7 @@ export async function addVendor(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name           = (formData.get('name') as string)?.trim()
   const contact_name   = (formData.get('contact_name') as string)?.trim() || null
@@ -251,6 +271,15 @@ export async function addVendor(
     }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.created',
+    targetType: 'vendor',
+    targetId:   vendor.id,
+    metadata:   { name, specialty },
+  })
+
   revalidatePath('/vendors')
   revalidatePath('/settings')
   return { success: true }
@@ -261,7 +290,7 @@ export async function updateVendor(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name         = (formData.get('name') as string)?.trim()
   const contact_name = (formData.get('contact_name') as string)?.trim() || null
@@ -297,6 +326,15 @@ export async function updateVendor(
     }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.updated',
+    targetType: 'vendor',
+    targetId:   vendorId,
+  })
+
+
   revalidatePath('/vendors')
   revalidatePath('/settings')
   return { success: true }
@@ -316,13 +354,21 @@ export async function updateVendorPortal(vendorId: string, enabled: boolean): Pr
 }
 
 export async function deactivateVendor(vendorId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   await supabase
     .from('vendors')
     .update({ is_active: false })
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.deactivated',
+    targetType: 'vendor',
+    targetId:   vendorId,
+  })
 
   revalidatePath('/vendors')
   revalidatePath('/settings')

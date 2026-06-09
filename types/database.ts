@@ -806,6 +806,20 @@ export interface OAuthState {
   expires_at:  string
 }
 
+// ── Audit Log ────────────────────────────────────────────────────────────────
+
+export interface AuditEvent {
+  id:          string
+  org_id:      string | null
+  actor_id:    string | null
+  action:      string
+  target_type: string | null
+  target_id:   string | null
+  metadata:    Record<string, unknown> | null
+  ip_address:  string | null
+  created_at:  string
+}
+
 // ── Asset Health ─────────────────────────────────────────────────────────────
 
 export interface PropertyAsset {
@@ -978,6 +992,9 @@ export interface Database {
       integration_providers:       { Row: IntegrationProvider;      Insert: Partial<IntegrationProvider>;      Update: Partial<IntegrationProvider>;      Relationships: [] }
       integration_connections:     { Row: IntegrationConnection;    Insert: Partial<IntegrationConnection>;    Update: Partial<IntegrationConnection>;    Relationships: [] }
       oauth_states:                { Row: OAuthState;               Insert: Partial<OAuthState>;               Update: Partial<OAuthState>;               Relationships: [] }
+
+      // ── Audit Log ──────────────────────────────────────────
+      audit_events:                { Row: AuditEvent;               Insert: Partial<AuditEvent>;               Update: Partial<AuditEvent>;               Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }
