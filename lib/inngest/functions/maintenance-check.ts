@@ -64,7 +64,16 @@ export const dailyMaintenanceCheck = inngest.createFunction(
         const pmEmail = await getPmEmail(supabase, schedule.org_id)
 
         if (schedule.auto_create_wo) {
-          const { data: wo } = await supabase
+          // Idempotency: skip if a non-terminal WO already exists for this schedule + date
+          const { data: existingWO } = await supabase
+            .from('work_orders')
+            .select('id')
+            .eq('source_schedule_id', schedule.id)
+            .eq('scheduled_date', schedule.next_due_date!)
+            .not('status', 'in', '("completed","cancelled")')
+            .maybeSingle()
+
+          const { data: wo } = existingWO ? { data: existingWO } : await supabase
             .from('work_orders')
             .insert({
               property_id:        schedule.property_id,
@@ -83,7 +92,7 @@ export const dailyMaintenanceCheck = inngest.createFunction(
             .select('id')
             .single()
 
-          if (pmEmail && wo) {
+          if (pmEmail && wo && !existingWO) {
             await resend.emails.send({
               from:    FROM,
               to:      pmEmail,
@@ -351,25 +360,14 @@ export const dailyMaintenanceCheck = inngest.createFunction(
       const ninetyDaysAgo = new Date(today)
       ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
 
-      const { data: wos } = await supabase
-        .from('work_orders')
-        .select('id, org_id, property_id, category')
-        .neq('status', 'cancelled')
-        .gte('created_at', ninetyDaysAgo.toISOString())
+      // DB-side GROUP BY avoids PostgREST 1000-row silent truncation
+      const { data: repeatGroups } = await supabase.rpc('get_repeat_issues', {
+        since_date: ninetyDaysAgo.toISOString(),
+      }) as { data: Array<{ org_id: string; property_id: string; category: string; wo_count: number }> | null }
 
-      const groups: Record<string, { org_id: string; property_id: string; category: string; count: number }> = {}
-      for (const wo of wos ?? []) {
-        const key = `${wo.org_id}:${wo.property_id}:${wo.category}`
-        if (!groups[key]) {
-          groups[key] = { org_id: wo.org_id, property_id: wo.property_id, category: wo.category, count: 0 }
-        }
-        groups[key]!.count++
-      }
-
-      const repeatGroups = Object.values(groups).filter((g) => g.count >= 3)
       const thirtyDaysAgo = new Date(today.getTime() - 30 * 86_400_000)
 
-      for (const group of repeatGroups) {
+      for (const group of repeatGroups ?? []) {
         const milestoneKey = `repeat_issue:${group.property_id}:${group.category}`
 
         const { data: existing } = await supabase
@@ -387,7 +385,7 @@ export const dailyMaintenanceCheck = inngest.createFunction(
             org_id:      group.org_id,
             property_id: group.property_id,
             wo_category: group.category,
-            count:       group.count,
+            count:       Number(group.wo_count),
             window_days: 90,
           },
         })
@@ -397,11 +395,11 @@ export const dailyMaintenanceCheck = inngest.createFunction(
           await resend.emails.send({
             from:    FROM,
             to:      pmEmail,
-            subject: `Repeat maintenance issue — ${group.category.replace(/_/g, ' ')} (${group.count}x in 90 days)`,
+            subject: `Repeat maintenance issue — ${group.category.replace(/_/g, ' ')} (${group.wo_count}x in 90 days)`,
             html:    buildScheduleEmail({
               heading:  'Repeat maintenance issue detected',
               name:     group.category.replace(/_/g, ' '),
-              daysText: `<strong>${group.count} work orders</strong> in the last 90 days`,
+              daysText: `<strong>${group.wo_count} work orders</strong> in the last 90 days`,
               dueDate:  'Last 90 days',
               url:      `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
               cta:      'View Work Orders →',
@@ -558,38 +556,21 @@ export const dailyMaintenanceCheck = inngest.createFunction(
         return data ?? []
       })
 
-      const repairWOs = await step.run('fetch-asset-repair-history', async () => {
-        const { data } = await supabase
-          .from('work_orders')
-          .select('asset_id, actual_cost, estimated_cost, completed_date')
-          .not('asset_id', 'is', null)
-          .eq('status', 'completed')
-        return data ?? []
-      })
-
-      // Aggregate repair history per asset
-      const repairByAsset: Record<string, {
-        total_repairs: number
-        total_repair_cost: number
-        last_serviced_at: string | null
-      }> = {}
-      for (const wo of repairWOs) {
-        if (!wo.asset_id) continue
-        const r = repairByAsset[wo.asset_id]
-        if (!r) {
-          repairByAsset[wo.asset_id] = {
-            total_repairs:     1,
-            total_repair_cost: wo.actual_cost ?? wo.estimated_cost ?? 0,
-            last_serviced_at:  wo.completed_date ?? null,
-          }
-        } else {
-          r.total_repairs++
-          r.total_repair_cost += wo.actual_cost ?? wo.estimated_cost ?? 0
-          if (wo.completed_date && (!r.last_serviced_at || wo.completed_date > r.last_serviced_at)) {
-            r.last_serviced_at = wo.completed_date
+      // DB-side aggregation avoids PostgREST 1000-row silent truncation on busy orgs
+      const repairByAsset = await step.run('fetch-asset-repair-history', async () => {
+        const { data: rows } = await supabase.rpc('get_asset_repair_summary') as {
+          data: Array<{ asset_id: string; total_repairs: number; total_repair_cost: number; last_serviced_at: string | null }> | null
+        }
+        const map: Record<string, { total_repairs: number; total_repair_cost: number; last_serviced_at: string | null }> = {}
+        for (const row of rows ?? []) {
+          map[row.asset_id] = {
+            total_repairs:     Number(row.total_repairs),
+            total_repair_cost: Number(row.total_repair_cost),
+            last_serviced_at:  row.last_serviced_at ?? null,
           }
         }
-      }
+        return map
+      })
 
       // Group assets by org for batched updates + threshold alerts
       const assetsByOrg = activeAssets.reduce<Record<string, typeof activeAssets>>((acc, a) => {
@@ -601,6 +582,8 @@ export const dailyMaintenanceCheck = inngest.createFunction(
         await step.run(`score-org-assets-${orgId}`, async () => {
           type Crossing = { asset_type: string; property_id: string; oldScore: number; newScore: number }
           const crossings: Crossing[] = []
+          const updates: Array<{ id: string; health_score: number; health_score_updated_at: string }> = []
+          const now = new Date().toISOString()
 
           for (const asset of orgAssets) {
             const std = standards.find((s) => s.asset_type === asset.asset_type)
@@ -620,13 +603,7 @@ export const dailyMaintenanceCheck = inngest.createFunction(
               repair
             )
 
-            await supabase
-              .from('property_assets')
-              .update({
-                health_score:            newScore,
-                health_score_updated_at: new Date().toISOString(),
-              })
-              .eq('id', asset.id)
+            updates.push({ id: asset.id, health_score: newScore, health_score_updated_at: now })
 
             // 8.5: detect threshold crossings (old > threshold >= new)
             const oldScore = asset.health_score
@@ -643,6 +620,11 @@ export const dailyMaintenanceCheck = inngest.createFunction(
                 }
               }
             }
+          }
+
+          // Batch all score writes into a single round-trip
+          if (updates.length > 0) {
+            await supabase.from('property_assets').upsert(updates, { onConflict: 'id' })
           }
 
           if (crossings.length > 0) {
@@ -720,6 +702,13 @@ export const dailyMaintenanceCheck = inngest.createFunction(
         const vendor   = Array.isArray(doc.vendors) ? doc.vendors[0] : doc.vendors
         const pmEmail  = await getPmEmail(supabase, doc.org_id)
 
+        // Record dedup FIRST — if email throws and step retries, the milestone
+        // guard above prevents a double-send on the next attempt
+        await supabase.from('org_milestones').insert({
+          org_id:    doc.org_id,
+          milestone: milestoneKey,
+        })
+
         if (pmEmail) {
           const isPast  = hitThreshold < 0
           const daysAbs = Math.abs(hitThreshold)
@@ -750,12 +739,6 @@ export const dailyMaintenanceCheck = inngest.createFunction(
             }),
           })
         }
-
-        // Record dedup so this threshold isn't re-sent
-        await supabase.from('org_milestones').insert({
-          org_id:    doc.org_id,
-          milestone: milestoneKey,
-        })
 
         return { sent: true, threshold: hitThreshold, vendor: vendor?.name }
       })

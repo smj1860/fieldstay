@@ -84,9 +84,8 @@ export const buildShoppingCart = inngest.createFunction(
     if (!orgSettings.kroger_location_id) {
       await supabase.from('org_milestones').upsert({
         org_id,
-        key:   'kroger_store_needed',
-        value: { requested_at: new Date().toISOString() },
-      }, { onConflict: 'org_id,key' })
+        milestone: 'kroger_store_needed',
+      }, { onConflict: 'org_id,milestone', ignoreDuplicates: true })
       return { status: 'no_store_configured', action_required: 'connect_kroger_store' }
     }
 
@@ -189,48 +188,61 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
       }
     })
 
-    // ── Step 4: Search Kroger for each item ──────────────────────
-    const searchResults = await step.run('search-kroger-products', async () => {
-      const clientToken = await getClientToken()
-      const results: Record<string, {
-        upc: string; productId: string; brand: string
-        description: string; size?: string; price?: number; imageUrl?: string
-      } | null> = {}
+    // ── Step 4: Search Kroger for each item (batched to prevent step timeout) ──
+    const SEARCH_BATCH_SIZE = 50
+    const uniqueNames = [...new Set(belowParItems.map((i: any) => i.name.toLowerCase().trim()))]
+    const searchBatches: string[][] = []
+    for (let i = 0; i < uniqueNames.length; i += SEARCH_BATCH_SIZE) {
+      searchBatches.push(uniqueNames.slice(i, i + SEARCH_BATCH_SIZE))
+    }
 
-      const uniqueNames = [...new Set(belowParItems.map((i: any) => i.name.toLowerCase().trim()))]
+    type KrogerProduct = {
+      upc: string; productId: string; brand: string
+      description: string; size?: string; price?: number; imageUrl?: string
+    }
+    const searchResults: Record<string, KrogerProduct | null> = {}
 
-      for (const originalName of uniqueNames) {
-        const searchTerm = normalizedItems[originalName] ?? originalName
-        const products   = await searchProducts(
-          searchTerm,
-          orgSettings.kroger_location_id!,
-          clientToken,
-          3,
-        )
+    for (let bIdx = 0; bIdx < searchBatches.length; bIdx++) {
+      const batchNames = searchBatches[bIdx]!
+      const batchResult = await step.run(`search-kroger-products-${bIdx}`, async () => {
+        const clientToken = await getClientToken()
+        const results: Record<string, KrogerProduct | null> = {}
 
-        if (!products.length) {
-          results[originalName] = null
-        } else {
-          const best = products.find(p =>
-            p.items?.[0]?.inventory?.stockLevel === 'HIGH' && p.items?.[0]?.price
-          ) ?? products[0]
+        for (const originalName of batchNames) {
+          const searchTerm = normalizedItems[originalName] ?? originalName
+          const products   = await searchProducts(
+            searchTerm,
+            orgSettings.kroger_location_id!,
+            clientToken,
+            3,
+          )
 
-          results[originalName] = {
-            upc:         best.upc,
-            productId:   best.productId,
-            brand:       best.brand,
-            description: best.description,
-            size:        best.items?.[0]?.size,
-            price:       getBestPrice(best),
-            imageUrl:    getBestProductImage(best),
+          if (!products.length) {
+            results[originalName] = null
+          } else {
+            const best = products.find(p =>
+              p.items?.[0]?.inventory?.stockLevel === 'HIGH' && p.items?.[0]?.price
+            ) ?? products[0]
+
+            results[originalName] = {
+              upc:         best.upc,
+              productId:   best.productId,
+              brand:       best.brand,
+              description: best.description,
+              size:        best.items?.[0]?.size,
+              price:       getBestPrice(best),
+              imageUrl:    getBestProductImage(best),
+            }
           }
+
+          await new Promise(r => setTimeout(r, 100))
         }
 
-        await new Promise(r => setTimeout(r, 100))
-      }
+        return results
+      })
 
-      return results
-    })
+      Object.assign(searchResults, batchResult)
+    }
 
     // ── Step 5: Build cart ───────────────────────────────────────
     const cartResult = await step.run('build-cart', async () => {
@@ -296,7 +308,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
     await step.run('persist-result', async () => {
       await supabase.from('org_milestones').upsert({
         org_id,
-        key:   'last_cart_build',
+        milestone: 'last_cart_build',
         value: {
           built_at:        new Date().toISOString(),
           requested_by,
@@ -309,7 +321,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
           unmatched_items: cartResult.unmatched_items,
           location_name:   orgSettings.kroger_location_name,
         },
-      }, { onConflict: 'org_id,key' })
+      }, { onConflict: 'org_id,milestone' })
 
       if (cartResult.unmatched_items.length > 0) {
         console.warn(

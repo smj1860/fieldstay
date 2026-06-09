@@ -16,8 +16,9 @@ export function calculateHealthScore(
   const installYear = new Date(asset.installation_date).getFullYear()
   const currentYear = new Date().getFullYear()
   const ageYears    = Math.max(currentYear - installYear, 0)
-  const lifespan    = asset.expected_lifespan_years
-    ?? Math.round((standards.lifespan_min_years + standards.lifespan_max_years) / 2)
+  const lifespan    = (asset.expected_lifespan_years
+    ?? Math.round((standards.lifespan_min_years + standards.lifespan_max_years) / 2))
+    || 10  // guard against 0/0 standard ranges to prevent division by zero
 
   const agePct   = Math.min(ageYears / lifespan, 1.0)
   const ageScore = Math.round((1 - agePct) * 60)
