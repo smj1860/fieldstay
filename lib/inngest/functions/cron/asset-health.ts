@@ -226,6 +226,12 @@ export const dailyAssetHealth = inngest.createFunction(
 
           const docLabel = `${doc.document_name} (${doc.document_type.replace(/_/g, ' ')})`
 
+          // Record dedup BEFORE sending so a retry after a failed send doesn't re-send
+          await supabase.from('org_milestones').insert({
+            org_id:    doc.org_id,
+            milestone: milestoneKey,
+          })
+
           await resend.emails.send({
             from:    FROM,
             to:      pmEmail,
@@ -242,12 +248,6 @@ export const dailyAssetHealth = inngest.createFunction(
             }),
           })
         }
-
-        // Record dedup so this threshold isn't re-sent
-        await supabase.from('org_milestones').insert({
-          org_id:    doc.org_id,
-          milestone: milestoneKey,
-        })
 
         return { sent: true, threshold: hitThreshold, vendor: vendor?.name }
       })
