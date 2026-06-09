@@ -31,6 +31,16 @@ export type AuditAction =
   | 'owner.transaction.created'
   | 'owner.transaction.deleted'
   | 'gdpr.data_export.requested'
+  | 'crew.member.created'
+  | 'crew.member.updated'
+  | 'crew.member.bulk_imported'
+  | 'vendor.bulk_imported'
+  | 'work_order.updated'
+  | 'owner.transaction.visibility_changed'
+  | 'asset.created'
+  | 'asset.updated'
+  | 'asset.bulk_imported'
+  | 'account.password_changed'
 
 interface AuditParams {
   orgId?:      string
