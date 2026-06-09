@@ -992,9 +992,6 @@ export interface Database {
       integration_providers:       { Row: IntegrationProvider;      Insert: Partial<IntegrationProvider>;      Update: Partial<IntegrationProvider>;      Relationships: [] }
       integration_connections:     { Row: IntegrationConnection;    Insert: Partial<IntegrationConnection>;    Update: Partial<IntegrationConnection>;    Relationships: [] }
       oauth_states:                { Row: OAuthState;               Insert: Partial<OAuthState>;               Update: Partial<OAuthState>;               Relationships: [] }
-
-      // ── Audit Log ──────────────────────────────────────────
-      audit_events:                { Row: AuditEvent;               Insert: Partial<AuditEvent>;               Update: Partial<AuditEvent>;               Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }
