@@ -145,7 +145,7 @@ export const autoAssignTurnover = inngest.createFunction(
     })
 
     if (!scored.length) {
-      await inngest.send({
+      await step.sendEvent('notify-assignment-gap', {
         name: 'crew/assignment-gap',
         data: {
           turnover_id,
