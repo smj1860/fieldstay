@@ -114,7 +114,9 @@ export const ownerRezReviewsSync = inngest.createFunction(
         })
       } catch (err) {
         if (err instanceof RateLimitError) {
-          await step.sleep(`rate-limit-sleep-${userId}`, err.retryAfter * 1000)
+          // err.retryAfter is in SECONDS; pass a duration string — not milliseconds.
+          // The previous `retryAfter * 1000` would sleep ~16 hours instead of ~60 sec.
+          await step.sleep(`rate-limit-sleep-${userId}`, `${err.retryAfter}s`)
           reviews = await step.run(`fetch-reviews-retry-${userId}`, async () => {
             return fetchAllReviews(userId, cursor)
           })

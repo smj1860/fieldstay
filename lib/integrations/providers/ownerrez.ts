@@ -174,10 +174,17 @@ export const ownerRezProvider: IntegrationProvider = {
       // These require setting up individual webhook subscriptions via:
       // POST /v2/webhooksubscriptions
       // See OwnerRez Webhooks documentation for the payload format.
-      default:
-        console.log(
-          `[OwnerRez] Unhandled webhook action: "${action}" for external user ${externalUserId}`
-        )
+      default: {
+        // Never log raw payload — future events (booking.created, guest.updated)
+        // will contain guest PII: name, email, phone. Log only safe fields.
+        const safeLog = {
+          action,
+          external_id: typeof payload === 'object' && payload !== null
+            ? (payload as Record<string, unknown>).id ?? null
+            : null,
+        }
+        console.warn('[OwnerRez] Unhandled webhook action', safeLog)
+      }
     }
   },
 }

@@ -102,6 +102,9 @@ export const ownerRezInitialSync = inngest.createFunction(
 
       if (!existingProps?.length) return
 
+      // MEDIUM-2: collect patch failures rather than silently swallowing them
+      const failures: string[] = []
+
       for (const existing of existingProps) {
         const orData = fetchPropsResult.patchData.find((p) => p.externalId === existing.external_id)
         if (!orData) continue
@@ -118,11 +121,17 @@ export const ownerRezInitialSync = inngest.createFunction(
           patch.square_footage = orData.sqft
 
         if (Object.keys(patch).length > 0) {
-          await supabase
+          const { error } = await supabase
             .from('properties')
             .update(patch)
             .eq('id', existing.id)
+          if (error) failures.push(`${existing.id}: ${error.message}`)
         }
+      }
+
+      if (failures.length) {
+        // Non-fatal: don't throw — patch failures don't block the booking sync
+        logger.error(`[OwnerRez:${user_id}] Property patch failures: ${failures.join(', ')}`)
       }
 
       logger.info(`[OwnerRez:${user_id}] Patched null fields on ${existingProps.length} properties`)
@@ -132,6 +141,11 @@ export const ownerRezInitialSync = inngest.createFunction(
 
     const syncCursor = await step.run('fetch-bookings', async () => {
       if (!fetchPropsResult.ids.length) return new Date().toISOString()
+
+      // MEDIUM-3: capture pre-fetch timestamp as cursor value.
+      // Using post-fetch time would miss bookings modified during the fetch window
+      // (which can be 30-90 seconds for large tenant histories).
+      const fetchStartedAt = new Date().toISOString()
 
       let bookings: OwnerRezBooking[]
 
@@ -184,14 +198,14 @@ export const ownerRezInitialSync = inngest.createFunction(
         logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
       }
 
-      return new Date().toISOString()
+      return fetchStartedAt  // MEDIUM-3: pre-fetch timestamp
     })
 
     // ── Step 3: Update sync metadata ─────────────────────────────────────────
 
     await step.run('update-last-synced', async () => {
       const supabase = createServiceClient()
-      await supabase
+      const { error } = await supabase
         .from('integration_connections')
         .update({
           metadata: {
@@ -201,6 +215,11 @@ export const ownerRezInitialSync = inngest.createFunction(
         })
         .eq('user_id', user_id)
         .eq('provider_id', PROVIDER)
+
+      // MEDIUM-2: throw on cursor failure — a stale cursor causes full re-syncs
+      if (error) {
+        throw new Error(`[OwnerRez:${user_id}] Failed to persist sync cursor: ${error.message}`)
+      }
     })
 
     return { user_id, synced: true }

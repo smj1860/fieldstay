@@ -820,6 +820,11 @@ export interface AuditEvent {
   created_at:  string
 }
 
+export interface OwnerRezProcessedWebhook {
+  webhook_id:   string
+  processed_at: string
+}
+
 // ── Asset Health ─────────────────────────────────────────────────────────────
 
 export interface PropertyAsset {
@@ -989,9 +994,10 @@ export interface Database {
       vendor_compliance_documents: { Row: VendorComplianceDocument; Insert: Partial<VendorComplianceDocument>; Update: Partial<VendorComplianceDocument>; Relationships: [] }
 
       // ── Integration framework (server-side only) ───────────
-      integration_providers:       { Row: IntegrationProvider;      Insert: Partial<IntegrationProvider>;      Update: Partial<IntegrationProvider>;      Relationships: [] }
-      integration_connections:     { Row: IntegrationConnection;    Insert: Partial<IntegrationConnection>;    Update: Partial<IntegrationConnection>;    Relationships: [] }
-      oauth_states:                { Row: OAuthState;               Insert: Partial<OAuthState>;               Update: Partial<OAuthState>;               Relationships: [] }
+      integration_providers:          { Row: IntegrationProvider;         Insert: Partial<IntegrationProvider>;         Update: Partial<IntegrationProvider>;         Relationships: [] }
+      integration_connections:        { Row: IntegrationConnection;       Insert: Partial<IntegrationConnection>;       Update: Partial<IntegrationConnection>;       Relationships: [] }
+      oauth_states:                   { Row: OAuthState;                  Insert: Partial<OAuthState>;                  Update: Partial<OAuthState>;                  Relationships: [] }
+      ownerrez_processed_webhooks:    { Row: OwnerRezProcessedWebhook;    Insert: Partial<OwnerRezProcessedWebhook>;    Update: Partial<OwnerRezProcessedWebhook>;    Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }
