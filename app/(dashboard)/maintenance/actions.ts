@@ -10,7 +10,7 @@ import { logAuditEvent } from '@/lib/audit'
 import type { WoStatus, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema } from '@/lib/schemas/work-order'
 
-export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string }
+export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -949,7 +949,7 @@ export async function createMaintenanceScheduleTemplate(data: {
   if (iErr) return { error: iErr.message }
 
   revalidatePath('/maintenance')
-  return { success: true }
+  return { success: true, templateId: template.id }
 }
 
 // ── Maintenance Schedule Template Broadcasting ───────────────────────────────
