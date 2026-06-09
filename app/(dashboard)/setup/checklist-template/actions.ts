@@ -15,25 +15,18 @@ export async function saveMasterChecklistItems(
 ): Promise<{ error?: string; saved: number }> {
   const { supabase, membership } = await requireOrgMember()
 
-  // Full replace — delete existing, re-insert
-  await supabase
-    .from('org_master_checklist_items')
-    .delete()
-    .eq('org_id', membership.org_id)
-
-  if (items.length === 0) return { saved: 0 }
-
-  const { error } = await supabase
-    .from('org_master_checklist_items')
-    .insert(
+  // Atomic replace via RPC — avoids a non-transactional delete+insert gap
+  const { error } = await supabase.rpc('replace_master_checklist_items', {
+    p_org_id: membership.org_id,
+    p_items:  JSON.stringify(
       items.map((item) => ({
-        org_id:     membership.org_id,
         section:    item.section,
         task:       item.task,
         sort_order: item.sort_order,
         source:     item.source,
       }))
-    )
+    ),
+  })
 
   if (error) return { error: error.message, saved: 0 }
 

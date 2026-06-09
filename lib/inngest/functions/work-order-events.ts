@@ -128,18 +128,10 @@ export const handleWorkOrderCompleted = inngest.createFunction(
       const cost = wo?.actual_cost ?? wo?.estimated_cost ?? null
       if (!cost || cost <= 0) return { skipped: true }
 
-      const { data: existing } = await supabase
-        .from('owner_transactions')
-        .select('id')
-        .eq('source_reference_id', work_order_id)
-        .eq('source', 'wo_completion')
-        .maybeSingle()
-
-      if (existing) return { skipped: true }
-
-      await supabase.from('owner_transactions').insert({
+      await supabase.from('owner_transactions').upsert({
         property_id,
         org_id,
+        work_order_id,
         source:               'wo_completion',
         source_reference_id:  work_order_id,
         transaction_type:     'expense',
@@ -148,7 +140,7 @@ export const handleWorkOrderCompleted = inngest.createFunction(
         description:          wo?.title ?? 'Work order expense',
         transaction_date:     new Date().toISOString().split('T')[0],
         visible_to_owner:     false,
-      })
+      }, { onConflict: 'source_reference_id,source', ignoreDuplicates: true })
 
       return { posted: cost }
     })
@@ -194,28 +186,19 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
 
       const cost = wo.actual_cost
       if (property && cost && cost > 0) {
-        const { data: existing } = await supabase
-          .from('owner_transactions')
-          .select('id')
-          .eq('source_reference_id', work_order_id)
-          .eq('source', 'wo_completion')
-          .maybeSingle()
-
-        if (!existing) {
-          await supabase.from('owner_transactions').insert({
-            property_id:          (property as { id: string }).id,
-            org_id:               wo.org_id,
-            work_order_id,
-            source:               'wo_completion',
-            source_reference_id:  work_order_id,
-            transaction_type:     'expense',
-            category:             'maintenance',
-            amount:               cost,
-            description:          wo.title,
-            transaction_date:     new Date().toISOString().split('T')[0],
-            notes:                'Auto-created from vendor portal completion',
-          })
-        }
+        await supabase.from('owner_transactions').upsert({
+          property_id:          (property as { id: string }).id,
+          org_id:               wo.org_id,
+          work_order_id,
+          source:               'wo_completion',
+          source_reference_id:  work_order_id,
+          transaction_type:     'expense',
+          category:             'maintenance',
+          amount:               cost,
+          description:          wo.title,
+          transaction_date:     new Date().toISOString().split('T')[0],
+          notes:                'Auto-created from vendor portal completion',
+        }, { onConflict: 'source_reference_id,source', ignoreDuplicates: true })
       }
 
       const photoNote = photos.length > 0

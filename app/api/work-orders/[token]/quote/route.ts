@@ -75,7 +75,7 @@ export async function POST(
     )
   }
 
-  await supabase
+  const { data: updated } = await supabase
     .from('quote_requests')
     .update({
       status:       'submitted',
@@ -84,6 +84,13 @@ export async function POST(
       submitted_at: new Date().toISOString(),
     })
     .eq('id', qr.id)
+    .eq('status', 'pending')
+    .select('id')
+    .single()
+
+  if (!updated) {
+    return NextResponse.json({ error: 'This quote has already been submitted' }, { status: 409 })
+  }
 
   await supabase.from('work_order_updates').insert({
     work_order_id:             qr.work_order_id,

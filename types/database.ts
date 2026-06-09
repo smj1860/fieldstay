@@ -457,6 +457,7 @@ export interface WorkOrder {
   status:                      WoStatus
   source:                      WoSource
   source_schedule_id:          string | null
+  source_turnover_id:          string | null
   asset_id:                    string | null
   scheduled_date:              string | null
   completed_date:              string | null

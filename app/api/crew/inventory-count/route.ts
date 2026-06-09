@@ -73,7 +73,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, draftId: draft.id })
   }
 
-  // Legacy direct-commit path
+  // Legacy direct-commit path — de-duplicate double-tap submits within a 5-minute window
+  const windowStart = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+  const { data: recentCount } = await supabase
+    .from('inventory_counts')
+    .select('id')
+    .eq('property_id', propertyId)
+    .eq('submitted_by_crew_id', crew.id)
+    .gte('created_at', windowStart)
+    .maybeSingle()
+
+  if (recentCount) {
+    return NextResponse.json({ success: true })
+  }
+
   const { data: count } = await supabase
     .from('inventory_counts')
     .insert({

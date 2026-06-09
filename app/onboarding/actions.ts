@@ -21,6 +21,14 @@ export async function createOrganization(
   // Use service client for inserts — user identity already verified above
   const admin = createServiceClient()
 
+  // Pre-flight: prevent duplicate orgs from double-submit
+  const { count: memberCount } = await admin
+    .from('organization_members')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+
+  if ((memberCount ?? 0) > 0) redirect('/ops')
+
   let slug = slugify(name)
   const { count } = await admin
     .from('organizations')

@@ -403,31 +403,20 @@ export async function logActualCost(
     notes:                     `Actual cost logged: $${data.actual_cost.toFixed(2)}${data.invoice_reference ? ` (Invoice: ${data.invoice_reference})` : ''}`,
   })
 
-  // Upsert expense transaction with actual cost
+  // Upsert expense transaction with actual cost (updates amount if already posted)
   if (wo.status === 'completed') {
-    const { data: existing } = await supabase
-      .from('owner_transactions')
-      .select('id')
-      .eq('work_order_id', workOrderId)
-      .single()
-
-    if (existing) {
-      await supabase
-        .from('owner_transactions')
-        .update({ amount: data.actual_cost, description: wo.title })
-        .eq('id', existing.id)
-    } else {
-      await supabase.from('owner_transactions').insert({
-        property_id:      wo.property_id,
-        org_id:           membership.org_id,
-        work_order_id:    workOrderId,
-        transaction_type: 'expense',
-        category:         'maintenance',
-        amount:           data.actual_cost,
-        description:      wo.title,
-        transaction_date: isoDate(),
-      })
-    }
+    await supabase.from('owner_transactions').upsert({
+      property_id:          wo.property_id,
+      org_id:               membership.org_id,
+      work_order_id:        workOrderId,
+      source:               'wo_completion',
+      source_reference_id:  workOrderId,
+      transaction_type:     'expense',
+      category:             'maintenance',
+      amount:               data.actual_cost,
+      description:          wo.title,
+      transaction_date:     isoDate(),
+    }, { onConflict: 'source_reference_id,source' })
   }
 
   revalidatePath(`/maintenance/${workOrderId}`)
@@ -580,13 +569,17 @@ export async function approveQuoteRequest(
     .single()
 
   if (!qr) return { error: 'Quote request not found' }
-  if (qr.status !== 'submitted') return { error: 'Can only approve a quote that has been submitted by the vendor' }
 
-  // Mark this one approved
-  await supabase
+  // Atomic status guard — prevents double-approval from concurrent requests
+  const { data: claimed } = await supabase
     .from('quote_requests')
     .update({ status: 'approved' })
     .eq('id', quoteRequestId)
+    .eq('status', 'submitted')
+    .select('id')
+    .single()
+
+  if (!claimed) return { error: 'Can only approve a quote that has been submitted by the vendor' }
 
   // Decline all other pending/submitted quotes for this WO
   await supabase
