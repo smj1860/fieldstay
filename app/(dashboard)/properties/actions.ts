@@ -6,6 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { slugify } from '@/lib/utils'
 import { geocodeZip } from '@/lib/geocoding'
 import { calculateHealthScore } from '@/lib/assets/health-score'
+import { logAuditEvent } from '@/lib/audit'
 import type { AssetType } from '@/types/database'
 
 export type PropertyActionState = {
@@ -20,7 +21,7 @@ export async function createProperty(
   _prev: PropertyActionState | null,
   formData: FormData
 ): Promise<PropertyActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name          = (formData.get('name') as string)?.trim()
   const address       = (formData.get('address') as string)?.trim()
@@ -92,6 +93,15 @@ export async function createProperty(
     }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.created',
+    targetType: 'property',
+    targetId:   property.id,
+    metadata:   { name },
+  })
+
   revalidatePath('/properties')
   redirect(`/properties/${property.id}/setup/ical`)
 }
@@ -103,7 +113,7 @@ export async function updateProperty(
   _prev: PropertyActionState | null,
   formData: FormData
 ): Promise<PropertyActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name          = (formData.get('name') as string)?.trim()
   const address       = (formData.get('address') as string)?.trim()
@@ -152,6 +162,14 @@ export async function updateProperty(
       console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
     }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.updated',
+    targetType: 'property',
+    targetId:   propertyId,
+  })
 
   revalidatePath(`/properties/${propertyId}`)
   return { success: true }
@@ -218,7 +236,7 @@ export async function createAsset(
   formData: FormData
 ): Promise<AssetActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgMember()
 
     const name              = (formData.get('name') as string)?.trim()
     const asset_type        = formData.get('asset_type') as AssetType
@@ -269,7 +287,7 @@ export async function createAsset(
       )
     }
 
-    const { error } = await supabase
+    const { data: asset, error } = await supabase
       .from('property_assets')
       .insert({
         property_id:               propertyId,
@@ -292,8 +310,19 @@ export async function createAsset(
         depreciation_method:       'macrs',
         salvage_value:             0,
       })
+      .select('id')
+      .single()
 
     if (error) return { error: error.message }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.created',
+      targetType: 'property_asset',
+      targetId:   asset?.id,
+      metadata:   { property_id: propertyId, asset_type },
+    })
 
     revalidatePath(`/properties/${propertyId}`)
     return { success: true }
@@ -310,7 +339,7 @@ export async function updateAsset(
   formData: FormData
 ): Promise<AssetActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgMember()
 
     const name              = (formData.get('name') as string)?.trim()
     const make              = (formData.get('make') as string)?.trim() || null
@@ -340,6 +369,15 @@ export async function updateAsset(
       .eq('org_id', membership.org_id)
 
     if (error) return { error: error.message }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.updated',
+      targetType: 'property_asset',
+      targetId:   assetId,
+      metadata:   { property_id: propertyId },
+    })
 
     revalidatePath(`/properties/${propertyId}`)
     return { success: true }
@@ -380,7 +418,7 @@ export async function bulkImportAssets(
   rows:       CsvAssetRow[],
 ): Promise<{ imported: number; error?: string }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgMember()
 
     const { data: standards } = await supabase
       .from('asset_type_standards')
@@ -418,6 +456,15 @@ export async function bulkImportAssets(
     const { error } = await supabase.from('property_assets').insert(insertRows)
     if (error) return { imported: 0, error: error.message }
 
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.bulk_imported',
+      targetType: 'property_asset',
+      targetId:   propertyId,
+      metadata:   { count: rows.length, property_id: propertyId },
+    })
+
     revalidatePath(`/properties/${propertyId}`)
     return { imported: rows.length }
   } catch (err) {
@@ -429,13 +476,21 @@ export async function bulkImportAssets(
 // ── Archive ──────────────────────────────────────────────────
 
 export async function archiveProperty(propertyId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   await supabase
     .from('properties')
     .update({ is_active: false })
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.archived',
+    targetType: 'property',
+    targetId:   propertyId,
+  })
 
   revalidatePath('/properties')
   redirect('/properties')

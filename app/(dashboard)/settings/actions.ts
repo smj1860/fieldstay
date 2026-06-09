@@ -6,6 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
 import { geocodeZip } from '@/lib/geocoding'
+import { logAuditEvent } from '@/lib/audit'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 
 export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
@@ -74,9 +75,15 @@ export async function changePassword(
     return { error: 'Passwords do not match' }
 
   const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
   const { error } = await supabase.auth.updateUser({ password: newPassword })
 
   if (error) return { error: error.message }
+
+  if (user) {
+    await logAuditEvent({ actorId: user.id, action: 'account.password_changed' })
+  }
+
   return { success: true }
 }
 
@@ -110,7 +117,7 @@ export async function addCrewMember(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name              = (formData.get('name') as string)?.trim()
   const email             = (formData.get('email') as string)?.trim() || null
@@ -122,7 +129,7 @@ export async function addCrewMember(
   if (!name) return { error: 'Name is required' }
   if (!email && !phone) return { error: 'Email or phone is required' }
 
-  const { error } = await supabase.from('crew_members').insert({
+  const { data: newCrew, error } = await supabase.from('crew_members').insert({
     org_id: membership.org_id,
     name,
     email,
@@ -131,9 +138,18 @@ export async function addCrewMember(
     preferred_contact,
     role,
     is_active: true,
-  })
+  }).select('id').single()
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'crew.member.created',
+    targetType: 'crew_member',
+    targetId:   newCrew?.id,
+    metadata:   { name, role },
+  })
 
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
@@ -152,7 +168,7 @@ export async function updateCrewMember(
     role: CrewRole
   }>
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { error } = await supabase
     .from('crew_members')
@@ -162,19 +178,46 @@ export async function updateCrewMember(
 
   if (error) return { error: error.message }
 
+  if (data.role !== undefined) {
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'crew.member.role_changed',
+      targetType: 'crew_member',
+      targetId:   crewId,
+      metadata:   { new_role: data.role },
+    })
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'crew.member.updated',
+    targetType: 'crew_member',
+    targetId:   crewId,
+  })
+
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
   return { success: true }
 }
 
 export async function deactivateCrewMember(crewId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   await supabase
     .from('crew_members')
     .update({ is_active: false })
     .eq('id', crewId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'crew.member.deactivated',
+    targetType: 'crew_member',
+    targetId:   crewId,
+  })
 
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
@@ -183,7 +226,7 @@ export async function deactivateCrewMember(crewId: string): Promise<void> {
 export async function bulkImportCrew(
   rows: Array<{ name: string; email?: string; phone?: string; specialty?: string }>
 ): Promise<{ imported: number; skipped: number; error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
 
@@ -205,6 +248,14 @@ export async function bulkImportCrew(
   const { error } = await supabase.from('crew_members').insert(records)
   if (error) return { imported: 0, skipped, error: error.message }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'crew.member.bulk_imported',
+    targetType: 'crew_member',
+    metadata:   { imported: valid.length },
+  })
+
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
   return { imported: valid.length, skipped }
@@ -216,7 +267,7 @@ export async function addVendor(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name           = (formData.get('name') as string)?.trim()
   const contact_name   = (formData.get('contact_name') as string)?.trim() || null
@@ -251,6 +302,15 @@ export async function addVendor(
     }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.created',
+    targetType: 'vendor',
+    targetId:   vendor.id,
+    metadata:   { name, specialty },
+  })
+
   revalidatePath('/vendors')
   revalidatePath('/settings')
   return { success: true }
@@ -261,7 +321,7 @@ export async function updateVendor(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const name         = (formData.get('name') as string)?.trim()
   const contact_name = (formData.get('contact_name') as string)?.trim() || null
@@ -297,6 +357,15 @@ export async function updateVendor(
     }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.updated',
+    targetType: 'vendor',
+    targetId:   vendorId,
+  })
+
+
   revalidatePath('/vendors')
   revalidatePath('/settings')
   return { success: true }
@@ -316,13 +385,21 @@ export async function updateVendorPortal(vendorId: string, enabled: boolean): Pr
 }
 
 export async function deactivateVendor(vendorId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   await supabase
     .from('vendors')
     .update({ is_active: false })
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.deactivated',
+    targetType: 'vendor',
+    targetId:   vendorId,
+  })
 
   revalidatePath('/vendors')
   revalidatePath('/settings')
@@ -331,7 +408,7 @@ export async function deactivateVendor(vendorId: string): Promise<void> {
 export async function bulkImportVendors(
   rows: Array<{ name: string; contact_name?: string; email?: string; phone?: string; specialty?: string }>
 ): Promise<{ imported: number; skipped: number; error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
 
@@ -353,6 +430,14 @@ export async function bulkImportVendors(
 
   const { error } = await supabase.from('vendors').insert(records)
   if (error) return { imported: 0, skipped, error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.bulk_imported',
+    targetType: 'vendor',
+    metadata:   { imported: valid.length },
+  })
 
   revalidatePath('/vendors')
   revalidatePath('/settings')

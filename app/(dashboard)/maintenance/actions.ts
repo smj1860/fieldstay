@@ -6,6 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
+import { logAuditEvent } from '@/lib/audit'
 import type { WoStatus, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema } from '@/lib/schemas/work-order'
 
@@ -21,7 +22,7 @@ export async function createWorkOrder(
   _prev: MaintenanceActionState | null,
   formData: FormData
 ): Promise<MaintenanceActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const title                  = (formData.get('title') as string)?.trim()
   const property_id            = formData.get('property_id') as string
@@ -144,6 +145,15 @@ export async function createWorkOrder(
     })
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.created',
+    targetType: 'work_order',
+    targetId:   wo.id,
+    metadata:   { title, property_id, priority, source: 'manual' },
+  })
+
   revalidatePath('/maintenance')
   return { success: true, workOrderId: wo.id }
 }
@@ -208,7 +218,7 @@ export async function updateWorkOrder(
     portal_enabled:  boolean
   }
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const priority = PriorityLevelSchema.safeParse(data.priority).data ?? 'medium'
 
@@ -227,6 +237,14 @@ export async function updateWorkOrder(
     .eq('org_id', membership.org_id)
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.updated',
+    targetType: 'work_order',
+    targetId:   workOrderId,
+  })
 
   revalidatePath(`/maintenance/${workOrderId}`)
   revalidatePath('/maintenance')
@@ -372,7 +390,7 @@ export async function logActualCost(
   workOrderId: string,
   data: { actual_cost: number; invoice_reference?: string }
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { data: wo, error: fetchErr } = await supabase
     .from('work_orders')
@@ -418,6 +436,15 @@ export async function logActualCost(
       transaction_date:     isoDate(),
     }, { onConflict: 'source_reference_id,source' })
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.cost.logged',
+    targetType: 'work_order',
+    targetId:   workOrderId,
+    metadata:   { actual_cost: data.actual_cost },
+  })
 
   revalidatePath(`/maintenance/${workOrderId}`)
   revalidatePath('/maintenance')
@@ -660,7 +687,7 @@ export async function declineQuoteRequest(
 // ── Delete (cancel) Work Order ───────────────────────────────────────────────
 
 export async function deleteWorkOrder(workOrderId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { data: current } = await supabase
     .from('work_orders')
@@ -683,6 +710,15 @@ export async function deleteWorkOrder(workOrderId: string): Promise<void> {
       status_from:               current.status as WoStatus,
       status_to:                 'cancelled',
       notes:                     'Cancelled by property manager',
+    })
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'work_order.cancelled',
+      targetType: 'work_order',
+      targetId:   workOrderId,
+      metadata:   { previous_status: current.status },
     })
   }
 

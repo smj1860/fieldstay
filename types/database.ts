@@ -806,6 +806,20 @@ export interface OAuthState {
   expires_at:  string
 }
 
+// ── Audit Log ────────────────────────────────────────────────────────────────
+
+export interface AuditEvent {
+  id:          string
+  org_id:      string | null
+  actor_id:    string | null
+  action:      string
+  target_type: string | null
+  target_id:   string | null
+  metadata:    Record<string, unknown> | null
+  ip_address:  string | null
+  created_at:  string
+}
+
 // ── Asset Health ─────────────────────────────────────────────────────────────
 
 export interface PropertyAsset {

@@ -1,6 +1,7 @@
-import { NextResponse }       from 'next/server'
-import { createClient }       from '@/lib/supabase/server'
+import { NextResponse }        from 'next/server'
+import { createClient }        from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent }       from '@/lib/audit'
 
 /**
  * GET /api/gdpr/export
@@ -14,6 +15,7 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+  // Service client — fetches across org boundaries for a complete personal data picture
   const admin = createServiceClient()
 
   const [
@@ -24,24 +26,33 @@ export async function GET() {
     { data: auditEvents },
   ] = await Promise.all([
     admin.from('profiles').select('id, full_name, avatar_url, created_at').eq('id', user.id).single(),
-    admin.from('organization_members').select('org_id, role, invite_accepted_at, organizations(name)').eq('user_id', user.id),
+    admin.from('organization_members').select('org_id, role, invite_accepted_at').eq('user_id', user.id),
     admin.from('crew_members').select('id, name, role, reliability_score, capacity_score, created_at').eq('user_id', user.id).maybeSingle(),
     admin.from('push_subscriptions').select('endpoint, created_at').eq('user_id', user.id),
     admin.from('audit_events').select('action, target_type, target_id, created_at').eq('actor_id', user.id).order('created_at', { ascending: false }).limit(500),
   ])
 
-  // If they are a crew member, also pull their turnover assignments
   const crewAssignments = crewMember
-    ? await admin
+    ? (await admin
         .from('turnover_assignments')
-        .select('turnover_id, assigned_at, turnovers(checkout_datetime, status, properties(name))')
+        .select('turnover_id, assigned_at')
         .eq('crew_member_id', crewMember.id)
         .order('assigned_at', { ascending: false })
-        .limit(200)
-    : null
+        .limit(200)).data
+    : []
+
+  const orgIds = (memberships ?? []).map((m) => m.org_id)
+
+  await logAuditEvent({
+    orgId:      orgIds[0] ?? undefined,
+    actorId:    user.id,
+    action:     'gdpr.data_export.requested',
+    targetType: 'user',
+    targetId:   user.id,
+  })
 
   const payload = {
-    exported_at: new Date().toISOString(),
+    exported_at:              new Date().toISOString(),
     account: {
       id:         user.id,
       email:      user.email,
@@ -50,13 +61,13 @@ export async function GET() {
     },
     organization_memberships: memberships ?? [],
     crew_profile:             crewMember ?? null,
-    crew_assignments:         crewAssignments?.data ?? [],
+    crew_assignments:         crewAssignments ?? [],
     push_subscriptions:       (pushSubs ?? []).map(s => ({ endpoint: s.endpoint, created_at: s.created_at })),
     audit_trail:              auditEvents ?? [],
   }
 
   return new NextResponse(JSON.stringify(payload, null, 2), {
-    status: 200,
+    status:  200,
     headers: {
       'Content-Type':        'application/json',
       'Content-Disposition': `attachment; filename="fieldstay-data-export-${new Date().toISOString().split('T')[0]}.json"`,
