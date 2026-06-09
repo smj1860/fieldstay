@@ -320,25 +320,43 @@ export async function applyTemplateToProperties(
     return { error: itemsErr?.message ?? 'No items in template', applied: 0 }
   }
 
+  // Fetch all existing items for ALL target properties in a single query, then group by property
+  const { data: allExisting } = await supabase
+    .from('inventory_items')
+    .select('property_id, catalog_item_id, name')
+    .in('property_id', propertyIds)
+
+  const existingByProperty: Record<string, { catalogIds: Set<string>; names: Set<string> }> = {}
+  for (const row of allExisting ?? []) {
+    if (!existingByProperty[row.property_id]) {
+      existingByProperty[row.property_id] = { catalogIds: new Set(), names: new Set() }
+    }
+    if (row.catalog_item_id) existingByProperty[row.property_id]!.catalogIds.add(row.catalog_item_id)
+    existingByProperty[row.property_id]!.names.add(row.name.toLowerCase())
+  }
+
   let applied = 0
+  const allToInsert: Array<{
+    property_id:             string
+    org_id:                  string
+    catalog_item_id:         string | null
+    name:                    string
+    category:                string
+    unit:                    string
+    par_level:               number
+    current_quantity:        number
+    low_stock_threshold_pct: number
+    is_active:               boolean
+    preferred_brand:         string | null
+  }> = []
 
   for (const propertyId of propertyIds) {
-    const { data: existing } = await supabase
-      .from('inventory_items')
-      .select('catalog_item_id, name')
-      .eq('property_id', propertyId)
-
-    const existingCatalogIds = new Set(
-      (existing ?? []).map((e) => e.catalog_item_id).filter(Boolean)
-    )
-    const existingNames = new Set(
-      (existing ?? []).map((e) => e.name.toLowerCase())
-    )
+    const existing = existingByProperty[propertyId] ?? { catalogIds: new Set<string>(), names: new Set<string>() }
 
     const toInsert = items
       .filter((item) => {
-        if (item.catalog_item_id && existingCatalogIds.has(item.catalog_item_id)) return false
-        if (existingNames.has(item.name.toLowerCase())) return false
+        if (item.catalog_item_id && existing.catalogIds.has(item.catalog_item_id)) return false
+        if (existing.names.has(item.name.toLowerCase())) return false
         return true
       })
       .map((item) => ({
@@ -355,10 +373,12 @@ export async function applyTemplateToProperties(
         preferred_brand:         (item as { preferred_brand?: string | null }).preferred_brand ?? null,
       }))
 
-    if (toInsert.length > 0) {
-      await supabase.from('inventory_items').insert(toInsert)
-      applied += toInsert.length
-    }
+    allToInsert.push(...toInsert)
+    applied += toInsert.length
+  }
+
+  if (allToInsert.length > 0) {
+    await supabase.from('inventory_items').insert(allToInsert)
   }
 
   revalidatePath('/inventory')
@@ -439,21 +459,26 @@ export interface AggregatedItem {
 export async function generateAggregatedPurchaseList(): Promise<{ items: AggregatedItem[]; error?: string }> {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: items, error } = await supabase
+  // Supabase JS client can't compare two columns directly; fetch active items and filter in JS.
+  // Limit to 2000 rows (well above any real org's inventory) to prevent unbounded scans.
+  const { data: allItems, error } = await supabase
     .from('inventory_items')
     .select('name, unit, current_quantity, par_level, property_id, properties(name)')
     .eq('org_id', membership.org_id)
-    .filter('current_quantity', 'lte', 'par_level')
+    .eq('is_active', true)
+    .limit(2000)
 
   if (error) return { items: [], error: error.message }
 
   const grouped: Record<string, AggregatedItem> = {}
-  for (const item of items ?? []) {
+  for (const item of allItems ?? []) {
+    if ((item.current_quantity ?? 0) > (item.par_level ?? 0)) continue
+
     const key = item.name.toLowerCase()
     if (!grouped[key]) {
       grouped[key] = { name: item.name, unit: item.unit, totalNeeded: 0, properties: [] }
     }
-    const needed = Math.max(0, item.par_level - item.current_quantity)
+    const needed = Math.max(0, (item.par_level ?? 0) - (item.current_quantity ?? 0))
     grouped[key]!.totalNeeded += needed
     const pName = Array.isArray(item.properties)
       ? (item.properties[0] as { name: string } | undefined)?.name ?? '—'
