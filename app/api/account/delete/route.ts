@@ -90,10 +90,9 @@ export async function DELETE(request: NextRequest) {
     }
 
     await logAuditEvent({
-      orgId:    orgId,
-      actorId:  user.id,
-      action:   'account.deleted',
-      metadata: { email: user.email },
+      orgId:   orgId,
+      actorId: user.id,
+      action:  'account.deleted',
     })
   }
 

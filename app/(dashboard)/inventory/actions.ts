@@ -280,11 +280,9 @@ export async function applyTemplateToProperty(
 
   const existingNames = new Set((existingItems ?? []).map(i => i.name.toLowerCase()))
 
-  let added = 0, skipped = 0
-
-  for (const item of templateItems) {
-    if (existingNames.has(item.name.toLowerCase())) { skipped++; continue }
-    await supabase.from('inventory_items').insert({
+  const toInsert = templateItems
+    .filter(item => !existingNames.has(item.name.toLowerCase()))
+    .map(item => ({
       property_id:             propertyId,
       org_id:                  membership.org_id,
       name:                    item.name,
@@ -297,12 +295,14 @@ export async function applyTemplateToProperty(
       is_active:               true,
       low_stock_threshold_pct: 20,
       preferred_brand:         (item as { preferred_brand?: string | null }).preferred_brand ?? null,
-    })
-    added++
+    }))
+
+  if (toInsert.length > 0) {
+    await supabase.from('inventory_items').insert(toInsert)
   }
 
   revalidatePath('/inventory')
-  return { added, skipped }
+  return { added: toInsert.length, skipped: templateItems.length - toInsert.length }
 }
 
 export async function applyTemplateToProperties(
@@ -419,12 +419,14 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
 
   if (!draftItems) return { error: 'Draft not found' }
 
-  for (const item of draftItems) {
-    await supabase
-      .from('inventory_items')
-      .update({ current_quantity: item.submitted_quantity })
-      .eq('id', item.inventory_item_id)
-  }
+  await Promise.all(
+    draftItems.map(item =>
+      supabase
+        .from('inventory_items')
+        .update({ current_quantity: item.submitted_quantity })
+        .eq('id', item.inventory_item_id)
+    )
+  )
 
   await supabase
     .from('inventory_count_drafts')
