@@ -78,7 +78,24 @@ export async function POST(
     }
   }
 
-  // Upload photos to Supabase Storage
+  // Atomically claim the completion — only succeeds once (idempotency gate)
+  const { data: claimed } = await supabase
+    .from('work_orders')
+    .update({
+      status:           'completed',
+      completed_date:   new Date().toISOString().split('T')[0],
+      completion_notes: notes,
+    })
+    .eq('id', workOrder.id)
+    .in('status', ['pending', 'assigned', 'in_progress'])
+    .select('id')
+    .single()
+
+  if (!claimed) {
+    return NextResponse.json({ error: 'Work order already closed' }, { status: 409 })
+  }
+
+  // Upload photos to Supabase Storage (only after claiming completion)
   for (const file of photoFiles) {
     if (!(file instanceof File)) continue
     const ext  = file.name.split('.').pop() ?? 'jpg'
@@ -103,16 +120,6 @@ export async function POST(
       }))
     )
   }
-
-  // Mark work order complete
-  await supabase
-    .from('work_orders')
-    .update({
-      status:           'completed',
-      completed_date:   new Date().toISOString().split('T')[0],
-      completion_notes: notes,
-    })
-    .eq('id', workOrder.id)
 
   // Record status update
   await supabase.from('work_order_updates').insert({

@@ -70,17 +70,13 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
   const token     = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 days
 
-  // Delete any existing tokens for this owner, then insert fresh
-  await supabase
-    .from('owner_portal_tokens')
-    .delete()
-    .eq('property_owner_id', ownerId)
-
-  const { error } = await supabase.from('owner_portal_tokens').insert({
+  // Upsert — replaces any existing single-property token for this owner
+  const { error } = await supabase.from('owner_portal_tokens').upsert({
     property_owner_id: ownerId,
     token,
     expires_at: expiresAt,
-  })
+    is_multi:   false,
+  }, { onConflict: 'property_owner_id,is_multi' })
 
   if (error) return { error: error.message }
 
@@ -113,20 +109,14 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
   const token     = crypto.randomUUID()
   const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString() // 90 days
 
-  // Replace any existing combined token anchored on this owner row
-  await supabase
-    .from('owner_portal_tokens')
-    .delete()
-    .eq('property_owner_id', anchorOwnerId)
-    .eq('is_multi', true)
-
-  const { error } = await supabase.from('owner_portal_tokens').insert({
+  // Upsert — replaces any existing combined token anchored on this owner row
+  const { error } = await supabase.from('owner_portal_tokens').upsert({
     property_owner_id: anchorOwnerId,
     token,
     expires_at:   expiresAt,
     property_ids: propertyIds,
     is_multi:     true,
-  })
+  }, { onConflict: 'property_owner_id,is_multi' })
 
   if (error) return { error: error.message }
 

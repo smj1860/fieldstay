@@ -74,6 +74,10 @@ export async function inviteTeamMember(
     .single()
 
   if (insertError || !invite) {
+    // code 23505 = unique_violation — concurrent duplicate invite
+    if (insertError?.code === '23505') {
+      return { error: 'A pending invitation already exists for this email.' }
+    }
     console.error(`[Team:${user.id}] invite insert failed:`, insertError?.message)
     return { error: 'Failed to create invitation. Please try again.' }
   }

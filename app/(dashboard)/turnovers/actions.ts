@@ -34,17 +34,18 @@ export async function assignCrew(
   if (!crew) return { error: 'Crew member not found' }
 
   for (const turnover of turnovers) {
-    // Remove existing assignments first (re-assign pattern)
+    // Remove assignments to other crew members (targeted re-assign)
     await supabase
       .from('turnover_assignments')
       .delete()
       .eq('turnover_id', turnover.id)
+      .neq('crew_member_id', crewMemberId)
 
-    // Insert new assignment
-    await supabase.from('turnover_assignments').insert({
+    // Upsert assignment for this crew member (no-op if already assigned)
+    await supabase.from('turnover_assignments').upsert({
       turnover_id:    turnover.id,
       crew_member_id: crewMemberId,
-    })
+    }, { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: true })
 
     // Update turnover status to assigned
     await supabase

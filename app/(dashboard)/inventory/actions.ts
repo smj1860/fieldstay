@@ -179,24 +179,29 @@ export async function createOrGetTemplate(): Promise<{
 }> {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: existing } = await supabase
+  // Upsert so concurrent calls don't race past the check+insert gap
+  const { data: tmpl, error } = await supabase
     .from('inventory_templates')
-    .select('id, name, inventory_template_items(*)')
-    .eq('org_id', membership.org_id)
-    .limit(1)
-    .single()
-
-  if (existing) return { template: existing as unknown as { id: string; name: string; inventory_template_items: null } }
-
-  const { data: created, error } = await supabase
-    .from('inventory_templates')
-    .insert({ org_id: membership.org_id, name: 'Master Inventory List' })
+    .upsert(
+      { org_id: membership.org_id, name: 'Master Inventory List' },
+      { onConflict: 'org_id', ignoreDuplicates: true }
+    )
     .select('id, name')
     .single()
 
-  if (error) return { error: error.message }
+  if (error || !tmpl) {
+    // Conflict ignored — fetch the existing row
+    const { data: existing, error: fetchErr } = await supabase
+      .from('inventory_templates')
+      .select('id, name')
+      .eq('org_id', membership.org_id)
+      .single()
+    if (fetchErr || !existing) return { error: fetchErr?.message ?? 'Template not found' }
+    return { template: { ...existing, inventory_template_items: null } }
+  }
+
   revalidatePath('/inventory')
-  return { template: { ...created!, inventory_template_items: null } }
+  return { template: { ...tmpl, inventory_template_items: null } }
 }
 
 export async function addTemplateItem(

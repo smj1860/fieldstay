@@ -27,6 +27,17 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient()
 
+  // Deduplicate — Stripe delivers webhooks at-least-once
+  const { error: dedupErr } = await supabase
+    .from('stripe_processed_events')
+    .insert({ stripe_event_id: event.id })
+  if (dedupErr) {
+    if (dedupErr.code === '23505') {
+      return NextResponse.json({ received: true })
+    }
+    console.error('[Stripe] dedup insert failed (non-fatal):', dedupErr.message)
+  }
+
   switch (event.type) {
 
     case 'checkout.session.completed': {

@@ -13,6 +13,16 @@ export const flaggedTurnoverToWO = inngest.createFunction(
     const workOrder = await step.run('create-draft-wo', async () => {
       const supabase = createServiceClient()
 
+      // Idempotency: return existing WO if this step is retried
+      const { data: existing } = await supabase
+        .from('work_orders')
+        .select('id, wo_number')
+        .eq('source_turnover_id', turnover_id)
+        .eq('source', 'crew_flag')
+        .maybeSingle()
+
+      if (existing) return existing
+
       const { data: property } = await supabase
         .from('properties')
         .select('name')
@@ -26,6 +36,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
         .insert({
           org_id,
           property_id,
+          source_turnover_id: turnover_id,
           title:       `Issue Flagged During Turnover — ${propName}`,
           description: flag_notes,
           priority:    'high',

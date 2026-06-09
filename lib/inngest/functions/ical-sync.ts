@@ -209,10 +209,10 @@ export const syncIcalFeed = inngest.createFunction(
             cancelledIds.push(existing.id)
           }
         } else {
-          // Insert new booking
+          // Upsert new booking — safe if two concurrent syncs race on the same ical_uid
           const { data: newBooking } = await supabase
             .from('bookings')
-            .insert({
+            .upsert({
               property_id:  property_id,
               org_id:       org_id,
               ical_feed_id: feed_id,
@@ -226,7 +226,7 @@ export const syncIcalFeed = inngest.createFunction(
               source:        'airbnb',  // refined from feed source if needed
               status,
               raw_ical_data: { summary: event.guestName, uid: event.uid },
-            })
+            }, { onConflict: 'ical_feed_id,ical_uid', ignoreDuplicates: false })
             .select('id')
             .single()
 
