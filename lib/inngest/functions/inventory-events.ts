@@ -100,6 +100,9 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         const threshold = Math.ceil(inv.par_level * (inv.low_stock_threshold_pct / 100))
         if (item.quantity_counted <= threshold) {
           const quantityToBuy = inv.par_level - item.quantity_counted
+          // When low_stock_threshold_pct = 100 the trigger fires at par, making
+          // quantityToBuy = 0 — skip those to avoid zero-quantity PO lines
+          if (quantityToBuy <= 0) continue
           below.push({
             id:               inv.id,
             name:             inv.name,

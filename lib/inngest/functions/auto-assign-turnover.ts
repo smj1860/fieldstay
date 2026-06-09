@@ -72,14 +72,16 @@ export const autoAssignTurnover = inngest.createFunction(
         familiarCrewIds = [...new Set(historyItems.map((h) => h.crew_member_id))]
       }
 
-      // Workload: assignments in next 14 days
+      // Workload: assignments in next 14 days only (not all-time history)
       const windowEnd = new Date()
       windowEnd.setDate(windowEnd.getDate() + 14)
 
       const { data: upcoming } = await supabase
         .from('turnover_assignments')
-        .select('crew_member_id')
+        .select('crew_member_id, turnovers!inner(checkout_datetime)')
         .in('crew_member_id', crew.map((c) => c.id))
+        .gte('turnovers.checkout_datetime', new Date().toISOString())
+        .lte('turnovers.checkout_datetime', windowEnd.toISOString())
 
       const workloadMap: Record<string, number> = {}
       for (const a of upcoming ?? []) {

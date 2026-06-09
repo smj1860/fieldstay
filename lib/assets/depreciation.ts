@@ -18,8 +18,14 @@ export function getMacrsRate(macrsClass: MacrsClass, yearOfService: number): num
   if (macrsClass === '39_year')     return 1 / 39
 
   const rates = MACRS_RATES[macrsClass]
-  if (yearOfService < 1 || yearOfService > rates.length) return 0
-  return rates[yearOfService - 1]
+  if (yearOfService < 1) return 0
+  // Final year: return whatever is needed to reach exactly 100% cost recovery
+  if (yearOfService === rates.length) {
+    const priorSum = rates.slice(0, -1).reduce((s, r) => s + r, 0)
+    return Math.max(0, 1 - priorSum)
+  }
+  if (yearOfService > rates.length) return 0
+  return rates[yearOfService - 1]!
 }
 
 export function calculateAnnualDepreciation(

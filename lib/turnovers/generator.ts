@@ -54,6 +54,17 @@ export async function generateTurnoversForProperty(
     .eq('is_default', true)
     .single()
 
+  // Prefetch all existing turnover pairs for this property in one query
+  // instead of one query per booking pair (O(N) → O(1) dedup lookup)
+  const { data: existingTurnovers } = await supabase
+    .from('turnovers')
+    .select('booking_id, prev_booking_id')
+    .eq('property_id', propertyId)
+
+  const existingPairs = new Set(
+    (existingTurnovers ?? []).map((t) => `${t.prev_booking_id}:${t.booking_id}`)
+  )
+
   const newTurnoverIds: string[] = []
 
   for (let i = 0; i < bookings.length - 1; i++) {
@@ -74,16 +85,8 @@ export async function generateTurnoversForProperty(
       (checkinDT.getTime() - checkoutDT.getTime()) / 60_000
     )
 
-    // Deduplicate — check if a turnover already exists for this exact pair
-    const { data: existing } = await supabase
-      .from('turnovers')
-      .select('id')
-      .eq('property_id', propertyId)
-      .eq('booking_id', incoming.id)
-      .eq('prev_booking_id', outgoing.id)
-      .maybeSingle()
-
-    if (existing) continue
+    // Deduplicate using prefetched set — O(1) vs O(N) round-trips
+    if (existingPairs.has(`${outgoing.id}:${incoming.id}`)) continue
 
     // Priority based on window size
     const priority: PriorityLevel =
