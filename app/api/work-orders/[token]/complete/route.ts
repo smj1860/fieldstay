@@ -95,20 +95,20 @@ export async function POST(
     return NextResponse.json({ error: 'Work order already closed' }, { status: 409 })
   }
 
-  // Upload photos to Supabase Storage (only after claiming completion)
-  for (const file of photoFiles) {
-    if (!(file instanceof File)) continue
-    const ext  = file.name.split('.').pop() ?? 'jpg'
-    const path = `work-orders/${workOrder.id}/vendor-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-
-    const { error: uploadError } = await supabase.storage
-      .from('work-order-photos')
-      .upload(path, file, { contentType: file.type })
-
-    if (!uploadError) {
-      photosPaths.push(path)
-    }
-  }
+  // Upload photos to Supabase Storage in parallel (only after claiming completion)
+  const uploadResults = await Promise.all(
+    photoFiles
+      .filter((f): f is File => f instanceof File)
+      .map(async (file) => {
+        const ext  = file.name.split('.').pop() ?? 'jpg'
+        const path = `work-orders/${workOrder.id}/vendor-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { error } = await supabase.storage
+          .from('work-order-photos')
+          .upload(path, file, { contentType: file.type })
+        return error ? null : path
+      })
+  )
+  photosPaths.push(...uploadResults.filter((p): p is string => p !== null))
 
   // Record photo rows
   if (photosPaths.length > 0) {

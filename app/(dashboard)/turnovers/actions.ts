@@ -33,27 +33,27 @@ export async function assignCrew(
 
   if (!crew) return { error: 'Crew member not found' }
 
-  for (const turnover of turnovers) {
-    // Remove assignments to other crew members (targeted re-assign)
-    await supabase
-      .from('turnover_assignments')
-      .delete()
-      .eq('turnover_id', turnover.id)
-      .neq('crew_member_id', crewMemberId)
+  const ids = turnovers.map(t => t.id)
 
-    // Upsert assignment for this crew member (no-op if already assigned)
-    await supabase.from('turnover_assignments').upsert({
-      turnover_id:    turnover.id,
-      crew_member_id: crewMemberId,
-    }, { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: true })
+  // Batch: remove other-crew assignments across all turnovers in one query
+  await supabase
+    .from('turnover_assignments')
+    .delete()
+    .in('turnover_id', ids)
+    .neq('crew_member_id', crewMemberId)
 
-    // Update turnover status to assigned
-    await supabase
-      .from('turnovers')
-      .update({ status: 'assigned' })
-      .eq('id', turnover.id)
-      .eq('status', 'pending_assignment') // only if not already further along
-  }
+  // Batch: upsert this crew member for all turnovers at once
+  await supabase.from('turnover_assignments').upsert(
+    ids.map(id => ({ turnover_id: id, crew_member_id: crewMemberId })),
+    { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: true }
+  )
+
+  // Batch: advance status for all pending_assignment turnovers at once
+  await supabase
+    .from('turnovers')
+    .update({ status: 'assigned' })
+    .in('id', ids)
+    .eq('status', 'pending_assignment')
 
   // Send push notification to the assigned crew member
   try {
@@ -278,27 +278,31 @@ export async function addCrewToTurnover(
 
   if (!crew) return { error: 'Crew member not found' }
 
-  for (const turnover of turnovers) {
-    const { data: existing } = await supabase
-      .from('turnover_assignments')
-      .select('id')
-      .eq('turnover_id', turnover.id)
-      .eq('crew_member_id', crewMemberId)
-      .maybeSingle()
+  const verifiedIds = turnovers.map(t => t.id)
 
-    if (!existing) {
-      await supabase.from('turnover_assignments').insert({
-        turnover_id:    turnover.id,
-        crew_member_id: crewMemberId,
-      })
-    }
+  // Fetch all existing assignments for this crew + these turnovers in one query
+  const { data: currentAssignments } = await supabase
+    .from('turnover_assignments')
+    .select('turnover_id')
+    .in('turnover_id', verifiedIds)
+    .eq('crew_member_id', crewMemberId)
 
-    if (turnover.status === 'pending_assignment') {
-      await supabase
-        .from('turnovers')
-        .update({ status: 'assigned' })
-        .eq('id', turnover.id)
-    }
+  const alreadyAssigned = new Set((currentAssignments ?? []).map(a => a.turnover_id))
+
+  // Batch insert only the missing assignments
+  const toInsert = verifiedIds.filter(id => !alreadyAssigned.has(id))
+  if (toInsert.length > 0) {
+    await supabase.from('turnover_assignments').insert(
+      toInsert.map(id => ({ turnover_id: id, crew_member_id: crewMemberId }))
+    )
+  }
+
+  // Batch advance pending_assignment turnovers to assigned
+  const pendingIds = turnovers
+    .filter(t => t.status === 'pending_assignment')
+    .map(t => t.id)
+  if (pendingIds.length > 0) {
+    await supabase.from('turnovers').update({ status: 'assigned' }).in('id', pendingIds)
   }
 
   // Conflict detection — check for overlapping assignments for this crew member
@@ -395,21 +399,10 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
   const crewIds = (turnover.suggested_crew_ids as string[] | null) ?? []
   if (!crewIds.length) return { error: 'No suggestion to accept' }
 
-  for (const crewId of crewIds) {
-    const { data: existing } = await supabase
-      .from('turnover_assignments')
-      .select('id')
-      .eq('turnover_id', turnoverId)
-      .eq('crew_member_id', crewId)
-      .maybeSingle()
-
-    if (!existing) {
-      await supabase.from('turnover_assignments').insert({
-        turnover_id:    turnoverId,
-        crew_member_id: crewId,
-      })
-    }
-  }
+  await supabase.from('turnover_assignments').upsert(
+    crewIds.map(crewId => ({ turnover_id: turnoverId, crew_member_id: crewId })),
+    { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: true }
+  )
 
   await supabase
     .from('turnovers')

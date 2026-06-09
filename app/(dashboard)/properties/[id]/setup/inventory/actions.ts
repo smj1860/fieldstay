@@ -22,24 +22,33 @@ export async function upsertInventoryItems(
 ): Promise<InventoryState> {
   const { supabase, membership } = await requireOrgMember()
 
-  for (const item of items) {
-    if (item.id) {
-      // Update existing
-      await supabase
-        .from('inventory_items')
-        .update({
-          name:            item.name,
-          category:        item.category as never,
-          unit:            item.unit,
-          par_level:       item.par_level,
-          notes:           item.notes ?? null,
-          preferred_brand: item.preferred_brand ?? null,
-        })
-        .eq('id', item.id)
-        .eq('org_id', membership.org_id)
-    } else {
-      // Insert new
-      await supabase.from('inventory_items').insert({
+  const toUpdate = items.filter(i => !!i.id)
+  const toInsert = items.filter(i => !i.id)
+
+  // Parallel updates (each targets a different row by id)
+  if (toUpdate.length > 0) {
+    await Promise.all(
+      toUpdate.map(item =>
+        supabase
+          .from('inventory_items')
+          .update({
+            name:            item.name,
+            category:        item.category as never,
+            unit:            item.unit,
+            par_level:       item.par_level,
+            notes:           item.notes ?? null,
+            preferred_brand: item.preferred_brand ?? null,
+          })
+          .eq('id', item.id!)
+          .eq('org_id', membership.org_id)
+      )
+    )
+  }
+
+  // Batch insert new items
+  if (toInsert.length > 0) {
+    await supabase.from('inventory_items').insert(
+      toInsert.map(item => ({
         property_id:      propertyId,
         org_id:           membership.org_id,
         catalog_item_id:  item.catalog_item_id ?? null,
@@ -50,8 +59,8 @@ export async function upsertInventoryItems(
         current_quantity: 0,
         notes:            item.notes ?? null,
         preferred_brand:  item.preferred_brand ?? null,
-      })
-    }
+      }))
+    )
   }
 
   revalidatePath(`/properties/${propertyId}/setup/inventory`)
