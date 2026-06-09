@@ -12,7 +12,7 @@ export default async function PropertiesPage() {
 
   const { data: properties } = await supabase
     .from('properties')
-    .select('id, name, city, state, property_type, bedrooms, bathrooms, setup_steps_completed, is_active')
+    .select('id, name, address, city, state, property_type, bedrooms, bathrooms, setup_steps_completed, is_active')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .order('name')
@@ -55,8 +55,11 @@ export default async function PropertiesPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <h3 className="font-semibold text-primary-themed truncate">{p.name}</h3>
+                    {p.address && (
+                      <p className="text-xs text-muted-themed mt-0.5 truncate">{p.address}</p>
+                    )}
                     {(p.city || p.state) && (
-                      <p className="text-sm text-muted-themed mt-0.5">
+                      <p className="text-xs text-muted-themed truncate">
                         {[p.city, p.state].filter(Boolean).join(', ')}
                       </p>
                     )}

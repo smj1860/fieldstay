@@ -256,6 +256,20 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
               </div>
             </div>
             <div>
+              <label className="label">Street Address</label>
+              <input name="address" type="text" defaultValue={vendor.address ?? ''} className="input" placeholder="123 Main St" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label">City</label>
+                <input name="city" type="text" defaultValue={vendor.city ?? ''} className="input" placeholder="Atlanta" />
+              </div>
+              <div>
+                <label className="label">State</label>
+                <input name="state" type="text" defaultValue={vendor.state ?? ''} className="input" placeholder="GA" maxLength={2} />
+              </div>
+            </div>
+            <div>
               <label className="label">Service ZIP</label>
               <input name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} className="input" placeholder="e.g. 30301" maxLength={10} />
             </div>
@@ -291,6 +305,17 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
                    className="text-accent-blue hover:underline truncate max-w-[180px]">
                   {vendor.email}
                 </a>
+              </div>
+            )}
+            {(vendor.address || vendor.city || vendor.state) && (
+              <div className="flex justify-between">
+                <span className="text-muted-themed">Address</span>
+                <span className="text-secondary-themed text-right">
+                  {vendor.address && <span className="block">{vendor.address}</span>}
+                  {(vendor.city || vendor.state) && (
+                    <span className="block">{[vendor.city, vendor.state].filter(Boolean).join(', ')}</span>
+                  )}
+                </span>
               </div>
             )}
             {vendor.service_zip && (
@@ -374,6 +399,22 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
           <div>
             <label htmlFor="vendor-zip" className="label">Service ZIP</label>
             <input id="vendor-zip" name="service_zip" type="text" className="input" placeholder="e.g. 30301" maxLength={10} />
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="vendor-address" className="label">Street Address</label>
+          <input id="vendor-address" name="address" type="text" className="input" placeholder="123 Main St" />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="vendor-city" className="label">City</label>
+            <input id="vendor-city" name="city" type="text" className="input" placeholder="Atlanta" />
+          </div>
+          <div>
+            <label htmlFor="vendor-state" className="label">State</label>
+            <input id="vendor-state" name="state" type="text" className="input" placeholder="GA" maxLength={2} />
           </div>
         </div>
 

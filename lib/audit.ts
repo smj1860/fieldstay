@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 export type AuditAction =
   | 'auth.invite.accepted'
+  | 'auth.oauth.callback'
   | 'team.member.invited'
   | 'team.member.removed'
   | 'team.invite.revoked'
@@ -17,6 +18,8 @@ export type AuditAction =
   | 'billing.subscription.cancelled'
   | 'ical.feed.added'
   | 'ical.feed.deleted'
+  | 'comms.log.created'
+  | 'comms.log.deleted'
   | 'crew.member.deactivated'
   | 'crew.member.role_changed'
   | 'vendor.created'

@@ -900,6 +900,58 @@ export async function deleteMaintenanceSchedule(
   return { success: true }
 }
 
+// ── Create Maintenance Schedule Template ─────────────────────────────────────
+
+export async function createMaintenanceScheduleTemplate(data: {
+  name:        string
+  description: string | null
+  items: Array<{
+    name:                  string
+    description:           string | null
+    schedule_frequency:    ScheduleFrequency
+    vendor_specialty_hint: VendorSpecialty | null
+    estimated_cost:        number | null
+    sort_order:            number
+  }>
+}): Promise<MaintenanceActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (!data.name.trim()) return { error: 'Template name is required' }
+  if (!data.items.length) return { error: 'Add at least one item to the template' }
+
+  const { data: template, error: tErr } = await supabase
+    .from('maintenance_schedule_templates')
+    .insert({
+      org_id:      membership.org_id,
+      name:        data.name.trim(),
+      description: data.description || null,
+      is_system:   false,
+    })
+    .select('id')
+    .single()
+
+  if (tErr || !template) return { error: tErr?.message ?? 'Failed to create template' }
+
+  const itemRows = data.items.map((item, i) => ({
+    template_id:           template.id,
+    name:                  item.name.trim(),
+    description:           item.description || null,
+    schedule_frequency:    item.schedule_frequency,
+    vendor_specialty_hint: item.vendor_specialty_hint || null,
+    estimated_cost:        item.estimated_cost || null,
+    sort_order:            i,
+  }))
+
+  const { error: iErr } = await supabase
+    .from('maintenance_schedule_template_items')
+    .insert(itemRows)
+
+  if (iErr) return { error: iErr.message }
+
+  revalidatePath('/maintenance')
+  return { success: true }
+}
+
 // ── Maintenance Schedule Template Broadcasting ───────────────────────────────
 
 export type BroadcastResult = {

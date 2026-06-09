@@ -125,7 +125,17 @@ export function InventorySetup({
                       <span className="text-xs text-accent-400">Par:</span>
                       <input
                         type="number" min="0" value={item.par_level}
-                        onChange={(e) => updateItem(idx, 'par_level', parseInt(e.target.value) || 0)}
+                        onChange={(e) => {
+                          const raw = e.target.value
+                          // Allow clearing the field — treat empty as 0 only on blur
+                          const n = raw === '' ? 0 : Math.max(0, parseInt(raw, 10) || 0)
+                          updateItem(idx, 'par_level', n)
+                        }}
+                        onBlur={(e) => {
+                          if (e.target.value === '' || isNaN(Number(e.target.value))) {
+                            updateItem(idx, 'par_level', 0)
+                          }
+                        }}
                         className="w-14 text-center text-sm border border-accent-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
                       />
                     </div>
@@ -246,7 +256,14 @@ export function InventorySetup({
             </div>
             <div>
               <label className="label">Par Level</label>
-              <input type="number" min="0" value={customItem.par_level} onChange={(e) => setCustomItem((p) => ({ ...p, par_level: parseInt(e.target.value) || 0 }))} className="input" />
+              <input
+                type="number" min="0" value={customItem.par_level}
+                onChange={(e) => {
+                  const n = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0)
+                  setCustomItem((p) => ({ ...p, par_level: n }))
+                }}
+                className="input"
+              />
             </div>
           </div>
           <div className="flex gap-2">

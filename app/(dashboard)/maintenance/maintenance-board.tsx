@@ -11,7 +11,7 @@ import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
 import {
   createWorkOrder, createWorkOrderFromSchedule,
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
-  broadcastMaintenanceTemplate, type BroadcastResult,
+  broadcastMaintenanceTemplate, createMaintenanceScheduleTemplate, type BroadcastResult,
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency, ComplianceStatus } from '@/types/database'
 import { distanceMiles } from '@/lib/geocoding'
@@ -1273,6 +1273,149 @@ function TemplateBroadcastModal({
   )
 }
 
+// ── Create Template Modal ─────────────────────────────────────────────────────
+
+interface NewTemplateItem {
+  name:                  string
+  description:           string
+  schedule_frequency:    ScheduleFrequency
+  vendor_specialty_hint: VendorSpecialty | ''
+  estimated_cost:        string
+}
+
+function CreateTemplateModal({ onClose }: { onClose: () => void }) {
+  const [name, setName]           = useState('')
+  const [description, setDesc]    = useState('')
+  const [items, setItems]         = useState<NewTemplateItem[]>([
+    { name: '', description: '', schedule_frequency: 'quarterly', vendor_specialty_hint: '', estimated_cost: '' },
+  ])
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState<string | null>(null)
+
+  const addItem = () =>
+    setItems((prev) => [...prev, { name: '', description: '', schedule_frequency: 'quarterly', vendor_specialty_hint: '', estimated_cost: '' }])
+
+  const removeItem = (i: number) =>
+    setItems((prev) => prev.filter((_, idx) => idx !== i))
+
+  const updateItem = (i: number, field: keyof NewTemplateItem, value: string) =>
+    setItems((prev) => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item))
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!name.trim()) { setError('Template name is required'); return }
+    const validItems = items.filter((it) => it.name.trim())
+    if (!validItems.length) { setError('Add at least one item'); return }
+    setSaving(true)
+    setError(null)
+    const result = await createMaintenanceScheduleTemplate({
+      name:        name.trim(),
+      description: description.trim() || null,
+      items:       validItems.map((it, i) => ({
+        name:                  it.name.trim(),
+        description:           it.description.trim() || null,
+        schedule_frequency:    it.schedule_frequency,
+        vendor_specialty_hint: (it.vendor_specialty_hint as VendorSpecialty | null) || null,
+        estimated_cost:        it.estimated_cost ? parseFloat(it.estimated_cost) : null,
+        sort_order:            i,
+      })),
+    })
+    setSaving(false)
+    if (result.error) { setError(result.error); return }
+    onClose()
+  }
+
+  const SPECIALTY_LABELS: Record<string, string> = {
+    plumbing: 'Plumbing', electrical: 'Electrical', hvac: 'HVAC',
+    landscaping: 'Landscaping', cleaning: 'Cleaning', pest_control: 'Pest Control',
+    pool: 'Pool', roofing: 'Roofing', general: 'General', other: 'Other',
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-lg font-semibold text-primary-themed">Create Schedule Template</h3>
+          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+        </div>
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="label">Template Name <span className="text-red-500">*</span></label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. STR Annual Maintenance" required />
+          </div>
+          <div>
+            <label className="label">Description</label>
+            <input value={description} onChange={(e) => setDesc(e.target.value)} className="input" placeholder="Optional description…" />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">Items <span className="text-red-500">*</span></label>
+              <button type="button" onClick={addItem} className="btn-secondary text-xs py-1 px-2 flex items-center gap-1">
+                <Plus className="w-3 h-3" /> Add Item
+              </button>
+            </div>
+            <div className="space-y-2">
+              {items.map((item, i) => (
+                <div key={i} className="border border-themed rounded-xl p-3 space-y-2 bg-canvas-themed">
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="label text-xs">Item Name <span className="text-red-500">*</span></label>
+                        <input value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
+                               className="input text-sm" placeholder="e.g. HVAC Filter Replacement" />
+                      </div>
+                      <div>
+                        <label className="label text-xs">Frequency</label>
+                        <select value={item.schedule_frequency}
+                                onChange={(e) => updateItem(i, 'schedule_frequency', e.target.value)}
+                                className="input text-sm">
+                          {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="label text-xs">Vendor Specialty</label>
+                        <select value={item.vendor_specialty_hint}
+                                onChange={(e) => updateItem(i, 'vendor_specialty_hint', e.target.value)}
+                                className="input text-sm">
+                          <option value="">None</option>
+                          {Object.entries(SPECIALTY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="label text-xs">Est. Cost ($)</label>
+                        <input type="number" min="0" step="0.01" value={item.estimated_cost}
+                               onChange={(e) => updateItem(i, 'estimated_cost', e.target.value)}
+                               className="input text-sm" placeholder="0.00" />
+                      </div>
+                    </div>
+                    {items.length > 1 && (
+                      <button type="button" onClick={() => removeItem(i)}
+                              className="btn-ghost p-1.5 text-red-500 hover:text-red-600 mt-5 flex-shrink-0">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2 border-t border-themed">
+            <button type="submit" disabled={saving} className="btn-primary flex-1">
+              {saving ? 'Creating…' : 'Create Template'}
+            </button>
+            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ── Templates Section ─────────────────────────────────────────────────────────
 
 function TemplatesSection({
@@ -1284,6 +1427,7 @@ function TemplatesSection({
 }) {
   const [open, setOpen]                             = useState(false)
   const [broadcastTemplateId, setBroadcastTemplateId] = useState<string | null>(null)
+  const [showCreateTemplate, setShowCreateTemplate] = useState(false)
 
   const broadcastTemplate = templates.find((t) => t.id === broadcastTemplateId) ?? null
 
@@ -1301,6 +1445,13 @@ function TemplatesSection({
             <span className="badge badge-slate">{templates.length}</span>
             <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
           </button>
+          <button
+            onClick={() => setShowCreateTemplate(true)}
+            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"
+          >
+            <Plus className="w-3 h-3" />
+            Create Template
+          </button>
         </div>
         <p className="text-xs text-muted-themed mb-3">
           Broadcast a curated set of recurring maintenance schedules to multiple properties at once
@@ -1308,7 +1459,7 @@ function TemplatesSection({
 
         {open && templates.length === 0 && (
           <div className="text-center py-8 text-sm text-muted-themed border border-themed rounded-xl">
-            No templates available yet.
+            No templates yet. Click "Create Template" to build one.
           </div>
         )}
 
@@ -1357,6 +1508,10 @@ function TemplatesSection({
           onClose={() => setBroadcastTemplateId(null)}
         />
       )}
+
+      {showCreateTemplate && (
+        <CreateTemplateModal onClose={() => setShowCreateTemplate(false)} />
+      )}
     </>
   )
 }
@@ -1395,7 +1550,7 @@ export function MaintenanceBoard({
   const [filterPriority, setFilterPriority] = useState<string>(
     urlFilter === 'urgent' ? 'high' : 'all'
   )
-  const [viewMode,       setViewMode]       = useState<'list' | 'calendar'>('calendar')
+  const [viewMode,       setViewMode]       = useState<'list' | 'calendar'>('list')
 
   const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
 
