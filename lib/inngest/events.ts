@@ -404,6 +404,19 @@ export type FieldStayEvents = {
   }
 
   // ----------------------------------------------------------
+  // Checklist template broadcasting (background job)
+  // ----------------------------------------------------------
+
+  'checklist/template-broadcast': {
+    data: {
+      org_id:             string
+      source_property_id: string
+      target_property_ids: string[]
+      triggered_by:       string
+    }
+  }
+
+  // ----------------------------------------------------------
   // In-App Messaging
   // ----------------------------------------------------------
 

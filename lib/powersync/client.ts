@@ -27,7 +27,6 @@ class SupabaseConnector {
             is_completed:       op.opData?.is_completed,
             crew_notes:         op.opData?.crew_notes,
             photo_storage_path: op.opData?.photo_storage_path ?? null,
-            updated_at:         new Date().toISOString(),
           })
           .eq('id', op.id)
       }

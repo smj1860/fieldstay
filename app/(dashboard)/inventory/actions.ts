@@ -147,14 +147,16 @@ export async function submitInventoryCount(
 
     if (itemsError) return { error: itemsError.message }
 
-    // Update current_quantity on each item (org_id guard)
-    for (const u of updates) {
-      await supabase
-        .from('inventory_items')
-        .update({ current_quantity: u.current_quantity })
-        .eq('id', u.id)
-        .eq('org_id', membership.org_id)
-    }
+    // Update current_quantity on each item (org_id guard) — parallel to avoid serial timeout
+    await Promise.all(
+      updates.map((u) =>
+        supabase
+          .from('inventory_items')
+          .update({ current_quantity: u.current_quantity })
+          .eq('id', u.id)
+          .eq('org_id', membership.org_id)
+      )
+    )
   }
 
   // Fire Inngest event
