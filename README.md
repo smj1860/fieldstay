@@ -18,7 +18,6 @@ FieldStay is a local-first, multi-tenant SaaS platform that automates turnover o
 | **Asset Health** | Data plate scanning via AI OCR, depreciation tracking, and maintenance history |
 | **RepuGuard** | AI-generated review response drafts, bundled for all OwnerRez-connected accounts |
 | **Crew Mobile** | Offline-first PWA for crew members powered by PowerSync SQLite sync |
-| **Communications** | Automated guest messaging (pre-checkout, booking confirmation) via configurable templates |
 
 ---
 
