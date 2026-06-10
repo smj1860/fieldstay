@@ -58,7 +58,7 @@ export function BottomNav({ role, onMore }: BottomNavProps) {
         style={{ color: 'var(--text-muted)' }}
       >
         <MoreHorizontal className="w-5 h-5" />
-        <span>More</span>
+        <span>Menu</span>
       </button>
     </nav>
   )

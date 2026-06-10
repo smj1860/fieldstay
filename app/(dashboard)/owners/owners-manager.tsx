@@ -420,17 +420,23 @@ function TransactionPanel({
         <div className="mt-3">
           {/* Summary */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-            <div className="bg-green-50 rounded-lg p-2 text-center">
-              <div className="text-xs text-green-600 mb-0.5">Revenue</div>
-              <div className="text-sm font-semibold text-green-700">{formatCurrency(totalRevenue)}</div>
+            <div className="rounded-lg p-2 text-center" style={{ background: 'var(--accent-green-dim)' }}>
+              <div className="text-xs mb-0.5" style={{ color: 'var(--accent-green)' }}>Revenue</div>
+              <div className="text-sm font-semibold" style={{ color: 'var(--accent-green)' }}>{formatCurrency(totalRevenue)}</div>
             </div>
-            <div className="bg-red-50 rounded-lg p-2 text-center">
-              <div className="text-xs text-red-600 mb-0.5">Expenses</div>
-              <div className="text-sm font-semibold text-red-700">{formatCurrency(totalExpense)}</div>
+            <div className="rounded-lg p-2 text-center" style={{ background: 'var(--accent-red-dim)' }}>
+              <div className="text-xs mb-0.5" style={{ color: 'var(--accent-red)' }}>Expenses</div>
+              <div className="text-sm font-semibold" style={{ color: 'var(--accent-red)' }}>{formatCurrency(totalExpense)}</div>
             </div>
-            <div className={cn('rounded-lg p-2 text-center', net >= 0 ? 'bg-canvas-themed' : 'bg-amber-50')}>
+            <div
+              className={cn('rounded-lg p-2 text-center', net >= 0 && 'bg-canvas-themed')}
+              style={net < 0 ? { background: 'var(--accent-amber-dim)' } : undefined}
+            >
               <div className="text-xs text-muted-themed mb-0.5">Net</div>
-              <div className={cn('text-sm font-semibold', net >= 0 ? 'text-primary-themed' : 'text-amber-700')}>
+              <div
+                className={cn('text-sm font-semibold', net >= 0 && 'text-primary-themed')}
+                style={net < 0 ? { color: 'var(--accent-amber)' } : undefined}
+              >
                 {formatCurrency(net)}
               </div>
             </div>

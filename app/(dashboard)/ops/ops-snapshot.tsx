@@ -65,7 +65,7 @@ function KpiCard({
 }) {
   const inner = (
     <div
-      className={cn('kpi-card', href && 'cursor-pointer hover:shadow-md transition-shadow')}
+      className={cn('kpi-card', href && 'cursor-pointer hover:shadow-md hover:border-[var(--accent-gold)] transition-colors')}
       style={{ '--kpi-accent': accentColor } as React.CSSProperties}
     >
       <div className="kpi-value" style={alert && value > 0 ? { color: accentColor } : undefined}>
@@ -122,9 +122,7 @@ function TurnoverCard({
         style={{
           background:  'var(--bg-card)',
           border:      '1px solid var(--border)',
-          borderLeft:  isUrgent
-            ? '3px solid var(--accent-amber)'
-            : `3px solid ${statusColor}`,
+          borderLeft:  `3px solid ${statusColor}`,
         }}
         onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)' }}
         onMouseOut={(e)  => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)'   }}
@@ -159,12 +157,22 @@ function TurnoverCard({
             </span>
           </div>
 
-          <span
-            className="text-xs font-semibold px-2 py-0.5 rounded-full"
-            style={{ background: `${statusColor}20`, color: statusColor }}
-          >
-            {turnover.status.replace('_', ' ')}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {isUrgent && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}
+              >
+                Urgent
+              </span>
+            )}
+            <span
+              className="text-xs font-semibold px-2 py-0.5 rounded-full"
+              style={{ background: `${statusColor}20`, color: statusColor }}
+            >
+              {turnover.status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            </span>
+          </div>
         </div>
       </div>
     </Link>
@@ -328,10 +336,13 @@ export function OpsSnapshot({
               onClick={() => setWindowDays(d)}
               className={cn(
                 'px-3 py-1 text-xs font-medium rounded-md transition-colors',
-                windowDays === d
-                  ? 'bg-brand-800 text-white'
-                  : 'text-muted-themed hover:text-secondary-themed'
+                windowDays !== d && 'text-muted-themed hover:text-secondary-themed'
               )}
+              style={windowDays === d ? {
+                background: 'var(--bg-raised)',
+                boxShadow:  'inset 0 0 0 1px var(--accent-gold)',
+                color:      'var(--accent-gold)',
+              } : undefined}
             >
               {d}d
             </button>

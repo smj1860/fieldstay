@@ -6,28 +6,32 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Building2, CalendarCheck, Package,
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
-  ChevronRight, Menu, X, Bell, Sun, Moon,
+  ChevronRight, Menu, X, Sun, Moon,
   Users2, Briefcase, MessageSquareDot, ShieldCheck, TrendingUp, MessageSquare,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
+import type { NotificationItem } from '@/lib/notifications'
 import { BottomNav } from '@/components/bottom-nav'
+import { NotificationBell } from '@/components/notification-bell'
 
+// Ops tier (daily use) first, then Management tier (weekly use) — split
+// below into opsNav/mgmtNav and rendered as two groups with a divider.
 const NAV_ITEMS = [
-  { href: '/ops',          label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin','manager','viewer'] },
-  { href: '/properties',  label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'] },
-  { href: '/bookings',    label: 'Bookings',      icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
-  { href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'] },
-  { href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin','manager']          },
-  { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager']          },
-  { href: '/assets',            label: 'Asset Health',     icon: ShieldCheck, roles: ['admin','manager'] },
-  { href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin','manager'] },
-  { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager']          },
-  { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager']          },
-  { href: '/messages',    label: 'Messages',     icon: MessageSquare,   roles: ['admin','manager']          },
-  { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager']          },
-  { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager']          },
-  { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin']                    },
+  { href: '/ops',          label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin','manager','viewer'], group: 'ops' as const        },
+  { href: '/bookings',    label: 'Bookings',      icon: CalendarCheck,   roles: ['admin','manager','viewer'], group: 'ops' as const        },
+  { href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'], group: 'ops' as const        },
+  { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager'],          group: 'ops' as const        },
+  { href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin','manager'],          group: 'ops' as const        },
+  { href: '/messages',    label: 'Messages',     icon: MessageSquare,   roles: ['admin','manager'],          group: 'ops' as const        },
+  { href: '/properties',  label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'], group: 'management' as const },
+  { href: '/assets',            label: 'Asset Health',     icon: ShieldCheck, roles: ['admin','manager'], group: 'management' as const },
+  { href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin','manager'], group: 'management' as const },
+  { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager'],          group: 'management' as const },
+  { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager'],          group: 'management' as const },
+  { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager'],          group: 'management' as const },
+  { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager'],          group: 'management' as const },
+  { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin'],                    group: 'management' as const },
 ] as const
 
 const PAGE_TITLES: Record<string, string> = {
@@ -55,10 +59,11 @@ interface Props {
   repuguardActive?:           boolean
   onboardingComplete?:        boolean
   onboardingPct?:             number
+  notifications?:             NotificationItem[]
   children:                   React.ReactNode
 }
 
-export function DashboardShell({ role, orgName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, children }: Props) {
+export function DashboardShell({ role, orgName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], children }: Props) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -100,7 +105,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
   const effectiveRole = role === 'owner' ? 'admin' : role
 
   const REPUGUARD_NAV = repuguardActive
-    ? [{ href: '/reviews', label: 'Reviews', icon: MessageSquareDot, roles: ['admin', 'manager'] as const }]
+    ? [{ href: '/reviews', label: 'Reviews', icon: MessageSquareDot, roles: ['admin', 'manager'] as const, group: 'management' as const }]
     : []
 
   const filteredNav = [
@@ -108,12 +113,59 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
     ...REPUGUARD_NAV.filter(item => item.roles.includes(effectiveRole as 'admin' | 'manager')),
   ]
 
+  // Split into Ops (daily-use) and Management (weekly-use) tiers, rendered
+  // as two groups with a divider to keep the sidebar scannable.
+  const opsNav  = filteredNav.filter((item) => item.group === 'ops')
+  const mgmtNav = filteredNav.filter((item) => item.group === 'management')
+
   // Derive page title for mobile header
   const pageTitle = Object.entries(PAGE_TITLES).find(([path]) =>
     pathname === path || pathname.startsWith(path + '/')
   )?.[1] ?? ''
 
-  const Sidebar = ({ mobile = false }: { mobile?: boolean }) => (
+  const Sidebar = ({ mobile = false }: { mobile?: boolean }) => {
+    const renderNavLink = (item: typeof filteredNav[number]) => {
+      const Icon   = item.icon
+      const active = pathname === item.href ||
+                     pathname.startsWith(item.href + '/')
+
+      return (
+        <Link
+          key={item.href}
+          href={item.href}
+          onClick={() => setMobileOpen(false)}
+          title={collapsed && !mobile ? item.label : undefined}
+          className={cn(
+            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm',
+            'font-medium transition-all relative'
+          )}
+          style={{
+            background: active
+              ? (theme === 'light' ? 'rgba(10,22,40,0.12)' : 'var(--bg-raised)')
+              : 'transparent',
+            color: theme === 'light'
+              ? (active ? '#0a1628' : 'rgba(10,22,40,0.65)')
+              : (active ? 'var(--text-primary)' : 'var(--text-muted)'),
+            borderLeft: active
+              ? `2px solid ${theme === 'light' ? '#0a1628' : 'var(--accent-gold)'}`
+              : '2px solid transparent',
+          }}
+          onMouseOver={(e) => {
+            if (!active) e.currentTarget.style.color = theme === 'light' ? '#0a1628' : 'var(--text-primary)'
+          }}
+          onMouseOut={(e) => {
+            if (!active) e.currentTarget.style.color = theme === 'light' ? 'rgba(10,22,40,0.65)' : 'var(--text-muted)'
+          }}
+        >
+          <Icon className="w-4 h-4 flex-shrink-0" />
+          {(!collapsed || mobile) && (
+            <span className="truncate">{item.label}</span>
+          )}
+        </Link>
+      )
+    }
+
+    return (
     <aside
       className={cn(
         'flex flex-col h-full transition-all duration-300',
@@ -180,46 +232,23 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
             <span className="ml-auto text-xs opacity-70">{onboardingPct}%</span>
           </Link>
         )}
-        {filteredNav.map((item) => {
-          const Icon   = item.icon
-          const active = pathname === item.href ||
-                         pathname.startsWith(item.href + '/')
+        {opsNav.map(renderNavLink)}
 
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setMobileOpen(false)}
-              title={collapsed && !mobile ? item.label : undefined}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm',
-                'font-medium transition-all relative'
-              )}
-              style={{
-                background: active
-                  ? (theme === 'light' ? 'rgba(10,22,40,0.12)' : 'var(--bg-raised)')
-                  : 'transparent',
-                color: theme === 'light'
-                  ? (active ? '#0a1628' : 'rgba(10,22,40,0.65)')
-                  : (active ? 'var(--text-primary)' : 'var(--text-muted)'),
-                borderLeft: active
-                  ? `2px solid ${theme === 'light' ? '#0a1628' : 'var(--accent-gold)'}`
-                  : '2px solid transparent',
-              }}
-              onMouseOver={(e) => {
-                if (!active) e.currentTarget.style.color = theme === 'light' ? '#0a1628' : 'var(--text-primary)'
-              }}
-              onMouseOut={(e) => {
-                if (!active) e.currentTarget.style.color = theme === 'light' ? 'rgba(10,22,40,0.65)' : 'var(--text-muted)'
-              }}
-            >
-              <Icon className="w-4 h-4 flex-shrink-0" />
+        {mgmtNav.length > 0 && (
+          <>
+            <div className="mt-3 mb-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
               {(!collapsed || mobile) && (
-                <span className="truncate">{item.label}</span>
+                <span
+                  className="section-header block px-3 pb-1"
+                  style={{ fontSize: '10px', opacity: 0.6 }}
+                >
+                  Management
+                </span>
               )}
-            </Link>
-          )
-        })}
+            </div>
+            {mgmtNav.map(renderNavLink)}
+          </>
+        )}
       </nav>
 
       {/* Bottom user row */}
@@ -250,7 +279,8 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
         </Link>
       </div>
     </aside>
-  )
+    )
+  }
 
   return (
     <div className="flex h-screen overflow-hidden"
@@ -298,7 +328,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
 
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="hidden md:flex p-2 rounded-lg transition-all"
+              className="hidden md:flex p-2.5 rounded-lg transition-all"
               style={{ color: 'var(--text-muted)' }}
               onMouseOver={(e) => {
                 e.currentTarget.style.background = 'var(--border)'
@@ -361,21 +391,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
               }
             </button>
 
-            <button
-              className="w-11 h-11 md:w-8 md:h-8 rounded-lg flex items-center justify-center
-                         transition-all relative"
-              style={{ color: 'var(--text-muted)' }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.background = 'var(--border)'
-                e.currentTarget.style.color = 'var(--text-primary)'
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--text-muted)'
-              }}
-            >
-              <Bell className="w-4 h-4" />
-            </button>
+            <NotificationBell items={notifications} />
           </div>
         </header>
 

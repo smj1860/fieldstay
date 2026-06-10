@@ -86,26 +86,27 @@ export default async function PropertiesPage() {
                 {!complete ? (
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs text-amber-600 font-medium flex items-center gap-1">
+                      <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
                         <AlertCircle className="w-3 h-3" />
                         Setup {progress}% complete
                       </span>
                       <Link
                         href={`/properties/${p.id}/setup/details`}
-                        className="text-xs text-brand-700 font-medium hover:underline"
+                        className="text-xs font-medium hover:underline"
+                        style={{ color: 'var(--accent-gold)' }}
                       >
                         Continue →
                       </Link>
                     </div>
                     <div className="h-1.5 bg-raised-themed rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-amber-400 rounded-full transition-all"
-                        style={{ width: `${progress}%` }}
+                        className="h-full rounded-full transition-all"
+                        style={{ width: `${progress}%`, background: 'var(--accent-amber)' }}
                       />
                     </div>
                   </div>
                 ) : (
-                  <p className="text-xs text-green-600 font-medium flex items-center gap-1">
+                  <p className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
                     <CheckCircle2 className="w-3 h-3" />
                     Setup complete
                   </p>
@@ -138,8 +139,8 @@ export default async function PropertiesPage() {
 function EmptyState() {
   return (
     <div className="card text-center py-16 max-w-md mx-auto mt-8">
-      <div className="w-12 h-12 rounded-full bg-brand-50 flex items-center justify-center mx-auto mb-4">
-        <Plus className="w-6 h-6 text-brand-700" />
+      <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: 'var(--accent-gold-dim)' }}>
+        <Plus className="w-6 h-6" style={{ color: 'var(--accent-gold)' }} />
       </div>
       <h3 className="font-semibold text-primary-themed mb-1">Add your first property</h3>
       <p className="text-sm text-muted-themed mb-6">
