@@ -50,35 +50,39 @@ export const flaggedTurnoverToWO = inngest.createFunction(
       return wo
     })
 
-    await step.run('notify-managers', async () => {
+    const managers = await step.run('load-managers', async () => {
       const supabase = createServiceClient()
 
-      const { data: managers } = await supabase
+      const { data } = await supabase
         .from('organization_members')
         .select('user_id')
         .eq('org_id', org_id)
         .in('role', ['admin', 'owner', 'manager'])
 
-      if (!managers?.length) return
+      return data ?? []
+    })
 
-      const { sendPushToCrewMember } = await import('@/lib/push/client')
+    for (const mgr of managers) {
+      if (!mgr.user_id) continue
 
-      for (const mgr of managers) {
-        if (!mgr.user_id) continue
+      await step.run(`notify-manager-${mgr.user_id}`, async () => {
+        const supabase = createServiceClient()
+
         const { data: subs } = await supabase
           .from('push_subscriptions')
           .select('endpoint, p256dh, auth')
           .eq('crew_member_id', mgr.user_id)
 
-        if (subs?.length) {
-          await sendPushToCrewMember(subs, {
-            title: 'Flagged Issue → Draft WO Created',
-            body:  flag_notes.slice(0, 80),
-            url:   '/maintenance',
-          }).catch(() => { /* silently skip failed pushes */ })
-        }
-      }
-    })
+        if (!subs?.length) return
+
+        const { sendPushToCrewMember } = await import('@/lib/push/client')
+        await sendPushToCrewMember(subs, {
+          title: 'Flagged Issue → Draft WO Created',
+          body:  flag_notes.slice(0, 80),
+          url:   '/maintenance',
+        }).catch(() => { /* silently skip failed pushes */ })
+      })
+    }
 
     return { work_order_id: workOrder.id, wo_number: workOrder.wo_number }
   }

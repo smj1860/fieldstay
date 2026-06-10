@@ -93,7 +93,7 @@ export const handleTurnoverCreated = inngest.createFunction(
               ctaLabel: 'View Turnover →',
               ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers`,
             }),
-          })
+          }, { idempotencyKey: `turnover-assigned-${turnover_id}-${assignment.crew_member_id}` })
         }
       })
 
@@ -147,7 +147,7 @@ export const handleTurnoverCreated = inngest.createFunction(
             ctaLabel: 'Assign Crew →',
             ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers`,
           }),
-        })
+        }, { idempotencyKey: `turnover-unassigned-warning-${turnover_id}` })
       })
     }
 
@@ -189,7 +189,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
           ctaLabel: 'View Turnover →',
           ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers/${turnover_id}`,
         }),
-      })
+      }, { idempotencyKey: `turnover-completed-pm-${turnover_id}` })
     })
 
     await step.run('record-completion-milestones', async () => {

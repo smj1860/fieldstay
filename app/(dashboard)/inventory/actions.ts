@@ -507,6 +507,7 @@ export async function updatePurchaseOrderStatus(
     .single()
 
   if (!po) return { error: 'Purchase order not found' }
+  if (po.status === status) return {}
 
   const statusUpdate: Record<string, unknown> = { status }
   if (status === 'sent') statusUpdate.sent_at = new Date().toISOString()
