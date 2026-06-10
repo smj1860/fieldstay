@@ -32,6 +32,10 @@ export function calculateHealthScore(
   const repairCostPct     = repairHistory.total_repair_cost / (replacementCost || 5000)
   const repairCostPenalty = Math.min(15, Math.round(repairCostPct * 100))
 
+  // last_serviced_at is null for assets with no repair history, which falls
+  // through to monthsSinceService = 999 → recencyBonus = 0. That's intentional:
+  // an asset that's never been serviced gets no recency bonus, same as one
+  // that's long overdue.
   const monthsSinceService = repairHistory.last_serviced_at
     ? Math.floor(
         (Date.now() - new Date(repairHistory.last_serviced_at).getTime())

@@ -108,6 +108,11 @@ export const ownerRezReviewsSync = inngest.createFunction(
 
       let reviews: OwnerRezReview[] = []
 
+      // Capture the timestamp BEFORE the fetch so reviews submitted during the
+      // fetch (with a created_at between this and the end of the fetch) are
+      // re-fetched on the next sync rather than skipped.
+      const fetchStartedAt = new Date().toISOString()
+
       try {
         reviews = await step.run(`fetch-reviews-${userId}`, async () => {
           return fetchAllReviews(userId, cursor)
@@ -175,8 +180,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
       })
 
       await step.run(`update-reviews-cursor-${userId}`, async () => {
-        const newCursor = new Date().toISOString()
-        const newMeta   = { ...meta, reviews_sync_cursor: newCursor }
+        const newMeta = { ...meta, reviews_sync_cursor: fetchStartedAt }
 
         const { error: updateErr } = await admin
           .from('integration_connections')

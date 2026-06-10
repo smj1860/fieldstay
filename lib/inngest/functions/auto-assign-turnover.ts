@@ -188,10 +188,18 @@ export const autoAssignTurnover = inngest.createFunction(
       }
 
       if (mode === 'autopilot') {
-        await supabase.from('turnover_assignments').insert({
+        const { error: assignError } = await supabase.from('turnover_assignments').insert({
           turnover_id,
           crew_member_id: top.crew_member_id,
         })
+
+        if (assignError) {
+          // Already assigned (e.g. retry after a prior successful insert) — leave
+          // turnovers.status as-is rather than re-marking it assigned.
+          if (assignError.code === '23505') return { action: 'already_assigned' as const }
+          throw new Error(`Failed to create turnover assignment: ${assignError.message}`)
+        }
+
         await supabase
           .from('turnovers')
           .update({
@@ -209,17 +217,25 @@ export const autoAssignTurnover = inngest.createFunction(
 
     await step.run('record-outcomes', async () => {
       const supabase = createServiceClient()
-      try {
-        await supabase.from('assignment_outcomes').insert({
+      const wasAutopilotAssigned =
+        acted.action === 'autopilot_assigned' || acted.action === 'already_assigned'
+
+      const { error } = await supabase.from('assignment_outcomes').upsert(
+        {
           turnover_id,
           org_id,
           crew_member_id:  top.crew_member_id,
           suggested_score: top.score,
           score_breakdown: top.breakdown,
-          was_accepted:    acted.action === 'autopilot_assigned' ? true : null,
-        })
-      } catch {
-        // Table may not yet exist — never fail the parent function
+          was_accepted:    wasAutopilotAssigned ? true : null,
+        },
+        { onConflict: 'turnover_id,crew_member_id' }
+      )
+
+      // 42P01 = table does not exist — never fail the parent function for that.
+      // Any other error (RLS, FK violation, etc.) should surface and retry.
+      if (error && error.code !== '42P01') {
+        throw new Error(`Failed to record assignment outcome: ${error.message}`)
       }
     })
 

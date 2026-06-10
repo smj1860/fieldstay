@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { getPmEmail } from '@/lib/inngest/helpers'
+import { getPmEmail, getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 /**
@@ -41,6 +41,36 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     logger.info(`Found ${agingWOs.length} aging work orders to escalate`)
 
+    // ── 7.4 lookup: schedules eligible for auto-WO (fetched early to batch PM emails) ──
+    const autoWOSchedules = await step.run('find-auto-wo-schedules', async () => {
+      const { data } = await supabase
+        .from('maintenance_schedules')
+        .select(`
+          id, name, org_id, property_id, next_due_date,
+          frequency, schedule_type, assigned_vendor_id,
+          vendor_specialty_hint, estimated_cost, instructions,
+          properties ( name )
+        `)
+        .lte('next_due_date', todayStr)
+        .eq('auto_create_wo', true)
+        .eq('is_active', true)
+
+      return data ?? []
+    })
+
+    logger.info(`Found ${autoWOSchedules.length} schedules eligible for auto-WO creation`)
+
+    // ── Batch-resolve PM emails for every org touched by aging WOs or auto-WO schedules ──
+    const pmEmailEntries = await step.run('find-pm-emails', async () => {
+      const orgIds = Array.from(new Set([
+        ...agingWOs.map((wo) => wo.org_id),
+        ...autoWOSchedules.map((s) => s.org_id),
+      ]))
+      const emails = await getPmEmailsByOrgIds(supabase, orgIds)
+      return Array.from(emails.entries())
+    })
+    const pmEmailByOrg = new Map(pmEmailEntries)
+
     for (const wo of agingWOs) {
       await step.run(`escalate-aging-wo-${wo.id}`, async () => {
         const daysOpen = Math.round((today.getTime() - new Date(wo.created_at).getTime()) / 86_400_000)
@@ -70,7 +100,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
           },
         })
 
-        const pmEmail = await getPmEmail(supabase, wo.org_id)
+        const pmEmail = pmEmailByOrg.get(wo.org_id) ?? null
         if (pmEmail) {
           await resend.emails.send({
             from:    FROM,
@@ -165,24 +195,6 @@ export const dailyWorkOrderOps = inngest.createFunction(
     })
 
     // ── 7.4: Auto-create WOs for due maintenance schedules ───────────────────
-    const autoWOSchedules = await step.run('find-auto-wo-schedules', async () => {
-      const { data } = await supabase
-        .from('maintenance_schedules')
-        .select(`
-          id, name, org_id, property_id, next_due_date,
-          frequency, schedule_type, assigned_vendor_id,
-          vendor_specialty_hint, estimated_cost, instructions,
-          properties ( name )
-        `)
-        .lte('next_due_date', todayStr)
-        .eq('auto_create_wo', true)
-        .eq('is_active', true)
-
-      return data ?? []
-    })
-
-    logger.info(`Found ${autoWOSchedules.length} schedules eligible for auto-WO creation`)
-
     for (const schedule of autoWOSchedules) {
       await step.run(`auto-create-wo-${schedule.id}`, async () => {
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
@@ -256,7 +268,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
             },
           })
 
-          const pmEmail = await getPmEmail(supabase, schedule.org_id)
+          const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
           if (pmEmail) {
             await resend.emails.send({
               from:    FROM,

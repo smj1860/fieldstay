@@ -125,7 +125,10 @@ export const handleWorkOrderCompleted = inngest.createFunction(
         .eq('id', work_order_id)
         .single()
 
-      const cost = wo?.actual_cost ?? wo?.estimated_cost ?? null
+      // Only post once the real cost is known — estimated_cost is a placeholder
+      // and would be permanently locked in by the ignoreDuplicates upsert below.
+      // logActualCost() posts/corrects the expense once actual_cost is logged.
+      const cost = wo?.actual_cost ?? null
       if (!cost || cost <= 0) return { skipped: true }
 
       await supabase.from('owner_transactions').upsert({
@@ -184,22 +187,9 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
       const photos   = Array.isArray(wo.work_order_photos) ? wo.work_order_photos : []
 
-      const cost = wo.actual_cost
-      if (property && cost && cost > 0) {
-        await supabase.from('owner_transactions').upsert({
-          property_id:          (property as { id: string }).id,
-          org_id:               wo.org_id,
-          work_order_id,
-          source:               'wo_completion',
-          source_reference_id:  work_order_id,
-          transaction_type:     'expense',
-          category:             'maintenance',
-          amount:               cost,
-          description:          wo.title,
-          transaction_date:     new Date().toISOString().split('T')[0],
-          notes:                'Auto-created from vendor portal completion',
-        }, { onConflict: 'source_reference_id,source', ignoreDuplicates: true })
-      }
+      // Expense posting is owned by handleWorkOrderCompleted / logActualCost —
+      // posting here too would race on (source_reference_id, source) and could
+      // lock in whichever amount lands first via ignoreDuplicates.
 
       const photoNote = photos.length > 0
         ? `${photos.length} photo${photos.length !== 1 ? 's' : ''} attached to the work order.`

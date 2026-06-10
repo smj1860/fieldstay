@@ -299,10 +299,9 @@ export async function addVendor(
 
   if (error) return { error: error.message }
 
-  // Geocode using full address if available, fall back to zip
-  const geocodeInput = [address, city, state, service_zip].filter(Boolean).join(', ')
-  if (geocodeInput) {
-    const coords = await geocodeZip(service_zip ?? geocodeInput)
+  // Geocode from service ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
+  if (service_zip) {
+    const coords = await geocodeZip(service_zip)
     if (coords) {
       await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendor.id)
     }
@@ -344,7 +343,7 @@ export async function updateVendor(
 
   const { data: existing } = await supabase
     .from('vendors')
-    .select('service_zip, address, city, state')
+    .select('service_zip')
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
     .single()
@@ -357,20 +356,13 @@ export async function updateVendor(
 
   if (error) return { error: error.message }
 
-  // Re-geocode when address-related fields change
-  const addressChanged =
-    service_zip !== (existing?.service_zip ?? null) ||
-    address     !== (existing?.address     ?? null) ||
-    city        !== (existing?.city        ?? null) ||
-    state       !== (existing?.state       ?? null)
+  // Re-geocode when service ZIP changes — Mapbox postcode endpoint requires a ZIP, not a full address
+  const zipChanged = service_zip !== (existing?.service_zip ?? null)
 
-  if (addressChanged) {
-    const geocodeInput = service_zip ?? [address, city, state].filter(Boolean).join(', ')
-    if (geocodeInput) {
-      const coords = await geocodeZip(geocodeInput)
-      if (coords) {
-        await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendorId)
-      }
+  if (zipChanged && service_zip) {
+    const coords = await geocodeZip(service_zip)
+    if (coords) {
+      await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendorId)
     }
   }
 

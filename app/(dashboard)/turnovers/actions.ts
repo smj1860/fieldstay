@@ -108,6 +108,15 @@ export async function updateTurnoverStatus(
 ): Promise<TurnoverActionState> {
   const { supabase, membership, user } = await requireOrgMember()
 
+  const { data: existing } = await supabase
+    .from('turnovers')
+    .select('status')
+    .eq('id', turnover_id)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  const wasAlreadyCompleted = existing?.status === 'completed'
+
   const update: Record<string, unknown> = { status }
   if (status === 'in_progress') {
     update.started_at = new Date().toISOString()
@@ -128,8 +137,9 @@ export async function updateTurnoverStatus(
 
   if (error) return { error: error.message }
 
-  // Fire completion event for PM notification
-  if (status === 'completed') {
+  // Fire completion event for PM notification (skip if already completed —
+  // re-saving completion notes shouldn't re-trigger downstream automations)
+  if (status === 'completed' && !wasAlreadyCompleted) {
     const { data: t } = await supabase
       .from('turnovers')
       .select('property_id, org_id')

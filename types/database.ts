@@ -98,6 +98,11 @@ export interface Organization {
   auto_assign_mode:             AutoAssignMode
   comms_log_retention_days:     number
   slack_webhook_url:            string | null
+  repuguard_status:             'inactive' | 'trial' | 'active' | 'cancelled'
+  repuguard_trial_start:        string | null
+  repuguard_trial_end:          string | null
+  repuguard_stripe_subscription_id: string | null
+  repuguard_founding_member:    boolean
   created_at:                   string
   updated_at:                   string
 }
@@ -434,6 +439,7 @@ export interface PurchaseOrder {
   property_id:          string
   org_id:               string
   status:               PoStatus
+  source_count_id:      string | null
   generated_at:         string
   sent_at:              string | null
   acknowledged_at:      string | null
@@ -475,7 +481,7 @@ export interface WorkOrder {
   property_id:                 string
   org_id:                      string
   vendor_id:                   string | null
-  assigned_crew_id:            string | null
+  assigned_crew_member_id:     string | null
   wo_number:                   string | null
   title:                       string
   description:                 string | null
