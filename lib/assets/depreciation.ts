@@ -19,7 +19,10 @@ export function getMacrsRate(macrsClass: MacrsClass, yearOfService: number): num
 
   const rates = MACRS_RATES[macrsClass]
   if (yearOfService < 1) return 0
-  // Final year: return whatever is needed to reach exactly 100% cost recovery
+  // Final year: return whatever is needed to reach exactly 100% cost recovery.
+  // The published IRS rate tables are themselves rounded (e.g. 15-year sums to
+  // 0.9996), so the final year absorbing the remainder is the IRS-correct
+  // approach, not a rounding bug.
   if (yearOfService === rates.length) {
     const priorSum = rates.slice(0, -1).reduce((s, r) => s + r, 0)
     return Math.max(0, 1 - priorSum)

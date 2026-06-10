@@ -5,6 +5,10 @@ import { getPmEmail } from '@/lib/inngest/helpers'
 import { formatDateTime } from '@/lib/utils'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
+// Durations beyond this are treated as tracking errors (e.g. a checklist item
+// completed a day late) and excluded from the auto-assignment learning loop.
+const MAX_PLAUSIBLE_DURATION_MINUTES = 8 * 60
+
 /**
  * Triggered when a new turnover is created (from iCal sync or manual).
  *
@@ -288,7 +292,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
 
       const durationMinutes = (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60_000
 
-      if (durationMinutes > 480) {
+      if (durationMinutes > MAX_PLAUSIBLE_DURATION_MINUTES) {
         console.warn(`[record-crew-duration] Anomalous duration ${durationMinutes}m for turnover ${turnover_id} — skipping`)
         return { skipped: 'anomalous_duration', duration_minutes: durationMinutes }
       }
