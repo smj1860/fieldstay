@@ -113,7 +113,7 @@ export function TemplateManager({
   // Catalog tab state
   const [catalogFilter, setCatalogFilter]     = useState<InventoryCategory | 'all'>('all')
   const [catalogSelected, setCatalogSelected] = useState<Set<string>>(new Set())
-  const [catalogParLevels, setCatalogParLevels] = useState<Record<string, number>>({})
+  const [catalogParLevels, setCatalogParLevels] = useState<Record<string, string>>({})
   const [catalogUnits, setCatalogUnits]         = useState<Record<string, string>>({})
   const [catalogBrands, setCatalogBrands]       = useState<Record<string, string>>({})
 
@@ -187,7 +187,7 @@ export function TemplateManager({
           name:            c.name,
           category:        c.category,
           unit:            catalogUnits[c.id]   ?? c.default_unit,
-          par_level:       catalogParLevels[c.id] ?? 1,
+          par_level:       parseInt(catalogParLevels[c.id] ?? '1') || 1,
           preferred_brand: catalogBrands[c.id]?.trim() || null,
         })
         if (result.item) newItems.push(result.item as TemplateItem)
@@ -463,8 +463,13 @@ export function TemplateManager({
                                 <input
                                   type="number"
                                   min={1}
-                                  value={catalogParLevels[c.id] ?? 1}
-                                  onChange={e => setCatalogParLevels(prev => ({ ...prev, [c.id]: parseInt(e.target.value) || 1 }))}
+                                  value={catalogParLevels[c.id] ?? '1'}
+                                  onChange={e => setCatalogParLevels(prev => ({ ...prev, [c.id]: e.target.value }))}
+                                  onBlur={e => {
+                                    if (!e.target.value || parseInt(e.target.value) < 1) {
+                                      setCatalogParLevels(prev => ({ ...prev, [c.id]: '1' }))
+                                    }
+                                  }}
                                   className="input w-16 py-0.5 text-xs"
                                 />
                               </div>

@@ -1872,16 +1872,22 @@ export function MaintenanceBoard({
               onClick={() => setActiveTab(tab.key)}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
-                activeTab === tab.key
-                  ? 'bg-brand-800 text-white'
-                  : 'text-muted-themed hover:text-secondary-themed'
+                activeTab !== tab.key && 'text-muted-themed hover:text-secondary-themed'
               )}
+              style={activeTab === tab.key ? {
+                background: 'var(--bg-raised)',
+                boxShadow:  'inset 0 0 0 1px var(--accent-gold)',
+                color:      'var(--accent-gold)',
+              } : undefined}
             >
               {tab.label}
-              <span className={cn(
-                'px-1.5 py-0.5 rounded-full text-xs font-semibold',
-                activeTab === tab.key ? 'bg-brand-700 text-brand-100' : 'bg-raised-themed text-muted-themed'
-              )}>
+              <span
+                className={cn(
+                  'px-1.5 py-0.5 rounded-full text-xs font-semibold',
+                  activeTab !== tab.key && 'bg-raised-themed text-muted-themed'
+                )}
+                style={activeTab === tab.key ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' } : undefined}
+              >
                 {count}
               </span>
             </button>
@@ -1929,8 +1935,13 @@ export function MaintenanceBoard({
             onClick={() => setViewMode('list')}
             className={cn(
               'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
-              viewMode === 'list' ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
+              viewMode !== 'list' && 'text-muted-themed hover:text-secondary-themed'
             )}
+            style={viewMode === 'list' ? {
+              background: 'var(--bg-raised)',
+              boxShadow:  'inset 0 0 0 1px var(--accent-gold)',
+              color:      'var(--accent-gold)',
+            } : undefined}
           >
             <List className="w-3.5 h-3.5" /> List
           </button>
@@ -1938,8 +1949,13 @@ export function MaintenanceBoard({
             onClick={() => setViewMode('calendar')}
             className={cn(
               'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
-              viewMode === 'calendar' ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
+              viewMode !== 'calendar' && 'text-muted-themed hover:text-secondary-themed'
             )}
+            style={viewMode === 'calendar' ? {
+              background: 'var(--bg-raised)',
+              boxShadow:  'inset 0 0 0 1px var(--accent-gold)',
+              color:      'var(--accent-gold)',
+            } : undefined}
           >
             <BarChart2 className="w-3.5 h-3.5" /> Calendar
           </button>

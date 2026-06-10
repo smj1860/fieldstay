@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { ReviewPrompt } from '@/components/review-prompt'
 import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
+import { getNotifications } from '@/lib/notifications'
 
 const MILESTONE_MESSAGES: Record<string, string> = {
   first_ical_sync:            'Your first bookings are syncing.',
@@ -81,6 +82,8 @@ export default async function DashboardLayout({
       .eq('milestone', pendingMilestone.milestone)
   }
 
+  const notifications = await getNotifications(membership.org_id)
+
   return (
     <DashboardShell
       role={membership.role}
@@ -89,6 +92,7 @@ export default async function DashboardLayout({
       repuguardActive={repuguardActive}
       onboardingComplete={onboardingComplete}
       onboardingPct={onboardingPct}
+      notifications={notifications}
     >
       {isPastDue && (
         <div
