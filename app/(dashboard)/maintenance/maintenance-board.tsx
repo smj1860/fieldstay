@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
-  Pencil, Trash2, Camera, List, BarChart2, Send,
+  Pencil, Trash2, Camera, List, BarChart2, Send, LayoutGrid,
 } from 'lucide-react'
 import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
 import {
@@ -142,6 +142,55 @@ function getJoined<T>(val: T | T[] | null): T | null {
   if (!val) return null
   return Array.isArray(val) ? val[0] ?? null : val
 }
+
+function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
+  const prop = getJoined(wo.properties)
+  const vend = getJoined(wo.vendors)
+
+  return {
+    id:                     wo.id,
+    wo_number:              wo.wo_number,
+    org_id:                 '',
+    property_id:            wo.property_id,
+    title:                  wo.title,
+    description:            wo.description,
+    category:               wo.category as WorkOrderDetailData['category'],
+    priority:               wo.priority,
+    status:                 wo.status,
+    source:                 '',
+    scheduled_date:         wo.scheduled_date,
+    completed_date:         wo.completed_date,
+    estimated_cost:         wo.estimated_cost,
+    nte_amount:             wo.nte_amount,
+    actual_cost:            wo.actual_cost,
+    access_notes:           wo.access_notes,
+    completion_notes:       wo.completion_notes,
+    invoice_reference:      wo.invoice_reference,
+    vendor_acknowledged_at: wo.vendor_acknowledged_at,
+    completion_verified_at: wo.completion_verified_at,
+    created_at:             wo.created_at,
+    properties: {
+      name:                prop?.name ?? '',
+      address:             prop?.address ?? null,
+      city:                prop?.city ?? null,
+      state:               prop?.state ?? null,
+      access_instructions: prop?.access_instructions ?? null,
+    },
+    vendors: vend ? {
+      id:        vend.id,
+      name:      vend.name,
+      specialty: vend.specialty as WorkOrderDetailData['vendors'] extends { specialty: infer S } | null ? S : never,
+    } : null,
+    work_order_line_items: (wo.work_order_line_items ?? []) as WorkOrderDetailData['work_order_line_items'],
+  }
+}
+
+const KANBAN_COLUMNS: { key: WoStatus; label: string; accentColor: string }[] = [
+  { key: 'pending',     label: 'Open',        accentColor: 'var(--text-muted)'   },
+  { key: 'assigned',    label: 'Assigned',    accentColor: 'var(--accent-blue)'  },
+  { key: 'in_progress', label: 'In Progress', accentColor: '#a78bfa'             },
+  { key: 'completed',   label: 'Completed',   accentColor: 'var(--accent-green)' },
+]
 
 function priorityBadgeClass(priority: PriorityLevel): string {
   const map: Record<PriorityLevel, string> = {
@@ -1816,7 +1865,7 @@ export function MaintenanceBoard({
   const [filterPriority, setFilterPriority] = useState<string>(
     urlFilter === 'urgent' ? 'high' : 'all'
   )
-  const [viewMode,       setViewMode]       = useState<'list' | 'calendar'>('list')
+  const [viewMode,       setViewMode]       = useState<'list' | 'calendar' | 'kanban'>('list')
 
   const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
 
@@ -1959,6 +2008,20 @@ export function MaintenanceBoard({
           >
             <BarChart2 className="w-3.5 h-3.5" /> Calendar
           </button>
+          <button
+            onClick={() => setViewMode('kanban')}
+            className={cn(
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+              viewMode !== 'kanban' && 'text-muted-themed hover:text-secondary-themed'
+            )}
+            style={viewMode === 'kanban' ? {
+              background: 'var(--bg-raised)',
+              boxShadow:  'inset 0 0 0 1px var(--accent-gold)',
+              color:      'var(--accent-gold)',
+            } : undefined}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" /> Kanban
+          </button>
         </div>
       </div>
 
@@ -1990,54 +2053,99 @@ export function MaintenanceBoard({
         </div>
       ) : (
         <div className="space-y-3">
-          {filtered.map((wo) => {
-            const prop = getJoined(wo.properties)
-            const vend = getJoined(wo.vendors)
+          {filtered.map((wo) => (
+            <WorkOrderCard
+              key={wo.id}
+              wo={wo}
+              onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
+            />
+          ))}
+        </div>
+      ))}
+
+      {/* Kanban View */}
+      {viewMode === 'kanban' && (
+        <div className="flex gap-4 overflow-x-auto pb-4">
+          {KANBAN_COLUMNS.map((col) => {
+            const colWOs = filtered.filter((wo) => wo.status === col.key)
             return (
-              <WorkOrderCard
-                key={wo.id}
-                wo={wo}
-                onClick={() => setSelectedWO({
-                  id:                     wo.id,
-                  wo_number:              wo.wo_number,
-                  org_id:                 '',
-                  property_id:            wo.property_id,
-                  title:                  wo.title,
-                  description:            wo.description,
-                  category:               wo.category as WorkOrderDetailData['category'],
-                  priority:               wo.priority,
-                  status:                 wo.status,
-                  source:                 '',
-                  scheduled_date:         wo.scheduled_date,
-                  completed_date:         wo.completed_date,
-                  estimated_cost:         wo.estimated_cost,
-                  nte_amount:             wo.nte_amount,
-                  actual_cost:            wo.actual_cost,
-                  access_notes:           wo.access_notes,
-                  completion_notes:       wo.completion_notes,
-                  invoice_reference:      wo.invoice_reference,
-                  vendor_acknowledged_at: wo.vendor_acknowledged_at,
-                  completion_verified_at: wo.completion_verified_at,
-                  created_at:             wo.created_at,
-                  properties: {
-                    name:                prop?.name ?? '',
-                    address:             prop?.address ?? null,
-                    city:                prop?.city ?? null,
-                    state:               prop?.state ?? null,
-                    access_instructions: prop?.access_instructions ?? null,
-                  },
-                  vendors: vend ? {
-                    id:        vend.id,
-                    name:      vend.name,
-                    specialty: vend.specialty as WorkOrderDetailData['vendors'] extends { specialty: infer S } | null ? S : never,
-                  } : null,
-                  work_order_line_items: (wo.work_order_line_items ?? []) as WorkOrderDetailData['work_order_line_items'],
-                })}
-              />
+              <div key={col.key} className="flex-shrink-0 w-72">
+                <div
+                  className="flex items-center justify-between px-3 py-2 rounded-t-lg mb-2"
+                  style={{ background: 'var(--bg-raised)', borderBottom: `2px solid ${col.accentColor}` }}
+                >
+                  <span className="text-xs font-semibold uppercase tracking-wide"
+                        style={{ color: col.accentColor }}>
+                    {col.label}
+                  </span>
+                  <span className="text-xs font-medium px-2 py-0.5 rounded-full"
+                        style={{ background: 'var(--bg-canvas)', color: 'var(--text-muted)' }}>
+                    {colWOs.length}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {colWOs.length === 0 && (
+                    <div className="text-xs text-center py-6 rounded-lg"
+                         style={{ color: 'var(--text-muted)', background: 'var(--bg-raised)' }}>
+                      No work orders
+                    </div>
+                  )}
+                  {colWOs.map((wo) => {
+                    const prop = getJoined(wo.properties)
+                    const vend = getJoined(wo.vendors)
+                    return (
+                      <button
+                        key={wo.id}
+                        onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
+                        className="w-full text-left rounded-lg p-3 transition-all hover:shadow-md"
+                        style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                          <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
+                            {wo.wo_number ?? '—'}
+                          </span>
+                          <span
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase"
+                            style={{
+                              background: wo.priority === 'urgent' ? 'rgba(240,84,84,0.15)'
+                                        : wo.priority === 'high'   ? 'rgba(251,191,36,0.15)'
+                                        : 'var(--bg-raised)',
+                              color: wo.priority === 'urgent' ? 'var(--accent-red)'
+                                   : wo.priority === 'high'   ? 'var(--accent-amber)'
+                                   : 'var(--text-muted)',
+                            }}
+                          >
+                            {wo.priority}
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium leading-snug mb-1"
+                           style={{ color: 'var(--text-primary)' }}>
+                          {wo.title}
+                        </p>
+                        <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
+                          {prop?.name ?? '—'}
+                        </p>
+                        {vend && (
+                          <p className="text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
+                            {vend.name}
+                          </p>
+                        )}
+                        {wo.scheduled_date && (
+                          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                            {new Date(wo.scheduled_date).toLocaleDateString('en-US', {
+                              month: 'short', day: 'numeric',
+                            })}
+                          </p>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
             )
           })}
         </div>
-      ))}
+      )}
 
       {/* Maintenance Schedules */}
       <SchedulesSection schedules={schedules} properties={properties} vendors={vendors} />

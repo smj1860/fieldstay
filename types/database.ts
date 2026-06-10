@@ -39,8 +39,6 @@ export type LineItemType        =
   | 'labor' | 'material' | 'equipment' | 'subcontractor' | 'other'
 export type ScheduleType        = 'routine' | 'seasonal'
 export type ScheduleFrequency   = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
-export type MessageTrigger      = 'booking_confirmed' | 'pre_checkout'
-export type MessageStatus       = 'sent' | 'failed' | 'bounced'
 export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
@@ -578,37 +576,6 @@ export interface MaintenanceScheduleTemplateItem {
   created_at:            string
 }
 
-export interface GuestMessageTemplate {
-  id:          string
-  property_id: string
-  org_id:      string
-  trigger:     MessageTrigger
-  name:        string
-  subject:     string
-  body:        string
-  days_before: number
-  is_active:   boolean
-  created_at:  string
-  updated_at:  string
-}
-
-export interface GuestMessageSent {
-  id:                string
-  property_id:       string
-  org_id:            string
-  booking_id:        string | null
-  template_id:       string | null
-  trigger:           MessageTrigger
-  recipient_name:    string | null
-  recipient_email:   string
-  subject:           string
-  body_rendered:     string
-  sent_at:           string
-  resend_message_id: string | null
-  status:            MessageStatus
-  created_at:        string
-}
-
 export interface OwnerTransaction {
   id:                   string
   property_id:          string
@@ -788,6 +755,7 @@ export interface IntegrationProvider {
 export interface IntegrationConnection {
   id:               string
   user_id:          string            // FK → auth.users.id
+  org_id:           string | null     // FK → organizations.id — backfilled from organization_members
   provider_id:      string            // FK → integration_providers.id
   external_user_id: string | null     // Provider's own user/account identifier
   /** FK → vault.secrets.id — null when revoked (secret physically destroyed) */
@@ -800,6 +768,10 @@ export interface IntegrationConnection {
   last_used_at:     string | null
   created_at:       string
   updated_at:       string
+  /** FK → vault.secrets.id for the refresh token. NULL for non-expiring providers (e.g. OwnerRez). */
+  refresh_token_vault_secret_id: string | null
+  /** When the access token expires. NULL for non-expiring tokens. */
+  expires_at:       string | null
 }
 
 export interface OAuthState {
@@ -980,8 +952,6 @@ export interface Database {
       maintenance_schedules:       { Row: MaintenanceSchedule;      Insert: Partial<MaintenanceSchedule>;      Update: Partial<MaintenanceSchedule>;      Relationships: [] }
       maintenance_schedule_templates:      { Row: MaintenanceScheduleTemplate;      Insert: Partial<MaintenanceScheduleTemplate>;      Update: Partial<MaintenanceScheduleTemplate>;      Relationships: [] }
       maintenance_schedule_template_items: { Row: MaintenanceScheduleTemplateItem;  Insert: Partial<MaintenanceScheduleTemplateItem>;  Update: Partial<MaintenanceScheduleTemplateItem>;  Relationships: [] }
-      guest_message_templates:     { Row: GuestMessageTemplate;     Insert: Partial<GuestMessageTemplate>;     Update: Partial<GuestMessageTemplate>;     Relationships: [] }
-      guest_messages_sent:         { Row: GuestMessageSent;         Insert: Partial<GuestMessageSent>;         Update: Partial<GuestMessageSent>;         Relationships: [] }
       owner_transactions:          { Row: OwnerTransaction;         Insert: Partial<OwnerTransaction>;         Update: Partial<OwnerTransaction>;         Relationships: [] }
       org_milestones:              { Row: OrgMilestone;             Insert: Partial<OrgMilestone>;             Update: Partial<OrgMilestone>;             Relationships: [] }
       audit_events:                { Row: AuditEvent;               Insert: Partial<AuditEvent>;               Update: Partial<AuditEvent>;               Relationships: [] }

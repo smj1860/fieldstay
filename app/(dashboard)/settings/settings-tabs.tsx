@@ -39,11 +39,20 @@ const PLAN_STATUS_BADGES: Record<string, string> = {
 
 // ── Root component ───────────────────────────────────────────────────────────
 
-interface Props {
-  org: Organization
+export interface ConnectionInfo {
+  provider_id:      string
+  status:           string
+  external_user_id: string | null
+  connected_at:     string
+  metadata:         Record<string, unknown>
 }
 
-export function SettingsTabs({ org }: Props) {
+interface Props {
+  org: Organization
+  connections?: Record<string, ConnectionInfo>
+}
+
+export function SettingsTabs({ org, connections = {} }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Organization')
 
   return (
@@ -75,7 +84,7 @@ export function SettingsTabs({ org }: Props) {
       </div>
 
       {/* Tab panels */}
-      {activeTab === 'Organization'  && <OrgTab org={org} />}
+      {activeTab === 'Organization'  && <OrgTab org={org} connections={connections} />}
       {activeTab === 'Billing'       && <BillingTab org={org} />}
       {activeTab === 'Security'      && <SecurityTab />}
       {activeTab === 'Notifications' && <NotificationsTab org={org} />}
@@ -88,7 +97,7 @@ export function SettingsTabs({ org }: Props) {
 
 // ── Organization tab ─────────────────────────────────────────────────────────
 
-function OrgTab({ org }: { org: Organization }) {
+function OrgTab({ org, connections }: { org: Organization; connections: Record<string, ConnectionInfo> }) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
   const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.pro
@@ -157,29 +166,59 @@ function OrgTab({ org }: { org: Organization }) {
         </form>
       </div>
 
-      {/* Kroger */}
+      {/* OwnerRez */}
       <div className="card">
-        <h2 className="text-base font-semibold text-primary-themed mb-1">Kroger Integration</h2>
+        <h2 className="text-base font-semibold text-primary-themed mb-1">OwnerRez</h2>
         <p className="text-xs text-muted-themed mb-4">
-          Connect your Kroger account to build shopping carts automatically from below-par inventory.
+          Sync properties and bookings from your OwnerRez account.
         </p>
-        {org.kroger_location_name ? (
+        {connections.ownerrez ? (
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
                 <span style={{ color: 'var(--accent-green)' }}>●</span>
-                Connected — {org.kroger_location_name}
+                Connected
               </p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                Below-par items are added to your cart automatically when you click Build Cart.
+                Bookings sync automatically and post revenue to the owner portal.
               </p>
             </div>
-            <a href="/api/kroger/connect" className="btn-secondary text-sm flex-shrink-0">Reconnect</a>
+            <a href="/api/integrations/ownerrez/connect" className="btn-secondary text-sm flex-shrink-0">Reconnect</a>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Not connected</p>
-            <a href="/api/kroger/connect" className="btn-primary text-sm flex-shrink-0">Connect Kroger Account</a>
+            <a href="/api/integrations/ownerrez/connect" className="btn-primary text-sm flex-shrink-0">Connect OwnerRez</a>
+          </div>
+        )}
+      </div>
+
+      {/* Kroger — Grocery Cart Automation */}
+      <div className="card">
+        <h2 className="text-base font-semibold text-primary-themed mb-1">Grocery Cart Automation</h2>
+        <p className="text-xs text-muted-themed mb-4">
+          Connect your Kroger account to build shopping carts automatically from below-par inventory.
+        </p>
+        {connections.kroger ? (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+                <span style={{ color: 'var(--accent-green)' }}>●</span>
+                Connected
+                {typeof connections.kroger.metadata?.location_name === 'string' && (
+                  <> — {connections.kroger.metadata.location_name as string}</>
+                )}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Below-par items are added to your Kroger Family cart automatically when you click Build Cart.
+              </p>
+            </div>
+            <a href="/api/integrations/kroger/connect" className="btn-secondary text-sm flex-shrink-0">Reconnect</a>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Not connected</p>
+            <a href="/api/integrations/kroger/connect" className="btn-primary text-sm flex-shrink-0">Connect Kroger Account</a>
           </div>
         )}
       </div>

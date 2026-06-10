@@ -14,6 +14,14 @@ export interface TokenResponse {
   scope?: string
   /** Any non-sensitive provider-specific metadata to persist in the connection row */
   metadata?: Record<string, unknown>
+  /**
+   * Refresh token, for providers whose access tokens expire (e.g. Kroger).
+   * Stored in its own Vault secret via store_integration_refresh_token —
+   * never persisted in `metadata` (plaintext jsonb).
+   */
+  refreshToken?: string
+  /** ISO timestamp when accessToken expires. Omit for non-expiring tokens. */
+  expiresAt?: string
 }
 
 /**

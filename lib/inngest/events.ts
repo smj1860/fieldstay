@@ -50,18 +50,6 @@ export type FieldStayEvents = {
     }
   }
 
-  'booking/checkout-approaching': {
-    data: {
-      booking_id: string
-      property_id: string
-      org_id: string
-      guest_name: string | null
-      guest_email: string | null
-      checkout_date: string
-      days_until_checkout: number
-    }
-  }
-
   // ----------------------------------------------------------
   // Turnovers
   // ----------------------------------------------------------
@@ -233,19 +221,6 @@ export type FieldStayEvents = {
       days_until_due: number
       auto_create_wo: boolean
       assigned_vendor_id: string | null
-    }
-  }
-
-  // ----------------------------------------------------------
-  // Guest Messaging
-  // ----------------------------------------------------------
-
-  'guest-message/send': {
-    data: {
-      booking_id: string
-      property_id: string
-      org_id: string
-      trigger: 'booking_confirmed' | 'pre_checkout'
     }
   }
 

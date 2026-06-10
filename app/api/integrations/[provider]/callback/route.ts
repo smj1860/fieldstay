@@ -27,7 +27,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient }             from '@supabase/ssr'
 import { createClient }                   from '@supabase/supabase-js'
 import { getProvider }                    from '@/lib/integrations/registry'
-import { storeIntegrationToken }          from '@/lib/integrations/vault'
+import { storeIntegrationToken, storeIntegrationRefreshToken } from '@/lib/integrations/vault'
 import { logAuditEvent }                  from '@/lib/audit'
 
 export async function GET(
@@ -210,6 +210,35 @@ export async function GET(
       scope:          tokenData.scope,
       metadata:       tokenData.metadata,
     })
+
+    // Refresh token (if the provider returned one) goes into its own Vault
+    // secret — never into `metadata`, which is plaintext jsonb.
+    if (tokenData.refreshToken) {
+      await storeIntegrationRefreshToken({
+        userId:       appUserId,
+        providerId,
+        refreshToken: tokenData.refreshToken,
+        expiresAt:    tokenData.expiresAt,
+      })
+    }
+
+    // Link this connection to the user's org so Inngest steps and server
+    // actions that only have org context (e.g. cart automation) can find it.
+    const { data: membership } = await admin
+      .from('organization_members')
+      .select('org_id')
+      .eq('user_id', appUserId)
+      .not('invite_accepted_at', 'is', null)
+      .limit(1)
+      .maybeSingle()
+
+    if (membership?.org_id) {
+      await admin
+        .from('integration_connections')
+        .update({ org_id: membership.org_id })
+        .eq('user_id', appUserId)
+        .eq('provider_id', providerId)
+    }
   } catch (err) {
     console.error(`[OAuth:${providerId}] Vault storage failed:`, err)
     return errorRedirect('storage_failed')

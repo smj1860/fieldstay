@@ -40,73 +40,6 @@ export default async function ReviewsPage() {
   const { membership } = await requireOrgMember()
   const admin = createServiceClient()
 
-  // Check repuguard status
-  const { data: org } = await admin
-    .from('organizations')
-    .select('repuguard_status, repuguard_trial_end')
-    .eq('id', membership.org_id)
-    .single()
-
-  const repuguardStatus = org?.repuguard_status ?? 'inactive'
-
-  if (repuguardStatus === 'inactive' || repuguardStatus === 'cancelled') {
-    return (
-      <div className="max-w-2xl mx-auto py-16 text-center">
-        <div
-          className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-6"
-          style={{ background: 'var(--accent-gold-dim)' }}
-        >
-          <span style={{ fontSize: 28 }}>&#9733;</span>
-        </div>
-        <h1
-          className="font-black text-3xl mb-3 tracking-tight"
-          style={{ color: 'var(--text-primary)', letterSpacing: '-1px' }}
-        >
-          RepuGuard Reputation Engine
-        </h1>
-        <p
-          className="text-base mb-4 leading-relaxed"
-          style={{ color: 'var(--text-muted)', maxWidth: 480, margin: '0 auto 16px' }}
-        >
-          Every review deserves a professional response. RepuGuard reads the context of
-          each guest review and generates calm, on-brand replies &mdash; automatically
-          drafted and ready for your approval before anything posts.
-        </p>
-        <div
-          className="inline-flex items-center gap-2 mb-8 px-4 py-2 rounded-full"
-          style={{ background: 'rgba(61,139,79,0.12)', border: '1px solid rgba(61,139,79,0.3)' }}
-        >
-          <span
-            className="text-white text-xs font-bold px-1.5 py-0.5 rounded"
-            style={{ background: '#3D8B4F' }}
-          >
-            OR
-          </span>
-          <span className="text-sm font-medium" style={{ color: '#4ade80' }}>
-            Included in your FieldStay subscription &middot; OwnerRez exclusive
-          </span>
-        </div>
-        <form action="/api/repuguard/activate" method="POST">
-          <button
-            type="submit"
-            className="inline-block rounded-xl font-bold text-sm px-8 py-3.5 transition-opacity hover:opacity-90"
-            style={{
-              background: 'var(--accent-gold)',
-              color:      'var(--text-inverse)',
-              border:     'none',
-              cursor:     'pointer',
-            }}
-          >
-            Enable RepuGuard &rarr;
-          </button>
-        </form>
-        <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
-          Requires an active OwnerRez connection. No additional charge.
-        </p>
-      </div>
-    )
-  }
-
   // Fetch reviews with responses
   const { data: reviews } = await admin
     .from('reviews')
@@ -142,11 +75,30 @@ export default async function ReviewsPage() {
     return da - db
   })
 
+  if (!reviewsWithDeadline.length) {
+    return (
+      <div className="max-w-lg mx-auto py-20 text-center">
+        <div
+          className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5"
+          style={{ background: 'var(--accent-gold-dim)' }}
+        >
+          <span style={{ fontSize: 24 }}>★</span>
+        </div>
+        <h1 className="font-black text-2xl mb-2 tracking-tight"
+            style={{ color: 'var(--text-primary)' }}>
+          No reviews yet
+        </h1>
+        <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+          Reviews sync automatically from OwnerRez every 6 hours.
+          They&apos;ll appear here once your first review lands.
+        </p>
+      </div>
+    )
+  }
+
   return (
     <ReviewsClient
       reviews={reviewsWithDeadline as ReviewRow[]}
-      repuguardStatus={repuguardStatus as 'trial' | 'active'}
-      orgId={membership.org_id}
     />
   )
 }
