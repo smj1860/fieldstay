@@ -31,10 +31,18 @@ class SupabaseConnector {
           .eq('id', op.id)
       }
       if (op.table === 'turnovers' && op.op === 'PUT') {
-        await this.supabase
-          .from('turnovers')
-          .update({ status: op.opData?.status })
-          .eq('id', op.id)
+        if (op.opData?.status === 'completed') {
+          // Routed through a Server Route Handler (not a direct table write) so
+          // the turnover/completed pipeline (cleaning-fee posting, PM
+          // notification, crew-duration tracking) fires for crew completions.
+          const res = await fetch(`/api/crew/turnovers/${op.id}/complete`, { method: 'POST' })
+          if (!res.ok) throw new Error(`Failed to complete turnover ${op.id}`)
+        } else {
+          await this.supabase
+            .from('turnovers')
+            .update({ status: op.opData?.status })
+            .eq('id', op.id)
+        }
       }
       if (op.table === 'inventory_items' && op.op === 'PUT') {
         await this.supabase
