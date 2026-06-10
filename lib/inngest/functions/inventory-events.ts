@@ -127,12 +127,22 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
     // ── Generate purchase order ──────────────────────────────────────────────
 
-    const purchaseOrderId = await step.run('create-purchase-order', async () => {
+    const { purchaseOrderId, alreadyExisted } = await step.run('create-purchase-order', async () => {
+      // Idempotency: a PO for this count may already exist from a prior retry
+      const { data: existing } = await supabase
+        .from('purchase_orders')
+        .select('id')
+        .eq('source_count_id', count_id)
+        .maybeSingle()
+
+      if (existing) return { purchaseOrderId: existing.id, alreadyExisted: true }
+
       const { data: po } = await supabase
         .from('purchase_orders')
         .insert({
           property_id:          property_id,
           org_id:               org_id,
+          source_count_id:      count_id,
           status:               'draft',
           total_estimated_cost: null,  // no unit costs at this stage
         })
@@ -158,8 +168,13 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         .update({ status: 'sent', sent_at: new Date().toISOString() })
         .eq('id', po.id)
 
-      return po.id
+      return { purchaseOrderId: po.id, alreadyExisted: false }
     })
+
+    if (alreadyExisted) {
+      logger.info(`Count ${count_id}: purchase order already exists — skipping duplicate creation`)
+      return { count_id, purchaseOrderCreated: true, purchaseOrderId, itemCount: belowParItems.length }
+    }
 
     await step.run('record-first-po-milestone', async () => {
       await supabase.from('org_milestones').upsert(

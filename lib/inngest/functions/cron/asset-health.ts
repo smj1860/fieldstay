@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calculateHealthScore } from '@/lib/assets/health-score'
-import { getPmEmail } from '@/lib/inngest/helpers'
+import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 // Alert thresholds (days relative to expiry): positive = before, negative = after
@@ -87,10 +87,19 @@ export const dailyAssetHealth = inngest.createFunction(
         return acc
       }, {})
 
+      // Batch-resolve PM emails for every org with active assets
+      const assetPmEmailEntries = await step.run('find-asset-pm-emails', async () => {
+        const emails = await getPmEmailsByOrgIds(supabase, Object.keys(assetsByOrg))
+        return Array.from(emails.entries())
+      })
+      const assetPmEmailByOrg = new Map(assetPmEmailEntries)
+
       for (const [orgId, orgAssets] of Object.entries(assetsByOrg)) {
         await step.run(`score-org-assets-${orgId}`, async () => {
           type Crossing = { asset_type: string; property_id: string; oldScore: number; newScore: number }
           const crossings: Crossing[] = []
+          const updates: Array<{ id: string; health_score: number; health_score_updated_at: string }> = []
+          const now = new Date().toISOString()
 
           for (const asset of orgAssets) {
             const std = standards.find((s) => s.asset_type === asset.asset_type)
@@ -110,13 +119,7 @@ export const dailyAssetHealth = inngest.createFunction(
               repair
             )
 
-            await supabase
-              .from('property_assets')
-              .update({
-                health_score:            newScore,
-                health_score_updated_at: new Date().toISOString(),
-              })
-              .eq('id', asset.id)
+            updates.push({ id: asset.id, health_score: newScore, health_score_updated_at: now })
 
             // 8.5: detect threshold crossings (old > threshold >= new)
             const oldScore = asset.health_score
@@ -135,8 +138,22 @@ export const dailyAssetHealth = inngest.createFunction(
             }
           }
 
+          // Run all score writes for this org concurrently instead of sequentially.
+          // (Can't use a single bulk upsert here — property_assets has other NOT NULL
+          // columns like name/property_id that aren't part of this partial update.)
+          if (updates.length > 0) {
+            await Promise.all(
+              updates.map((u) =>
+                supabase
+                  .from('property_assets')
+                  .update({ health_score: u.health_score, health_score_updated_at: u.health_score_updated_at })
+                  .eq('id', u.id)
+              )
+            )
+          }
+
           if (crossings.length > 0) {
-            const pmEmail = await getPmEmail(supabase, orgId)
+            const pmEmail = assetPmEmailByOrg.get(orgId) ?? null
             if (pmEmail) {
               for (const c of crossings) {
                 const label = c.newScore < 20 ? 'Critical' : c.newScore < 40 ? 'Poor' : 'Fair'
@@ -177,19 +194,25 @@ export const dailyAssetHealth = inngest.createFunction(
 
     logger.info(`Checking ${expiringDocs.length} compliance docs for expiry alerts`)
 
-    for (const doc of expiringDocs) {
-      if (!doc.expiry_date) continue
-
+    // Pre-compute which docs hit an alert threshold so we can batch PM email lookups
+    const dueAlerts = expiringDocs.flatMap((doc) => {
+      if (!doc.expiry_date) return []
       const daysUntil = Math.floor(
         (new Date(doc.expiry_date).getTime() - today.getTime()) / 86_400_000
       )
+      const hitThreshold = COMPLIANCE_ALERT_THRESHOLDS.find((t) => Math.abs(daysUntil - t) <= 1)
+      if (hitThreshold === undefined) return []
+      return [{ doc, hitThreshold }]
+    })
 
-      // Find if this doc falls within ±1 day of any alert threshold
-      const hitThreshold = COMPLIANCE_ALERT_THRESHOLDS.find(
-        (t) => Math.abs(daysUntil - t) <= 1
-      )
-      if (hitThreshold === undefined) continue
+    const compliancePmEmailEntries = await step.run('find-compliance-pm-emails', async () => {
+      const orgIds = Array.from(new Set(dueAlerts.map((a) => a.doc.org_id)))
+      const emails = await getPmEmailsByOrgIds(supabase, orgIds)
+      return Array.from(emails.entries())
+    })
+    const compliancePmEmailByOrg = new Map(compliancePmEmailEntries)
 
+    for (const { doc, hitThreshold } of dueAlerts) {
       await step.run(`compliance-alert-${doc.id}-t${hitThreshold}`, async () => {
         const thresholdKey = hitThreshold >= 0
           ? `${hitThreshold}d_before`
@@ -207,7 +230,7 @@ export const dailyAssetHealth = inngest.createFunction(
         if (existing) return { skipped: true }
 
         const vendor   = Array.isArray(doc.vendors) ? doc.vendors[0] : doc.vendors
-        const pmEmail  = await getPmEmail(supabase, doc.org_id)
+        const pmEmail  = compliancePmEmailByOrg.get(doc.org_id) ?? null
 
         if (pmEmail) {
           const isPast  = hitThreshold < 0

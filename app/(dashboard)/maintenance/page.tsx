@@ -20,7 +20,7 @@ export default async function MaintenancePage() {
     supabase
       .from('work_orders')
       .select(`
-        id, property_id, vendor_id, assigned_crew_id,
+        id, property_id, vendor_id, assigned_crew_member_id,
         wo_number, title, description, category, priority, status, source,
         scheduled_date, completed_date,
         estimated_cost, nte_amount, actual_cost,

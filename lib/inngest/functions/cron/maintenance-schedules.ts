@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { getPmEmail } from '@/lib/inngest/helpers'
+import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
@@ -56,6 +56,35 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     logger.info(`Found ${dueSchedules.length} schedules due within ${ALERT_WINDOW_DAYS} days`)
 
+    // ── Pass 2 lookup: Overdue schedules (fetched early to batch PM emails) ──
+    const overdueSchedules = await step.run('find-overdue-schedules', async () => {
+      const { data } = await supabase
+        .from('maintenance_schedules')
+        .select(`
+          id, name, estimated_cost, next_due_date,
+          assigned_vendor_id, property_id, org_id,
+          properties ( name ),
+          vendors ( name )
+        `)
+        .eq('is_active', true)
+        .lt('next_due_date', todayStr)  // past due date
+
+      return data ?? []
+    })
+
+    logger.info(`Found ${overdueSchedules.length} overdue schedules`)
+
+    // ── Batch-resolve PM emails for every org touched by either pass ────────
+    const pmEmailEntries = await step.run('find-pm-emails', async () => {
+      const orgIds = Array.from(new Set([
+        ...dueSchedules.map((s) => s.org_id),
+        ...overdueSchedules.map((s) => s.org_id),
+      ]))
+      const emails = await getPmEmailsByOrgIds(supabase, orgIds)
+      return Array.from(emails.entries())
+    })
+    const pmEmailByOrg = new Map(pmEmailEntries)
+
     for (const schedule of dueSchedules) {
       await step.run(`process-schedule-${schedule.id}`, async () => {
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
@@ -64,29 +93,40 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
         const dueDate      = new Date(schedule.next_due_date!)
         const daysUntilDue = Math.round((dueDate.getTime() - today.getTime()) / 86_400_000)
 
-        const pmEmail = await getPmEmail(supabase, schedule.org_id)
+        const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
 
         if (schedule.auto_create_wo) {
-          const { data: wo } = await supabase
+          // Idempotency: skip insert if a WO already exists for this schedule + due date
+          const { data: existingWO } = await supabase
             .from('work_orders')
-            .insert({
-              property_id:        schedule.property_id,
-              org_id:             schedule.org_id,
-              vendor_id:          schedule.assigned_vendor_id ?? null,
-              title:              schedule.name,
-              description:        schedule.instructions,
-              priority:           daysUntilDue <= 1 ? 'urgent' : daysUntilDue <= 3 ? 'high' : 'medium',
-              status:             'pending',
-              source:             'maintenance_schedule',
-              source_schedule_id: schedule.id,
-              scheduled_date:     schedule.next_due_date,
-              estimated_cost:     schedule.estimated_cost,
-              portal_enabled:     vendor?.portal_enabled ?? false,
-            })
             .select('id')
-            .single()
+            .eq('source_schedule_id', schedule.id)
+            .eq('scheduled_date', schedule.next_due_date!)
+            .eq('source', 'maintenance_schedule')
+            .maybeSingle()
 
-          if (pmEmail && wo) {
+          const { data: wo } = existingWO
+            ? { data: existingWO }
+            : await supabase
+                .from('work_orders')
+                .insert({
+                  property_id:        schedule.property_id,
+                  org_id:             schedule.org_id,
+                  vendor_id:          schedule.assigned_vendor_id ?? null,
+                  title:              schedule.name,
+                  description:        schedule.instructions,
+                  priority:           daysUntilDue <= 1 ? 'urgent' : daysUntilDue <= 3 ? 'high' : 'medium',
+                  status:             'pending',
+                  source:             'maintenance_schedule',
+                  source_schedule_id: schedule.id,
+                  scheduled_date:     schedule.next_due_date,
+                  estimated_cost:     schedule.estimated_cost,
+                  portal_enabled:     vendor?.portal_enabled ?? false,
+                })
+                .select('id')
+                .single()
+
+          if (pmEmail && wo && !existingWO) {
             await resend.emails.send({
               from:    FROM,
               to:      pmEmail,
@@ -106,7 +146,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
             })
           }
 
-          if (wo && vendor?.email && vendor?.portal_enabled) {
+          if (wo && vendor?.email && vendor?.portal_enabled && !existingWO) {
             await inngest.send({
               name: 'work-order/created' as const,
               data: {
@@ -155,23 +195,6 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     const escalateBefore = new Date(today)
     escalateBefore.setDate(escalateBefore.getDate() - ESCALATE_DAYS_PAST)
 
-    const overdueSchedules = await step.run('find-overdue-schedules', async () => {
-      const { data } = await supabase
-        .from('maintenance_schedules')
-        .select(`
-          id, name, estimated_cost, next_due_date,
-          assigned_vendor_id, property_id, org_id,
-          properties ( name ),
-          vendors ( name )
-        `)
-        .eq('is_active', true)
-        .lt('next_due_date', todayStr)  // past due date
-
-      return data ?? []
-    })
-
-    logger.info(`Found ${overdueSchedules.length} overdue schedules`)
-
     for (const schedule of overdueSchedules) {
       await step.run(`escalate-overdue-${schedule.id}`, async () => {
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
@@ -189,7 +212,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
           .limit(1)
           .maybeSingle()
 
-        const pmEmail = await getPmEmail(supabase, schedule.org_id)
+        const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
 
         if (openWO) {
           // Escalate existing WO priority to urgent if not already
@@ -230,26 +253,37 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
           }
         } else {
           // No open WO — create one with urgent priority
-          const { data: wo } = await supabase
+          // Idempotency: skip insert if a WO already exists for this schedule + due date
+          const { data: existingWO } = await supabase
             .from('work_orders')
-            .insert({
-              property_id:        schedule.property_id,
-              org_id:             schedule.org_id,
-              vendor_id:          schedule.assigned_vendor_id ?? null,
-              title:              schedule.name,
-              description:        `OVERDUE ${daysLate} day${daysLate !== 1 ? 's' : ''}. Original due date: ${dueDate.toLocaleDateString()}`,
-              priority:           'urgent',
-              status:             'pending',
-              source:             'maintenance_schedule',
-              source_schedule_id: schedule.id,
-              scheduled_date:     schedule.next_due_date,
-              estimated_cost:     schedule.estimated_cost,
-              portal_enabled:     false,
-            })
             .select('id')
-            .single()
+            .eq('source_schedule_id', schedule.id)
+            .eq('scheduled_date', schedule.next_due_date!)
+            .eq('source', 'maintenance_schedule')
+            .maybeSingle()
 
-          if (pmEmail) {
+          const { data: wo } = existingWO
+            ? { data: existingWO }
+            : await supabase
+                .from('work_orders')
+                .insert({
+                  property_id:        schedule.property_id,
+                  org_id:             schedule.org_id,
+                  vendor_id:          schedule.assigned_vendor_id ?? null,
+                  title:              schedule.name,
+                  description:        `OVERDUE ${daysLate} day${daysLate !== 1 ? 's' : ''}. Original due date: ${dueDate.toLocaleDateString()}`,
+                  priority:           'urgent',
+                  status:             'pending',
+                  source:             'maintenance_schedule',
+                  source_schedule_id: schedule.id,
+                  scheduled_date:     schedule.next_due_date,
+                  estimated_cost:     schedule.estimated_cost,
+                  portal_enabled:     false,
+                })
+                .select('id')
+                .single()
+
+          if (pmEmail && wo && !existingWO) {
             await resend.emails.send({
               from:    FROM,
               to:      pmEmail,
