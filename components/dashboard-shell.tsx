@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Building2, CalendarCheck, Package,
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Sun, Moon,
-  Users2, Briefcase, MessageSquareDot, ShieldCheck, TrendingUp, MessageSquare,
+  Users2, Briefcase, MessageSquareDot, ShieldCheck, TrendingUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -23,7 +23,6 @@ const NAV_ITEMS = [
   { href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'], group: 'ops' as const        },
   { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager'],          group: 'ops' as const        },
   { href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin','manager'],          group: 'ops' as const        },
-  { href: '/messages',    label: 'Messages',     icon: MessageSquare,   roles: ['admin','manager'],          group: 'ops' as const        },
   { href: '/properties',  label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'], group: 'management' as const },
   { href: '/assets',            label: 'Asset Health',     icon: ShieldCheck, roles: ['admin','manager'], group: 'management' as const },
   { href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin','manager'], group: 'management' as const },
@@ -45,7 +44,6 @@ const PAGE_TITLES: Record<string, string> = {
   '/capital-planning':  'Capital Planning',
   '/crew-manage':  'Crew',
   '/vendors':      'Vendors',
-  '/messages':     'Messages',
   '/comms-log':    'Comms Log',
   '/owners':       'Owner Portal',
   '/reviews':      'Reviews',

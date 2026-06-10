@@ -6,8 +6,14 @@ import {
   addItemsToKrogerCart,
   getBestProductImage,
   getBestPrice,
-  refreshCustomerToken,
 } from '@/lib/kroger/client'
+import {
+  readIntegrationToken,
+  readIntegrationRefreshToken,
+  storeIntegrationToken,
+  storeIntegrationRefreshToken,
+} from '@/lib/integrations/vault'
+import { getProvider } from '@/lib/integrations/registry'
 import type { MatchedItem, CartBuildResult } from '@/lib/kroger/types'
 
 export type ShoppingCartRequestedEvent = {
@@ -31,15 +37,12 @@ export const buildShoppingCart = inngest.createFunction(
     const { org_id, requested_by, property_ids, modality } = event.data
     const supabase = createServiceClient()
 
-    // ── Step 1: Load org settings + below-par items ─────────────
-    const { orgSettings, belowParItems } = await step.run('load-inventory-data', async () => {
-      const [{ data: org }, { data: allItems }] = await Promise.all([
+    // ── Step 1: Load org settings + below-par items + Kroger connection ──
+    const { orgSettings, belowParItems, connection } = await step.run('load-inventory-data', async () => {
+      const [{ data: org }, { data: allItems }, { data: conn }] = await Promise.all([
         supabase
           .from('organizations')
-          .select(`
-            id, preferred_retailer, kroger_location_id, kroger_location_name,
-            kroger_customer_token, kroger_token_expires_at, kroger_refresh_token
-          `)
+          .select('id, preferred_retailer')
           .eq('id', org_id)
           .single(),
 
@@ -60,6 +63,14 @@ export const buildShoppingCart = inngest.createFunction(
 
           return query
         })(),
+
+        supabase
+          .from('integration_connections')
+          .select('user_id, external_user_id, metadata, expires_at')
+          .eq('org_id', org_id)
+          .eq('provider_id', 'kroger')
+          .eq('status', 'active')
+          .maybeSingle(),
       ])
 
       if (!org) throw new Error(`Org ${org_id} not found`)
@@ -68,9 +79,9 @@ export const buildShoppingCart = inngest.createFunction(
         item => (item.current_quantity ?? 0) < (item.par_level ?? 1)
       )
 
-      if (!items.length) return { orgSettings: org, belowParItems: [] }
+      if (!items.length) return { orgSettings: org, belowParItems: [], connection: conn }
 
-      return { orgSettings: org, belowParItems: items }
+      return { orgSettings: org, belowParItems: items, connection: conn }
     })
 
     if (!belowParItems.length) {
@@ -81,7 +92,10 @@ export const buildShoppingCart = inngest.createFunction(
       return { status: 'retailer_not_kroger', preferred: orgSettings.preferred_retailer }
     }
 
-    if (!orgSettings.kroger_location_id) {
+    const krogerLocationId   = (connection?.metadata as { location_id?: string } | null)?.location_id
+    const krogerLocationName = (connection?.metadata as { location_name?: string } | null)?.location_name
+
+    if (!connection || !krogerLocationId) {
       await supabase.from('org_milestones').upsert({
         org_id,
         milestone: 'kroger_store_needed',
@@ -89,33 +103,43 @@ export const buildShoppingCart = inngest.createFunction(
       return { status: 'no_store_configured', action_required: 'connect_kroger_store' }
     }
 
-    // ── Step 2: Refresh customer token if needed ─────────────────
-    const customerToken = await step.run('refresh-customer-token', async () => {
-      if (!orgSettings.kroger_customer_token) return null
+    // ── Step 2: Read customer token from Vault, refreshing if near expiry ──
+    const customerToken = await step.run('get-customer-token', async () => {
+      const expiresAt    = connection.expires_at ? new Date(connection.expires_at) : null
+      const needsRefresh = !!expiresAt && expiresAt.getTime() - Date.now() < 5 * 60 * 1000
 
-      const expiresAt    = orgSettings.kroger_token_expires_at
-        ? new Date(orgSettings.kroger_token_expires_at)
-        : null
-      const needsRefresh = !expiresAt || expiresAt.getTime() - Date.now() < 5 * 60 * 1000
+      if (!needsRefresh) {
+        return readIntegrationToken(connection.user_id, 'kroger')
+      }
 
-      if (!needsRefresh) return orgSettings.kroger_customer_token
-      if (!orgSettings.kroger_refresh_token) return null
+      const refreshToken = await readIntegrationRefreshToken(connection.user_id, 'kroger')
+      if (!refreshToken) return readIntegrationToken(connection.user_id, 'kroger')
 
       try {
-        const refreshed = await refreshCustomerToken(orgSettings.kroger_refresh_token)
-        await supabase
-          .from('organizations')
-          .update({
-            kroger_customer_token:   refreshed.access_token,
-            kroger_refresh_token:    refreshed.refresh_token ?? orgSettings.kroger_refresh_token,
-            kroger_token_expires_at: new Date(
-              Date.now() + refreshed.expires_in * 1000
-            ).toISOString(),
+        const provider  = getProvider('kroger')
+        const refreshed = await provider.refreshAccessToken!({ refreshToken })
+
+        await storeIntegrationToken({
+          userId:         connection.user_id,
+          providerId:     'kroger',
+          accessToken:    refreshed.accessToken,
+          externalUserId: connection.external_user_id ?? refreshed.externalUserId,
+          scope:          refreshed.scope,
+          metadata:       connection.metadata,
+        })
+
+        if (refreshed.refreshToken) {
+          await storeIntegrationRefreshToken({
+            userId:       connection.user_id,
+            providerId:   'kroger',
+            refreshToken: refreshed.refreshToken,
+            expiresAt:    refreshed.expiresAt,
           })
-          .eq('id', org_id)
-        return refreshed.access_token
+        }
+
+        return refreshed.accessToken
       } catch (err) {
-        console.error('Kroger token refresh failed — falling back to list-only:', err)
+        console.error('Kroger token refresh failed — falling back to list-only:', err instanceof Error ? err.message : err)
         return null
       }
     })
@@ -212,7 +236,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
           const searchTerm = normalizedItems[originalName] ?? originalName
           const products   = await searchProducts(
             searchTerm,
-            orgSettings.kroger_location_id!,
+            krogerLocationId,
             clientToken,
             3,
           )
@@ -342,7 +366,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
           cart_url:        cartResult.cart_url,
           matched_items:   cartResult.matched_items,
           unmatched_items: cartResult.unmatched_items,
-          location_name:   orgSettings.kroger_location_name,
+          location_name:   krogerLocationName,
         },
       }, { onConflict: 'org_id,milestone' })
 

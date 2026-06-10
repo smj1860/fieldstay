@@ -39,9 +39,6 @@ interface ReviewRow {
 
 interface Props {
   reviews: ReviewRow[]
-  repuguardStatus: 'trial' | 'active'
-  trialEnd?: string | null
-  orgId: string
 }
 
 function StarRating({ rating }: { rating: number }) {
@@ -99,7 +96,7 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-export function ReviewsClient({ reviews: initialReviews, repuguardStatus, trialEnd }: Props) {
+export function ReviewsClient({ reviews: initialReviews }: Props) {
   const [reviews, setReviews]           = useState<ReviewRow[]>(initialReviews)
   const [selected, setSelected]         = useState<ReviewRow | null>(null)
   const [editedResponse, setEdited]     = useState('')

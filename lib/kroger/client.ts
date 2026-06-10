@@ -127,6 +127,27 @@ export function buildKrogerAuthUrl(state: string, redirectUri: string): string {
   return `${KROGER_AUTH_BASE}/authorize?${params.toString()}`
 }
 
+/**
+ * Fetch the connected customer's Kroger profile ID.
+ * Requires the `profile.compact` scope (included in buildKrogerAuthUrl).
+ * Used as the externalUserId for the integration_connections row.
+ */
+export async function getKrogerProfile(
+  customerToken: string,
+): Promise<{ id: string } | null> {
+  const res = await fetch(`${KROGER_API_BASE}/identity/profile`, {
+    headers: {
+      'Authorization': `Bearer ${customerToken}`,
+      'Accept':        'application/json',
+    },
+  })
+
+  if (!res.ok) return null
+
+  const data = (await res.json()) as { data?: { id?: string } }
+  return data.data?.id ? { id: data.data.id } : null
+}
+
 // ── Products ────────────────────────────────────────────────────
 
 export async function searchProducts(

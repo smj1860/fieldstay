@@ -116,6 +116,59 @@ export async function revokeIntegrationToken(
 }
 
 /**
+ * Securely store (or update) an OAuth refresh token in Supabase Vault, and
+ * record the access-token expiry on the connection row. Used by providers
+ * whose access tokens expire (e.g. Kroger). The connection row must already
+ * exist — call storeIntegrationToken first.
+ */
+export async function storeIntegrationRefreshToken(params: {
+  userId: string
+  providerId: string
+  refreshToken: string
+  expiresAt?: string | null
+}): Promise<void> {
+  const admin = getAdminClient()
+
+  const { error } = await admin.rpc('store_integration_refresh_token', {
+    p_user_id:       params.userId,
+    p_provider_id:   params.providerId,
+    p_refresh_token: params.refreshToken,
+    p_expires_at:    params.expiresAt ?? null,
+  })
+
+  if (error) {
+    throw new Error(
+      `[Vault] Failed to store refresh token for provider "${params.providerId}": ${error.message}`
+    )
+  }
+}
+
+/**
+ * Retrieve and decrypt a stored refresh token from Vault.
+ * Returns null if the connection has no refresh token (e.g. OwnerRez,
+ * which never expires and never has one).
+ */
+export async function readIntegrationRefreshToken(
+  userId: string,
+  providerId: string
+): Promise<string | null> {
+  const admin = getAdminClient()
+
+  const { data: token, error } = await admin.rpc('read_integration_refresh_token', {
+    p_user_id:     userId,
+    p_provider_id: providerId,
+  })
+
+  if (error) {
+    throw new Error(
+      `[Vault] Failed to read refresh token for provider "${providerId}": ${error.message}`
+    )
+  }
+
+  return token as string | null
+}
+
+/**
  * Look up a FieldStay user ID by their external provider user ID.
  * Used by the webhook handler to find the right user when OwnerRez
  * sends a revocation event that only includes the OwnerRez user_id.

@@ -54,7 +54,13 @@ export async function createBooking(
     .select('id')
     .single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    // bookings_manual_dates_unique — double-submit or network retry
+    if (error.code === '23505') {
+      return { error: 'A booking already exists for these dates at this property.' }
+    }
+    return { error: error.message }
+  }
 
   // Fire booking/detected so Inngest auto-generates a turnover
   await inngest.send({
@@ -82,6 +88,7 @@ export async function cancelBooking(
 ): Promise<{ error?: string }> {
   const { supabase, membership } = await requireOrgMember()
 
+  // 1. Cancel the booking
   const { error } = await supabase
     .from('bookings')
     .update({ status: 'cancelled' })
@@ -90,7 +97,50 @@ export async function cancelBooking(
 
   if (error) return { error: error.message }
 
+  // 2. Cancel pending/assigned turnovers tied to this booking
+  await supabase
+    .from('turnovers')
+    .update({ status: 'cancelled' })
+    .eq('booking_id', bookingId)
+    .eq('org_id', membership.org_id)
+    .in('status', ['pending_assignment', 'assigned'])
+
+  // 3. Post a revenue reversal if a booking revenue transaction exists.
+  //    Soft reversal (new expense row) preserves the audit trail. Uses a
+  //    distinct `source` so it doesn't collide with the original
+  //    UNIQUE(source_reference_id, source) row.
+  const { data: txn } = await supabase
+    .from('owner_transactions')
+    .select('id, amount, property_id')
+    .eq('source_reference_id', bookingId)
+    .in('source', ['booking_revenue', 'uplisting_booking'])
+    .maybeSingle()
+
+  if (txn) {
+    const { count } = await supabase
+      .from('owner_transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('source_reference_id', bookingId)
+      .eq('source', 'booking_cancellation')
+
+    if ((count ?? 0) === 0) {
+      await supabase.from('owner_transactions').insert({
+        property_id:         txn.property_id,
+        org_id:              membership.org_id,
+        source:              'booking_cancellation',
+        source_reference_id: bookingId,
+        transaction_type:    'expense',
+        category:            'booking_revenue',
+        amount:              txn.amount,
+        description:         'Booking cancelled — revenue reversal',
+        transaction_date:    new Date().toISOString().split('T')[0],
+        visible_to_owner:    true,
+      })
+    }
+  }
+
   revalidatePath('/bookings')
+  revalidatePath('/turnovers')
   return {}
 }
 

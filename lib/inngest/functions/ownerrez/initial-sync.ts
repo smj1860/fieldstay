@@ -222,6 +222,19 @@ export const ownerRezInitialSync = inngest.createFunction(
       }
     })
 
+    // ── Step 4: Auto-activate RepuGuard ──────────────────────────────────────
+
+    await step.run('auto-activate-repuguard', async () => {
+      // RepuGuard is bundled for all OwnerRez users — activate on first connect.
+      // .in() filter skips orgs already active, so reconnects are safe.
+      const supabase = createServiceClient()
+      await supabase
+        .from('organizations')
+        .update({ repuguard_status: 'active' })
+        .eq('id', org_id)
+        .in('repuguard_status', ['inactive', 'cancelled'])
+    })
+
     return { user_id, synced: true }
   }
 )
