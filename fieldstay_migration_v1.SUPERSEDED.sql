@@ -1,4 +1,20 @@
 -- ============================================================
+-- ⚠️  SUPERSEDED — DO NOT RUN
+-- ============================================================
+-- This file represents the schema as of the initial v1.0 design.
+-- The live Supabase project (vpmznjktllhmmbfnxuvk) has since
+-- advanced through 64 tracked migrations and no longer matches
+-- this file's contents (table set, columns, RLS policies, enums,
+-- functions, triggers, etc. have all changed substantially).
+--
+-- For the current live schema, see:
+--   supabase/schema_reference.sql
+--
+-- Do not apply this file to any database. It is kept for
+-- historical reference only.
+-- ============================================================
+
+-- ============================================================
 -- FieldStay — Supabase Database Migration v1.0
 -- Multi-tenant STR operations platform
 -- ============================================================

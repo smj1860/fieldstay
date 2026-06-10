@@ -1,3 +1,18 @@
+-- ============================================================
+-- ⚠️  SUPERSEDED — DO NOT RUN
+-- ============================================================
+-- This file represents an early incremental patch on top of v1.
+-- The live Supabase project (vpmznjktllhmmbfnxuvk) has since
+-- advanced through 64 tracked migrations; all changes below are
+-- already present in the live schema (and have evolved further).
+--
+-- For the current live schema, see:
+--   supabase/schema_reference.sql
+--
+-- Do not apply this file to any database. It is kept for
+-- historical reference only.
+-- ============================================================
+
 -- FieldStay Migration v2
 -- Safe to re-run — all statements are idempotent
 
