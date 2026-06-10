@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { createClient }       from '@/lib/supabase/client'
+import { reportTurnoverIssue } from '@/app/crew/turnovers/actions'
 
 type TurnoverRow   = { id: string; status: string; priority: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number; notes: string | null; property_id: string; org_id: string }
 type InstanceRow   = { id: string; turnover_id: string; status: string }
@@ -473,7 +474,6 @@ export default function CrewTurnoverPage() {
       {showFlagModal && (
         <IssueReportModal
           turnover={turnover}
-          supabase={supabase}
           onClose={() => setShowFlagModal(false)}
         />
       )}
@@ -481,15 +481,13 @@ export default function CrewTurnoverPage() {
   )
 }
 
-// ── Issue Report Modal (unchanged) ────────────────────────────────────────────
+// ── Issue Report Modal ────────────────────────────────────────────────────────
 
 function IssueReportModal({
   turnover,
-  supabase,
   onClose,
 }: {
-  turnover: { id: string; property_id: string; org_id: string }
-  supabase: ReturnType<typeof createClient>
+  turnover: { id: string }
   onClose: () => void
 }) {
   const [title,      setTitle]      = useState('')
@@ -506,16 +504,8 @@ function IssueReportModal({
     setError(null)
 
     try {
-      const { error: insertErr } = await supabase.from('work_orders').insert({
-        property_id: turnover.property_id,
-        org_id:      turnover.org_id,
-        title:       title.trim(),
-        description: details.trim() || null,
-        priority,
-        status:      'pending',
-        source:      'crew_flag',
-      })
-      if (insertErr) throw new Error(insertErr.message)
+      const result = await reportTurnoverIssue(turnover.id, title, details, priority)
+      if (result.error) throw new Error(result.error)
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message)
