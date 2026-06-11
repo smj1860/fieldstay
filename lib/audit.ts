@@ -44,6 +44,8 @@ export type AuditAction =
   | 'asset.updated'
   | 'asset.bulk_imported'
   | 'account.password_changed'
+  | 'integration.sync_triggered'
+  | 'integration.sync_failed'
 
 interface AuditParams {
   orgId?:         string

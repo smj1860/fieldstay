@@ -255,6 +255,14 @@ export type FieldStayEvents = {
     }
   }
 
+  'ownerrez/sync.now.requested': {
+    data: {
+      org_id:  string
+      user_id: string
+      trigger: 'manual'
+    }
+  }
+
   // ----------------------------------------------------------
   // Billing / Stripe
   // ----------------------------------------------------------
