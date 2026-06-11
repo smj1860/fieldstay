@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { upsertInventoryItems, deleteInventoryItem, completeInventoryStep } from './actions'
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
-import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import type { InventoryCatalogItem, InventoryItem, InventoryCategory } from '@/types/database'
 
 interface EditableItem {
@@ -101,7 +101,7 @@ export function InventorySetup({
   return (
     <div className="space-y-6">
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>
+        <div className="border text-sm rounded-lg px-4 py-3" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{error}</div>
       )}
 
       {/* Current item list */}
@@ -115,14 +115,16 @@ export function InventorySetup({
                 templateBrand !== null && item.preferred_brand !== templateBrand
               return (
                 <div key={item.id ?? `new-${idx}`}
-                  className={cn('flex items-start gap-3 px-3 py-2.5 rounded-lg border',
-                    item.isDirty ? 'border-amber-200 bg-amber-50' : 'border-accent-100 bg-accent-50'
-                  )}
+                  className="flex items-start gap-3 px-3 py-2.5 rounded-lg border"
+                  style={item.isDirty
+                    ? { borderColor: 'var(--accent-amber)', background: 'var(--accent-amber-dim)' }
+                    : { borderColor: 'var(--border)', background: 'var(--bg-canvas)' }
+                  }
                 >
                   <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-2 items-center min-w-0">
-                    <p className="text-sm font-medium text-accent-800 truncate col-span-2">{item.name}</p>
+                    <p className="text-sm font-medium text-primary-themed truncate col-span-2">{item.name}</p>
                     <div className="flex items-center gap-1">
-                      <span className="text-xs text-accent-400">Par:</span>
+                      <span className="text-xs text-muted-themed">Par:</span>
                       <input
                         type="number" min="0" value={item.par_level}
                         onChange={(e) => {
@@ -136,13 +138,13 @@ export function InventorySetup({
                             updateItem(idx, 'par_level', 0)
                           }
                         }}
-                        className="w-14 text-center text-sm border border-accent-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="w-14 text-center text-sm border border-themed rounded px-1 py-0.5 bg-transparent text-primary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                       />
                     </div>
                     <select
                       value={item.unit}
                       onChange={(e) => updateItem(idx, 'unit', e.target.value)}
-                      className="text-xs border border-accent-200 rounded px-1 py-0.5 text-accent-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="text-xs border border-themed rounded px-1 py-0.5 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                     >
                       {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                     </select>
@@ -152,7 +154,7 @@ export function InventorySetup({
                         value={item.preferred_brand ?? ''}
                         onChange={(e) => updateItem(idx, 'preferred_brand', e.target.value.trim() || null)}
                         placeholder={templateBrand ? `Template: ${templateBrand}` : 'Brand (optional)'}
-                        className="text-xs border border-accent-200 rounded px-2 py-0.5 text-accent-700 focus:outline-none focus:ring-1 focus:ring-brand-500 w-40"
+                        className="text-xs border border-themed rounded px-2 py-0.5 bg-transparent text-primary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)] w-40"
                       />
                       {isOverride && (
                         <span className="text-xs font-medium" style={{ color: 'var(--accent-amber)' }}>
@@ -161,7 +163,7 @@ export function InventorySetup({
                       )}
                     </div>
                   </div>
-                  <button onClick={() => removeItem(item, idx)} className="text-accent-300 hover:text-red-500 transition-colors mt-0.5">
+                  <button onClick={() => removeItem(item, idx)} className="text-muted-themed hover:text-red-500 transition-colors mt-0.5">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -179,28 +181,28 @@ export function InventorySetup({
       {/* Catalog picker */}
       <div>
         <p className="section-header">Add from Catalog</p>
-        <div className="border border-accent-200 rounded-xl overflow-hidden">
+        <div className="border border-themed rounded-xl overflow-hidden">
           {Object.entries(catalogByCategory).map(([category, catItems]) => {
             const isOpen   = expandedCategories.has(category)
             const addedIds = new Set(items.map((i) => i.catalog_item_id).filter(Boolean))
             const available = catItems.filter((i) => !addedIds.has(i.id))
 
             return (
-              <div key={category} className="border-b border-accent-100 last:border-b-0">
+              <div key={category} className="border-b border-themed last:border-b-0">
                 <button
                   onClick={() => setExpandedCategories((prev) => {
                     const next = new Set(prev)
                     isOpen ? next.delete(category) : next.add(category)
                     return next
                   })}
-                  className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-accent-50 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-raised-themed transition-colors"
                 >
-                  <span className="text-sm font-medium text-accent-700">
+                  <span className="text-sm font-medium text-primary-themed">
                     {INVENTORY_CATEGORY_LABELS[category as InventoryCategory] ?? category}
                   </span>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-accent-400">{available.length} available</span>
-                    {isOpen ? <ChevronDown className="w-4 h-4 text-accent-400" /> : <ChevronRight className="w-4 h-4 text-accent-400" />}
+                    <span className="text-xs text-muted-themed">{available.length} available</span>
+                    {isOpen ? <ChevronDown className="w-4 h-4 text-muted-themed" /> : <ChevronRight className="w-4 h-4 text-muted-themed" />}
                   </div>
                 </button>
                 {isOpen && (
@@ -212,14 +214,13 @@ export function InventorySetup({
                           key={ci.id}
                           onClick={() => !added && addFromCatalog(ci)}
                           disabled={added}
-                          className={cn(
-                            'flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-all',
-                            added
-                              ? 'bg-green-50 text-green-600 cursor-default'
-                              : 'bg-accent-50 text-accent-700 hover:bg-brand-50 hover:text-brand-700'
-                          )}
+                          className={added
+                            ? 'flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-all cursor-default'
+                            : 'flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-left transition-all bg-canvas-themed text-secondary-themed hover:text-[var(--accent-gold)] hover:bg-[var(--accent-gold-dim)]'
+                          }
+                          style={added ? { background: 'var(--accent-green-dim)', color: 'var(--accent-green)' } : undefined}
                         >
-                          <Plus className={cn('w-3 h-3 flex-shrink-0', added && 'text-green-500')} />
+                          <Plus className="w-3 h-3 flex-shrink-0" style={added ? { color: 'var(--accent-green)' } : undefined} />
                           {ci.name}
                           {added && <span className="ml-auto text-xs">✓</span>}
                         </button>
@@ -235,8 +236,8 @@ export function InventorySetup({
 
       {/* Custom item */}
       {showCustomForm ? (
-        <div className="border border-accent-200 rounded-xl p-4 space-y-3">
-          <p className="text-sm font-semibold text-accent-700">Custom Item</p>
+        <div className="border border-themed rounded-xl p-4 space-y-3">
+          <p className="text-sm font-semibold text-primary-themed">Custom Item</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Item Name</label>
@@ -278,7 +279,7 @@ export function InventorySetup({
       )}
 
       {/* Continue */}
-      <div className="flex items-center gap-3 pt-4 border-t border-accent-100">
+      <div className="flex items-center gap-3 pt-4 border-t border-themed">
         <button
           disabled={completing}
           onClick={() => startComplete(async () => {

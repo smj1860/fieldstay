@@ -23,19 +23,12 @@ const SPECIALTY_LABELS: Record<string, string> = {
 }
 
 const FREQUENCY_LABELS: Record<string, string> = {
-  weekly:    'Weekly',
-  monthly:   'Monthly',
-  quarterly: 'Quarterly',
-  annually:  'Annually',
+  weekly:      'Weekly',
+  monthly:     'Monthly',
+  quarterly:   'Quarterly',
+  semi_annual: 'Semi-Annually',
+  annually:    'Annually',
 }
-
-const DEFAULTS: MaintenanceScheduleInput[] = [
-  { title: 'HVAC Filter Replacement',  description: null, frequency: 'quarterly', specialty: 'hvac',         estimated_cost: null },
-  { title: 'Gutter Cleaning',          description: null, frequency: 'annually',  specialty: 'landscaping',  estimated_cost: null },
-  { title: 'Pest Control Inspection',  description: null, frequency: 'quarterly', specialty: 'pest_control', estimated_cost: null },
-  { title: 'Fire Extinguisher Check',  description: null, frequency: 'annually',  specialty: 'general',      estimated_cost: null },
-  { title: 'Water Heater Inspection',  description: null, frequency: 'annually',  specialty: 'plumbing',     estimated_cost: null },
-]
 
 function emptySchedule(): MaintenanceScheduleInput {
   return { title: '', description: null, frequency: 'monthly', specialty: null, estimated_cost: null }
@@ -43,17 +36,19 @@ function emptySchedule(): MaintenanceScheduleInput {
 
 export function MasterMaintenanceBuilder({
   existingItems,
+  suggestionItems = [],
   finishAction,
 }: {
-  existingItems: Array<{ id: string; title: string; description: string | null; frequency: string; specialty: string | null; estimated_cost: number | null }>
-  finishAction:  () => Promise<void>
+  existingItems:    Array<{ id: string; title: string; description: string | null; frequency: string; specialty: string | null; estimated_cost: number | null }>
+  suggestionItems?: Array<{ title: string; description: string | null; frequency: string; specialty: string | null; estimated_cost: number | null }>
+  finishAction:     () => Promise<void>
 }) {
   const [schedules, setSchedules] = useState<MaintenanceScheduleInput[]>(
     existingItems.length > 0
       ? existingItems.map(({ title, description, frequency, specialty, estimated_cost }) => ({
           title, description, frequency, specialty, estimated_cost,
         }))
-      : DEFAULTS
+      : []
   )
   const [saving, startSave] = useTransition()
   const [success, setSuccess] = useState(false)
@@ -84,6 +79,44 @@ export function MasterMaintenanceBuilder({
 
   return (
     <div className="space-y-4">
+      {/* Quick-add suggestions */}
+      {suggestionItems.length > 0 && (
+        <div
+          className="rounded-xl p-4"
+          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide mb-3"
+             style={{ color: 'var(--text-muted)' }}>
+            Suggested Schedules — tap to add
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {suggestionItems
+              .filter((s) => !schedules.some((existing) => existing.title === s.title))
+              .map((s) => (
+                <button
+                  key={s.title}
+                  type="button"
+                  onClick={() => setSchedules((prev) => [
+                    ...prev,
+                    { title: s.title, description: s.description, frequency: s.frequency, specialty: s.specialty, estimated_cost: s.estimated_cost },
+                  ])}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
+                  style={{
+                    background: 'var(--bg-card)',
+                    color:      'var(--text-secondary)',
+                    border:     '1px solid var(--border)',
+                  }}
+                >
+                  + {s.title}
+                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+                    ({FREQUENCY_LABELS[s.frequency] ?? s.frequency})
+                  </span>
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
+
       {schedules.map((s, i) => (
         <div key={i} className="card p-4 space-y-3">
           <div className="flex items-start gap-3">

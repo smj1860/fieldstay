@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { SettingsTabs, type ConnectionInfo } from './settings-tabs'
@@ -33,7 +34,9 @@ export default async function SettingsPage() {
         <p className="page-subtitle">Manage your organization, billing, security, and notifications</p>
       </div>
 
-      <SettingsTabs org={org as unknown as Organization} connections={connectionsByProvider} />
+      <Suspense fallback={null}>
+        <SettingsTabs org={org as unknown as Organization} connections={connectionsByProvider} />
+      </Suspense>
     </div>
   )
 }

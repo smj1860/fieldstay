@@ -6,6 +6,7 @@ import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import {
   createOrGetTemplate,
   addTemplateItem,
+  bulkAddTemplateItems,
   removeTemplateItem,
   updateTemplateItemBrand,
   applyTemplateToProperty,
@@ -42,7 +43,9 @@ interface CatalogItem {
 }
 
 const CATEGORY_ORDER: InventoryCategory[] = [
-  'paper_goods', 'cleaning', 'kitchen', 'bath', 'laundry', 'bedroom', 'outdoor', 'other',
+  'paper_goods', 'cleaning', 'kitchen', 'bath', 'laundry',
+  'bedroom_linens', 'outdoor', 'maintenance_safety',
+  'guest_experience', 'technology', 'other',
 ]
 
 function TemplateBrandInput({ itemId, defaultBrand }: { itemId: string; defaultBrand: string | null }) {
@@ -221,23 +224,24 @@ export function TemplateManager({
   const handleImportCsv = () => {
     if (!currentTemplate || !csvPreview.length) return
     startTransition(async () => {
-      const newItems: TemplateItem[] = []
-      for (const row of csvPreview) {
-        const result = await addTemplateItem(currentTemplate.id, {
+      const result = await bulkAddTemplateItems(
+        currentTemplate.id,
+        csvPreview.map((row) => ({
           name:      row.name,
           category:  row.category,
           unit:      row.unit,
           par_level: row.par_level,
-        })
-        if (result.item) newItems.push(result.item as TemplateItem)
+        }))
+      )
+      if (result.items?.length) {
+        setCurrentTemplate(prev => prev ? {
+          ...prev,
+          inventory_template_items: [
+            ...(prev.inventory_template_items ?? []),
+            ...(result.items as TemplateItem[]),
+          ],
+        } : prev)
       }
-      setCurrentTemplate(prev => prev ? {
-        ...prev,
-        inventory_template_items: [
-          ...(prev.inventory_template_items ?? []),
-          ...newItems,
-        ],
-      } : prev)
       setCsvPreview([])
       setAddTab('catalog')
     })

@@ -230,6 +230,37 @@ export async function addTemplateItem(
   return { item: data! as { id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null } }
 }
 
+export async function bulkAddTemplateItems(
+  templateId: string,
+  items: Array<{ name: string; category: string; unit: string; par_level: number; preferred_brand?: string | null }>
+): Promise<{
+  items?: Array<{ id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null }>
+  error?: string
+}> {
+  const { supabase } = await requireOrgMember()
+
+  if (!items.length) return { items: [] }
+
+  const { data, error } = await supabase
+    .from('inventory_template_items')
+    .insert(
+      items.map((item) => ({
+        template_id:     templateId,
+        name:            item.name,
+        category:        item.category,
+        unit:            item.unit,
+        par_level:       item.par_level,
+        preferred_brand: item.preferred_brand ?? null,
+      }))
+    )
+    .select('id, name, category, unit, par_level, notes, preferred_brand')
+
+  if (error) return { error: error.message }
+
+  revalidatePath('/inventory')
+  return { items: data as Array<{ id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null }> }
+}
+
 export async function updateTemplateItemBrand(
   itemId: string,
   brand:  string | null

@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { addCrewMember, completeCrewStep } from './actions'
 import { Plus, User, CheckCircle2 } from 'lucide-react'
 
@@ -20,6 +20,11 @@ export function CrewSetup({
   const [showForm, setShowForm] = useState(crew.length === 0)
   const [completing, setCompleting] = useState(false)
 
+  // Close form on successful submission
+  useEffect(() => {
+    if (state?.success) setShowForm(false)
+  }, [state?.success])
+
   return (
     <div className="space-y-6">
       {/* Existing crew */}
@@ -27,17 +32,20 @@ export function CrewSetup({
         <div className="space-y-2">
           <p className="section-header">{crew.length} crew member{crew.length !== 1 ? 's' : ''}</p>
           {crew.map((c) => (
-            <div key={c.id} className="flex items-center gap-3 px-4 py-3 bg-accent-50 rounded-lg border border-accent-100">
-              <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 text-sm font-bold flex-shrink-0">
+            <div key={c.id} className="flex items-center gap-3 px-4 py-3 bg-canvas-themed rounded-lg border border-themed">
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
+                style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}
+              >
                 {c.name[0]?.toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-accent-800">{c.name}</p>
-                <p className="text-xs text-accent-400">
+                <p className="text-sm font-medium text-primary-themed">{c.name}</p>
+                <p className="text-xs text-muted-themed">
                   {c.email ?? c.phone} · {c.preferred_contact}
                 </p>
               </div>
-              <span className="text-xs text-accent-400 capitalize">{c.specialty}</span>
+              <span className="text-xs text-muted-themed capitalize">{c.specialty}</span>
             </div>
           ))}
         </div>
@@ -45,22 +53,19 @@ export function CrewSetup({
 
       {/* Add form */}
       {showForm ? (
-        <div className="border border-accent-200 rounded-xl p-5">
-          <h3 className="text-sm font-semibold text-accent-700 mb-4">Add Crew Member</h3>
+        <div className="border border-themed rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-primary-themed mb-4">Add Crew Member</h3>
 
           {state?.error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{state.error}</div>
+            <div className="border text-sm rounded-lg px-3 py-2 mb-4" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{state.error}</div>
           )}
           {state?.success && (
-            <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-3 py-2 mb-4 flex items-center gap-2">
+            <div className="border text-sm rounded-lg px-3 py-2 mb-4 flex items-center gap-2" style={{ background: 'var(--accent-green-dim)', borderColor: 'var(--accent-green)', color: 'var(--accent-green)' }}>
               <CheckCircle2 className="w-4 h-4" /> Added successfully
             </div>
           )}
 
-          <form action={async (fd) => {
-            await formAction(fd)
-            if (!state?.error) setShowForm(false)
-          }} className="space-y-4">
+          <form action={formAction} className="space-y-4">
             <div>
               <label className="label">Name <span className="text-red-500">*</span></label>
               <input name="name" type="text" required className="input" placeholder="Full name" />
@@ -100,11 +105,11 @@ export function CrewSetup({
       )}
 
       {/* Finish setup */}
-      <div className="border border-green-200 bg-green-50 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-green-800 mb-1">
+      <div className="border rounded-xl p-5" style={{ borderColor: 'var(--accent-green)', background: 'var(--accent-green-dim)' }}>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--accent-green)' }}>
           {crew.length > 0 ? '🎉 Almost done!' : 'Finish setup'}
         </h3>
-        <p className="text-sm text-green-700 mb-4">
+        <p className="text-sm mb-4" style={{ color: 'var(--accent-green)' }}>
           {crew.length > 0
             ? 'Your property is set up and ready. FieldStay will sync your calendar and start creating turnovers.'
             : "You can add crew later. Click Finish to complete your property setup."

@@ -26,7 +26,7 @@ export type TurnoverStatus      = 'pending_assignment' | 'assigned' | 'in_progre
 export type PriorityLevel       = 'low' | 'medium' | 'high' | 'urgent'
 export type ContactPref         = 'email' | 'sms' | 'both'
 export type ChecklistStatus     = 'not_started' | 'in_progress' | 'completed'
-export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom' | 'outdoor' | 'other'
+export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom_linens' | 'outdoor' | 'maintenance_safety' | 'guest_experience' | 'technology' | 'other'
 export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
@@ -334,16 +334,17 @@ export interface TurnoverAssignment {
 }
 
 export interface ChecklistInstance {
-  id:                string
-  turnover_id:       string
-  org_id:            string
-  template_id:       string | null
-  template_snapshot: Record<string, unknown>
-  status:            ChecklistStatus
-  started_at:        string | null
-  completed_at:      string | null
-  created_at:        string
-  updated_at:        string
+  id:                  string
+  turnover_id:         string
+  org_id:              string
+  template_id:         string | null
+  template_snapshot:   Record<string, unknown>
+  status:              ChecklistStatus
+  section_photo_path:  string | null
+  started_at:          string | null
+  completed_at:        string | null
+  created_at:          string
+  updated_at:          string
 }
 
 export interface ChecklistInstanceItem {
