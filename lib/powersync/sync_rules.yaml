@@ -1,0 +1,22 @@
+bucket_definitions:
+  user_turnovers:
+    parameters:
+      - SELECT turnover_id FROM powersync_crew_turnovers WHERE user_id = token_parameters.user_id
+    data:
+      - SELECT * FROM turnovers WHERE id = bucket.turnover_id
+      - SELECT * FROM checklist_instances WHERE turnover_id = bucket.turnover_id
+  user_checklist_items:
+    parameters:
+      - SELECT instance_id FROM powersync_crew_instances WHERE user_id = token_parameters.user_id
+    data:
+      - SELECT * FROM checklist_instance_items WHERE instance_id = bucket.instance_id
+  user_inventory:
+    parameters:
+      - SELECT property_id FROM powersync_crew_properties WHERE user_id = token_parameters.user_id
+    data:
+      - SELECT * FROM inventory_items WHERE property_id = bucket.property_id
+  user_properties:
+    parameters:
+      - SELECT property_id FROM powersync_crew_properties WHERE user_id = token_parameters.user_id
+    data:
+      - SELECT id, name, address, city, state FROM properties WHERE id = bucket.property_id
