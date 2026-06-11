@@ -10,7 +10,7 @@ export default async function InventoryPage({ params }: Props) {
   const { id } = await params
   const { property, supabase, membership } = await requireProperty(id)
 
-  const [{ data: catalogItems }, { data: propertyItems }, { data: templateItems }] = await Promise.all([
+  const [{ data: catalogItems }, { data: propertyItems }, { data: templateItems }, { data: siblingItems }] = await Promise.all([
     supabase
       .from('inventory_catalog')
       .select('*')
@@ -30,6 +30,12 @@ export default async function InventoryPage({ params }: Props) {
       .eq('org_id', membership.org_id)
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from('inventory_items')
+      .select('property_id, properties!inner(name)')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .neq('property_id', property.id),
   ])
 
   const templateBrands: Record<string, string | null> = {}
@@ -41,6 +47,17 @@ export default async function InventoryPage({ params }: Props) {
 
   const templateId   = templateItems?.id ?? undefined
   const templateName = (templateItems as { name?: string } | null)?.name ?? undefined
+
+  const itemCountByProperty: Record<string, number> = {}
+  const propertyNames: Record<string, string> = {}
+  for (const row of siblingItems ?? []) {
+    itemCountByProperty[row.property_id] = (itemCountByProperty[row.property_id] ?? 0) + 1
+    const p = Array.isArray(row.properties) ? row.properties[0] : row.properties
+    if (p?.name) propertyNames[row.property_id] = p.name
+  }
+  const sourceProperties = Object.entries(itemCountByProperty)
+    .map(([sid, itemCount]) => ({ id: sid, name: propertyNames[sid] ?? sid, itemCount }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
     <div className="card">
@@ -56,6 +73,7 @@ export default async function InventoryPage({ params }: Props) {
         templateBrands={templateBrands}
         templateId={templateId}
         templateName={templateName}
+        sourceProperties={sourceProperties}
       />
     </div>
   )

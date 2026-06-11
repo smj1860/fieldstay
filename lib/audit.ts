@@ -46,6 +46,9 @@ export type AuditAction =
   | 'account.password_changed'
   | 'integration.sync_triggered'
   | 'integration.sync_failed'
+  | 'property.inventory.cloned'
+  | 'property.checklist.cloned'
+  | 'property.maintenance.cloned'
   | 'gdpr.data_erasure.completed'
 
 interface AuditParams {

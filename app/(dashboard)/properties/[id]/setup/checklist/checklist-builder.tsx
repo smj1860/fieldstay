@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate } from './actions'
+import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate, cloneChecklistFromProperty } from './actions'
 import { Plus, Trash2, ChevronUp, ChevronDown, Camera, X, Check } from 'lucide-react'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
@@ -74,15 +74,18 @@ function buildInitialSections(template: { checklist_template_sections?: Array<{ 
 }
 
 interface OtherProperty { id: string; name: string }
+interface SourceProperty { id: string; name: string; sectionCount: number }
 
 export function ChecklistBuilder({
   propertyId,
   template,
   otherProperties = [],
+  sourceProperties = [],
 }: {
   propertyId: string
   template: { id: string; name: string; checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null
   otherProperties?: OtherProperty[]
+  sourceProperties?: SourceProperty[]
 }) {
   const [sections, setSections] = useState<Section[]>(() => buildInitialSections(template))
   const [saving, startSave] = useTransition()
@@ -93,6 +96,9 @@ export function ChecklistBuilder({
   const [broadcastModal, setBroadcastModal] = useState(false)
   const [broadcastTargets, setBroadcastTargets] = useState<Set<string>>(new Set())
   const [broadcastResult, setBroadcastResult] = useState<string | null>(null)
+  const [cloneFromModal, setCloneFromModal] = useState(false)
+  const [cloneFromSource, setCloneFromSource] = useState('')
+  const [cloningFrom, startCloneFrom] = useTransition()
 
   const toggleAllPhotos = () => {
     const totalItems = sections.reduce((n, s) => n + s.items.length, 0)
@@ -180,6 +186,16 @@ export function ChecklistBuilder({
       }
       setBroadcastModal(false)
       setBroadcastTargets(new Set())
+    })
+  }
+
+  const handleCloneFrom = () => {
+    if (!cloneFromSource) return
+    startCloneFrom(async () => {
+      const result = await cloneChecklistFromProperty(cloneFromSource, propertyId)
+      if (result.error) { setError(result.error); return }
+      setCloneFromModal(false)
+      window.location.reload()
     })
   }
 
@@ -343,11 +359,20 @@ export function ChecklistBuilder({
         >
           {completing ? 'Saving…' : 'Save & Continue →'}
         </button>
+        {sourceProperties.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setCloneFromModal(true)}
+            className="btn-secondary text-xs ml-auto"
+          >
+            Clone from property…
+          </button>
+        )}
         {otherProperties.length > 0 && (
           <button
             type="button"
             onClick={() => setBroadcastModal(true)}
-            className="btn-secondary text-xs ml-auto"
+            className={sourceProperties.length > 0 ? 'btn-secondary text-xs' : 'btn-secondary text-xs ml-auto'}
           >
             📋 Apply to Other Properties
           </button>
@@ -394,6 +419,42 @@ export function ChecklistBuilder({
                 {broadcasting ? 'Applying…' : `Apply to ${broadcastTargets.size} propert${broadcastTargets.size !== 1 ? 'ies' : 'y'}`}
               </button>
               <button onClick={() => setBroadcastModal(false)} className="btn-ghost text-sm">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {cloneFromModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-sm p-6">
+            <h3 className="font-semibold text-primary-themed mb-1">Import Checklist From</h3>
+            <p className="text-xs text-muted-themed mb-1">
+              This will replace the current checklist entirely with a copy from the selected property.
+            </p>
+            <p className="text-xs font-semibold mb-4" style={{ color: 'var(--accent-amber)' }}>
+              ⚠ Any existing checklist on this property will be overwritten.
+            </p>
+            <select
+              value={cloneFromSource}
+              onChange={e => setCloneFromSource(e.target.value)}
+              className="input w-full mb-4"
+            >
+              <option value="">Select a property…</option>
+              {sourceProperties.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.sectionCount} sections)
+                </option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCloneFrom}
+                disabled={!cloneFromSource || cloningFrom}
+                className="btn-primary flex-1"
+              >
+                {cloningFrom ? 'Importing…' : 'Import Checklist'}
+              </button>
+              <button onClick={() => setCloneFromModal(false)} className="btn-ghost">Cancel</button>
             </div>
           </div>
         </div>
