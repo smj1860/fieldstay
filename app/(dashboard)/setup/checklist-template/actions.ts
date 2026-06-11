@@ -18,14 +18,12 @@ export async function saveMasterChecklistItems(
   // Atomic replace via RPC — avoids a non-transactional delete+insert gap
   const { error } = await supabase.rpc('replace_master_checklist_items', {
     p_org_id: membership.org_id,
-    p_items:  JSON.stringify(
-      items.map((item) => ({
-        section:    item.section,
-        task:       item.task,
-        sort_order: item.sort_order,
-        source:     item.source,
-      }))
-    ),
+    p_items:  items.map((item) => ({
+      section:    item.section,
+      task:       item.task,
+      sort_order: item.sort_order,
+      source:     item.source,
+    })),
   })
 
   if (error) return { error: error.message, saved: 0 }

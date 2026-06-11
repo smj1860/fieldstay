@@ -1918,7 +1918,7 @@ export function MaintenanceBoard({
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 bg-card-themed border border-themed rounded-lg px-1 py-1 w-fit mb-4">
+      <div className="flex items-center gap-1 bg-card-themed border border-themed rounded-lg px-1 py-1 w-fit max-w-full overflow-x-auto mb-4">
         {STATUS_TABS.map((tab) => {
           const count = tab.key === 'all'
             ? workOrders.length
@@ -1928,7 +1928,7 @@ export function MaintenanceBoard({
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
-                'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex-shrink-0',
                 activeTab !== tab.key && 'text-muted-themed hover:text-secondary-themed'
               )}
               style={activeTab === tab.key ? {
@@ -1987,11 +1987,11 @@ export function MaintenanceBoard({
         )}
 
         {/* View toggle */}
-        <div className="flex items-center gap-1 ml-auto bg-card-themed border border-themed rounded-lg px-1 py-1">
+        <div className="flex items-center gap-1 ml-auto flex-shrink-0 bg-card-themed border border-themed rounded-lg px-1 py-1">
           <button
             onClick={() => setViewMode('list')}
             className={cn(
-              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 whitespace-nowrap',
               viewMode !== 'list' && 'text-muted-themed hover:text-secondary-themed'
             )}
             style={viewMode === 'list' ? {
@@ -2005,7 +2005,7 @@ export function MaintenanceBoard({
           <button
             onClick={() => setViewMode('calendar')}
             className={cn(
-              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 whitespace-nowrap',
               viewMode !== 'calendar' && 'text-muted-themed hover:text-secondary-themed'
             )}
             style={viewMode === 'calendar' ? {
@@ -2019,7 +2019,7 @@ export function MaintenanceBoard({
           <button
             onClick={() => setViewMode('kanban')}
             className={cn(
-              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1 whitespace-nowrap',
               viewMode !== 'kanban' && 'text-muted-themed hover:text-secondary-themed'
             )}
             style={viewMode === 'kanban' ? {

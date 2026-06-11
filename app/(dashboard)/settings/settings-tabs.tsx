@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useTransition, useActionState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook, RefreshCw, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Organization } from '@/types/database'
@@ -93,18 +93,23 @@ interface Props {
 }
 
 export function SettingsTabs({ org, connections = {} }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>('Organization')
+  const searchParams = useSearchParams()
+  const requestedTab = searchParams.get('tab') as Tab | null
+  const initialTab   = requestedTab && (TABS as readonly string[]).includes(requestedTab)
+    ? requestedTab
+    : 'Organization'
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab)
 
   return (
     <div>
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-themed mb-6">
+      <div className="flex flex-wrap gap-x-0 gap-y-0 border-b border-themed mb-6 overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              'px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px'
+              'px-3 py-2.5 text-xs sm:text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap flex-shrink-0'
             )}
             style={
               activeTab === tab

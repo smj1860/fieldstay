@@ -3,7 +3,6 @@
 import { useState, useTransition } from 'react'
 import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate } from './actions'
 import { Plus, Trash2, ChevronUp, ChevronDown, Camera, X, Check } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
 interface Section { tempId: string; id?: string; name: string; items: Item[] }
@@ -208,7 +207,7 @@ export function ChecklistBuilder({
   return (
     <div className="space-y-4">
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{error}</div>
+        <div className="border text-sm rounded-lg px-4 py-3" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{error}</div>
       )}
 
       {/* Global photo requirement toggle */}
@@ -218,43 +217,36 @@ export function ChecklistBuilder({
         const allOn      = totalItems > 0 && photoItems === totalItems
 
         return (
-          <div className="flex items-center justify-between px-4 py-3 bg-accent-50 rounded-xl border border-accent-200 mb-4">
+          <div className="flex items-center justify-between px-4 py-3 bg-canvas-themed rounded-xl border border-themed mb-4">
             <div className="flex items-center gap-2">
-              <Camera className="w-4 h-4 text-accent-500" />
+              <Camera className="w-4 h-4 text-muted-themed" />
               <div>
-                <p className="text-sm font-medium text-accent-700">Require photo proof for all tasks</p>
-                <p className="text-xs text-accent-400">{photoItems} of {totalItems} tasks require a photo</p>
+                <p className="text-sm font-medium text-primary-themed">Require photo proof for all tasks</p>
+                <p className="text-xs text-muted-themed">{photoItems} of {totalItems} tasks require a photo</p>
               </div>
             </div>
             <button
               type="button"
               onClick={toggleAllPhotos}
-              className={cn(
-                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full',
-                'border-2 border-transparent transition-colors duration-200 focus:outline-none',
-                allOn ? 'bg-brand-800' : 'bg-accent-300'
-              )}
+              className="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none"
+              style={{ background: allOn ? 'var(--accent-gold)' : 'var(--border-strong)' }}
               role="switch"
               aria-checked={allOn}
             >
-              <span className={cn(
-                'pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow',
-                'transform transition-transform duration-200',
-                allOn ? 'translate-x-5' : 'translate-x-0'
-              )} />
+              <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform duration-200 ${allOn ? 'translate-x-5' : 'translate-x-0'}`} />
             </button>
           </div>
         )
       })()}
 
       {sections.map((section, si) => (
-        <div key={section.tempId} className="border border-accent-200 rounded-xl overflow-hidden">
+        <div key={section.tempId} className="border border-themed rounded-xl overflow-hidden">
           {/* Section header */}
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-accent-50 border-b border-accent-200">
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-canvas-themed border-b border-themed">
             <input
               value={section.name}
               onChange={(e) => updateSection(section.tempId, e.target.value)}
-              className="flex-1 text-sm font-semibold bg-transparent text-accent-800 focus:outline-none border-b border-transparent focus:border-brand-500"
+              className="flex-1 text-sm font-semibold bg-transparent text-primary-themed focus:outline-none border-b border-transparent focus:border-[var(--accent-gold)]"
             />
             <div className="flex items-center gap-0.5 ml-auto">
               {(() => {
@@ -267,12 +259,8 @@ export function ChecklistBuilder({
                     title={sectionAllPhoto
                       ? 'Remove photo requirement for all items in this section'
                       : 'Require photo for all items in this section'}
-                    className={cn(
-                      'p-1 rounded transition-colors',
-                      sectionAllPhoto
-                        ? 'text-brand-800 bg-brand-50'
-                        : 'text-accent-300 hover:text-accent-500'
-                    )}
+                    className={sectionAllPhoto ? 'p-1 rounded transition-colors' : 'p-1 rounded transition-colors text-muted-themed hover:text-secondary-themed'}
+                    style={sectionAllPhoto ? { color: 'var(--accent-gold)', background: 'var(--accent-gold-dim)' } : undefined}
                   >
                     <Camera className="w-3.5 h-3.5" />
                   </button>
@@ -284,16 +272,16 @@ export function ChecklistBuilder({
               <button onClick={() => moveSection(section.tempId, 1)} disabled={si === sections.length - 1} className="btn-ghost p-1 disabled:opacity-30">
                 <ChevronDown className="w-3.5 h-3.5" />
               </button>
-              <button onClick={() => removeSection(section.tempId)} className="btn-ghost p-1 text-accent-400 hover:text-red-500">
+              <button onClick={() => removeSection(section.tempId)} className="btn-ghost p-1 text-muted-themed hover:text-red-500">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
 
           {/* Items */}
-          <div className="divide-y divide-accent-100">
+          <div className="divide-y divide-themed">
             {section.items.map((item, ii) => (
-              <div key={item.tempId} className="flex items-center gap-2 px-4 py-2.5 group hover:bg-accent-50">
+              <div key={item.tempId} className="flex items-center gap-2 px-4 py-2.5 group hover:bg-raised-themed">
                 <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button onClick={() => moveItem(section.tempId, item.tempId, -1)} disabled={ii === 0} className="btn-ghost p-0.5 disabled:opacity-30">
                     <ChevronUp className="w-3 h-3" />
@@ -306,16 +294,17 @@ export function ChecklistBuilder({
                   value={item.task}
                   onChange={(e) => updateItem(section.tempId, item.tempId, 'task', e.target.value)}
                   placeholder="Task description…"
-                  className="flex-1 text-sm text-accent-800 bg-transparent focus:outline-none placeholder:text-accent-300"
+                  className="flex-1 text-sm text-primary-themed bg-transparent focus:outline-none placeholder:text-[var(--text-muted)]"
                 />
                 <button
                   onClick={() => updateItem(section.tempId, item.tempId, 'requires_photo', !item.requires_photo)}
                   title="Require photo"
-                  className={cn('p-1 rounded transition-colors', item.requires_photo ? 'text-brand-700 bg-brand-50' : 'text-accent-300 hover:text-accent-500')}
+                  className={item.requires_photo ? 'p-1 rounded transition-colors' : 'p-1 rounded transition-colors text-muted-themed hover:text-secondary-themed'}
+                  style={item.requires_photo ? { color: 'var(--accent-gold)', background: 'var(--accent-gold-dim)' } : undefined}
                 >
                   <Camera className="w-4 h-4" />
                 </button>
-                <button onClick={() => removeItem(section.tempId, item.tempId)} className="text-accent-300 hover:text-red-500 transition-colors p-1 opacity-0 group-hover:opacity-100">
+                <button onClick={() => removeItem(section.tempId, item.tempId)} className="text-muted-themed hover:text-red-500 transition-colors p-1 opacity-0 group-hover:opacity-100">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -325,7 +314,7 @@ export function ChecklistBuilder({
           {/* Add item */}
           <button
             onClick={() => addItem(section.tempId)}
-            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-accent-400 hover:text-brand-700 hover:bg-brand-50 transition-colors"
+            className="w-full flex items-center gap-2 px-4 py-2 text-sm text-muted-themed hover:text-[var(--accent-gold)] hover:bg-[var(--accent-gold-dim)] transition-colors"
           >
             <Plus className="w-3.5 h-3.5" /> Add task
           </button>
@@ -337,13 +326,13 @@ export function ChecklistBuilder({
       </button>
 
       {broadcastResult && (
-        <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm bg-green-50 border border-green-200 text-green-800">
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm border" style={{ background: 'var(--accent-green-dim)', borderColor: 'var(--accent-green)', color: 'var(--accent-green)' }}>
           <Check className="w-4 h-4 flex-shrink-0" />
           {broadcastResult}
         </div>
       )}
 
-      <div className="flex items-center gap-3 pt-4 border-t border-accent-100 flex-wrap">
+      <div className="flex items-center gap-3 pt-4 border-t border-themed flex-wrap">
         <button onClick={save} disabled={saving} className="btn-secondary">
           {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Checklist'}
         </button>
@@ -367,15 +356,15 @@ export function ChecklistBuilder({
 
       {broadcastModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
-            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-accent-100">
-              <h3 className="font-semibold text-accent-900">Apply to Other Properties</h3>
-              <button onClick={() => setBroadcastModal(false)} className="p-1.5 rounded-lg text-accent-400 hover:text-accent-700">
+          <div className="bg-card-themed rounded-2xl shadow-xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-themed">
+              <h3 className="font-semibold text-primary-themed">Apply to Other Properties</h3>
+              <button onClick={() => setBroadcastModal(false)} className="p-1.5 rounded-lg text-muted-themed hover:text-primary-themed">
                 <X className="w-4 h-4" />
               </button>
             </div>
             <div className="px-5 py-4 space-y-2 max-h-60 overflow-y-auto">
-              <p className="text-xs text-accent-500 mb-3">
+              <p className="text-xs text-muted-themed mb-3">
                 This will replace the existing checklist at each selected property.
               </p>
               {otherProperties.map(p => (
@@ -389,13 +378,14 @@ export function ChecklistBuilder({
                       else next.delete(p.id)
                       setBroadcastTargets(next)
                     }}
-                    className="w-4 h-4 rounded text-brand-700"
+                    className="w-4 h-4 rounded"
+                    style={{ accentColor: 'var(--accent-gold)' }}
                   />
-                  <span className="text-sm text-accent-800">{p.name}</span>
+                  <span className="text-sm text-primary-themed">{p.name}</span>
                 </label>
               ))}
             </div>
-            <div className="px-5 pb-5 pt-3 border-t border-accent-100 flex gap-3">
+            <div className="px-5 pb-5 pt-3 border-t border-themed flex gap-3">
               <button
                 onClick={handleBroadcast}
                 disabled={broadcasting || broadcastTargets.size === 0}

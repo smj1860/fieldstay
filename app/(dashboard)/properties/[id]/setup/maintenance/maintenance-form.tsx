@@ -3,7 +3,6 @@
 import { useActionState, useEffect, useState } from 'react'
 import { addMaintenanceSchedule, deleteMaintenanceSchedule, completeMaintenanceStep } from './actions'
 import { Plus, Trash2, RefreshCw, Calendar } from 'lucide-react'
-import { cn } from '@/lib/utils'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const FREQUENCIES = [
@@ -89,18 +88,19 @@ export function MaintenanceScheduleManager({
       {schedules.length > 0 && (
         <div className="space-y-2">
           {schedules.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 px-4 py-3 bg-accent-50 rounded-lg border border-accent-100">
-              <div className={cn('w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0',
-                s.schedule_type === 'routine' ? 'bg-blue-100' : 'bg-amber-100'
-              )}>
+            <div key={s.id} className="flex items-center gap-3 px-4 py-3 bg-canvas-themed rounded-lg border border-themed">
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+                style={{ background: s.schedule_type === 'routine' ? 'var(--accent-blue-dim)' : 'var(--accent-amber-dim)' }}
+              >
                 {s.schedule_type === 'routine'
-                  ? <RefreshCw className="w-3.5 h-3.5 text-blue-600" />
-                  : <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                  ? <RefreshCw className="w-3.5 h-3.5" style={{ color: 'var(--accent-blue)' }} />
+                  : <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--accent-amber)' }} />
                 }
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-accent-800">{s.name}</p>
-                <p className="text-xs text-accent-400">
+                <p className="text-sm font-medium text-primary-themed">{s.name}</p>
+                <p className="text-xs text-muted-themed">
                   {s.schedule_type === 'routine'
                     ? FREQUENCIES.find((f) => f.value === s.frequency)?.label ?? s.frequency
                     : `Every ${MONTHS[(s.month_due ?? 1) - 1]}`
@@ -111,7 +111,7 @@ export function MaintenanceScheduleManager({
                 </p>
               </div>
               <form action={async () => { await deleteMaintenanceSchedule(s.id, propertyId) }}>
-                <button type="submit" className="text-accent-300 hover:text-red-500 transition-colors p-1">
+                <button type="submit" className="text-muted-themed hover:text-red-500 transition-colors p-1">
                   <Trash2 className="w-4 h-4" />
                 </button>
               </form>
@@ -130,9 +130,9 @@ export function MaintenanceScheduleManager({
                 <button
                   key={s.name}
                   onClick={() => prefill({ name: s.name, frequency: s.frequency })}
-                  className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-accent-600 hover:bg-accent-100 transition-colors"
+                  className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-secondary-themed hover:bg-raised-themed transition-colors"
                 >
-                  <RefreshCw className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                  <RefreshCw className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent-blue)' }} />
                   {s.name}
                 </button>
               ))}
@@ -145,9 +145,9 @@ export function MaintenanceScheduleManager({
                 <button
                   key={s.name}
                   onClick={() => prefill({ name: s.name, month_due: s.month })}
-                  className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-accent-600 hover:bg-accent-100 transition-colors"
+                  className="w-full text-left flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-secondary-themed hover:bg-raised-themed transition-colors"
                 >
-                  <Calendar className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                  <Calendar className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--accent-amber)' }} />
                   {s.name}
                 </button>
               ))}
@@ -158,11 +158,11 @@ export function MaintenanceScheduleManager({
 
       {/* Add form */}
       {showForm ? (
-        <div className="border border-accent-200 rounded-xl p-5 space-y-4">
-          <h3 className="text-sm font-semibold text-accent-700">Add Schedule</h3>
+        <div className="border border-themed rounded-xl p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-primary-themed">Add Schedule</h3>
 
           {state?.error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{state.error}</div>
+            <div className="border text-sm rounded-lg px-3 py-2" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{state.error}</div>
           )}
 
           <form action={formAction} className="space-y-4">
@@ -182,15 +182,18 @@ export function MaintenanceScheduleManager({
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Type</label>
-                <div className="flex rounded-lg overflow-hidden border border-accent-200">
+                <div className="flex rounded-lg overflow-hidden border border-themed">
                   {(['routine', 'seasonal'] as const).map((t) => (
                     <button
                       key={t}
                       type="button"
                       onClick={() => setSchedType(t)}
-                      className={cn('flex-1 py-2 text-sm font-medium transition-colors capitalize',
-                        schedType === t ? 'bg-brand-800 text-white' : 'bg-white text-accent-600 hover:bg-accent-50'
-                      )}
+                      className="flex-1 py-2 text-sm font-medium transition-colors capitalize"
+                      style={
+                        schedType === t
+                          ? { background: 'var(--accent-gold)', color: 'var(--bg-card)' }
+                          : { background: 'var(--bg-card)', color: 'var(--text-secondary)' }
+                      }
                     >
                       {t}
                     </button>
@@ -250,8 +253,14 @@ export function MaintenanceScheduleManager({
 
             <div className="flex items-center gap-3">
               <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" name="auto_create_wo" value="true" className="rounded border-accent-300 text-brand-700 focus:ring-brand-500" />
-                <span className="text-sm text-accent-700">Auto-create work order when due</span>
+                <input
+                  type="checkbox"
+                  name="auto_create_wo"
+                  value="true"
+                  className="rounded border-themed"
+                  style={{ accentColor: 'var(--accent-gold)' }}
+                />
+                <span className="text-sm text-primary-themed">Auto-create work order when due</span>
               </label>
             </div>
 
@@ -269,7 +278,7 @@ export function MaintenanceScheduleManager({
         </button>
       )}
 
-      <div className="flex items-center gap-3 pt-4 border-t border-accent-100">
+      <div className="flex items-center gap-3 pt-4 border-t border-themed">
         <form action={async () => {
           setCompleting(true)
           await completeMaintenanceStep(propertyId)

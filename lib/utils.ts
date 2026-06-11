@@ -88,12 +88,15 @@ export function formatDuration(startedAt: string | null, completedAt: string | n
 
 /** Inventory category display labels */
 export const INVENTORY_CATEGORY_LABELS = {
-  paper_goods: 'Paper Goods',
-  cleaning:    'Cleaning',
-  kitchen:     'Kitchen',
-  bath:        'Bath',
-  laundry:     'Laundry',
-  bedroom:     'Bedroom',
-  outdoor:     'Outdoor',
-  other:       'Other',
+  paper_goods:        'Paper Goods',
+  cleaning:           'Cleaning',
+  kitchen:            'Kitchen',
+  bath:               'Bath',
+  laundry:            'Laundry',
+  bedroom_linens:     'Bedroom & Linens',
+  outdoor:            'Outdoor',
+  maintenance_safety: 'Maintenance & Safety',
+  guest_experience:   'Guest Experience',
+  technology:         'Technology',
+  other:              'Other',
 } as const

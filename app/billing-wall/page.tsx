@@ -70,7 +70,7 @@ export default async function BillingWallPage() {
 
         <div className="flex flex-col gap-3">
           <a
-            href="/settings"
+            href="/settings?tab=Billing"
             className="btn-primary py-3 text-base text-center block rounded-xl"
             style={{ background: 'var(--accent-gold)', color: '#0a1628', fontWeight: 700 }}
           >

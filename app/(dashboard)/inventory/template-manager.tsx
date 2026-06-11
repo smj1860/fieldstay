@@ -43,7 +43,9 @@ interface CatalogItem {
 }
 
 const CATEGORY_ORDER: InventoryCategory[] = [
-  'paper_goods', 'cleaning', 'kitchen', 'bath', 'laundry', 'bedroom', 'outdoor', 'other',
+  'paper_goods', 'cleaning', 'kitchen', 'bath', 'laundry',
+  'bedroom_linens', 'outdoor', 'maintenance_safety',
+  'guest_experience', 'technology', 'other',
 ]
 
 function TemplateBrandInput({ itemId, defaultBrand }: { itemId: string; defaultBrand: string | null }) {
