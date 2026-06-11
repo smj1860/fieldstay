@@ -26,6 +26,9 @@ export const ownerRezInitialSync = inngest.createFunction(
   { event: 'integration/ownerrez.connected' as const },
   async ({ event, step, logger }) => {
     const { user_id, org_id, external_user_id } = event.data
+    const workflowId = crypto.randomUUID()
+    logger.info('ownerrez-initial-sync start', { workflowId, user_id, org_id })
+
     const client = new OwnerRezApiClient(user_id)
 
     // ── Step 1: Fetch and upsert properties ─────────────────────────────────

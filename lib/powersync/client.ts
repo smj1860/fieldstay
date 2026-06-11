@@ -37,6 +37,11 @@ class SupabaseConnector {
           // notification, crew-duration tracking) fires for crew completions.
           const res = await fetch(`/api/crew/turnovers/${op.id}/complete`, { method: 'POST' })
           if (!res.ok) throw new Error(`Failed to complete turnover ${op.id}`)
+        } else if (op.opData?.status === 'in_progress') {
+          // Routed through a Server Route Handler so started_at is set
+          // authoritatively by the server, not the client clock.
+          const res = await fetch(`/api/crew/turnovers/${op.id}/start`, { method: 'POST' })
+          if (!res.ok) throw new Error(`Failed to start turnover ${op.id}`)
         } else {
           await this.supabase
             .from('turnovers')

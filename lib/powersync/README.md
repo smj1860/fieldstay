@@ -44,7 +44,7 @@ Crew members see only turnovers belonging to their organization. Contains `org_i
 ### `checklist_instances`
 **Tenant filter:** join-based — filtered via `turnovers.org_id` since `checklist_instances` has no `org_id` column in the synced schema.
 
-**Known gap:** `org_id` is missing from the PowerSync schema definition (`schema.ts`). The sync rule must join through `turnovers` to enforce tenant isolation. Adding `org_id: column.text` here would allow direct bucket filtering and is the preferred long-term state — tracked as an open finding.
+**Resolved (2026-06-11):** `org_id: column.text` added to the PowerSync schema definition (`schema.ts`). The sync rule on the PowerSync Cloud dashboard still needs to be updated to filter directly by `org_id` instead of joining through `turnovers` — see `sync_rules.yaml` and the "Changing sync rules" section below.
 
 **Upload behavior:** read-only from the crew app. Status is derived from `checklist_instance_items`. No direct writes to this table from the client.
 
@@ -58,18 +58,18 @@ Crew members see only turnovers belonging to their organization. Contains `org_i
 ---
 
 ### `inventory_items`
-**Tenant filter:** join-based — `property_id` links to `properties.org_id`. Direct org filtering is not possible since `org_id` is absent from the synced schema.
+**Tenant filter:** join-based — `property_id` links to `properties.org_id`. Direct org filtering is not yet possible via the PowerSync Cloud sync rule.
 
-**Known gap:** Same as `checklist_instances` — `org_id` is missing from the schema. Adding it would simplify sync rule bucket definition. Tracked as an open finding.
+**Resolved (2026-06-11):** `org_id: column.text` added to the PowerSync schema definition (`schema.ts`). The sync rule on the PowerSync Cloud dashboard still needs to be updated to filter directly by `org_id` instead of joining through `properties` — see `sync_rules.yaml` and the "Changing sync rules" section below.
 
 **Upload behavior:** `PUT` operations update `current_quantity` only. Crew members can adjust stock counts on-site. No other fields are writable from the client.
 
 ---
 
 ### `properties`
-**Tenant filter:** join-based — must join to `organization_members` via some intermediate table since `org_id` is absent from the synced schema.
+**Tenant filter:** join-based — joins through `powersync_crew_properties` since `org_id` is absent from the synced schema.
 
-**Known gap:** `org_id` is missing from the schema. This is the highest-priority missing field — `properties` contains `address` which is sensitive enough that cross-tenant leakage would be a real problem. Adding `org_id: column.text` here and updating the sync rule to filter directly is the correct fix. Tracked as an open finding.
+**Resolved (2026-06-11):** `org_id: column.text` added to the PowerSync schema definition (`schema.ts`). `properties` contains `address`, which is sensitive enough that cross-tenant leakage would be a real problem — this allows the sync rule on the PowerSync Cloud dashboard to filter directly by `org_id` once updated. See `sync_rules.yaml` and the "Changing sync rules" section below.
 
 **Intentionally excluded columns:** `door_code`, `wifi_password`, `owner_id`, `cleaning_cost`, and all financial fields are **not** in the synced schema and must never be added. Crew members need the property name and address to navigate — nothing more.
 
@@ -152,7 +152,6 @@ These are known gaps tracked for remediation. Do not close them by working aroun
 
 | Finding | Description | Fix |
 |---|---|---|
-| `properties` missing `org_id` | Sync rule must join through another table to tenant-filter. Cross-tenant address leakage possible if bucket is misconfigured. | Add `org_id: column.text` to `properties` in `schema.ts`; update sync rule to filter directly. |
-| `checklist_instances` missing `org_id` | Tenant filter relies on join through `turnovers`. | Add `org_id: column.text` to `checklist_instances` in `schema.ts`. |
-| `inventory_items` missing `org_id` | Tenant filter relies on join through `properties`. | Add `org_id: column.text` to `inventory_items` in `schema.ts`. |
-| `sync_rules.yaml` not yet committed | Sync rules live only in the PowerSync Cloud dashboard — no version history, no PR review. | Export current rules from the dashboard and commit as `sync_rules.yaml`. |
+| `properties` sync rule still join-based | `org_id: column.text` added to `schema.ts` (2026-06-11), but the PowerSync Cloud dashboard sync rule still joins through `powersync_crew_properties`. Cross-tenant address leakage possible if bucket is misconfigured. | Update `sync_rules.yaml` and the PowerSync Cloud dashboard to filter `properties` directly by `org_id`. |
+| `checklist_instances` sync rule still join-based | `org_id: column.text` added to `schema.ts` (2026-06-11), but the sync rule still joins through `turnovers`. | Update `sync_rules.yaml` and the PowerSync Cloud dashboard to filter `checklist_instances` directly by `org_id`. |
+| `inventory_items` sync rule still join-based | `org_id: column.text` added to `schema.ts` (2026-06-11), but the sync rule still joins through `properties`. | Update `sync_rules.yaml` and the PowerSync Cloud dashboard to filter `inventory_items` directly by `org_id`. |

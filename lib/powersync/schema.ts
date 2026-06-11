@@ -13,6 +13,7 @@ const turnovers = new Table({
 
 const checklist_instances = new Table({
   turnover_id: column.text,
+  org_id:      column.text,
   status:      column.text,
 })
 
@@ -30,6 +31,7 @@ const checklist_instance_items = new Table({
 
 const inventory_items = new Table({
   property_id:      column.text,
+  org_id:           column.text,
   name:             column.text,
   category:         column.text,
   unit:             column.text,
@@ -39,6 +41,7 @@ const inventory_items = new Table({
 
 const properties = new Table({
   name:    column.text,
+  org_id:  column.text,
   address: column.text,
   city:    column.text,
   state:   column.text,

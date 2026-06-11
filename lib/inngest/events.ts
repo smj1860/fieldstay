@@ -75,6 +75,15 @@ export type FieldStayEvents = {
     }
   }
 
+  'turnover/started': {
+    data: {
+      turnover_id:        string
+      org_id:             string
+      started_by_crew_id: string
+      started_at:         string
+    }
+  }
+
   'turnover/flagged': {
     data: {
       turnover_id: string

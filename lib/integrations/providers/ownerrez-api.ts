@@ -122,7 +122,19 @@ export class OwnerRezApiClient {
       throw new Error(`[OwnerRez:${this.userId}] ${path} → ${res.status}: ${body}`)
     }
 
-    return res.json() as Promise<T>
+    const body = await res.json() as Record<string, unknown>
+
+    // OwnerRez uses semantic HTTP codes primarily, but can return
+    // { success: false } or { error: '...' } on a 200 for certain
+    // validation failures. Catch these before returning to the caller.
+    if (body?.success === false || body?.error) {
+      throw new Error(
+        `[OwnerRez:${this.userId}] ${path} → 200 with error body: ` +
+        String(body?.error ?? body?.message ?? JSON.stringify(body))
+      )
+    }
+
+    return body as T
   }
 
   private async markConnectionError(): Promise<void> {

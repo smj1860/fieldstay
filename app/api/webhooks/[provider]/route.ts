@@ -74,8 +74,9 @@ export async function POST(
   // OwnerRez revocation format: { "action": "application_authorization_revoked", "user_id": 12345 }
   const action         = String(payload.action ?? payload.event_type ?? '')
   const externalUserId = String(payload.user_id ?? payload.account_id ?? '')
+  const correlationId  = payload.id ? String(payload.id) : crypto.randomUUID()
 
-  console.log(`[Webhook:${providerId}] Received action: "${action}" for external user: ${externalUserId}`)
+  console.log(`[Webhook:${providerId}] action="${action}" correlationId=${correlationId}`)
 
   // ── 4. Handle generic "authorization revoked" universally ─
   //    This event means the user disconnected our app from within OwnerRez.
@@ -99,6 +100,7 @@ export async function POST(
             targetType: 'integration_provider',
             targetId:   providerId,
             metadata:   { externalUserId, trigger: 'webhook' },
+            correlationId,
           })
           // TODO: Trigger an Inngest event here to notify the user via Resend email:
           // await inngest.send({ name: 'integration/connection.revoked', data: { appUserId, providerId } })
@@ -127,12 +129,6 @@ export async function POST(
 
     if (webhookId) {
       const admin = createServiceClient()
-
-      // Cleanup old records (>72 hours) before inserting — TTL maintenance
-      await admin
-        .from('ownerrez_processed_webhooks')
-        .delete()
-        .lt('processed_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
 
       const { error: dedupErr } = await admin
         .from('ownerrez_processed_webhooks')

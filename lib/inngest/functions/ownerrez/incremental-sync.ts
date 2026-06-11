@@ -35,6 +35,9 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     { event: 'integration/ownerrez.sync.requested' as const },
   ],
   async ({ step, logger }) => {
+    const workflowId = crypto.randomUUID()
+    logger.info('ownerrez-incremental-sync start', { workflowId })
+
     const supabase = createServiceClient()
 
     const { data: connections } = await supabase
@@ -138,7 +141,10 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             logger.error(`[OwnerRez:${conn.user_id}] cursor update failed: ${cursorErr.message}`)
           }
 
-          logger.info(`[OwnerRez:${conn.user_id}] sync complete — ${bookings.length} bookings`)
+          logger.info(`[OwnerRez:${conn.user_id}] sync complete — ${bookings.length} bookings`, {
+            workflowId,
+            bookingCount: bookings.length,
+          })
           syncedCount++
 
         } catch (err) {
