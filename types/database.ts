@@ -14,7 +14,7 @@
 // Scalar union types — mirror Postgres enums and CHECK constraints
 // ─────────────────────────────────────────────────────────────
 
-export type OrgPlan             = 'starter' | 'growth' | 'pro' | 'enterprise'
+export type OrgPlan             = 'starter' | 'growth' | 'pro' | 'portfolio' | 'enterprise'
 export type OrgPlanStatus       = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'paused'
 export type MemberRole          = 'owner' | 'admin' | 'manager' | 'crew' | 'viewer'
 export type PropertyType        = 'house' | 'condo' | 'cabin' | 'cottage' | 'townhouse' | 'other'

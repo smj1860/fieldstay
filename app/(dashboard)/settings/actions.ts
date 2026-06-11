@@ -579,7 +579,7 @@ export async function updateCommsRetention(days: number): Promise<SettingsAction
 }
 
 export async function createCheckoutSession(
-  planKey: 'pro' | 'growth',
+  planKey: 'starter' | 'growth' | 'portfolio',
   interval: 'monthly' | 'annual'
 ): Promise<SettingsActionState> {
   const { supabase, membership } = await requireOrgMember()

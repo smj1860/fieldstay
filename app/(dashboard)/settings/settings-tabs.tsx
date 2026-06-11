@@ -24,10 +24,12 @@ const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team', 'A
 type Tab = typeof TABS[number]
 
 const PLAN_INFO = {
-  pro:        { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',  badge: 'badge-blue'  },
-  growth:     { name: 'Growth',     maxProperties: 45,  description: '16–45 properties',     badge: 'badge-green' },
-  enterprise: { name: 'Enterprise', maxProperties: 999, description: '45+ properties',       badge: 'badge-amber' },
-  starter:    { name: 'Pro',        maxProperties: 15,  description: 'Up to 15 properties',  badge: 'badge-blue'  },
+  starter:    { name: 'Starter',   maxProperties: 15,  description: 'Up to 15 properties',   badge: 'badge-blue'  },
+  growth:     { name: 'Growth',    maxProperties: 50,  description: '16–50 properties',      badge: 'badge-green' },
+  portfolio:  { name: 'Portfolio', maxProperties: 100, description: '51–100 properties',     badge: 'badge-gold'  },
+  enterprise: { name: 'Enterprise',maxProperties: 999, description: '100+ properties',       badge: 'badge-amber' },
+  // Legacy alias — orgs created before the 'pro' tier was renamed to 'starter'
+  pro:        { name: 'Starter',   maxProperties: 15,  description: 'Up to 15 properties',   badge: 'badge-blue'  },
 } as const
 
 const PLAN_STATUS_BADGES: Record<string, string> = {
@@ -145,7 +147,7 @@ export function SettingsTabs({ org, connections = {} }: Props) {
 function OrgTab({ org, connections }: { org: Organization; connections: Record<string, ConnectionInfo> }) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
-  const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.pro
+  const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
 
   return (
@@ -814,25 +816,33 @@ function AccountTabRedirect() {
 
 const DISPLAY_PLANS = [
   {
-    key:     'pro'    as const,
-    name:    'Pro',
+    key:     'starter' as const,
+    name:    'Starter',
     props:   'Up to 15 properties',
-    monthly: 149,
-    annual:  1490,
-    savings: '$298',
+    monthly: 199,
+    annual:  1990,
+    savings: '$398',
   },
   {
     key:     'growth' as const,
     name:    'Growth',
-    props:   '16–45 properties',
-    monthly: 219,
-    annual:  2190,
-    savings: '$438',
+    props:   '16–50 properties',
+    monthly: 379,
+    annual:  3790,
+    savings: '$758',
+  },
+  {
+    key:     'portfolio' as const,
+    name:    'Portfolio',
+    props:   '51–100 properties',
+    monthly: 599,
+    annual:  5990,
+    savings: '$1,198',
   },
 ]
 
 function BillingTab({ org }: { org: Organization }) {
-  const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.pro
+  const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
   const isTrialing  = org.plan_status === 'trialing'
 
@@ -846,7 +856,7 @@ function BillingTab({ org }: { org: Organization }) {
     startPortal(async () => { await openBillingPortal() })
   }
 
-  function handleCheckout(planKey: 'pro' | 'growth') {
+  function handleCheckout(planKey: 'starter' | 'growth' | 'portfolio') {
     setCheckoutPlan(planKey)
     setCheckoutError(null)
     startCheckoutT(async () => {
@@ -936,7 +946,7 @@ function BillingTab({ org }: { org: Organization }) {
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {DISPLAY_PLANS.map((plan) => {
             const isCurrent = org.plan === plan.key
             const isPending = checkoutPlan === plan.key && checkoutPending
@@ -987,11 +997,11 @@ function BillingTab({ org }: { org: Organization }) {
           })}
 
           {/* Enterprise */}
-          <div className="card flex flex-col gap-3 sm:col-span-2">
+          <div className="card flex flex-col gap-3 sm:col-span-3">
             <div className="flex items-start justify-between flex-wrap gap-3">
               <div>
                 <span className="font-semibold text-primary-themed">Enterprise</span>
-                <p className="text-sm text-muted-themed mt-0.5">45+ properties — custom pricing</p>
+                <p className="text-sm text-muted-themed mt-0.5">100+ properties — custom pricing</p>
               </div>
               <a href="mailto:hello@fieldstay.app" className="btn-secondary text-sm">
                 Contact Us →

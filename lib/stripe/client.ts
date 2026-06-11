@@ -6,23 +6,32 @@ export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
 })
 
 export const PLANS = {
-  pro: {
-    name:           'Pro',
-    monthlyPriceId: process.env.STRIPE_PRICE_PRO_MONTHLY!,
-    annualPriceId:  process.env.STRIPE_PRICE_PRO_ANNUAL!,
+  starter: {
+    name:           'Starter',
+    monthlyPriceId: process.env.STRIPE_PRICE_STARTER_MONTHLY!,
+    annualPriceId:  process.env.STRIPE_PRICE_STARTER_ANNUAL!,
     maxProperties:  15,
-    monthlyPrice:   149,
-    annualPrice:    1490,
+    monthlyPrice:   199,
+    annualPrice:    1990,
     description:    'Up to 15 properties',
   },
   growth: {
     name:           'Growth',
     monthlyPriceId: process.env.STRIPE_PRICE_GROWTH_MONTHLY!,
     annualPriceId:  process.env.STRIPE_PRICE_GROWTH_ANNUAL!,
-    maxProperties:  45,
-    monthlyPrice:   219,
-    annualPrice:    2190,
-    description:    '16–45 properties',
+    maxProperties:  50,
+    monthlyPrice:   379,
+    annualPrice:    3790,
+    description:    '16–50 properties',
+  },
+  portfolio: {
+    name:           'Portfolio',
+    monthlyPriceId: process.env.STRIPE_PRICE_PORTFOLIO_MONTHLY!,
+    annualPriceId:  process.env.STRIPE_PRICE_PORTFOLIO_ANNUAL!,
+    maxProperties:  100,
+    monthlyPrice:   599,
+    annualPrice:    5990,
+    description:    '51–100 properties',
   },
   enterprise: {
     name:           'Enterprise',
@@ -31,7 +40,7 @@ export const PLANS = {
     maxProperties:  999,
     monthlyPrice:   null,
     annualPrice:    null,
-    description:    '45+ properties — contact for pricing',
+    description:    '100+ properties — contact for pricing',
   },
 } as const
 

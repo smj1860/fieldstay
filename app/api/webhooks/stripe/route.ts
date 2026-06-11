@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
 
       const customerId   = subscription.customer as string
       const priceId      = subscription.items.data[0]?.price.id ?? ''
-      const planKey      = getPlanByPriceId(priceId) ?? 'pro'
+      const planKey      = getPlanByPriceId(priceId) ?? 'starter'
       const plan         = planKey as PlanKey
 
       const planStatus = subscription.status === 'active'   ? 'active'
