@@ -94,9 +94,10 @@ export interface IntegrationProvider {
    * Implement this for provider-specific event types (bookings, guests, etc.)
    */
   handleWebhookEvent(params: {
-    action: string
-    payload: unknown
-    externalUserId: string
+    action:          string
+    payload:         unknown
+    externalUserId:  string
+    correlationId?:  string
   }): Promise<void>
 }
 
@@ -142,6 +143,19 @@ export interface OwnerRezPagedResponse<T> {
   total_count:     number
   items:           T[]
   next_page_token?: string | null
+}
+
+export interface OwnerRezReview {
+  id:            number
+  rating:        number
+  comments?:     string
+  body?:         string
+  review_text?:  string
+  guest_name?:   string
+  guest?: { name?: string }
+  created_at?:   string
+  submitted_at?: string
+  property_id?:  number
 }
 
 // ── Error classes ─────────────────────────────────────────────────────────────

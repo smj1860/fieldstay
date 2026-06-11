@@ -14,6 +14,7 @@ import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError } from '@/lib/integrations/types'
 import type { OwnerRezProperty, OwnerRezBooking } from '@/lib/integrations/types'
+import { logAuditEvent }        from '@/lib/audit'
 
 const PROVIDER = 'ownerrez'
 
@@ -34,6 +35,15 @@ export const ownerRezInitialSync = inngest.createFunction(
     // ── Step 1: Fetch and upsert properties ─────────────────────────────────
 
     const fetchPropsResult = await step.run('fetch-properties', async () => {
+      await logAuditEvent({
+        actorId:    user_id,
+        orgId:      org_id,
+        action:     'integration.sync_triggered',
+        targetType: 'integration_connection',
+        targetId:   PROVIDER,
+        metadata:   { sync_type: 'initial', workflow_id: workflowId },
+      })
+
       let properties: OwnerRezProperty[]
 
       try {
@@ -236,6 +246,26 @@ export const ownerRezInitialSync = inngest.createFunction(
         .update({ repuguard_status: 'active' })
         .eq('id', org_id)
         .in('repuguard_status', ['inactive', 'cancelled'])
+    })
+
+    // ── Step 5: Register entity webhook subscriptions ────────────────────────
+
+    await step.run('register-entity-webhooks', async () => {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL
+      if (!appUrl) {
+        logger.warn('[OwnerRez] NEXT_PUBLIC_APP_URL not set — skipping webhook registration')
+        return
+      }
+      const webhookUrl = `${appUrl}/api/webhooks/ownerrez`
+      try {
+        await client.registerWebhookSubscriptions(webhookUrl)
+        logger.info(`[OwnerRez:${user_id}] Entity webhook subscriptions registered`)
+      } catch (err) {
+        // Non-fatal: polling fallback still works. Log and continue.
+        logger.error(
+          `[OwnerRez:${user_id}] Webhook registration failed: ${err instanceof Error ? err.message : String(err)}`
+        )
+      }
     })
 
     return { user_id, synced: true }

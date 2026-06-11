@@ -49,6 +49,7 @@ export type AuditAction =
   | 'property.inventory.cloned'
   | 'property.checklist.cloned'
   | 'property.maintenance.cloned'
+  | 'gdpr.data_erasure.completed'
 
 interface AuditParams {
   orgId?:         string

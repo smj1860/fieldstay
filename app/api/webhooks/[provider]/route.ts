@@ -152,7 +152,7 @@ export async function POST(
   //
   //    We always return 200 quickly and offload heavy processing to Inngest.
   try {
-    await providerAdapter.handleWebhookEvent({ action, payload, externalUserId })
+    await providerAdapter.handleWebhookEvent({ action, payload, externalUserId, correlationId })
   } catch (err) {
     // Again: log, don't 500 — provider is not responsible for our processing errors
     console.error(`[Webhook:${providerId}] Handler threw for action "${action}":`, err)
