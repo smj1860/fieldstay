@@ -1,22 +1,89 @@
+# FieldStay — PowerSync Sync Rules
+# Last applied: 2026-06-11
+#
+# request.user_id() = JWT 'sub' claim = Supabase auth.users.id
+# All parameter queries: single-table SELECT only
+# All data queries: single-table SELECT only (no JOINs)
+#
+# Denormalised columns (kept in sync by DB triggers):
+#   turnover_assignments.user_id       ← from crew_members.user_id
+#   turnover_assignments.property_id   ← from turnovers.property_id
+#   checklist_instance_items.turnover_id ← from checklist_instances.turnover_id
+
 bucket_definitions:
+
+  # ── Turnovers ─────────────────────────────────────────────────────────────
   user_turnovers:
     parameters:
-      - SELECT turnover_id FROM powersync_crew_turnovers WHERE user_id = token_parameters.user_id
+      - SELECT turnover_id
+        FROM turnover_assignments
+        WHERE user_id = request.user_id()
     data:
-      - SELECT * FROM turnovers WHERE id = bucket.turnover_id
-      - SELECT * FROM checklist_instances WHERE turnover_id = bucket.turnover_id
-  user_checklist_items:
-    parameters:
-      - SELECT instance_id FROM powersync_crew_instances WHERE user_id = token_parameters.user_id
-    data:
-      - SELECT * FROM checklist_instance_items WHERE instance_id = bucket.instance_id
-  user_inventory:
-    parameters:
-      - SELECT property_id FROM powersync_crew_properties WHERE user_id = token_parameters.user_id
-    data:
-      - SELECT * FROM inventory_items WHERE property_id = bucket.property_id
+      - SELECT id, property_id, org_id, checkout_datetime, checkin_datetime,
+               window_minutes, status, priority, notes
+        FROM turnovers
+        WHERE id = bucket.turnover_id
+
+      - SELECT id, turnover_id, org_id, status
+        FROM checklist_instances
+        WHERE turnover_id = bucket.turnover_id
+
+      - SELECT id, instance_id, turnover_id, section_name, task,
+               is_completed, completed_at, requires_photo,
+               photo_storage_path, crew_notes, sort_order
+        FROM checklist_instance_items
+        WHERE turnover_id = bucket.turnover_id
+
+  # ── Properties ────────────────────────────────────────────────────────────
+  # Column whitelist intentionally excludes door_code, wifi_password,
+  # wifi_name, access_instructions, and all financial fields.
+  # Crew needs name and address to navigate — nothing more.
   user_properties:
     parameters:
-      - SELECT property_id FROM powersync_crew_properties WHERE user_id = token_parameters.user_id
+      - SELECT property_id
+        FROM turnover_assignments
+        WHERE user_id = request.user_id()
     data:
-      - SELECT id, name, address, city, state FROM properties WHERE id = bucket.property_id
+      - SELECT id, org_id, name, address, city, state
+        FROM properties
+        WHERE id = bucket.property_id
+
+  # ── Inventory Items ───────────────────────────────────────────────────────
+  user_inventory:
+    parameters:
+      - SELECT property_id
+        FROM turnover_assignments
+        WHERE user_id = request.user_id()
+    data:
+      - SELECT id, property_id, org_id, name, category, unit,
+               par_level, current_quantity
+        FROM inventory_items
+        WHERE property_id = bucket.property_id
+        AND is_active = true
+
+  # ── Crew Availability ─────────────────────────────────────────────────────
+  user_crew_availability:
+    parameters:
+      - SELECT org_id
+        FROM crew_members
+        WHERE user_id = request.user_id()
+        AND is_active = true
+    data:
+      - SELECT id, org_id, crew_member_id, available_date, is_available, notes
+        FROM crew_availability
+        WHERE org_id = bucket.org_id
+
+  # ── Messages ──────────────────────────────────────────────────────────────
+  # Org-scoped via crew_members. RLS on the messages table provides the
+  # secondary sender/recipient boundary at the database layer.
+  user_messages:
+    parameters:
+      - SELECT org_id
+        FROM crew_members
+        WHERE user_id = request.user_id()
+        AND is_active = true
+    data:
+      - SELECT id, org_id, sender_id, recipient_id, content,
+               read_at, turnover_id, created_at
+        FROM messages
+        WHERE org_id = bucket.org_id
