@@ -609,3 +609,40 @@ export async function createCheckoutSession(
   revalidatePath('/settings')
   return { redirectUrl: session.url }
 }
+
+// ── OwnerRez Manual Sync ──────────────────────────────────────
+
+export async function syncOwnerRezNow(): Promise<SettingsActionState> {
+  const { membership, user } = await requireOrgMember()
+
+  if (!['admin', 'manager'].includes(membership.role)) {
+    return { error: 'Permission denied' }
+  }
+
+  // Rate limit: 1 manual sync per org per 60 seconds
+  const { syncNowLimiter } = await import('@/lib/rate-limit')
+  const { success } = await syncNowLimiter.limit(membership.org_id)
+  if (!success) {
+    return { error: 'Sync already in progress — please wait 60 seconds before trying again' }
+  }
+
+  const { inngest } = await import('@/lib/inngest/client')
+  await inngest.send({
+    name: 'ownerrez/sync.now.requested',
+    data: {
+      org_id:  membership.org_id,
+      user_id: user.id,
+      trigger: 'manual',
+    },
+  })
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'integration.sync_triggered',
+    targetType: 'integration_connection',
+    metadata:   { provider_id: 'ownerrez', trigger: 'manual' },
+  })
+
+  return { success: true }
+}

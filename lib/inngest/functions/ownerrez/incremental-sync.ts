@@ -20,6 +20,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError }      from '@/lib/integrations/types'
+import { logAuditEvent }       from '@/lib/audit'
 
 const PROVIDER = 'ownerrez'
 
@@ -33,6 +34,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
   [
     { cron: '0/15 * * * *' },
     { event: 'integration/ownerrez.sync.requested' as const },
+    { event: 'ownerrez/sync.now.requested' as const },
   ],
   async ({ step, logger }) => {
     const workflowId = crypto.randomUUID()
@@ -130,8 +132,11 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             .update({
               metadata: {
                 ...metadata,
-                sync_cursor:    fetchStartedAt,
-                last_synced_at: new Date().toISOString(),
+                sync_cursor:       fetchStartedAt,
+                last_synced_at:    new Date().toISOString(),
+                last_sync_status:  'success',
+                last_sync_error:   null,
+                last_sync_count:   bookings.length,
               },
             })
             .eq('id', conn.id)
@@ -154,15 +159,47 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             rateLimited       = true
             retryAfterSeconds = err.retryAfter
             logger.warn(`[OwnerRez:${conn.user_id}] Rate limited — sleeping ${err.retryAfter}s`)
+
+            // Write transient rate-limit status — don't change connection status to 'error'
+            await supabase
+              .from('integration_connections')
+              .update({
+                metadata: {
+                  ...metadata,
+                  last_sync_status: 'rate_limited',
+                  last_sync_error:  translateSyncError(err),
+                },
+              })
+              .eq('id', conn.id)
+
             return  // exit this step cleanly without failing it
           }
+
+          const humanError = translateSyncError(err)
           logger.error(
             `[OwnerRez:${conn.user_id}] sync failed: ${err instanceof Error ? err.message : String(err)}`
           )
+
           await supabase
             .from('integration_connections')
-            .update({ status: 'error' })
+            .update({
+              status:   'error',
+              metadata: {
+                ...metadata,
+                last_sync_status: 'error',
+                last_sync_error:  humanError,
+                last_synced_at:   new Date().toISOString(),
+              },
+            })
             .eq('id', conn.id)
+
+          await logAuditEvent({
+            orgId:      conn.org_id,
+            action:     'integration.sync_failed',
+            targetType: 'integration_connection',
+            targetId:   conn.id,
+            metadata:   { provider_id: PROVIDER, error: humanError },
+          })
         }
       })
 
@@ -197,4 +234,30 @@ function mapChannelToSource(channel?: string): string {
   if (c.includes('booking'))                        return 'booking_com'
   if (c.includes('direct'))                         return 'direct'
   return 'other'
+}
+
+// ── Sync error → PM-friendly message ────────────────────────────────────────
+
+function translateSyncError(err: unknown): string {
+  if (err instanceof RateLimitError) {
+    return 'OwnerRez sync paused due to rate limiting — will retry automatically'
+  }
+  const msg = err instanceof Error ? err.message : String(err)
+  const lower = msg.toLowerCase()
+  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid_token')) {
+    return 'OwnerRez authorization expired — reconnect your account to resume syncing'
+  }
+  if (lower.includes('403') || lower.includes('forbidden')) {
+    return 'OwnerRez access denied — reconnect your account'
+  }
+  if (lower.includes('timeout') || lower.includes('econnreset') || lower.includes('network')) {
+    return 'Could not reach OwnerRez — sync will retry automatically'
+  }
+  if (lower.includes('vault') || lower.includes('credentials not found')) {
+    return 'OwnerRez credentials not found — reconnect your account'
+  }
+  if (lower.includes('upsert') || lower.includes('insert') || lower.includes('database')) {
+    return 'Sync completed with errors — some bookings may not have updated'
+  }
+  return 'Sync failed — will retry automatically'
 }

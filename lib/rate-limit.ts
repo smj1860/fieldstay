@@ -19,3 +19,12 @@ export const scanLimiter = new Ratelimit({
   analytics: true,
   prefix:    'scan-data-plate',
 })
+
+// Max 1 manual OwnerRez sync trigger per org per 60 seconds.
+// Prevents a panicking PM from hammering the button and burning API quota.
+export const syncNowLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(1, '60 s'),
+  analytics: true,
+  prefix:    'ownerrez-sync-now',
+})

@@ -20,7 +20,7 @@ export default async function SettingsPage() {
     .from('integration_connections')
     .select('provider_id, status, external_user_id, connected_at, metadata')
     .eq('org_id', membership.org_id)
-    .eq('status', 'active')
+    .in('status', ['active', 'error'])   // include errored connections so UI can surface them
 
   const connectionsByProvider = Object.fromEntries(
     (connections ?? []).map((c) => [c.provider_id, c as ConnectionInfo])
