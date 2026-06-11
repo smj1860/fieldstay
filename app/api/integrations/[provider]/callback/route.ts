@@ -29,6 +29,7 @@ import { createClient }                   from '@supabase/supabase-js'
 import { getProvider }                    from '@/lib/integrations/registry'
 import { storeIntegrationToken, storeIntegrationRefreshToken } from '@/lib/integrations/vault'
 import { logAuditEvent }                  from '@/lib/audit'
+import { inngest }                        from '@/lib/inngest/client'
 
 export async function GET(
   request: NextRequest,
@@ -238,6 +239,18 @@ export async function GET(
         .update({ org_id: membership.org_id })
         .eq('user_id', appUserId)
         .eq('provider_id', providerId)
+    }
+
+    // ── 7. Kick off initial data sync ─────────────────────────────
+    if (providerId === 'ownerrez') {
+      await inngest.send({
+        name: 'integration/ownerrez.connected',
+        data: {
+          user_id:          appUserId,
+          org_id:           membership?.org_id ?? '',
+          external_user_id: tokenData.externalUserId,
+        },
+      })
     }
   } catch (err) {
     console.error(`[OAuth:${providerId}] Vault storage failed:`, err)
