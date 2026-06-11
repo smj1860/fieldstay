@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { upsertInventoryItems, deleteInventoryItem, completeInventoryStep } from './actions'
+import { upsertInventoryItems, deleteInventoryItem, completeInventoryStep, applyTemplateToProperty } from './actions'
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import type { InventoryCatalogItem, InventoryItem, InventoryCategory } from '@/types/database'
@@ -26,11 +26,15 @@ export function InventorySetup({
   catalogItems,
   existingItems,
   templateBrands = {},
+  templateId,
+  templateName,
 }: {
   propertyId: string
   catalogItems: InventoryCatalogItem[]
   existingItems: InventoryItem[]
   templateBrands?: Record<string, string | null>
+  templateId?: string
+  templateName?: string
 }) {
   const [items, setItems] = useState<EditableItem[]>(
     existingItems.map((i) => ({
@@ -46,6 +50,8 @@ export function InventorySetup({
   const [saving, startSave] = useTransition()
   const [completing, startComplete] = useTransition()
   const [error, setError] = useState<string | null>(null)
+  const [applying, startApply] = useTransition()
+  const [applyResult, setApplyResult] = useState<{ added: number; skipped: number } | null>(null)
 
   // Group catalog by category
   const catalogByCategory = catalogItems.reduce<Record<string, InventoryCatalogItem[]>>((acc, item) => {
@@ -98,10 +104,52 @@ export function InventorySetup({
 
   const dirtyCount = items.filter((i) => i.isDirty).length
 
+  const handleApplyTemplate = () => {
+    if (!templateId) return
+    startApply(async () => {
+      const res = await applyTemplateToProperty(templateId, propertyId)
+      if (res.error) {
+        setError(res.error)
+      } else {
+        setApplyResult({ added: res.added, skipped: res.skipped })
+        window.location.reload()
+      }
+    })
+  }
+
   return (
     <div className="space-y-6">
       {error && (
         <div className="border text-sm rounded-lg px-4 py-3" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{error}</div>
+      )}
+
+      {templateId && items.length === 0 && (
+        <div
+          className="rounded-xl px-4 py-4 flex items-center justify-between gap-4"
+          style={{ background: 'var(--accent-gold-dim)', border: '1px solid rgba(252,209,22,0.25)' }}
+        >
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--accent-gold)' }}>
+              Master template ready
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              Apply &#34;{templateName ?? 'Master Inventory'}&#34; to populate this property in one click.
+            </p>
+          </div>
+          <button
+            onClick={handleApplyTemplate}
+            disabled={applying}
+            className="btn-cta text-xs whitespace-nowrap"
+          >
+            {applying ? 'Applying…' : 'Apply Template'}
+          </button>
+        </div>
+      )}
+      {applyResult && (
+        <div className="rounded-lg px-4 py-3 text-sm flex items-center gap-2"
+             style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
+          &#10003; {applyResult.added} items added, {applyResult.skipped} already existed.
+        </div>
       )}
 
       {/* Current item list */}

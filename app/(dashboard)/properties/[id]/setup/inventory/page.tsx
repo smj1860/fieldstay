@@ -26,7 +26,7 @@ export default async function InventoryPage({ params }: Props) {
       .order('name'),
     supabase
       .from('inventory_templates')
-      .select('inventory_template_items(name, preferred_brand)')
+      .select('id, name, inventory_template_items(name, preferred_brand)')
       .eq('org_id', membership.org_id)
       .limit(1)
       .maybeSingle(),
@@ -38,6 +38,9 @@ export default async function InventoryPage({ params }: Props) {
   for (const ti of rawItems) {
     templateBrands[ti.name.toLowerCase()] = ti.preferred_brand
   }
+
+  const templateId   = templateItems?.id ?? undefined
+  const templateName = (templateItems as { name?: string } | null)?.name ?? undefined
 
   return (
     <div className="card">
@@ -51,6 +54,8 @@ export default async function InventoryPage({ params }: Props) {
         catalogItems={catalogItems ?? []}
         existingItems={propertyItems ?? []}
         templateBrands={templateBrands}
+        templateId={templateId}
+        templateName={templateName}
       />
     </div>
   )

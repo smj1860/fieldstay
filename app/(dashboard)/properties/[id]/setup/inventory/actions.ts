@@ -4,6 +4,9 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
+import { applyTemplateToProperty } from '@/app/(dashboard)/inventory/actions'
+
+export { applyTemplateToProperty }
 
 export type InventoryState = { error?: string; success?: boolean }
 

@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useActionState, useRef, useEffect, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
@@ -855,7 +856,7 @@ function ScheduleFormFields({
       </div>
 
       <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
-        <input type="checkbox" name="auto_create_wo" defaultChecked={defaults?.auto_create_wo ?? false} className="w-4 h-4 rounded" />
+        <input type="checkbox" name="auto_create_wo" defaultChecked={defaults?.auto_create_wo ?? true} className="w-4 h-4 rounded" />
         Auto-create work order when due
       </label>
     </>
@@ -1805,14 +1806,25 @@ function TemplatesSection({
                       <li className="text-muted-themed">+ {items.length - preview.length} more…</li>
                     )}
                   </ul>
-                  <button
-                    onClick={() => setBroadcastTemplateId(t.id)}
-                    disabled={properties.length === 0}
-                    className="btn-secondary text-xs py-1.5 px-3 w-full flex items-center justify-center gap-1.5"
-                  >
-                    <Send className="w-3 h-3" />
-                    Broadcast to Properties
-                  </button>
+                  <div className="flex gap-2 mt-auto">
+                    {!t.is_system && (
+                      <Link
+                        href={`/setup/maintenance-template?edit=${t.id}`}
+                        className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 flex-shrink-0"
+                      >
+                        <Pencil className="w-3 h-3" />
+                        Edit
+                      </Link>
+                    )}
+                    <button
+                      onClick={() => setBroadcastTemplateId(t.id)}
+                      disabled={properties.length === 0}
+                      className="btn-secondary text-xs py-1.5 px-3 flex items-center justify-center gap-1.5 flex-1"
+                    >
+                      <Send className="w-3 h-3" />
+                      Broadcast
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -1918,7 +1930,7 @@ export function MaintenanceBoard({
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 bg-card-themed border border-themed rounded-lg px-1 py-1 w-fit max-w-full overflow-x-auto mb-4">
+      <div className="flex flex-wrap items-center gap-1 bg-card-themed border border-themed rounded-lg px-1 py-1 max-w-full mb-4">
         {STATUS_TABS.map((tab) => {
           const count = tab.key === 'all'
             ? workOrders.length
