@@ -4,6 +4,7 @@ import { useState, useTransition, useActionState, useRef } from 'react'
 import Link from 'next/link'
 import { X, Loader2, Upload, Briefcase, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { NudgeBanner } from '@/components/nudge-banner'
 import type { Vendor, VendorSpecialty } from '@/types/database'
 import {
   addVendor,
@@ -100,16 +101,24 @@ function parsePastedText(text: string): ParsedVendor[] {
 
 // ── Root client component ─────────────────────────────────────────────────────
 
-interface Props { vendors: Vendor[] }
+interface Props { vendors: Vendor[]; showComplianceNudge: boolean }
 
 type ViewMode = 'list' | 'add' | 'bulk'
 
-export function VendorsClient({ vendors }: Props) {
+export function VendorsClient({ vendors, showComplianceNudge }: Props) {
   const [view, setView]                 = useState<ViewMode>('list')
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null)
 
   return (
     <div className="space-y-6">
+      {showComplianceNudge && (
+        <NudgeBanner
+          id="compliance-vault-intro"
+          message="Vendors without a current COI can be auto-blocked from new work orders."
+          href="/vendors?tab=compliance"
+          linkText="Set up compliance tracking"
+        />
+      )}
       <div className="card">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div className="flex items-center gap-2">

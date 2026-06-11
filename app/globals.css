@@ -34,6 +34,11 @@
 
   --radius:    8px;
   --radius-lg: 12px;
+
+  --bg-elevated:    #1f3d78;
+  --bg-overlay:     #253f6e;
+  --border-subtle:  rgba(255, 255, 255, 0.04);
+  --border-medium:  rgba(255, 255, 255, 0.10);
 }
 
 /* ── Light theme override ─────────────────────────────────────── */
@@ -68,6 +73,11 @@
 
   --shadow-card: 0 1px 4px rgba(10,22,40,0.10), 0 4px 16px rgba(10,22,40,0.08);
   --shadow-lg:   0 8px 32px rgba(10,22,40,0.18);
+
+  --bg-elevated:    #dceaf5;
+  --bg-overlay:     #ffffff;
+  --border-subtle:  rgba(10, 22, 40, 0.06);
+  --border-medium:  rgba(10, 22, 40, 0.15);
 }
 
 /* ── Light mode: brand-gold page titles ─────────────────────── */
@@ -315,9 +325,11 @@
    requiring changes to every individual file. In light mode, the CSS vars
    resolve to equivalent values so no visual difference. */
 @layer utilities {
-  .bg-card-themed   { background-color: var(--bg-card); }
-  .bg-canvas-themed { background-color: var(--bg-canvas); }
-  .bg-raised-themed { background-color: var(--bg-raised); }
+  .bg-card-themed     { background-color: var(--bg-card); }
+  .bg-canvas-themed   { background-color: var(--bg-canvas); }
+  .bg-raised-themed   { background-color: var(--bg-raised); }
+  .bg-elevated-themed { background-color: var(--bg-elevated); }
+  .bg-overlay-themed  { background-color: var(--bg-overlay); }
 
   .hover\:bg-card-themed:hover   { background-color: var(--bg-card); }
   .hover\:bg-canvas-themed:hover { background-color: var(--bg-canvas); }

@@ -28,6 +28,10 @@ export function BottomNav({ role, onMore }: BottomNavProps) {
     (item.roles as readonly string[]).includes(effectiveRole)
   )
 
+  const moreActive = !items.some(item =>
+    pathname === item.href || pathname.startsWith(item.href + '/')
+  )
+
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden"
@@ -44,21 +48,33 @@ export function BottomNav({ role, onMore }: BottomNavProps) {
           <Link
             key={item.href}
             href={item.href}
-            className="flex flex-col items-center justify-center flex-1 py-2 gap-0.5 text-xs font-medium transition-colors"
+            className="relative flex flex-col items-center justify-center flex-1 py-2 gap-0.5 text-xs font-medium transition-colors"
             style={{ color: active ? 'var(--accent-gold)' : 'var(--text-muted)' }}
           >
-            <Icon className="w-5 h-5" />
-            <span>{item.label}</span>
+            {active && (
+              <span
+                className="absolute inset-x-2 top-1 bottom-1 rounded-xl"
+                style={{ background: 'var(--accent-gold-dim)' }}
+              />
+            )}
+            <Icon className="relative z-10 w-5 h-5" />
+            <span className="relative z-10">{item.label}</span>
           </Link>
         )
       })}
       <button
         onClick={onMore}
-        className="flex flex-col items-center justify-center flex-1 py-2 gap-0.5 text-xs font-medium transition-colors"
-        style={{ color: 'var(--text-muted)' }}
+        className="relative flex flex-col items-center justify-center flex-1 py-2 gap-0.5 text-xs font-medium transition-colors"
+        style={{ color: moreActive ? 'var(--accent-gold)' : 'var(--text-muted)' }}
       >
-        <MoreHorizontal className="w-5 h-5" />
-        <span>Menu</span>
+        {moreActive && (
+          <span
+            className="absolute inset-x-2 top-1 bottom-1 rounded-xl"
+            style={{ background: 'var(--accent-gold-dim)' }}
+          />
+        )}
+        <MoreHorizontal className="relative z-10 w-5 h-5" />
+        <span className="relative z-10">Menu</span>
       </button>
     </nav>
   )

@@ -1,4 +1,5 @@
 import { requireOrgMember } from '@/lib/auth'
+import { createServiceClient } from '@/lib/supabase/server'
 import { InventoryManager } from './inventory-manager'
 import type { Metadata } from 'next'
 import type { CartBuildResult } from '@/lib/kroger/types'
@@ -90,6 +91,17 @@ export default async function InventoryPage() {
   const template  = templates?.[0] ?? null
   const cartData  = (cartMilestone?.value ?? null) as (CartBuildResult & { built_at: string; location_name: string }) | null
 
+  const admin = createServiceClient()
+  const { data: krogerConnection } = await admin
+    .from('integration_connections')
+    .select('id')
+    .eq('org_id', membership.org_id)
+    .eq('provider_id', 'kroger')
+    .eq('status', 'active')
+    .maybeSingle()
+
+  const showKrogerNudge = !krogerConnection
+
   return (
     <div>
       <InventoryManager
@@ -106,6 +118,7 @@ export default async function InventoryPage() {
         pendingDrafts={(pendingDrafts ?? []) as any}
         orgId={membership.org_id}
         cartData={cartData}
+        showKrogerNudge={showKrogerNudge}
       />
     </div>
   )

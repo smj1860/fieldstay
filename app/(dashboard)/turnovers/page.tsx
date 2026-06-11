@@ -22,6 +22,7 @@ export default async function TurnoversPage() {
     { data: crew },
     { data: bookings },
     { data: crewAvailability },
+    { data: org },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -66,11 +67,18 @@ export default async function TurnoversPage() {
       .eq('org_id', membership.org_id)
       .gte('available_date', rangeStart)
       .lte('available_date', rangeEnd),
+    supabase
+      .from('organizations')
+      .select('auto_assign_mode')
+      .eq('id', membership.org_id)
+      .single(),
   ])
 
   const propertyMap = Object.fromEntries(
     (properties ?? []).map((p) => [p.id, p])
   )
+
+  const showAutoAssignNudge = org?.auto_assign_mode === 'disabled'
 
   return (
     <div>
@@ -87,6 +95,7 @@ export default async function TurnoversPage() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         crewAvailability={(crewAvailability ?? []) as any}
         orgId={membership.org_id}
+        showAutoAssignNudge={showAutoAssignNudge}
       />
     </div>
   )

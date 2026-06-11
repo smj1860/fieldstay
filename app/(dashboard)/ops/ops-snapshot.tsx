@@ -3,9 +3,10 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import {
-  Clock, User, Wrench, Package, ChevronDown,
+  Clock, User, Wrench, Package, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { NudgeBanner } from '@/components/nudge-banner'
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -81,6 +82,69 @@ function KpiCard({
   )
 
   return href ? <Link href={href}>{inner}</Link> : inner
+}
+
+// ── Mobile Exception Banner (shows above KPIs on small screens only) ──────────
+
+function MobileExceptionBanner({
+  urgentWorkOrders,
+  overdueCount,
+  belowPar,
+}: {
+  urgentWorkOrders: number
+  overdueCount:     number
+  belowPar:         number
+}) {
+  const hasExceptions = urgentWorkOrders > 0 || overdueCount > 0 || belowPar > 0
+  if (!hasExceptions) return null
+
+  return (
+    <div className="md:hidden space-y-2 mb-5">
+      <p className="text-xs font-semibold uppercase tracking-wide"
+         style={{ color: 'var(--text-muted)' }}>
+        Needs Attention
+      </p>
+
+      {urgentWorkOrders > 0 && (
+        <Link href="/maintenance?filter=urgent">
+          <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+               style={{ background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red)' }}>
+            <Wrench className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent-red)' }} />
+            <p className="text-sm font-semibold flex-1" style={{ color: 'var(--accent-red)' }}>
+              {urgentWorkOrders} urgent work order{urgentWorkOrders !== 1 ? 's' : ''}
+            </p>
+            <ChevronRight className="w-4 h-4" style={{ color: 'var(--accent-red)' }} />
+          </div>
+        </Link>
+      )}
+
+      {overdueCount > 0 && (
+        <Link href="/turnovers?status=pending_assignment">
+          <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+               style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)' }}>
+            <Clock className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent-amber)' }} />
+            <p className="text-sm font-semibold flex-1" style={{ color: 'var(--accent-amber)' }}>
+              {overdueCount} turnover{overdueCount !== 1 ? 's' : ''} unassigned
+            </p>
+            <ChevronRight className="w-4 h-4" style={{ color: 'var(--accent-amber)' }} />
+          </div>
+        </Link>
+      )}
+
+      {belowPar > 0 && (
+        <Link href="/inventory?filter=below_par">
+          <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+               style={{ background: 'var(--accent-blue-dim)', border: '1px solid var(--accent-blue)' }}>
+            <Package className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent-blue)' }} />
+            <p className="text-sm font-semibold flex-1" style={{ color: 'var(--accent-blue)' }}>
+              {belowPar} item{belowPar !== 1 ? 's' : ''} below par
+            </p>
+            <ChevronRight className="w-4 h-4" style={{ color: 'var(--accent-blue)' }} />
+          </div>
+        </Link>
+      )}
+    </div>
+  )
 }
 
 // ── Turnover Card ──────────────────────────────────────────────
@@ -280,6 +344,7 @@ export function OpsSnapshot({
   kpis,
   todayDate,
   metrics,
+  showOwnerRezNudge = false,
 }: {
   turnovers:      Turnover[]
   properties:     Property[]
@@ -288,6 +353,7 @@ export function OpsSnapshot({
   kpis:           KPIs
   todayDate:      string
   metrics?:       Metrics
+  showOwnerRezNudge?: boolean
 }) {
   const [windowDays, setWindowDays] = useState<7 | 14 | 30>(7)
 
@@ -308,6 +374,15 @@ export function OpsSnapshot({
 
   return (
     <div>
+      {showOwnerRezNudge && (
+        <NudgeBanner
+          id="ownerrez-revenue-intro"
+          message="Booking revenue and cleaning fees post to owner ledgers automatically when you connect OwnerRez."
+          href="/settings?tab=integrations"
+          linkText="Connect OwnerRez"
+        />
+      )}
+
       {/* Page header */}
       <div className="page-header flex items-center justify-between">
         <div>
@@ -349,6 +424,13 @@ export function OpsSnapshot({
           ))}
         </div>
       </div>
+
+      {/* Mobile exception banner — visible only below md breakpoint */}
+      <MobileExceptionBanner
+        urgentWorkOrders={kpis.urgentWorkOrders}
+        overdueCount={kpis.unassigned}
+        belowPar={kpis.belowPar}
+      />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

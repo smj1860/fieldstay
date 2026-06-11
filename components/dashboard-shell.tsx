@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
 import type { NotificationItem } from '@/lib/notifications'
 import { BottomNav } from '@/components/bottom-nav'
+import { PmMoreDrawer } from '@/components/pm-more-drawer'
 import { NotificationBell } from '@/components/notification-bell'
 
 // Ops tier (daily use) first, then Management tier (weekly use) — split
@@ -65,6 +66,7 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [moreDrawerOpen, setMoreDrawerOpen] = useState(false)
   const [theme,      setTheme]      = useState<'dark' | 'light'>('dark')
   const [time,       setTime]       = useState('')
 
@@ -405,7 +407,15 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
       </div>
 
       {/* Bottom navigation (mobile only) */}
-      <BottomNav role={role} onMore={() => setMobileOpen(true)} />
+      <BottomNav role={role} onMore={() => setMoreDrawerOpen(true)} />
+
+      {/* "More" drawer (mobile only) */}
+      <PmMoreDrawer
+        open={moreDrawerOpen}
+        onClose={() => setMoreDrawerOpen(false)}
+        role={role}
+        repuguardActive={repuguardActive}
+      />
     </div>
   )
 }

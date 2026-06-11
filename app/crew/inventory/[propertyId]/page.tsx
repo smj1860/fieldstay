@@ -3,7 +3,8 @@ import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
 import { useParams, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ArrowLeft, Package } from 'lucide-react'
-import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
 import type { InventoryCategory } from '@/types/database'
 
 export default function CrewInventoryPage() {
@@ -62,46 +63,22 @@ export default function CrewInventoryPage() {
           <h3 className="text-xs font-semibold text-accent-500 uppercase tracking-wide mb-2">
             {INVENTORY_CATEGORY_LABELS[category as InventoryCategory] ?? category}
           </h3>
-          <div className="bg-white rounded-xl border border-accent-200 divide-y divide-accent-100 overflow-hidden">
-            {catItems!.map((item: InvRow) => {
-              const current = counts[item.id] ?? item.current_quantity ?? 0
-              const isLow   = current < item.par_level
-
-              return (
-                <div key={item.id} className="flex items-center gap-3 px-4 py-3">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-accent-800 truncate">{item.name}</p>
-                    <p className="text-xs text-accent-400">
-                      Par: {item.par_level} {item.unit}
-                      {isLow && (
-                        <span className="ml-1.5 text-amber-600 font-medium">· Low</span>
-                      )}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setCounts((prev) => ({ ...prev, [item.id]: Math.max(0, current - 1) }))}
-                      className="w-8 h-8 rounded-full bg-accent-100 text-accent-600 flex items-center justify-center text-lg font-bold hover:bg-accent-200"
-                    >
-                      −
-                    </button>
-                    <input
-                      type="number"
-                      min="0"
-                      value={current}
-                      onChange={(e) => setCounts((prev) => ({ ...prev, [item.id]: Math.max(0, parseInt(e.target.value) || 0) }))}
-                      className="w-14 text-center border border-accent-200 rounded-lg py-1 text-sm font-semibold text-accent-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    />
-                    <button
-                      onClick={() => setCounts((prev) => ({ ...prev, [item.id]: current + 1 }))}
-                      className="w-8 h-8 rounded-full bg-accent-100 text-accent-600 flex items-center justify-center text-lg font-bold hover:bg-accent-200"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
+          <div className="grid grid-cols-1 gap-3">
+            {catItems!.map((item: InvRow) => (
+              <InventoryItemCard
+                key={item.id}
+                id={item.id}
+                name={item.name}
+                category={item.category}
+                unit={item.unit}
+                parLevel={item.par_level}
+                currentQuantity={counts[item.id] ?? item.current_quantity ?? 0}
+                variant="crew"
+                onQuantityChange={(itemId, newQty) =>
+                  setCounts((prev) => ({ ...prev, [itemId]: newQty }))
+                }
+              />
+            ))}
           </div>
         </div>
       ))}

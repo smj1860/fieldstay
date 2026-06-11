@@ -74,14 +74,14 @@ export default function LandingPage() {
       </section>
 
       {/* ── Stats bar ────────────────────────────────────────────────────── */}
-      <div className="flex justify-center gap-16 px-8 py-5"
+      <div className="flex flex-col sm:flex-row justify-center gap-6 sm:gap-16 px-8 py-6 sm:py-5"
            style={{ background: '#0d1e3d', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         {[
           { num: '15 min', label: 'Avg. property setup' },
           { num: '0',      label: 'Spreadsheets needed' },
           { num: '100%',   label: 'Offline crew access' },
         ].map((s) => (
-          <div key={s.label} className="text-center">
+          <div key={s.label} className="text-center flex sm:block items-center justify-between sm:justify-start gap-4">
             <div className="font-black leading-none mb-1"
                  style={{ fontSize: 28, color: '#FCD116', letterSpacing: '-1px' }}>
               {s.num}

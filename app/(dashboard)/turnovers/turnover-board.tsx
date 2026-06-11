@@ -15,6 +15,7 @@ import {
 } from './actions'
 import { TurnoverGantt } from './turnover-gantt'
 import { createClient } from '@/lib/supabase/client'
+import { NudgeBanner } from '@/components/nudge-banner'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -828,6 +829,7 @@ export function TurnoverBoard({
   bookings = [],
   crewAvailability = [],
   orgId,
+  showAutoAssignNudge = false,
 }: {
   turnovers: Turnover[]
   propertyMap: Record<string, Property>
@@ -836,6 +838,7 @@ export function TurnoverBoard({
   bookings?: BookingRow[]
   crewAvailability?: CrewAvailabilityRow[]
   orgId: string
+  showAutoAssignNudge?: boolean
 }) {
   const searchParams = useSearchParams()
   const urlStatus    = searchParams.get('status')
@@ -933,6 +936,15 @@ export function TurnoverBoard({
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
+      )}
+
+      {showAutoAssignNudge && (
+        <NudgeBanner
+          id="auto-assign-intro"
+          message="FieldStay can assign crews automatically based on availability and distance."
+          href="/settings?tab=automation"
+          linkText="Enable auto-assignment"
+        />
       )}
 
       {/* Page header */}

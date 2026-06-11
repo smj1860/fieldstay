@@ -3,6 +3,7 @@ import { calcSetupProgress } from '@/lib/wizard'
 import Link from 'next/link'
 import { Plus, AlertCircle, CheckCircle2, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { NudgeBanner } from '@/components/nudge-banner'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Properties' }
@@ -19,8 +20,24 @@ export default async function PropertiesPage() {
 
   const atLimit = (properties?.length ?? 0) >= membership.org.max_properties
 
+  const { count: ownerPortalTokenCount } = await supabase
+    .from('owner_portal_tokens')
+    .select('id, property_owners!inner(org_id)', { count: 'exact', head: true })
+    .eq('property_owners.org_id', membership.org_id)
+
+  const showOwnerPortalNudge = (ownerPortalTokenCount ?? 0) === 0
+
   return (
     <div>
+      {showOwnerPortalNudge && (
+        <NudgeBanner
+          id="owner-portal-intro"
+          message="Give property owners real-time financial visibility without any extra work on your end."
+          href="/owners"
+          linkText="Enable owner portal"
+        />
+      )}
+
       <div className="page-header flex items-start justify-between">
         <div>
           <h1 className="page-title">Properties</h1>
