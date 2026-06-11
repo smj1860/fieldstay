@@ -42,7 +42,7 @@ export async function createOrganization(
       name,
       slug,
       billing_email: user.email,
-      plan: 'pro',
+      plan: 'starter',
       plan_status: 'trialing',
       trial_ends_at: new Date(Date.now() + 14 * 86_400_000).toISOString(),
       max_properties: 15,
