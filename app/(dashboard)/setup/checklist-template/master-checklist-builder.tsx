@@ -132,6 +132,24 @@ export function MasterChecklistBuilder({
     }
   }
 
+  const toggleAllCatalog = () => {
+    const allTasks = ALL_SECTIONS.flatMap((s) => (CLEANING_CATALOG[s] ?? []).map((t) => ({ section: s, task: t })))
+    const allSelected = allTasks.every(({ section, task }) => isTaskSelected(section, task))
+    if (allSelected) {
+      setItems((prev) => prev.filter((i) => i.source !== 'catalog'))
+    } else {
+      setItems((prev) => {
+        const next = [...prev]
+        for (const { section, task } of allTasks) {
+          if (!next.some((i) => i.section === section && i.task === task)) {
+            next.push({ section, task, sort_order: next.filter((i) => i.section === section).length, source: 'catalog' })
+          }
+        }
+        return next
+      })
+    }
+  }
+
   const toggleAllInSection = (section: string) => {
     const tasks        = CLEANING_CATALOG[section] ?? []
     const allSelected  = tasks.every((t) => isTaskSelected(section, t))
@@ -263,6 +281,25 @@ export function MasterChecklistBuilder({
       {/* ── Catalog tab ─────────────────────────────────────────────────────── */}
       {tab === 'catalog' && (
         <div className="card p-4 space-y-4">
+          {/* Global select-all */}
+          {(() => {
+            const allTasks = ALL_SECTIONS.flatMap((s) => (CLEANING_CATALOG[s] ?? []).map((t) => ({ section: s, task: t })))
+            const allSelected = allTasks.length > 0 && allTasks.every(({ section, task }) => isTaskSelected(section, task))
+            return (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAllCatalog}
+                  className="w-4 h-4 rounded"
+                />
+                <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                  Select all tasks ({allTasks.length})
+                </span>
+              </label>
+            )
+          })()}
+
           {/* Section picker */}
           <div className="flex gap-1.5 flex-wrap">
             {ALL_SECTIONS.map((s) => (

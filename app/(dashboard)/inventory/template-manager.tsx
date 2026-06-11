@@ -120,6 +120,9 @@ export function TemplateManager({
   const [catalogUnits, setCatalogUnits]         = useState<Record<string, string>>({})
   const [catalogBrands, setCatalogBrands]       = useState<Record<string, string>>({})
 
+  // Template items list selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
   // Custom tab state
   const [newName,     setNewName]     = useState('')
   const [newCategory, setNewCategory] = useState<InventoryCategory>('other')
@@ -176,6 +179,47 @@ export function TemplateManager({
         ...prev,
         inventory_template_items: (prev.inventory_template_items ?? []).filter(i => i.id !== itemId),
       } : prev)
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        next.delete(itemId)
+        return next
+      })
+    })
+  }
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleAllSelected = (ids: string[]) => {
+    setSelectedIds(prev => {
+      const allSelected = ids.length > 0 && ids.every(id => prev.has(id))
+      const next = new Set(prev)
+      if (allSelected) {
+        ids.forEach(id => next.delete(id))
+      } else {
+        ids.forEach(id => next.add(id))
+      }
+      return next
+    })
+  }
+
+  const handleRemoveSelected = () => {
+    if (selectedIds.size === 0) return
+    const ids = Array.from(selectedIds)
+    startTransition(async () => {
+      for (const id of ids) {
+        await removeTemplateItem(id)
+      }
+      setCurrentTemplate(prev => prev ? {
+        ...prev,
+        inventory_template_items: (prev.inventory_template_items ?? []).filter(i => !selectedIds.has(i.id)),
+      } : prev)
+      setSelectedIds(new Set())
     })
   }
 
@@ -313,34 +357,71 @@ export function TemplateManager({
 
       {/* Template items list */}
       {byCategory.length > 0 ? (
-        <div className="border border-themed rounded-xl overflow-hidden">
-          {byCategory.map(({ cat, catItems }) => (
-            <div key={cat}>
-              <div className="px-4 py-2 bg-canvas-themed border-b border-themed">
-                <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
-                  {INVENTORY_CATEGORY_LABELS[cat]}
-                </span>
-              </div>
-              {catItems.map(item => (
-                <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-primary-themed">{item.name}</span>
-                    <span className="text-xs text-muted-themed ml-2">
-                      Par {item.par_level} {item.unit}
-                    </span>
-                  </div>
-                  <TemplateBrandInput itemId={item.id} defaultBrand={item.preferred_brand} />
-                  <button
-                    onClick={() => handleRemoveItem(item.id)}
-                    disabled={isPending}
-                    className="flex-shrink-0 text-muted-themed hover:text-red-500 p-1 transition-colors"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={templateItems.length > 0 && templateItems.every(i => selectedIds.has(i.id))}
+                onChange={() => toggleAllSelected(templateItems.map(i => i.id))}
+                className="w-4 h-4 rounded"
+              />
+              <span className="text-xs font-medium text-muted-themed">
+                {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}
+              </span>
+            </label>
+            {selectedIds.size > 0 && (
+              <button
+                onClick={handleRemoveSelected}
+                disabled={isPending}
+                className="text-xs font-medium"
+                style={{ color: 'var(--accent-red)' }}
+              >
+                Remove Selected
+              </button>
+            )}
+          </div>
+          <div className="border border-themed rounded-xl overflow-hidden">
+            {byCategory.map(({ cat, catItems }) => (
+              <div key={cat}>
+                <div className="flex items-center gap-2 px-4 py-2 bg-canvas-themed border-b border-themed">
+                  <input
+                    type="checkbox"
+                    checked={catItems.every(i => selectedIds.has(i.id))}
+                    onChange={() => toggleAllSelected(catItems.map(i => i.id))}
+                    className="w-3.5 h-3.5 rounded"
+                  />
+                  <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
+                    {INVENTORY_CATEGORY_LABELS[cat]}
+                  </span>
                 </div>
-              ))}
-            </div>
-          ))}
+                {catItems.map(item => (
+                  <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleSelected(item.id)}
+                      className="w-4 h-4 rounded flex-shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-primary-themed">{item.name}</span>
+                      <span className="text-xs text-muted-themed ml-2">
+                        Par {item.par_level} {item.unit}
+                      </span>
+                    </div>
+                    <TemplateBrandInput itemId={item.id} defaultBrand={item.preferred_brand} />
+                    <button
+                      onClick={() => handleRemoveItem(item.id)}
+                      disabled={isPending}
+                      className="flex-shrink-0 text-muted-themed hover:text-red-500 p-1 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       ) : (
         <div className="border border-dashed border-themed rounded-xl px-4 py-8 text-center text-sm text-muted-themed">

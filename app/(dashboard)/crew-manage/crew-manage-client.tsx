@@ -236,8 +236,54 @@ function CrewCardModal({ member, onClose }: { member: CrewMember; onClose: () =>
               {member.user_id ? 'Active' : member.invite_sent_at ? 'Invited' : 'Not invited'}
             </span>
           </div>
+          {member.notes && (
+            <div className="pt-2 border-t border-themed">
+              <p className="text-muted-themed mb-1">Notes</p>
+              <p className="text-secondary-themed whitespace-pre-wrap">{member.notes}</p>
+            </div>
+          )}
         </div>
+
+        {!member.user_id && (
+          <div className="pt-3 border-t border-themed mt-3">
+            <InviteButton memberId={member.id} inviteSentAt={member.invite_sent_at} />
+          </div>
+        )}
       </div>
+    </div>
+  )
+}
+
+function InviteButton({ memberId, inviteSentAt }: { memberId: string; inviteSentAt: string | null }) {
+  const [sent, setSent]   = useState(false)
+  const [err, setErr]     = useState<string | null>(null)
+  const [busy, startBusy] = useTransition()
+
+  const handle = () => {
+    startBusy(async () => {
+      const result = await inviteCrewMember(memberId)
+      if (result.error) setErr(result.error)
+      else setSent(true)
+    })
+  }
+
+  if (sent) {
+    return (
+      <p className="text-xs text-center" style={{ color: 'var(--accent-green)' }}>✓ Invite sent</p>
+    )
+  }
+
+  return (
+    <div>
+      <button onClick={handle} disabled={busy} className="btn-primary w-full text-sm">
+        {busy ? 'Sending…' : inviteSentAt ? 'Resend Invite' : 'Invite to App'}
+      </button>
+      {inviteSentAt && !sent && (
+        <p className="text-xs text-center mt-1" style={{ color: 'var(--text-muted)' }}>
+          Invite sent {new Date(inviteSentAt).toLocaleDateString()}
+        </p>
+      )}
+      {err && <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }}>{err}</p>}
     </div>
   )
 }
