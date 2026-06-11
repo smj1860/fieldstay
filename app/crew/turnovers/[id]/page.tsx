@@ -99,13 +99,36 @@ export default function CrewTurnoverPage() {
   const handleSectionPhoto = async (sectionName: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+
     const ext  = file.name.split('.').pop() ?? 'jpg'
     const path = `turnover-${id}/section-${sectionName.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.${ext}`
-    await supabase.storage
-      .from('turnover-photos')
-      .upload(path, file, { contentType: file.type, upsert: true })
-    setSectionPhotoPrompt(null)
-    e.target.value = ''
+
+    try {
+      const { error: uploadErr } = await supabase.storage
+        .from('turnover-photos')
+        .upload(path, file, { contentType: file.type, upsert: true })
+
+      if (uploadErr) {
+        setUploadError('Section photo upload failed. Please try again.')
+        return
+      }
+
+      // Write path to the checklist_instances row for this section
+      // Find the instance_id from the first item in this section
+      const sectionItem = items?.find((i) => i.section_name === sectionName)
+      if (sectionItem) {
+        await db.execute(
+          `UPDATE checklist_instances SET section_photo_path = ? WHERE id = ?`,
+          [path, sectionItem.instance_id]
+        )
+      }
+    } catch (err) {
+      console.error('Section photo upload failed:', err)
+      setUploadError('Section photo upload failed. Make sure you have a connection and try again.')
+    } finally {
+      setSectionPhotoPrompt(null)
+      e.target.value = ''
+    }
   }
 
   const handlePhotoCapture = async (itemId: string, file: File) => {

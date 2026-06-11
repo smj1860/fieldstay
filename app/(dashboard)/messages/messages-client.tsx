@@ -117,9 +117,13 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
   function handleSend() {
     const content = draft.trim()
     if (!content || !selectedThread) return
-    setDraft('')
     startSend(async () => {
-      await sendMessageToCrew(selectedThread.crew.id, content)
+      try {
+        await sendMessageToCrew(selectedThread.crew.id, content)
+        setDraft('')
+      } catch {
+        // Draft is preserved in state — user can retry
+      }
     })
   }
 

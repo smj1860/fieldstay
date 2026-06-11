@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { addMaintenanceSchedule, deleteMaintenanceSchedule, completeMaintenanceStep } from './actions'
 import { Plus, Trash2, RefreshCw, Calendar } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -74,6 +74,14 @@ export function MaintenanceScheduleManager({
     setPrefilledFrequency('quarterly')
     setPrefilledMonth('')
   }
+
+  // Close form on successful submission only
+  useEffect(() => {
+    if (state?.success) {
+      resetPrefill()
+      setShowForm(false)
+    }
+  }, [state?.success])
 
   return (
     <div className="space-y-6">
@@ -157,11 +165,7 @@ export function MaintenanceScheduleManager({
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{state.error}</div>
           )}
 
-          <form action={async (fd) => {
-            await formAction(fd)
-            resetPrefill()
-            setShowForm(false)
-          }} className="space-y-4">
+          <form action={formAction} className="space-y-4">
             <div>
               <label className="label">Name</label>
               <input

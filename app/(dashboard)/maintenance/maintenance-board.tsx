@@ -389,7 +389,15 @@ function CreateWorkOrderModal({
 
   // After successful WO creation, upload photos
   useEffect(() => {
-    if (!state?.success || !state.workOrderId || !photoFiles.length) return
+    if (!state?.success || !state.workOrderId) return
+
+    // No photos attached — close immediately
+    if (!photoFiles.length) {
+      onClose()
+      return
+    }
+
+    // Photos to upload — upload then close
     const workOrderId = state.workOrderId
     ;(async () => {
       const supabase = createClient()

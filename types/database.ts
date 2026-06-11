@@ -334,16 +334,17 @@ export interface TurnoverAssignment {
 }
 
 export interface ChecklistInstance {
-  id:                string
-  turnover_id:       string
-  org_id:            string
-  template_id:       string | null
-  template_snapshot: Record<string, unknown>
-  status:            ChecklistStatus
-  started_at:        string | null
-  completed_at:      string | null
-  created_at:        string
-  updated_at:        string
+  id:                  string
+  turnover_id:         string
+  org_id:              string
+  template_id:         string | null
+  template_snapshot:   Record<string, unknown>
+  status:              ChecklistStatus
+  section_photo_path:  string | null
+  started_at:          string | null
+  completed_at:        string | null
+  created_at:          string
+  updated_at:          string
 }
 
 export interface ChecklistInstanceItem {

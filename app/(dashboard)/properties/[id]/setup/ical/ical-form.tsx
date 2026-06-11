@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { addIcalFeed, deleteIcalFeed, completeIcalStep } from './actions'
 import { Plus, Trash2, RefreshCw, Link as LinkIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -32,6 +32,11 @@ export function IcalManager({
   const [showForm, setShowForm] = useState(feeds.length === 0)
   const [selectedSource, setSelectedSource] = useState('airbnb')
   const [completing, setCompleting] = useState(false)
+
+  // Close form on successful submission
+  useEffect(() => {
+    if (state?.success) setShowForm(false)
+  }, [state?.success])
 
   return (
     <div className="space-y-6">
@@ -89,7 +94,6 @@ export function IcalManager({
               return
             }
             formAction(fd)
-            if (!state?.error) setShowForm(false)
           }} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>

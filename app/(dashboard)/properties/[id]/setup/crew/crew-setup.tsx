@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { addCrewMember, completeCrewStep } from './actions'
 import { Plus, User, CheckCircle2 } from 'lucide-react'
 
@@ -19,6 +19,11 @@ export function CrewSetup({
   const [state, formAction, pending] = useActionState(addCrewMember, null)
   const [showForm, setShowForm] = useState(crew.length === 0)
   const [completing, setCompleting] = useState(false)
+
+  // Close form on successful submission
+  useEffect(() => {
+    if (state?.success) setShowForm(false)
+  }, [state?.success])
 
   return (
     <div className="space-y-6">
@@ -57,10 +62,7 @@ export function CrewSetup({
             </div>
           )}
 
-          <form action={async (fd) => {
-            await formAction(fd)
-            if (!state?.error) setShowForm(false)
-          }} className="space-y-4">
+          <form action={formAction} className="space-y-4">
             <div>
               <label className="label">Name <span className="text-red-500">*</span></label>
               <input name="name" type="text" required className="input" placeholder="Full name" />

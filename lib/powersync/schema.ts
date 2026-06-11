@@ -12,9 +12,10 @@ const turnovers = new Table({
 })
 
 const checklist_instances = new Table({
-  turnover_id: column.text,
-  org_id:      column.text,
-  status:      column.text,
+  turnover_id:        column.text,
+  org_id:             column.text,
+  status:             column.text,
+  section_photo_path: column.text,
 })
 
 const checklist_instance_items = new Table({
