@@ -257,6 +257,7 @@ export function MaintenanceScheduleManager({
                   type="checkbox"
                   name="auto_create_wo"
                   value="true"
+                  defaultChecked
                   className="rounded border-themed"
                   style={{ accentColor: 'var(--accent-gold)' }}
                 />
