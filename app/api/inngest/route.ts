@@ -57,6 +57,9 @@ import { logMessageCommunication } from '@/lib/inngest/functions/log-message-com
 // Checklist broadcasting
 import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist-broadcast'
 
+// Integration error notifications
+import { notifyIntegrationError } from '@/lib/inngest/functions/notify-integration-error'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -117,5 +120,8 @@ export const { GET, POST, PUT } = serve({
 
     // Checklist broadcasting
     broadcastChecklistTemplateJob,
+
+    // Integration error notifications
+    notifyIntegrationError,
   ],
 })

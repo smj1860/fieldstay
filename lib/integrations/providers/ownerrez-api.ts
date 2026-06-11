@@ -19,11 +19,19 @@ import type {
   OwnerRezBooking,
   OwnerRezGuest,
   OwnerRezUser,
+  OwnerRezReview,
   OwnerRezPagedResponse,
 } from '../types'
 
 const BASE_URL   = 'https://api.ownerrez.com'
 const PROVIDER   = 'ownerrez'
+
+interface OwnerRezWebhookSubscription {
+  id?:        number
+  url:        string
+  event_type: string
+  is_active?: boolean
+}
 
 // ── Shared IP rate-limit budget tracker ──────────────────────────────────────
 //
@@ -40,7 +48,7 @@ const RATE_LIMIT_WINDOW = 5 * 60   // 5 minutes in seconds
 const RATE_LIMIT_BUDGET = 270      // 270/300 — 10% headroom before auto-disable
 
 let _redis: Redis | null = null
-function getRedis(): Redis {
+export function getRedis(): Redis {
   if (!_redis) {
     _redis = new Redis({
       url:   process.env.upstash_fieldstay_KV_REST_API_URL!,
@@ -76,7 +84,8 @@ export class OwnerRezApiClient {
 
   private async fetch<T>(
     path: string,
-    params?: Record<string, string | number | undefined>
+    params?: Record<string, string | number | undefined>,
+    options?: { method?: string; body?: string }
   ): Promise<T> {
     // HIGH-2: check shared IP budget before making the request.
     // Throws RateLimitError proactively at 270/300 to prevent exhausting the pool
@@ -99,11 +108,14 @@ export class OwnerRezApiClient {
     }
 
     const res = await globalThis.fetch(url.toString(), {
+      method:  options?.method ?? 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
         'User-Agent':    `FieldStay/1.0 (${clientId})`,
         'Accept':        'application/json',
+        ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
       },
+      ...(options?.body ? { body: options.body } : {}),
     })
 
     if (res.status === 401) {
@@ -139,11 +151,34 @@ export class OwnerRezApiClient {
 
   private async markConnectionError(): Promise<void> {
     const supabase = createServiceClient()
+
+    const { data: conn } = await supabase
+      .from('integration_connections')
+      .select('org_id')
+      .eq('user_id', this.userId)
+      .eq('provider_id', PROVIDER)
+      .single()
+
     await supabase
       .from('integration_connections')
       .update({ status: 'error' })
       .eq('user_id', this.userId)
       .eq('provider_id', PROVIDER)
+
+    try {
+      const { inngest } = await import('@/lib/inngest/client')
+      await inngest.send({
+        name: 'integration/connection.error',
+        data: {
+          user_id:     this.userId,
+          org_id:      conn?.org_id ?? '',
+          provider_id: PROVIDER,
+          reason:      'Token revoked or expired — 401 received from OwnerRez API',
+        },
+      })
+    } catch {
+      // Non-fatal — token is already marked error
+    }
   }
 
   // ── Pagination helper ──────────────────────────────────────────────────────
@@ -192,6 +227,40 @@ export class OwnerRezApiClient {
     const queryParams: Record<string, string | number | undefined> = {}
     if (params.sinceUtc) queryParams['since_utc'] = params.sinceUtc
     return this.fetchAllPages<OwnerRezGuest>('/v2/guests', queryParams)
+  }
+
+  async getReviews(params: { sinceUtc?: string } = {}): Promise<OwnerRezReview[]> {
+    const queryParams: Record<string, string | number | undefined> = {}
+    if (params.sinceUtc) queryParams['since_utc'] = params.sinceUtc
+    return this.fetchAllPages<OwnerRezReview>('/v2/reviews', queryParams)
+  }
+
+  async registerWebhookSubscriptions(webhookBaseUrl: string): Promise<void> {
+    const eventsToRegister = [
+      'booking.created',
+      'booking.modified',
+      'booking.cancelled',
+      'guest.created',
+      'guest.updated',
+    ]
+
+    const existing = await this.fetchAllPages<OwnerRezWebhookSubscription>(
+      '/v2/webhooksubscriptions'
+    )
+    const existingUrls = new Set(
+      existing
+        .filter(s => s.url === webhookBaseUrl && s.is_active)
+        .map(s => s.event_type)
+    )
+
+    for (const eventType of eventsToRegister) {
+      if (existingUrls.has(eventType)) continue
+
+      await this.fetch('/v2/webhooksubscriptions', undefined, {
+        method: 'POST',
+        body: JSON.stringify({ url: webhookBaseUrl, event_type: eventType, is_active: true }),
+      })
+    }
   }
 
   async getCurrentUser(): Promise<OwnerRezUser> {

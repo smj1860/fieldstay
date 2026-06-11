@@ -46,6 +46,7 @@ export type AuditAction =
   | 'account.password_changed'
   | 'integration.sync_triggered'
   | 'integration.sync_failed'
+  | 'gdpr.data_erasure.completed'
 
 interface AuditParams {
   orgId?:         string

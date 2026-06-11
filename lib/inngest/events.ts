@@ -247,11 +247,21 @@ export type FieldStayEvents = {
 
   'integration/ownerrez.sync.requested': {
     data: {
-      provider_id:  string
-      event_type:   string
-      entity_type:  string
-      entity_id:    string
-      triggered_at: string
+      provider_id:    string
+      event_type:     string
+      entity_type:    string
+      entity_id:      string
+      triggered_at:   string
+      correlation_id: string | null | undefined
+    }
+  }
+
+  'integration/connection.error': {
+    data: {
+      user_id:     string
+      org_id:      string
+      provider_id: string
+      reason:      string
     }
   }
 

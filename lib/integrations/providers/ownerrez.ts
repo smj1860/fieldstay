@@ -164,19 +164,48 @@ export const ownerRezProvider: IntegrationProvider = {
 
   // Handles OwnerRez-specific webhook events beyond the generic revocation.
   // The revocation event is handled centrally by the webhook route handler.
-  async handleWebhookEvent({ action, payload, externalUserId }) {
+  async handleWebhookEvent({ action, payload, externalUserId, correlationId }) {
     switch (action) {
       case 'application_authorization_revoked':
         // Handled by the generic webhook route — nothing to do here
         break
 
-      // Future: entity change webhooks (booking.created, guest.updated, etc.)
-      // These require setting up individual webhook subscriptions via:
-      // POST /v2/webhooksubscriptions
-      // See OwnerRez Webhooks documentation for the payload format.
+      case 'booking.created':
+      case 'booking.modified':
+      case 'booking.cancelled': {
+        const { inngest } = await import('@/lib/inngest/client')
+        await inngest.send({
+          name: 'integration/ownerrez.sync.requested',
+          data: {
+            provider_id:    'ownerrez',
+            event_type:     action,
+            entity_type:    'booking',
+            entity_id:      String((payload as Record<string, unknown>)?.id ?? ''),
+            triggered_at:   new Date().toISOString(),
+            correlation_id: correlationId ?? null,
+          },
+        })
+        break
+      }
+
+      case 'guest.created':
+      case 'guest.updated': {
+        const { inngest } = await import('@/lib/inngest/client')
+        await inngest.send({
+          name: 'integration/ownerrez.sync.requested',
+          data: {
+            provider_id:    'ownerrez',
+            event_type:     action,
+            entity_type:    'guest',
+            entity_id:      String((payload as Record<string, unknown>)?.id ?? ''),
+            triggered_at:   new Date().toISOString(),
+            correlation_id: correlationId ?? null,
+          },
+        })
+        break
+      }
+
       default: {
-        // Never log raw payload — future events (booking.created, guest.updated)
-        // will contain guest PII: name, email, phone. Log only safe fields.
         const safeLog = {
           action,
           external_id: typeof payload === 'object' && payload !== null

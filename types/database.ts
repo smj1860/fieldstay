@@ -605,6 +605,7 @@ export interface OrgMilestone {
   prompted_at:    string | null
   review_clicked: boolean
   dismissed:      boolean
+  value:          Record<string, unknown> | null
 }
 
 export interface AuditEvent {
