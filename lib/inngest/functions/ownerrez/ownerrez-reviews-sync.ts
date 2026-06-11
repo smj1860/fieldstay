@@ -1,80 +1,8 @@
-import { inngest } from '@/lib/inngest/client'
+import { inngest }            from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { readIntegrationToken } from '@/lib/integrations/vault'
-import { RateLimitError } from '@/lib/integrations/types'
-
-interface OwnerRezReview {
-  id: number
-  rating: number
-  comments?: string
-  body?: string
-  review_text?: string
-  guest_name?: string
-  guest?: { name?: string }
-  created_at?: string
-  submitted_at?: string
-  property_id?: number
-}
-
-interface OwnerRezReviewsPage {
-  items: OwnerRezReview[]
-  next_page_token?: string
-}
-
-async function fetchAllReviews(
-  userId: string,
-  sinceUtc?: string
-): Promise<OwnerRezReview[]> {
-  const token = await readIntegrationToken(userId, 'ownerrez')
-  if (!token) throw new Error(`[OwnerRez:${userId}] No token found`)
-
-  const clientId = process.env.OWNERREZ_CLIENT_ID
-  if (!clientId) throw new Error('Missing OWNERREZ_CLIENT_ID env var')
-
-  const headers: HeadersInit = {
-    Authorization: `Bearer ${token}`,
-    'User-Agent':  `FieldStay/1.0 (${clientId})`,
-    Accept:        'application/json',
-  }
-
-  const allReviews: OwnerRezReview[] = []
-  let pageToken: string | undefined
-
-  do {
-    const params = new URLSearchParams()
-    if (sinceUtc) params.set('since_utc', sinceUtc)
-    if (pageToken) params.set('page_token', pageToken)
-
-    const url = `https://api.ownerrez.com/v2/reviews?${params.toString()}`
-    const res  = await fetch(url, { headers })
-
-    if (res.status === 401) {
-      // Mark connection as error
-      const admin = createServiceClient()
-      await admin
-        .from('integration_connections')
-        .update({ status: 'error' })
-        .eq('user_id', userId)
-        .eq('provider_id', 'ownerrez')
-      throw new Error(`[OwnerRez:${userId}] Token revoked (401)`)
-    }
-
-    if (res.status === 429) {
-      const retryAfter = Number(res.headers.get('Retry-After') ?? '60')
-      throw new RateLimitError(retryAfter)
-    }
-
-    if (!res.ok) {
-      throw new Error(`[OwnerRez:${userId}] GET /v2/reviews returned ${res.status}`)
-    }
-
-    const page = (await res.json()) as OwnerRezReviewsPage
-    allReviews.push(...(page.items ?? []))
-    pageToken = page.next_page_token
-  } while (pageToken)
-
-  return allReviews
-}
+import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
+import { RateLimitError }      from '@/lib/integrations/types'
+import type { OwnerRezReview } from '@/lib/integrations/types'
 
 export const ownerRezReviewsSync = inngest.createFunction(
   {
@@ -85,7 +13,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
     { cron: '0 */6 * * *' },
     { event: 'integration/ownerrez.connected' },
   ],
-  async ({ step }) => {
+  async ({ step, logger }) => {
     const admin = createServiceClient()
 
     const { data: connections, error } = await admin
@@ -115,18 +43,16 @@ export const ownerRezReviewsSync = inngest.createFunction(
 
       try {
         reviews = await step.run(`fetch-reviews-${userId}`, async () => {
-          return fetchAllReviews(userId, cursor)
+          return new OwnerRezApiClient(userId).getReviews({ sinceUtc: cursor })
         })
       } catch (err) {
         if (err instanceof RateLimitError) {
-          // err.retryAfter is in SECONDS; pass a duration string — not milliseconds.
-          // The previous `retryAfter * 1000` would sleep ~16 hours instead of ~60 sec.
           await step.sleep(`rate-limit-sleep-${userId}`, `${err.retryAfter}s`)
           reviews = await step.run(`fetch-reviews-retry-${userId}`, async () => {
-            return fetchAllReviews(userId, cursor)
+            return new OwnerRezApiClient(userId).getReviews({ sinceUtc: cursor })
           })
         } else {
-          console.error(`[OwnerRez:${userId}] Reviews fetch failed:`, err)
+          logger.error(`[OwnerRez:${userId}] Reviews fetch failed: ${err instanceof Error ? err.message : String(err)}`)
           continue
         }
       }
@@ -134,7 +60,6 @@ export const ownerRezReviewsSync = inngest.createFunction(
       await step.run(`upsert-reviews-${userId}`, async () => {
         if (reviews.length === 0) return
 
-        // Fetch properties for property_id lookup
         const propertyExternalIds = reviews
           .map(r => r.property_id)
           .filter((id): id is number => id != null)

@@ -16,11 +16,11 @@
  * step.sleep() is called at the TOP LEVEL only — never inside step.run().
  */
 
-import { inngest }             from '@/lib/inngest/client'
-import { createServiceClient } from '@/lib/supabase/server'
-import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
-import { RateLimitError }      from '@/lib/integrations/types'
-import { logAuditEvent }       from '@/lib/audit'
+import { inngest }                      from '@/lib/inngest/client'
+import { createServiceClient }          from '@/lib/supabase/server'
+import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
+import { RateLimitError }               from '@/lib/integrations/types'
+import { logAuditEvent }                from '@/lib/audit'
 
 const PROVIDER = 'ownerrez'
 
@@ -38,7 +38,19 @@ export const ownerRezIncrementalSync = inngest.createFunction(
   ],
   async ({ step, logger }) => {
     const workflowId = crypto.randomUUID()
-    logger.info('ownerrez-incremental-sync start', { workflowId })
+    logger.info('ownerrez-incremental-sync triggered', { workflowId, trigger: 'cron' })
+
+    // Circuit breaker: if the OwnerRez API is degraded, skip this cron tick.
+    const circuitOpen = await step.run('check-circuit-breaker', async () => {
+      const redis    = getRedis()
+      const failCount = await redis.get<number>('ownerrez:circuit:consecutive_failures') ?? 0
+      return failCount >= 10
+    })
+
+    if (circuitOpen) {
+      logger.warn('[OwnerRez] Circuit breaker open — skipping cron tick, waiting for recovery')
+      return { synced: 0, circuit_open: true }
+    }
 
     const supabase = createServiceClient()
 
@@ -152,6 +164,12 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           })
           syncedCount++
 
+          // Reset circuit breaker on success
+          try {
+            const redis = getRedis()
+            await redis.del('ownerrez:circuit:consecutive_failures')
+          } catch { /* non-fatal */ }
+
         } catch (err) {
           if (err instanceof RateLimitError) {
             // HIGH-1: do NOT call step.sleep here — step primitives cannot be nested
@@ -200,6 +218,49 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             targetId:   conn.id,
             metadata:   { provider_id: PROVIDER, error: humanError },
           })
+
+          // Increment circuit breaker counter (expires in 30 minutes)
+          try {
+            const redis    = getRedis()
+            const key      = 'ownerrez:circuit:consecutive_failures'
+            const newCount = await redis.incr(key)
+            if (newCount === 1) await redis.expire(key, 30 * 60)
+          } catch { /* non-fatal */ }
+
+          // Fire PM notification — throttled to once per 4 hours per connection
+          try {
+            const milestoneKey = `integration_error_notified:${conn.id}`
+            const { data: recentNotification } = await supabase
+              .from('org_milestones')
+              .select('value, achieved_at')
+              .eq('org_id', conn.org_id)
+              .eq('milestone', milestoneKey)
+              .order('achieved_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+
+            const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
+              ?.notified_at
+            const tooSoon = lastNotifiedAt &&
+              Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
+
+            if (!tooSoon) {
+              await inngest.send({
+                name: 'integration/connection.error',
+                data: {
+                  user_id:     conn.user_id,
+                  org_id:      conn.org_id ?? '',
+                  provider_id: PROVIDER,
+                  reason:      humanError,
+                },
+              })
+              await supabase.from('org_milestones').upsert({
+                org_id:    conn.org_id,
+                milestone: milestoneKey,
+                value:     { notified_at: new Date().toISOString() },
+              }, { onConflict: 'org_id,milestone' })
+            }
+          } catch { /* non-fatal — data was already written to metadata */ }
         }
       })
 
