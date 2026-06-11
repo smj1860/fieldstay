@@ -16,13 +16,20 @@ export default async function VendorsPage() {
     .order('specialty')
     .order('name')
 
+  const { count: complianceDocCount } = await supabase
+    .from('vendor_compliance_documents')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', membership.org_id)
+
+  const showComplianceNudge = (complianceDocCount ?? 0) === 0
+
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">Vendors</h1>
         <p className="page-subtitle">Manage your service vendors and contractor contacts</p>
       </div>
-      <VendorsClient vendors={(vendors ?? []) as unknown as Vendor[]} />
+      <VendorsClient vendors={(vendors ?? []) as unknown as Vendor[]} showComplianceNudge={showComplianceNudge} />
     </div>
   )
 }

@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import {
   MapPin, Wrench, Calendar, AlertTriangle, CheckCircle2,
-  Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight,
+  Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight, ChevronDown,
   ShieldAlert, ClipboardList, User, Star, Camera,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -386,7 +386,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
 
         {/* ── Property Access ───────────────────────────────────── */}
         {hasAccess && (
-          <Section icon={<Key className="w-4 h-4" />} title="Property Access">
+          <Section icon={<Key className="w-4 h-4" />} title="Property Access" mobileCollapse defaultOpen={false}>
             {wo.properties.access_instructions && (
               <p className="text-sm leading-relaxed whitespace-pre-wrap"
                  style={{ color: 'var(--text-primary)' }}>
@@ -416,6 +416,8 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
         <Section
           icon={<Wrench className="w-4 h-4" />}
           title="Materials & Labor"
+          mobileCollapse
+          defaultOpen={false}
           action={
             wo.actual_cost != null && lineItems.length > 0 ? (
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -535,7 +537,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
 
         {/* ── Photos ────────────────────────────────────────────── */}
         {(wo.work_order_photos ?? []).length > 0 && (
-          <Section icon={<Camera className="w-4 h-4" />} title="Photos">
+          <Section icon={<Camera className="w-4 h-4" />} title="Photos" mobileCollapse defaultOpen={false}>
             <div className="flex flex-wrap gap-2">
               {wo.work_order_photos!.map(photo => {
                 const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/work-order-photos/${photo.storage_path}`
@@ -563,7 +565,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
 
         {/* ── Vendor Rating ─────────────────────────────────────── */}
         {wo.status === 'completed' && wo.vendors && canEdit && (
-          <Section icon={<Star className="w-4 h-4" />} title="Vendor Rating">
+          <Section icon={<Star className="w-4 h-4" />} title="Vendor Rating" mobileCollapse defaultOpen={false}>
             <div className="space-y-3">
               <div className="flex items-center gap-1">
                 {[1, 2, 3, 4, 5].map(star => (
@@ -635,27 +637,56 @@ function Section({
   icon,
   title,
   action,
+  mobileCollapse = false,
+  defaultOpen = true,
   children,
 }: {
-  icon:      React.ReactNode
-  title:     string
-  action?:   React.ReactNode
-  children:  React.ReactNode
+  icon:            React.ReactNode
+  title:           string
+  action?:         React.ReactNode
+  mobileCollapse?: boolean
+  defaultOpen?:    boolean
+  children:        React.ReactNode
 }) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  const header = (
+    <>
+      <div className="flex items-center gap-2">
+        <span style={{ color: 'var(--accent-gold)' }}>{icon}</span>
+        <h3 className="text-xs font-semibold uppercase tracking-widest"
+            style={{ color: 'var(--text-muted)' }}>
+          {title}
+        </h3>
+      </div>
+      <div className="flex items-center gap-2">
+        {action}
+        {mobileCollapse && (
+          <ChevronDown
+            className={cn('w-4 h-4 transition-transform md:hidden', open && 'rotate-180')}
+            style={{ color: 'var(--text-muted)' }}
+          />
+        )}
+      </div>
+    </>
+  )
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span style={{ color: 'var(--accent-gold)' }}>{icon}</span>
-          <h3 className="text-xs font-semibold uppercase tracking-widest"
-              style={{ color: 'var(--text-muted)' }}>
-            {title}
-          </h3>
+      {mobileCollapse ? (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center justify-between w-full text-left md:cursor-default"
+        >
+          {header}
+        </button>
+      ) : (
+        <div className="flex items-center justify-between">
+          {header}
         </div>
-        {action}
-      </div>
+      )}
       <div
-        className="pl-4 ml-2"
+        className={cn('pl-4 ml-2', mobileCollapse && !open && 'hidden md:block')}
         style={{ borderLeft: '2px solid var(--border)' }}
       >
         {children}

@@ -1,4 +1,5 @@
 import { requireOrgMember } from '@/lib/auth'
+import { createServiceClient } from '@/lib/supabase/server'
 import { OpsSnapshot } from './ops-snapshot'
 import { addDays, subDays, startOfDay, endOfDay } from 'date-fns'
 import type { Metadata } from 'next'
@@ -73,6 +74,17 @@ export default async function OpsSnapshotPage() {
     (i) => i.current_quantity <= i.par_level
   )
 
+  const admin = createServiceClient()
+  const { data: ownerRezConnection } = await admin
+    .from('integration_connections')
+    .select('id')
+    .eq('org_id', membership.org_id)
+    .eq('provider_id', 'ownerrez')
+    .eq('status', 'active')
+    .maybeSingle()
+
+  const showOwnerRezNudge = !ownerRezConnection
+
   const allTurnovers   = turnovers ?? []
   const openWorkOrders = openWOs ?? []
 
@@ -120,6 +132,7 @@ export default async function OpsSnapshotPage() {
         belowPar:         lowStockItems.length,
       }}
       metrics={{ occupancyRate, confirmedBookings, turnoversCompleted }}
+      showOwnerRezNudge={showOwnerRezNudge}
     />
   )
 }

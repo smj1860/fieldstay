@@ -13,6 +13,8 @@ import type { InventoryCategory, PoStatus } from '@/types/database'
 import { PortfolioInventoryView } from './portfolio-view'
 import { TemplateManager } from './template-manager'
 import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
+import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
+import { NudgeBanner } from '@/components/nudge-banner'
 import type { CartBuildResult } from '@/lib/kroger/types'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -659,33 +661,53 @@ function CategoryRows({ category, items }: { category: InventoryCategory; items:
           {INVENTORY_CATEGORY_LABELS[category]}
         </span>
       </div>
-      {items.map((item) => (
-        <div
-          key={item.id}
-          className={cn(
-            'grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2.5 items-center text-sm',
-            getStockStatus(item) === 'critical' && 'bg-red-50/40',
-            getStockStatus(item) === 'low'      && 'bg-amber-50/30',
-          )}
-        >
-          <div className="min-w-0">
-            <span className="font-medium text-primary-themed truncate block">{item.name}</span>
-            {item.notes && (
-              <span className="text-xs text-muted-themed truncate block">{item.notes}</span>
+
+      {/* Mobile card layout */}
+      <div className="md:hidden p-3 space-y-2">
+        {items.map((item) => (
+          <InventoryItemCard
+            key={item.id}
+            id={item.id}
+            name={item.name}
+            category={item.category}
+            unit={item.unit}
+            parLevel={item.par_level}
+            currentQuantity={item.current_quantity}
+            variant="pm"
+          />
+        ))}
+      </div>
+
+      {/* Desktop table rows — unchanged */}
+      <div className="hidden md:contents">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className={cn(
+              'grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2.5 items-center text-sm',
+              getStockStatus(item) === 'critical' && 'bg-red-50/40',
+              getStockStatus(item) === 'low'      && 'bg-amber-50/30',
             )}
+          >
+            <div className="min-w-0">
+              <span className="font-medium text-primary-themed truncate block">{item.name}</span>
+              {item.notes && (
+                <span className="text-xs text-muted-themed truncate block">{item.notes}</span>
+              )}
+            </div>
+            <div className="text-right tabular-nums font-medium text-primary-themed">
+              {item.current_quantity}
+            </div>
+            <div className="text-right">
+              <ParLevelEditor item={item} />
+            </div>
+            <div className="text-right text-muted-themed text-xs">{item.unit}</div>
+            <div className="text-right">
+              <StockBadge item={item} />
+            </div>
           </div>
-          <div className="text-right tabular-nums font-medium text-primary-themed">
-            {item.current_quantity}
-          </div>
-          <div className="text-right">
-            <ParLevelEditor item={item} />
-          </div>
-          <div className="text-right text-muted-themed text-xs">{item.unit}</div>
-          <div className="text-right">
-            <StockBadge item={item} />
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </>
   )
 }
@@ -776,7 +798,7 @@ function PropertyInventoryDetail({
             ) : (
               <div className="overflow-x-auto">
               <div className="divide-y divide-themed min-w-[480px]">
-                <div className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
+                <div className="hidden md:grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
                   <span>Item</span>
                   <span className="text-right">Current</span>
                   <span className="text-right">Par</span>
@@ -1139,6 +1161,7 @@ export function InventoryManager({
   pendingDrafts,
   orgId,
   cartData,
+  showKrogerNudge = false,
 }: {
   properties: Property[]
   items: InventoryItem[]
@@ -1150,6 +1173,7 @@ export function InventoryManager({
   pendingDrafts: PendingDraft[]
   orgId: string
   cartData: (CartBuildResult & { built_at: string; location_name: string }) | null
+  showKrogerNudge?: boolean
 }) {
   const router = useRouter()
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
@@ -1171,6 +1195,15 @@ export function InventoryManager({
 
   return (
     <>
+      {showKrogerNudge && (
+        <NudgeBanner
+          id="kroger-cart-intro"
+          message="Below-par items can automatically build a Kroger shopping cart for same-day reordering."
+          href="/settings?tab=integrations"
+          linkText="Connect your store"
+        />
+      )}
+
       <div className="page-header flex items-start justify-between">
         <div>
           <h1 className="page-title">Inventory</h1>
