@@ -138,18 +138,19 @@ export const dailyAssetHealth = inngest.createFunction(
             }
           }
 
-          // Run all score writes for this org concurrently instead of sequentially.
-          // (Can't use a single bulk upsert here — property_assets has other NOT NULL
-          // columns like name/property_id that aren't part of this partial update.)
           if (updates.length > 0) {
-            await Promise.all(
-              updates.map((u) =>
-                supabase
-                  .from('property_assets')
-                  .update({ health_score: u.health_score, health_score_updated_at: u.health_score_updated_at })
-                  .eq('id', u.id)
+            // Single round trip per org — upsert with onConflict: 'id' only updates
+            // the columns provided; all other NOT NULL columns are untouched.
+            await supabase
+              .from('property_assets')
+              .upsert(
+                updates.map((u) => ({
+                  id:                      u.id,
+                  health_score:            u.health_score,
+                  health_score_updated_at: u.health_score_updated_at,
+                })),
+                { onConflict: 'id' }
               )
-            )
           }
 
           if (crossings.length > 0) {

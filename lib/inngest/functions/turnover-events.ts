@@ -166,8 +166,11 @@ export const handleTurnoverCompleted = inngest.createFunction(
     retries: 2,
   },
   { event: 'turnover/completed' as const },
-  async ({ event, step }) => {
+  async ({ event, step, logger }) => {
     const { turnover_id, property_id, org_id } = event.data
+    const workflowId = crypto.randomUUID()
+
+    logger.info('turnover-completed start', { workflowId, turnover_id })
 
     await step.run('notify-pm-of-completion', async () => {
       const supabase = createServiceClient()
@@ -305,6 +308,8 @@ export const handleTurnoverCompleted = inngest.createFunction(
 
       return { updated_rows: updatedRows?.length ?? 0, duration_minutes: Math.round(durationMinutes) }
     })
+
+    logger.info('turnover-completed done', { workflowId, turnover_id })
 
     return { turnover_id, notified: true }
   }

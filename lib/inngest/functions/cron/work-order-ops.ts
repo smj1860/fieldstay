@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { getPmEmail, getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
+import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 /**
@@ -60,11 +60,26 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     logger.info(`Found ${autoWOSchedules.length} schedules eligible for auto-WO creation`)
 
-    // ── Batch-resolve PM emails for every org touched by aging WOs or auto-WO schedules ──
+    // ── Pre-collect org IDs with repeat issues so their PM emails are batched below ──
+    const repeatIssueOrgIds = await step.run('find-repeat-issue-org-ids', async () => {
+      const ninetyDaysAgo = new Date(today)
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
+
+      const { data } = await supabase
+        .from('work_orders')
+        .select('org_id')
+        .neq('status', 'cancelled')
+        .gte('created_at', ninetyDaysAgo.toISOString())
+
+      return [...new Set((data ?? []).map((w) => w.org_id))]
+    })
+
+    // ── Batch-resolve PM emails for every org touched by aging WOs, auto-WO schedules, or repeat issues ──
     const pmEmailEntries = await step.run('find-pm-emails', async () => {
       const orgIds = Array.from(new Set([
         ...agingWOs.map((wo) => wo.org_id),
         ...autoWOSchedules.map((s) => s.org_id),
+        ...repeatIssueOrgIds,
       ]))
       const emails = await getPmEmailsByOrgIds(supabase, orgIds)
       return Array.from(emails.entries())
@@ -166,7 +181,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
           },
         })
 
-        const pmEmail = await getPmEmail(supabase, group.org_id)
+        const pmEmail = pmEmailByOrg.get(group.org_id) ?? null
         if (pmEmail) {
           await resend.emails.send({
             from:    FROM,
@@ -293,9 +308,20 @@ export const dailyWorkOrderOps = inngest.createFunction(
       })
     }
 
+    // ── Webhook inbox TTL cleanup ─────────────────────────────────────────────
+    // Removes ownerrez_processed_webhooks entries older than 72 hours.
+    // Moved off the webhook hot path — runs once daily here instead.
+    await step.run('cleanup-ownerrez-webhook-inbox', async () => {
+      await supabase
+        .from('ownerrez_processed_webhooks')
+        .delete()
+        .lt('processed_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
+    })
+
     return {
-      aging_escalated:    agingWOs.length,
-      auto_wos_attempted: autoWOSchedules.length,
+      aging_escalated:       agingWOs.length,
+      auto_wos_attempted:    autoWOSchedules.length,
+      webhook_inbox_cleaned: true,
     }
   }
 )

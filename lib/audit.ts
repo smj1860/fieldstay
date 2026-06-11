@@ -46,13 +46,14 @@ export type AuditAction =
   | 'account.password_changed'
 
 interface AuditParams {
-  orgId?:      string
-  actorId?:    string
-  action:      AuditAction
-  targetType?: string
-  targetId?:   string
-  metadata?:   Record<string, unknown>
-  ipAddress?:  string
+  orgId?:         string
+  actorId?:       string
+  action:         AuditAction
+  targetType?:    string
+  targetId?:      string
+  metadata?:      Record<string, unknown>
+  ipAddress?:     string
+  correlationId?: string
 }
 
 export async function logAuditEvent(params: AuditParams): Promise<void> {
@@ -64,8 +65,11 @@ export async function logAuditEvent(params: AuditParams): Promise<void> {
       action:      params.action,
       target_type: params.targetType ?? null,
       target_id:   params.targetId   ?? null,
-      metadata:    params.metadata   ?? null,
       ip_address:  params.ipAddress  ?? null,
+      metadata: {
+        ...(params.metadata ?? {}),
+        ...(params.correlationId ? { correlation_id: params.correlationId } : {}),
+      },
     })
   } catch (err) {
     // Audit failures must never crash the main flow — log and continue
