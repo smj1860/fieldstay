@@ -9,7 +9,7 @@ export default async function MaintenancePage({ params }: Props) {
   const { id } = await params
   const { property, supabase, membership } = await requireProperty(id)
 
-  const [{ data: schedules }, { data: vendors }] = await Promise.all([
+  const [{ data: schedules }, { data: vendors }, { data: siblingSchedules }] = await Promise.all([
     supabase
       .from('maintenance_schedules')
       .select('*, vendors(name)')
@@ -22,7 +22,24 @@ export default async function MaintenancePage({ params }: Props) {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
+    supabase
+      .from('maintenance_schedules')
+      .select('property_id, properties!inner(name)')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .neq('property_id', property.id),
   ])
+
+  const scheduleCountByProperty: Record<string, number> = {}
+  const propNameBySchedule: Record<string, string> = {}
+  for (const row of siblingSchedules ?? []) {
+    scheduleCountByProperty[row.property_id] = (scheduleCountByProperty[row.property_id] ?? 0) + 1
+    const p = Array.isArray(row.properties) ? row.properties[0] : row.properties
+    if (p?.name) propNameBySchedule[row.property_id] = p.name
+  }
+  const sourceProperties = Object.entries(scheduleCountByProperty)
+    .map(([sid, scheduleCount]) => ({ id: sid, name: propNameBySchedule[sid] ?? sid, scheduleCount }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
     <div className="card">
@@ -35,6 +52,7 @@ export default async function MaintenancePage({ params }: Props) {
         propertyId={property.id}
         schedules={schedules ?? []}
         vendors={vendors ?? []}
+        sourceProperties={sourceProperties}
       />
     </div>
   )

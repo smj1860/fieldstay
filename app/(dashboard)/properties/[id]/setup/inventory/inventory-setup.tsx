@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { upsertInventoryItems, deleteInventoryItem, completeInventoryStep, applyTemplateToProperty } from './actions'
+import { upsertInventoryItems, deleteInventoryItem, completeInventoryStep, applyTemplateToProperty, cloneInventoryFromProperty } from './actions'
 import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import type { InventoryCatalogItem, InventoryItem, InventoryCategory } from '@/types/database'
@@ -28,6 +28,7 @@ export function InventorySetup({
   templateBrands = {},
   templateId,
   templateName,
+  sourceProperties = [],
 }: {
   propertyId: string
   catalogItems: InventoryCatalogItem[]
@@ -35,6 +36,7 @@ export function InventorySetup({
   templateBrands?: Record<string, string | null>
   templateId?: string
   templateName?: string
+  sourceProperties?: { id: string; name: string; itemCount: number }[]
 }) {
   const [items, setItems] = useState<EditableItem[]>(
     existingItems.map((i) => ({
@@ -52,6 +54,10 @@ export function InventorySetup({
   const [error, setError] = useState<string | null>(null)
   const [applying, startApply] = useTransition()
   const [applyResult, setApplyResult] = useState<{ added: number; skipped: number } | null>(null)
+  const [cloneModal, setCloneModal] = useState(false)
+  const [cloneSource, setCloneSource] = useState('')
+  const [cloning, startClone] = useTransition()
+  const [, setCloneResult] = useState<{ added: number; skipped: number } | null>(null)
 
   // Group catalog by category
   const catalogByCategory = catalogItems.reduce<Record<string, InventoryCatalogItem[]>>((acc, item) => {
@@ -104,6 +110,17 @@ export function InventorySetup({
 
   const dirtyCount = items.filter((i) => i.isDirty).length
 
+  const handleClone = () => {
+    if (!cloneSource) return
+    startClone(async () => {
+      const res = await cloneInventoryFromProperty(cloneSource, propertyId)
+      if (res.error) { setError(res.error); return }
+      setCloneResult({ added: res.added, skipped: res.skipped })
+      setCloneModal(false)
+      window.location.reload()
+    })
+  }
+
   const handleApplyTemplate = () => {
     if (!templateId) return
     startApply(async () => {
@@ -121,6 +138,56 @@ export function InventorySetup({
     <div className="space-y-6">
       {error && (
         <div className="border text-sm rounded-lg px-4 py-3" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{error}</div>
+      )}
+
+      {items.length === 0 && sourceProperties.length > 0 && (
+        <div
+          className="rounded-xl px-4 py-4 flex items-center justify-between gap-4"
+          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <p className="text-sm font-semibold text-primary-themed">Copy from another property</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              Duplicate the inventory list from an existing property.
+            </p>
+          </div>
+          <button onClick={() => setCloneModal(true)} className="btn-secondary text-xs whitespace-nowrap">
+            Clone Inventory
+          </button>
+        </div>
+      )}
+
+      {cloneModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-sm p-6">
+            <h3 className="font-semibold text-primary-themed mb-1">Clone Inventory From</h3>
+            <p className="text-xs text-muted-themed mb-4">
+              Items already on this property will be skipped. Counts are not copied — only par levels and items.
+            </p>
+            <select
+              value={cloneSource}
+              onChange={e => setCloneSource(e.target.value)}
+              className="input w-full mb-4"
+            >
+              <option value="">Select a property…</option>
+              {sourceProperties.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.itemCount} items)
+                </option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <button
+                onClick={handleClone}
+                disabled={!cloneSource || cloning}
+                className="btn-primary flex-1"
+              >
+                {cloning ? 'Cloning…' : 'Clone Items'}
+              </button>
+              <button onClick={() => setCloneModal(false)} className="btn-ghost">Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {templateId && items.length === 0 && (

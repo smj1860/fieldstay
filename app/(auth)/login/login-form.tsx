@@ -5,6 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 
+const ERROR_MESSAGES: Record<string, string> = {
+  auth_callback:              'Sign-in failed. Please try again.',
+  auth_callback_missing_code: 'The sign-in link is incomplete. Please request a new one.',
+  link_expired:               'This sign-in link has expired. Please request a new one.',
+  already_used:               'This sign-in link has already been used. Please sign in directly.',
+}
+
 export function LoginForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
@@ -14,6 +21,9 @@ export function LoginForm() {
   const [password, setPassword] = useState('')
   const [error,    setError]    = useState<string | null>(null)
   const [loading,  setLoading]  = useState(false)
+
+  const errorCode    = searchParams.get('error')
+  const callbackError = errorCode ? (ERROR_MESSAGES[errorCode] ?? 'Something went wrong. Please try again.') : null
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -35,6 +45,15 @@ export function LoginForm() {
 
   return (
     <div className="space-y-4">
+      {callbackError && (
+        <div
+          className="px-4 py-3 rounded-lg text-sm"
+          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}
+        >
+          {callbackError}
+        </div>
+      )}
+
       <GoogleSignInButton next={next} label="Sign in with Google" />
 
       <div className="relative my-4">

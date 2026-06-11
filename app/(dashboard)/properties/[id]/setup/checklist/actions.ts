@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvent } from '@/lib/audit'
 
 export type ChecklistState = { error?: string; success?: boolean }
 
@@ -107,4 +108,25 @@ export async function broadcastChecklistTemplate(
 
   revalidatePath('/properties')
   return { broadcast: targetPropertyIds.length }
+}
+
+export async function cloneChecklistFromProperty(
+  sourcePropertyId: string,
+  targetPropertyId: string,
+): Promise<{ broadcast: number; error?: string }> {
+  const { user, membership } = await requireOrgMember()
+
+  const result = await broadcastChecklistTemplate(sourcePropertyId, [targetPropertyId])
+  if (result.error) return result
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.checklist.cloned',
+    targetType: 'property',
+    targetId:   targetPropertyId,
+    metadata:   { sourcePropertyId },
+  })
+
+  return result
 }

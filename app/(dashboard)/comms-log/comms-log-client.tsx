@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useActionState, useMemo } from 'react'
+import Link from 'next/link'
 import {
   Plus, X, Search, ChevronDown, ChevronUp, Trash2,
   Mail, Phone, MessageSquare, Users, Briefcase,
@@ -33,6 +34,12 @@ interface LogEntry {
 interface PersonOption     { id: string; name: string; specialty?: string }
 interface PropertyOption   { id: string; name: string }
 interface WorkOrderOption  { id: string; title: string }
+
+function getEntityLink(entry: LogEntry): { href: string; label: string } | null {
+  if (entry.work_order_id) return { href: `/maintenance/${entry.work_order_id}`, label: 'View work order →' }
+  if (entry.property_id)   return { href: `/properties/${entry.property_id}`,    label: 'View property →' }
+  return null
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -158,6 +165,19 @@ function LogRow({ entry }: { entry: LogEntry }) {
                 No message body recorded.
               </p>
             )}
+
+            {(() => {
+              const link = getEntityLink(entry)
+              return link ? (
+                <Link
+                  href={link.href}
+                  className="text-xs font-medium inline-block"
+                  style={{ color: 'var(--accent-gold)' }}
+                >
+                  {link.label}
+                </Link>
+              ) : null
+            })()}
 
             <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
               <span>Logged {formatDateTime(entry.communicated_at)}</span>

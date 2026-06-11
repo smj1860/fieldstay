@@ -1,7 +1,7 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
-import { addMaintenanceSchedule, deleteMaintenanceSchedule, completeMaintenanceStep } from './actions'
+import { useActionState, useEffect, useState, useTransition } from 'react'
+import { addMaintenanceSchedule, deleteMaintenanceSchedule, completeMaintenanceStep, cloneMaintenanceFromProperty } from './actions'
 import { Plus, Trash2, RefreshCw, Calendar } from 'lucide-react'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -46,10 +46,12 @@ export function MaintenanceScheduleManager({
   propertyId,
   schedules,
   vendors,
+  sourceProperties = [],
 }: {
   propertyId: string
   schedules: Schedule[]
   vendors: { id: string; name: string; specialty: string }[]
+  sourceProperties?: { id: string; name: string; scheduleCount: number }[]
 }) {
   const addAction = addMaintenanceSchedule.bind(null, propertyId)
   const [state, formAction, pending] = useActionState(addAction, null)
@@ -59,6 +61,11 @@ export function MaintenanceScheduleManager({
   const [prefilledName, setPrefilledName]           = useState('')
   const [prefilledFrequency, setPrefilledFrequency] = useState('quarterly')
   const [prefilledMonth, setPrefilledMonth]         = useState<number | ''>('')
+  const [cloneModal, setCloneModal] = useState(false)
+  const [cloneSource, setCloneSource] = useState('')
+  const [cloning, startClone] = useTransition()
+  const [cloneError, setCloneError] = useState<string | null>(null)
+  const [cloneSuccess, setCloneSuccess] = useState<string | null>(null)
 
   const prefill = (values: Partial<{ name: string; frequency: string; month_due: number }>) => {
     setPrefilledName(values.name ?? '')
@@ -82,8 +89,80 @@ export function MaintenanceScheduleManager({
     }
   }, [state?.success])
 
+  const handleClone = () => {
+    if (!cloneSource) return
+    startClone(async () => {
+      const res = await cloneMaintenanceFromProperty(cloneSource, propertyId)
+      if (res.error) { setCloneError(res.error); return }
+      setCloneModal(false)
+      setCloneSuccess(`${res.added} schedules added, dates reset to unscheduled`)
+      setTimeout(() => window.location.reload(), 1200)
+    })
+  }
+
   return (
     <div className="space-y-6">
+      {cloneSuccess && (
+        <div className="rounded-lg px-4 py-3 text-sm flex items-center gap-2"
+             style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
+          &#10003; {cloneSuccess}
+        </div>
+      )}
+
+      {/* Clone from another property */}
+      {schedules.length === 0 && sourceProperties.length > 0 && (
+        <div
+          className="rounded-xl px-4 py-4 flex items-center justify-between gap-4"
+          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
+        >
+          <div>
+            <p className="text-sm font-semibold text-primary-themed">Copy from another property</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              Duplicate maintenance schedules from an existing property. Due dates start fresh.
+            </p>
+          </div>
+          <button onClick={() => setCloneModal(true)} className="btn-secondary text-xs whitespace-nowrap">
+            Clone Schedules
+          </button>
+        </div>
+      )}
+
+      {cloneModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-sm p-6">
+            <h3 className="font-semibold text-primary-themed mb-1">Clone Schedules From</h3>
+            <p className="text-xs text-muted-themed mb-4">
+              Schedules already on this property will be skipped. Due dates are reset to unscheduled.
+            </p>
+            {cloneError && (
+              <div className="border text-sm rounded-lg px-3 py-2 mb-3" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{cloneError}</div>
+            )}
+            <select
+              value={cloneSource}
+              onChange={e => setCloneSource(e.target.value)}
+              className="input w-full mb-4"
+            >
+              <option value="">Select a property…</option>
+              {sourceProperties.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.scheduleCount} schedules)
+                </option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <button
+                onClick={handleClone}
+                disabled={!cloneSource || cloning}
+                className="btn-primary flex-1"
+              >
+                {cloning ? 'Cloning…' : 'Clone Schedules'}
+              </button>
+              <button onClick={() => setCloneModal(false)} className="btn-ghost">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Existing schedules */}
       {schedules.length > 0 && (
         <div className="space-y-2">
