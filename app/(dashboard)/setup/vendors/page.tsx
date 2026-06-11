@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '../actions'
 
@@ -50,11 +49,14 @@ export default async function OnboardingVendorsPage() {
           ))}
         </div>
       ) : (
-        <div className="card p-6 text-center" style={{ color: 'var(--text-muted)' }}>
-          <p className="text-sm mb-3">No vendors yet.</p>
-          <Link href="/vendors" className="btn-secondary text-sm">
+        <div className="rounded-xl p-6 text-center" style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}>
+          <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>No vendors yet.</p>
+          <a href="/vendors" target="_blank" rel="noopener noreferrer" className="btn-secondary text-sm">
             Add vendors in Vendors section →
-          </Link>
+          </a>
+          <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>
+            Tip: The Vendors section supports bulk CSV import.
+          </p>
         </div>
       )}
 
@@ -64,11 +66,6 @@ export default async function OnboardingVendorsPage() {
             {vendors && vendors.length > 0 ? 'Continue →' : 'Skip for now →'}
           </button>
         </form>
-        {(vendors?.length ?? 0) === 0 && (
-          <Link href="/vendors" className="btn-secondary">
-            Add vendors
-          </Link>
-        )}
       </div>
     </div>
   )

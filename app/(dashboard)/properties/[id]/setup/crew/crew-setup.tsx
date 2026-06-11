@@ -98,6 +98,26 @@ export function CrewSetup({
             </div>
           </form>
         </div>
+      ) : crew.length > 0 ? (
+        <div className="space-y-3">
+          <button onClick={() => setShowForm(true)} className="btn-primary w-full justify-center">
+            <Plus className="w-4 h-4" /> Add Another Crew Member
+          </button>
+          <div className="rounded-lg p-4" style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}>
+            <p className="text-sm text-secondary-themed mb-1">
+              Have a team? Upload a CSV with columns: name, email, phone, specialty
+            </p>
+            <a
+              href="/crew-manage"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-medium"
+              style={{ color: 'var(--accent-gold)' }}
+            >
+              Bulk import in Crew Manager →
+            </a>
+          </div>
+        </div>
       ) : (
         <button onClick={() => setShowForm(true)} className="btn-secondary w-full justify-center border-dashed">
           <Plus className="w-4 h-4" /> Add Crew Member

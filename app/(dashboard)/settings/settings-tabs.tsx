@@ -344,8 +344,12 @@ function OrgTab({ org, connections }: { org: Organization; connections: Record<s
       {/* Kroger — Grocery Cart Automation */}
       <div className="card">
         <h2 className="text-base font-semibold text-primary-themed mb-1">Grocery Cart Automation</h2>
-        <p className="text-xs text-muted-themed mb-4">
+        <p className="text-xs text-muted-themed mb-1">
           Connect your Kroger account to build shopping carts automatically from below-par inventory.
+        </p>
+        <p className="text-xs text-muted-themed mb-4" style={{ fontStyle: 'italic' }}>
+          Works across the entire Kroger family of stores — Ralphs, Fred Meyer, King Soopers, Smith&apos;s, Fry&apos;s, QFC,
+          City Market, Dillons, Mariano&apos;s, Pick &apos;n Save, Metro Market, Harris Teeter, Gerbes, and Baker&apos;s.
         </p>
         {connections.kroger ? (
           <div className="flex items-center justify-between gap-4 flex-wrap">

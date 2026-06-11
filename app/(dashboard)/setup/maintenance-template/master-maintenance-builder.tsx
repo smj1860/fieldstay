@@ -85,10 +85,27 @@ export function MasterMaintenanceBuilder({
           className="rounded-xl p-4"
           style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
         >
-          <p className="text-xs font-semibold uppercase tracking-wide mb-3"
-             style={{ color: 'var(--text-muted)' }}>
-            Suggested Schedules — tap to add
-          </p>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold uppercase tracking-wide"
+               style={{ color: 'var(--text-muted)' }}>
+              Suggested Schedules — tap to add
+            </p>
+            {suggestionItems.some((s) => !schedules.some((existing) => existing.title === s.title)) && (
+              <button
+                type="button"
+                onClick={() => {
+                  const toAdd = suggestionItems
+                    .filter((s) => !schedules.some((existing) => existing.title === s.title))
+                    .map((s) => ({ title: s.title, description: s.description, frequency: s.frequency, specialty: s.specialty, estimated_cost: s.estimated_cost }))
+                  setSchedules((prev) => [...prev, ...toAdd])
+                }}
+                className="text-xs font-medium"
+                style={{ color: 'var(--accent-gold)' }}
+              >
+                Add all
+              </button>
+            )}
+          </div>
           <div className="flex flex-wrap gap-2">
             {suggestionItems
               .filter((s) => !schedules.some((existing) => existing.title === s.title))

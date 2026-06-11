@@ -523,6 +523,12 @@ export async function inviteCrewMember(
             Accept Invitation →
           </a>
         </p>
+        <p style="color:#e2e8f0">
+          <strong>Tip:</strong> FieldStay works best installed as an app on your phone.
+          After accepting your invite, open the link on your phone and use your browser's
+          "Add to Home Screen" (iPhone) or "Install App" (Android) option to add FieldStay
+          to your home screen.
+        </p>
         <p style="color:#6C757D;font-size:13px">
           This link expires in 7 days. If you weren't expecting this, you can safely ignore it.
         </p>
