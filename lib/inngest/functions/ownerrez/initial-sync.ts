@@ -12,7 +12,7 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
-import { RateLimitError, TokenRevokedError } from '@/lib/integrations/types'
+import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import type { OwnerRezProperty, OwnerRezBooking } from '@/lib/integrations/types'
 import { logAuditEvent }        from '@/lib/audit'
 
@@ -32,210 +32,269 @@ export const ownerRezInitialSync = inngest.createFunction(
 
     const client = new OwnerRezApiClient(user_id)
 
-    // ── Step 1: Fetch and upsert properties ─────────────────────────────────
+    try {
+      // ── Step 1: Fetch and upsert properties ───────────────────────────────
 
-    const fetchPropsResult = await step.run('fetch-properties', async () => {
-      await logAuditEvent({
-        actorId:    user_id,
-        orgId:      org_id,
-        action:     'integration.sync_triggered',
-        targetType: 'integration_connection',
-        targetId:   PROVIDER,
-        metadata:   { sync_type: 'initial', workflow_id: workflowId },
-      })
+      const fetchPropsResult = await step.run('fetch-properties', async () => {
+        await logAuditEvent({
+          actorId:    user_id,
+          orgId:      org_id,
+          action:     'integration.sync_triggered',
+          targetType: 'integration_connection',
+          targetId:   PROVIDER,
+          metadata:   { sync_type: 'initial', workflow_id: workflowId },
+        })
 
-      let properties: OwnerRezProperty[]
+        let properties: OwnerRezProperty[]
 
-      try {
-        properties = await client.getProperties()
-      } catch (err) {
-        if (err instanceof RateLimitError) {
-          throw err // Inngest will retry
-        }
-        throw err
-      }
-
-      if (!properties.length) return { ids: [] as number[], patchData: [] as typeof patchData }
-
-      const patchData = properties.map((p) => ({
-        externalId: String(p.id),
-        bedrooms:   p.bedrooms,
-        bathrooms:  p.bathrooms,
-        sqft:       p.sqft ?? p.square_feet ?? p.size ?? null,
-      }))
-
-      const supabase = createServiceClient()
-      const rows = properties.map((p) => ({
-        org_id,
-        name:            p.name,
-        bedrooms:        p.bedrooms,
-        bathrooms:       p.bathrooms,
-        max_guests:      p.max_occupancy,
-        external_id:     String(p.id),
-        external_source: PROVIDER,
-        // Required fields with defaults
-        property_type:              'other',
-        avg_stay_length:            0,
-        avg_turnovers_per_month:    0,
-        checkout_time:              '11:00',
-        checkin_time:               '15:00',
-        setup_steps_completed:      {},
-        is_active:                  true,
-      }))
-
-      const { error } = await supabase
-        .from('properties')
-        .upsert(rows, { onConflict: 'external_id,external_source' })
-
-      if (error) {
-        logger.error(`[OwnerRez:${user_id}] properties upsert failed: ${error.message}`)
-        throw new Error(error.message)
-      }
-
-      logger.info(`[OwnerRez:${user_id}] Upserted ${rows.length} properties`)
-
-      return { ids: properties.map((p) => p.id), patchData }
-    })
-
-    // ── Step 1b: Patch null property fields from OwnerRez data ───────────────
-    // Only fills fields that are currently NULL — never overwrites PM-entered data
-
-    await step.run('patch-property-fields', async () => {
-      if (!fetchPropsResult.patchData.length) return
-
-      const supabase    = createServiceClient()
-      const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
-
-      const { data: existingProps } = await supabase
-        .from('properties')
-        .select('id, external_id, bedrooms, bathrooms, square_footage')
-        .eq('org_id', org_id)
-        .eq('external_source', PROVIDER)
-        .in('external_id', externalIds)
-
-      if (!existingProps?.length) return
-
-      // MEDIUM-2: collect patch failures rather than silently swallowing them
-      const failures: string[] = []
-
-      for (const existing of existingProps) {
-        const orData = fetchPropsResult.patchData.find((p) => p.externalId === existing.external_id)
-        if (!orData) continue
-
-        const patch: Record<string, unknown> = {}
-
-        if (orData.bedrooms  != null && !existing.bedrooms)
-          patch.bedrooms = orData.bedrooms
-
-        if (orData.bathrooms != null && existing.bathrooms == null)
-          patch.bathrooms = orData.bathrooms
-
-        if (orData.sqft != null && !existing.square_footage)
-          patch.square_footage = orData.sqft
-
-        if (Object.keys(patch).length > 0) {
-          const { error } = await supabase
-            .from('properties')
-            .update(patch)
-            .eq('id', existing.id)
-          if (error) failures.push(`${existing.id}: ${error.message}`)
-        }
-      }
-
-      if (failures.length) {
-        // Non-fatal: don't throw — patch failures don't block the booking sync
-        logger.error(`[OwnerRez:${user_id}] Property patch failures: ${failures.join(', ')}`)
-      }
-
-      logger.info(`[OwnerRez:${user_id}] Patched null fields on ${existingProps.length} properties`)
-    })
-
-    // ── Step 2: Fetch and upsert bookings ────────────────────────────────────
-
-    const syncCursor = await step.run('fetch-bookings', async () => {
-      if (!fetchPropsResult.ids.length) return new Date().toISOString()
-
-      // MEDIUM-3: capture pre-fetch timestamp as cursor value.
-      // Using post-fetch time would miss bookings modified during the fetch window
-      // (which can be 30-90 seconds for large tenant histories).
-      const fetchStartedAt = new Date().toISOString()
-
-      let bookings: OwnerRezBooking[]
-
-      try {
-        bookings = await client.getBookings({ propertyIds: fetchPropsResult.ids, includeGuest: true })
-      } catch (err) {
-        if (err instanceof RateLimitError) {
+        try {
+          properties = await client.getProperties()
+        } catch (err) {
+          if (err instanceof RateLimitError) {
+            throw err // Inngest will retry
+          }
           throw err
         }
-        throw err
-      }
 
-      if (bookings.length) {
-        const supabase   = createServiceClient()
+        if (!properties.length) return { ids: [] as number[], patchData: [] as typeof patchData }
 
-        // Resolve FieldStay property IDs from external IDs
-        const { data: fsProps } = await supabase
-          .from('properties')
-          .select('id, external_id')
-          .eq('org_id', org_id)
-          .eq('external_source', PROVIDER)
-          .in('external_id', fetchPropsResult.ids.map(String))
+        const patchData = properties.map((p) => ({
+          externalId: String(p.id),
+          bedrooms:   p.bedrooms,
+          bathrooms:  p.bathrooms,
+          sqft:       p.sqft ?? p.square_feet ?? p.size ?? null,
+        }))
 
-        const externalToFsId = Object.fromEntries(
-          (fsProps ?? []).map((p) => [p.external_id, p.id])
-        )
-
-        const bookingRows = bookings.map((b) => ({
+        const supabase = createServiceClient()
+        const rows = properties.map((p) => ({
           org_id,
-          property_id:     externalToFsId[String(b.property_id)] ?? null,
-          guest_name:      b.guest?.name  ?? null,
-          guest_email:     b.guest?.email ?? null,
-          checkin_date:    b.arrival,
-          checkout_date:   b.departure,
-          source:          mapChannelToSource(b.channel_name),
-          status:          mapBookingStatus(b.status),
-          external_id:     String(b.id),
+          name:            p.name,
+          bedrooms:        p.bedrooms,
+          bathrooms:       p.bathrooms,
+          max_guests:      p.max_occupancy,
+          external_id:     String(p.id),
           external_source: PROVIDER,
+          // Required fields with defaults
+          property_type:              'other',
+          avg_stay_length:            0,
+          avg_turnovers_per_month:    0,
+          checkout_time:              '11:00',
+          checkin_time:               '15:00',
+          setup_steps_completed:      {},
+          is_active:                  true,
         }))
 
         const { error } = await supabase
-          .from('bookings')
-          .upsert(bookingRows, { onConflict: 'external_id,external_source' })
+          .from('properties')
+          .upsert(rows, { onConflict: 'external_id,external_source' })
 
         if (error) {
-          logger.error(`[OwnerRez:${user_id}] bookings upsert failed: ${error.message}`)
+          logger.error(`[OwnerRez:${user_id}] properties upsert failed: ${error.message}`)
           throw new Error(error.message)
         }
 
-        logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
-      }
+        logger.info(`[OwnerRez:${user_id}] Upserted ${rows.length} properties`)
 
-      return fetchStartedAt  // MEDIUM-3: pre-fetch timestamp
-    })
+        return { ids: properties.map((p) => p.id), patchData }
+      })
 
-    // ── Step 3: Update sync metadata ─────────────────────────────────────────
+      // ── Step 1b: Patch null property fields from OwnerRez data ─────────────
+      // Only fills fields that are currently NULL — never overwrites PM-entered data
 
-    await step.run('update-last-synced', async () => {
-      const supabase = createServiceClient()
-      const { error } = await supabase
-        .from('integration_connections')
-        .update({
-          metadata: {
-            sync_cursor:     syncCursor,
-            last_synced_at:  new Date().toISOString(),
-          },
+      await step.run('patch-property-fields', async () => {
+        if (!fetchPropsResult.patchData.length) return
+
+        const supabase    = createServiceClient()
+        const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
+
+        const { data: existingProps } = await supabase
+          .from('properties')
+          .select('id, external_id, bedrooms, bathrooms, square_footage')
+          .eq('org_id', org_id)
+          .eq('external_source', PROVIDER)
+          .in('external_id', externalIds)
+
+        if (!existingProps?.length) return
+
+        // MEDIUM-2: collect patch failures rather than silently swallowing them
+        const failures: string[] = []
+
+        for (const existing of existingProps) {
+          const orData = fetchPropsResult.patchData.find((p) => p.externalId === existing.external_id)
+          if (!orData) continue
+
+          const patch: Record<string, unknown> = {}
+
+          if (orData.bedrooms  != null && !existing.bedrooms)
+            patch.bedrooms = orData.bedrooms
+
+          if (orData.bathrooms != null && existing.bathrooms == null)
+            patch.bathrooms = orData.bathrooms
+
+          if (orData.sqft != null && !existing.square_footage)
+            patch.square_footage = orData.sqft
+
+          if (Object.keys(patch).length > 0) {
+            const { error } = await supabase
+              .from('properties')
+              .update(patch)
+              .eq('id', existing.id)
+            if (error) failures.push(`${existing.id}: ${error.message}`)
+          }
+        }
+
+        if (failures.length) {
+          // Non-fatal: don't throw — patch failures don't block the booking sync
+          logger.error(`[OwnerRez:${user_id}] Property patch failures: ${failures.join(', ')}`)
+        }
+
+        logger.info(`[OwnerRez:${user_id}] Patched null fields on ${existingProps.length} properties`)
+      })
+
+      // ── Step 2: Fetch and upsert bookings ───────────────────────────────────
+
+      const fetchBookingsResult = await step.run('fetch-bookings', async () => {
+        if (!fetchPropsResult.ids.length) return { cursor: new Date().toISOString(), count: 0 }
+
+        // MEDIUM-3: capture pre-fetch timestamp as cursor value.
+        // Using post-fetch time would miss bookings modified during the fetch window
+        // (which can be 30-90 seconds for large tenant histories).
+        const fetchStartedAt = new Date().toISOString()
+
+        let bookings: OwnerRezBooking[]
+
+        try {
+          bookings = await client.getBookings({ propertyIds: fetchPropsResult.ids, includeGuest: true })
+        } catch (err) {
+          if (err instanceof RateLimitError) {
+            throw err
+          }
+          throw err
+        }
+
+        if (bookings.length) {
+          const supabase   = createServiceClient()
+
+          // Resolve FieldStay property IDs from external IDs
+          const { data: fsProps } = await supabase
+            .from('properties')
+            .select('id, external_id')
+            .eq('org_id', org_id)
+            .eq('external_source', PROVIDER)
+            .in('external_id', fetchPropsResult.ids.map(String))
+
+          const externalToFsId = Object.fromEntries(
+            (fsProps ?? []).map((p) => [p.external_id, p.id])
+          )
+
+          const bookingRows = bookings.map((b) => ({
+            org_id,
+            property_id:     externalToFsId[String(b.property_id)] ?? null,
+            guest_name:      b.guest?.name  ?? null,
+            guest_email:     b.guest?.email ?? null,
+            checkin_date:    b.arrival,
+            checkout_date:   b.departure,
+            source:          mapChannelToSource(b.channel_name),
+            status:          mapBookingStatus(b.status),
+            external_id:     String(b.id),
+            external_source: PROVIDER,
+          }))
+
+          const { error } = await supabase
+            .from('bookings')
+            .upsert(bookingRows, { onConflict: 'external_id,external_source' })
+
+          if (error) {
+            logger.error(`[OwnerRez:${user_id}] bookings upsert failed: ${error.message}`)
+            throw new Error(error.message)
+          }
+
+          logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
+        }
+
+        return { cursor: fetchStartedAt, count: bookings.length }  // MEDIUM-3: pre-fetch timestamp
+      })
+
+      // ── Step 3: Update sync metadata ────────────────────────────────────────
+
+      await step.run('update-last-synced', async () => {
+        const supabase = createServiceClient()
+
+        const { data: existing } = await supabase
+          .from('integration_connections')
+          .select('metadata')
+          .eq('user_id', user_id)
+          .eq('provider_id', PROVIDER)
+          .maybeSingle()
+
+        const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
+
+        const { error } = await supabase
+          .from('integration_connections')
+          .update({
+            metadata: {
+              ...existingMeta,
+              sync_cursor:       fetchBookingsResult.cursor,
+              last_synced_at:    new Date().toISOString(),
+              last_sync_status:  'success',
+              last_sync_error:   null,
+              last_sync_count:   fetchBookingsResult.count,
+            },
+          })
+          .eq('user_id', user_id)
+          .eq('provider_id', PROVIDER)
+
+        // MEDIUM-2: throw on cursor failure — a stale cursor causes full re-syncs
+        if (error) {
+          throw new Error(`[OwnerRez:${user_id}] Failed to persist sync cursor: ${error.message}`)
+        }
+      })
+    } catch (err) {
+      const humanError = translateSyncError(err)
+      logger.error(
+        `[OwnerRez:${user_id}] initial sync failed: ${err instanceof Error ? err.message : String(err)}`
+      )
+
+      await step.run('handle-sync-failure', async () => {
+        const supabase = createServiceClient()
+
+        const { data: existing } = await supabase
+          .from('integration_connections')
+          .select('metadata')
+          .eq('user_id', user_id)
+          .eq('provider_id', PROVIDER)
+          .maybeSingle()
+
+        const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
+
+        await supabase
+          .from('integration_connections')
+          .update({
+            status:   'error',
+            metadata: {
+              ...existingMeta,
+              last_sync_status: 'error',
+              last_sync_error:  humanError,
+              last_synced_at:   new Date().toISOString(),
+            },
+          })
+          .eq('user_id', user_id)
+          .eq('provider_id', PROVIDER)
+
+        await logAuditEvent({
+          orgId:      org_id,
+          actorId:    user_id,
+          action:     'integration.sync_failed',
+          targetType: 'integration_connection',
+          targetId:   PROVIDER,
+          metadata:   { provider_id: PROVIDER, error: humanError, workflow_id: workflowId, sync_type: 'initial' },
         })
-        .eq('user_id', user_id)
-        .eq('provider_id', PROVIDER)
+      })
 
-      // MEDIUM-2: throw on cursor failure — a stale cursor causes full re-syncs
-      if (error) {
-        throw new Error(`[OwnerRez:${user_id}] Failed to persist sync cursor: ${error.message}`)
-      }
-    })
+      return { user_id, synced: false }
+    }
 
-    // ── Step 4: Auto-activate RepuGuard ──────────────────────────────────────
+    // ── Step 4: Auto-activate RepuGuard ────────────────────────────────────────
 
     await step.run('auto-activate-repuguard', async () => {
       // RepuGuard is bundled for all OwnerRez users — activate on first connect.
@@ -248,7 +307,7 @@ export const ownerRezInitialSync = inngest.createFunction(
         .in('repuguard_status', ['inactive', 'cancelled'])
     })
 
-    // ── Step 5: Register entity webhook subscriptions ────────────────────────
+    // ── Step 5: Register entity webhook subscriptions ──────────────────────────
 
     await step.run('register-entity-webhooks', async () => {
       const appUrl = process.env.NEXT_PUBLIC_APP_URL
