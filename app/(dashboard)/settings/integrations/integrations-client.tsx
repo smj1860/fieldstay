@@ -96,12 +96,6 @@ function IntegrationCard({
             )}
           </div>
 
-          {provider.description && (
-            <p className="text-sm mb-2" style={{ color: 'var(--text-muted)' }}>
-              {provider.description}
-            </p>
-          )}
-
           {isConnected && connection && (
             <div className="text-xs space-y-0.5" style={{ color: 'var(--text-muted)' }}>
               {connection.external_user_id && (
