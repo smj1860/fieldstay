@@ -53,11 +53,21 @@ export default async function TeamPage() {
         <span className="text-sm text-secondary-themed">Team</span>
       </div>
 
-      <div className="page-header mb-6">
-        <h1 className="page-title">Team</h1>
-        <p className="page-subtitle">
-          Manage who has access to your FieldStay organization.
-        </p>
+      <div className="page-header mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="page-title">Team</h1>
+          <p className="page-subtitle">
+            Manage who has access to your FieldStay organization.
+          </p>
+        </div>
+        {membership.role === 'owner' && (
+          <a
+            href="#invite"
+            className="btn-primary text-sm flex-shrink-0 flex items-center gap-1.5"
+          >
+            Invite Member
+          </a>
+        )}
       </div>
 
       <TeamClient

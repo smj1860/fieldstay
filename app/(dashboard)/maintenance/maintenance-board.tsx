@@ -11,7 +11,7 @@ import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
 import {
   createWorkOrder, createWorkOrderFromSchedule,
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
-  broadcastMaintenanceTemplate, createMaintenanceScheduleTemplate, type BroadcastResult,
+  broadcastMaintenanceTemplate, createMaintenanceScheduleTemplate, updateMaintenanceTemplate, type BroadcastResult,
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency, ComplianceStatus } from '@/types/database'
 import { distanceMiles } from '@/lib/geocoding'
@@ -1746,8 +1746,10 @@ function TemplatesSection({
   const [open, setOpen]                             = useState(false)
   const [broadcastTemplateId, setBroadcastTemplateId] = useState<string | null>(null)
   const [showCreateTemplate, setShowCreateTemplate] = useState(false)
+  const [editTemplateId, setEditTemplateId]         = useState<string | null>(null)
 
   const broadcastTemplate = templates.find((t) => t.id === broadcastTemplateId) ?? null
+  const editTemplate = templates.find((t) => t.id === editTemplateId) ?? null
   const catalogItems = templates.find((t) => t.is_system)?.maintenance_schedule_template_items ?? []
 
   return (
@@ -1791,7 +1793,14 @@ function TemplatesSection({
                 <div key={t.id} className="bg-card-themed rounded-xl border border-themed p-4 flex flex-col">
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <span className="font-medium text-primary-themed text-sm">{t.name}</span>
-                    {t.is_system && <span className="badge badge-blue flex-shrink-0">FieldStay</span>}
+                    {t.is_system && (
+                      <span
+                        className="badge badge-blue flex-shrink-0"
+                        title="This is a read-only FieldStay template. Create your own template to customise it."
+                      >
+                        FieldStay · Read-only
+                      </span>
+                    )}
                   </div>
                   {t.description && (
                     <p className="text-xs text-muted-themed mb-2 truncate">{t.description}</p>
@@ -1813,6 +1822,15 @@ function TemplatesSection({
                     <Send className="w-3 h-3" />
                     Broadcast to Properties
                   </button>
+                  {!t.is_system && (
+                    <button
+                      onClick={() => setEditTemplateId(t.id)}
+                      className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 w-full justify-center mt-1"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      Edit
+                    </button>
+                  )}
                 </div>
               )
             })}
@@ -1828,6 +1846,13 @@ function TemplatesSection({
         />
       )}
 
+      {editTemplate && !editTemplate.is_system && (
+        <EditTemplateModal
+          template={editTemplate}
+          onClose={() => setEditTemplateId(null)}
+        />
+      )}
+
       {showCreateTemplate && (
         <CreateTemplateModal
           onClose={() => setShowCreateTemplate(false)}
@@ -1836,6 +1861,102 @@ function TemplatesSection({
         />
       )}
     </>
+  )
+}
+
+// ── Edit Template Modal ───────────────────────────────────────────────────────
+
+function EditTemplateModal({
+  template,
+  onClose,
+}: {
+  template: TemplateRow
+  onClose:  () => void
+}) {
+  const [name,        setName]        = useState(template.name)
+  const [description, setDescription] = useState(template.description ?? '')
+  const [saving,      startSave]      = useTransition()
+  const [error,       setError]       = useState<string | null>(null)
+  const [success,     setSuccess]     = useState(false)
+
+  const handleSave = () => {
+    const trimmedName = name.trim()
+    if (!trimmedName) { setError('Name is required'); return }
+    if (trimmedName.length > 100) { setError('Name must be 100 characters or fewer'); return }
+
+    setError(null)
+    startSave(async () => {
+      const result = await updateMaintenanceTemplate(template.id, {
+        name:        trimmedName,
+        description: description.trim() || null,
+      })
+      if (result?.error) setError(result.error)
+      else               setSuccess(true)
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div
+        className="rounded-2xl shadow-card-lg w-full max-w-md p-6"
+        style={{ background: 'var(--bg-card)' }}
+      >
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-lg font-semibold text-primary-themed">Edit Template</h3>
+          <button onClick={onClose} className="btn-ghost p-1.5">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {success ? (
+          <div className="text-center py-4">
+            <p className="text-sm font-medium mb-4" style={{ color: 'var(--accent-green)' }}>
+              ✓ Template updated
+            </p>
+            <button onClick={onClose} className="btn-primary">Done</button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div>
+              <label className="label">Template Name <span className="text-red-400">*</span></label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={100}
+                className="input w-full"
+                placeholder="e.g. Seasonal Rental Prep"
+              />
+            </div>
+            <div>
+              <label className="label">Description</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={500}
+                rows={3}
+                className="input w-full resize-none"
+                placeholder="Optional — shown on the template card"
+              />
+            </div>
+
+            {error && (
+              <p className="text-sm" style={{ color: 'var(--accent-red)' }}>{error}</p>
+            )}
+
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="btn-primary flex-1 flex items-center justify-center gap-2"
+              >
+                {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
+              </button>
+              <button onClick={onClose} className="btn-ghost">Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
-import { Send, MessageSquare, Search } from 'lucide-react'
+import { Send, MessageSquare, Search, ChevronLeft } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
@@ -128,11 +128,16 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
   }
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] gap-4">
-      {/* Thread list */}
+    <div className="flex h-[calc(100vh-80px)] overflow-hidden rounded-xl border border-themed">
+
+      {/* Left pane — thread list */}
       <div
-        className="w-80 shrink-0 rounded-xl border flex flex-col overflow-hidden"
-        style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+        className={cn(
+          'flex flex-col border-r border-themed flex-shrink-0',
+          'w-full md:w-80 lg:w-96',
+          selectedId ? 'hidden md:flex' : 'flex',
+        )}
+        style={{ background: 'var(--bg-card)' }}
       >
         <div className="p-3 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="relative">
@@ -200,19 +205,29 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
         </div>
       </div>
 
-      {/* Conversation */}
+      {/* Right pane — active conversation */}
       <div
-        className="flex-1 rounded-xl border flex flex-col overflow-hidden"
-        style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+        className={cn(
+          'flex flex-col flex-1 min-w-0',
+          !selectedId ? 'hidden md:flex' : 'flex',
+        )}
+        style={{ background: 'var(--bg-card)' }}
       >
         {!selectedThread ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-2" style={{ color: 'var(--text-muted)' }}>
             <MessageSquare className="w-10 h-10" />
-            <p className="text-sm">Select a crew member to start messaging</p>
+            <p className="text-sm">Select a conversation</p>
           </div>
         ) : (
           <>
-            <div className="px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+            <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
+              {/* Mobile back button */}
+              <button
+                className="md:hidden btn-ghost p-1.5 -ml-1 mr-1"
+                onClick={() => setSelected(null)}
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
               <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
                 {selectedThread.crew.name}
               </span>

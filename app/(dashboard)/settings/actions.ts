@@ -8,6 +8,7 @@ import { stripe, PLANS } from '@/lib/stripe/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent } from '@/lib/audit'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
+import { renderCrewInviteEmail } from '@/lib/resend/emails/crew-invite'
 
 export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
 
@@ -503,37 +504,16 @@ export async function inviteCrewMember(
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew/accept-invite/${crew.invite_token}`
 
   const { resend, FROM } = await import('@/lib/resend/client')
+  const html = await renderCrewInviteEmail({
+    crewName:  crew.name,
+    orgName:   org?.name ?? 'Your property manager',
+    acceptUrl: inviteUrl,
+  })
   const { error: emailError } = await resend.emails.send({
     from:    FROM,
     to:      crew.email,
-    subject: `You've been invited to join ${org?.name ?? 'FieldStay'}`,
-    html: `
-      <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
-        <h2 style="color:#FCD116;margin-bottom:8px">You're invited to FieldStay</h2>
-        <p style="color:#e2e8f0">Hi ${crew.name},</p>
-        <p style="color:#e2e8f0">
-          <strong>${org?.name ?? 'Your property manager'}</strong> has invited you to join
-          their team on FieldStay — the app you'll use to view cleaning assignments,
-          complete checklists, and submit inventory counts.
-        </p>
-        <p style="margin:28px 0">
-          <a href="${inviteUrl}"
-             style="background:#FCD116;color:#0a1628;padding:14px 28px;text-decoration:none;
-                    border-radius:8px;font-weight:700;display:inline-block;font-size:15px">
-            Accept Invitation →
-          </a>
-        </p>
-        <p style="color:#e2e8f0">
-          <strong>Tip:</strong> FieldStay works best installed as an app on your phone.
-          After accepting your invite, open the link on your phone and use your browser's
-          "Add to Home Screen" (iPhone) or "Install App" (Android) option to add FieldStay
-          to your home screen.
-        </p>
-        <p style="color:#6C757D;font-size:13px">
-          This link expires in 7 days. If you weren't expecting this, you can safely ignore it.
-        </p>
-      </div>
-    `,
+    subject: `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
+    html,
   })
 
   if (emailError) return { error: emailError.message }

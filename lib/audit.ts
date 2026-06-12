@@ -50,6 +50,8 @@ export type AuditAction =
   | 'org.auto_assign_mode.updated'
   | 'auth.account.created'
   | 'inventory.restock_cart.sent'
+  | 'maintenance.template.updated'
+  | 'crew.account.activated'
 
 interface AuditParams {
   orgId?:         string

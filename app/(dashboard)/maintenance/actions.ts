@@ -1066,3 +1066,52 @@ export async function broadcastMaintenanceTemplate(
   revalidatePath('/maintenance')
   return { success: true, created: rowsToInsert.length, skipped }
 }
+
+// ── Update Maintenance Template ──────────────────────────────────────────────
+
+export async function updateMaintenanceTemplate(
+  templateId: string,
+  updates: { name: string; description: string | null }
+): Promise<{ error?: string }> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  if (!['admin', 'manager'].includes(membership.role)) {
+    return { error: 'Permission denied' }
+  }
+
+  const name        = updates.name.trim().slice(0, 100)
+  const description = updates.description?.trim().slice(0, 500) ?? null
+
+  if (!name) return { error: 'Name is required' }
+
+  const { data: template } = await supabase
+    .from('maintenance_schedule_templates')
+    .select('id, is_system')
+    .eq('id', templateId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!template)          return { error: 'Template not found' }
+  if (template.is_system) return { error: 'System templates cannot be edited' }
+
+  const { error } = await supabase
+    .from('maintenance_schedule_templates')
+    .update({ name, description })
+    .eq('id', templateId)
+    .eq('org_id', membership.org_id)
+    .eq('is_system', false)
+
+  if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'maintenance.template.updated',
+    targetType: 'maintenance_schedule_template',
+    targetId:   templateId,
+    metadata:   { name, description },
+  })
+
+  revalidatePath('/maintenance')
+  return {}
+}

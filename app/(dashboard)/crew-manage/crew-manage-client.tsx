@@ -101,13 +101,32 @@ const ROLE_BADGE: Record<CrewRole, { label: string; cls: string }> = {
   general:     { label: 'General',     cls: 'badge badge-slate' },
 }
 
+// ── Availability helpers ──────────────────────────────────────────────────────
+
+interface AvailabilityRow {
+  crew_member_id: string
+  available_date: string
+  is_available:   boolean
+}
+
+function getNextUnavailableDate(
+  crewMemberId: string,
+  rows: AvailabilityRow[]
+): string | null {
+  const today = new Date().toISOString().split('T')[0]!
+  const off = rows
+    .filter((r) => r.crew_member_id === crewMemberId && !r.is_available && r.available_date >= today)
+    .sort((a, b) => a.available_date.localeCompare(b.available_date))
+  return off[0]?.available_date ?? null
+}
+
 // ── Root client component ─────────────────────────────────────────────────────
 
-interface Props { crew: CrewMember[] }
+interface Props { crew: CrewMember[]; availabilityRows: AvailabilityRow[] }
 
 type ViewMode = 'list' | 'add' | 'bulk'
 
-export function CrewManageClient({ crew }: Props) {
+export function CrewManageClient({ crew, availabilityRows }: Props) {
   const [view, setView]                 = useState<ViewMode>('list')
   const [selectedMember, setSelectedMember] = useState<CrewMember | null>(null)
 
@@ -172,7 +191,11 @@ export function CrewManageClient({ crew }: Props) {
         )}
       </div>
       {selectedMember && (
-        <CrewCardModal member={selectedMember} onClose={() => setSelectedMember(null)} />
+        <CrewCardModal
+          member={selectedMember}
+          onClose={() => setSelectedMember(null)}
+          availabilityRows={availabilityRows}
+        />
       )}
     </div>
   )
@@ -180,7 +203,15 @@ export function CrewManageClient({ crew }: Props) {
 
 // ── Crew card modal ───────────────────────────────────────────────────────────
 
-function CrewCardModal({ member, onClose }: { member: CrewMember; onClose: () => void }) {
+function CrewCardModal({
+  member,
+  onClose,
+  availabilityRows,
+}: {
+  member:           CrewMember
+  onClose:          () => void
+  availabilityRows: AvailabilityRow[]
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
          onClick={onClose}>
@@ -208,6 +239,27 @@ function CrewCardModal({ member, onClose }: { member: CrewMember; onClose: () =>
         </div>
 
         <div className="space-y-2 text-sm">
+          {/* Availability */}
+          <div className="flex justify-between items-center pb-2 mb-1 border-b border-themed">
+            <span className="text-muted-themed">Availability</span>
+            {(() => {
+              const nextOff = getNextUnavailableDate(member.id, availabilityRows)
+              if (!nextOff) {
+                return (
+                  <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent-green)' }} />
+                    Available
+                  </span>
+                )
+              }
+              return (
+                <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-amber)' }}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent-amber)' }} />
+                  Off {new Date(nextOff + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              )
+            })()}
+          </div>
           {member.specialty && (
             <div className="flex justify-between">
               <span className="text-muted-themed">Specialty</span>

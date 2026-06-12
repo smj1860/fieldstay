@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   X, Building2, ShieldCheck, TrendingUp, Users2,
-  Briefcase, Mail, BarChart3, Settings, Star, CalendarCheck,
+  Briefcase, Mail, BarChart3, Settings, Star, CalendarCheck, MessageSquare,
 } from 'lucide-react'
 import type { MemberRole } from '@/types/database'
 
@@ -14,6 +14,7 @@ const MORE_ITEMS = [
   { href: '/assets',          label: 'Asset Health',    icon: ShieldCheck,   roles: ['admin','manager']          },
   { href: '/capital-planning',label: 'Capital Planning',icon: TrendingUp,    roles: ['admin','manager']          },
   { href: '/crew-manage',     label: 'Crew',            icon: Users2,        roles: ['admin','manager']          },
+  { href: '/messages',        label: 'Messages',        icon: MessageSquare, roles: ['admin','manager']          },
   { href: '/vendors',         label: 'Vendors',         icon: Briefcase,     roles: ['admin','manager']          },
   { href: '/comms-log',       label: 'Comms Log',       icon: Mail,          roles: ['admin','manager']          },
   { href: '/owners',          label: 'Owner Portal',    icon: BarChart3,     roles: ['admin','manager']          },
