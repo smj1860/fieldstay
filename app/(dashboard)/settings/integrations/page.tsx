@@ -15,9 +15,9 @@ export default async function IntegrationsPage() {
   // Fetch active providers
   const { data: providers } = await admin
     .from('integration_providers')
-    .select('id, name, description, is_active')
+    .select('id, display_name, is_active')
     .eq('is_active', true)
-    .order('name')
+    .order('display_name')
 
   // Fetch this user's connections
   const { data: connections } = await admin
