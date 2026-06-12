@@ -43,6 +43,10 @@ export async function disconnectIntegration(
     })
 
     revalidatePath('/settings/integrations')
+    revalidatePath('/settings')
+    revalidatePath('/ops')
+    revalidatePath('/setup/power-ups')
+    revalidatePath('/inventory')
     return {}
 
   } catch (err) {
