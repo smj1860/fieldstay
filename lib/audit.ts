@@ -47,6 +47,9 @@ export type AuditAction =
   | 'integration.sync_triggered'
   | 'integration.sync_failed'
   | 'gdpr.data_erasure.completed'
+  | 'org.auto_assign_mode.updated'
+  | 'auth.account.created'
+  | 'inventory.restock_cart.sent'
 
 interface AuditParams {
   orgId?:         string

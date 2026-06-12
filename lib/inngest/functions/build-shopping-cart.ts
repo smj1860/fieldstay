@@ -1,5 +1,6 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent }       from '@/lib/audit'
 import {
   getClientToken,
   searchProducts,
@@ -401,6 +402,20 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
         to:      pmEmail,
         subject: `Your Kroger restock cart is ready (${cartResult.matched_items.length} items)`,
         html,
+      })
+
+      await logAuditEvent({
+        orgId:      org_id,
+        action:     'inventory.restock_cart.sent',
+        targetType: 'organization',
+        targetId:   org_id,
+        metadata:   {
+          matched_items:   cartResult.matched_items.length,
+          unmatched_items: cartResult.unmatched_items.length,
+          total_est:       cartResult.total_est ?? null,
+          status:          cartResult.status,
+          location_name:   krogerLocationName ?? null,
+        },
       })
     })
 

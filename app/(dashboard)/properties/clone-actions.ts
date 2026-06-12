@@ -1,14 +1,15 @@
 'use server'
 
 import { requireOrgMember } from '@/lib/auth'
-import { revalidatePath } from 'next/cache'
+import { logAuditEvent }    from '@/lib/audit'
+import { revalidatePath }   from 'next/cache'
 
 export async function clonePropertySetup(
   sourcePropertyId: string,
   targetPropertyId: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgMember()
     const orgId = membership.org_id
 
     // Verify both properties belong to this org
@@ -52,6 +53,15 @@ export async function clonePropertySetup(
           is_active:      true,
         }))
       )
+
+      await logAuditEvent({
+        orgId:      orgId,
+        actorId:    user.id,
+        action:     'property.updated',
+        targetType: 'property',
+        targetId:   targetPropertyId,
+        metadata:   { clone_section: 'inventory', source_property_id: sourcePropertyId, items_cloned: sourceItems.length },
+      })
     }
 
     // ── 2. Clone checklist template ──────────────────────────────────────────
@@ -98,6 +108,8 @@ export async function clonePropertySetup(
         }>
       }).checklist_template_sections ?? []
 
+      const totalItems = sourceSections.reduce((sum, s) => sum + (s.checklist_template_items?.length ?? 0), 0)
+
       for (const section of sourceSections) {
         const { data: newSection, error: sErr } = await supabase
           .from('checklist_template_sections')
@@ -120,6 +132,15 @@ export async function clonePropertySetup(
           )
         }
       }
+
+      await logAuditEvent({
+        orgId:      orgId,
+        actorId:    user.id,
+        action:     'property.updated',
+        targetType: 'property',
+        targetId:   targetPropertyId,
+        metadata:   { clone_section: 'checklist', source_property_id: sourcePropertyId, sections_cloned: sourceSections.length, items_cloned: totalItems },
+      })
     }
 
     // ── 3. Clone maintenance_schedules ───────────────────────────────────────
@@ -153,6 +174,15 @@ export async function clonePropertySetup(
           is_active:          true,
         }))
       )
+
+      await logAuditEvent({
+        orgId:      orgId,
+        actorId:    user.id,
+        action:     'property.updated',
+        targetType: 'property',
+        targetId:   targetPropertyId,
+        metadata:   { clone_section: 'maintenance', source_property_id: sourcePropertyId, schedules_cloned: sourceSched.length },
+      })
     }
 
     revalidatePath(`/properties/${targetPropertyId}/setup`)

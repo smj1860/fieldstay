@@ -551,7 +551,7 @@ export async function inviteCrewMember(
 export async function updateAutoAssignMode(
   mode: 'suggest' | 'autopilot' | 'disabled'
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { error } = await supabase
     .from('organizations')
@@ -559,6 +559,15 @@ export async function updateAutoAssignMode(
     .eq('id', membership.org_id)
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'org.auto_assign_mode.updated',
+    targetType: 'organization',
+    targetId:   membership.org_id,
+    metadata:   { mode },
+  })
 
   revalidatePath('/settings')
   return { success: true }

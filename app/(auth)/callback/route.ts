@@ -53,6 +53,14 @@ export async function GET(request: NextRequest) {
             },
           }).catch(() => {})
         }
+
+        logAuditEvent({
+          actorId:    data.session.user.id,
+          action:     'auth.account.created',
+          targetType: 'user',
+          targetId:   data.session.user.id,
+          metadata:   { email: data.session.user.email },
+        }).catch(() => {})
       }
 
       // Handle team invite token if present
