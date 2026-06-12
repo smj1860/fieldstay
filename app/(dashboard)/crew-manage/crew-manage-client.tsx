@@ -122,22 +122,12 @@ function getNextUnavailableDate(
 
 // ── Root client component ─────────────────────────────────────────────────────
 
-interface AvailabilityRow { crew_member_id: string; available_date: string; is_available: boolean }
-
 interface Props {
   crew:             CrewMember[]
   availabilityRows: AvailabilityRow[]
 }
 
 type ViewMode = 'list' | 'add' | 'bulk'
-
-function getNextUnavailableDate(memberId: string, rows: AvailabilityRow[]): string | null {
-  const dates = rows
-    .filter(r => r.crew_member_id === memberId && !r.is_available)
-    .map(r => r.available_date)
-    .sort()
-  return dates[0] ?? null
-}
 
 export function CrewManageClient({ crew, availabilityRows }: Props) {
   const [view, setView]                 = useState<ViewMode>('list')
