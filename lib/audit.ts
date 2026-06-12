@@ -55,6 +55,8 @@ export type AuditAction =
   | 'inventory.restock_cart.sent'
   | 'maintenance.template.updated'
   | 'crew.account.activated'
+  | 'crew.invite.accepted'
+  | 'security.route.mismatch'
 
 interface AuditParams {
   orgId?:         string

@@ -88,5 +88,5 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     metadata:   { email: crew.email },
   })
 
-  redirect('/crew')
+  redirect('/crew/install')
 }

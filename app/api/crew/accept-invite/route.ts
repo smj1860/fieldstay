@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
 
   const { data: crew } = await supabase
     .from('crew_members')
-    .select('id, user_id, invite_accepted_at')
+    .select('id, user_id, invite_accepted_at, org_id')
     .eq('invite_token', token)
     .single()
 
@@ -44,6 +45,16 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
+
+  await logAuditEvent({
+    actorId:    user.id,
+    action:     'crew.invite.accepted',
+    targetType: 'crew_member',
+    targetId:   crew.id,
+    metadata: {
+      org_id: crew.org_id,
+    },
+  })
 
   return NextResponse.json({ success: true })
 }

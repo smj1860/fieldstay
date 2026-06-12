@@ -11,6 +11,7 @@ const PUBLIC_ROUTES = [
   '/forgot-password',
   '/reset-password',
   '/crew/accept-invite',
+  '/crew/install',
   '/privacy',
   '/terms',
 ]
