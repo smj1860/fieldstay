@@ -103,7 +103,7 @@ export async function createProperty(
   })
 
   revalidatePath('/properties')
-  redirect(`/properties/${property.id}/setup/ical`)
+  redirect(`/properties/${property.id}/setup/details`)
 }
 
 // ── Update ───────────────────────────────────────────────────

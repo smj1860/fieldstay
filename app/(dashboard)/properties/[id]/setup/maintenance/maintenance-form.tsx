@@ -101,7 +101,7 @@ export function MaintenanceScheduleManager({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" suppressHydrationWarning>
       {cloneSuccess && (
         <div className="rounded-lg px-4 py-3 text-sm flex items-center gap-2"
              style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
