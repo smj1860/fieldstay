@@ -101,24 +101,30 @@ const ROLE_BADGE: Record<CrewRole, { label: string; cls: string }> = {
   general:     { label: 'General',     cls: 'badge badge-slate' },
 }
 
+// ── Availability helpers ──────────────────────────────────────────────────────
+
+interface AvailabilityRow {
+  crew_member_id: string
+  available_date: string
+  is_available:   boolean
+}
+
+function getNextUnavailableDate(
+  crewMemberId: string,
+  rows: AvailabilityRow[]
+): string | null {
+  const today = new Date().toISOString().split('T')[0]!
+  const off = rows
+    .filter((r) => r.crew_member_id === crewMemberId && !r.is_available && r.available_date >= today)
+    .sort((a, b) => a.available_date.localeCompare(b.available_date))
+  return off[0]?.available_date ?? null
+}
+
 // ── Root client component ─────────────────────────────────────────────────────
 
-interface AvailabilityRow { crew_member_id: string; available_date: string; is_available: boolean }
-
-interface Props {
-  crew:             CrewMember[]
-  availabilityRows: AvailabilityRow[]
-}
+interface Props { crew: CrewMember[]; availabilityRows: AvailabilityRow[] }
 
 type ViewMode = 'list' | 'add' | 'bulk'
-
-function getNextUnavailableDate(memberId: string, rows: AvailabilityRow[]): string | null {
-  const dates = rows
-    .filter(r => r.crew_member_id === memberId && !r.is_available)
-    .map(r => r.available_date)
-    .sort()
-  return dates[0] ?? null
-}
 
 export function CrewManageClient({ crew, availabilityRows }: Props) {
   const [view, setView]                 = useState<ViewMode>('list')
@@ -166,7 +172,7 @@ export function CrewManageClient({ crew, availabilityRows }: Props) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-themed">
-                  {['Name','Role','Specialty','Contact','Pref','Avail (14d)','App Access',''].map((h) => (
+                  {['Name','Role','Specialty','Contact','Pref','App Access',''].map((h) => (
                     <th key={h}
                         className={cn('py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide',
                                       h ? 'text-left' : 'text-right')}>
@@ -177,7 +183,7 @@ export function CrewManageClient({ crew, availabilityRows }: Props) {
               </thead>
               <tbody className="divide-y divide-themed">
                 {crew.map((member) => (
-                  <CrewRow key={member.id} member={member} onSelect={setSelectedMember} availabilityRows={availabilityRows} />
+                  <CrewRow key={member.id} member={member} onSelect={setSelectedMember} />
                 ))}
               </tbody>
             </table>
@@ -185,7 +191,11 @@ export function CrewManageClient({ crew, availabilityRows }: Props) {
         )}
       </div>
       {selectedMember && (
-        <CrewCardModal member={selectedMember} onClose={() => setSelectedMember(null)} />
+        <CrewCardModal
+          member={selectedMember}
+          onClose={() => setSelectedMember(null)}
+          availabilityRows={availabilityRows}
+        />
       )}
     </div>
   )
@@ -193,7 +203,15 @@ export function CrewManageClient({ crew, availabilityRows }: Props) {
 
 // ── Crew card modal ───────────────────────────────────────────────────────────
 
-function CrewCardModal({ member, onClose }: { member: CrewMember; onClose: () => void }) {
+function CrewCardModal({
+  member,
+  onClose,
+  availabilityRows,
+}: {
+  member:           CrewMember
+  onClose:          () => void
+  availabilityRows: AvailabilityRow[]
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
          onClick={onClose}>
@@ -221,6 +239,27 @@ function CrewCardModal({ member, onClose }: { member: CrewMember; onClose: () =>
         </div>
 
         <div className="space-y-2 text-sm">
+          {/* Availability */}
+          <div className="flex justify-between items-center pb-2 mb-1 border-b border-themed">
+            <span className="text-muted-themed">Availability</span>
+            {(() => {
+              const nextOff = getNextUnavailableDate(member.id, availabilityRows)
+              if (!nextOff) {
+                return (
+                  <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent-green)' }} />
+                    Available
+                  </span>
+                )
+              }
+              return (
+                <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-amber)' }}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent-amber)' }} />
+                  Off {new Date(nextOff + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </span>
+              )
+            })()}
+          </div>
           {member.specialty && (
             <div className="flex justify-between">
               <span className="text-muted-themed">Specialty</span>
@@ -579,7 +618,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
 
 // ── Crew row ──────────────────────────────────────────────────────────────────
 
-function CrewRow({ member, onSelect, availabilityRows }: { member: CrewMember; onSelect: (m: CrewMember) => void; availabilityRows: AvailabilityRow[] }) {
+function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewMember) => void }) {
   const [editing, setEditing]         = useState(false)
   const [name, setName]               = useState(member.name)
   const [roleVal, setRoleVal]         = useState<CrewRole>(member.role ?? 'general')
@@ -651,7 +690,6 @@ function CrewRow({ member, onSelect, availabilityRows }: { member: CrewMember; o
           </select>
         </td>
         <td className="py-2 pr-4" />
-        <td className="py-2 pr-4" />
         <td className="py-2 text-right">
           <div className="flex items-center justify-end gap-1">
             <button onClick={handleSave} disabled={saving} className="btn-primary py-1 px-2 text-xs" title="Save">
@@ -684,17 +722,6 @@ function CrewRow({ member, onSelect, availabilityRows }: { member: CrewMember; o
       </td>
       <td className="py-2.5 pr-4">
         <span className="badge badge-slate capitalize">{member.preferred_contact}</span>
-      </td>
-      <td className="py-2.5 pr-4 text-xs">
-        {(() => {
-          const nextOff = getNextUnavailableDate(member.id, availabilityRows)
-          if (!nextOff) return <span style={{ color: 'var(--accent-green)' }}>Available</span>
-          return (
-            <span style={{ color: 'var(--accent-amber)' }}>
-              Off {new Date(nextOff + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-            </span>
-          )
-        })()}
       </td>
       <td className="py-2.5 pr-4">
         {member.user_id ? (
