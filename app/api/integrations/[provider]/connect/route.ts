@@ -118,7 +118,7 @@ export async function GET(
     state,
     user_id:     user?.id ?? null,
     provider_id: providerId,
-    return_to:   request.nextUrl.searchParams.get('return_to') ?? '/dashboard',
+    return_to:   request.nextUrl.searchParams.get('return_to') ?? '/ops',
   })
 
   if (stateError) {
