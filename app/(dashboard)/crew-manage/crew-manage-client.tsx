@@ -175,7 +175,7 @@ export function CrewManageClient({ crew, availabilityRows }: Props) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-themed">
-                  {['Name','Role','Specialty','Contact','Pref','Avail (14d)','App Access',''].map((h) => (
+                  {['Name','Role','Specialty','Contact','Pref','App Access',''].map((h) => (
                     <th key={h}
                         className={cn('py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide',
                                       h ? 'text-left' : 'text-right')}>
@@ -186,7 +186,7 @@ export function CrewManageClient({ crew, availabilityRows }: Props) {
               </thead>
               <tbody className="divide-y divide-themed">
                 {crew.map((member) => (
-                  <CrewRow key={member.id} member={member} onSelect={setSelectedMember} availabilityRows={availabilityRows} />
+                  <CrewRow key={member.id} member={member} onSelect={setSelectedMember} />
                 ))}
               </tbody>
             </table>
@@ -621,7 +621,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
 
 // ── Crew row ──────────────────────────────────────────────────────────────────
 
-function CrewRow({ member, onSelect, availabilityRows }: { member: CrewMember; onSelect: (m: CrewMember) => void; availabilityRows: AvailabilityRow[] }) {
+function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewMember) => void }) {
   const [editing, setEditing]         = useState(false)
   const [name, setName]               = useState(member.name)
   const [roleVal, setRoleVal]         = useState<CrewRole>(member.role ?? 'general')
@@ -693,7 +693,6 @@ function CrewRow({ member, onSelect, availabilityRows }: { member: CrewMember; o
           </select>
         </td>
         <td className="py-2 pr-4" />
-        <td className="py-2 pr-4" />
         <td className="py-2 text-right">
           <div className="flex items-center justify-end gap-1">
             <button onClick={handleSave} disabled={saving} className="btn-primary py-1 px-2 text-xs" title="Save">
@@ -726,17 +725,6 @@ function CrewRow({ member, onSelect, availabilityRows }: { member: CrewMember; o
       </td>
       <td className="py-2.5 pr-4">
         <span className="badge badge-slate capitalize">{member.preferred_contact}</span>
-      </td>
-      <td className="py-2.5 pr-4 text-xs">
-        {(() => {
-          const nextOff = getNextUnavailableDate(member.id, availabilityRows)
-          if (!nextOff) return <span style={{ color: 'var(--accent-green)' }}>Available</span>
-          return (
-            <span style={{ color: 'var(--accent-amber)' }}>
-              Off {new Date(nextOff + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-            </span>
-          )
-        })()}
       </td>
       <td className="py-2.5 pr-4">
         {member.user_id ? (
