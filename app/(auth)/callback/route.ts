@@ -17,7 +17,17 @@ export async function GET(request: NextRequest) {
     const supabase = await createClient()
     const { error, data } = await supabase.auth.exchangeCodeForSession(code)
 
-    if (!error && data.session) {
+    if (error) {
+      // Specific error codes for triage
+      const reason = error.message?.toLowerCase().includes('expired')
+        ? 'link_expired'
+        : error.message?.toLowerCase().includes('already')
+          ? 'already_used'
+          : 'auth_callback'
+      return NextResponse.redirect(`${origin}/login?error=${reason}`)
+    }
+
+    if (data.session) {
       // Audit every successful OAuth callback for SOC2 compliance
       // Fire-and-forget: audit failure must never block authentication
       logAuditEvent({
@@ -85,7 +95,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  return NextResponse.redirect(`${origin}/login?error=auth_callback`)
+  return NextResponse.redirect(`${origin}/login?error=auth_callback_missing_code`)
 }
 
 async function handleInviteAccept(userId: string, userEmail: string, inviteToken: string) {

@@ -8,6 +8,9 @@ export const metadata: Metadata = { title: 'Crew' }
 export default async function CrewManagePage() {
   const { supabase, membership } = await requireOrgMember()
 
+  const today    = new Date().toISOString().split('T')[0]!
+  const in14days = (() => { const d = new Date(); d.setDate(d.getDate() + 14); return d.toISOString().split('T')[0]! })()
+
   const [{ data: crew }, { data: availability }] = await Promise.all([
     supabase
       .from('crew_members')
@@ -18,9 +21,8 @@ export default async function CrewManagePage() {
     supabase
       .from('crew_availability')
       .select('crew_member_id, available_date, is_available')
-      .eq('org_id', membership.org_id)
-      .gte('available_date', new Date().toISOString().split('T')[0]!)
-      .lte('available_date', new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]!),
+      .gte('available_date', today)
+      .lte('available_date', in14days),
   ])
 
   return (
@@ -29,10 +31,7 @@ export default async function CrewManagePage() {
         <h1 className="page-title">Crew</h1>
         <p className="page-subtitle">Manage your cleaning and maintenance crew members</p>
       </div>
-      <CrewManageClient
-        crew={(crew ?? []) as unknown as CrewMember[]}
-        availabilityRows={availability ?? []}
-      />
+      <CrewManageClient crew={(crew ?? []) as unknown as CrewMember[]} availabilityRows={availability ?? []} />
     </div>
   )
 }

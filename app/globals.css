@@ -14,8 +14,8 @@
   --border-strong:  rgba(255, 255, 255, 0.14);
 
   --text-primary:   #ffffff;
-  --text-secondary: #c2d6eb;
-  --text-muted:     #7a9ab8;
+  --text-secondary: #dce9f5;   /* was #c2d6eb — ~15% lighter, still readable hierarchy */
+  --text-muted:     #9ab5cc;   /* was #7a9ab8 — lifted slightly so it doesn't disappear */
   --text-inverse:   #0a1628;
 
   --accent-gold:       #FCD116;
@@ -78,11 +78,6 @@
   --bg-overlay:     #ffffff;
   --border-subtle:  rgba(10, 22, 40, 0.06);
   --border-medium:  rgba(10, 22, 40, 0.15);
-}
-
-/* ── Light mode: brand-gold page titles ─────────────────────── */
-:root.light .page-title {
-  color: #b8900a;
 }
 
 /* ── Light mode: sidebar stays dark — anchor the "blue frame" ── */
@@ -189,7 +184,7 @@
     font-family:    var(--font-syne), sans-serif;
     font-size:      22px;
     font-weight:    700;
-    color:          var(--text-primary);
+    color:          var(--accent-gold);
     letter-spacing: -0.02em;
   }
 
@@ -235,9 +230,6 @@
   }
   .btn-primary:hover { background: #1a3464; }
 
-  :root.light .page-title {
-    color: var(--accent-gold);
-  }
   :root.light .btn-primary {
     background: rgba(255,255,255,0.12);
     color:      var(--accent-gold);
