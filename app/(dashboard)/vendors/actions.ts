@@ -54,7 +54,10 @@ export async function createComplianceDocument(
         is_active:      true,
       })
 
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[createComplianceDocument]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     revalidatePath(`/vendors/${vendorId}`)
     revalidatePath('/vendors')
@@ -82,12 +85,18 @@ export async function deleteComplianceDocument(
 export async function verifyComplianceDocument(
   docId: string,
   vendorId: string
-): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
-  await supabase
-    .from('vendor_compliance_documents')
-    .update({ is_verified: true })
-    .eq('id', docId)
-    .eq('org_id', membership.org_id)
-  revalidatePath(`/vendors/${vendorId}`)
+): Promise<{ error?: string }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+    await supabase
+      .from('vendor_compliance_documents')
+      .update({ is_verified: true })
+      .eq('id', docId)
+      .eq('org_id', membership.org_id)
+    revalidatePath(`/vendors/${vendorId}`)
+    return {}
+  } catch (err) {
+    console.error('[verifyComplianceDocument]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
 }

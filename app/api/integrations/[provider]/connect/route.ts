@@ -22,7 +22,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient }             from '@supabase/ssr'
-import { createClient }                   from '@supabase/supabase-js'
+import { createServiceClient }            from '@/lib/supabase/server'
 import { randomBytes }                    from 'crypto'
 import { getProvider }                    from '@/lib/integrations/registry'
 
@@ -108,11 +108,7 @@ export async function GET(
   // ── 5. Persist state in the DB ────────────────────────────
   //    Storing in the DB (not only a cookie) makes the state durable
   //    across cross-device flows and easier to expire/consume server-side.
-  const admin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  )
+  const admin = createServiceClient()
 
   const { error: stateError } = await admin.from('oauth_states').insert({
     state,

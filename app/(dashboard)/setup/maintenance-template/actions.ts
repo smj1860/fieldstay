@@ -38,7 +38,10 @@ export async function saveMasterMaintenanceSchedules(
       }))
     )
 
-  if (error) return { error: error.message, saved: 0 }
+  if (error) {
+    console.error('[saveMasterMaintenanceSchedules]', error)
+    return { error: 'Operation failed. Please try again.', saved: 0 }
+  }
 
   revalidatePath('/setup')
   revalidatePath('/maintenance')

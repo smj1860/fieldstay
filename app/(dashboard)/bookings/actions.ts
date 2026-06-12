@@ -59,7 +59,8 @@ export async function createBooking(
     if (error.code === '23505') {
       return { error: 'A booking already exists for these dates at this property.' }
     }
-    return { error: error.message }
+    console.error('[createBooking]', error)
+    return { error: 'Operation failed. Please try again.' }
   }
 
   // Fire booking/detected so Inngest auto-generates a turnover
@@ -95,7 +96,10 @@ export async function cancelBooking(
     .eq('id', bookingId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[cancelBooking]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   // 2. Cancel pending/assigned turnovers tied to this booking
   await supabase

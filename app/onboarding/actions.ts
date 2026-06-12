@@ -50,7 +50,10 @@ export async function createOrganization(
     .select('id')
     .single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[createOrganization]', error)
+    return { error: 'Failed to create organization. Please try again.' }
+  }
 
   await admin.from('organization_members').insert({
     org_id:             org.id,
@@ -60,4 +63,5 @@ export async function createOrganization(
   })
 
   redirect('/ops')
+  return { error: null }
 }

@@ -13,6 +13,8 @@ async function requireCrewMember() {
     .from('crew_members')
     .select('id, org_id')
     .eq('user_id', user.id)
+    .eq('is_active', true)
+    .not('invite_accepted_at', 'is', null)
     .single()
   if (!crew) throw new Error('Crew member not found')
 
@@ -49,7 +51,10 @@ export async function reportTurnoverIssue(
       source: 'crew_flag',
     })
 
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[reportTurnoverIssue]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
     return { success: true }
   } catch (err) {
     console.error('[reportTurnoverIssue]', err)

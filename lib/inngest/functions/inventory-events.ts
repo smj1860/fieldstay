@@ -63,11 +63,11 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
   { event: 'inventory/count-submitted' as const },
   async ({ event, step, logger }) => {
     const { count_id, property_id, org_id } = event.data
-    const supabase = createServiceClient()
 
     // ── Apply the count to inventory_items ──────────────────────────────────
 
     const { belowParItems } = await step.run('apply-count-and-check-par', async () => {
+      const supabase = createServiceClient()
       // Fetch count items
       const { data: countItems } = await supabase
         .from('inventory_count_items')
@@ -128,6 +128,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // ── Generate purchase order ──────────────────────────────────────────────
 
     const { purchaseOrderId, alreadyExisted } = await step.run('create-purchase-order', async () => {
+      const supabase = createServiceClient()
       // Idempotency: a PO for this count may already exist from a prior retry
       const { data: existing } = await supabase
         .from('purchase_orders')
@@ -177,6 +178,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     }
 
     await step.run('record-first-po-milestone', async () => {
+      const supabase = createServiceClient()
       await supabase.from('org_milestones').upsert(
         { org_id, milestone: 'first_purchase_order' },
         { onConflict: 'org_id,milestone', ignoreDuplicates: true }
@@ -186,6 +188,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // ── Email PM with PO summary ─────────────────────────────────────────────
 
     await step.run('email-po-to-pm', async () => {
+      const supabase = createServiceClient()
       const [{ data: property }, pmEmail] = await Promise.all([
         supabase.from('properties').select('name').eq('id', property_id).single(),
         getPmEmail(supabase, org_id),

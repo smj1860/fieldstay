@@ -296,7 +296,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
       const durationMinutes = (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60_000
 
       if (durationMinutes > MAX_PLAUSIBLE_DURATION_MINUTES) {
-        console.warn(`[record-crew-duration] Anomalous duration ${durationMinutes}m for turnover ${turnover_id} — skipping`)
+        logger.warn('Anomalous turnover duration detected — skipping', { flag: 'duration_anomaly' })
         return { skipped: 'anomalous_duration', duration_minutes: durationMinutes }
       }
 

@@ -26,7 +26,16 @@ export const dailyAssetHealth = inngest.createFunction(
     const today    = new Date()
 
     // ── 8.4: Daily Asset Health Score Recalculation ──────────────────────────
-    const activeAssets = await step.run('find-assets-for-scoring', async () => {
+    const activeAssets = await step.run('find-assets-for-scoring', async (): Promise<Array<{
+      id: string
+      org_id: string
+      property_id: string
+      asset_type: string
+      installation_date: string | null
+      expected_lifespan_years: number | null
+      estimated_replacement_cost: number | null
+      health_score: number | null
+    }>> => {
       const { data } = await supabase
         .from('property_assets')
         .select(`
@@ -181,7 +190,15 @@ export const dailyAssetHealth = inngest.createFunction(
     }
 
     // ── 8.13: COI & License Expiry Escalation ────────────────────────────────
-    const expiringDocs = await step.run('find-expiring-compliance-docs', async () => {
+    const expiringDocs = await step.run('find-expiring-compliance-docs', async (): Promise<Array<{
+      id: string
+      org_id: string
+      vendor_id: string
+      document_type: string
+      document_name: string
+      expiry_date: string | null
+      vendors: { name: string } | { name: string }[] | null
+    }>> => {
       const { data } = await supabase
         .from('vendor_compliance_documents')
         .select(`

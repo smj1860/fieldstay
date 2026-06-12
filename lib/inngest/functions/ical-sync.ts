@@ -160,7 +160,9 @@ export const syncIcalFeed = inngest.createFunction(
 
     // ── Step 3: Upsert bookings ──────────────────────────────────────────────
 
-    const { newBookings, cancelledBookingIds } = await step.run('upsert-bookings', async () => {
+    const { newBookings, cancelledBookingIds } = await step.run(
+      'upsert-bookings',
+      async (): Promise<{ newBookings: Array<{ id: string; guestEmail: string | null }>; cancelledBookingIds: string[] }> => {
       // Fetch existing bookings for this feed
       const { data: existingBookings } = await supabase
         .from('bookings')
@@ -250,7 +252,8 @@ export const syncIcalFeed = inngest.createFunction(
       }
 
       return { newBookings: newBookingRows, cancelledBookingIds: cancelledIds }
-    })
+      }
+    )
 
     // ── Step 4: Cancel turnovers for any cancelled bookings ─────────────────
 

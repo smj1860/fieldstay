@@ -62,16 +62,18 @@ bucket_definitions:
         AND is_active = true
 
   # ── Crew Availability ─────────────────────────────────────────────────────
+  # Scoped to the individual crew member — crew members only sync their own
+  # availability to prevent exposure of personal notes (e.g. "medical leave").
   user_crew_availability:
     parameters:
-      - SELECT org_id
+      - SELECT id AS crew_member_id
         FROM crew_members
         WHERE user_id = request.user_id()
         AND is_active = true
     data:
       - SELECT id, org_id, crew_member_id, available_date, is_available, notes
         FROM crew_availability
-        WHERE org_id = bucket.org_id
+        WHERE crew_member_id = bucket.crew_member_id
 
   # ── Messages ──────────────────────────────────────────────────────────────
   # Org-scoped via crew_members. RLS on the messages table provides the

@@ -25,7 +25,7 @@
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient }             from '@supabase/ssr'
-import { createClient }                   from '@supabase/supabase-js'
+import { createServiceClient }            from '@/lib/supabase/server'
 import { revalidatePath }                 from 'next/cache'
 import { getProvider }                    from '@/lib/integrations/registry'
 import { storeIntegrationToken, storeIntegrationRefreshToken } from '@/lib/integrations/vault'
@@ -118,11 +118,7 @@ export async function GET(
   // ── 2. Validate the state token (CSRF protection) ──────────
   //    We use the service-role client here because oauth_states has no
   //    RLS policy for reads — it is a server-side-only table.
-  const admin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  )
+  const admin = createServiceClient()
 
   const { data: stateRecord, error: stateError } = await admin
     .from('oauth_states')

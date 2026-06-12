@@ -57,9 +57,13 @@ export async function saveDetails(
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[saveDetails]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await markStepComplete(propertyId, 'details')
   revalidatePath(`/properties/${propertyId}`)
   redirect(`/properties/${propertyId}/setup/ical`)
+  return { error: null }
 }

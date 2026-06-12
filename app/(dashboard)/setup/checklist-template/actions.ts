@@ -26,7 +26,10 @@ export async function saveMasterChecklistItems(
     })),
   })
 
-  if (error) return { error: error.message, saved: 0 }
+  if (error) {
+    console.error('[saveMasterChecklistItems]', error)
+    return { error: 'Operation failed. Please try again.', saved: 0 }
+  }
 
   revalidatePath('/setup')
   revalidatePath('/inventory')

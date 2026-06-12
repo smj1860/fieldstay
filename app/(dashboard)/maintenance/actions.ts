@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
-import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
@@ -92,7 +91,10 @@ export async function createWorkOrder(
     .select('id')
     .single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[createWorkOrder]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   // Send RFQ emails to each selected vendor
   if (request_quotes && quote_vendor_ids.length) {
@@ -176,7 +178,10 @@ export async function rateWorkOrderVendor(
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[rateWorkOrderVendor]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
   revalidatePath('/maintenance')
   revalidatePath('/vendors')
   return {}
@@ -199,7 +204,10 @@ export async function assignCrewToWorkOrder(
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[assignCrewToWorkOrder]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
   revalidatePath('/maintenance')
   return {}
 }
@@ -236,7 +244,10 @@ export async function updateWorkOrder(
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateWorkOrder]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -314,7 +325,10 @@ export async function updateWorkOrderStatus(
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateWorkOrderStatus]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   if (status === 'completed') {
     await inngest.send({
@@ -349,7 +363,7 @@ export async function updateWorkOrderStatus(
 // ── Feature 4: Advance schedule after WO completion ──────────────────────────
 
 async function advanceScheduleAfterCompletion(
-  supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createClient>>,
+  supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createServerClient>>,
   scheduleId: string,
   orgId: string
 ) {
@@ -399,7 +413,7 @@ export async function logActualCost(
     .eq('org_id', membership.org_id)
     .single()
 
-  if (!wo) return { error: fetchErr?.message ?? 'Work order not found' }
+  if (!wo) return { error: 'Work order not found' }
 
   const { error } = await supabase
     .from('work_orders')
@@ -410,7 +424,10 @@ export async function logActualCost(
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[logActualCost]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await supabase.from('work_order_updates').insert({
     work_order_id:             workOrderId,
@@ -467,7 +484,10 @@ export async function recordWorkOrderPhoto(
     uploaded_by:   user?.id ?? 'pm',
   })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[recordWorkOrderPhoto]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath(`/maintenance/${workOrderId}`)
   return {}
@@ -632,7 +652,10 @@ export async function approveQuoteRequest(
     .eq('id', qr.work_order_id)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[approveQuoteRequest]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await supabase.from('work_order_updates').insert({
     work_order_id:             qr.work_order_id,
@@ -765,7 +788,10 @@ export async function createWorkOrderFromSchedule(
     .select('id')
     .single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[createWorkOrderFromSchedule]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   // Feature 4: Advance next_due_date immediately on manual WO creation from schedule
   if (schedule.schedule_type === 'routine' && schedule.frequency && schedule.next_due_date) {
@@ -837,7 +863,10 @@ export async function createMaintenanceSchedule(
     is_active:          true,
   })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[createMaintenanceSchedule]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/maintenance')
   return { success: true }
@@ -877,7 +906,10 @@ export async function updateMaintenanceSchedule(
     .eq('id', scheduleId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateMaintenanceSchedule]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/maintenance')
   return { success: true }
@@ -894,7 +926,10 @@ export async function deleteMaintenanceSchedule(
     .eq('id', scheduleId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[deleteMaintenanceSchedule]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/maintenance')
   return { success: true }
@@ -930,7 +965,10 @@ export async function createMaintenanceScheduleTemplate(data: {
     .select('id')
     .single()
 
-  if (tErr || !template) return { error: tErr?.message ?? 'Failed to create template' }
+  if (tErr || !template) {
+    console.error('[createMaintenanceScheduleTemplate]', tErr)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   const itemRows = data.items.map((item, i) => ({
     template_id:           template.id,
@@ -946,7 +984,10 @@ export async function createMaintenanceScheduleTemplate(data: {
     .from('maintenance_schedule_template_items')
     .insert(itemRows)
 
-  if (iErr) return { error: iErr.message }
+  if (iErr) {
+    console.error('[createMaintenanceScheduleTemplate:items]', iErr)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/maintenance')
   return { success: true, templateId: template.id }
@@ -1101,7 +1142,10 @@ export async function updateMaintenanceTemplate(
     .eq('org_id', membership.org_id)
     .eq('is_system', false)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateMaintenanceTemplate]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,

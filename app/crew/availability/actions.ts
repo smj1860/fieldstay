@@ -19,6 +19,8 @@ async function requireCrewMember() {
     .from('crew_members')
     .select('id, org_id')
     .eq('user_id', user.id)
+    .eq('is_active', true)
+    .not('invite_accepted_at', 'is', null)
     .single()
   if (!crew) throw new Error('Crew member not found')
 
@@ -53,7 +55,10 @@ export async function setCrewAvailability(
         .delete()
         .eq('crew_member_id', crew.id)
         .eq('available_date', date)
-      if (error) return { error: error.message }
+      if (error) {
+        console.error('[setCrewAvailability:delete]', error)
+        return { error: 'Operation failed. Please try again.' }
+      }
       return { success: true }
     }
 
@@ -69,7 +74,10 @@ export async function setCrewAvailability(
         },
         { onConflict: 'crew_member_id,available_date' }
       )
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[setCrewAvailability]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
     return { success: true }
   } catch (err) {
     console.error('[setCrewAvailability]', err)
