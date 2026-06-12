@@ -385,7 +385,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
       const admin = createServiceClient()
       const { data: userRecord } = await admin.auth.admin.getUserById(requested_by)
       const pmEmail = userRecord?.user?.email
-      if (!pmEmail) return
+      if (!pmEmail || !userRecord.user) return
 
       const html = await renderShoppingCartReadyEmail({
         cartData: {
