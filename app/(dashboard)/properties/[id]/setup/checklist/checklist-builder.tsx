@@ -7,7 +7,10 @@ import { Plus, Trash2, ChevronUp, ChevronDown, Camera, X, Check } from 'lucide-r
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
 interface Section { tempId: string; id?: string; name: string; items: Item[] }
 
-function makeId() { return Math.random().toString(36).slice(2) }
+function makeId() {
+  if (typeof window === 'undefined') return 'ssr'
+  return Math.random().toString(36).slice(2)
+}
 
 const DEFAULT_SECTIONS: Section[] = [
   {
@@ -221,7 +224,7 @@ export function ChecklistBuilder({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" suppressHydrationWarning>
       {error && (
         <div className="border text-sm rounded-lg px-4 py-3" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{error}</div>
       )}
