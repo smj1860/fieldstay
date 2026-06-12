@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useActionState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Check } from 'lucide-react'
 import { addVendor, type SettingsActionState } from '@/app/(dashboard)/settings/actions'
 
 const VENDOR_SPECIALTIES = [
@@ -23,10 +23,15 @@ interface Props  { vendors: Vendor[]; continueAction: () => Promise<void> }
 export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Props) {
   const [vendors, setVendors] = useState(initialVendors)
   const [view, setView]       = useState<'list' | 'add'>('list')
+  const [savedName, setSavedName] = useState<string | null>(null)
   const [state, formAction, pending] = useActionState(
     async (prev: SettingsActionState | null, fd: FormData) => {
       const res = await addVendor(prev, fd)
-      if (res.success) setView('list')
+      if (res.success) {
+        setView('list')
+        setSavedName((fd.get('name') as string)?.trim() || 'Vendor')
+        setTimeout(() => setSavedName(null), 4000)
+      }
       return res
     },
     null
@@ -42,6 +47,14 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
           Add service vendors and contractors for maintenance and specialized work.
         </p>
       </div>
+
+      {savedName && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm"
+             style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
+          <Check className="w-4 h-4 flex-shrink-0" />
+          {savedName} saved successfully
+        </div>
+      )}
 
       {vendors.length > 0 && (
         <div className="border border-themed rounded-xl overflow-hidden">

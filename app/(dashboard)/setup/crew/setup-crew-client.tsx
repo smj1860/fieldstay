@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useActionState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, Check } from 'lucide-react'
 import {
   addCrewMember,
   inviteCrewMember,
@@ -21,10 +21,15 @@ interface Props {
 export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
   const [crew, setCrew] = useState(initialCrew)
   const [view, setView] = useState<'list' | 'add'>('list')
+  const [savedName, setSavedName] = useState<string | null>(null)
   const [state, formAction, pending] = useActionState(
     async (prev: SettingsActionState | null, fd: FormData) => {
       const res = await addCrewMember(prev, fd)
-      if (res.success) setView('list')
+      if (res.success) {
+        setView('list')
+        setSavedName((fd.get('name') as string)?.trim() || 'Crew member')
+        setTimeout(() => setSavedName(null), 4000)
+      }
       return res
     },
     null
@@ -40,6 +45,14 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
           Add cleaning and maintenance team members. Invite them to the crew app after adding.
         </p>
       </div>
+
+      {savedName && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm"
+             style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}>
+          <Check className="w-4 h-4 flex-shrink-0" />
+          {savedName} saved successfully
+        </div>
+      )}
 
       {crew.length > 0 && (
         <div className="border border-themed rounded-xl overflow-hidden">
