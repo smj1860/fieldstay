@@ -9,8 +9,7 @@ import { formatDate }               from '@/lib/utils'
 
 interface Provider {
   id:          string
-  name:        string
-  description: string | null
+  display_name: string
   is_active:   boolean
 }
 
