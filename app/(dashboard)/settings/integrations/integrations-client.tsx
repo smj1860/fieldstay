@@ -86,7 +86,7 @@ function IntegrationCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <h3 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
-              {provider.name}
+              {provider.display_name}
             </h3>
             {isConnected && (
               <span className="badge badge-green text-xs">Connected</span>
