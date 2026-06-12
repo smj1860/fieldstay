@@ -105,7 +105,6 @@ export async function GET(
   const state = randomBytes(32).toString('hex')
 
 
-console.log('[OAuth debug] service key prefix:', process.env.SUPABASE_SERVICE_ROLE_KEY?.slice(0, 20))
   // ── 5. Persist state in the DB ────────────────────────────
   //    Storing in the DB (not only a cookie) makes the state durable
   //    across cross-device flows and easier to expire/consume server-side.
