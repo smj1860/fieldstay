@@ -122,7 +122,10 @@ function getNextUnavailableDate(
 
 // ── Root client component ─────────────────────────────────────────────────────
 
-interface Props { crew: CrewMember[]; availabilityRows: AvailabilityRow[] }
+interface Props {
+  crew:             CrewMember[]
+  availabilityRows: AvailabilityRow[]
+}
 
 type ViewMode = 'list' | 'add' | 'bulk'
 
