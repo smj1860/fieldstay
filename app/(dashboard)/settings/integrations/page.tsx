@@ -1,29 +1,26 @@
-import type { Metadata }    from 'next'
-import Link                  from 'next/link'
-import { requireOrgMember }  from '@/lib/auth'
+import type { Metadata }       from 'next'
+import Link                    from 'next/link'
+import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { IntegrationsClient }  from './integrations-client'
 
 export const metadata: Metadata = { title: 'Integrations — FieldStay' }
 
 export default async function IntegrationsPage() {
-  const { supabase, membership } = await requireOrgMember()
-  const { data: { user } }       = await supabase.auth.getUser()
+  const { membership } = await requireOrgMember()
 
   const admin = createServiceClient()
 
-  // Fetch active providers
   const { data: providers } = await admin
     .from('integration_providers')
     .select('id, display_name, is_active')
     .eq('is_active', true)
     .order('display_name')
 
-  // Fetch this user's connections
   const { data: connections } = await admin
     .from('integration_connections')
     .select('id, provider_id, status, external_user_id, created_at, metadata')
-    .eq('user_id', user?.id ?? '')
+    .eq('org_id', membership.org_id)
 
   const connectionsByProvider = Object.fromEntries(
     (connections ?? []).map((c) => [c.provider_id, c])
