@@ -173,3 +173,32 @@ export class RateLimitError extends Error {
     this.name = 'RateLimitError'
   }
 }
+
+// ── Sync error → PM-friendly message ────────────────────────────────────────
+// Shared by all OwnerRez sync functions (initial, incremental, reviews) so
+// integration_connections.metadata.last_sync_error and the Settings UI show
+// a consistent, actionable message regardless of which sync wrote it.
+
+export function translateSyncError(err: unknown): string {
+  if (err instanceof RateLimitError) {
+    return 'OwnerRez sync paused due to rate limiting — will retry automatically'
+  }
+  const msg = err instanceof Error ? err.message : String(err)
+  const lower = msg.toLowerCase()
+  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid_token')) {
+    return 'OwnerRez authorization expired — reconnect your account to resume syncing'
+  }
+  if (lower.includes('403') || lower.includes('forbidden')) {
+    return 'OwnerRez access denied — reconnect your account'
+  }
+  if (lower.includes('timeout') || lower.includes('econnreset') || lower.includes('network')) {
+    return 'Could not reach OwnerRez — sync will retry automatically'
+  }
+  if (lower.includes('vault') || lower.includes('credentials not found')) {
+    return 'OwnerRez credentials not found — reconnect your account'
+  }
+  if (lower.includes('upsert') || lower.includes('insert') || lower.includes('database')) {
+    return 'Sync completed with errors — some bookings may not have updated'
+  }
+  return 'Sync failed — will retry automatically'
+}

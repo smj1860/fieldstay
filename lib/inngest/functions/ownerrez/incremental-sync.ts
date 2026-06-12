@@ -19,7 +19,7 @@
 import { inngest }                      from '@/lib/inngest/client'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
-import { RateLimitError }               from '@/lib/integrations/types'
+import { RateLimitError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
 
 const PROVIDER = 'ownerrez'
@@ -295,30 +295,4 @@ function mapChannelToSource(channel?: string): string {
   if (c.includes('booking'))                        return 'booking_com'
   if (c.includes('direct'))                         return 'direct'
   return 'other'
-}
-
-// ── Sync error → PM-friendly message ────────────────────────────────────────
-
-function translateSyncError(err: unknown): string {
-  if (err instanceof RateLimitError) {
-    return 'OwnerRez sync paused due to rate limiting — will retry automatically'
-  }
-  const msg = err instanceof Error ? err.message : String(err)
-  const lower = msg.toLowerCase()
-  if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid_token')) {
-    return 'OwnerRez authorization expired — reconnect your account to resume syncing'
-  }
-  if (lower.includes('403') || lower.includes('forbidden')) {
-    return 'OwnerRez access denied — reconnect your account'
-  }
-  if (lower.includes('timeout') || lower.includes('econnreset') || lower.includes('network')) {
-    return 'Could not reach OwnerRez — sync will retry automatically'
-  }
-  if (lower.includes('vault') || lower.includes('credentials not found')) {
-    return 'OwnerRez credentials not found — reconnect your account'
-  }
-  if (lower.includes('upsert') || lower.includes('insert') || lower.includes('database')) {
-    return 'Sync completed with errors — some bookings may not have updated'
-  }
-  return 'Sync failed — will retry automatically'
 }
