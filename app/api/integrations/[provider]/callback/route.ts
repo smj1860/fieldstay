@@ -26,6 +26,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient }             from '@supabase/ssr'
 import { createClient }                   from '@supabase/supabase-js'
+import { revalidatePath }                 from 'next/cache'
 import { getProvider }                    from '@/lib/integrations/registry'
 import { storeIntegrationToken, storeIntegrationRefreshToken } from '@/lib/integrations/vault'
 import { logAuditEvent }                  from '@/lib/audit'
@@ -256,6 +257,15 @@ export async function GET(
     console.error(`[OAuth:${providerId}] Vault storage failed:`, err)
     return errorRedirect('storage_failed')
   }
+
+  // Pages that render connection status from integration_connections —
+  // without this, they keep serving the pre-connection cached render.
+  revalidatePath('/ops')
+  revalidatePath('/settings')
+  revalidatePath('/settings/integrations')
+  revalidatePath('/setup/power-ups')
+  revalidatePath('/setup/pms')
+  revalidatePath('/inventory')
 
   // ── 7. Success — redirect to dashboard ────────────────────
   const returnTo  = stateRecord.return_to ?? '/ops'
