@@ -2,15 +2,14 @@
 
 import { useState, useTransition } from 'react'
 import Link                         from 'next/link'
-import { CheckCircle2, XCircle, Loader2, PlugZap, Unplug } from 'lucide-react'
-import { cn }                       from '@/lib/utils'
+import { Loader2, PlugZap, Unplug } from 'lucide-react'
 import { disconnectIntegration }    from './actions'
 import { formatDate }               from '@/lib/utils'
 
 interface Provider {
-  id:          string
+  id:           string
   display_name: string
-  is_active:   boolean
+  is_active:    boolean
 }
 
 interface Connection {
@@ -26,7 +25,7 @@ export function IntegrationsClient({
   providers,
   connectionsByProvider,
 }: {
-  providers: Provider[]
+  providers:             Provider[]
   connectionsByProvider: Record<string, Connection>
 }) {
   if (!providers.length) {
@@ -116,7 +115,6 @@ function IntegrationCard({
           )}
         </div>
 
-        {/* Actions */}
         <div className="flex-shrink-0">
           {!connection || isError ? (
             <Link
