@@ -35,7 +35,7 @@ export default async function OnboardingMaintenanceTemplatePage() {
 
   async function finishAction() {
     'use server'
-    await markStepComplete('maintenance_template', '/ops')
+    await markStepComplete('maintenance_template', '/setup/power-ups')
   }
 
   return (

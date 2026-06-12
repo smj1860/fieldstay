@@ -1,4 +1,6 @@
 import { Resend } from 'resend'
+import { renderPmWelcomeEmail }    from './emails/pm-welcome'
+import { renderTeamInviteEmail }   from './emails/team-invite'
 
 /**
  * Resend client — single instance for all transactional email.
@@ -20,28 +22,30 @@ export async function sendTeamInviteEmail({
   inviteToken:  string
 }) {
   const acceptUrl = `${process.env.NEXT_PUBLIC_APP_URL}/accept-invite/${inviteToken}`
+  const html      = await renderTeamInviteEmail({ inviterEmail, orgName, acceptUrl })
 
   return resend.emails.send({
-    from:    'FieldStay <hello@fieldstay.app>',
+    from:    FROM,
     to:      toEmail,
     subject: `You've been invited to join ${orgName} on FieldStay`,
-    html: `
-      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 32px;">
-        <h2 style="color: #0a1628;">You're invited to FieldStay</h2>
-        <p style="color: #5a6a7a;">
-          <strong>${inviterEmail}</strong> has invited you to join
-          <strong>${orgName}</strong> on FieldStay as a team admin.
-        </p>
-        <a href="${acceptUrl}"
-           style="display:inline-block; background:#FCD116; color:#0a1628;
-                  font-weight:700; padding:12px 24px; border-radius:8px;
-                  text-decoration:none; margin: 16px 0;">
-          Accept Invitation
-        </a>
-        <p style="color: #8a9bb0; font-size: 13px;">
-          This invitation expires in 7 days. If you didn't expect this email, you can ignore it.
-        </p>
-      </div>
-    `,
+    html,
+  })
+}
+
+export async function sendPmWelcomeEmail({
+  toEmail,
+  orgName,
+}: {
+  toEmail: string
+  orgName: string
+}) {
+  const setupUrl = `${process.env.NEXT_PUBLIC_APP_URL}/setup`
+  const html = await renderPmWelcomeEmail({ orgName, setupUrl })
+
+  return resend.emails.send({
+    from:    FROM,
+    to:      toEmail,
+    subject: `Welcome to FieldStay — let's set up ${orgName}`,
+    html,
   })
 }

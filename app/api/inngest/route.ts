@@ -60,6 +60,9 @@ import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist
 // Integration error notifications
 import { notifyIntegrationError } from '@/lib/inngest/functions/notify-integration-error'
 
+// PM welcome email
+import { pmWelcome } from '@/lib/inngest/functions/pm-welcome'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -123,5 +126,8 @@ export const { GET, POST, PUT } = serve({
 
     // Integration error notifications
     notifyIntegrationError,
+
+    // PM welcome email
+    pmWelcome,
   ],
 })

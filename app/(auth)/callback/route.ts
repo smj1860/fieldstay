@@ -3,6 +3,7 @@ import type { NextRequest }    from 'next/server'
 import { createClient }        from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
+import { inngest }             from '@/lib/inngest/client'
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
@@ -26,6 +27,33 @@ export async function GET(request: NextRequest) {
         targetId:   data.session.user.id,
         metadata:   { provider: data.session.user.app_metadata?.provider ?? 'unknown' },
       }).catch(() => {})
+
+      // Fire welcome email for brand-new accounts (created within the last 60 seconds)
+      const createdAt = data.session.user.created_at
+      const isNew     = createdAt && (Date.now() - new Date(createdAt).getTime()) < 60_000
+      if (isNew && data.session.user.email && !inviteToken) {
+        const admin = createServiceClient()
+        const { data: membership } = await admin
+          .from('organization_members')
+          .select('org_id, organizations(name)')
+          .eq('user_id', data.session.user.id)
+          .limit(1)
+          .maybeSingle()
+
+        if (membership?.org_id) {
+          const orgName = (membership as unknown as { organizations?: { name: string } | null })
+            .organizations?.name ?? 'your organization'
+          inngest.send({
+            name: 'user/pm.signed_up',
+            data: {
+              user_id:  data.session.user.id,
+              email:    data.session.user.email,
+              org_id:   membership.org_id,
+              org_name: orgName,
+            },
+          }).catch(() => {})
+        }
+      }
 
       // Handle team invite token if present
       if (inviteToken) {

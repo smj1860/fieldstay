@@ -13,7 +13,9 @@ import {
   storeIntegrationToken,
   storeIntegrationRefreshToken,
 } from '@/lib/integrations/vault'
-import { getProvider } from '@/lib/integrations/registry'
+import { getProvider }                     from '@/lib/integrations/registry'
+import { resend, FROM }                    from '@/lib/resend/client'
+import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
 import type { MatchedItem, CartBuildResult } from '@/lib/kroger/types'
 
 export type ShoppingCartRequestedEvent = {
@@ -376,6 +378,30 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
           cartResult.unmatched_items,
         )
       }
+    })
+
+    // ── Step 8: Email PM with cart summary ───────────────────────────────────
+    await step.run('send-cart-ready-email', async () => {
+      const admin = createServiceClient()
+      const { data: userRecord } = await admin.auth.admin.getUserById(requested_by)
+      const pmEmail = userRecord?.user?.email
+      if (!pmEmail) return
+
+      const html = await renderShoppingCartReadyEmail({
+        cartData: {
+          ...cartResult,
+          built_at:      new Date().toISOString(),
+          location_name: krogerLocationName ?? 'your Kroger store',
+        },
+        recipientName: userRecord.user.user_metadata?.full_name ?? 'there',
+      })
+
+      await resend.emails.send({
+        from:    FROM,
+        to:      pmEmail,
+        subject: `Your Kroger restock cart is ready (${cartResult.matched_items.length} items)`,
+        html,
+      })
     })
 
     return {

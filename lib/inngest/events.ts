@@ -432,4 +432,17 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // User lifecycle
+  // ----------------------------------------------------------
+
+  'user/pm.signed_up': {
+    data: {
+      user_id:    string
+      email:      string
+      org_id:     string
+      org_name:   string
+    }
+  }
+
 }
