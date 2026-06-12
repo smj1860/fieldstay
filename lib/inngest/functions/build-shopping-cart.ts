@@ -1,5 +1,6 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent }       from '@/lib/audit'
 import {
   getClientToken,
   searchProducts,
@@ -13,7 +14,9 @@ import {
   storeIntegrationToken,
   storeIntegrationRefreshToken,
 } from '@/lib/integrations/vault'
-import { getProvider } from '@/lib/integrations/registry'
+import { getProvider }                     from '@/lib/integrations/registry'
+import { resend, FROM }                    from '@/lib/resend/client'
+import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
 import type { MatchedItem, CartBuildResult } from '@/lib/kroger/types'
 
 export type ShoppingCartRequestedEvent = {
@@ -376,6 +379,44 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
           cartResult.unmatched_items,
         )
       }
+    })
+
+    // ── Step 8: Email PM with cart summary ───────────────────────────────────
+    await step.run('send-cart-ready-email', async () => {
+      const admin = createServiceClient()
+      const { data: userRecord } = await admin.auth.admin.getUserById(requested_by)
+      const pmEmail = userRecord?.user?.email
+      if (!pmEmail || !userRecord.user) return
+
+      const html = await renderShoppingCartReadyEmail({
+        cartData: {
+          ...cartResult,
+          built_at:      new Date().toISOString(),
+          location_name: krogerLocationName ?? 'your Kroger store',
+        },
+        recipientName: userRecord.user.user_metadata?.full_name ?? 'there',
+      })
+
+      await resend.emails.send({
+        from:    FROM,
+        to:      pmEmail,
+        subject: `Your Kroger restock cart is ready (${cartResult.matched_items.length} items)`,
+        html,
+      })
+
+      await logAuditEvent({
+        orgId:      org_id,
+        action:     'inventory.restock_cart.sent',
+        targetType: 'organization',
+        targetId:   org_id,
+        metadata:   {
+          matched_items:   cartResult.matched_items.length,
+          unmatched_items: cartResult.unmatched_items.length,
+          total_est:       cartResult.total_est ?? null,
+          status:          cartResult.status,
+          location_name:   krogerLocationName ?? null,
+        },
+      })
     })
 
     return {

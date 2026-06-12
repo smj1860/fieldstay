@@ -139,7 +139,7 @@ function InviteSection() {
   }
 
   return (
-    <div className="card">
+    <div className="card" id="invite">
       <h2 className="text-base font-semibold text-primary-themed mb-1">Invite Team Member</h2>
       <p className="text-sm text-muted-themed mb-4">
         Admins have full operational access but cannot manage billing or team members.

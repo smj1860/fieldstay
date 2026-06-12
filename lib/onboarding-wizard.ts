@@ -19,6 +19,12 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     description: 'Add your cleaning and maintenance team',
   },
   {
+    key:         'auto_assign',
+    label:       'Auto-Assign',
+    href:        'auto-assign',
+    description: 'Choose how FieldStay assigns crew to turnovers',
+  },
+  {
     key:         'vendors',
     label:       'Add Vendors',
     href:        'vendors',
@@ -41,6 +47,12 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     label:       'Maintenance Schedule',
     href:        'maintenance-template',
     description: 'Set up recurring maintenance tasks',
+  },
+  {
+    key:         'power_ups',
+    label:       'Power-Ups',
+    href:        'power-ups',
+    description: 'Optional integrations that add more automation',
   },
 ]
 

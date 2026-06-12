@@ -84,6 +84,13 @@ export default async function DashboardLayout({
 
   const notifications = await getNotifications(membership.org_id)
 
+  const { count: unreadMessages } = await supabase
+    .from('messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('org_id', membership.org_id)
+    .eq('recipient_id', user.id)
+    .is('read_at', null)
+
   return (
     <DashboardShell
       role={membership.role}
@@ -93,6 +100,7 @@ export default async function DashboardLayout({
       onboardingComplete={onboardingComplete}
       onboardingPct={onboardingPct}
       notifications={notifications}
+      unreadMessages={unreadMessages ?? 0}
     >
       {isPastDue && (
         <div

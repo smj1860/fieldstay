@@ -50,6 +50,11 @@ export type AuditAction =
   | 'property.checklist.cloned'
   | 'property.maintenance.cloned'
   | 'gdpr.data_erasure.completed'
+  | 'org.auto_assign_mode.updated'
+  | 'auth.account.created'
+  | 'inventory.restock_cart.sent'
+  | 'maintenance.template.updated'
+  | 'crew.account.activated'
 
 interface AuditParams {
   orgId?:         string

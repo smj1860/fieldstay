@@ -61,7 +61,7 @@ export default async function OnboardingMaintenanceTemplatePage({ searchParams }
 
   async function finishAction() {
     'use server'
-    await markStepComplete('maintenance_template', '/ops')
+    await markStepComplete('maintenance_template', '/setup/power-ups')
   }
 
   return (

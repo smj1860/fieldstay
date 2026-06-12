@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Plus, AlertCircle, CheckCircle2, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
+import { CopyFromButton } from './property-card-actions'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Properties' }
@@ -143,6 +144,12 @@ export default async function PropertiesPage() {
                   >
                     Setup
                   </Link>
+                  <CopyFromButton
+                    targetProperty={{ id: p.id, name: p.name }}
+                    otherProperties={(properties ?? [])
+                      .filter((other) => other.id !== p.id)
+                      .map((other) => ({ id: other.id, name: other.name }))}
+                  />
                 </div>
               </div>
             )

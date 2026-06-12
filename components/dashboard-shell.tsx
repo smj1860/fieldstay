@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Building2, CalendarCheck, Package,
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Sun, Moon,
-  Users2, Briefcase, MessageSquareDot, ShieldCheck, TrendingUp,
+  Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -28,6 +28,7 @@ const NAV_ITEMS = [
   { href: '/assets',            label: 'Asset Health',     icon: ShieldCheck, roles: ['admin','manager'], group: 'management' as const },
   { href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin','manager'], group: 'management' as const },
   { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager'],          group: 'management' as const },
+  { href: '/messages', label: 'Messages', icon: MessageSquare, roles: ['admin','manager'], group: 'management' as const },
   { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager'],          group: 'management' as const },
   { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager'],          group: 'management' as const },
   { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager'],          group: 'management' as const },
@@ -44,6 +45,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/assets':            'Asset Health',
   '/capital-planning':  'Capital Planning',
   '/crew-manage':  'Crew',
+  '/messages':     'Messages',
   '/vendors':      'Vendors',
   '/comms-log':    'Comms Log',
   '/owners':       'Owner Portal',
@@ -59,10 +61,11 @@ interface Props {
   onboardingComplete?:        boolean
   onboardingPct?:             number
   notifications?:             NotificationItem[]
+  unreadMessages?:            number
   children:                   React.ReactNode
 }
 
-export function DashboardShell({ role, orgName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], children }: Props) {
+export function DashboardShell({ role, orgName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, children }: Props) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -159,7 +162,17 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
         >
           <Icon className="w-4 h-4 flex-shrink-0" />
           {(!collapsed || mobile) && (
-            <span className="truncate">{item.label}</span>
+            <>
+              <span className="truncate">{item.label}</span>
+              {item.href === '/messages' && (unreadMessages ?? 0) > 0 && (
+                <span
+                  className="ml-auto text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center"
+                  style={{ background: '#FCD116', color: '#0a1628' }}
+                >
+                  {(unreadMessages ?? 0) > 99 ? '99+' : unreadMessages}
+                </span>
+              )}
+            </>
           )}
         </Link>
       )

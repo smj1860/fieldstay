@@ -1,8 +1,9 @@
 import {
-  Html, Head, Body, Container, Section, Row, Column,
+  Section, Row, Column,
   Text, Button, Hr, Preview,
 } from '@react-email/components'
 import { render } from '@react-email/render'
+import { BaseLayout } from './base-layout'
 
 export interface WorkOrderEmailProps {
   wo_number:        string | null
@@ -87,156 +88,122 @@ export function WorkOrderVendorEmail({
     ? `WO-${wo_number}: ${title} at ${property_name}`
     : `Work order: ${title} at ${property_name}`
 
+  const footerLine = [
+    `This link expires in ${expires_in_days} day${expires_in_days !== 1 ? 's' : ''}.`,
+    pm_name ? `Questions? Reach out to ${pm_name}.` : null,
+  ].filter(Boolean).join(' ')
+
   return (
-    <Html lang="en">
-      <Head />
-      <Preview>{previewText}</Preview>
-      <Body style={{ backgroundColor: '#f1f5f9', fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif', margin: 0, padding: 0 }}>
-        <Container style={{ maxWidth: 600, margin: '32px auto', padding: 0 }}>
+    <BaseLayout
+      previewText={previewText}
+      headerSub={wo_number ? `Work Order · WO-${wo_number}` : 'Work Order'}
+      footerLine={footerLine}
+    >
+      {/* Property block */}
+      <Section style={{ backgroundColor: '#f8fafc', borderRadius: 8, padding: '14px 16px', marginBottom: 24, borderLeft: '3px solid #FCD116' }}>
+        <Text style={{ fontSize: 15, fontWeight: 700, color: '#0a1628', margin: 0 }}>
+          {property_name}
+        </Text>
+        {fullAddress && (
+          <Text style={{ fontSize: 13, color: '#475569', margin: '4px 0 0' }}>
+            {fullAddress}
+          </Text>
+        )}
+      </Section>
 
-          {/* ── Header ── */}
-          <Section style={{ backgroundColor: '#0a1628', borderRadius: '12px 12px 0 0', padding: '28px 32px' }}>
-            <Text style={{ color: '#FCD116', fontSize: 22, fontWeight: 800, letterSpacing: '-0.5px', margin: 0, lineHeight: 1 }}>
-              FieldStay
+      {/* Job title */}
+      <Text style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', margin: '0 0 20px' }}>
+        {title}
+      </Text>
+
+      {/* Details grid */}
+      <Row style={{ marginBottom: 20 }}>
+        {categoryLabel && (
+          <Column style={{ width: '50%', paddingRight: 8 }}>
+            <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
+              Category
             </Text>
-            <Text style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', margin: '6px 0 0' }}>
-              Work Order
+            <Text style={{ fontSize: 13, color: '#1e293b', fontWeight: 600, margin: 0 }}>
+              {categoryLabel}
             </Text>
-            {wo_number && (
-              <Text style={{ color: '#FCD116', fontSize: 28, fontWeight: 800, margin: '12px 0 0', letterSpacing: '-0.5px' }}>
-                WO-{wo_number}
-              </Text>
-            )}
-          </Section>
-
-          {/* ── Body card ── */}
-          <Section style={{ backgroundColor: '#ffffff', padding: '28px 32px' }}>
-
-            {/* Property block */}
-            <Section style={{ backgroundColor: '#f8fafc', borderRadius: 8, padding: '14px 16px', marginBottom: 24, borderLeft: '3px solid #FCD116' }}>
-              <Text style={{ fontSize: 15, fontWeight: 700, color: '#0a1628', margin: 0 }}>
-                {property_name}
-              </Text>
-              {fullAddress && (
-                <Text style={{ fontSize: 13, color: '#475569', margin: '4px 0 0' }}>
-                  {fullAddress}
-                </Text>
-              )}
-            </Section>
-
-            {/* Job title */}
-            <Text style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', margin: '0 0 20px' }}>
-              {title}
+          </Column>
+        )}
+        {priorityLabel && priorityStyle && (
+          <Column style={{ width: '50%', paddingLeft: 8 }}>
+            <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
+              Priority
             </Text>
-
-            {/* Details grid */}
-            <Row style={{ marginBottom: 20 }}>
-              {categoryLabel && (
-                <Column style={{ width: '50%', paddingRight: 8 }}>
-                  <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
-                    Category
-                  </Text>
-                  <Text style={{ fontSize: 13, color: '#1e293b', fontWeight: 600, margin: 0 }}>
-                    {categoryLabel}
-                  </Text>
-                </Column>
-              )}
-              {priorityLabel && priorityStyle && (
-                <Column style={{ width: '50%', paddingLeft: 8 }}>
-                  <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
-                    Priority
-                  </Text>
-                  <Text style={{
-                    display: 'inline-block',
-                    fontSize: 12,
-                    fontWeight: 700,
-                    padding: '2px 10px',
-                    borderRadius: 99,
-                    backgroundColor: priorityStyle.bg,
-                    color: priorityStyle.text,
-                    margin: 0,
-                  }}>
-                    {priorityLabel}
-                  </Text>
-                </Column>
-              )}
-            </Row>
-
-            <Row style={{ marginBottom: 20 }}>
-              <Column style={{ width: '50%', paddingRight: 8 }}>
-                <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
-                  Scheduled Date
-                </Text>
-                <Text style={{ fontSize: 13, color: '#1e293b', fontWeight: 600, margin: 0 }}>
-                  {formatDate(scheduled_date)}
-                </Text>
-              </Column>
-              {nte_amount != null && (
-                <Column style={{ width: '50%', paddingLeft: 8 }}>
-                  <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
-                    Not to Exceed
-                  </Text>
-                  <Text style={{ fontSize: 15, fontWeight: 800, color: '#0a1628', margin: 0 }}>
-                    ${nte_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </Text>
-                </Column>
-              )}
-            </Row>
-
-            {/* Scope of work */}
-            {description && (
-              <>
-                <Hr style={{ borderColor: '#e2e8f0', margin: '0 0 16px' }} />
-                <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
-                  Scope of Work
-                </Text>
-                <Section style={{ backgroundColor: '#f8fafc', borderRadius: 6, padding: '12px 14px', marginBottom: 24 }}>
-                  <Text style={{ fontSize: 13, color: '#334155', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
-                    {description}
-                  </Text>
-                </Section>
-              </>
-            )}
-
-            <Hr style={{ borderColor: '#e2e8f0', margin: '4px 0 24px' }} />
-
-            {/* CTA */}
-            <Button
-              href={portal_url}
-              style={{
-                backgroundColor: '#FCD116',
-                color: '#0a1628',
-                fontWeight: 700,
-                fontSize: 15,
-                padding: '14px 32px',
-                borderRadius: 8,
-                textDecoration: 'none',
-                display: 'block',
-                textAlign: 'center',
-              }}
-            >
-              {portal_type === 'quote' ? 'Submit Quote →' : 'Mark as Complete →'}
-            </Button>
-          </Section>
-
-          {/* ── Footer ── */}
-          <Section style={{ backgroundColor: '#f8fafc', borderRadius: '0 0 12px 12px', padding: '18px 32px', borderTop: '1px solid #e2e8f0' }}>
-            <Text style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 4px' }}>
-              This link expires in {expires_in_days} day{expires_in_days !== 1 ? 's' : ''}.
+            <Text style={{
+              display: 'inline-block',
+              fontSize: 12,
+              fontWeight: 700,
+              padding: '2px 10px',
+              borderRadius: 99,
+              backgroundColor: priorityStyle.bg,
+              color: priorityStyle.text,
+              margin: 0,
+            }}>
+              {priorityLabel}
             </Text>
-            {pm_name && (
-              <Text style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 4px' }}>
-                Questions? Reach out to {pm_name}.
-              </Text>
-            )}
-            <Text style={{ fontSize: 11, color: '#cbd5e1', margin: '8px 0 0' }}>
-              Powered by FieldStay · fieldstay.app
+          </Column>
+        )}
+      </Row>
+
+      <Row style={{ marginBottom: 20 }}>
+        <Column style={{ width: '50%', paddingRight: 8 }}>
+          <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
+            Scheduled Date
+          </Text>
+          <Text style={{ fontSize: 13, color: '#1e293b', fontWeight: 600, margin: 0 }}>
+            {formatDate(scheduled_date)}
+          </Text>
+        </Column>
+        {nte_amount != null && (
+          <Column style={{ width: '50%', paddingLeft: 8 }}>
+            <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
+              Not to Exceed
+            </Text>
+            <Text style={{ fontSize: 15, fontWeight: 800, color: '#0a1628', margin: 0 }}>
+              ${nte_amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
+          </Column>
+        )}
+      </Row>
+
+      {/* Scope of work */}
+      {description && (
+        <>
+          <Hr style={{ borderColor: '#e2e8f0', margin: '0 0 16px' }} />
+          <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
+            Scope of Work
+          </Text>
+          <Section style={{ backgroundColor: '#f8fafc', borderRadius: 6, padding: '12px 14px', marginBottom: 24 }}>
+            <Text style={{ fontSize: 13, color: '#334155', lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap' }}>
+              {description}
             </Text>
           </Section>
+        </>
+      )}
 
-        </Container>
-      </Body>
-    </Html>
+      <Hr style={{ borderColor: '#e2e8f0', margin: '4px 0 24px' }} />
+
+      <Button
+        href={portal_url}
+        style={{
+          backgroundColor: '#FCD116',
+          color: '#0a1628',
+          fontWeight: 700,
+          fontSize: 15,
+          padding: '14px 32px',
+          borderRadius: 8,
+          textDecoration: 'none',
+          display: 'block',
+          textAlign: 'center',
+        }}
+      >
+        {portal_type === 'quote' ? 'Submit Quote →' : 'Mark as Complete →'}
+      </Button>
+    </BaseLayout>
   )
 }
 

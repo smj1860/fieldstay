@@ -384,14 +384,14 @@ export function TemplateManager({
           <div className="border border-themed rounded-xl overflow-hidden">
             {byCategory.map(({ cat, catItems }) => (
               <div key={cat}>
-                <div className="flex items-center gap-2 px-4 py-2 bg-canvas-themed border-b border-themed">
+                <div className="flex items-center gap-2 px-4 py-2 border-b border-themed" style={{ background: 'var(--bg-raised)' }}>
                   <input
                     type="checkbox"
                     checked={catItems.every(i => selectedIds.has(i.id))}
                     onChange={() => toggleAllSelected(catItems.map(i => i.id))}
                     className="w-3.5 h-3.5 rounded"
                   />
-                  <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
+                  <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--accent-gold)' }}>
                     {INVENTORY_CATEGORY_LABELS[cat]}
                   </span>
                 </div>

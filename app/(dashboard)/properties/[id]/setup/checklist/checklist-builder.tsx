@@ -258,7 +258,7 @@ export function ChecklistBuilder({
       {sections.map((section, si) => (
         <div key={section.tempId} className="border border-themed rounded-xl overflow-hidden">
           {/* Section header */}
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-canvas-themed border-b border-themed">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-themed" style={{ background: 'var(--bg-raised)' }}>
             <input
               value={section.name}
               onChange={(e) => updateSection(section.tempId, e.target.value)}
