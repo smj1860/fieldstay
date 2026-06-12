@@ -19,14 +19,13 @@ const POWER_UP_DEFS = [
 ]
 
 export default async function PowerUpsPage() {
-  const { supabase, membership } = await requireOrgMember()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { membership } = await requireOrgMember()
 
   const admin = createServiceClient()
   const { data: connections } = await admin
     .from('integration_connections')
     .select('provider_id, status')
-    .eq('user_id', user?.id ?? '')
+    .eq('org_id', membership.org_id)
     .eq('status', 'active')
 
   const connectedIds = new Set((connections ?? []).map((c) => c.provider_id))
