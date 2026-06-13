@@ -304,7 +304,10 @@ export function ComplianceSection({
                       <button
                         onClick={() => {
                           setActingId(doc.id)
-                          startVerify(() => verifyComplianceDocument(doc.id, vendorId))
+                          startVerify(async () => {
+                            const result = await verifyComplianceDocument(doc.id, vendorId)
+                            if (result?.error) throw new Error(result.error)
+                          })
                         }}
                         disabled={verifying && actingId === doc.id}
                         className="btn-ghost p-1.5 text-xs"
