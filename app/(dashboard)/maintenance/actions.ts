@@ -1006,8 +1006,10 @@ export type BroadcastResult = {
 // Idempotent: skip if a maintenance_schedule with the same name
 // already exists on the property
 export async function broadcastMaintenanceTemplate(
-  templateId:  string,
-  propertyIds: string[],
+  templateId:         string,
+  propertyIds:        string[],
+  nextDueDates:       Record<string, string>          = {},
+  recurrenceOverrides: Record<string, ScheduleFrequency> = {},
 ): Promise<BroadcastResult> {
   const { supabase, user, membership } = await requireOrgMember()
 
@@ -1025,7 +1027,7 @@ export async function broadcastMaintenanceTemplate(
 
   const { data: items } = await supabase
     .from('maintenance_schedule_template_items')
-    .select('name, description, schedule_frequency, vendor_specialty_hint, estimated_cost, sort_order')
+    .select('id, name, description, schedule_frequency, vendor_specialty_hint, estimated_cost, sort_order, asset_category, active_from_month, active_to_month')
     .eq('template_id', templateId)
     .order('sort_order', { ascending: true })
 
@@ -1042,24 +1044,29 @@ export async function broadcastMaintenanceTemplate(
   const { data: existingSchedules } = await supabase
     .from('maintenance_schedules')
     .select('property_id, name')
-    .in('property_id', properties.map((p) => p.id))
+    .in('property_id', (properties as { id: string }[]).map((p) => p.id))
 
-  const existingNames = new Set((existingSchedules ?? []).map((s) => `${s.property_id}::${s.name}`))
+  const existingNames = new Set((existingSchedules ?? []).map((s: { property_id: string; name: string }) => `${s.property_id}::${s.name}`))
 
-  const nextDueDate = new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]
+  const fallbackDueDate = new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]
 
   const rowsToInsert: Array<{
-    property_id:           string
-    org_id:                string
-    name:                  string
-    description:           string | null
-    schedule_type:         ScheduleType
-    frequency:             ScheduleFrequency
-    vendor_specialty_hint: VendorSpecialty | null
-    estimated_cost:        number | null
-    auto_create_wo:        boolean
-    next_due_date:         string
-    is_active:             boolean
+    property_id:               string
+    org_id:                    string
+    name:                      string
+    description:               string | null
+    schedule_type:             ScheduleType
+    frequency:                 ScheduleFrequency
+    vendor_specialty_hint:     VendorSpecialty | null
+    estimated_cost:            number | null
+    auto_create_wo:            boolean
+    next_due_date:             string
+    is_active:                 boolean
+    active_from_month:         number | null
+    active_to_month:           number | null
+    asset_category:            string | null
+    is_from_standard_template: boolean
+    source_template_item_id:   string
   }> = []
   let skipped = 0
 
@@ -1072,17 +1079,22 @@ export async function broadcastMaintenanceTemplate(
       }
 
       rowsToInsert.push({
-        property_id:           property.id,
-        org_id:                membership.org_id,
-        name:                  item.name,
-        description:           item.description,
-        schedule_type:         'routine',
-        frequency:             item.schedule_frequency,
-        vendor_specialty_hint: item.vendor_specialty_hint,
-        estimated_cost:        item.estimated_cost,
-        auto_create_wo:        true,
-        next_due_date:         nextDueDate,
-        is_active:             true,
+        property_id:               property.id,
+        org_id:                    membership.org_id,
+        name:                      item.name,
+        description:               item.description,
+        schedule_type:             'routine',
+        frequency:                 recurrenceOverrides[item.id] ?? item.schedule_frequency,
+        vendor_specialty_hint:     item.vendor_specialty_hint,
+        estimated_cost:            item.estimated_cost,
+        auto_create_wo:            true,
+        next_due_date:             nextDueDates[item.id] ?? fallbackDueDate,
+        is_active:                 true,
+        active_from_month:         item.active_from_month ?? null,
+        active_to_month:           item.active_to_month ?? null,
+        asset_category:            item.asset_category ?? null,
+        is_from_standard_template: template.is_system,
+        source_template_item_id:   item.id,
       })
     }
   }
@@ -1100,7 +1112,7 @@ export async function broadcastMaintenanceTemplate(
     data: {
       org_id:       membership.org_id,
       template_id:  templateId,
-      property_ids: properties.map((p) => p.id),
+      property_ids: (properties as { id: string }[]).map((p) => p.id),
       triggered_by: user.id,
     },
   })
@@ -1159,4 +1171,288 @@ export async function updateMaintenanceTemplate(
 
   revalidatePath('/maintenance')
   return {}
+}
+
+// ── Seasonal window helper ────────────────────────────────────────────────────
+
+// Returns false only when a seasonal window is set AND today is outside it.
+// Year-wrap: active_from=11, active_to=3 means November through March.
+export function isMaintenanceItemActiveThisMonth(
+  activeFromMonth: number | null,
+  activeToMonth:   number | null,
+): boolean {
+  if (activeFromMonth === null || activeToMonth === null) return true
+  const month = new Date().getMonth() + 1  // 1–12
+  if (activeFromMonth <= activeToMonth) {
+    return month >= activeFromMonth && month <= activeToMonth
+  }
+  return month >= activeFromMonth || month <= activeToMonth
+}
+
+// ── Update a per-property maintenance schedule item ───────────────────────────
+
+export async function updateMaintenanceScheduleItem(
+  itemId: string,
+  updates: {
+    name?:              string
+    frequency?:         ScheduleFrequency
+    next_due_date?:     string | null
+    active_from_month?: number | null
+    active_to_month?:   number | null
+    asset_category?:    string | null
+    instructions?:      string | null
+    estimated_cost?:    number | null
+  }
+): Promise<{ error?: string; success?: boolean }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const { error } = await supabase
+      .from('maintenance_schedules')
+      .update(updates)
+      .eq('id', itemId)
+      .eq('org_id', membership.org_id)
+
+    if (error) {
+      console.error('[updateMaintenanceScheduleItem]', error)
+      return { error: 'Failed to update item' }
+    }
+
+    revalidatePath('/maintenance')
+    return { success: true }
+  } catch (err) {
+    console.error('[updateMaintenanceScheduleItem]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Duplicate a per-property maintenance schedule item ────────────────────────
+
+export async function duplicateMaintenanceScheduleItem(
+  itemId:      string,
+  nextDueDate: string,
+): Promise<{ error?: string; success?: boolean }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const { data: original, error: fetchErr } = await supabase
+      .from('maintenance_schedules')
+      .select('*')
+      .eq('id', itemId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (fetchErr || !original) return { error: 'Item not found' }
+
+    const { id: _id, created_at: _ca, updated_at: _ua, ...rest } = original as Record<string, unknown>
+
+    const { error } = await supabase
+      .from('maintenance_schedules')
+      .insert({
+        ...rest,
+        next_due_date:             nextDueDate,
+        source_template_item_id:   null,
+        is_from_standard_template: false,
+      })
+
+    if (error) {
+      console.error('[duplicateMaintenanceScheduleItem]', error)
+      return { error: 'Failed to duplicate item' }
+    }
+
+    revalidatePath(`/properties/${original.property_id}`)
+    revalidatePath('/maintenance')
+    return { success: true }
+  } catch (err) {
+    console.error('[duplicateMaintenanceScheduleItem]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Soft-delete a per-property maintenance schedule item ──────────────────────
+
+export async function removeMaintenanceScheduleItem(
+  itemId:     string,
+  propertyId: string,
+): Promise<{ error?: string; success?: boolean }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const { error } = await supabase
+      .from('maintenance_schedules')
+      .update({ is_active: false })
+      .eq('id', itemId)
+      .eq('org_id', membership.org_id)
+
+    if (error) {
+      console.error('[removeMaintenanceScheduleItem]', error)
+      return { error: 'Failed to remove item' }
+    }
+
+    revalidatePath(`/properties/${propertyId}`)
+    revalidatePath('/maintenance')
+    return { success: true }
+  } catch (err) {
+    console.error('[removeMaintenanceScheduleItem]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Add a catalog item to a property ─────────────────────────────────────────
+
+export async function addCatalogItemToProperty(
+  propertyId:    string,
+  catalogItemId: string,
+  nextDueDate:   string,
+  recurrence:    ScheduleFrequency,
+): Promise<{ error?: string; success?: boolean }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const { data: catalogItem, error: catErr } = await supabase
+      .from('maintenance_catalog_items')
+      .select('name, asset_category, description')
+      .eq('id', catalogItemId)
+      .single()
+
+    if (catErr || !catalogItem) return { error: 'Catalog item not found' }
+
+    const { error } = await supabase
+      .from('maintenance_schedules')
+      .insert({
+        property_id:               propertyId,
+        org_id:                    membership.org_id,
+        name:                      catalogItem.name,
+        asset_category:            catalogItem.asset_category ?? null,
+        schedule_type:             'routine',
+        frequency:                 recurrence,
+        next_due_date:             nextDueDate,
+        instructions:              catalogItem.description ?? null,
+        is_from_standard_template: false,
+        source_catalog_item_id:    catalogItemId,
+        auto_create_wo:            false,
+        is_active:                 true,
+      })
+
+    if (error) {
+      console.error('[addCatalogItemToProperty]', error)
+      return { error: 'Failed to add item' }
+    }
+
+    revalidatePath(`/properties/${propertyId}`)
+    return { success: true }
+  } catch (err) {
+    console.error('[addCatalogItemToProperty]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Add a custom maintenance item to a property ───────────────────────────────
+
+export async function addCustomMaintenanceItem(
+  propertyId: string,
+  item: {
+    name:               string
+    frequency:          ScheduleFrequency
+    next_due_date:      string
+    active_from_month?: number | null
+    active_to_month?:   number | null
+    asset_category?:    string | null
+    instructions?:      string | null
+    estimated_cost?:    number | null
+  },
+): Promise<{ error?: string; success?: boolean }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const { error } = await supabase
+      .from('maintenance_schedules')
+      .insert({
+        property_id:               propertyId,
+        org_id:                    membership.org_id,
+        schedule_type:             'routine',
+        auto_create_wo:            false,
+        is_from_standard_template: false,
+        is_active:                 true,
+        ...item,
+      })
+
+    if (error) {
+      console.error('[addCustomMaintenanceItem]', error)
+      return { error: 'Failed to add item' }
+    }
+
+    revalidatePath(`/properties/${propertyId}`)
+    return { success: true }
+  } catch (err) {
+    console.error('[addCustomMaintenanceItem]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Record a maintenance completion and advance next_due_date ─────────────────
+
+export async function recordMaintenanceCompletion(
+  scheduleItemId: string,
+  input: { notes?: string; work_order_id?: string },
+): Promise<{ error?: string; success?: boolean; nextDueDate?: string }> {
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
+
+    const { data: item, error: fetchErr } = await supabase
+      .from('maintenance_schedules')
+      .select('property_id, org_id, asset_category, frequency, active_from_month, active_to_month')
+      .eq('id', scheduleItemId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (fetchErr || !item) return { error: 'Maintenance item not found' }
+
+    const today = new Date()
+    const next  = new Date(today)
+    switch (item.frequency) {
+      case 'weekly':      next.setDate(next.getDate() + 7);         break
+      case 'biweekly':    next.setDate(next.getDate() + 14);        break
+      case 'monthly':     next.setMonth(next.getMonth() + 1);       break
+      case 'quarterly':   next.setMonth(next.getMonth() + 3);       break
+      case 'semi_annual': next.setMonth(next.getMonth() + 6);       break
+      case 'annual':      next.setFullYear(next.getFullYear() + 1); break
+    }
+    const nextDueDateStr = next.toISOString().split('T')[0]
+
+    const { error: compErr } = await supabase
+      .from('maintenance_completions')
+      .insert({
+        maintenance_schedule_id: scheduleItemId,
+        property_id:             item.property_id,
+        org_id:                  item.org_id,
+        asset_category:          item.asset_category ?? null,
+        completed_at:            today.toISOString(),
+        completed_by:            user.id,
+        notes:                   input.notes ?? null,
+        work_order_id:           input.work_order_id ?? null,
+        next_due_date_set:       nextDueDateStr,
+      })
+
+    if (compErr) {
+      console.error('[recordMaintenanceCompletion] insert', compErr)
+      return { error: 'Failed to record completion' }
+    }
+
+    const { error: updateErr } = await supabase
+      .from('maintenance_schedules')
+      .update({ next_due_date: nextDueDateStr })
+      .eq('id', scheduleItemId)
+
+    if (updateErr) {
+      console.error('[recordMaintenanceCompletion] update next_due_date', updateErr)
+    }
+
+    revalidatePath(`/properties/${item.property_id}`)
+    revalidatePath('/maintenance')
+    return { success: true, nextDueDate: nextDueDateStr }
+  } catch (err) {
+    console.error('[recordMaintenanceCompletion]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
 }

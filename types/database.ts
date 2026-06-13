@@ -39,6 +39,7 @@ export type LineItemType        =
   | 'labor' | 'material' | 'equipment' | 'subcontractor' | 'other'
 export type ScheduleType        = 'routine' | 'seasonal'
 export type ScheduleFrequency   = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'semi_annual' | 'annual'
+export type MaintenanceCatalogCategory = 'water_features' | 'heating_fuel' | 'outdoor_grounds' | 'systems' | 'amenities'
 export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
@@ -536,24 +537,30 @@ export interface WorkOrderPhoto {
 }
 
 export interface MaintenanceSchedule {
-  id:                  string
-  property_id:         string
-  org_id:              string
-  assigned_vendor_id:  string | null
-  name:                string
-  description:         string | null
-  schedule_type:       ScheduleType
-  frequency:           ScheduleFrequency | null
-  month_due:           number | null
-  day_of_month_due:    number | null
-  estimated_cost:      number | null
-  instructions:        string | null
-  auto_create_wo:      boolean
-  last_completed_date: string | null
-  next_due_date:       string | null
-  is_active:           boolean
-  created_at:          string
-  updated_at:          string
+  id:                        string
+  property_id:               string
+  org_id:                    string
+  assigned_vendor_id:        string | null
+  name:                      string
+  description:               string | null
+  schedule_type:             ScheduleType
+  frequency:                 ScheduleFrequency | null
+  month_due:                 number | null
+  day_of_month_due:          number | null
+  estimated_cost:            number | null
+  instructions:              string | null
+  auto_create_wo:            boolean
+  last_completed_date:       string | null
+  next_due_date:             string | null
+  active_from_month:         number | null
+  active_to_month:           number | null
+  asset_category:            string | null
+  is_from_standard_template: boolean
+  source_template_item_id:   string | null
+  source_catalog_item_id:    string | null
+  is_active:                 boolean
+  created_at:                string
+  updated_at:                string
 }
 
 export interface MaintenanceScheduleTemplate {
@@ -575,7 +582,59 @@ export interface MaintenanceScheduleTemplateItem {
   estimated_cost:        number | null
   is_optional_flag:      string | null
   sort_order:            number
+  asset_category:        string | null
+  active_from_month:     number | null
+  active_to_month:       number | null
   created_at:            string
+}
+
+export interface MaintenanceCatalogItem {
+  id:                   string
+  name:                 string
+  category:             MaintenanceCatalogCategory
+  suggested_recurrence: ScheduleFrequency | null
+  asset_category:       string | null
+  description:          string | null
+  sort_order:           number
+  is_active:            boolean
+  created_at:           string
+}
+
+export interface MaintenanceCompletion {
+  id:                      string
+  maintenance_schedule_id: string
+  property_id:             string
+  org_id:                  string
+  asset_category:          string | null
+  completed_at:            string
+  completed_by:            string | null
+  notes:                   string | null
+  work_order_id:           string | null
+  next_due_date_set:       string | null
+  created_at:              string
+}
+
+export const RECURRENCE_LABELS: Record<ScheduleFrequency, string> = {
+  weekly:      'Weekly',
+  biweekly:    'Bi-Weekly',
+  monthly:     'Monthly',
+  quarterly:   'Quarterly',
+  semi_annual: 'Semi-Annual',
+  annual:      'Annual',
+}
+
+export const MONTH_NAMES = [
+  '', // index 0 unused — months are 1-indexed
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+] as const
+
+export const CATALOG_CATEGORY_LABELS: Record<MaintenanceCatalogCategory, string> = {
+  water_features:  'Water Features',
+  heating_fuel:    'Heating & Fuel',
+  outdoor_grounds: 'Outdoor & Grounds',
+  systems:         'Systems',
+  amenities:       'Amenities',
 }
 
 export interface OwnerTransaction {
