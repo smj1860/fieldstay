@@ -505,7 +505,7 @@ paths with imports verified against actual path aliases:
 |---|---|
 | Kroger API types | `lib/kroger/types.ts` |
 | Kroger API client | `lib/kroger/client.ts` |
-| Shopping cart Inngest function | `inngest/functions/build-shopping-cart.ts` |
+| Shopping cart Inngest function | `lib/inngest/functions/build-shopping-cart.ts` |
 | Kroger OAuth initiate | `app/api/kroger/connect/route.ts` |
 | Kroger OAuth callback | `app/api/kroger/callback/route.ts` |
 | triggerShoppingCart() server action | `app/(dashboard)/inventory/actions.ts` (add to existing) |

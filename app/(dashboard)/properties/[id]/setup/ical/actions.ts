@@ -29,7 +29,10 @@ export async function addIcalFeed(
     name, url, source,
   })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addIcalFeed]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,

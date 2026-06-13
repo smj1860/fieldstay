@@ -91,7 +91,7 @@ export async function inviteTeamMember(
       inviteToken:  invite.token,
     })
   } catch (err) {
-    console.error(`[Team:${user.id}] invite email failed:`, err instanceof Error ? err.message : err)
+    console.error(`[Team:${user.id}] invite email failed`)
     // Non-fatal — invite record exists, user can resend
   }
 
@@ -102,7 +102,7 @@ export async function inviteTeamMember(
     action:     'team.member.invited',
     targetType: 'invite',
     targetId:   invite.id,
-    metadata:   { email: normalizedEmail },
+    metadata:   { role: 'admin' },
   })
 
   revalidatePath('/settings/team')

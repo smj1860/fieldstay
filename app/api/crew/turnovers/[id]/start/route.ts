@@ -53,7 +53,10 @@ export async function POST(
     .eq('id', turnover_id)
     .eq('org_id', crew.org_id)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('[CrewTurnoverStart]', error)
+    return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+  }
 
   await inngest.send({
     name: 'turnover/started',

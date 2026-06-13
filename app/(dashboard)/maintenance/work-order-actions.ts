@@ -1,6 +1,5 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
 import { requireOrgMember } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 
@@ -17,8 +16,7 @@ export async function addWorkOrderLineItem(
     sort_order?: number
   }
 ) {
-  const { membership } = await requireOrgMember()
-  const supabase = await createClient()
+  const { supabase, membership } = await requireOrgMember()
 
   const { error } = await supabase
     .from('work_order_line_items')
@@ -28,13 +26,15 @@ export async function addWorkOrderLineItem(
       ...item,
     })
 
-  if (error) throw new Error(`Failed to add line item: ${error.message}`)
+  if (error) {
+    console.error('[addWorkOrderLineItem]', error)
+    throw new Error('Failed to add line item')
+  }
   revalidatePath('/maintenance')
 }
 
 export async function deleteWorkOrderLineItem(lineItemId: string) {
-  const { membership } = await requireOrgMember()
-  const supabase = await createClient()
+  const { supabase, membership } = await requireOrgMember()
 
   const { error } = await supabase
     .from('work_order_line_items')
@@ -42,15 +42,17 @@ export async function deleteWorkOrderLineItem(lineItemId: string) {
     .eq('id', lineItemId)
     .eq('org_id', membership.org_id)  // RLS reinforcement
 
-  if (error) throw new Error(`Failed to delete line item: ${error.message}`)
+  if (error) {
+    console.error('[deleteWorkOrderLineItem]', error)
+    throw new Error('Failed to delete line item')
+  }
   revalidatePath('/maintenance')
 }
 
 export async function reorderWorkOrderLineItems(
   updates: Array<{ id: string; sort_order: number }>
 ) {
-  const { membership } = await requireOrgMember()
-  const supabase = await createClient()
+  const { supabase, membership } = await requireOrgMember()
 
   const promises = updates.map(({ id, sort_order }) =>
     supabase

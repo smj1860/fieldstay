@@ -43,7 +43,8 @@ export async function POST(request: NextRequest) {
     .is('user_id', null)
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    console.error('[CrewAcceptInvite]', error)
+    return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
   }
 
   await logAuditEvent({

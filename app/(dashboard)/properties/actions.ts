@@ -82,7 +82,10 @@ export async function createProperty(
     .select('id')
     .single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[createProperty]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   if (zip) {
     const coords = await geocodeZip(zip)
@@ -152,7 +155,10 @@ export async function updateProperty(
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateProperty]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   if (zip && zip !== (existing?.zip ?? '')) {
     const coords = await geocodeZip(zip)
@@ -313,7 +319,10 @@ export async function createAsset(
       .select('id')
       .single()
 
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[createAsset]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -368,7 +377,10 @@ export async function updateAsset(
       .eq('id', assetId)
       .eq('org_id', membership.org_id)
 
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[updateAsset]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -387,14 +399,20 @@ export async function updateAsset(
   }
 }
 
-export async function deactivateAsset(assetId: string, propertyId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
-  await supabase
-    .from('property_assets')
-    .update({ is_active: false })
-    .eq('id', assetId)
-    .eq('org_id', membership.org_id)
-  revalidatePath(`/properties/${propertyId}`)
+export async function deactivateAsset(assetId: string, propertyId: string): Promise<{ error?: string }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+    await supabase
+      .from('property_assets')
+      .update({ is_active: false })
+      .eq('id', assetId)
+      .eq('org_id', membership.org_id)
+    revalidatePath(`/properties/${propertyId}`)
+    return {}
+  } catch (err) {
+    console.error('[deactivateAsset]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
 }
 
 // ── Bulk CSV asset import ─────────────────────────────────────
@@ -454,7 +472,10 @@ export async function bulkImportAssets(
     })
 
     const { error } = await supabase.from('property_assets').insert(insertRows)
-    if (error) return { imported: 0, error: error.message }
+    if (error) {
+      console.error('[bulkImportAssets]', error)
+      return { imported: 0, error: 'Import failed — please try again' }
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,

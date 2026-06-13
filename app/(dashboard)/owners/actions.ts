@@ -45,7 +45,10 @@ export async function addPropertyOwner(
     notes,
   })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addPropertyOwner]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/owners')
   return { success: true }
@@ -78,7 +81,10 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
     is_multi:   false,
   }, { onConflict: 'property_owner_id,is_multi' })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[generatePortalToken]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/owners')
   return { success: true, token }
@@ -118,7 +124,10 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
     is_multi:     true,
   }, { onConflict: 'property_owner_id,is_multi' })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[generateCombinedPortalToken]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/owners')
   return { success: true, token }
@@ -167,7 +176,10 @@ export async function addOwnerTransaction(
     visible_to_owner: true,
   }).select('id').single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addOwnerTransaction]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -196,7 +208,10 @@ export async function toggleTransactionVisibility(
     .eq('id', txnId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[toggleTransactionVisibility]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -232,7 +247,10 @@ export async function revokeOwnerPortalToken(ownerId: string): Promise<OwnersAct
     .eq('property_owner_id', ownerId)
     .is('revoked_at', null)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[revokeOwnerPortalToken]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,

@@ -58,7 +58,8 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     if (createError.message.includes('already registered')) {
       return { error: 'An account with this email already exists. Try logging in instead.' }
     }
-    return { error: createError.message }
+    console.error('[activateCrewAccount]', createError)
+    return { error: 'Account creation failed — please try again' }
   }
 
   if (!authData.user) return { error: 'Account creation failed — please try again' }
@@ -89,4 +90,5 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
   })
 
   redirect('/crew/install')
+  return { error: undefined }
 }
