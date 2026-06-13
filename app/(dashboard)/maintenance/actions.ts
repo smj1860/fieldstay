@@ -8,6 +8,7 @@ import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
 import type { WoStatus, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema } from '@/lib/schemas/work-order'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string }
 
@@ -363,7 +364,7 @@ export async function updateWorkOrderStatus(
 // ── Feature 4: Advance schedule after WO completion ──────────────────────────
 
 async function advanceScheduleAfterCompletion(
-  supabase: Awaited<ReturnType<typeof import('@/lib/supabase/server').createServerClient>>,
+  supabase: SupabaseClient,
   scheduleId: string,
   orgId: string
 ) {
