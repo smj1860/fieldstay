@@ -65,5 +65,5 @@ export async function saveDetails(
   await markStepComplete(propertyId, 'details')
   revalidatePath(`/properties/${propertyId}`)
   redirect(`/properties/${propertyId}/setup/ical`)
-  return { error: null }
+  return {}
 }

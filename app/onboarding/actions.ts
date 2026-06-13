@@ -63,5 +63,5 @@ export async function createOrganization(
   })
 
   redirect('/ops')
-  return { error: null }
+  return {}
 }
