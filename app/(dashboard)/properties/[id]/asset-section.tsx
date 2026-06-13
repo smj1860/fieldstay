@@ -647,7 +647,10 @@ function AssetRow({
           <Pencil className="w-3.5 h-3.5" />
         </button>
         <button
-          onClick={() => startRemove(() => deactivateAsset(asset.id, propertyId))}
+          onClick={() => startRemove(async () => {
+            const result = await deactivateAsset(asset.id, propertyId)
+            if (result?.error) throw new Error(result.error)
+          })}
           disabled={removing}
           className="btn-ghost p-1.5 text-muted-themed hover:text-red-500"
           title="Deactivate asset"
