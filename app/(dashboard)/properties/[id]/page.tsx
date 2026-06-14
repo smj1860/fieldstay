@@ -5,6 +5,8 @@ import { formatDate } from '@/lib/utils'
 import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Clock, DollarSign, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AssetSection } from './asset-section'
+import { PropertyMaintenanceManager } from '@/components/property/PropertyMaintenanceManager'
+import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/database'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Property' }
@@ -27,6 +29,8 @@ export default async function PropertyDetailPage({ params }: Props) {
     { data: upcomingSchedules },
     { data: assets },
     { data: standards },
+    { data: allSchedules },
+    { data: catalogItems },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -54,7 +58,7 @@ export default async function PropertyDetailPage({ params }: Props) {
       .order('created_at', { ascending: false })
       .limit(10),
 
-    // Upcoming scheduled maintenance
+    // Upcoming scheduled maintenance (for summary widget)
     supabase
       .from('maintenance_schedules')
       .select('id, name, frequency, next_due_date, estimated_cost')
@@ -74,6 +78,22 @@ export default async function PropertyDetailPage({ params }: Props) {
       .from('asset_type_standards')
       .select('*')
       .order('display_name'),
+
+    // Full schedule list for management UI
+    supabase
+      .from('maintenance_schedules')
+      .select('*')
+      .eq('property_id', property.id)
+      .eq('is_active', true)
+      .order('next_due_date', { ascending: true }),
+
+    // Catalog for "Add from catalog" modal
+    supabase
+      .from('maintenance_catalog_items')
+      .select('*')
+      .eq('is_active', true)
+      .order('category')
+      .order('sort_order'),
   ])
 
   // Calculate YTD maintenance spend
@@ -171,6 +191,15 @@ export default async function PropertyDetailPage({ params }: Props) {
         standards={standards ?? []}
         propertyId={property.id}
       />
+
+      {/* ── Maintenance Schedule Manager ────────────────────────────────── */}
+      <div className="card mb-4">
+        <PropertyMaintenanceManager
+          propertyId={property.id}
+          initialSchedules={(allSchedules ?? []) as MaintenanceSchedule[]}
+          catalog={(catalogItems ?? []) as MaintenanceCatalogItem[]}
+        />
+      </div>
 
       {/* ── Feature 6: Maintenance History ─────────────────────────────── */}
       <div className="card mb-4">

@@ -75,6 +75,36 @@ bucket_definitions:
         FROM crew_availability
         WHERE crew_member_id = bucket.crew_member_id
 
+  # ── Maintenance (org-member dashboard) ───────────────────────────────────
+  # Syncs per-property maintenance schedules and completions for PM use.
+  # Catalog items and template items are fetched directly from Supabase
+  # on demand (onboarding + modal flows) — do not add them here.
+  org_maintenance:
+    parameters:
+      - SELECT org_id
+        FROM organization_members
+        WHERE user_id = request.user_id()
+        AND invite_accepted_at IS NOT NULL
+    data:
+      - SELECT
+            id, property_id, org_id, name, description,
+            schedule_type, frequency,
+            active_from_month, active_to_month,
+            asset_category, next_due_date,
+            estimated_cost, instructions, auto_create_wo,
+            is_from_standard_template,
+            is_active, created_at, updated_at
+          FROM maintenance_schedules
+          WHERE org_id = bucket.org_id::uuid
+            AND is_active = true
+
+      - SELECT
+            id, maintenance_schedule_id, property_id, org_id,
+            asset_category, completed_at, completed_by,
+            notes, work_order_id, next_due_date_set, created_at
+          FROM maintenance_completions
+          WHERE org_id = bucket.org_id::uuid
+
   # ── Messages ──────────────────────────────────────────────────────────────
   # Org-scoped via crew_members. RLS on the messages table provides the
   # secondary sender/recipient boundary at the database layer.

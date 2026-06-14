@@ -8,6 +8,20 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
 const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
 
+// Returns false only when a seasonal window is set AND today is outside it.
+// Year-wrap: active_from=11, active_to=3 = November through March.
+function isActiveThisMonth(
+  activeFromMonth: number | null,
+  activeToMonth:   number | null,
+): boolean {
+  if (activeFromMonth === null || activeToMonth === null) return true
+  const month = new Date().getMonth() + 1  // 1–12
+  if (activeFromMonth <= activeToMonth) {
+    return month >= activeFromMonth && month <= activeToMonth
+  }
+  return month >= activeFromMonth || month <= activeToMonth
+}
+
 /**
  * SCHEDULED: runs every morning at 8am CT.
  *
@@ -43,6 +57,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
         .select(`
           id, name, schedule_type, frequency, estimated_cost,
           instructions, auto_create_wo, next_due_date,
+          active_from_month, active_to_month,
           assigned_vendor_id, property_id, org_id,
           properties ( name, city, state ),
           vendors ( id, name, email, portal_enabled )
@@ -92,6 +107,11 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
         const dueDate      = new Date(schedule.next_due_date!)
         const daysUntilDue = Math.round((dueDate.getTime() - today.getTime()) / 86_400_000)
+
+        // Skip items outside their seasonal window — no WO, no alert
+        if (!isActiveThisMonth(schedule.active_from_month ?? null, schedule.active_to_month ?? null)) {
+          return
+        }
 
         const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
 
