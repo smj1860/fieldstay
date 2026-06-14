@@ -46,7 +46,7 @@ export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) 
       .eq('is_active', true)
       .order('category')
       .order('sort_order')
-      .then(({ data }) => {
+      .then(({ data }: { data: MaintenanceCatalogItem[] | null; error: unknown }) => {
         if (data) setCatalog(data as MaintenanceCatalogItem[])
         setLoading(false)
       })
