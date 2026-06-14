@@ -110,11 +110,11 @@ export const syncIcalFeed = inngest.createFunction(
   { event: 'ical/sync.requested' as const },
   async ({ event, step, logger }) => {
     const { feed_id, property_id, org_id } = event.data
-    const supabase = createServiceClient()
 
     // ── Step 1: Fetch feed URL and raw data ─────────────────────────────────
 
     const feedUrl = await step.run('fetch-feed-url', async () => {
+      const supabase = createServiceClient()
       const { data, error } = await supabase
         .from('ical_feeds')
         .select('url')
@@ -140,6 +140,7 @@ export const syncIcalFeed = inngest.createFunction(
       })
     } catch (err) {
       // Mark feed as errored and exit cleanly (don't retry fetch errors)
+      const supabase = createServiceClient()
       await supabase.from('ical_feeds').update({
         last_synced_at:   new Date().toISOString(),
         last_sync_status: 'error',
@@ -163,6 +164,7 @@ export const syncIcalFeed = inngest.createFunction(
     const { newBookings, cancelledBookingIds } = await step.run(
       'upsert-bookings',
       async (): Promise<{ newBookings: Array<{ id: string; guestEmail: string | null }>; cancelledBookingIds: string[] }> => {
+      const supabase = createServiceClient()
       // Fetch existing bookings for this feed
       const { data: existingBookings } = await supabase
         .from('bookings')
@@ -259,6 +261,7 @@ export const syncIcalFeed = inngest.createFunction(
 
     if (cancelledBookingIds.length > 0) {
       await step.run('cancel-affected-turnovers', async () => {
+        const supabase = createServiceClient()
         for (const bookingId of cancelledBookingIds) {
           await cancelTurnoversForBooking(bookingId, supabase)
         }
@@ -268,6 +271,7 @@ export const syncIcalFeed = inngest.createFunction(
     // ── Step 5: Generate turnovers from gaps between bookings ────────────────
 
     const newTurnoverIds = await step.run('generate-turnovers', async () => {
+      const supabase = createServiceClient()
       return generateTurnoversForProperty(property_id, org_id, supabase)
     })
 
@@ -276,6 +280,7 @@ export const syncIcalFeed = inngest.createFunction(
     // ── Step 6: Fire downstream events ──────────────────────────────────────
 
     const eventsToSend: Parameters<typeof step.sendEvent>[1] = []
+    const supabase = createServiceClient()
 
     // One `booking/detected` per new confirmed booking
     if (newBookings.length > 0) {
@@ -331,6 +336,7 @@ export const syncIcalFeed = inngest.createFunction(
     // ── Step 7: Update feed sync status ─────────────────────────────────────
 
     await step.run('mark-sync-success', async () => {
+      const supabase = createServiceClient()
       await supabase.from('ical_feeds').update({
         last_synced_at:   new Date().toISOString(),
         last_sync_status: 'success',

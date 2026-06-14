@@ -42,10 +42,10 @@ export const generateCapexProjections = inngest.createFunction(
   },
   { cron: '0 0 1 * *' },
   async ({ step, logger }) => {
-    const supabase    = createServiceClient()
     const currentYear = new Date().getFullYear()
 
     const orgs = await step.run('fetch-orgs', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase.from('organizations').select('id')
       return data ?? []
     })
@@ -54,6 +54,7 @@ export const generateCapexProjections = inngest.createFunction(
 
     for (const org of orgs) {
       await step.run(`project-org-${org.id}`, async () => {
+        const supabase = createServiceClient()
         const [{ data: assets }, { data: standards }, { data: properties }] =
           await Promise.all([
             supabase

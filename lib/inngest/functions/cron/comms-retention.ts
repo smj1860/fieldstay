@@ -16,10 +16,10 @@ export const dailyCommsRetention = inngest.createFunction(
   },
   { cron: '0 14 * * *' },  // stagger 1hr to avoid Supabase contention
   async ({ step, logger }) => {
-    const supabase = createServiceClient()
-    const today    = new Date()
+    const today = new Date()
 
     const retentionOrgs = await step.run('find-comms-retention-orgs', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('organizations')
         .select('id, comms_log_retention_days')
@@ -32,6 +32,7 @@ export const dailyCommsRetention = inngest.createFunction(
 
     for (const org of retentionOrgs) {
       await step.run(`comms-log-retention-${org.id}`, async () => {
+        const supabase = createServiceClient()
         // Step A — soft-delete logs older than the retention window
         const { data: softDeleted } = await supabase
           .from('communication_logs')

@@ -40,7 +40,10 @@ export async function upsertInventoryItems(
         })
         .eq('id', item.id)
         .eq('org_id', membership.org_id)
-      if (error) return { error: `Failed to update "${item.name}": ${error.message}` }
+      if (error) {
+        console.error('[upsertInventoryItems]', error)
+        return { error: 'Operation failed. Please try again.' }
+      }
     } else {
       const { error } = await supabase.from('inventory_items').insert({
         property_id:      propertyId,
@@ -54,7 +57,10 @@ export async function upsertInventoryItems(
         notes:            item.notes ?? null,
         preferred_brand:  item.preferred_brand ?? null,
       })
-      if (error) return { error: `Failed to add "${item.name}": ${error.message}` }
+      if (error) {
+        console.error('[upsertInventoryItems]', error)
+        return { error: 'Operation failed. Please try again.' }
+      }
     }
   }
 
@@ -121,7 +127,10 @@ export async function cloneInventoryFromProperty(
   if (toInsert.length === 0) return { added: 0, skipped }
 
   const { error } = await supabase.from('inventory_items').insert(toInsert)
-  if (error) return { added: 0, skipped, error: error.message }
+  if (error) {
+    console.error('[cloneInventoryFromProperty]', error)
+    return { added: 0, skipped, error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,

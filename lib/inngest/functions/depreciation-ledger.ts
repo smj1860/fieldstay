@@ -28,7 +28,6 @@ export const generateDepreciationLedger = inngest.createFunction(
     { cron:  '0 0 1 1 *' },  // January 1st — auto-run for prior year
   ],
   async ({ event, step, logger }) => {
-    const supabase = createServiceClient()
 
     // Cron has no event; use prior year. Event-triggered uses provided year.
     const taxYear: number = (event as { data?: { org_id?: string; tax_year?: number } })?.data?.tax_year
@@ -37,6 +36,7 @@ export const generateDepreciationLedger = inngest.createFunction(
     // ── Step 1: Load active assets ──────────────────────────────────────────
 
     const assets = await step.run('load-assets', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('property_assets')
         .select('id, org_id, property_id, name, asset_type, placed_in_service_date, purchase_price, salvage_value, macrs_class')
@@ -54,6 +54,7 @@ export const generateDepreciationLedger = inngest.createFunction(
     // ── Step 2: Fetch prior cumulative depreciation per asset ───────────────
 
     const priorEntries = await step.run('fetch-prior-cumulative', async () => {
+      const supabase = createServiceClient()
       const assetIds = assets.map((a) => a.id)
       const { data } = await supabase
         .from('asset_depreciation_entries')
@@ -83,6 +84,7 @@ export const generateDepreciationLedger = inngest.createFunction(
 
     for (const [orgId, orgAssets] of Object.entries(orgMap)) {
       const written = await step.run(`upsert-entries-${orgId}`, async () => {
+        const supabase = createServiceClient()
         const entries = []
 
         for (const asset of orgAssets) {

@@ -22,8 +22,7 @@ export const dailyAssetHealth = inngest.createFunction(
   },
   { cron: '0 13 * * *' },
   async ({ step, logger }) => {
-    const supabase = createServiceClient()
-    const today    = new Date()
+    const today = new Date()
 
     // ── 8.4: Daily Asset Health Score Recalculation ──────────────────────────
     const activeAssets = await step.run('find-assets-for-scoring', async (): Promise<Array<{
@@ -36,6 +35,7 @@ export const dailyAssetHealth = inngest.createFunction(
       estimated_replacement_cost: number | null
       health_score: number | null
     }>> => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('property_assets')
         .select(`
@@ -51,6 +51,7 @@ export const dailyAssetHealth = inngest.createFunction(
 
     if (activeAssets.length > 0) {
       const standards = await step.run('fetch-asset-standards', async () => {
+        const supabase = createServiceClient()
         const { data } = await supabase
           .from('asset_type_standards')
           .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high')
@@ -58,6 +59,7 @@ export const dailyAssetHealth = inngest.createFunction(
       })
 
       const repairWOs = await step.run('fetch-asset-repair-history', async () => {
+        const supabase = createServiceClient()
         const { data } = await supabase
           .from('work_orders')
           .select('asset_id, actual_cost, estimated_cost, completed_date')
@@ -98,6 +100,7 @@ export const dailyAssetHealth = inngest.createFunction(
 
       // Batch-resolve PM emails for every org with active assets
       const assetPmEmailEntries = await step.run('find-asset-pm-emails', async () => {
+        const supabase = createServiceClient()
         const emails = await getPmEmailsByOrgIds(supabase, Object.keys(assetsByOrg))
         return Array.from(emails.entries())
       })
@@ -105,6 +108,7 @@ export const dailyAssetHealth = inngest.createFunction(
 
       for (const [orgId, orgAssets] of Object.entries(assetsByOrg)) {
         await step.run(`score-org-assets-${orgId}`, async () => {
+          const supabase = createServiceClient()
           type Crossing = { asset_type: string; property_id: string; oldScore: number; newScore: number }
           const crossings: Crossing[] = []
           const updates: Array<{ id: string; health_score: number; health_score_updated_at: string }> = []
@@ -199,6 +203,7 @@ export const dailyAssetHealth = inngest.createFunction(
       expiry_date: string | null
       vendors: { name: string } | { name: string }[] | null
     }>> => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('vendor_compliance_documents')
         .select(`
@@ -224,6 +229,7 @@ export const dailyAssetHealth = inngest.createFunction(
     })
 
     const compliancePmEmailEntries = await step.run('find-compliance-pm-emails', async () => {
+      const supabase = createServiceClient()
       const orgIds = Array.from(new Set(dueAlerts.map((a) => a.doc.org_id)))
       const emails = await getPmEmailsByOrgIds(supabase, orgIds)
       return Array.from(emails.entries())
@@ -232,6 +238,7 @@ export const dailyAssetHealth = inngest.createFunction(
 
     for (const { doc, hitThreshold } of dueAlerts) {
       await step.run(`compliance-alert-${doc.id}-t${hitThreshold}`, async () => {
+        const supabase = createServiceClient()
         const thresholdKey = hitThreshold >= 0
           ? `${hitThreshold}d_before`
           : `${Math.abs(hitThreshold)}d_after`

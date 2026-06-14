@@ -25,7 +25,10 @@ export async function addCrewMember(
     org_id: membership.org_id, name, email, phone, preferred_contact,
   })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addCrewMember]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/properties')
   return { success: true }
