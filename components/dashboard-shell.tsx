@@ -8,6 +8,7 @@ import {
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Sun, Moon,
   Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
+  LifeBuoy,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -52,6 +53,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/owners':       'Owner Portal',
   '/reviews':      'Reviews',
   '/settings':     'Settings',
+  '/help':         'Help & Support',
 }
 
 interface Props {
@@ -265,6 +267,34 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
           </>
         )}
       </nav>
+
+      {/* ── Help & Support ─────────────────────────────── */}
+      <div
+        className="px-2 pt-1 pb-0 flex-shrink-0"
+        style={{ borderTop: '1px solid var(--border)' }}
+      >
+        <Link
+          href="/help"
+          onClick={() => setMobileOpen(false)}
+          title={collapsed && !mobile ? 'Help & Support' : undefined}
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+          style={{ color: 'var(--text-muted)' }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.background =
+              theme === 'light' ? 'rgba(10,22,40,0.06)' : 'var(--bg-raised)'
+            e.currentTarget.style.color = 'var(--text-primary)'
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--text-muted)'
+          }}
+        >
+          <LifeBuoy className="w-4 h-4 flex-shrink-0" />
+          {(!collapsed || mobile) && (
+            <span className="truncate">Help &amp; Support</span>
+          )}
+        </Link>
+      </div>
 
       {/* Bottom user row */}
       {(!collapsed || mobile) && (
