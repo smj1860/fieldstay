@@ -38,10 +38,10 @@ export const buildShoppingCart = inngest.createFunction(
   { event: 'inventory/cart_requested' as const },
   async ({ event, step, runId }) => {
     const { org_id, requested_by, property_ids, modality } = event.data
-    const supabase = createServiceClient()
 
     // ── Step 1: Load org settings + below-par items + Kroger connection ──
     const { orgSettings, belowParItems, connection } = await step.run('load-inventory-data', async () => {
+      const supabase = createServiceClient()
       const [{ data: org }, { data: allItems }, { data: conn }] = await Promise.all([
         supabase
           .from('organizations')
@@ -97,6 +97,7 @@ export const buildShoppingCart = inngest.createFunction(
 
     const krogerLocationId   = (connection?.metadata as { location_id?: string } | null)?.location_id
     const krogerLocationName = (connection?.metadata as { location_name?: string } | null)?.location_name
+    const supabase = createServiceClient()
 
     if (!connection || !krogerLocationId) {
       await supabase.from('org_milestones').upsert({
@@ -320,6 +321,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
     // and guarded by an org_milestones flag (keyed on this function run) so a
     // retry of this step itself can't add the items to the cart twice.
     const cartAdded = await step.run('add-items-to-kroger-cart', async () => {
+      const supabase = createServiceClient()
       if (!customerToken || matchResult.cartItems.length === 0) return false
 
       const milestoneKey = `kroger_cart_added:${runId}`
@@ -360,6 +362,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
 
     // ── Step 7: Persist result for PowerSync UI sync ─────────────
     await step.run('persist-result', async () => {
+      const supabase = createServiceClient()
       await supabase.from('org_milestones').upsert({
         org_id,
         milestone: 'last_cart_build',

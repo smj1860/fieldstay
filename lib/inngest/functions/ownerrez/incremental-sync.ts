@@ -52,15 +52,17 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       return { synced: 0, circuit_open: true }
     }
 
-    const supabase = createServiceClient()
+    const connections = await step.run('fetch-connections', async () => {
+      const supabase = createServiceClient()
+      const { data } = await supabase
+        .from('integration_connections')
+        .select('id, user_id, org_id, metadata')
+        .eq('provider_id', PROVIDER)
+        .eq('status', 'active')
+      return data ?? []
+    })
 
-    const { data: connections } = await supabase
-      .from('integration_connections')
-      .select('id, user_id, org_id, metadata')
-      .eq('provider_id', PROVIDER)
-      .eq('status', 'active')
-
-    if (!connections?.length) {
+    if (!connections.length) {
       logger.info('[OwnerRez] No active connections to sync')
       return { synced: 0 }
     }
@@ -73,6 +75,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       let retryAfterSeconds = 60
 
       await step.run(`sync-user-${conn.user_id}`, async () => {
+        const supabase = createServiceClient()
         const metadata = (conn.metadata ?? {}) as Record<string, unknown>
         const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
         const client   = new OwnerRezApiClient(conn.user_id)

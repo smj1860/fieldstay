@@ -135,7 +135,10 @@ export async function updateTurnoverStatus(
     .eq('id', turnover_id)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateTurnoverStatus]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   // Fire completion event for PM notification (skip if already completed —
   // re-saving completion notes shouldn't re-trigger downstream automations)
@@ -245,7 +248,10 @@ export async function createManualTurnover(
     .select('id')
     .single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[createManualTurnover]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await inngest.send({
     name: 'turnover/created',
@@ -447,7 +453,10 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
     .eq('id', turnoverId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[dismissSuggestion]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/turnovers')
   return { success: true }

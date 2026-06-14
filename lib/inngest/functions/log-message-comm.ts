@@ -7,9 +7,9 @@ export const logMessageCommunication = inngest.createFunction(
   { event: 'message/sent' as const },
   async ({ event, step, logger }) => {
     const { message_id, org_id, sender_id, recipient_id, is_crew_to_pm } = event.data
-    const supabase = createServiceClient()
 
     const message = await step.run('fetch-message', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('messages')
         .select('content, created_at, work_order_id')
@@ -23,6 +23,7 @@ export const logMessageCommunication = inngest.createFunction(
     const crewUserId = is_crew_to_pm ? sender_id : recipient_id
 
     const crewMember = await step.run('resolve-crew-member', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('crew_members')
         .select('id')
@@ -35,6 +36,7 @@ export const logMessageCommunication = inngest.createFunction(
     if (!crewMember) return { skipped: 'crew_member_not_found' }
 
     const result = await step.run('write-comms-log', async () => {
+      const supabase = createServiceClient()
       // Idempotency: a message's created_at is unique to the millisecond — use
       // it as the dedup key since communication_logs has no source_reference_id.
       const { data: existing } = await supabase

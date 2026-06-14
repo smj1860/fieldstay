@@ -14,19 +14,18 @@ export const ownerRezReviewsSync = inngest.createFunction(
     { event: 'integration/ownerrez.connected' },
   ],
   async ({ step, logger }) => {
-    const admin = createServiceClient()
+    const connections = await step.run('fetch-connections', async () => {
+      const admin = createServiceClient()
+      const { data, error } = await admin
+        .from('integration_connections')
+        .select('user_id, org_id, metadata')
+        .eq('provider_id', 'ownerrez')
+        .eq('status', 'active')
+      if (error) throw new Error(`[OwnerRez reviews sync] Failed to fetch connections: ${error.message}`)
+      return data ?? []
+    })
 
-    const { data: connections, error } = await admin
-      .from('integration_connections')
-      .select('user_id, org_id, metadata')
-      .eq('provider_id', 'ownerrez')
-      .eq('status', 'active')
-
-    if (error) {
-      throw new Error(`[OwnerRez reviews sync] Failed to fetch connections: ${error.message}`)
-    }
-
-    for (const conn of connections ?? []) {
+    for (const conn of connections) {
       const userId = conn.user_id as string
       const orgId  = conn.org_id  as string
       const meta   = (conn.metadata as Record<string, unknown> | null) ?? {}
@@ -58,6 +57,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
       }
 
       await step.run(`upsert-reviews-${userId}`, async () => {
+        const admin = createServiceClient()
         if (reviews.length === 0) return
 
         const propertyExternalIds = reviews
@@ -105,6 +105,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
       })
 
       await step.run(`update-reviews-cursor-${userId}`, async () => {
+        const admin = createServiceClient()
         const newMeta = { ...meta, reviews_sync_cursor: fetchStartedAt }
 
         const { error: updateErr } = await admin

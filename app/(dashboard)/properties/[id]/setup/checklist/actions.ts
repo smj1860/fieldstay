@@ -45,7 +45,10 @@ export async function saveChecklistTemplate(
       })
       .select('id')
       .single()
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[saveChecklistTemplate]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
     tmplId = data.id
   }
 
