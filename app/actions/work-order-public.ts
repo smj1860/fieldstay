@@ -177,6 +177,20 @@ export async function submitWorkOrderSignOff(
 ): Promise<{ success?: boolean; error?: string }> {
   if (!token || token.length !== 64) return { error: 'Invalid link' }
 
+  // Rate limit by token — prevents spam sign-offs on the same work order
+  // Uses the token (not IP) so the limit is per work order, not per contractor
+  try {
+    const { signOffRatelimit } = await import('@/lib/rate-limit')
+    const { success } = await signOffRatelimit.limit(`signoff:${token.slice(0, 16)}`)
+    if (!success) {
+      return { error: 'Too many requests. Please try again in a few minutes.' }
+    }
+  } catch (rlErr) {
+    // If Redis is unavailable, log and continue — a degraded rate limiting
+    // service must never block legitimate contractor sign-offs
+    console.error('[submitWorkOrderSignOff] rate limit check failed', rlErr)
+  }
+
   const supabase = createServiceClient()
 
   const { data: wo, error: fetchErr } = await supabase
