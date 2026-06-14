@@ -26,29 +26,37 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Props
   const [error,       setError]       = useState<string | null>(null)
 
   useEffect(() => {
-    supabase
-      .from('maintenance_schedule_template_items')
-      .select('*')
-      .eq('template_id', STANDARD_TEMPLATE_ID)
-      .order('sort_order')
-      .then(({ data, error: err }) => {
-        if (err || !data) { setLoading(false); return }
+    async function loadTemplate() {
+      setLoading(true)
 
-        setItems(data as MaintenanceScheduleTemplateItem[])
+      const { data, error: err } = await supabase
+        .from('maintenance_schedule_template_items')
+        .select('*')
+        .eq('template_id', STANDARD_TEMPLATE_ID)
+        .order('sort_order')
 
-        const today = new Date().toISOString().split('T')[0]
-        const defaultDates:  Record<string, string>          = {}
-        const defaultRecur:  Record<string, ScheduleFrequency> = {}
-
-        data.forEach((item) => {
-          defaultDates[item.id] = today
-          defaultRecur[item.id] = (item.schedule_frequency as ScheduleFrequency) ?? 'annual'
-        })
-
-        setDueDates(defaultDates)
-        setRecurrences(defaultRecur)
+      if (err || !data) {
         setLoading(false)
+        return
+      }
+
+      setItems(data as MaintenanceScheduleTemplateItem[])
+
+      const today = new Date().toISOString().split('T')[0]
+      const defaultDates:  Record<string, string>            = {}
+      const defaultRecur:  Record<string, ScheduleFrequency> = {}
+
+      data.forEach((item) => {
+        defaultDates[item.id] = today
+        defaultRecur[item.id] = (item.schedule_frequency as ScheduleFrequency) ?? 'annual'
       })
+
+      setDueDates(defaultDates)
+      setRecurrences(defaultRecur)
+      setLoading(false)
+    }
+
+    loadTemplate()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
