@@ -512,8 +512,82 @@ export interface WorkOrder {
   vendor_acknowledged_by:      string | null
   completion_verified_at:      string | null
   completion_verified_by:      string | null
+  // Public dispatch fields (added 2026-06-14)
+  public_token:                string | null
+  public_token_expires_at:     string | null
+  public_viewed_at:            string | null
+  public_signed_off_at:        string | null
+  sign_off_notes:              string | null
+  vendor_dispatch_email:       string | null
+  lockbox_code:                string | null
+  parking_notes:               string | null
   created_at:                  string
   updated_at:                  string
+}
+
+// ─── Work Order Public Dispatch ───────────────────────────────────────────
+
+export type WorkOrderPublicStatus =
+  | 'draft'
+  | 'sent'        // dispatched to vendor via email
+  | 'viewed'      // vendor opened the magic link
+  | 'signed_off'  // vendor submitted sign-off
+  | 'cancelled'
+
+export interface WorkOrderPublicView {
+  // Core identity
+  id:              string
+  wo_number:       string
+  public_token:    string
+  status:          WorkOrderPublicStatus
+
+  // Property
+  property_id:     string
+  property_name:   string
+  property_address: string
+
+  // Job details
+  title:           string
+  description:     string | null
+  scope_of_work:   string | null
+  category:        string | null
+
+  // Authorization
+  nte_amount:      number | null
+
+  // Access
+  access_notes:    string | null
+  lockbox_code:    string | null
+  parking_notes:   string | null
+
+  // Asset (optional)
+  asset_id:        string | null
+  asset_name:      string | null
+
+  // Dispatcher (PM contact)
+  dispatched_by:   string
+  dispatcher_name: string
+  dispatcher_org:  string
+  dispatcher_phone: string | null
+
+  // Vendor
+  vendor_id:            string | null
+  vendor_name:          string | null
+  vendor_dispatch_email: string | null
+
+  // Lifecycle timestamps
+  created_at:           string
+  dispatched_at:        string | null
+  public_token_expires_at: string | null
+  public_viewed_at:     string | null
+  public_signed_off_at: string | null
+  sign_off_notes:       string | null
+}
+
+export interface WorkOrderDispatchInput {
+  workOrderId:     string
+  vendorEmail:     string
+  vendorName:      string
 }
 
 export interface WorkOrderUpdate {
