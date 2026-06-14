@@ -76,7 +76,10 @@ export async function POST(
   const externalUserId = String(payload.user_id ?? payload.account_id ?? '')
   const correlationId  = payload.id ? String(payload.id) : crypto.randomUUID()
 
-  console.log(`[Webhook:${providerId}] action="${action}" correlationId=${correlationId}`)
+  const safeAction        = action.slice(0, 100)
+  const safeCorrelationId = correlationId.slice(0, 100)
+
+  console.log(`[Webhook:${providerId}] action="${safeAction}" correlationId=${safeCorrelationId}`)
 
   // ── 4. Handle generic "authorization revoked" universally ─
   //    This event means the user disconnected our app from within OwnerRez.

@@ -21,7 +21,10 @@ export async function updateParLevel(
     .eq('id', itemId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateParLevel]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/inventory')
   return { success: true }
@@ -79,7 +82,10 @@ export async function addInventoryItems(
   if (rows.length === 0) return { error: 'No valid items to add' }
 
   const { error } = await supabase.from('inventory_items').insert(rows)
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addInventoryItems]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/inventory')
   return { success: true }
@@ -120,7 +126,10 @@ export async function submitInventoryCount(
     .select('id')
     .single()
 
-  if (countError || !count) return { error: countError?.message ?? 'Failed to create count' }
+  if (countError || !count) {
+    console.error('[submitInventoryCount]', countError)
+    return { error: 'Failed to create inventory count. Please try again.' }
+  }
 
   // Parse item_{itemId} fields from formData
   const countItems: Array<{ count_id: string; inventory_item_id: string; quantity_counted: number }> = []
@@ -145,7 +154,10 @@ export async function submitInventoryCount(
       .from('inventory_count_items')
       .insert(countItems)
 
-    if (itemsError) return { error: itemsError.message }
+    if (itemsError) {
+      console.error('[submitInventoryCount] items insert', itemsError)
+      return { error: 'Failed to record inventory count items. Please try again.' }
+    }
 
     // Update current_quantity on each item (org_id guard) — parallel to avoid serial timeout
     await Promise.all(
@@ -198,7 +210,10 @@ export async function createOrGetTemplate(): Promise<{
       .select('id, name')
       .eq('org_id', membership.org_id)
       .single()
-    if (fetchErr || !existing) return { error: fetchErr?.message ?? 'Template not found' }
+    if (fetchErr || !existing) {
+      console.error('[createOrGetTemplate]', fetchErr)
+      return { error: 'Template not found' }
+    }
     return { template: { ...existing, inventory_template_items: null } }
   }
 
@@ -225,7 +240,10 @@ export async function addTemplateItem(
     .select('id, name, category, unit, par_level, notes, preferred_brand')
     .single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addTemplateItem]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
   revalidatePath('/inventory')
   return { item: data! as { id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null } }
 }
@@ -255,7 +273,10 @@ export async function bulkAddTemplateItems(
     )
     .select('id, name, category, unit, par_level, notes, preferred_brand')
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[bulkAddTemplateItems]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/inventory')
   return { items: data as Array<{ id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null }> }
@@ -272,7 +293,10 @@ export async function updateTemplateItemBrand(
     .update({ preferred_brand: brand || null })
     .eq('id', itemId)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateTemplateItemBrand]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
   revalidatePath('/inventory')
   return {}
 }
@@ -285,7 +309,10 @@ export async function removeTemplateItem(itemId: string): Promise<{ error?: stri
     .delete()
     .eq('id', itemId)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[removeTemplateItem]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
   revalidatePath('/inventory')
   return {}
 }
@@ -348,7 +375,8 @@ export async function applyTemplateToProperties(
     .eq('template_id', templateId)
 
   if (itemsErr || !items?.length) {
-    return { error: itemsErr?.message ?? 'No items in template', applied: 0 }
+    if (itemsErr) console.error('[applyTemplateToProperties]', itemsErr)
+    return { error: 'No items in template', applied: 0 }
   }
 
   // Fetch all existing items for ALL target properties in a single query, then group by property
@@ -432,7 +460,10 @@ export async function bulkAddTemplateItemsFromCSV(
   }))
 
   const { error } = await supabase.from('inventory_template_items').insert(toInsert)
-  if (error) return { error: error.message, added: 0 }
+  if (error) {
+    console.error('[bulkAddTemplateItemsFromCSV]', error)
+    return { error: 'Operation failed. Please try again.', added: 0 }
+  }
 
   revalidatePath('/inventory')
   return { added: toInsert.length }
@@ -501,7 +532,10 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
     .eq('is_active', true)
     .limit(2000)
 
-  if (error) return { items: [], error: error.message }
+  if (error) {
+    console.error('[generateAggregatedPurchaseList]', error)
+    return { items: [], error: 'Operation failed. Please try again.' }
+  }
 
   const grouped: Record<string, AggregatedItem> = {}
   for (const item of allItems ?? []) {
@@ -549,7 +583,10 @@ export async function updatePurchaseOrderStatus(
     .eq('id', purchaseOrderId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updatePurchaseOrderStatus]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   if (status === 'ordered') {
     await inngest.send({

@@ -27,14 +27,18 @@ export async function DELETE(request: NextRequest) {
 
   const admin = createServiceClient()
 
-  // Get org membership
-  const { data: membership } = await admin
+  // Get all org memberships — user may belong to more than one org
+  const { data: memberships, error: memberErr } = await admin
     .from('organization_members')
     .select('org_id, role')
     .eq('user_id', user.id)
-    .single()
 
-  if (membership) {
+  if (memberErr) {
+    console.error('[account/delete] membership lookup', memberErr)
+    return NextResponse.json({ error: 'Delete failed' }, { status: 500 })
+  }
+
+  for (const membership of memberships ?? []) {
     const orgId = membership.org_id as string
 
     // If owner, check no other members exist before deleting
@@ -52,7 +56,7 @@ export async function DELETE(request: NextRequest) {
         )
       }
 
-      // Cancel Stripe subscription
+      // Cancel Stripe subscription (owner-only)
       const { data: org } = await admin
         .from('organizations')
         .select('stripe_subscription_id, repuguard_stripe_subscription_id')
@@ -75,25 +79,25 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
-    // Revoke integration tokens
-    const { data: connections } = await admin
-      .from('integration_connections')
-      .select('provider_id')
-      .eq('user_id', user.id)
-
-    for (const conn of connections ?? []) {
-      try {
-        await revokeIntegrationToken(user.id, conn.provider_id as string)
-      } catch (err) {
-        console.error(`[Account:${user.id}] vault revoke failed for ${conn.provider_id}:`, err)
-      }
-    }
-
     await logAuditEvent({
       orgId:   orgId,
       actorId: user.id,
       action:  'account.deleted',
     })
+  }
+
+  // Revoke integration tokens — user-level, done once after per-org cleanup
+  const { data: connections } = await admin
+    .from('integration_connections')
+    .select('provider_id')
+    .eq('user_id', user.id)
+
+  for (const conn of connections ?? []) {
+    try {
+      await revokeIntegrationToken(user.id, conn.provider_id as string)
+    } catch (err) {
+      console.error(`[Account:${user.id}] vault revoke failed for ${conn.provider_id}:`, err)
+    }
   }
 
   // Delete the auth user (cascades to org data via DB foreign keys)

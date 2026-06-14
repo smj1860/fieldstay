@@ -30,15 +30,15 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
   },
   { cron: '0 13 * * *' },  // 8am CT (UTC-5)
   async ({ step, logger }) => {
-    const supabase  = createServiceClient()
-    const today     = new Date()
-    const todayStr  = today.toISOString().split('T')[0]
+    const today    = new Date()
+    const todayStr = today.toISOString().split('T')[0]
 
     const alertDate = new Date(today)
     alertDate.setDate(alertDate.getDate() + ALERT_WINDOW_DAYS)
 
     // ── Pass 1: Due-soon schedules ─────────────────────────────────────────
     const dueSchedules = await step.run('find-due-schedules', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('maintenance_schedules')
         .select(`
@@ -60,6 +60,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     // ── Pass 2 lookup: Overdue schedules (fetched early to batch PM emails) ──
     const overdueSchedules = await step.run('find-overdue-schedules', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('maintenance_schedules')
         .select(`
@@ -78,6 +79,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     // ── Batch-resolve PM emails for every org touched by either pass ────────
     const pmEmailEntries = await step.run('find-pm-emails', async () => {
+      const supabase = createServiceClient()
       const orgIds = Array.from(new Set([
         ...dueSchedules.map((s) => s.org_id),
         ...overdueSchedules.map((s) => s.org_id),
@@ -89,6 +91,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     for (const schedule of dueSchedules) {
       await step.run(`process-schedule-${schedule.id}`, async () => {
+        const supabase = createServiceClient()
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
         const vendor   = Array.isArray(schedule.vendors)   ? schedule.vendors[0]   : schedule.vendors
 
@@ -204,6 +207,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     for (const schedule of overdueSchedules) {
       await step.run(`escalate-overdue-${schedule.id}`, async () => {
+        const supabase = createServiceClient()
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
         const vendor   = Array.isArray(schedule.vendors)   ? schedule.vendors[0]   : schedule.vendors
         const dueDate  = new Date(schedule.next_due_date!)
@@ -315,6 +319,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     // ── Thirty-day milestone ────────────────────────────────────────────────
     await step.run('check-thirty-day-milestone', async () => {
+      const supabase = createServiceClient()
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
       const { data: orgs } = await supabase
         .from('organizations')

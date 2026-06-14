@@ -55,7 +55,10 @@ export async function createCommunicationLog(
     .select('id')
     .single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[createCommunicationLog]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -84,7 +87,10 @@ export async function deleteCommunicationLog(
     .eq('org_id', membership.org_id)
     .is('deleted_at', null)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[deleteCommunicationLog]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,

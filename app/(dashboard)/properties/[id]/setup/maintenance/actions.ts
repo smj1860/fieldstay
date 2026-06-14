@@ -44,7 +44,10 @@ export async function addMaintenanceSchedule(
     estimated_cost, instructions, auto_create_wo, next_due_date,
   })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addMaintenanceSchedule]', error)
+    return { error: 'Failed to save schedule. Please try again.' }
+  }
 
   revalidatePath(`/properties/${propertyId}/setup/maintenance`)
   return { success: true }
@@ -110,7 +113,10 @@ export async function cloneMaintenanceFromProperty(
   if (toInsert.length === 0) return { added: 0, skipped }
 
   const { error } = await supabase.from('maintenance_schedules').insert(toInsert)
-  if (error) return { added: 0, skipped, error: error.message }
+  if (error) {
+    console.error('[cloneMaintenanceFromProperty]', error)
+    return { added: 0, skipped, error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
