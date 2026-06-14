@@ -40,13 +40,14 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Props
         return
       }
 
-      setItems(data as MaintenanceScheduleTemplateItem[])
+      const typedData = data as MaintenanceScheduleTemplateItem[]
+      setItems(typedData)
 
       const today = new Date().toISOString().split('T')[0]
       const defaultDates:  Record<string, string>            = {}
       const defaultRecur:  Record<string, ScheduleFrequency> = {}
 
-      data.forEach((item) => {
+      typedData.forEach((item) => {
         defaultDates[item.id] = today
         defaultRecur[item.id] = (item.schedule_frequency as ScheduleFrequency) ?? 'annual'
       })
