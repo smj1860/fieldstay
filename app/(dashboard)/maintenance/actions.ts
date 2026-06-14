@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
+import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
@@ -1171,22 +1172,6 @@ export async function updateMaintenanceTemplate(
 
   revalidatePath('/maintenance')
   return {}
-}
-
-// ── Seasonal window helper ────────────────────────────────────────────────────
-
-// Returns false only when a seasonal window is set AND today is outside it.
-// Year-wrap: active_from=11, active_to=3 means November through March.
-export function isMaintenanceItemActiveThisMonth(
-  activeFromMonth: number | null,
-  activeToMonth:   number | null,
-): boolean {
-  if (activeFromMonth === null || activeToMonth === null) return true
-  const month = new Date().getMonth() + 1  // 1–12
-  if (activeFromMonth <= activeToMonth) {
-    return month >= activeFromMonth && month <= activeToMonth
-  }
-  return month >= activeFromMonth || month <= activeToMonth
 }
 
 // ── Update a per-property maintenance schedule item ───────────────────────────
