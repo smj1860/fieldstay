@@ -40,17 +40,19 @@ export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) 
   const today = new Date().toISOString().split('T')[0]
 
   useEffect(() => {
-    supabase
-      .from('maintenance_catalog_items')
-      .select('*')
-      .eq('is_active', true)
-      .order('category')
-      .order('sort_order')
-      .then(({ data }: { data: MaintenanceCatalogItem[] | null; error: unknown }) => {
-        if (data) setCatalog(data as MaintenanceCatalogItem[])
-        setLoading(false)
-      })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    async function loadCatalog() {
+      const { data } = await supabase
+        .from('maintenance_catalog_items')
+        .select('*')
+        .eq('is_active', true)
+        .order('category')
+        .order('sort_order')
+
+      if (data) setCatalog(data as MaintenanceCatalogItem[])
+      setLoading(false)
+    }
+
+    loadCatalog()
   }, [])
 
   const byCategory = catalog.reduce<Record<string, MaintenanceCatalogItem[]>>((acc, item) => {
