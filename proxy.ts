@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
+import { workOrderRatelimit } from '@/lib/rate-limit'
 
 // ── Public routes ──────────────────────────────────────────────────────────
 // Unauthenticated users can access these. Authenticated users are redirected
@@ -22,6 +23,7 @@ const TOKEN_ROUTES = [
   '/owner/',
   '/work-orders/',
   '/api/work-orders',
+  '/wo/',
 ]
 
 // ── Bypass routes ──────────────────────────────────────────────────────────
@@ -66,6 +68,41 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return NextResponse.next()
+
+  // Rate limit the public work order page — guards against token
+  // enumeration and request flooding on this unauthenticated route.
+  if (pathname.startsWith('/wo/')) {
+    const ip =
+      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+      request.headers.get('x-real-ip') ??
+      '127.0.0.1'
+
+    try {
+      const { success, limit, remaining, reset } =
+        await workOrderRatelimit.limit(ip)
+
+      if (!success) {
+        return new NextResponse(
+          JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
+          {
+            status:  429,
+            headers: {
+              'Content-Type':  'application/json',
+              'X-RateLimit-Limit':     String(limit),
+              'X-RateLimit-Remaining': String(remaining),
+              'X-RateLimit-Reset':     String(reset),
+              'Retry-After':           String(Math.ceil((reset - Date.now()) / 1000)),
+            },
+          }
+        )
+      }
+    } catch (err) {
+      // If Redis is unavailable, fail open — don't take down the public
+      // work order page over an infrastructure issue
+      console.error('[proxy] rate limit check failed', err)
+    }
+  }
+
   if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r)))  return NextResponse.next()
 
   const { supabaseResponse, user } = await updateSession(request)

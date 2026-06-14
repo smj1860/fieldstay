@@ -28,3 +28,21 @@ export const syncNowLimiter = new Ratelimit({
   analytics: true,
   prefix:    'ownerrez-sync-now',
 })
+
+// Public work order page — 20 requests per minute per IP
+// Allows a contractor to refresh and interact normally, blocks enumeration
+export const workOrderRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:wo',
+})
+
+// Sign-off action — 5 submissions per 5 minutes per work order token
+// A contractor will never legitimately submit more than once
+export const signOffRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(5, '5 m'),
+  analytics: false,
+  prefix:    'rl:signoff',
+})
