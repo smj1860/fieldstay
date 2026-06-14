@@ -172,5 +172,13 @@ export async function GET(
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
+  // Expiry check — matches POST handler behaviour
+  if (
+    workOrder.completion_token_expires_at &&
+    new Date(workOrder.completion_token_expires_at) < new Date()
+  ) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
   return NextResponse.json({ workOrder })
 }

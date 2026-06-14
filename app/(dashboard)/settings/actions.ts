@@ -30,7 +30,10 @@ export async function updateOrgSettings(
     .update({ name, billing_email })
     .eq('id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateOrgSettings]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/settings')
   return { success: true }
@@ -55,7 +58,10 @@ export async function updateSlackWebhook(
     .update({ slack_webhook_url: url })
     .eq('id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateSlackWebhook]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/settings')
   return { success: true }
@@ -79,7 +85,10 @@ export async function changePassword(
   const { data: { user } } = await supabase.auth.getUser()
   const { error } = await supabase.auth.updateUser({ password: newPassword })
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[changePassword]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   if (user) {
     await logAuditEvent({ actorId: user.id, action: 'account.password_changed' })
@@ -108,7 +117,10 @@ export async function updateNotificationPrefs(
   }
 
   const { error } = await supabase.auth.updateUser({ data: { notification_prefs: prefs } })
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateNotificationPrefs]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
   return { success: true }
 }
 
@@ -141,7 +153,10 @@ export async function addCrewMember(
     is_active: true,
   }).select('id').single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addCrewMember]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -177,7 +192,10 @@ export async function updateCrewMember(
     .eq('id', crewId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateCrewMember]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   if (data.role !== undefined) {
     await logAuditEvent({
@@ -247,7 +265,10 @@ export async function bulkImportCrew(
   }))
 
   const { error } = await supabase.from('crew_members').insert(records)
-  if (error) return { imported: 0, skipped, error: error.message }
+  if (error) {
+    console.error('[bulkImportCrew]', error)
+    return { imported: 0, skipped, error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -298,7 +319,10 @@ export async function addVendor(
     is_active: true,
   }).select('id').single()
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[addVendor]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   // Geocode from service ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
   if (service_zip) {
@@ -355,7 +379,10 @@ export async function updateVendor(
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateVendor]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   // Re-geocode when service ZIP changes — Mapbox postcode endpoint requires a ZIP, not a full address
   const zipChanged = service_zip !== (existing?.service_zip ?? null)
@@ -439,7 +466,10 @@ export async function bulkImportVendors(
   }))
 
   const { error } = await supabase.from('vendors').insert(records)
-  if (error) return { imported: 0, skipped, error: error.message }
+  if (error) {
+    console.error('[bulkImportVendors]', error)
+    return { imported: 0, skipped, error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -516,7 +546,10 @@ export async function inviteCrewMember(
     html,
   })
 
-  if (emailError) return { error: emailError.message }
+  if (emailError) {
+    console.error('[inviteCrewMember] email send failed')
+    return { error: 'Failed to send invite email. Please try again.' }
+  }
 
   await supabase
     .from('crew_members')
@@ -538,7 +571,10 @@ export async function updateAutoAssignMode(
     .update({ auto_assign_mode: mode })
     .eq('id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateAutoAssignMode]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -561,7 +597,10 @@ export async function updateCommsRetention(days: number): Promise<SettingsAction
     .update({ comms_log_retention_days: days })
     .eq('id', membership.org_id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error('[updateCommsRetention]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
 
   revalidatePath('/settings')
   return { success: true }
