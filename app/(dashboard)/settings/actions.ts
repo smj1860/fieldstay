@@ -531,7 +531,7 @@ export async function inviteCrewMember(
     .eq('id', membership.org_id)
     .single()
 
-  const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew/accept-invite/${crew.invite_token}`
+  const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
 
   const { resend, FROM } = await import('@/lib/resend/client')
   const html = await renderCrewInviteEmail({
