@@ -333,6 +333,40 @@ export type FieldStayEvents = {
     }
   }
 
+  'work-order/dispatched': {
+    data: {
+      workOrderId:     string
+      woNumber:        string
+      token:           string
+      publicUrl:       string
+      vendorEmail:     string
+      vendorName:      string
+      propertyName:    string
+      propertyAddress: string
+      title:           string
+      description:     string
+      nteAmount:       number
+      dispatcherName:  string
+      dispatcherOrg:   string
+      dispatcherPhone: string | null
+    }
+  }
+
+  'work-order/signed-off': {
+    data: {
+      workOrderId:     string
+      woNumber:        string
+      title:           string
+      signOffNotes:    string | null
+      signedOffAt:     string
+      propertyName:    string
+      propertyAddress: string
+      orgId:           string
+      orgName:         string
+      vendorEmail:     string | null
+    }
+  }
+
   // ----------------------------------------------------------
   // Maintenance analytics
   // ----------------------------------------------------------

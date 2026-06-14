@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import {
   MapPin, Wrench, Calendar, AlertTriangle, CheckCircle2,
   Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight, ChevronDown,
-  ShieldAlert, ClipboardList, User, Star, Camera,
+  ShieldAlert, ClipboardList, User, Star, Camera, Send, Copy, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LineItemsEditor, type WorkOrderLineItem } from './line-items-editor'
@@ -12,7 +12,8 @@ import {
   markVendorAcknowledged,
   markWorkVerified,
 } from '@/app/(dashboard)/maintenance/work-order-actions'
-import { rateWorkOrderVendor } from '@/app/(dashboard)/maintenance/actions'
+import { rateWorkOrderVendor }         from '@/app/(dashboard)/maintenance/actions'
+import { dispatchWorkOrderToVendor }   from '@/app/actions/work-order-public'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -59,7 +60,11 @@ export interface WorkOrderDetailData {
     id:        string
     name:      string
     specialty: VendorSpecialty
+    email?:    string | null
   } | null
+  // Public dispatch tracking
+  vendor_dispatch_email?: string | null
+  public_signed_off_at?:  string | null
   vendor_rating?:       number | null
   vendor_rating_notes?: string | null
   work_order_photos?: Array<{
@@ -133,6 +138,15 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
   const [ratingError, setRatingError] = useState<string | null>(null)
   const [ratingSuccess, setRatingSuccess] = useState(false)
 
+  // Dispatch modal state
+  const [showDispatch,    setShowDispatch]    = useState(false)
+  const [dispatchEmail,   setDispatchEmail]   = useState(wo.vendors?.email ?? wo.vendor_dispatch_email ?? '')
+  const [dispatchName,    setDispatchName]    = useState(wo.vendors?.name ?? '')
+  const [dispatching,     setDispatching]     = useState(false)
+  const [dispatchError,   setDispatchError]   = useState<string | null>(null)
+  const [dispatchedUrl,   setDispatchedUrl]   = useState<string | null>(null)
+  const [copied,          setCopied]          = useState(false)
+
   const canEdit  = userRole === 'admin' || userRole === 'manager'
   const priority = PRIORITY_STYLES[wo.priority]
   const status   = STATUS_STYLES[wo.status]
@@ -182,6 +196,33 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
     handleRating(savedRating)
   }
 
+  async function handleDispatch() {
+    if (!dispatchEmail.trim()) return
+    setDispatching(true)
+    setDispatchError(null)
+    const result = await dispatchWorkOrderToVendor({
+      workOrderId: wo.id,
+      vendorEmail: dispatchEmail.trim(),
+      vendorName:  dispatchName.trim() || 'Contractor',
+    })
+    setDispatching(false)
+    if (result.error) {
+      setDispatchError(result.error)
+      return
+    }
+    if (result.publicUrl) {
+      setDispatchedUrl(result.publicUrl)
+    }
+  }
+
+  function handleCopyUrl() {
+    if (!dispatchedUrl) return
+    navigator.clipboard.writeText(dispatchedUrl).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
   // ── Render ───────────────────────────────────────────────────
 
   return (
@@ -219,6 +260,23 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
               Issued {fmtDate(wo.created_at)}
             </p>
           </div>
+
+          {/* Send to Vendor button */}
+          {canEdit && wo.status !== 'cancelled' && !wo.public_signed_off_at && (
+            <button
+              onClick={() => setShowDispatch(true)}
+              className="print:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+              style={{
+                background: 'rgba(255,107,0,0.1)',
+                color:      '#FF6B00',
+                border:     '1px solid rgba(255,107,0,0.3)',
+              }}
+              title="Send work order to vendor"
+            >
+              <Send className="w-3.5 h-3.5" />
+              Send to Vendor
+            </button>
+          )}
 
           {/* Print button */}
           <button
@@ -627,6 +685,147 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
           </Section>
         )}
       </div>
+
+      {/* ── Dispatch Modal ────────────────────────────────────── */}
+      {showDispatch && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden"
+          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setShowDispatch(false) }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
+                  Send to Vendor
+                </h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                  Vendor receives a magic link to view and sign off this work order
+                </p>
+              </div>
+              <button
+                onClick={() => { setShowDispatch(false); setDispatchedUrl(null); setDispatchError(null) }}
+                className="p-1.5 rounded-lg transition-colors"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {!dispatchedUrl ? (
+              <>
+                {/* Vendor email */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                    Vendor Email *
+                  </label>
+                  <input
+                    type="email"
+                    value={dispatchEmail}
+                    onChange={e => setDispatchEmail(e.target.value)}
+                    placeholder="vendor@company.com"
+                    className="input w-full text-sm"
+                  />
+                </div>
+
+                {/* Vendor name */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                    Vendor Name
+                  </label>
+                  <input
+                    type="text"
+                    value={dispatchName}
+                    onChange={e => setDispatchName(e.target.value)}
+                    placeholder="e.g. Mike Johnson"
+                    className="input w-full text-sm"
+                  />
+                </div>
+
+                {dispatchError && (
+                  <p className="text-xs text-red-400">{dispatchError}</p>
+                )}
+
+                <button
+                  onClick={handleDispatch}
+                  disabled={dispatching || !dispatchEmail.trim()}
+                  className="w-full btn flex items-center justify-center gap-2 py-2.5 text-sm font-semibold"
+                  style={{
+                    background: '#1A1A1A',
+                    color:      '#F0F0F0',
+                    border:     '2px solid #FF6B00',
+                    borderRadius: 12,
+                    opacity: (dispatching || !dispatchEmail.trim()) ? 0.6 : 1,
+                  }}
+                >
+                  {dispatching ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
+                  {dispatching ? 'Sending…' : 'Send Work Order'}
+                </button>
+              </>
+            ) : (
+              <>
+                {/* Success state */}
+                <div
+                  className="rounded-xl p-4 space-y-3"
+                  style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}
+                >
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                    <p className="text-sm font-semibold text-emerald-400">
+                      Work order sent to {dispatchEmail}
+                    </p>
+                  </div>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    The vendor will receive an email with a magic link. Link expires in 30 days.
+                  </p>
+                </div>
+
+                {/* Copy link */}
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                    Magic Link (shareable)
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      readOnly
+                      value={dispatchedUrl}
+                      className="input flex-1 text-xs font-mono"
+                      onClick={e => (e.target as HTMLInputElement).select()}
+                    />
+                    <button
+                      onClick={handleCopyUrl}
+                      className="p-2 rounded-lg flex-shrink-0 transition-colors"
+                      style={{
+                        background: copied ? 'rgba(16,185,129,0.15)' : 'var(--bg-raised)',
+                        border:     '1px solid var(--border)',
+                        color:      copied ? '#34D399' : 'var(--text-muted)',
+                      }}
+                      title="Copy link"
+                    >
+                      {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => { setShowDispatch(false); setDispatchedUrl(null) }}
+                  className="w-full btn-secondary text-sm py-2"
+                >
+                  Done
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -63,6 +63,9 @@ import { notifyIntegrationError } from '@/lib/inngest/functions/notify-integrati
 // PM welcome email
 import { pmWelcome } from '@/lib/inngest/functions/pm-welcome'
 
+// Work order public dispatch + sign-off
+import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -129,5 +132,9 @@ export const { GET, POST, PUT } = serve({
 
     // PM welcome email
     pmWelcome,
+
+    // Work order public dispatch
+    workOrderDispatch,
+    workOrderSignedOff,
   ],
 })
