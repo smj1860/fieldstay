@@ -95,6 +95,11 @@ export default async function DashboardLayout({
     <DashboardShell
       role={membership.role}
       orgName={org?.name ?? 'FieldStay'}
+      userName={
+        (user.user_metadata?.full_name as string | undefined) ??
+        user.email?.split('@')[0] ??
+        'User'
+      }
       userEmail={user.email ?? ''}
       repuguardActive={repuguardActive}
       onboardingComplete={onboardingComplete}

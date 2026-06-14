@@ -15,6 +15,7 @@ import type { NotificationItem } from '@/lib/notifications'
 import { BottomNav } from '@/components/bottom-nav'
 import { PmMoreDrawer } from '@/components/pm-more-drawer'
 import { NotificationBell } from '@/components/notification-bell'
+import { SidebarUserMenu } from '@/components/layout/SidebarUserMenu'
 
 // Ops tier (daily use) first, then Management tier (weekly use) — split
 // below into opsNav/mgmtNav and rendered as two groups with a divider.
@@ -56,6 +57,7 @@ const PAGE_TITLES: Record<string, string> = {
 interface Props {
   role:                       MemberRole
   orgName:                    string
+  userName:                   string
   userEmail:                  string
   repuguardActive?:           boolean
   onboardingComplete?:        boolean
@@ -65,7 +67,7 @@ interface Props {
   children:                   React.ReactNode
 }
 
-export function DashboardShell({ role, orgName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, children }: Props) {
+export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, children }: Props) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -265,32 +267,15 @@ export function DashboardShell({ role, orgName, userEmail, repuguardActive = fal
       </nav>
 
       {/* Bottom user row */}
-      <div
-        className="p-3 flex-shrink-0"
-        style={{ borderTop: '1px solid var(--border)' }}
-      >
-        <Link
-          href="/settings"
-          className="flex items-center gap-2.5 px-2 py-2 rounded-lg transition-all"
-          style={{ color: 'var(--text-muted)' }}
-          onMouseOver={(e) => (e.currentTarget.style.color = 'var(--text-primary)')}
-          onMouseOut={(e)  => (e.currentTarget.style.color = 'var(--text-muted)')}
-        >
-          <span
-            className="w-7 h-7 rounded-full flex-shrink-0 flex items-center
-                       justify-center text-xs font-bold"
-            style={{
-              background: 'var(--accent-gold-dim)',
-              color:      'var(--accent-gold)',
-            }}
-          >
-            {userEmail[0]?.toUpperCase() ?? '?'}
-          </span>
-          {(!collapsed || mobile) && (
-            <span className="truncate text-xs">{userEmail}</span>
-          )}
-        </Link>
-      </div>
+      {(!collapsed || mobile) && (
+        <div className="px-2 pb-3 border-t border-black/10 pt-3 flex-shrink-0">
+          <SidebarUserMenu
+            userName={userName}
+            userEmail={userEmail}
+            orgName={orgName}
+          />
+        </div>
+      )}
     </aside>
     )
   }
