@@ -77,7 +77,7 @@ export async function dispatchWorkOrderToVendor(input: {
         workOrderId:      wo.id,
         woNumber:         wo.wo_number ?? '',
         token,
-        publicUrl:        `${APP_URL}/work-orders/${token}`,
+        publicUrl:        `${APP_URL}/wo/${token}`,
         vendorEmail:      input.vendorEmail,
         vendorName:       input.vendorName,
         propertyName:     (property as { name: string } | null)?.name  ?? 'Property',
@@ -92,7 +92,7 @@ export async function dispatchWorkOrderToVendor(input: {
     })
 
     revalidatePath('/maintenance')
-    return { success: true, token, publicUrl: `${APP_URL}/work-orders/${token}` }
+    return { success: true, token, publicUrl: `${APP_URL}/wo/${token}` }
 
   } catch (err) {
     console.error('[dispatchWorkOrderToVendor]', err)
