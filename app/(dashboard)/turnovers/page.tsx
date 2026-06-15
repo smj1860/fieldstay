@@ -19,8 +19,8 @@ export default async function TurnoversPage() {
   const [
     { data: turnovers },
     { data: properties },
-    { data: crew },
     { data: bookings },
+    { data: crew },
     { data: crewAvailability },
     { data: org },
   ] = await Promise.all([
