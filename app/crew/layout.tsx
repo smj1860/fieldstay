@@ -1,7 +1,19 @@
+import type { Metadata } from 'next'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { redirect } from 'next/navigation'
 import { CrewShell } from './crew-shell'
+
+export const metadata: Metadata = {
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+  },
+  other: {
+    'mobile-web-app-capable': 'yes',
+  },
+}
 
 export default async function CrewLayout({
   children,

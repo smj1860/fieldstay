@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut } from 'lucide-react'
@@ -148,11 +148,66 @@ function CrewBottomNav({ userId }: { userId: string }) {
 function SyncStatus() {
   const db = usePowerSync()
   const connected = db?.currentStatus?.connected
+  const [showInfo, setShowInfo] = useState(false)
 
   if (connected) return null
   return (
-    <span className="bg-amber-400 text-amber-900 text-xs font-medium px-2 py-1 rounded-full">
-      Offline
-    </span>
+    <>
+      <button
+        onClick={() => setShowInfo(true)}
+        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-opacity active:opacity-70"
+        style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
+        Offline
+      </button>
+
+      {showInfo && (
+        <div
+          className="fixed inset-0 z-50 flex items-end"
+          onClick={() => setShowInfo(false)}
+        >
+          <div className="absolute inset-0 bg-black/40" />
+          <div
+            className="relative w-full rounded-t-2xl p-6 pb-10"
+            style={{ background: 'var(--bg-card)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              className="w-10 h-1 rounded-full mx-auto mb-5"
+              style={{ background: 'var(--border)' }}
+            />
+            <div className="flex items-center gap-3 mb-3">
+              <span
+                className="w-10 h-10 rounded-full flex items-center justify-center text-lg"
+                style={{ background: 'var(--accent-gold-dim)' }}
+              >
+                📶
+              </span>
+              <div>
+                <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                  You&apos;re offline
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  Working from cached data
+                </p>
+              </div>
+            </div>
+            <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text-secondary)' }}>
+              Your assignments and checklists are saved on your device.
+              You can complete turnovers and check off tasks without a
+              signal — everything syncs automatically when you reconnect.
+            </p>
+            <button
+              onClick={() => setShowInfo(false)}
+              className="w-full py-3 rounded-xl text-sm font-semibold"
+              style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
