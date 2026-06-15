@@ -40,7 +40,7 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
       >
         <div
           className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold"
-          style={{ background: 'rgba(0,0,0,0.2)', color: 'var(--sidebar-text, #0a1628)' }}
+          style={{ background: 'var(--accent-gold)', color: '#0a1628' }}
         >
           {initials}
         </div>
@@ -75,18 +75,26 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
 
           <div
-            className="absolute bottom-full left-0 right-0 mb-2 z-50 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden"
-            style={{ minWidth: 200 }}
+            className="absolute bottom-full left-0 right-0 mb-2 z-50 rounded-xl overflow-hidden"
+            style={{
+              minWidth:  200,
+              background: 'var(--bg-raised)',
+              border:     '1px solid var(--border)',
+              boxShadow:  '0 4px 16px rgba(0,0,0,0.3)',
+            }}
           >
-            <div className="px-4 py-3 border-b border-gray-100">
-              <div className="text-sm font-semibold text-gray-900 truncate">{userName}</div>
-              <div className="text-xs text-gray-400 truncate mt-0.5">{userEmail}</div>
+            <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{userName}</div>
+              <div className="text-xs truncate mt-0.5" style={{ color: 'var(--text-muted)' }}>{userEmail}</div>
             </div>
 
             <div className="py-1">
               <button
                 onClick={() => { setOpen(false); router.push('/settings') }}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors"
+                style={{ color: 'var(--text-primary)' }}
+                onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-card)' }}
+                onMouseOut={(e)  => { e.currentTarget.style.background = 'transparent' }}
               >
                 <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24"
                      stroke="currentColor" strokeWidth={1.75}>
@@ -98,12 +106,15 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
                 Settings
               </button>
 
-              <div className="border-t border-gray-100 my-1"/>
+              <div className="my-1" style={{ borderTop: '1px solid var(--border)' }}/>
 
               <button
                 onClick={handleSignOut}
                 disabled={loading}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors disabled:opacity-50"
+                style={{ color: '#ef4444' }}
+                onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-card)' }}
+                onMouseOut={(e)  => { e.currentTarget.style.background = 'transparent' }}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24"
                      stroke="currentColor" strokeWidth={1.75}>
