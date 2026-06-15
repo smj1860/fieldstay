@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useTransition, useActionState, useRef } from 'react'
-import { Pencil, X, Check, Loader2, Upload, Users2, FileText } from 'lucide-react'
+import { Pencil, X, Check, Loader2, Upload, Users2, FileText, CalendarDays } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
 import type { ContactPref } from '@/types/database'
+import { AvailabilityOverviewCalendar } from '@/components/crew/availability-overview-calendar'
 import {
   addCrewMember,
   updateCrewMember,
@@ -108,7 +109,7 @@ interface Props {
   availabilityMap: Record<string, CrewAvailabilityEntry[]>
 }
 
-type ViewMode = 'list' | 'add' | 'bulk'
+type ViewMode = 'list' | 'add' | 'bulk' | 'calendar'
 
 export function CrewManageClient({ crew, availabilityMap }: Props) {
   const [view, setView]                 = useState<ViewMode>('list')
@@ -127,6 +128,18 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
           </div>
           <div className="flex gap-2">
             <button
+              onClick={() => setView(view === 'calendar' ? 'list' : 'calendar')}
+              className="btn-secondary text-sm"
+              style={
+                view === 'calendar'
+                  ? { border: '1px solid var(--accent-gold)', color: 'var(--accent-gold)' }
+                  : undefined
+              }
+            >
+              <CalendarDays className="w-4 h-4" />
+              {view === 'calendar' ? 'List View' : 'Calendar'}
+            </button>
+            <button
               onClick={() => setView(view === 'bulk' ? 'list' : 'bulk')}
               className="btn-secondary text-sm"
             >
@@ -144,6 +157,16 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
 
         {view === 'add'  && <AddCrewForm  onSuccess={() => setView('list')} />}
         {view === 'bulk' && <BulkCrewUpload onSuccess={() => setView('list')} />}
+
+        {/* Calendar view */}
+        {view === 'calendar' && (
+          <div className="mt-2">
+            <AvailabilityOverviewCalendar
+              crew={crew}
+              availabilityMap={availabilityMap}
+            />
+          </div>
+        )}
 
         {crew.length === 0 && view === 'list' ? (
           <div className="py-12 text-center">

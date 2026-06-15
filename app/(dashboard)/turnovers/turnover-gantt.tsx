@@ -1,208 +1,389 @@
 'use client'
 
 import { useMemo } from 'react'
-import { cn } from '@/lib/utils'
+import Link        from 'next/link'
 
-interface BookingRow {
-  id: string
-  property_id: string
-  checkin_date: string
-  checkout_date: string
-  guest_name: string | null
-  status: string
-}
+// ── Types (match what TurnoverBoard already receives) ─────────────────────
 
 interface Turnover {
-  id: string
-  property_id: string
+  id:                string
+  property_id:       string
   checkout_datetime: string
-  checkin_datetime: string
-  window_minutes: number | null
-  status: string
+  checkin_datetime:  string
+  window_minutes:    number | null
+  status:            string
+  priority:          string
 }
 
 interface Property {
-  id: string
-  name: string
+  id:    string
+  name:  string
+  city?: string | null
+  state?: string | null
 }
 
-function dayOffset(date: Date, today: Date): number {
-  const d = new Date(date)
-  d.setHours(0, 0, 0, 0)
-  return Math.floor((d.getTime() - today.getTime()) / 86_400_000)
+interface Booking {
+  id:            string
+  property_id:   string
+  checkin_date:  string
+  checkout_date: string
+  guest_name:    string | null
+  status:        string
 }
 
-export function TurnoverGantt({
-  turnovers,
-  bookings,
-  properties,
-  windowDays = 14,
-}: {
+interface Props {
   turnovers:  Turnover[]
-  bookings:   BookingRow[]
   properties: Property[]
-  windowDays?: number
-}) {
-  const today = useMemo(() => {
-    const d = new Date()
-    d.setHours(0, 0, 0, 0)
-    return d
-  }, [])
+  bookings:   Booking[]
+}
 
-  const days = useMemo(() =>
-    Array.from({ length: windowDays }, (_, i) => {
-      const d = new Date(today)
+// ── Constants ──────────────────────────────────────────────────────────────
+
+const DAYS_BACK  = 3   // days of history to show
+const DAYS_AHEAD = 18  // days of future to show
+const TOTAL_DAYS = DAYS_BACK + 1 + DAYS_AHEAD  // 22 total
+const COL_W      = 52  // px per day column
+const ROW_H      = 72  // px per property row
+const LABEL_W    = 164 // px for the sticky property label column
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function localDateStr(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number) as [number, number, number]
+  return new Date(y, m - 1, d)
+}
+
+function dayIndex(date: Date, windowStart: Date): number {
+  return Math.round((date.getTime() - windowStart.getTime()) / 86_400_000)
+}
+
+// ── Turnover status → color ────────────────────────────────────────────────
+
+function turnoverColors(status: string, isTight: boolean) {
+  if (isTight) return { bg: 'var(--accent-red-dim)', fg: 'var(--accent-red)',    border: 'var(--accent-red)' }
+
+  const map: Record<string, { bg: string; fg: string; border: string }> = {
+    completed:          { bg: 'var(--accent-green-dim)',  fg: 'var(--accent-green)',  border: 'var(--accent-green)'  },
+    in_progress:        { bg: 'rgba(168,85,247,0.12)',    fg: '#a855f7',              border: '#a855f7'              },
+    assigned:           { bg: 'var(--accent-blue-dim)',   fg: 'var(--accent-blue)',   border: 'var(--accent-blue)'   },
+    pending_assignment: { bg: 'var(--accent-amber-dim)',  fg: 'var(--accent-amber)',  border: 'var(--accent-amber)'  },
+    flagged:            { bg: 'var(--accent-red-dim)',    fg: 'var(--accent-red)',    border: 'var(--accent-red)'    },
+  }
+  return map[status] ?? { bg: 'var(--bg-raised)', fg: 'var(--text-muted)', border: 'var(--border)' }
+}
+
+// ── Component ──────────────────────────────────────────────────────────────
+
+export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
+  const today      = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d }, [])
+  const todayStr   = localDateStr(today)
+
+  const windowStart = useMemo(() => {
+    const d = new Date(today)
+    d.setDate(d.getDate() - DAYS_BACK)
+    return d
+  }, [today])
+
+  // Generate day column headers
+  const days = useMemo(
+    () => Array.from({ length: TOTAL_DAYS }, (_, i) => {
+      const d = new Date(windowStart)
       d.setDate(d.getDate() + i)
       return d
     }),
-  [today, windowDays])
+    [windowStart]
+  )
 
-  const propData = useMemo(() => {
-    const map: Record<string, { bookings: BookingRow[]; turnovers: Turnover[] }> = {}
-    for (const p of properties) map[p.id] = { bookings: [], turnovers: [] }
-    for (const b of bookings)   map[b.property_id]?.bookings.push(b)
-    for (const t of turnovers)  map[t.property_id]?.turnovers.push(t)
-    return map
-  }, [properties, bookings, turnovers])
+  // Index data by property
+  const bookingsByProp  = useMemo(() => {
+    const m = new Map<string, Booking[]>()
+    for (const b of bookings) {
+      if (!m.has(b.property_id)) m.set(b.property_id, [])
+      m.get(b.property_id)!.push(b)
+    }
+    return m
+  }, [bookings])
 
-  const COL_PX    = 52
-  const LABEL_W   = 160
-  const totalWidth = days.length * COL_PX + LABEL_W
+  const turnoversByProp = useMemo(() => {
+    const m = new Map<string, Turnover[]>()
+    for (const t of turnovers) {
+      if (!m.has(t.property_id)) m.set(t.property_id, [])
+      m.get(t.property_id)!.push(t)
+    }
+    return m
+  }, [turnovers])
+
+  // Only show properties that have activity in the window, sorted by name
+  const activeProperties = useMemo(
+    () => properties.filter(
+      (p) => bookingsByProp.has(p.id) || turnoversByProp.has(p.id)
+    ).sort((a, b) => a.name.localeCompare(b.name)),
+    [properties, bookingsByProp, turnoversByProp]
+  )
+
+  const totalW = TOTAL_DAYS * COL_W
 
   return (
-    <div className="overflow-x-auto -mx-4 sm:mx-0 rounded-xl border border-themed">
-      <div style={{ minWidth: totalWidth }}>
+    <div
+      className="rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--border)' }}
+    >
+      {/* Scroll container */}
+      <div className="overflow-x-auto">
+        <div style={{ minWidth: LABEL_W + totalW }}>
 
-        {/* Header */}
-        <div className="flex sticky top-0 z-10 border-b border-themed"
-             style={{ background: 'var(--bg-card)' }}>
-          <div className="flex-shrink-0 border-r border-themed"
-               style={{ width: LABEL_W, padding: '8px 12px', fontSize: 10 }} />
-          {days.map(d => {
-            const isToday = d.toDateString() === new Date().toDateString()
-            return (
-              <div
-                key={d.toISOString()}
-                className={cn('flex-shrink-0 text-center border-r border-themed py-2')}
-                style={{
-                  width:      COL_PX,
-                  background: isToday ? 'var(--accent-gold-dim)' : undefined,
-                  color:      isToday ? 'var(--accent-gold)' : 'var(--text-muted)',
-                  fontSize:   10,
-                  fontWeight: isToday ? 700 : 400,
-                }}
-              >
-                <div>{d.toLocaleDateString('en-US', { weekday: 'short' })}</div>
-                <div>{d.getDate()}</div>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Rows */}
-        {properties.map(prop => {
-          const data = propData[prop.id] ?? { bookings: [], turnovers: [] }
-
-          return (
-            <div key={prop.id} className="flex border-b border-themed" style={{ height: 60 }}>
-              {/* Label */}
-              <div
-                className="flex-shrink-0 flex items-center px-3 border-r border-themed"
-                style={{ width: LABEL_W, background: 'var(--bg-card)' }}
-              >
-                <span className="text-xs font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                  {prop.name}
-                </span>
-              </div>
-
-              {/* Timeline */}
-              <div className="relative flex-1" style={{ background: 'var(--bg-canvas)' }}>
-                {days.map((d, idx) => (
-                  <div
-                    key={d.toISOString()}
-                    className="absolute inset-y-0 border-r border-themed"
-                    style={{
-                      left:       idx * COL_PX,
-                      width:      COL_PX,
-                      background: d.toDateString() === new Date().toDateString()
-                        ? 'var(--accent-gold-dim)'
-                        : undefined,
-                    }}
-                  />
-                ))}
-
-                {/* Booking blocks (blue) */}
-                {data.bookings.map(b => {
-                  const start = Math.max(0, dayOffset(new Date(b.checkin_date + 'T00:00:00'), today))
-                  const end   = Math.min(days.length, dayOffset(new Date(b.checkout_date + 'T00:00:00'), today))
-                  if (end <= 0 || start >= days.length || end <= start) return null
-                  return (
-                    <div
-                      key={b.id}
-                      className="absolute flex items-center px-1.5 overflow-hidden rounded"
-                      title={b.guest_name ?? 'Booking'}
-                      style={{
-                        left:       start * COL_PX + 2,
-                        width:      Math.max(4, (end - start) * COL_PX - 4),
-                        top:        4, height: 22,
-                        background: 'var(--accent-blue-dim)',
-                        border:     '1px solid rgba(59,130,246,0.4)',
-                        fontSize:   9, color: 'var(--accent-blue)', fontWeight: 600, zIndex: 2,
-                      }}
-                    >
-                      <span className="truncate">{b.guest_name ?? 'Guest'}</span>
-                    </div>
-                  )
-                })}
-
-                {/* Cleaning window blocks */}
-                {data.turnovers.map(t => {
-                  if (t.status === 'cancelled') return null
-                  const checkoutDay = new Date(t.checkout_datetime)
-                  const start = dayOffset(checkoutDay, today)
-                  const isTight = (t.window_minutes ?? 0) < 120
-                  if (start < 0 || start >= days.length) return null
-                  return (
-                    <div
-                      key={t.id}
-                      className="absolute overflow-hidden rounded flex items-center"
-                      title={`${Math.floor((t.window_minutes ?? 0) / 60)}h window`}
-                      style={{
-                        left:       start * COL_PX + 2,
-                        width:      COL_PX - 4,
-                        top:        30, height: 22,
-                        background: isTight ? 'var(--accent-red-dim)'   : 'var(--accent-gold-dim)',
-                        border:     isTight ? '1px solid var(--accent-red)' : '1px solid rgba(252,209,22,0.4)',
-                        fontSize:   9,
-                        color:      isTight ? 'var(--accent-red)' : 'var(--accent-gold)',
-                        fontWeight: 600, paddingLeft: 4, zIndex: 2,
-                      }}
-                    >
-                      {isTight ? '⚠ Tight' : '🧹 Clean'}
-                    </div>
-                  )
-                })}
-              </div>
+          {/* ── Header row ── */}
+          <div
+            className="flex sticky top-0 z-20"
+            style={{ background: 'var(--bg-raised)', borderBottom: '1px solid var(--border)' }}
+          >
+            {/* Property label column header */}
+            <div
+              className="flex-shrink-0 sticky left-0 z-30 flex items-center px-3 py-2"
+              style={{
+                width:       LABEL_W,
+                background:  'var(--bg-raised)',
+                borderRight: '1px solid var(--border)',
+              }}
+            >
+              <span className="text-xs font-semibold uppercase tracking-wider"
+                    style={{ color: 'var(--text-muted)' }}>
+                Property
+              </span>
             </div>
-          )
-        })}
+
+            {/* Day column headers */}
+            {days.map((day, i) => {
+              const isToday = localDateStr(day) === todayStr
+              const isPast  = day < today
+              return (
+                <div
+                  key={i}
+                  className="flex-shrink-0 flex flex-col items-center justify-center py-2"
+                  style={{
+                    width:       COL_W,
+                    borderRight: '1px solid var(--border)',
+                    background:  isToday ? 'rgba(252,209,22,0.08)' : 'transparent',
+                    borderBottom: isToday ? '2px solid var(--accent-gold)' : '1px solid var(--border)',
+                    opacity:     isPast && !isToday ? 0.5 : 1,
+                  }}
+                >
+                  <span
+                    className="text-[10px] font-medium"
+                    style={{ color: isToday ? 'var(--accent-gold)' : 'var(--text-muted)' }}
+                  >
+                    {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                  </span>
+                  <span
+                    className="text-xs font-bold"
+                    style={{ color: isToday ? 'var(--accent-gold)' : 'var(--text-secondary)' }}
+                  >
+                    {day.getDate()}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* ── Property rows ── */}
+          {activeProperties.length === 0 ? (
+            <div
+              className="flex items-center justify-center py-16 text-sm"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              No properties with bookings or turnovers in this window.
+            </div>
+          ) : (
+            activeProperties.map((property, rowIdx) => {
+              const propBookings  = bookingsByProp.get(property.id)  ?? []
+              const propTurnovers = turnoversByProp.get(property.id) ?? []
+
+              return (
+                <div
+                  key={property.id}
+                  className="flex relative"
+                  style={{
+                    height:      ROW_H,
+                    borderBottom:'1px solid var(--border)',
+                    background:  rowIdx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-raised)',
+                  }}
+                >
+                  {/* Property label — sticky left */}
+                  <div
+                    className="flex-shrink-0 sticky left-0 z-10 flex flex-col
+                               justify-center px-3 py-2"
+                    style={{
+                      width:       LABEL_W,
+                      background:  rowIdx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-raised)',
+                      borderRight: '1px solid var(--border)',
+                    }}
+                  >
+                    <span
+                      className="text-xs font-semibold truncate leading-tight"
+                      style={{ color: 'var(--text-primary)' }}
+                    >
+                      {property.name}
+                    </span>
+                    {(property.city || property.state) && (
+                      <span
+                        className="text-[10px] truncate mt-0.5"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        {[property.city, property.state].filter(Boolean).join(', ')}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Timeline cells — one per day */}
+                  <div className="flex relative flex-1">
+                    {days.map((day, colIdx) => {
+                      const isToday = localDateStr(day) === todayStr
+                      const isPast  = day < today
+                      return (
+                        <div
+                          key={colIdx}
+                          className="flex-shrink-0 relative"
+                          style={{
+                            width:       COL_W,
+                            height:      ROW_H,
+                            borderRight: '1px solid var(--border)',
+                            background:  isToday
+                              ? 'rgba(252,209,22,0.05)'
+                              : isPast
+                              ? 'rgba(0,0,0,0.04)'
+                              : 'transparent',
+                          }}
+                        />
+                      )
+                    })}
+
+                    {/* ── Booking blocks ── */}
+                    {propBookings.map((booking) => {
+                      const checkinDay  = parseLocalDate(booking.checkin_date)
+                      const checkoutDay = parseLocalDate(booking.checkout_date)
+
+                      const startIdx = Math.max(0, dayIndex(checkinDay, windowStart))
+                      const endIdx   = Math.min(TOTAL_DAYS - 1, dayIndex(checkoutDay, windowStart) - 1)
+
+                      if (startIdx > endIdx || endIdx < 0 || startIdx >= TOTAL_DAYS) return null
+
+                      const leftPx  = startIdx * COL_W
+                      const widthPx = (endIdx - startIdx + 1) * COL_W - 2
+
+                      return (
+                        <div
+                          key={booking.id}
+                          className="absolute top-2 rounded-md px-2 flex items-center
+                                     text-[10px] font-medium truncate"
+                          style={{
+                            left:       leftPx + 1,
+                            width:      widthPx,
+                            height:     28,
+                            background: 'var(--accent-blue-dim)',
+                            color:      'var(--accent-blue)',
+                            border:     '1px solid var(--accent-blue)',
+                            opacity:    parseLocalDate(booking.checkout_date) < today ? 0.45 : 1,
+                          }}
+                          title={`${booking.guest_name ?? 'Guest'} · ${booking.checkin_date} – ${booking.checkout_date}`}
+                        >
+                          {booking.guest_name ?? 'Booking'}
+                        </div>
+                      )
+                    })}
+
+                    {/* ── Turnover indicators ── */}
+                    {propTurnovers.map((turnover) => {
+                      const checkoutDT = new Date(turnover.checkout_datetime)
+                      const checkoutDay = new Date(
+                        checkoutDT.getFullYear(), checkoutDT.getMonth(), checkoutDT.getDate()
+                      )
+                      const colIdx = dayIndex(checkoutDay, windowStart)
+
+                      if (colIdx < 0 || colIdx >= TOTAL_DAYS) return null
+
+                      // Tight window detection
+                      const windowMinutes = turnover.window_minutes ?? 0
+                      const windowMs  = windowMinutes * 60_000
+                      const checkinDT = new Date(turnover.checkin_datetime)
+                      const gapMs     = checkinDT.getTime() - checkoutDT.getTime()
+                      const isTight   = gapMs > 0 && gapMs < windowMs
+
+                      const colors = turnoverColors(turnover.status, isTight)
+                      const leftPx = colIdx * COL_W + 2
+
+                      return (
+                        <Link
+                          key={turnover.id}
+                          href={`/turnovers/${turnover.id}`}
+                          className="absolute bottom-2 rounded flex items-center
+                                     justify-center text-[10px] font-semibold
+                                     transition-opacity hover:opacity-80 truncate px-1.5"
+                          style={{
+                            left:       leftPx,
+                            width:      COL_W - 4,
+                            height:     28,
+                            background: colors.bg,
+                            color:      colors.fg,
+                            border:     `1px solid ${colors.border}`,
+                          }}
+                          title={`${isTight ? '⚠ Tight window — ' : ''}${turnover.status} · ${Math.round(windowMinutes / 60 * 10) / 10}h window`}
+                        >
+                          {isTight ? '⚠' : '✦'} {Math.round(windowMinutes / 60 * 10) / 10}h
+                        </Link>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
       </div>
 
-      {/* Legend */}
-      <div className="flex items-center gap-4 px-4 py-3 flex-wrap border-t border-themed"
-           style={{ background: 'var(--bg-card)' }}>
-        {[
-          { bg: 'var(--accent-blue-dim)',  border: 'rgba(59,130,246,0.4)', color: 'var(--accent-blue)',  label: 'Booking'             },
-          { bg: 'var(--accent-gold-dim)',  border: 'rgba(252,209,22,0.4)', color: 'var(--accent-gold)',  label: 'Cleaning window'     },
-          { bg: 'var(--accent-red-dim)',   border: 'var(--accent-red)',     color: 'var(--accent-red)',   label: 'Tight (< 2h)'        },
-        ].map(item => (
-          <div key={item.label} className="flex items-center gap-1.5 text-xs"
-               style={{ color: 'var(--text-muted)' }}>
-            <div className="w-4 h-3 rounded-sm flex-shrink-0"
-                 style={{ background: item.bg, border: `1px solid ${item.border}` }} />
-            {item.label}
-          </div>
-        ))}
+      {/* ── Legend ── */}
+      <div
+        className="flex flex-wrap items-center gap-x-5 gap-y-1.5 px-4 py-3 text-xs"
+        style={{ borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}
+      >
+        <div className="flex items-center gap-1.5">
+          <span
+            className="w-4 h-2.5 rounded-sm inline-block"
+            style={{ background: 'var(--accent-blue-dim)', border: '1px solid var(--accent-blue)' }}
+          />
+          Guest stay
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span
+            className="w-4 h-2.5 rounded-sm inline-block"
+            style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)' }}
+          />
+          Unassigned turnover
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span
+            className="w-4 h-2.5 rounded-sm inline-block"
+            style={{ background: 'var(--accent-blue-dim)', border: '1px solid var(--accent-blue)' }}
+          />
+          Assigned
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span
+            className="w-4 h-2.5 rounded-sm inline-block"
+            style={{ background: 'var(--accent-green-dim)', border: '1px solid var(--accent-green)' }}
+          />
+          Completed
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span
+            className="w-4 h-2.5 rounded-sm inline-block"
+            style={{ background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red)' }}
+          />
+          ⚠ Tight window
+        </div>
       </div>
     </div>
   )

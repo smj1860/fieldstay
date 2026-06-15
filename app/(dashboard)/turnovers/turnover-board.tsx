@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, RefreshCw, CalendarCheck, Clock, ChevronDown,
-  AlertTriangle, CheckCircle2, Flag, X, UserPlus, List, BarChart2, Camera,
+  AlertTriangle, CheckCircle2, Flag, X, UserPlus, LayoutList, GanttChartSquare, Camera,
 } from 'lucide-react'
 import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
 import {
@@ -852,7 +852,7 @@ export function TurnoverBoard({
   const [filterCrew,        setFilterCrew]        = useState<string>('all')
   const [selectedIds,       setSelectedIds]       = useState<Set<string>>(new Set())
   const [bulkAssigning,     startBulkAssign]      = useTransition()
-  const [viewMode,          setViewMode]          = useState<'list' | 'gantt'>('gantt')
+  const [viewMode,          setViewMode]          = useState<'list' | 'gantt'>('list')
   const [assignmentWarning, setAssignmentWarning] = useState<string | null>(null)
 
   useEffect(() => {
@@ -1024,25 +1024,38 @@ export function TurnoverBoard({
           </select>
         )}
 
-        {/* View toggle */}
-        <div className="flex items-center gap-1 ml-auto bg-card-themed border border-themed rounded-lg px-1 py-1">
+        {/* List / Gantt toggle */}
+        <div
+          className="flex items-center gap-0.5 rounded-lg p-0.5 ml-auto"
+          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
+        >
           <button
             onClick={() => setViewMode('list')}
-            className={cn(
-              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
-              viewMode === 'list' ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
-            )}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs
+                       font-medium transition-colors"
+            style={{
+              background: viewMode === 'list' ? 'var(--bg-card)' : 'transparent',
+              color:      viewMode === 'list' ? 'var(--text-primary)' : 'var(--text-muted)',
+              boxShadow:  viewMode === 'list' ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
+            }}
+            title="List view"
           >
-            <List className="w-3.5 h-3.5" /> List
+            <LayoutList className="w-3.5 h-3.5" />
+            List
           </button>
           <button
             onClick={() => setViewMode('gantt')}
-            className={cn(
-              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors flex items-center gap-1',
-              viewMode === 'gantt' ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
-            )}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs
+                       font-medium transition-colors"
+            style={{
+              background: viewMode === 'gantt' ? 'var(--bg-card)' : 'transparent',
+              color:      viewMode === 'gantt' ? 'var(--text-primary)' : 'var(--text-muted)',
+              boxShadow:  viewMode === 'gantt' ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
+            }}
+            title="Gantt view"
           >
-            <BarChart2 className="w-3.5 h-3.5" /> Calendar
+            <GanttChartSquare className="w-3.5 h-3.5" />
+            Gantt
           </button>
         </div>
       </div>
@@ -1069,82 +1082,86 @@ export function TurnoverBoard({
       {viewMode === 'gantt' ? (
         <TurnoverGantt
           turnovers={filtered}
-          bookings={bookings}
           properties={properties}
-          windowDays={14}
+          bookings={bookings}
         />
-      ) : filtered.length === 0 ? (
-        <div className="card text-center py-16 max-w-md mx-auto mt-4">
-          <CalendarCheck className="w-10 h-10 text-muted-themed mx-auto mb-3" />
-          <h3 className="font-semibold text-secondary-themed mb-1">No turnovers found</h3>
-          <p className="text-sm text-muted-themed">
-            {turnovers.length === 0
-              ? 'Add a property and connect your calendar to start seeing turnovers here.'
-              : 'No turnovers match the current filter.'
-            }
-          </p>
-        </div>
       ) : (
+        /* existing full list-view render block unchanged */
         <div>
-          <BoardSection
-            label="🚨 Needs Attention"
-            turnovers={groups.urgent}
-            propertyMap={propertyMap}
-            crewMembers={crewMembers}
-            variant="urgent"
-            selectedIds={selectedIds}
-            onToggle={toggleSelect}
-            onWarning={setAssignmentWarning}
-          />
-          <BoardSection
-            label="Today"
-            turnovers={groups.today}
-            propertyMap={propertyMap}
-            crewMembers={crewMembers}
-            selectedIds={selectedIds}
-            onToggle={toggleSelect}
-            onWarning={setAssignmentWarning}
-          />
-          <BoardSection
-            label="Tomorrow"
-            turnovers={groups.tomorrow}
-            propertyMap={propertyMap}
-            crewMembers={crewMembers}
-            selectedIds={selectedIds}
-            onToggle={toggleSelect}
-            onWarning={setAssignmentWarning}
-          />
-          <BoardSection
-            label="This Week"
-            turnovers={groups.week}
-            propertyMap={propertyMap}
-            crewMembers={crewMembers}
-            selectedIds={selectedIds}
-            onToggle={toggleSelect}
-            onWarning={setAssignmentWarning}
-          />
-          <BoardSection
-            label="Upcoming"
-            turnovers={groups.upcoming}
-            propertyMap={propertyMap}
-            crewMembers={crewMembers}
-            defaultOpen={false}
-            selectedIds={selectedIds}
-            onToggle={toggleSelect}
-            onWarning={setAssignmentWarning}
-          />
-          {filterStatus !== 'active' && (
-            <BoardSection
-              label="Recently Completed"
-              turnovers={groups.recent}
-              propertyMap={propertyMap}
-              crewMembers={crewMembers}
-              defaultOpen={false}
-              variant="muted"
-              selectedIds={selectedIds}
-              onToggle={toggleSelect}
-              onWarning={setAssignmentWarning}
-            />
+          {filtered.length === 0 ? (
+            <div className="card text-center py-16 max-w-md mx-auto mt-4">
+              <CalendarCheck className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+              <h3 className="font-semibold text-secondary-themed mb-1">No turnovers found</h3>
+              <p className="text-sm text-muted-themed">
+                {turnovers.length === 0
+                  ? 'Add a property and connect your calendar to start seeing turnovers here.'
+                  : 'No turnovers match the current filter.'
+                }
+              </p>
+            </div>
+          ) : (
+            <>
+              <BoardSection
+                label="🚨 Needs Attention"
+                turnovers={groups.urgent}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                variant="urgent"
+                selectedIds={selectedIds}
+                onToggle={toggleSelect}
+                onWarning={setAssignmentWarning}
+              />
+              <BoardSection
+                label="Today"
+                turnovers={groups.today}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                selectedIds={selectedIds}
+                onToggle={toggleSelect}
+                onWarning={setAssignmentWarning}
+              />
+              <BoardSection
+                label="Tomorrow"
+                turnovers={groups.tomorrow}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                selectedIds={selectedIds}
+                onToggle={toggleSelect}
+                onWarning={setAssignmentWarning}
+              />
+              <BoardSection
+                label="This Week"
+                turnovers={groups.week}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                selectedIds={selectedIds}
+                onToggle={toggleSelect}
+                onWarning={setAssignmentWarning}
+              />
+              <BoardSection
+                label="Upcoming"
+                turnovers={groups.upcoming}
+                propertyMap={propertyMap}
+                crewMembers={crewMembers}
+                defaultOpen={false}
+                selectedIds={selectedIds}
+                onToggle={toggleSelect}
+                onWarning={setAssignmentWarning}
+              />
+              {filterStatus !== 'active' && (
+                <BoardSection
+                  label="Recently Completed"
+                  turnovers={groups.recent}
+                  propertyMap={propertyMap}
+                  crewMembers={crewMembers}
+                  defaultOpen={false}
+                  variant="muted"
+                  selectedIds={selectedIds}
+                  onToggle={toggleSelect}
+                  onWarning={setAssignmentWarning}
+                />
+              )}
+            </>
           )}
         </div>
       )}
