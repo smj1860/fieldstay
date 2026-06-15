@@ -49,11 +49,12 @@ const properties = new Table({
 })
 
 const crew_availability = new Table({
-  org_id:          column.text,
-  crew_member_id:  column.text,
-  available_date:  column.text,
-  is_available:    column.integer,
-  notes:           column.text,
+  org_id:         column.text,
+  crew_member_id: column.text,
+  available_date: column.text,
+  is_available:   column.integer,
+  notes:          column.text,
+  created_at:     column.text,
 })
 
 const messages = new Table({

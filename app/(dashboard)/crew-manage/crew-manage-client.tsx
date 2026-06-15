@@ -3,7 +3,7 @@
 import { useState, useTransition, useActionState, useRef } from 'react'
 import { Pencil, X, Check, Loader2, Upload, Users2, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { CrewMember, CrewRole } from '@/types/database'
+import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
 import type { ContactPref } from '@/types/database'
 import {
   addCrewMember,
@@ -101,35 +101,16 @@ const ROLE_BADGE: Record<CrewRole, { label: string; cls: string }> = {
   general:     { label: 'General',     cls: 'badge badge-slate' },
 }
 
-// ── Availability helpers ──────────────────────────────────────────────────────
-
-interface AvailabilityRow {
-  crew_member_id: string
-  available_date: string
-  is_available:   boolean
-}
-
-function getNextUnavailableDate(
-  crewMemberId: string,
-  rows: AvailabilityRow[]
-): string | null {
-  const today = new Date().toISOString().split('T')[0]!
-  const off = rows
-    .filter((r) => r.crew_member_id === crewMemberId && !r.is_available && r.available_date >= today)
-    .sort((a, b) => a.available_date.localeCompare(b.available_date))
-  return off[0]?.available_date ?? null
-}
-
 // ── Root client component ─────────────────────────────────────────────────────
 
 interface Props {
-  crew:             CrewMember[]
-  availabilityRows: AvailabilityRow[]
+  crew:            CrewMember[]
+  availabilityMap: Record<string, CrewAvailabilityEntry[]>
 }
 
 type ViewMode = 'list' | 'add' | 'bulk'
 
-export function CrewManageClient({ crew, availabilityRows }: Props) {
+export function CrewManageClient({ crew, availabilityMap }: Props) {
   const [view, setView]                 = useState<ViewMode>('list')
   const [selectedMember, setSelectedMember] = useState<CrewMember | null>(null)
 
@@ -196,8 +177,8 @@ export function CrewManageClient({ crew, availabilityRows }: Props) {
       {selectedMember && (
         <CrewCardModal
           member={selectedMember}
+          availability={availabilityMap[selectedMember.id] ?? []}
           onClose={() => setSelectedMember(null)}
-          availabilityRows={availabilityRows}
         />
       )}
     </div>
@@ -206,14 +187,20 @@ export function CrewManageClient({ crew, availabilityRows }: Props) {
 
 // ── Crew card modal ───────────────────────────────────────────────────────────
 
+const fmtAvailDate = (iso: string): string =>
+  new Date(iso + 'T00:00:00').toLocaleDateString('en-US', {
+    month: 'short',
+    day:   'numeric',
+  })
+
 function CrewCardModal({
   member,
+  availability,
   onClose,
-  availabilityRows,
 }: {
-  member:           CrewMember
-  onClose:          () => void
-  availabilityRows: AvailabilityRow[]
+  member:       CrewMember
+  availability: CrewAvailabilityEntry[]
+  onClose:      () => void
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
@@ -242,11 +229,11 @@ function CrewCardModal({
         </div>
 
         <div className="space-y-2 text-sm">
-          {/* Availability */}
+          {/* Quick availability status */}
           <div className="flex justify-between items-center pb-2 mb-1 border-b border-themed">
             <span className="text-muted-themed">Availability</span>
             {(() => {
-              const nextOff = getNextUnavailableDate(member.id, availabilityRows)
+              const nextOff = availability.filter((r) => !r.is_available)[0]?.available_date ?? null
               if (!nextOff) {
                 return (
                   <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
@@ -258,7 +245,7 @@ function CrewCardModal({
               return (
                 <span className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--accent-amber)' }}>
                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'var(--accent-amber)' }} />
-                  Off {new Date(nextOff + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  Off {fmtAvailDate(nextOff)}
                 </span>
               )
             })()}
@@ -297,6 +284,77 @@ function CrewCardModal({
               <p className="text-secondary-themed whitespace-pre-wrap">{member.notes}</p>
             </div>
           )}
+
+          {/* ── Availability (next 30 days) ─────────────────── */}
+          <div
+            className="pt-2 mt-2"
+            style={{ borderTop: '1px solid var(--border)' }}
+          >
+            <p
+              className="text-xs font-semibold uppercase tracking-wider mb-2"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Availability · next 30 days
+            </p>
+
+            {/* Not yet invited — can't have entered availability */}
+            {!member.user_id && !member.invite_sent_at && (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Invite crew member to enable availability tracking.
+              </p>
+            )}
+
+            {/* Invited but not yet accepted */}
+            {!member.user_id && !!member.invite_sent_at && (
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Pending invite — availability will appear once crew member joins.
+              </p>
+            )}
+
+            {/* Active crew member */}
+            {!!member.user_id && (() => {
+              const unavailable = availability.filter((r) => !r.is_available)
+
+              if (unavailable.length === 0) {
+                return (
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                      style={{ background: 'var(--accent-green, #22c55e)' }}
+                    />
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      No restrictions set
+                    </p>
+                  </div>
+                )
+              }
+
+              return (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {unavailable.map((r) => (
+                      <span
+                        key={r.available_date}
+                        className="text-xs px-2 py-0.5 rounded-full font-medium"
+                        style={{
+                          background: 'rgba(239,68,68,0.12)',
+                          color:      '#ef4444',
+                        }}
+                      >
+                        {fmtAvailDate(r.available_date)}
+                      </span>
+                    ))}
+                  </div>
+                  {/* Show notes if any unavailable entry has them */}
+                  {unavailable.some((r) => r.notes) && (
+                    <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+                      {unavailable.find((r) => r.notes)?.notes}
+                    </p>
+                  )}
+                </div>
+              )
+            })()}
+          </div>
         </div>
 
         {!member.user_id && (

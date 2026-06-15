@@ -246,6 +246,12 @@ export interface CrewAvailability {
   created_at:     string
 }
 
+export interface CrewAvailabilityEntry {
+  available_date: string
+  is_available:   boolean
+  notes:          string | null
+}
+
 export interface Vendor {
   id:                   string
   org_id:               string
