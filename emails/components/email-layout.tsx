@@ -102,7 +102,7 @@ const headerInner: React.CSSProperties = {
 }
 
 const logoText: React.CSSProperties = {
-  color:         '#ffffff',
+  color:         '#FCD116',
   fontSize:      28,
   fontWeight:    700,
   margin:        0,
@@ -111,7 +111,7 @@ const logoText: React.CSSProperties = {
 }
 
 const taglineText: React.CSSProperties = {
-  color:         '#FCD116',
+  color:         '#ffffff',
   fontSize:      12,
   fontWeight:    500,
   margin:        '4px 0 0',

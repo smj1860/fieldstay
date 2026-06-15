@@ -1,6 +1,6 @@
-import { Section, Text, Button, Hr } from '@react-email/components'
-import { render } from '@react-email/render'
-import { BaseLayout } from './base-layout'
+import { Section, Text, Hr } from '@react-email/components'
+import { render }             from '@react-email/render'
+import { EmailLayout }        from '@/emails/components/email-layout'
 import type { CartBuildResult } from '@/lib/kroger/types'
 
 export interface ShoppingCartReadyEmailProps {
@@ -14,7 +14,9 @@ const STATUS_LABELS: Record<CartBuildResult['status'], string> = {
   list_only:  'Shopping list ready (cart not added)',
 }
 
-export function ShoppingCartReadyEmail({ cartData, recipientName }: ShoppingCartReadyEmailProps) {
+export function ShoppingCartReadyEmail({
+  cartData, recipientName,
+}: ShoppingCartReadyEmailProps) {
   const statusLabel    = STATUS_LABELS[cartData.status] ?? cartData.status
   const matchedCount   = cartData.matched_items.length
   const unmatchedCount = cartData.unmatched_items.length
@@ -24,30 +26,34 @@ export function ShoppingCartReadyEmail({ cartData, recipientName }: ShoppingCart
     : null
 
   return (
-    <BaseLayout
-      previewText={`Your Kroger restock cart is ready — ${matchedCount} item${matchedCount !== 1 ? 's' : ''} added`}
-      headerSub="Kroger Restock"
-      footerLine={`Below-par inventory restock · ${new Date(cartData.built_at).toLocaleString()}`}
+    <EmailLayout
+      preview={`Your Kroger restock cart is ready — ${matchedCount} item${matchedCount !== 1 ? 's' : ''} added`}
+      ctaLabel={cartData.cart_url ? 'Open Cart →' : undefined}
+      ctaUrl={cartData.cart_url ?? undefined}
+      footerNote={`Below-par inventory restock · ${new Date(cartData.built_at).toLocaleString()}`}
     >
-      <Text style={{ fontSize: 20, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>
+      <Text style={{ fontSize: 20, fontWeight: 700, color: '#0a1628', margin: '0 0 4px' }}>
         Your Kroger cart is ready
       </Text>
-      <Text style={{ fontSize: 14, color: '#475569', margin: '0 0 20px', lineHeight: 1.5 }}>
+
+      <Text style={{ fontSize: 14, color: '#374151', margin: '0 0 20px', lineHeight: 1.5 }}>
         Hi {recipientName} — FieldStay finished building your below-par restock list.
       </Text>
 
       {/* Status pill */}
       <Section style={{ marginBottom: 20 }}>
-        <Text style={{
-          display: 'inline-block',
-          padding: '4px 12px',
-          borderRadius: 999,
-          fontSize: 12,
-          fontWeight: 600,
-          backgroundColor: hasCart ? '#d1fae5' : '#fef3c7',
-          color:           hasCart ? '#065f46' : '#92400e',
-          margin: 0,
-        }}>
+        <Text
+          style={{
+            display:         'inline-block',
+            padding:         '4px 12px',
+            borderRadius:    999,
+            fontSize:        12,
+            fontWeight:      600,
+            backgroundColor: hasCart ? '#d1fae5' : '#fef3c7',
+            color:           hasCart ? '#065f46' : '#92400e',
+            margin:          0,
+          }}
+        >
           {statusLabel}
         </Text>
       </Section>
@@ -55,68 +61,58 @@ export function ShoppingCartReadyEmail({ cartData, recipientName }: ShoppingCart
       {/* Stats */}
       <Section style={{ marginBottom: 24 }}>
         <Section style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 8, marginBottom: 8 }}>
-          <Text style={{ fontSize: 14, color: '#475569', margin: 0, display: 'inline' }}>Items matched</Text>
-          <Text style={{ fontSize: 14, fontWeight: 600, color: '#0f172a', margin: 0, float: 'right' }}>{matchedCount}</Text>
+          <Text style={{ fontSize: 14, color: '#374151', margin: 0 }}>
+            Items matched: <strong>{matchedCount}</strong>
+          </Text>
         </Section>
         {unmatchedCount > 0 && (
           <Section style={{ borderBottom: '1px solid #e2e8f0', paddingBottom: 8, marginBottom: 8 }}>
-            <Text style={{ fontSize: 14, color: '#475569', margin: 0, display: 'inline' }}>Items not found</Text>
-            <Text style={{ fontSize: 14, fontWeight: 600, color: '#d97706', margin: 0, float: 'right' }}>{unmatchedCount}</Text>
+            <Text style={{ fontSize: 14, color: '#374151', margin: 0 }}>
+              Items not found: <strong style={{ color: '#d97706' }}>{unmatchedCount}</strong>
+            </Text>
           </Section>
         )}
         {totalEst && (
           <Section>
-            <Text style={{ fontSize: 14, color: '#475569', margin: 0, display: 'inline' }}>Estimated total</Text>
-            <Text style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0, float: 'right' }}>{totalEst}</Text>
+            <Text style={{ fontSize: 14, color: '#374151', margin: 0 }}>
+              Estimated total: <strong style={{ fontSize: 16 }}>{totalEst}</strong>
+            </Text>
           </Section>
         )}
       </Section>
 
-      {/* Open Cart CTA */}
       {cartData.cart_url && (
-        <>
-          <Button
-            href={cartData.cart_url}
-            style={{
-              backgroundColor: '#FCD116',
-              color: '#0a1628',
-              fontWeight: 700,
-              fontSize: 15,
-              padding: '12px 28px',
-              borderRadius: 8,
-              textDecoration: 'none',
-              display: 'inline-block',
-            }}
-          >
-            Open Cart →
-          </Button>
-          <Text style={{ fontSize: 12, color: '#94a3b8', margin: '8px 0 20px' }}>
-            Store: {cartData.location_name}
-          </Text>
-        </>
+        <Text style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 20px' }}>
+          Store: {cartData.location_name}
+        </Text>
       )}
 
       {/* Unmatched items */}
       {cartData.unmatched_items.length > 0 && (
         <>
           <Hr style={{ borderColor: '#e2e8f0', margin: '4px 0 16px' }} />
-          <Text style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', margin: '0 0 10px' }}>
+          <Text style={{ fontSize: 13, fontWeight: 600, color: '#0a1628', margin: '0 0 10px' }}>
             Items not found — search manually:
           </Text>
           {cartData.unmatched_items.map((name) => {
             const searchUrl = `https://www.kroger.com/search?query=${encodeURIComponent(name)}`
             return (
-              <Text key={name} style={{ fontSize: 13, color: '#475569', margin: '0 0 6px' }}>
-                · <a href={searchUrl} style={{ color: '#2563eb', textDecoration: 'underline' }}>{name}</a>
+              <Text key={name} style={{ fontSize: 13, color: '#374151', margin: '0 0 6px' }}>
+                ·{' '}
+                <a href={searchUrl} style={{ color: '#0a1628', textDecoration: 'underline' }}>
+                  {name}
+                </a>
               </Text>
             )
           })}
         </>
       )}
-    </BaseLayout>
+    </EmailLayout>
   )
 }
 
-export async function renderShoppingCartReadyEmail(props: ShoppingCartReadyEmailProps): Promise<string> {
+export async function renderShoppingCartReadyEmail(
+  props: ShoppingCartReadyEmailProps
+): Promise<string> {
   return render(<ShoppingCartReadyEmail {...props} />)
 }
