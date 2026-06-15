@@ -15,16 +15,19 @@ export default async function CrewManagePage() {
     .eq('is_active', true)
     .order('name')
 
-  // Fetch next 30 days of availability for all crew in this org
-  const today = new Date().toISOString().split('T')[0]!
-  const in30  = new Date(Date.now() + 30 * 86_400_000).toISOString().split('T')[0]!
+  // Cover current month + next month for the calendar overview
+  const now        = new Date()
+  const calStart   = new Date(now.getFullYear(), now.getMonth(), 1)
+  const calEnd     = new Date(now.getFullYear(), now.getMonth() + 2, 0)
+  const rangeStart = calStart.toISOString().split('T')[0]!
+  const rangeEnd   = calEnd.toISOString().split('T')[0]!
 
   const { data: availabilityRows } = await supabase
     .from('crew_availability')
     .select('crew_member_id, available_date, is_available, notes')
     .eq('org_id', membership.org_id)
-    .gte('available_date', today)
-    .lte('available_date', in30)
+    .gte('available_date', rangeStart)
+    .lte('available_date', rangeEnd)
     .order('available_date', { ascending: true })
 
   // Build a lookup map: crew_member_id → sorted list of availability entries
