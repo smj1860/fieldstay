@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       // Find the org by Stripe customer ID
       const { data: org } = await supabase
         .from('organizations')
-        .select('id')
+        .select('id, name')
         .eq('stripe_customer_id', customerId)
         .single()
 
@@ -132,6 +132,65 @@ export async function POST(request: NextRequest) {
           action:   'billing.subscription.updated',
           metadata: { plan, planStatus, subscriptionId: subscription.id },
         })
+
+        // ── Trial lifecycle start (subscription.created while trialing) ───
+        if (event.type === 'customer.subscription.created' && planStatus === 'trialing' && subscription.trial_end) {
+          const { data: member } = await supabase
+            .from('organization_members')
+            .select('user_id')
+            .eq('org_id', org.id)
+            .eq('role', 'admin')
+            .single()
+
+          if (member?.user_id) {
+            const { data: { user: adminUser } } = await supabase.auth.admin.getUserById(member.user_id)
+            if (adminUser?.email) {
+              const fullName = adminUser.user_metadata?.full_name as string | undefined
+
+              await inngest.send({
+                name: 'billing/trial-lifecycle-start',
+                data: {
+                  org_id:        org.id,
+                  user_email:    adminUser.email,
+                  first_name:    fullName?.split(' ')[0] ?? 'there',
+                  org_name:      (org as { id: string; name?: string | null }).name ?? '',
+                  trial_ends_at: new Date(subscription.trial_end * 1000).toISOString(),
+                },
+              })
+            }
+          }
+        }
+
+        // ── First payment confirmed (trialing → active transition) ────────
+        if (event.type === 'customer.subscription.updated') {
+          const previousAttributes = event.data.previous_attributes as Partial<{ status: string }> | undefined
+          const previousStatus = previousAttributes?.status
+          if (previousStatus === 'trialing' && planStatus === 'active') {
+            const { data: member } = await supabase
+              .from('organization_members')
+              .select('user_id')
+              .eq('org_id', org.id)
+              .eq('role', 'admin')
+              .single()
+
+            if (member?.user_id) {
+              const { data: { user: adminUser } } = await supabase.auth.admin.getUserById(member.user_id)
+              if (adminUser?.email) {
+                const fullName = adminUser.user_metadata?.full_name as string | undefined
+
+                await inngest.send({
+                  name: 'billing/first-payment-confirmed',
+                  data: {
+                    org_id:     org.id,
+                    user_email: adminUser.email,
+                    first_name: fullName?.split(' ')[0] ?? 'there',
+                    org_name:   (org as { id: string; name?: string | null }).name ?? '',
+                  },
+                })
+              }
+            }
+          }
+        }
       }
       break
     }

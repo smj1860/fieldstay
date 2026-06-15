@@ -8,7 +8,7 @@ import { stripe, PLANS } from '@/lib/stripe/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent } from '@/lib/audit'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
-import { renderCrewInviteEmail } from '@/lib/resend/emails/crew-invite'
+import { renderCrewInviteEmail } from '@/emails/crew-invite'
 
 export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
 
@@ -537,12 +537,13 @@ export async function inviteCrewMember(
   const html = await renderCrewInviteEmail({
     crewName:  crew.name,
     orgName:   org?.name ?? 'Your property manager',
-    acceptUrl: inviteUrl,
+    inviteUrl,
   })
   const { error: emailError } = await resend.emails.send({
-    from:    FROM,
-    to:      crew.email,
-    subject: `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
+    from:     FROM,
+    to:       crew.email,
+    replyTo:  'help@fieldstay.app',
+    subject:  `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
     html,
   })
 

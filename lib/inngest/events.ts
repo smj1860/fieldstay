@@ -479,4 +479,41 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Org lifecycle
+  // ----------------------------------------------------------
+
+  'org/created': {
+    data: {
+      org_id:     string
+      user_id:    string
+      org_name:   string
+      user_email: string
+      first_name: string
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Billing lifecycle (trial + subscriber)
+  // ----------------------------------------------------------
+
+  'billing/trial-lifecycle-start': {
+    data: {
+      org_id:        string
+      user_email:    string
+      first_name:    string
+      org_name:      string
+      trial_ends_at: string
+    }
+  }
+
+  'billing/first-payment-confirmed': {
+    data: {
+      org_id:     string
+      user_email: string
+      first_name: string
+      org_name:   string
+    }
+  }
+
 }
