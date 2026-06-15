@@ -1,6 +1,8 @@
-import { Heading, Text, Button, Row, Column, Hr, Section } from '@react-email/components'
-import { render } from '@react-email/render'
-import { BaseLayout } from './base-layout'
+import {
+  Heading, Text, Button, Row, Column, Hr, Section,
+} from '@react-email/components'
+import { render }      from '@react-email/render'
+import { EmailLayout } from '@/emails/components/email-layout'
 
 export interface PmAlertTable {
   headers: string[]
@@ -17,20 +19,25 @@ export interface PmAlertProps {
   ctaUrl:   string
 }
 
-/**
- * Generic PM-facing alert — replaces the raw-HTML buildScheduleEmail()
- * template string and inline `html: \`<div...\`` sends scattered across
- * the Inngest notification functions.
- */
-export function PmAlert({ heading, body, details, table, note, ctaLabel, ctaUrl }: PmAlertProps) {
+export function PmAlert({
+  heading, body, details, table, note, ctaLabel, ctaUrl,
+}: PmAlertProps) {
   const rows = details?.filter((d) => d.value != null && d.value !== '') ?? []
 
   return (
-    <BaseLayout previewText={heading}>
-      <Heading as="h2" style={{ fontSize: 20, color: '#0f172a', margin: '0 0 12px' }}>
+    <EmailLayout
+      preview={heading}
+      ctaLabel={ctaLabel}
+      ctaUrl={ctaUrl}
+    >
+      <Heading
+        as="h2"
+        style={{ fontSize: 20, color: '#0a1628', margin: '0 0 12px' }}
+      >
         {heading}
       </Heading>
-      <Text style={{ fontSize: 14, color: '#334155', lineHeight: 1.6, margin: '0 0 20px' }}>
+
+      <Text style={{ fontSize: 14, color: '#374151', lineHeight: 1.6, margin: '0 0 20px' }}>
         {body}
       </Text>
 
@@ -39,8 +46,12 @@ export function PmAlert({ heading, body, details, table, note, ctaLabel, ctaUrl 
           <Section style={{ backgroundColor: '#f8fafc', borderRadius: 8, padding: '14px 16px' }}>
             {rows.map((d) => (
               <Row key={d.label} style={{ marginBottom: 8 }}>
-                <Column style={{ color: '#64748b', fontSize: 13, width: '140px' }}>{d.label}</Column>
-                <Column style={{ color: '#0f172a', fontSize: 13, fontWeight: 600 }}>{d.value}</Column>
+                <Column style={{ color: '#64748b', fontSize: 13, width: '140px' }}>
+                  {d.label}
+                </Column>
+                <Column style={{ color: '#0a1628', fontSize: 13, fontWeight: 600 }}>
+                  {d.value}
+                </Column>
               </Row>
             ))}
           </Section>
@@ -55,11 +66,11 @@ export function PmAlert({ heading, body, details, table, note, ctaLabel, ctaUrl 
               <Column
                 key={i}
                 style={{
-                  padding: '10px 8px',
-                  fontSize: 12,
-                  color: '#64748b',
+                  padding:       '10px 8px',
+                  fontSize:      12,
+                  color:         '#64748b',
                   textTransform: 'uppercase',
-                  textAlign: i === 0 ? 'left' : 'center',
+                  textAlign:     i === 0 ? 'left' : 'center',
                 }}
               >
                 {h}
@@ -72,11 +83,11 @@ export function PmAlert({ heading, body, details, table, note, ctaLabel, ctaUrl 
                 <Column
                   key={ci}
                   style={{
-                    padding: '8px',
-                    fontSize: 13,
-                    color: ci === 0 ? '#1e293b' : '#0f172a',
+                    padding:    '8px',
+                    fontSize:   13,
+                    color:      ci === 0 ? '#1e293b' : '#0a1628',
                     fontWeight: ci === 0 ? 400 : 600,
-                    textAlign: ci === 0 ? 'left' : 'center',
+                    textAlign:  ci === 0 ? 'left' : 'center',
                   }}
                 >
                   {cell}
@@ -92,23 +103,7 @@ export function PmAlert({ heading, body, details, table, note, ctaLabel, ctaUrl 
           {note}
         </Text>
       )}
-
-      <Button
-        href={ctaUrl}
-        style={{
-          backgroundColor: '#FCD116',
-          color: '#0a1628',
-          fontWeight: 700,
-          fontSize: 15,
-          padding: '12px 28px',
-          borderRadius: 8,
-          textDecoration: 'none',
-          display: 'inline-block',
-        }}
-      >
-        {ctaLabel}
-      </Button>
-    </BaseLayout>
+    </EmailLayout>
   )
 }
 
