@@ -113,14 +113,10 @@ export default async function OpsSnapshotPage() {
 
   return (
     <OpsSnapshot
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      turnovers={allTurnovers as any}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      properties={(properties ?? []) as any}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      openWorkOrders={openWorkOrders as any}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      lowStockItems={lowStockItems as any}
+      turnovers={allTurnovers}
+      properties={properties ?? []}
+      openWorkOrders={openWorkOrders}
+      lowStockItems={lowStockItems}
       todayDate={todayIso}
       kpis={{
         turnoversToday:   todayTurnovers.length,

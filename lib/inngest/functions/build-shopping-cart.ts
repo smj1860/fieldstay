@@ -155,7 +155,7 @@ export const buildShoppingCart = inngest.createFunction(
       for (const item of belowParItems) {
         const key = item.name.toLowerCase().trim()
         if (!itemBrandMap.has(key)) {
-          itemBrandMap.set(key, (item as any).preferred_brand ?? null)
+          itemBrandMap.set(key, item.preferred_brand ?? null)
         }
       }
 
@@ -222,7 +222,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
 
     // ── Step 4: Search Kroger for each item (batched to prevent step timeout) ──
     const SEARCH_BATCH_SIZE = 50
-    const uniqueNames = [...new Set(belowParItems.map((i: any) => i.name.toLowerCase().trim()))]
+    const uniqueNames = [...new Set(belowParItems.map((i) => i.name.toLowerCase().trim()))]
     const searchBatches: string[][] = []
     for (let i = 0; i < uniqueNames.length; i += SEARCH_BATCH_SIZE) {
       searchBatches.push(uniqueNames.slice(i, i + SEARCH_BATCH_SIZE))
@@ -285,7 +285,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
       const quantityMap = new Map<string, number>()
       for (const item of belowParItems) {
         const key    = item.name.toLowerCase().trim()
-        const deficit = Math.max(0, ((item as any).par_level ?? 1) - ((item as any).current_quantity ?? 0))
+        const deficit = Math.max(0, (item.par_level ?? 1) - (item.current_quantity ?? 0))
         quantityMap.set(key, (quantityMap.get(key) ?? 0) + deficit)
       }
 
