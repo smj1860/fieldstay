@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { CrispWidget } from '@/components/crisp-widget'
@@ -45,6 +46,30 @@ export default async function DashboardLayout({
   const completedSteps  = (org?.onboarding_steps_completed ?? {}) as Record<string, boolean>
   const onboardingPct   = calcOnboardingProgress(completedSteps)
   const onboardingComplete = ONBOARDING_STEPS.every((s) => completedSteps[s.key])
+
+  if (!onboardingComplete) {
+    const hasStartedSetup = Object.values(completedSteps).some(Boolean)
+
+    if (!hasStartedSetup) {
+      const headersList = await headers()
+      const pathname    = headersList.get('x-pathname') ?? ''
+
+      // Routes that must stay reachable on a brand-new account:
+      // /setup        — the wizard itself
+      // /settings     — user may need billing or account access
+      // /help         — support must always be reachable
+      // /billing-wall — subscription gate must not loop
+      const isExempt =
+        pathname.startsWith('/setup')       ||
+        pathname.startsWith('/settings')    ||
+        pathname.startsWith('/help')        ||
+        pathname.startsWith('/billing-wall')
+
+      if (!isExempt) {
+        redirect('/setup')
+      }
+    }
+  }
 
   // ── Billing gate ──────────────────────────────────────────────────────────
   const planStatus  = org?.plan_status  ?? 'trialing'

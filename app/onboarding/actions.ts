@@ -62,6 +62,6 @@ export async function createOrganization(
     invite_accepted_at: new Date().toISOString(),
   })
 
-  redirect('/ops')
+  redirect('/setup')
   return {}
 }
