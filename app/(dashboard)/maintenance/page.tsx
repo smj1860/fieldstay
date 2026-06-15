@@ -106,10 +106,8 @@ export default async function MaintenancePage() {
       properties={properties ?? []}
       vendors={vendors ?? []}
       schedules={schedules ?? []}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      templates={(templates ?? []) as any}
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      crewMembers={(crewMembers ?? []) as any}
+      templates={templates ?? []}
+      crewMembers={crewMembers ?? []}
       propertyAssets={propertyAssets ?? []}
       vendorCompliance={vendorCompliance ?? []}
       orgId={membership.org_id}

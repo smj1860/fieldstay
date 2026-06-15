@@ -83,17 +83,12 @@ export default async function TurnoversPage() {
   return (
     <div>
       <TurnoverBoard
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        turnovers={(turnovers ?? []) as any}
+        turnovers={turnovers ?? []}
         propertyMap={propertyMap}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        crewMembers={(crew ?? []) as any}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        properties={(properties ?? []) as any}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        bookings={(bookings ?? []) as any}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        crewAvailability={(crewAvailability ?? []) as any}
+        crewMembers={crew ?? []}
+        properties={properties ?? []}
+        bookings={bookings ?? []}
+        crewAvailability={crewAvailability ?? []}
         orgId={membership.org_id}
         showAutoAssignNudge={showAutoAssignNudge}
       />

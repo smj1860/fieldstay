@@ -110,12 +110,9 @@ export default async function InventoryPage() {
         purchaseOrders={purchaseOrders ?? []}
         catalogItems={catalogItems ?? []}
         recentCounts={recentCounts ?? []}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        allInventoryItems={(allInventoryItems ?? []) as any}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        template={template as any}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        pendingDrafts={(pendingDrafts ?? []) as any}
+        allInventoryItems={allInventoryItems ?? []}
+        template={template}
+        pendingDrafts={pendingDrafts ?? []}
         orgId={membership.org_id}
         cartData={cartData}
         showKrogerNudge={showKrogerNudge}

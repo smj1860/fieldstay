@@ -57,6 +57,27 @@ const crew_availability = new Table({
   created_at:     column.text,
 })
 
+const crew_members = new Table({
+  org_id:             column.text,
+  name:               column.text,
+  email:              column.text,
+  phone:              column.text,
+  role:               column.text,
+  specialty:          column.text,
+  is_active:          column.integer,
+  user_id:            column.text,
+  invite_sent_at:     column.text,
+  invite_accepted_at: column.text,
+})
+
+const turnover_assignments = new Table({
+  turnover_id:    column.text,
+  crew_member_id: column.text,
+  org_id:         column.text,
+  assigned_at:    column.text,
+  assigned_by:    column.text,
+})
+
 const messages = new Table({
   org_id:       column.text,
   sender_id:    column.text,
@@ -74,5 +95,7 @@ export const AppSchema = new Schema({
   inventory_items,
   properties,
   crew_availability,
+  crew_members,
+  turnover_assignments,
   messages,
 })
