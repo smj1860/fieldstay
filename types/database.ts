@@ -329,6 +329,7 @@ export interface Turnover {
   suggestion_status:     SuggestionStatus | null
   created_at:            string
   updated_at:            string
+  turnover_assignments:  TurnoverAssignment[]
 }
 
 export interface TurnoverAssignment {
@@ -339,6 +340,7 @@ export interface TurnoverAssignment {
   notified_at:       string | null
   notification_type: ContactPref | null
   created_at:        string
+  crew_members:      { id: string; name: string; phone: string | null; email: string | null }[]
 }
 
 export interface ChecklistInstance {

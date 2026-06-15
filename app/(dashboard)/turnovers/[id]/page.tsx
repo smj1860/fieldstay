@@ -42,9 +42,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
     .eq('id', turnover.property_id)
     .single()
 
-  const assignments = Array.isArray(turnover.turnover_assignments)
-    ? turnover.turnover_assignments
-    : turnover.turnover_assignments ? [turnover.turnover_assignments] : []
+  const assignments = turnover.turnover_assignments ?? []
 
   const checklistInstance = Array.isArray(turnover.checklist_instances)
     ? turnover.checklist_instances[0]
@@ -135,7 +133,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
           )}
           {assignments.length > 0 ? (
             assignments.map((a) => {
-              const crew = Array.isArray(a.crew_members) ? a.crew_members[0] : a.crew_members
+              const crew = a.crew_members[0]
               return (
                 <div key={a.id} className="flex items-center gap-2">
                   <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 text-sm font-bold flex items-center justify-center">
