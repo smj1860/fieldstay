@@ -53,7 +53,7 @@ interface DraftItem {
   inventory_item_id: string
   previous_quantity: number
   submitted_quantity: number
-  inventory_items: { name: string; unit: string } | null
+  inventory_items: { name: string; unit: string }[]
 }
 
 interface PendingDraft {
@@ -63,7 +63,7 @@ interface PendingDraft {
   submitted_at: string | null
   notes: string | null
   crew_members: { name: string }[] | null
-  inventory_count_draft_items: DraftItem[] | DraftItem | null
+  inventory_count_draft_items: DraftItem[]
 }
 
 interface PortfolioItem {
@@ -1055,9 +1055,7 @@ function PendingCountReview({
         <span className="badge badge-amber">{drafts.length}</span>
       </div>
       {drafts.map(draft => {
-        const draftItems = Array.isArray(draft.inventory_count_draft_items)
-          ? draft.inventory_count_draft_items
-          : draft.inventory_count_draft_items ? [draft.inventory_count_draft_items] : []
+        const draftItems = draft.inventory_count_draft_items ?? []
         const isOpen = expanded === draft.id
         return (
           <div key={draft.id} className="border-b border-themed last:border-0">
@@ -1094,10 +1092,10 @@ function PendingCountReview({
                         <div key={di.id} className="grid grid-cols-[1fr_80px_80px_80px] gap-2 px-4 py-2.5 border-b border-themed last:border-0 text-sm items-center">
                           <div>
                             <span className="font-medium text-primary-themed">
-                              {di.inventory_items?.name ?? '—'}
+                              {di.inventory_items?.[0]?.name ?? '—'}
                             </span>
-                            {di.inventory_items?.unit && (
-                              <span className="text-xs text-muted-themed ml-1">({di.inventory_items.unit})</span>
+                            {di.inventory_items?.[0]?.unit && (
+                              <span className="text-xs text-muted-themed ml-1">({di.inventory_items[0]?.unit})</span>
                             )}
                           </div>
                           <span className="text-right text-muted-themed tabular-nums">{di.previous_quantity}</span>
