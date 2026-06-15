@@ -16,6 +16,7 @@ import {
 import { TurnoverGantt } from './turnover-gantt'
 import { createClient } from '@/lib/supabase/client'
 import { NudgeBanner } from '@/components/nudge-banner'
+import type { AssignedCrewMember } from '@/types/database'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,7 +45,7 @@ const CrewAvailabilityContext = createContext<Record<string, boolean>>({})
 interface TurnoverAssignment {
   id: string
   crew_member_id: string
-  crew_members: { id: string; name: string; phone: string | null; email: string | null }[]
+  crew_members: AssignedCrewMember[]
 }
 
 interface Turnover {
@@ -83,7 +84,7 @@ function isPast(d: Date): boolean {
   return d < new Date()
 }
 
-function getAllAssignedCrew(t: Turnover): { id: string; name: string; phone: string | null; email: string | null }[] {
+function getAllAssignedCrew(t: Turnover): AssignedCrewMember[] {
   return t.turnover_assignments.flatMap(a => a.crew_members)
 }
 
@@ -149,7 +150,7 @@ function CrewAssignment({
 }: {
   turnover:     Turnover
   crewMembers:  CrewMember[]
-  assignedCrew: CrewMember[]
+  assignedCrew: AssignedCrewMember[]
   onWarning?:   (msg: string) => void
 }) {
   const [open,     setOpen]     = useState(false)

@@ -340,7 +340,14 @@ export interface TurnoverAssignment {
   notified_at:       string | null
   notification_type: ContactPref | null
   created_at:        string
-  crew_members:      { id: string; name: string; phone: string | null; email: string | null }[]
+  crew_members:      AssignedCrewMember[]
+}
+
+export type AssignedCrewMember = {
+  id:    string
+  name:  string
+  phone: string | null
+  email: string | null
 }
 
 export interface ChecklistInstance {
