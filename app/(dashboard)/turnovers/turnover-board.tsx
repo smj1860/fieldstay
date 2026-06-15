@@ -44,7 +44,7 @@ const CrewAvailabilityContext = createContext<Record<string, boolean>>({})
 interface TurnoverAssignment {
   id: string
   crew_member_id: string
-  crew_members: CrewMember | CrewMember[] | null
+  crew_members: { id: string; name: string; phone: string | null; email: string | null }[]
 }
 
 interface Turnover {
@@ -63,7 +63,7 @@ interface Turnover {
   suggested_crew_ids: string[] | null
   suggestion_reasoning: string | null
   suggestion_status: 'pending' | 'accepted' | 'dismissed' | null
-  turnover_assignments: TurnoverAssignment | TurnoverAssignment[] | null
+  turnover_assignments: TurnoverAssignment[]
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -83,16 +83,8 @@ function isPast(d: Date): boolean {
   return d < new Date()
 }
 
-function getAllAssignedCrew(t: Turnover): CrewMember[] {
-  const assignments = Array.isArray(t.turnover_assignments)
-    ? t.turnover_assignments
-    : t.turnover_assignments ? [t.turnover_assignments] : []
-
-  return assignments.flatMap(a => {
-    const cm = a.crew_members
-    if (!cm) return []
-    return Array.isArray(cm) ? cm : [cm]
-  })
+function getAllAssignedCrew(t: Turnover): { id: string; name: string; phone: string | null; email: string | null }[] {
+  return t.turnover_assignments.flatMap(a => a.crew_members)
 }
 
 function groupTurnovers(turnovers: Turnover[]) {
@@ -885,10 +877,7 @@ export function TurnoverBoard({
     if (filterStatus === 'completed' &&  t.status !== 'completed') return false
 
     if (filterCrew !== 'all') {
-      const assignments = Array.isArray(t.turnover_assignments)
-        ? t.turnover_assignments
-        : t.turnover_assignments ? [t.turnover_assignments] : []
-      const crewIds = assignments.map(a => a.crew_member_id)
+      const crewIds = t.turnover_assignments.map(a => a.crew_member_id)
 
       if (filterCrew === 'unassigned') {
         if (t.status !== 'pending_assignment') return false
