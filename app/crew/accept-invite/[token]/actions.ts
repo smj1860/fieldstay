@@ -1,6 +1,6 @@
 'use server'
 
-import { createServiceClient } from '@/lib/supabase/server'
+import { createServiceClient, createClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
 import { redirect }            from 'next/navigation'
 import { z }                   from 'zod'
@@ -54,20 +54,44 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     user_metadata: { full_name: crew.name, role: 'crew' },
   })
 
-  if (createError) {
-    if (createError.message.includes('already registered')) {
-      return { error: 'An account with this email already exists. Try logging in instead.' }
-    }
-    console.error('[activateCrewAccount]', createError)
-    return { error: 'Account creation failed — please try again' }
-  }
+  let userId: string
 
-  if (!authData.user) return { error: 'Account creation failed — please try again' }
+  if (createError) {
+    const msg = createError.message.toLowerCase()
+    const alreadyExists =
+      msg.includes('already registered') ||
+      msg.includes('already been registered') ||
+      (createError as { code?: string }).code === 'user_already_exists'
+
+    if (alreadyExists) {
+      // Sign in with the cookie-based client so the session is established
+      // and we can recover the existing user's ID.
+      const userClient = await createClient()
+      const { data: signInData, error: signInError } = await userClient.auth.signInWithPassword({
+        email:    crew.email,
+        password,
+      })
+
+      if (signInError || !signInData.user) {
+        return {
+          error: 'This email is already registered with FieldStay. Use your existing password to accept this invite.',
+        }
+      }
+
+      userId = signInData.user.id
+    } else {
+      console.error('[activateCrewAccount]', createError)
+      return { error: 'Account creation failed — please try again' }
+    }
+  } else {
+    if (!authData.user) return { error: 'Account creation failed — please try again' }
+    userId = authData.user.id
+  }
 
   const { error: linkError } = await supabase
     .from('crew_members')
     .update({
-      user_id:            authData.user.id,
+      user_id:            userId,
       invite_accepted_at: new Date().toISOString(),
     })
     .eq('id', crewId)
@@ -76,13 +100,14 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     .is('invite_accepted_at', null)
 
   if (linkError) {
-    await supabase.auth.admin.deleteUser(authData.user.id)
+    // Only roll back the auth user if we just created it (not the sign-in path)
+    if (authData?.user) await supabase.auth.admin.deleteUser(userId)
     return { error: 'Failed to activate account. Please try again.' }
   }
 
   await logAuditEvent({
     orgId:      crew.org_id,
-    actorId:    authData.user.id,
+    actorId:    userId,
     action:     'crew.account.activated',
     targetType: 'crew_member',
     targetId:   crewId,
