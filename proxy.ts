@@ -128,6 +128,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  supabaseResponse.headers.set('x-pathname', pathname)
   return supabaseResponse
 }
 
