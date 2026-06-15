@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { CrispWidget } from '@/components/crisp-widget'
 import { ReviewPrompt } from '@/components/review-prompt'
 import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 import { getNotifications } from '@/lib/notifications'
@@ -91,50 +92,60 @@ export default async function DashboardLayout({
     .eq('recipient_id', user.id)
     .is('read_at', null)
 
+  const displayName =
+    (user.user_metadata?.full_name as string | undefined) ??
+    user.email?.split('@')[0] ??
+    'User'
+
   return (
-    <DashboardShell
-      role={membership.role}
-      orgName={org?.name ?? 'FieldStay'}
-      userName={
-        (user.user_metadata?.full_name as string | undefined) ??
-        user.email?.split('@')[0] ??
-        'User'
-      }
-      userEmail={user.email ?? ''}
-      repuguardActive={repuguardActive}
-      onboardingComplete={onboardingComplete}
-      onboardingPct={onboardingPct}
-      notifications={notifications}
-      unreadMessages={unreadMessages ?? 0}
-    >
-      {isPastDue && (
-        <div
-          className="mx-4 mt-4 px-4 py-3 rounded-xl flex items-center justify-between gap-4 text-sm"
-          style={{
-            background: 'var(--accent-red-dim)',
-            border:     '1px solid rgba(240,84,84,0.3)',
-          }}
-        >
-          <span style={{ color: 'var(--accent-red)' }}>
-            <strong>Payment past due.</strong> Please update your payment method
-            to avoid interruption.
-          </span>
-          <a
-            href="/settings"
-            className="text-xs font-semibold underline whitespace-nowrap"
-            style={{ color: 'var(--accent-red)' }}
+    <>
+      <DashboardShell
+        role={membership.role}
+        orgName={org?.name ?? 'FieldStay'}
+        userName={displayName}
+        userEmail={user.email ?? ''}
+        repuguardActive={repuguardActive}
+        onboardingComplete={onboardingComplete}
+        onboardingPct={onboardingPct}
+        notifications={notifications}
+        unreadMessages={unreadMessages ?? 0}
+      >
+        {isPastDue && (
+          <div
+            className="mx-4 mt-4 px-4 py-3 rounded-xl flex items-center justify-between gap-4 text-sm"
+            style={{
+              background: 'var(--accent-red-dim)',
+              border:     '1px solid rgba(240,84,84,0.3)',
+            }}
           >
-            Update billing →
-          </a>
-        </div>
-      )}
-      {pendingMilestone && MILESTONE_MESSAGES[pendingMilestone.milestone] && (
-        <ReviewPrompt
-          milestone={pendingMilestone.milestone}
-          message={MILESTONE_MESSAGES[pendingMilestone.milestone]!}
-        />
-      )}
-      {children}
-    </DashboardShell>
+            <span style={{ color: 'var(--accent-red)' }}>
+              <strong>Payment past due.</strong> Please update your payment method
+              to avoid interruption.
+            </span>
+            <a
+              href="/settings"
+              className="text-xs font-semibold underline whitespace-nowrap"
+              style={{ color: 'var(--accent-red)' }}
+            >
+              Update billing →
+            </a>
+          </div>
+        )}
+        {pendingMilestone && MILESTONE_MESSAGES[pendingMilestone.milestone] && (
+          <ReviewPrompt
+            milestone={pendingMilestone.milestone}
+            message={MILESTONE_MESSAGES[pendingMilestone.milestone]!}
+          />
+        )}
+        {children}
+      </DashboardShell>
+
+      {/* Live chat — authenticated only, pre-identifies user in Crisp inbox */}
+      <CrispWidget
+        userEmail={user.email ?? ''}
+        userName={displayName}
+        orgName={org?.name}
+      />
+    </>
   )
 }

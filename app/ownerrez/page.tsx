@@ -5,6 +5,7 @@ import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/ownerrez/PricingSection'
+import FaqSection from '@/components/ownerrez/faq-section'
 
 export default async function OwnerRezPage() {
   const cookieStore = await cookies()
@@ -299,6 +300,11 @@ export default async function OwnerRezPage() {
           </div>
         </div>
       </div>
+
+      {/* ══════════════════════════════════════════
+          SECTION 4b — FAQ
+      ══════════════════════════════════════════ */}
+      <FaqSection />
 
       {/* ══════════════════════════════════════════
           SECTION 5 — YELLOW
