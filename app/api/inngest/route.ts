@@ -60,9 +60,6 @@ import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist
 // Integration error notifications
 import { notifyIntegrationError } from '@/lib/inngest/functions/notify-integration-error'
 
-// PM welcome email
-import { pmWelcome } from '@/lib/inngest/functions/pm-welcome'
-
 // Work order public dispatch + sign-off
 import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
 
@@ -135,9 +132,6 @@ export const { GET, POST, PUT } = serve({
 
     // Integration error notifications
     notifyIntegrationError,
-
-    // PM welcome email
-    pmWelcome,
 
     // Work order public dispatch
     workOrderDispatch,

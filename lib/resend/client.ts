@@ -1,5 +1,4 @@
 import { Resend } from 'resend'
-import { renderPmWelcomeEmail }    from './emails/pm-welcome'
 import { renderTeamInviteEmail }   from '@/emails/team-invite'
 
 /**
@@ -33,20 +32,3 @@ export async function sendTeamInviteEmail({
   })
 }
 
-export async function sendPmWelcomeEmail({
-  toEmail,
-  orgName,
-}: {
-  toEmail: string
-  orgName: string
-}) {
-  const setupUrl = `${process.env.NEXT_PUBLIC_APP_URL}/setup`
-  const html = await renderPmWelcomeEmail({ orgName, setupUrl })
-
-  return resend.emails.send({
-    from:    FROM,
-    to:      toEmail,
-    subject: `Welcome to FieldStay — let's set up ${orgName}`,
-    html,
-  })
-}
