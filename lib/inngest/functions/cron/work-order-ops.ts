@@ -186,10 +186,10 @@ export const dailyWorkOrderOps = inngest.createFunction(
           await resend.emails.send({
             from:    FROM,
             to:      pmEmail,
-            subject: `Repeat maintenance issue — ${group.category.replace(/_/g, ' ')} (${group.count}x in 90 days)`,
+            subject: `Repeat maintenance issue — ${(group.category ?? '').replace(/_/g, ' ')} (${group.count}x in 90 days)`,
             html:    await renderPmAlert({
               heading:  'Repeat maintenance issue detected',
-              body:     `${group.category.replace(/_/g, ' ')} has come up ${group.count} times in the last 90 days at this property — this may indicate a recurring problem worth investigating.`,
+              body:     `${(group.category ?? '').replace(/_/g, ' ')} has come up ${group.count} times in the last 90 days at this property — this may indicate a recurring problem worth investigating.`,
               details: [
                 { label: 'Work Orders', value: `${group.count} in the last 90 days` },
               ],
