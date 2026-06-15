@@ -66,6 +66,12 @@ import { pmWelcome } from '@/lib/inngest/functions/pm-welcome'
 // Work order public dispatch + sign-off
 import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
 
+// Email lifecycle functions
+import { sendWelcomeEmail }           from '@/lib/inngest/functions/email-welcome'
+import { sendOwnerRezConnectedEmail } from '@/lib/inngest/functions/email-ownerrez-connected'
+import { handleTrialLifecycle }       from '@/lib/inngest/functions/email-trial-lifecycle'
+import { sendSubscriberCheckin }      from '@/lib/inngest/functions/email-subscriber-checkin'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -136,5 +142,11 @@ export const { GET, POST, PUT } = serve({
     // Work order public dispatch
     workOrderDispatch,
     workOrderSignedOff,
+
+    // Email lifecycle
+    sendWelcomeEmail,
+    sendOwnerRezConnectedEmail,
+    handleTrialLifecycle,
+    sendSubscriberCheckin,
   ],
 })

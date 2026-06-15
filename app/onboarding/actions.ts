@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { inngest } from '@/lib/inngest/client'
 import { slugify } from '@/lib/utils'
 
 export type OnboardingState = { error?: string }
@@ -60,6 +61,18 @@ export async function createOrganization(
     user_id:            user.id,
     role:               'admin',
     invite_accepted_at: new Date().toISOString(),
+  })
+
+  await inngest.send({
+    name: 'org/created',
+    data: {
+      org_id:     org.id,
+      user_id:    user.id,
+      org_name:   name,
+      user_email: user.email ?? '',
+      first_name: (user.user_metadata?.full_name as string | undefined)
+        ?.split(' ')[0] ?? 'there',
+    },
   })
 
   redirect('/setup')

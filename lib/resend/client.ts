@@ -1,6 +1,6 @@
 import { Resend } from 'resend'
 import { renderPmWelcomeEmail }    from './emails/pm-welcome'
-import { renderTeamInviteEmail }   from './emails/team-invite'
+import { renderTeamInviteEmail }   from '@/emails/team-invite'
 
 /**
  * Resend client — single instance for all transactional email.
@@ -25,9 +25,10 @@ export async function sendTeamInviteEmail({
   const html      = await renderTeamInviteEmail({ inviterEmail, orgName, acceptUrl })
 
   return resend.emails.send({
-    from:    FROM,
-    to:      toEmail,
-    subject: `You've been invited to join ${orgName} on FieldStay`,
+    from:     FROM,
+    to:       toEmail,
+    replyTo:  'stephen@fieldstay.app',
+    subject:  `You've been invited to join ${orgName} on FieldStay`,
     html,
   })
 }

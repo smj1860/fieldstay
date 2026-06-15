@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
-import { WorkOrderVendorEmail } from '@/lib/resend/emails/work-order-vendor'
+import { renderWorkOrderEmail } from '@/emails/work-order'
 import { getPmEmail } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
@@ -52,28 +52,26 @@ export const handleWorkOrderCreated = inngest.createFunction(
           .update({ completion_token_expires_at: expiresAt.toISOString() })
           .eq('id', work_order_id)
 
-        const EXPIRES_IN_DAYS = 30
+        const html = await renderWorkOrderEmail({
+          vendorName:     vendor.name,
+          jobTitle:       wo.title,
+          description:    wo.description ?? undefined,
+          scheduledDate:  wo.scheduled_date
+            ? new Date(wo.scheduled_date).toLocaleDateString('en-US', {
+                month: 'long', day: 'numeric', year: 'numeric',
+              })
+            : undefined,
+          propertyName:   property?.name ?? '',
+          propertyCity:   property?.city ?? undefined,
+          propertyState:  property?.state ?? undefined,
+          portalUrl,
+        })
+
         await resend.emails.send({
           from:    FROM,
           to:      vendor.email,
-          subject: `Work Order${wo.wo_number ? ` #${wo.wo_number}` : ''}: ${wo.title} — ${property?.name}`,
-          react:   WorkOrderVendorEmail({
-            wo_number:       wo.wo_number ?? null,
-            title:           wo.title,
-            description:     wo.description ?? null,
-            wo_category:     wo.wo_category ?? null,
-            priority_level:  wo.priority_level ?? null,
-            scheduled_date:  wo.scheduled_date ?? null,
-            nte_amount:      (wo as { nte_amount?: number | null }).nte_amount ?? null,
-            property_name:   property?.name ?? '',
-            address_line1:   (property as { address_line1?: string | null } | null)?.address_line1 ?? null,
-            city:            property?.city ?? null,
-            state:           property?.state ?? null,
-            zip:             (property as { zip?: string | null } | null)?.zip ?? null,
-            portal_url:      portalUrl,
-            portal_type:     'complete',
-            expires_in_days: EXPIRES_IN_DAYS,
-          }),
+          subject: `Work order: ${wo.title} — ${property?.name}`,
+          html,
         })
 
         logger.info(`Sent vendor portal link to ${vendor.email} for WO ${work_order_id}`)
@@ -308,28 +306,26 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
 
       const quoteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/work-orders/${qr.quote_token}/quote`
 
-      const QUOTE_EXPIRES_DAYS = 14
+      const html = await renderWorkOrderEmail({
+        vendorName:    vendor.name,
+        jobTitle:      wo?.title ?? '',
+        description:   wo?.description ?? undefined,
+        scheduledDate: wo?.scheduled_date
+          ? new Date(wo.scheduled_date).toLocaleDateString('en-US', {
+              month: 'long', day: 'numeric', year: 'numeric',
+            })
+          : undefined,
+        propertyName:  property?.name ?? '',
+        propertyCity:  property?.city ?? undefined,
+        propertyState: property?.state ?? undefined,
+        portalUrl:     quoteUrl,
+      })
+
       await resend.emails.send({
         from:    FROM,
         to:      vendor.email,
-        subject: `Quote Request${wo?.wo_number ? ` #${wo.wo_number}` : ''}: ${wo?.title} — ${property?.name}`,
-        react:   WorkOrderVendorEmail({
-          wo_number:       (wo as { wo_number?: string | null } | null)?.wo_number ?? null,
-          title:           wo?.title ?? '',
-          description:     wo?.description ?? null,
-          wo_category:     (wo as { wo_category?: string | null } | null)?.wo_category ?? null,
-          priority_level:  (wo as { priority_level?: string | null } | null)?.priority_level ?? null,
-          scheduled_date:  wo?.scheduled_date ?? null,
-          nte_amount:      (wo as { nte_amount?: number | null } | null)?.nte_amount ?? null,
-          property_name:   property?.name ?? '',
-          address_line1:   (property as { address_line1?: string | null } | null)?.address_line1 ?? null,
-          city:            property?.city ?? null,
-          state:           property?.state ?? null,
-          zip:             (property as { zip?: string | null } | null)?.zip ?? null,
-          portal_url:      quoteUrl,
-          portal_type:     'quote',
-          expires_in_days: QUOTE_EXPIRES_DAYS,
-        }),
+        subject: `Quote request: ${wo?.title} — ${property?.name}`,
+        html,
       })
 
       logger.info(`Sent quote request to ${vendor.email} for WO ${work_order_id}`)
