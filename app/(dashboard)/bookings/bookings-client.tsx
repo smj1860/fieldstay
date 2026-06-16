@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition, useActionState, useMemo, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, RefreshCw, X, ChevronDown, ChevronUp,
@@ -450,6 +451,8 @@ export function BookingsClient({
   bookings:   BookingRow[]
   properties: PropertyOption[]
 }) {
+  const router = useRouter()
+
   const [showAdd,          setShowAdd]         = useState(false)
   const [syncing,          startSync]          = useTransition()
   const [filterProperty,   setFilterProperty]  = useState('all')
@@ -682,7 +685,7 @@ export function BookingsClient({
         <AddBookingModal
           properties={properties}
           onClose={() => setShowAdd(false)}
-          onSuccess={() => setJustAdded(true)}
+          onSuccess={() => { setJustAdded(true); router.refresh() }}
         />
       )}
     </div>
