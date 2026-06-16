@@ -62,8 +62,14 @@ export async function generateTurnoversForProperty(
       t => t.booking_id === booking.id && t.prev_booking_id != null
     )
     if (alreadyPaired) continue
-    const checkoutTimeStr = booking.checkout_time ?? property?.checkout_time ?? '11:00'
+    const checkoutTimeStr = (booking.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)
     const checkoutDT      = new Date(`${booking.checkout_date}T${checkoutTimeStr}:00`)
+    if (isNaN(checkoutDT.getTime())) {
+      console.error('[generator] invalid date in Pass 1', {
+        propertyId, checkout_date: booking.checkout_date, checkoutTimeStr,
+      })
+      continue
+    }
     const checkinDT       = new Date(checkoutDT.getTime() + DEFAULT_WINDOW_HOURS * 3_600_000)
     const windowMinutes   = DEFAULT_WINDOW_HOURS * 60
     const { data: turnover, error } = await supabase
