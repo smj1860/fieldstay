@@ -510,7 +510,7 @@ export async function inviteCrewMember(
 ): Promise<{ error?: string; success?: boolean }> {
   const { supabase, membership } = await requireOrgMember()
 
-  if (!['admin', 'manager'].includes(membership.role)) {
+  if (!['owner', 'admin', 'manager'].includes(membership.role)) {
     return { error: 'Permission denied' }
   }
 
@@ -650,7 +650,7 @@ export async function createCheckoutSession(
 export async function syncOwnerRezNow(): Promise<SettingsActionState> {
   const { membership, user } = await requireOrgMember()
 
-  if (!['admin', 'manager'].includes(membership.role)) {
+  if (!['owner', 'admin', 'manager'].includes(membership.role)) {
     return { error: 'Permission denied' }
   }
 
