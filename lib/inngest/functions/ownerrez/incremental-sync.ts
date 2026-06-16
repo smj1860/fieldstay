@@ -104,14 +104,23 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
             const externalToFsId: Record<string, string> = {}
             if (externalPropertyIds.length) {
-              const { data: fsProps } = await supabase
+              const { data: fsProps, error: propsLookupError } = await supabase
                 .from('properties')
                 .select('id, external_id')
                 .eq('org_id', conn.org_id)
                 .eq('external_source', PROVIDER)
                 .in('external_id', externalPropertyIds)
 
-              for (const p of fsProps ?? []) {
+              if (propsLookupError || !fsProps) {
+                console.error(
+                  `[OwnerRez sync] Property lookup failed for org ${conn.org_id} — ` +
+                  `skipping booking upsert to prevent property_id null overwrite`,
+                  propsLookupError?.message
+                )
+                return
+              }
+
+              for (const p of fsProps) {
                 if (p.external_id) externalToFsId[p.external_id] = p.id
               }
             }
@@ -248,7 +257,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
 
             if (!tooSoon) {
-              await inngest.send({
+              await step.sendEvent('notify-connection-error', {
                 name: 'integration/connection.error',
                 data: {
                   user_id:     conn.user_id,

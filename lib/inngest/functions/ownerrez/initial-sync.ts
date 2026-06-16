@@ -176,20 +176,33 @@ export const ownerRezInitialSync = inngest.createFunction(
           const supabase   = createServiceClient()
 
           // Resolve FieldStay property IDs from external IDs
-          const { data: fsProps } = await supabase
+          const { data: fsProps, error: propsLookupError } = await supabase
             .from('properties')
             .select('id, external_id')
             .eq('org_id', org_id)
             .eq('external_source', PROVIDER)
             .in('external_id', fetchPropsResult.ids.map(String))
 
+          if (propsLookupError || !fsProps) {
+            console.error(
+              `[OwnerRez sync] Property lookup failed for org ${org_id} — ` +
+              `skipping booking upsert to prevent property_id null overwrite`,
+              propsLookupError?.message
+            )
+            throw new Error(
+              `Property lookup failed for org ${org_id}: ${propsLookupError?.message ?? 'unknown error'}`
+            )
+          }
+
           const externalToFsId = Object.fromEntries(
-            (fsProps ?? []).map((p) => [p.external_id, p.id])
+            fsProps.map((p) => [p.external_id, p.id])
           )
 
           const bookingRows = bookings.map((b) => ({
             org_id,
-            property_id:     externalToFsId[String(b.property_id)] ?? null,
+            property_id:     b.property_id != null
+                               ? (externalToFsId[String(b.property_id)] ?? null)
+                               : null,
             guest_name:      b.guest?.name  ?? null,
             guest_email:     b.guest?.email ?? null,
             checkin_date:    b.arrival,

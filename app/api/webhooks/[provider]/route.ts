@@ -92,6 +92,22 @@ export async function POST(
         const appUserId = await findUserByExternalId(providerId, externalUserId)
 
         if (appUserId) {
+          const supabase = createServiceClient()
+          const { data: existingConn } = await supabase
+            .from('integration_connections')
+            .select('status')
+            .eq('provider_id', providerId)
+            .eq('external_user_id', externalUserId)
+            .maybeSingle()
+
+          if (!existingConn || existingConn.status === 'revoked') {
+            console.log(
+              `[Webhook:${providerId}] Revocation already processed or connection ` +
+              `not found for external user ${externalUserId} — skipping`
+            )
+            return NextResponse.json({ received: true }, { status: 200 })
+          }
+
           await revokeIntegrationToken(appUserId, providerId)
           console.log(
             `[Webhook:${providerId}] Token revoked — FieldStay user ${appUserId} ` +
