@@ -1130,7 +1130,7 @@ export async function updateMaintenanceTemplate(
 ): Promise<{ error?: string }> {
   const { supabase, membership, user } = await requireOrgMember()
 
-  if (!['admin', 'manager'].includes(membership.role)) {
+  if (!['owner', 'admin', 'manager'].includes(membership.role)) {
     return { error: 'Permission denied' }
   }
 
