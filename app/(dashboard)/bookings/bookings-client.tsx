@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useActionState, useMemo } from 'react'
+import { useState, useTransition, useActionState, useMemo, useEffect } from 'react'
 import Link from 'next/link'
 import {
   Plus, RefreshCw, X, ChevronDown, ChevronUp,
@@ -329,15 +329,17 @@ function Detail({ label, value }: { label: string; value: string }) {
 function AddBookingModal({
   properties,
   onClose,
+  onSuccess,
 }: {
   properties: PropertyOption[]
   onClose:    () => void
+  onSuccess:  () => void
 }) {
   const [state, action, pending] = useActionState(createBooking, null)
   const [checkinVal, setCheckinVal] = useState('')
   const todayStr = new Date().toISOString().split('T')[0]!
 
-  if (state?.success) { onClose(); return null }
+  if (state?.success) { onSuccess(); onClose(); return null }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-y-auto">
@@ -455,6 +457,17 @@ export function BookingsClient({
   const [filterSource,     setFilterSource]    = useState<'all' | BookingSource>('all')
   const [showPast,         setShowPast]        = useState(false)
   const [localBookings,    setLocalBookings]   = useState(bookings)
+  const [justAdded,        setJustAdded]       = useState(false)
+
+  useEffect(() => {
+    setLocalBookings(bookings)
+  }, [bookings])
+
+  useEffect(() => {
+    if (!justAdded) return
+    const t = setTimeout(() => setJustAdded(false), 4000)
+    return () => clearTimeout(t)
+  }, [justAdded])
 
   const today = new Date().toDateString()
 
@@ -512,6 +525,21 @@ export function BookingsClient({
           </button>
         </div>
       </div>
+
+      {/* Success banner */}
+      {justAdded && (
+        <div
+          className="flex items-center gap-2 px-4 py-3 rounded-xl mb-5"
+          style={{
+            background: 'var(--accent-green-dim)',
+            border: '1px solid rgba(47,217,140,0.25)',
+            color: 'var(--accent-green)',
+          }}
+        >
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          <span className="text-sm font-medium">Booking added — a turnover will be generated automatically.</span>
+        </div>
+      )}
 
       {/* Today's stats strip */}
       {(checkinsToday.length > 0 || checkoutsToday.length > 0) && (
@@ -654,6 +682,7 @@ export function BookingsClient({
         <AddBookingModal
           properties={properties}
           onClose={() => setShowAdd(false)}
+          onSuccess={() => setJustAdded(true)}
         />
       )}
     </div>
