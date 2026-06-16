@@ -527,7 +527,7 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
   // Limit to 2000 rows (well above any real org's inventory) to prevent unbounded scans.
   const { data: allItems, error } = await supabase
     .from('inventory_items')
-    .select('name, unit, current_quantity, par_level, property_id, properties(name)')
+    .select('name, unit, current_quantity, par_level, property_id, property:properties(name)')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .limit(2000)
@@ -547,9 +547,9 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
     }
     const needed = Math.max(0, (item.par_level ?? 0) - (item.current_quantity ?? 0))
     grouped[key]!.totalNeeded += needed
-    const pName = Array.isArray(item.properties)
-      ? (item.properties[0] as { name: string } | undefined)?.name ?? '—'
-      : (item.properties as { name: string } | null)?.name ?? '—'
+    const pName = Array.isArray(item.property)
+      ? (item.property[0] as { name: string } | undefined)?.name ?? '—'
+      : (item.property as { name: string } | null)?.name ?? '—'
     grouped[key]!.properties.push({ name: pName, needed })
   }
 
