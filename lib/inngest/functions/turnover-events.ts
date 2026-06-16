@@ -207,9 +207,9 @@ export const handleTurnoverCompleted = inngest.createFunction(
       const n = count ?? 0
 
       const milestones: string[] = []
-      if (n === 1)  milestones.push('first_turnover_complete')
-      if (n === 10) milestones.push('turnover_milestone_10')
-      if (n === 50) milestones.push('turnover_milestone_50')
+      if (n >= 1)  milestones.push('first_turnover_complete')
+      if (n >= 10) milestones.push('turnover_milestone_10')
+      if (n >= 50) milestones.push('turnover_milestone_50')
 
       for (const milestone of milestones) {
         await supabase.from('org_milestones').upsert(
@@ -222,26 +222,9 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('post-cleaning-fee-expense', async () => {
       const supabase = createServiceClient()
 
-      const { data: existing } = await supabase
-        .from('owner_transactions')
-        .select('id')
-        .eq('source_reference_id', turnover_id)
-        .eq('source', 'cleaning_fee')
-        .maybeSingle()
-
-      if (existing) return { skipped: true }
-
       const [{ data: property }, { data: turnover }] = await Promise.all([
-        supabase
-          .from('properties')
-          .select('cleaning_cost, same_day_premium_pct')
-          .eq('id', property_id)
-          .single(),
-        supabase
-          .from('turnovers')
-          .select('is_same_day_turnover')
-          .eq('id', turnover_id)
-          .single(),
+        supabase.from('properties').select('cleaning_cost, same_day_premium_pct').eq('id', property_id).single(),
+        supabase.from('turnovers').select('is_same_day_turnover').eq('id', turnover_id).single(),
       ])
 
       if (!property?.cleaning_cost) return { skipped: true }
@@ -252,21 +235,26 @@ export const handleTurnoverCompleted = inngest.createFunction(
         : 0
       const amount  = parseFloat((base + premium).toFixed(2))
 
-      await supabase.from('owner_transactions').insert({
-        property_id,
-        org_id,
-        source:               'cleaning_fee',
-        source_reference_id:  turnover_id,
-        transaction_type:     'expense',
-        category:             'cleaning_fee',
-        amount,
-        description:          (premium > 0)
-          ? `Cleaning fee + ${property.same_day_premium_pct}% same-day premium`
-          : 'Cleaning fee',
-        transaction_date:     new Date().toISOString().split('T')[0],
-        visible_to_owner:     false,
-      })
+      // Atomic upsert — ON CONFLICT (source_reference_id, source) DO NOTHING
+      const { error } = await supabase.from('owner_transactions').upsert(
+        {
+          property_id,
+          org_id,
+          source:               'cleaning_fee',
+          source_reference_id:  turnover_id,
+          transaction_type:     'expense',
+          category:             'cleaning_fee',
+          amount,
+          description:          (premium > 0)
+            ? `Cleaning fee + ${property.same_day_premium_pct}% same-day premium`
+            : 'Cleaning fee',
+          transaction_date:     new Date().toISOString().split('T')[0],
+          visible_to_owner:     false,
+        },
+        { onConflict: 'source_reference_id,source', ignoreDuplicates: true }
+      )
 
+      if (error) throw error
       return { posted: amount }
     })
 
