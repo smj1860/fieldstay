@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvent } from '@/lib/audit'
 import type { BookingSource } from '@/types/database'
 
 export type BookingActionState = { error?: string; success?: boolean }
@@ -13,7 +14,7 @@ export async function createBooking(
   _prev: BookingActionState | null,
   formData: FormData
 ): Promise<BookingActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   const property_id   = formData.get('property_id')  as string
   const guest_name    = (formData.get('guest_name')  as string)?.trim() || null
@@ -63,6 +64,15 @@ export async function createBooking(
     return { error: 'Operation failed. Please try again.' }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'booking.created',
+    targetType: 'booking',
+    targetId:   booking.id,
+    metadata:   { property_id, checkin_date, checkout_date, source, guest_name },
+  })
+
   // Fire booking/detected so Inngest auto-generates a turnover
   await inngest.send({
     name: 'booking/detected',
@@ -87,7 +97,7 @@ export async function createBooking(
 export async function cancelBooking(
   bookingId: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   // 1. Cancel the booking
   const { error } = await supabase
@@ -100,6 +110,14 @@ export async function cancelBooking(
     console.error('[cancelBooking]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'booking.cancelled',
+    targetType: 'booking',
+    targetId:   bookingId,
+  })
 
   // 2. Cancel pending/assigned turnovers tied to this booking
   await supabase

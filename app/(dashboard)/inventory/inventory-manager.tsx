@@ -352,16 +352,19 @@ function AddItemsModal({
                       disabled={alreadyAdded}
                       className={cn(
                         'w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm border-b border-themed last:border-0 transition-colors',
-                        isSelected   && 'bg-brand-50',
                         alreadyAdded && 'opacity-40 cursor-not-allowed',
-                        !isSelected && !alreadyAdded && 'hover:bg-canvas-themed'
+                        !isSelected && !alreadyAdded && 'hover:bg-raised-themed',
                       )}
+                      style={isSelected ? { background: 'var(--accent-amber-dim)' } : undefined}
                     >
-                      <div className={cn(
-                        'w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors',
-                        isSelected ? 'bg-brand-800 border-brand-800' : 'border-themed'
-                      )}>
-                        {isSelected && <Check className="w-3 h-3 text-white" />}
+                      <div
+                        className="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-colors"
+                        style={{
+                          background:  isSelected ? 'var(--accent-gold)' : 'transparent',
+                          borderColor: isSelected ? 'var(--accent-gold)' : 'var(--border)',
+                        }}
+                      >
+                        {isSelected && <Check className="w-3 h-3" style={{ color: 'var(--bg-base)' }} />}
                       </div>
                       <span className="flex-1 font-medium text-primary-themed">{item.name}</span>
                       <span className="text-xs text-muted-themed">
