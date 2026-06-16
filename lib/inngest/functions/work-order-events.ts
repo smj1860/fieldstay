@@ -4,6 +4,7 @@ import { resend, FROM } from '@/lib/resend/client'
 import { renderWorkOrderEmail } from '@/emails/work-order'
 import { getPmEmail } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
+import { parseLocalDate } from '@/lib/utils/date-validation'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -56,11 +57,15 @@ export const handleWorkOrderCreated = inngest.createFunction(
           vendorName:     vendor.name,
           jobTitle:       wo.title,
           description:    wo.description ?? undefined,
-          scheduledDate:  wo.scheduled_date
-            ? new Date(wo.scheduled_date).toLocaleDateString('en-US', {
-                month: 'long', day: 'numeric', year: 'numeric',
-              })
-            : undefined,
+          scheduledDate:  (() => {
+            if (!wo.scheduled_date) return undefined
+            try {
+              return parseLocalDate(wo.scheduled_date, 'scheduled_date')
+                .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+            } catch {
+              return undefined
+            }
+          })(),
           propertyName:   property?.name ?? '',
           propertyCity:   property?.city ?? undefined,
           propertyState:  property?.state ?? undefined,

@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
+import { parseLocalDate } from '@/lib/utils/date-validation'
 
 // ── Booking Confirmed (OwnerRez / Uplisting) ─────────────────────────────────
 
@@ -21,10 +22,22 @@ export const handleBookingConfirmed = inngest.createFunction(
 
       if (!booking || !property?.avg_nightly_rate) return { skipped: true }
 
-      const checkin  = new Date(booking.checkin_date  + 'T00:00:00')
-      const checkout = new Date(booking.checkout_date + 'T00:00:00')
-      const nights   = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
-      if (nights <= 0) return { skipped: true }
+      let checkin: Date, checkout: Date
+      try {
+        checkin  = parseLocalDate(booking.checkin_date,  'checkin_date')
+        checkout = parseLocalDate(booking.checkout_date, 'checkout_date')
+      } catch (err) {
+        console.error('[booking-confirmed] invalid date on booking', {
+          booking_id,
+          checkin_date:  booking.checkin_date,
+          checkout_date: booking.checkout_date,
+          error: String(err),
+        })
+        return { skipped: true, reason: 'invalid_date' }
+      }
+
+      const nights = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
+      if (nights <= 0) return { skipped: true, reason: 'non_positive_nights' }
 
       const amount     = parseFloat((nights * property.avg_nightly_rate).toFixed(2))
       const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
@@ -79,9 +92,22 @@ export const handleBookingDetected = inngest.createFunction(
           .eq('id', booking_id)
           .single()
         if (!booking) return { skipped: 'booking_not_found' }
-        const checkin  = new Date(booking.checkin_date + 'T00:00:00')
-        const checkout = new Date(booking.checkout_date + 'T00:00:00')
-        const nights   = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
+
+        let checkin: Date, checkout: Date
+        try {
+          checkin  = parseLocalDate(booking.checkin_date,  'checkin_date')
+          checkout = parseLocalDate(booking.checkout_date, 'checkout_date')
+        } catch (err) {
+          logger.error('[booking-detected] invalid date on booking (non-fatal)', {
+            booking_id,
+            checkin_date:  booking.checkin_date,
+            checkout_date: booking.checkout_date,
+            error: String(err),
+          })
+          return { skipped: 'invalid_date' }
+        }
+
+        const nights = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
         if (nights <= 0) return { skipped: 'zero_nights' }
         const amount     = parseFloat((nights * prop.avg_nightly_rate).toFixed(2))
         const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
