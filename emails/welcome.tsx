@@ -32,7 +32,7 @@ export function WelcomeEmail({
       <Text style={body}>
         We set up your account for <strong>{orgName}</strong>. Your 14-day trial
         gives you full access to everything — turnovers, crew management, inventory,
-        maintenance, and owner reporting. No credit card required and no surprises.
+        maintenance, RepuGuard, and owner reporting. No credit card required and no surprises.
       </Text>
 
       <Text style={sectionLabel}>THREE THINGS TO DO FIRST</Text>
