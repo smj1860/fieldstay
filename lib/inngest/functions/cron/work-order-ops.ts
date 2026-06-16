@@ -144,6 +144,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
         .from('work_orders')
         .select('id, org_id, property_id, category')
         .neq('status', 'cancelled')
+        .not('category', 'is', null)
         .gte('created_at', ninetyDaysAgo.toISOString())
 
       const groups: Record<string, { org_id: string; property_id: string; category: string; count: number }> = {}
