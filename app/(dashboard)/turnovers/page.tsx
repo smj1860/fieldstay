@@ -80,10 +80,20 @@ export default async function TurnoversPage() {
 
   const showAutoAssignNudge = org?.auto_assign_mode === 'disabled'
 
+  const normalizedTurnovers = (turnovers ?? []).map((t) => ({
+    ...t,
+    turnover_assignments: t.turnover_assignments.map((a) => ({
+      ...a,
+      crew_member: Array.isArray(a.crew_member)
+        ? (a.crew_member[0] ?? null)
+        : (a.crew_member ?? null),
+    })),
+  }))
+
   return (
     <div>
       <TurnoverBoard
-        turnovers={turnovers ?? []}
+        turnovers={normalizedTurnovers}
         propertyMap={propertyMap}
         crewMembers={crew ?? []}
         properties={properties ?? []}
