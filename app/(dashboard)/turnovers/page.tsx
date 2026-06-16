@@ -33,7 +33,7 @@ export default async function TurnoversPage() {
         suggested_crew_ids, suggestion_reasoning, suggestion_status,
         turnover_assignments (
           id, crew_member_id,
-          crew_members ( id, name, phone, email )
+          crew_member:crew_members ( id, name, phone, email )
         )
       `)
       .eq('org_id', membership.org_id)

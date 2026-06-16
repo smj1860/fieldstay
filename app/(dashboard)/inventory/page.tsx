@@ -56,7 +56,7 @@ export default async function InventoryPage() {
       .limit(50),
     supabase
       .from('inventory_items')
-      .select('id, name, category, unit, par_level, current_quantity, preferred_brand, property_id, properties(name)')
+      .select('id, name, category, unit, par_level, current_quantity, preferred_brand, property_id, property:properties(name)')
       .eq('org_id', membership.org_id)
       .order('property_id')
       .order('category')
