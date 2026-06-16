@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
+import { sendOwnerPortalEmail } from '@/lib/resend/client'
 import type { TxnCategory } from '@/types/database'
 
 export type OwnersActionState = { error?: string; success?: boolean; token?: string }
@@ -57,7 +58,7 @@ export async function addPropertyOwner(
 // ── Generate / refresh portal token ─────────────────────────────────────────
 
 export async function generatePortalToken(ownerId: string): Promise<OwnersActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   // Verify owner belongs to this org
   const { data: owner } = await supabase
@@ -85,6 +86,50 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
     console.error('[generatePortalToken]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  // Upsert succeeded
+  const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  const portalUrl = `${appUrl}/owner/${token}`
+
+  // Fetch owner name, email, property name, and org name for the email
+  const { data: ownerData } = await supabase
+    .from('property_owners')
+    .select('name, email, properties ( name ), organizations ( name )')
+    .eq('id', ownerId)
+    .single()
+
+  const ownerEmail    = ownerData?.email ?? null
+  const ownerName     = ownerData?.name ?? 'Property Owner'
+  const propertyRaw   = Array.isArray(ownerData?.properties)
+    ? ownerData?.properties[0] : ownerData?.properties
+  const propertyName  = propertyRaw?.name ?? 'your property'
+  const orgRaw        = Array.isArray(ownerData?.organizations)
+    ? ownerData?.organizations[0] : ownerData?.organizations
+  const orgName       = orgRaw?.name ?? 'Your property manager'
+
+  if (ownerEmail) {
+    try {
+      await sendOwnerPortalEmail({
+        toEmail: ownerEmail,
+        ownerName,
+        orgName,
+        propertyName,
+        portalUrl,
+      })
+    } catch (emailErr) {
+      // Non-fatal: token saved. PM can still copy the link manually.
+      console.error('[generatePortalToken] email send failed (non-fatal):', emailErr)
+    }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'owner_portal.token.generated',
+    targetType: 'property_owner',
+    targetId:   ownerId,
+    metadata:   { owner_email: ownerEmail, property_name: propertyName, email_sent: !!ownerEmail },
+  })
 
   revalidatePath('/owners')
   return { success: true, token }

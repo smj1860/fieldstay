@@ -196,11 +196,13 @@ export default async function VendorDetailPage({ params }: Props) {
       )}
 
       {/* Compliance documents */}
-      <ComplianceSection
-        vendorId={vendor.id}
-        orgId={membership.org_id}
-        documents={docs ?? []}
-      />
+      <div id="compliance">
+        <ComplianceSection
+          vendorId={vendor.id}
+          orgId={membership.org_id}
+          documents={docs ?? []}
+        />
+      </div>
     </div>
   )
 }

@@ -59,6 +59,7 @@ export type AuditAction =
   | 'security.route.mismatch'
   | 'booking.created'
   | 'booking.cancelled'
+  | 'owner_portal.token.generated'
 
 interface AuditParams {
   orgId?:         string

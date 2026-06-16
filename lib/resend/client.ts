@@ -1,5 +1,6 @@
 import { Resend } from 'resend'
 import { renderTeamInviteEmail }   from '@/emails/team-invite'
+import { renderOwnerPortalEmail } from '@/emails/owner-portal'
 
 /**
  * Resend client — single instance for all transactional email.
@@ -32,3 +33,25 @@ export async function sendTeamInviteEmail({
   })
 }
 
+export async function sendOwnerPortalEmail({
+  toEmail,
+  ownerName,
+  orgName,
+  propertyName,
+  portalUrl,
+}: {
+  toEmail:      string
+  ownerName:    string
+  orgName:      string
+  propertyName: string
+  portalUrl:    string
+}) {
+  const html = await renderOwnerPortalEmail({ ownerName, orgName, propertyName, portalUrl })
+  return resend.emails.send({
+    from:    FROM,
+    to:      toEmail,
+    replyTo: 'help@fieldstay.app',
+    subject: `Your owner portal for ${propertyName} is ready — FieldStay`,
+    html,
+  })
+}

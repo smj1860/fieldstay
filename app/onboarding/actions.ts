@@ -59,7 +59,7 @@ export async function createOrganization(
   await admin.from('organization_members').insert({
     org_id:             org.id,
     user_id:            user.id,
-    role:               'admin',
+    role:               'owner',
     invite_accepted_at: new Date().toISOString(),
   })
 
