@@ -176,7 +176,16 @@ export const syncIcalFeed = inngest.createFunction(
         const existingByUid = new Map<string, ExistingRow>(
           (existingBookings as ExistingRow[] ?? []).map((b) => [b.ical_uid, b])
         )
-        const typedEvents = parsedEvents as ParsedBooking[]
+        // Inngest serializes step.run() results as JSON, so Date objects become
+        // strings. toDateString/toTimeString/isAllDay all accept Date | string.
+        type ParsedBookingJson = {
+          uid:       string
+          guestName: string | null
+          start:     string | Date
+          end:       string | Date
+          status:    ParsedBooking['status']
+        }
+        const typedEvents = parsedEvents as unknown as ParsedBookingJson[]
         const seenUids = new Set<string>(typedEvents.map((e) => e.uid))
 
         // ── Bulk upsert all current feed events ──────────────────────────────
