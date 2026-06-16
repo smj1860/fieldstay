@@ -120,8 +120,9 @@ export function MaintenanceCalendar({
               onClick={() => setCalView(v)}
               className={cn(
                 'px-3 py-1 text-xs font-medium rounded-md transition-colors capitalize',
-                calView === v ? 'bg-brand-800 text-white' : 'text-muted-themed hover:text-secondary-themed'
+                calView !== v && 'text-muted-themed hover:text-secondary-themed'
               )}
+              style={calView === v ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' } : undefined}
             >
               {v}
             </button>

@@ -462,10 +462,9 @@ export function TemplateManager({
                   onClick={() => setCatalogFilter(c)}
                   className={cn(
                     'px-2.5 py-1 text-xs rounded-full border transition-colors',
-                    catalogFilter === c
-                      ? 'bg-brand-800 text-white border-brand-800'
-                      : 'border-themed text-secondary-themed hover:text-primary-themed'
+                    catalogFilter !== c && 'border-themed text-secondary-themed hover:text-primary-themed'
                   )}
+                  style={catalogFilter === c ? { background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
                 >
                   {c === 'all' ? 'All' : INVENTORY_CATEGORY_LABELS[c]}
                 </button>
