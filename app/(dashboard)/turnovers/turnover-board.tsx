@@ -977,10 +977,9 @@ export function TurnoverBoard({
               onClick={() => setFilterStatus(s)}
               className={cn(
                 'px-3 py-1.5 text-xs font-medium rounded-md transition-colors capitalize',
-                filterStatus === s
-                  ? 'bg-brand-800 text-white'
-                  : 'text-muted-themed hover:text-secondary-themed'
+                filterStatus !== s && 'text-muted-themed hover:text-secondary-themed'
               )}
+              style={filterStatus === s ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' } : undefined}
             >
               {s}
             </button>

@@ -564,10 +564,9 @@ function CreateWorkOrderModal({
                   onClick={() => setAssignMode('vendor')}
                   className={cn(
                     'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
-                    assignMode === 'vendor'
-                      ? 'bg-brand-800 text-white'
-                      : 'text-muted-themed hover:text-secondary-themed'
+                    assignMode !== 'vendor' && 'text-muted-themed hover:text-secondary-themed'
                   )}
+                  style={assignMode === 'vendor' ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' } : undefined}
                 >
                   Vendor
                 </button>
@@ -578,10 +577,9 @@ function CreateWorkOrderModal({
                   onClick={() => setAssignMode('crew')}
                   className={cn(
                     'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
-                    assignMode === 'crew'
-                      ? 'bg-brand-800 text-white'
-                      : 'text-muted-themed hover:text-secondary-themed'
+                    assignMode !== 'crew' && 'text-muted-themed hover:text-secondary-themed'
                   )}
+                  style={assignMode === 'crew' ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' } : undefined}
                 >
                   Internal Crew
                 </button>
@@ -592,10 +590,9 @@ function CreateWorkOrderModal({
                   onClick={() => setAssignMode('quotes')}
                   className={cn(
                     'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
-                    assignMode === 'quotes'
-                      ? 'bg-brand-800 text-white'
-                      : 'text-muted-themed hover:text-secondary-themed'
+                    assignMode !== 'quotes' && 'text-muted-themed hover:text-secondary-themed'
                   )}
+                  style={assignMode === 'quotes' ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' } : undefined}
                 >
                   Request quotes
                 </button>
@@ -1211,10 +1208,13 @@ function TemplateBroadcastModal({
           <div className="flex items-center gap-2 mb-5">
             {[1, 2, 3].map((n) => (
               <div key={n} className="flex items-center gap-2 flex-1">
-                <div className={cn(
-                  'w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0',
-                  step === n ? 'bg-brand-800 text-white' : step > n ? 'bg-green-100 text-green-700' : 'bg-raised-themed text-muted-themed'
-                )}>
+                <div
+                  className={cn(
+                    'w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0',
+                    step === n ? '' : step > n ? 'bg-green-100 text-green-700' : 'bg-raised-themed text-muted-themed'
+                  )}
+                  style={step === n ? { background: 'var(--accent-gold)', color: 'var(--bg-base)' } : undefined}
+                >
                   {step > n ? <CheckCircle2 className="w-3.5 h-3.5" /> : n}
                 </div>
                 {n < 3 && <div className={cn('h-0.5 flex-1', step > n ? 'bg-green-300' : 'bg-themed')} />}
@@ -1536,9 +1536,9 @@ function CreateTemplateModal({
                   onClick={() => setApplyMode('all')}
                   className={cn(
                     'flex-1 text-sm rounded-lg px-3 py-2 border text-center',
-                    applyMode === 'all' ? 'border-brand-800 bg-brand-50 text-brand-800 font-medium' : 'border-themed text-secondary-themed'
+                    applyMode === 'all' ? 'font-medium' : 'border-themed text-secondary-themed'
                   )}
-                  style={applyMode === 'all' ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
+                  style={applyMode === 'all' ? { background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
                 >
                   All properties ({properties.length})
                 </button>

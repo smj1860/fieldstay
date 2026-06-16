@@ -496,13 +496,13 @@ function AutoAssignToggle({ mode }: { mode: string }) {
             className={cn(
               'px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
               current === opt.value
-                ? 'border-brand-600'
-                : 'border-themed hover:border-brand-700',
+                ? ''
+                : 'border-themed hover:border-themed',
               saving && 'opacity-60 cursor-not-allowed'
             )}
             style={
               current === opt.value
-                ? { background: 'var(--bg-raised)', color: 'var(--text-primary)' }
+                ? { background: 'var(--bg-raised)', color: 'var(--text-primary)', borderColor: 'var(--accent-gold)' }
                 : { color: 'var(--text-muted)' }
             }
           >

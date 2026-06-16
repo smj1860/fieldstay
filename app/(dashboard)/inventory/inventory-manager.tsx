@@ -176,7 +176,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
     return (
       <button
         onClick={() => setEditing(true)}
-        className="text-sm text-secondary-themed hover:text-brand-700 hover:underline tabular-nums"
+        className="text-sm text-secondary-themed hover:text-primary-themed hover:underline tabular-nums"
         title="Click to edit par level"
       >
         {Number.isInteger(item.par_level) ? item.par_level : item.par_level.toFixed(1)}
@@ -199,7 +199,8 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
       <button
         onClick={handleSave}
         disabled={saving}
-        className="text-xs px-2 py-1 rounded bg-brand-800 text-white hover:bg-brand-700 disabled:opacity-50"
+        className="text-xs px-2 py-1 rounded disabled:opacity-50"
+        style={{ background: 'var(--accent-gold)', color: 'var(--bg-base)', fontWeight: 600 }}
       >
         {saving ? '…' : 'Save'}
       </button>
@@ -301,10 +302,9 @@ function AddItemsModal({
               onClick={() => setTab(t)}
               className={cn(
                 'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-                tab === t
-                  ? 'border-brand-700 text-brand-800'
-                  : 'border-transparent text-muted-themed hover:text-secondary-themed'
+                tab !== t && 'border-transparent text-muted-themed hover:text-secondary-themed'
               )}
+              style={tab === t ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
             >
               {t === 'catalog' ? 'From Catalog' : 'Custom Item'}
             </button>
@@ -328,10 +328,9 @@ function AddItemsModal({
                     onClick={() => setCategoryFilter(c)}
                     className={cn(
                       'px-2.5 py-1 text-xs rounded-full border transition-colors',
-                      categoryFilter === c
-                        ? 'bg-brand-800 text-white border-brand-800'
-                        : 'bg-card-themed text-secondary-themed border-themed hover:border-brand-700'
+                      categoryFilter !== c && 'bg-card-themed text-secondary-themed border-themed hover:border-themed'
                     )}
+                    style={categoryFilter === c ? { background: 'var(--accent-gold-dim)', borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
                   >
                     {c === 'all' ? 'All' : INVENTORY_CATEGORY_LABELS[c]}
                   </button>
@@ -1232,10 +1231,9 @@ export function InventoryManager({
             onClick={() => setActiveTab(tab.id)}
             className={cn(
               'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
-              activeTab === tab.id
-                ? 'border-brand-700 text-brand-800'
-                : 'border-transparent text-muted-themed hover:text-secondary-themed'
+              activeTab !== tab.id && 'border-transparent text-muted-themed hover:text-secondary-themed'
             )}
+            style={activeTab === tab.id ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
           >
             {tab.icon}
             {tab.label}
