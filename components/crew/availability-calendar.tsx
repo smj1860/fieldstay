@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useTransition }        from 'react'
-import { usePowerSync, usePowerSyncQuery } from '@powersync/react'
+import { useState, useTransition }  from 'react'
+import { usePowerSyncQuery }         from '@powersync/react'
 import { ChevronLeft, ChevronRight, CheckCircle2, XCircle } from 'lucide-react'
+import { setCrewAvailability }       from '@/app/crew/availability/actions'
 
 type AvailRow = { available_date: string; is_available: number }
 
@@ -11,9 +12,9 @@ interface Props {
   orgId:        string
 }
 
-export function AvailabilityCalendar({ crewMemberId, orgId }: Props) {
-  const db                      = usePowerSync()
+export function AvailabilityCalendar({ crewMemberId, orgId: _orgId }: Props) {
   const [toggling, startToggle] = useTransition()
+  const [toggleError, setToggleError] = useState<string | null>(null)
 
   // First day of the currently viewed month
   const [viewDate, setViewDate] = useState<Date>(() => {
@@ -61,24 +62,12 @@ export function AvailabilityCalendar({ crewMemberId, orgId }: Props) {
   const toggleDay = (dayNum: number) => {
     const dateStr        = isoDate(dayNum)
     const currentVal     = availMap.get(dateStr) ?? 1 // default = available
-    const newIsAvailable = currentVal === 1 ? 0 : 1
+    const newIsAvailable = currentVal === 1 ? false : true
 
+    setToggleError(null)
     startToggle(async () => {
-      await db.execute(
-        `INSERT INTO crew_availability
-           (id, org_id, crew_member_id, available_date, is_available, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(crew_member_id, available_date)
-         DO UPDATE SET is_available = excluded.is_available`,
-        [
-          crypto.randomUUID(),
-          orgId,
-          crewMemberId,
-          dateStr,
-          newIsAvailable,
-          new Date().toISOString(),
-        ]
-      )
+      const result = await setCrewAvailability(dateStr, newIsAvailable)
+      if (result.error) setToggleError(result.error)
     })
   }
 
@@ -195,6 +184,10 @@ export function AvailabilityCalendar({ crewMemberId, orgId }: Props) {
       <p className="text-xs text-accent-400 text-center mt-3">
         Tap any day to toggle your availability
       </p>
+
+      {toggleError && (
+        <p className="text-xs text-red-500 text-center mt-2">{toggleError}</p>
+      )}
     </div>
   )
 }
