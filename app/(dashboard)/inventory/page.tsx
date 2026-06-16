@@ -69,7 +69,7 @@ export default async function InventoryPage() {
     supabase
       .from('inventory_count_drafts')
       .select(`
-        id, property_id, status, notes,
+        id, property_id, status, created_at, notes,
         crew_members!submitted_by(name),
         inventory_count_draft_items(
           id, inventory_item_id, previous_quantity, submitted_quantity,
