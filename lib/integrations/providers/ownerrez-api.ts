@@ -115,6 +115,7 @@ export class OwnerRezApiClient {
         'Accept':        'application/json',
         ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
       },
+      signal: AbortSignal.timeout(30_000),
       ...(options?.body ? { body: options.body } : {}),
     })
 

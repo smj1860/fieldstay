@@ -91,7 +91,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     const pmEmailByOrg = new Map(pmEmailEntries)
 
     for (const schedule of dueSchedules) {
-      await step.run(`process-schedule-${schedule.id}`, async () => {
+      const processResult = await step.run(`process-schedule-${schedule.id}`, async () => {
         const supabase = createServiceClient()
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
         const vendor   = Array.isArray(schedule.vendors)   ? schedule.vendors[0]   : schedule.vendors
@@ -115,6 +115,11 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
         }
 
         const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
+
+        let vendorPortalEvent: {
+          work_order_id: string; property_id: string; org_id: string
+          vendor_id: string; portal_enabled: true
+        } | null = null
 
         if (schedule.auto_create_wo) {
           // Idempotency: skip insert if a WO already exists for this schedule + due date
@@ -148,56 +153,59 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
                 .single()
 
           if (pmEmail && wo && !existingWO) {
-            await resend.emails.send({
-              from:    FROM,
-              to:      pmEmail,
-              subject: `Work order created — ${schedule.name} at ${property?.name}`,
-              html: await renderPmAlert({
-                heading:  'Scheduled maintenance work order created',
-                body:     `${schedule.name} is due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''} — a work order has been created.`,
-                details: [
-                  { label: 'Property',  value: property?.name ?? null },
-                  { label: 'Due Date',  value: dueDate.toLocaleDateString() },
-                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
-                  { label: 'Vendor',    value: vendor?.name ?? null },
-                ],
-                ctaLabel: 'View Work Order →',
-                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-              }),
-            })
+            await resend.emails.send(
+              {
+                from:    FROM,
+                to:      pmEmail,
+                subject: `Work order created — ${schedule.name} at ${property?.name}`,
+                html: await renderPmAlert({
+                  heading:  'Scheduled maintenance work order created',
+                  body:     `${schedule.name} is due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''} — a work order has been created.`,
+                  details: [
+                    { label: 'Property',  value: property?.name ?? null },
+                    { label: 'Due Date',  value: dueDate.toLocaleDateString() },
+                    { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
+                    { label: 'Vendor',    value: vendor?.name ?? null },
+                  ],
+                  ctaLabel: 'View Work Order →',
+                  ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
+                }),
+              },
+              { idempotencyKey: `maint-wo-created-${schedule.id}-${schedule.next_due_date}` }
+            )
           }
 
-          if (wo && vendor?.email && vendor?.portal_enabled && !existingWO) {
-            await inngest.send({
-              name: 'work-order/created' as const,
-              data: {
-                work_order_id: wo.id,
-                property_id:   schedule.property_id,
-                org_id:        schedule.org_id,
-                vendor_id:     vendor.id,
-                portal_enabled: true,
-              },
-            })
-          }
+          vendorPortalEvent = (wo && vendor?.email && vendor?.portal_enabled && !existingWO)
+            ? {
+                work_order_id:  wo.id,
+                property_id:    schedule.property_id,
+                org_id:         schedule.org_id,
+                vendor_id:      vendor.id,
+                portal_enabled: true as const,
+              }
+            : null
         } else {
           if (pmEmail) {
-            await resend.emails.send({
-              from:    FROM,
-              to:      pmEmail,
-              subject: `🔧 Maintenance due soon — ${schedule.name} at ${property?.name}`,
-              html: await renderPmAlert({
-                heading:  'Scheduled maintenance coming up',
-                body:     `${schedule.name} is due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}.`,
-                details: [
-                  { label: 'Property',  value: property?.name ?? null },
-                  { label: 'Due Date',  value: dueDate.toLocaleDateString() },
-                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
-                  { label: 'Vendor',    value: vendor?.name ?? null },
-                ],
-                ctaLabel: 'Create Work Order →',
-                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-              }),
-            })
+            await resend.emails.send(
+              {
+                from:    FROM,
+                to:      pmEmail,
+                subject: `🔧 Maintenance due soon — ${schedule.name} at ${property?.name}`,
+                html: await renderPmAlert({
+                  heading:  'Scheduled maintenance coming up',
+                  body:     `${schedule.name} is due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}.`,
+                  details: [
+                    { label: 'Property',  value: property?.name ?? null },
+                    { label: 'Due Date',  value: dueDate.toLocaleDateString() },
+                    { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
+                    { label: 'Vendor',    value: vendor?.name ?? null },
+                  ],
+                  ctaLabel: 'Create Work Order →',
+                  ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
+                }),
+              },
+              { idempotencyKey: `maint-due-soon-${schedule.id}-${schedule.next_due_date}` }
+            )
           }
         }
 
@@ -208,8 +216,18 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
             .from('maintenance_schedules')
             .update({ next_due_date: nextDue.toISOString().split('T')[0] })
             .eq('id', schedule.id)
+            .eq('next_due_date', schedule.next_due_date!)  // optimistic lock — prevents double-advance on retry
         }
+
+        return { vendorPortalEvent }
       })
+
+      if (processResult?.vendorPortalEvent) {
+        await step.sendEvent(`fire-vendor-portal-${schedule.id}`, {
+          name: 'work-order/created' as const,
+          data: processResult.vendorPortalEvent,
+        })
+      }
     }
 
     // ── Pass 2: Overdue escalation ─────────────────────────────────────────

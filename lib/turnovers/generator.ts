@@ -89,7 +89,15 @@ export async function generateTurnoversForProperty(
       })
       .select('id')
       .single()
-    if (!error && turnover) {
+    if (error) {
+      // 23505 = unique_violation: concurrent worker already inserted this standalone.
+      // The new turnovers_standalone_unique partial index makes this safe to ignore.
+      if (error.code !== '23505') {
+        console.error('[generator] Pass 1 insert error', { propertyId, bookingId: booking.id, code: error.code, msg: error.message })
+      }
+      continue
+    }
+    if (turnover) {
       newTurnoverIds.push(turnover.id)
       existingStandalones.add(booking.id)
       await snapshotChecklist(supabase, turnover.id, orgId, defaultTemplate?.id ?? null)
@@ -154,7 +162,13 @@ export async function generateTurnoversForProperty(
         })
         .select('id')
         .single()
-      if (!error && turnover) {
+      if (error) {
+        // 23505 = unique_violation: concurrent worker already inserted this pair
+        // (covered by the existing turnovers_booking_pair_unique partial index).
+        if (error.code !== '23505') {
+          console.error('[generator] Pass 2 insert error', { propertyId, code: error.code, msg: error.message })
+        }
+      } else if (turnover) {
         newTurnoverIds.push(turnover.id)
         await snapshotChecklist(supabase, turnover.id, orgId, defaultTemplate?.id ?? null)
       }

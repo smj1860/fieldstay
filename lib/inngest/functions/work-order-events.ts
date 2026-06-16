@@ -72,39 +72,43 @@ export const handleWorkOrderCreated = inngest.createFunction(
           portalUrl,
         })
 
-        await resend.emails.send({
-          from:    FROM,
-          to:      vendor.email,
-          subject: `Work order: ${wo.title} — ${property?.name}`,
-          html,
-        })
+        await resend.emails.send(
+          {
+            from:    FROM,
+            to:      vendor.email,
+            subject: `Work order: ${wo.title} — ${property?.name}`,
+            html,
+          },
+          { idempotencyKey: `wo-vendor-portal-${work_order_id}` }
+        )
 
         logger.info(`Sent vendor portal link to ${vendor.email} for WO ${work_order_id}`)
       })
     }
 
     if (event.data.vendor_id) {
-      await step.run('schedule-overdue-check', async () => {
+      const scheduledDate = await step.run('fetch-scheduled-date', async () => {
         const supabase = createServiceClient()
         const { data: wo } = await supabase
           .from('work_orders')
           .select('scheduled_date')
           .eq('id', work_order_id)
           .single()
+        return wo?.scheduled_date ?? null
+      })
 
-        if (!wo?.scheduled_date) return
-
-        await inngest.send({
+      if (scheduledDate) {
+        await step.sendEvent('schedule-overdue-check', {
           name: 'work-order/overdue' as const,
           data: {
             work_order_id,
             property_id,
             org_id,
-            scheduled_date: wo.scheduled_date,
+            scheduled_date: scheduledDate,
             days_overdue:   3,
           },
         })
-      })
+      }
     }
 
     return { work_order_id }

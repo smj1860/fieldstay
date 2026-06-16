@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { parseIcalFeed, toDateString, toTimeString, isAllDay } from '@/lib/ical/parser'
-import { generateTurnoversForProperty, cancelTurnoversForBooking } from '@/lib/turnovers/generator'
+import { parseIcalFeed, toDateString, toTimeString, isAllDay, type ParsedBooking } from '@/lib/ical/parser'
+import { cancelTurnoversForBooking } from '@/lib/turnovers/generator'
 
 // H-2: Reject non-HTTPS URLs and private/loopback IP ranges to prevent SSRF
 function assertSafeIcalUrl(url: string): void {
@@ -164,96 +164,90 @@ export const syncIcalFeed = inngest.createFunction(
     const { newBookings, cancelledBookingIds } = await step.run(
       'upsert-bookings',
       async (): Promise<{ newBookings: Array<{ id: string; guestEmail: string | null }>; cancelledBookingIds: string[] }> => {
-      const supabase = createServiceClient()
-      // Fetch existing bookings for this feed
-      const { data: existingBookings } = await supabase
-        .from('bookings')
-        .select('id, ical_uid, status, guest_email')
-        .eq('ical_feed_id', feed_id)
+        const supabase = createServiceClient()
 
-      const existingByUid = new Map(existingBookings?.map((b) => [b.ical_uid, b]) ?? [])
-      const seenUids      = new Set<string>()
-      const newBookingRows: Array<{ id: string; guestEmail: string | null }> = []
-      const cancelledIds: string[] = []
+        type ExistingRow = { id: string; ical_uid: string; status: string; guest_email: string | null }
 
-      for (const event of parsedEvents) {
-        seenUids.add(event.uid)
+        const { data: existingBookings } = await supabase
+          .from('bookings')
+          .select('id, ical_uid, status, guest_email')
+          .eq('ical_feed_id', feed_id)
 
-        const status =
-          event.status === 'cancelled' ? 'cancelled' :
-          event.status === 'blocked'   ? 'blocked'   :
-          event.status === 'tentative' ? 'tentative' : 'confirmed'
+        const existingByUid = new Map<string, ExistingRow>(
+          (existingBookings as ExistingRow[] ?? []).map((b) => [b.ical_uid, b])
+        )
+        // Inngest serializes step.run() results as JSON, so Date objects become
+        // strings. toDateString/toTimeString/isAllDay all accept Date | string.
+        type ParsedBookingJson = {
+          uid:       string
+          guestName: string | null
+          start:     string | Date
+          end:       string | Date
+          status:    ParsedBooking['status']
+        }
+        const typedEvents = parsedEvents as unknown as ParsedBookingJson[]
+        const seenUids = new Set<string>(typedEvents.map((e) => e.uid))
 
-        const checkinDate  = toDateString(event.start)
-        const checkoutDate = toDateString(event.end)
+        // ── Bulk upsert all current feed events ──────────────────────────────
+        // Single round-trip replaces N individual updates/inserts.
+        const upsertRows = typedEvents.map((event) => ({
+          property_id:   property_id,
+          org_id:        org_id,
+          ical_feed_id:  feed_id,
+          ical_uid:      event.uid,
+          guest_name:    event.guestName,
+          guest_email:   null as null,
+          checkin_date:  toDateString(event.start),
+          checkout_date: toDateString(event.end),
+          checkin_time:  isAllDay(event.start) ? null : toTimeString(event.start),
+          checkout_time: isAllDay(event.end)   ? null : toTimeString(event.end),
+          source:        'airbnb' as const,
+          status:        (event.status === 'cancelled' ? 'cancelled' :
+                          event.status === 'blocked'   ? 'blocked'   :
+                          event.status === 'tentative' ? 'tentative' : 'confirmed'),
+          raw_ical_data: { summary: event.guestName, uid: event.uid },
+        }))
 
-        // Extract times only if not an all-day event
-        const checkinTime  = isAllDay(event.start) ? null : toTimeString(event.start)
-        const checkoutTime = isAllDay(event.end)   ? null : toTimeString(event.end)
+        type UpsertedRow = { id: string; ical_uid: string; status: string }
+        const { data: upserted } = await supabase
+          .from('bookings')
+          .upsert(upsertRows, { onConflict: 'ical_feed_id,ical_uid', ignoreDuplicates: false })
+          .select('id, ical_uid, status')
 
-        const existing = existingByUid.get(event.uid)
+        const upsertedRows = upserted as UpsertedRow[] ?? []
 
-        if (existing) {
-          // Update if anything changed
-          await supabase
-            .from('bookings')
-            .update({
-              guest_name:    event.guestName,
-              checkin_date:  checkinDate,
-              checkout_date: checkoutDate,
-              checkin_time:  checkinTime,
-              checkout_time: checkoutTime,
-              status,
-              raw_ical_data: { summary: event.guestName, uid: event.uid },
-            })
-            .eq('id', existing.id)
+        const newBookingRows: Array<{ id: string; guestEmail: string | null }> = []
+        const cancelledIds: string[] = []
 
-          // Track newly cancelled bookings
-          if (status === 'cancelled' && existing.status !== 'cancelled') {
-            cancelledIds.push(existing.id)
+        for (const row of upsertedRows) {
+          // New confirmed booking — uid wasn't in the pre-existing map
+          if (!existingByUid.has(row.ical_uid) && row.status === 'confirmed') {
+            newBookingRows.push({ id: row.id, guestEmail: null })
           }
-        } else {
-          // Upsert new booking — safe if two concurrent syncs race on the same ical_uid
-          const { data: newBooking } = await supabase
-            .from('bookings')
-            .upsert({
-              property_id:  property_id,
-              org_id:       org_id,
-              ical_feed_id: feed_id,
-              ical_uid:     event.uid,
-              guest_name:   event.guestName,
-              guest_email:  null,  // iCal rarely includes email
-              checkin_date:  checkinDate,
-              checkout_date: checkoutDate,
-              checkin_time:  checkinTime,
-              checkout_time: checkoutTime,
-              source:        'airbnb',  // refined from feed source if needed
-              status,
-              raw_ical_data: { summary: event.guestName, uid: event.uid },
-            }, { onConflict: 'ical_feed_id,ical_uid', ignoreDuplicates: false })
-            .select('id')
-            .single()
-
-          if (newBooking && status === 'confirmed') {
-            newBookingRows.push({ id: newBooking.id, guestEmail: null })
+          // Booking transitioned to cancelled in this sync
+          const prior = existingByUid.get(row.ical_uid)
+          if (prior && row.status === 'cancelled' && prior.status !== 'cancelled') {
+            cancelledIds.push(row.id)
           }
         }
-      }
 
-      // Mark bookings not present in latest feed as cancelled
-      // (only confirmed/tentative — don't flip already-cancelled ones)
-      for (const [uid, existing] of existingByUid.entries()) {
-        if (!seenUids.has(uid) && existing.status === 'confirmed') {
+        // ── Bulk cancel bookings absent from the latest feed ─────────────────
+        const toCancel: string[] = []
+        for (const [uid, existing] of existingByUid.entries()) {
+          if (!seenUids.has(uid) && existing.status === 'confirmed') {
+            toCancel.push(existing.id)
+            cancelledIds.push(existing.id)
+          }
+        }
+
+        if (toCancel.length > 0) {
           await supabase
             .from('bookings')
             .update({ status: 'cancelled' })
-            .eq('id', existing.id)
-
-          cancelledIds.push(existing.id)
+            .in('id', toCancel)
         }
-      }
 
-      return { newBookings: newBookingRows, cancelledBookingIds: cancelledIds }
+        return { newBookings: newBookingRows, cancelledBookingIds: cancelledIds }
       }
     )
 
@@ -268,30 +262,46 @@ export const syncIcalFeed = inngest.createFunction(
       })
     }
 
-    // ── Step 5: Generate turnovers from gaps between bookings ────────────────
+    // ── Step 5: Build and fire downstream events ────────────────────────────
+    // Turnovers are generated by handleBookingDetected (one booking/detected
+    // event fires per new booking). Generating them here too would call
+    // generateTurnoversForProperty N+1 times concurrently for the same property.
+    //
+    // All DB reads are inside this step.run so replays see consistent data
+    // rather than re-querying live DB state on every function resume.
 
-    const newTurnoverIds = await step.run('generate-turnovers', async () => {
+    const eventsToSend = await step.run('build-downstream-events', async () => {
+      if (!(newBookings as Array<{ id: string }>).length) return []
+
       const supabase = createServiceClient()
-      return generateTurnoversForProperty(property_id, org_id, supabase)
-    })
 
-    logger.info(`Generated ${newTurnoverIds.length} new turnovers for property ${property_id}`)
+      type BookingDetectedEvent = {
+        name: 'booking/detected'
+        data: {
+          booking_id: string; property_id: string; org_id: string
+          guest_name: string | null; guest_email: string | null
+          checkin_date: string; checkout_date: string
+        }
+      }
+      const events: BookingDetectedEvent[] = []
 
-    // ── Step 6: Fire downstream events ──────────────────────────────────────
+      type BookingDetail = {
+        id: string; guest_name: string | null; guest_email: string | null
+        checkin_date: string; checkout_date: string
+      }
 
-    const eventsToSend: Parameters<typeof step.sendEvent>[1] = []
-    const supabase = createServiceClient()
-
-    // One `booking/detected` per new confirmed booking
-    if (newBookings.length > 0) {
-      // Fetch full booking data for the events
-      const { data: bookingDetails } = await supabase
+      // Fetch full booking data — filter to confirmed only in case a booking
+      // was cancelled between the upsert step and this step
+      const { data: bookingDetails, error: detailsError } = await supabase
         .from('bookings')
         .select('id, guest_name, guest_email, checkin_date, checkout_date')
-        .in('id', newBookings.map((b) => b.id))
+        .in('id', (newBookings as Array<{ id: string }>).map((b) => b.id))
+        .eq('status', 'confirmed')
 
-      for (const booking of bookingDetails ?? []) {
-        eventsToSend.push({
+      if (detailsError) throw new Error(`Failed to fetch booking details: ${detailsError.message}`)
+
+      for (const booking of (bookingDetails as BookingDetail[] ?? [])) {
+        events.push({
           name: 'booking/detected' as const,
           data: {
             booking_id:    booking.id,
@@ -304,36 +314,15 @@ export const syncIcalFeed = inngest.createFunction(
           },
         })
       }
-    }
 
-    // One `turnover/created` per new turnover
-    for (const turnover_id of newTurnoverIds) {
-      const { data: t } = await supabase
-        .from('turnovers')
-        .select('checkout_datetime, checkin_datetime, window_minutes')
-        .eq('id', turnover_id)
-        .single()
-
-      if (t) {
-        eventsToSend.push({
-          name: 'turnover/created' as const,
-          data: {
-            turnover_id,
-            property_id,
-            org_id,
-            checkout_datetime: t.checkout_datetime,
-            checkin_datetime:  t.checkin_datetime,
-            window_minutes:    t.window_minutes ?? 0,
-          },
-        })
-      }
-    }
+      return events
+    })
 
     if (eventsToSend.length > 0) {
       await step.sendEvent('fire-downstream-events', eventsToSend)
     }
 
-    // ── Step 7: Update feed sync status ─────────────────────────────────────
+    // ── Step 6: Update feed sync status ─────────────────────────────────────
 
     await step.run('mark-sync-success', async () => {
       const supabase = createServiceClient()
@@ -351,9 +340,8 @@ export const syncIcalFeed = inngest.createFunction(
 
     return {
       feed_id,
-      newBookings:   newBookings.length,
-      newTurnovers:  newTurnoverIds.length,
-      cancelled:     cancelledBookingIds.length,
+      newBookings: newBookings.length,
+      cancelled:   cancelledBookingIds.length,
     }
   }
 )

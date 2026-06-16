@@ -17,28 +17,24 @@ export const handlePurchaseOrderApproved = inngest.createFunction(
 
       const supabase = createServiceClient()
 
-      const { data: existing } = await supabase
-        .from('owner_transactions')
-        .select('id')
-        .eq('source_reference_id', purchase_order_id)
-        .eq('source', 'inventory_purchase')
-        .maybeSingle()
+      // Atomic upsert — ON CONFLICT (source_reference_id, source) DO NOTHING
+      const { error } = await supabase.from('owner_transactions').upsert(
+        {
+          property_id,
+          org_id,
+          source:               'inventory_purchase',
+          source_reference_id:  purchase_order_id,
+          transaction_type:     'expense',
+          category:             'restock',
+          amount:               total_estimated_cost,
+          description:          'Inventory restock',
+          transaction_date:     new Date().toISOString().split('T')[0],
+          visible_to_owner:     false,
+        },
+        { onConflict: 'source_reference_id,source', ignoreDuplicates: true }
+      )
 
-      if (existing) return { skipped: true }
-
-      await supabase.from('owner_transactions').insert({
-        property_id,
-        org_id,
-        source:               'inventory_purchase',
-        source_reference_id:  purchase_order_id,
-        transaction_type:     'expense',
-        category:             'restock',
-        amount:               total_estimated_cost,
-        description:          'Inventory restock',
-        transaction_date:     new Date().toISOString().split('T')[0],
-        visible_to_owner:     false,
-      })
-
+      if (error) throw error
       return { posted: total_estimated_cost }
     })
 
@@ -68,7 +64,8 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
     const { belowParItems } = await step.run('apply-count-and-check-par', async () => {
       const supabase = createServiceClient()
-      // Fetch count items
+
+      // 1 query: fetch all count items for this session
       const { data: countItems } = await supabase
         .from('inventory_count_items')
         .select('inventory_item_id, quantity_counted')
@@ -76,30 +73,43 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
 
       if (!countItems?.length) return { belowParItems: [] }
 
+      type CountRow = { inventory_item_id: string; quantity_counted: number }
+      type InvRow   = { id: string; name: string; category: string; unit: string; par_level: number; low_stock_threshold_pct: number }
+
+      const typedCount = countItems as CountRow[]
+      const itemIds    = typedCount.map((c) => c.inventory_item_id)
+
+      // 1 query: bulk fetch all inventory item metadata
+      const { data: inventoryItems } = await supabase
+        .from('inventory_items')
+        .select('id, name, category, unit, par_level, low_stock_threshold_pct')
+        .in('id', itemIds)
+
+      if (!inventoryItems?.length) return { belowParItems: [] }
+
+      const typedInv = inventoryItems as InvRow[]
+
+      // 1 query: bulk upsert current quantities (replaces N sequential UPDATEs)
+      await supabase
+        .from('inventory_items')
+        .upsert(
+          typedCount.map((c) => ({ id: c.inventory_item_id, current_quantity: c.quantity_counted })),
+          { onConflict: 'id' }
+        )
+
+      // Compute below-par entirely in memory — no further DB round trips
+      const countMap = new Map<string, number>(typedCount.map((c) => [c.inventory_item_id, c.quantity_counted]))
+
       const below: Array<{
         id: string; name: string; category: string; unit: string
         par_level: number; current_quantity: number; quantity_to_buy: number
       }> = []
 
-      for (const item of countItems) {
-        // Update current_quantity
-        await supabase
-          .from('inventory_items')
-          .update({ current_quantity: item.quantity_counted })
-          .eq('id', item.inventory_item_id)
-
-        // Fetch full item to check against par
-        const { data: inv } = await supabase
-          .from('inventory_items')
-          .select('id, name, category, unit, par_level, low_stock_threshold_pct')
-          .eq('id', item.inventory_item_id)
-          .single()
-
-        if (!inv) continue
-
-        const threshold = Math.ceil(inv.par_level * (inv.low_stock_threshold_pct / 100))
-        if (item.quantity_counted <= threshold) {
-          const quantityToBuy = inv.par_level - item.quantity_counted
+      for (const inv of typedInv) {
+        const counted    = countMap.get(inv.id) ?? 0
+        const threshold  = Math.ceil(inv.par_level * (inv.low_stock_threshold_pct / 100))
+        if (counted <= threshold) {
+          const quantityToBuy = inv.par_level - counted
           // When low_stock_threshold_pct = 100 the trigger fires at par, making
           // quantityToBuy = 0 — skip those to avoid zero-quantity PO lines
           if (quantityToBuy <= 0) continue
@@ -109,7 +119,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
             category:         inv.category,
             unit:             inv.unit,
             par_level:        inv.par_level,
-            current_quantity: item.quantity_counted,
+            current_quantity: counted,
             quantity_to_buy:  quantityToBuy,
           })
         }
