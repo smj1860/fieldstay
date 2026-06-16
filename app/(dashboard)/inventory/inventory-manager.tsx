@@ -60,7 +60,7 @@ interface PendingDraft {
   id: string
   property_id: string
   status: string
-  submitted_at: string | null
+  created_at: string
   notes: string | null
   crew_members: { name: string }[] | null
   inventory_count_draft_items: DraftItem[]
@@ -1068,8 +1068,8 @@ function PendingCountReview({
                 {draft.crew_members?.[0] && (
                   <span className="text-xs text-muted-themed ml-2">by {draft.crew_members[0]?.name ?? 'Unknown'}</span>
                 )}
-                {draft.submitted_at && (
-                  <span className="text-xs text-muted-themed ml-2">· {formatDate(draft.submitted_at)}</span>
+                {draft.created_at && (
+                  <span className="text-xs text-muted-themed ml-2">· {formatDate(draft.created_at)}</span>
                 )}
               </div>
               <span className="text-xs text-muted-themed">{draftItems.length} items</span>
