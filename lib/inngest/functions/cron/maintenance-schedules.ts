@@ -5,6 +5,7 @@ import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
+import { parseLocalDate } from '@/lib/utils/date-validation'
 
 const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
 const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
@@ -95,7 +96,17 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
         const vendor   = Array.isArray(schedule.vendors)   ? schedule.vendors[0]   : schedule.vendors
 
-        const dueDate      = new Date(schedule.next_due_date!)
+        let dueDate: Date
+        try {
+          dueDate = parseLocalDate(schedule.next_due_date, 'next_due_date')
+        } catch (err) {
+          console.error(`[maintenance-cron] invalid next_due_date on schedule ${schedule.id}`, {
+            schedule_id:   schedule.id,
+            next_due_date: schedule.next_due_date,
+            error:         String(err),
+          })
+          return
+        }
         const daysUntilDue = Math.round((dueDate.getTime() - today.getTime()) / 86_400_000)
 
         // Skip items outside their seasonal window — no WO, no alert
@@ -210,7 +221,17 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
         const supabase = createServiceClient()
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
         const vendor   = Array.isArray(schedule.vendors)   ? schedule.vendors[0]   : schedule.vendors
-        const dueDate  = new Date(schedule.next_due_date!)
+        let dueDate: Date
+        try {
+          dueDate = parseLocalDate(schedule.next_due_date, 'next_due_date')
+        } catch (err) {
+          console.error(`[maintenance-cron] invalid next_due_date in overdue pass for schedule ${schedule.id}`, {
+            schedule_id:   schedule.id,
+            next_due_date: schedule.next_due_date,
+            error:         String(err),
+          })
+          return
+        }
         const daysLate = Math.round((today.getTime() - dueDate.getTime()) / 86_400_000)
 
         // Look for an open WO tied to this schedule

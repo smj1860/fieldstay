@@ -7,7 +7,7 @@ import { redirect }            from 'next/navigation'
 import { z }                   from 'zod'
 
 const ActivateSchema = z.object({
-  token:    z.string().min(1),
+  token:    z.string().uuid('Invite link is invalid or expired'),
   crewId:   z.string().uuid(),
   password: z.string().min(8, 'Password must be at least 8 characters').max(72),
   confirm:  z.string(),
@@ -32,13 +32,20 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
   const { token, crewId, password } = parsed.data
   const supabase = createServiceClient()
 
-  const { data: crew } = await supabase
+  const { data: crew, error: crewError } = await supabase
     .from('crew_members')
     .select('id, name, email, org_id, user_id, invite_accepted_at, invite_token, invite_sent_at')
     .eq('id', crewId)
     .eq('invite_token', token)
     .single()
 
+  if (crewError) {
+    console.error('[activateCrewAccount] crew lookup error', {
+      code:    crewError.code,
+      message: crewError.message,
+    })
+    return { error: 'Invalid invite link' }
+  }
   if (!crew)                                   return { error: 'Invalid invite link' }
   if (!crew.email)                             return { error: 'No email address on record' }
   if (crew.user_id || crew.invite_accepted_at) return { error: 'This invite has already been used' }
