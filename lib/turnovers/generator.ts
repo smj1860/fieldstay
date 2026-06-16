@@ -62,8 +62,14 @@ export async function generateTurnoversForProperty(
       t => t.booking_id === booking.id && t.prev_booking_id != null
     )
     if (alreadyPaired) continue
-    const checkoutTimeStr = booking.checkout_time ?? property?.checkout_time ?? '11:00'
+    const checkoutTimeStr = (booking.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)
     const checkoutDT      = new Date(`${booking.checkout_date}T${checkoutTimeStr}:00`)
+    if (isNaN(checkoutDT.getTime())) {
+      console.error('[generator] invalid date in Pass 1', {
+        propertyId, checkout_date: booking.checkout_date, checkoutTimeStr,
+      })
+      continue
+    }
     const checkinDT       = new Date(checkoutDT.getTime() + DEFAULT_WINDOW_HOURS * 3_600_000)
     const windowMinutes   = DEFAULT_WINDOW_HOURS * 60
     const { data: turnover, error } = await supabase
@@ -95,10 +101,18 @@ export async function generateTurnoversForProperty(
     const outgoing = bookings[i]!
     const incoming = bookings[i + 1]!
     if (existingPairs.has(`${outgoing.id}:${incoming.id}`)) continue
-    const checkoutTimeStr = outgoing.checkout_time ?? property?.checkout_time ?? '11:00'
-    const checkinTimeStr  = incoming.checkin_time  ?? property?.checkin_time  ?? '15:00'
+    // Slice to 5 chars ('HH:MM') to handle both 'HH:MM' and 'HH:MM:SS' storage formats
+    const checkoutTimeStr = (outgoing.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)
+    const checkinTimeStr  = (incoming.checkin_time  ?? property?.checkin_time  ?? '15:00').slice(0, 5)
     const checkoutDT = new Date(`${outgoing.checkout_date}T${checkoutTimeStr}:00`)
     const checkinDT  = new Date(`${incoming.checkin_date}T${checkinTimeStr}:00`)
+    if (isNaN(checkoutDT.getTime()) || isNaN(checkinDT.getTime())) {
+      console.error('[generator] invalid date constructed', {
+        propertyId, checkout_date: outgoing.checkout_date, checkoutTimeStr,
+        checkin_date: incoming.checkin_date, checkinTimeStr,
+      })
+      continue
+    }
     if (checkinDT <= checkoutDT) continue
     const windowMinutes = Math.round(
       (checkinDT.getTime() - checkoutDT.getTime()) / 60_000
