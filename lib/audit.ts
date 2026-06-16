@@ -57,6 +57,8 @@ export type AuditAction =
   | 'crew.account.activated'
   | 'crew.invite.accepted'
   | 'security.route.mismatch'
+  | 'booking.created'
+  | 'booking.cancelled'
 
 interface AuditParams {
   orgId?:         string
