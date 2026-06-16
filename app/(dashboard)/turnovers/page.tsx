@@ -33,7 +33,7 @@ export default async function TurnoversPage() {
         suggested_crew_ids, suggestion_reasoning, suggestion_status,
         turnover_assignments (
           id, crew_member_id,
-          crew_members ( id, name, phone, email )
+          crew_member:crew_members ( id, name, phone, email )
         )
       `)
       .eq('org_id', membership.org_id)
@@ -80,10 +80,20 @@ export default async function TurnoversPage() {
 
   const showAutoAssignNudge = org?.auto_assign_mode === 'disabled'
 
+  const normalizedTurnovers = (turnovers ?? []).map((t) => ({
+    ...t,
+    turnover_assignments: t.turnover_assignments.map((a) => ({
+      ...a,
+      crew_member: Array.isArray(a.crew_member)
+        ? (a.crew_member[0] ?? null)
+        : (a.crew_member ?? null),
+    })),
+  }))
+
   return (
     <div>
       <TurnoverBoard
-        turnovers={turnovers ?? []}
+        turnovers={normalizedTurnovers}
         propertyMap={propertyMap}
         crewMembers={crew ?? []}
         properties={properties ?? []}

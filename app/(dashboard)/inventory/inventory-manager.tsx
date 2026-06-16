@@ -75,7 +75,7 @@ interface PortfolioItem {
   current_quantity: number
   property_id: string
   preferred_brand: string | null
-  properties: { name: string } | { name: string }[] | null
+  property: { name: string } | null
 }
 
 interface TemplateItem {

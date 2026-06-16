@@ -45,7 +45,7 @@ const CrewAvailabilityContext = createContext<Record<string, boolean>>({})
 interface TurnoverAssignment {
   id: string
   crew_member_id: string
-  crew_members: AssignedCrewMember[]
+  crew_member: AssignedCrewMember | null
 }
 
 interface Turnover {
@@ -85,7 +85,7 @@ function isPast(d: Date): boolean {
 }
 
 function getAllAssignedCrew(t: Turnover): AssignedCrewMember[] {
-  return t.turnover_assignments.flatMap(a => a.crew_members)
+  return t.turnover_assignments.flatMap(a => a.crew_member ? [a.crew_member] : [])
 }
 
 function groupTurnovers(turnovers: Turnover[]) {

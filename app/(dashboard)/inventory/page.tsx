@@ -56,7 +56,7 @@ export default async function InventoryPage() {
       .limit(50),
     supabase
       .from('inventory_items')
-      .select('id, name, category, unit, par_level, current_quantity, preferred_brand, property_id, properties(name)')
+      .select('id, name, category, unit, par_level, current_quantity, preferred_brand, property_id, property:properties(name)')
       .eq('org_id', membership.org_id)
       .order('property_id')
       .order('category')
@@ -91,6 +91,13 @@ export default async function InventoryPage() {
   const template  = templates?.[0] ?? null
   const cartData  = (cartMilestone?.value ?? null) as (CartBuildResult & { built_at: string; location_name: string }) | null
 
+  const normalizedAllInventoryItems = (allInventoryItems ?? []).map((item) => ({
+    ...item,
+    property: Array.isArray(item.property)
+      ? (item.property[0] ?? null)
+      : (item.property ?? null),
+  }))
+
   const admin = createServiceClient()
   const { data: krogerConnection } = await admin
     .from('integration_connections')
@@ -110,7 +117,7 @@ export default async function InventoryPage() {
         purchaseOrders={purchaseOrders ?? []}
         catalogItems={catalogItems ?? []}
         recentCounts={recentCounts ?? []}
-        allInventoryItems={allInventoryItems ?? []}
+        allInventoryItems={normalizedAllInventoryItems}
         template={template}
         pendingDrafts={pendingDrafts ?? []}
         orgId={membership.org_id}

@@ -15,7 +15,7 @@ interface PortfolioItem {
   current_quantity: number
   property_id: string
   preferred_brand: string | null
-  properties: { name: string } | { name: string }[] | null
+  property: { name: string } | null
 }
 
 interface AggregatedItem {
@@ -44,10 +44,7 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
   const low      = items.filter(i => i.current_quantity > i.par_level && i.current_quantity <= i.par_level * 1.2)
   const healthy  = items.filter(i => i.current_quantity > i.par_level * 1.2)
 
-  const propName = (item: PortfolioItem) =>
-    Array.isArray(item.properties)
-      ? item.properties[0]?.name
-      : (item.properties as { name: string } | null)?.name
+  const propName = (item: PortfolioItem) => item.property?.name
 
   const handleGenerateList = () => {
     startTransition(async () => {
