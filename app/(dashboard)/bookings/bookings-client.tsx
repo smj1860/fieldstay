@@ -472,20 +472,20 @@ export function BookingsClient({
     return () => clearTimeout(t)
   }, [justAdded])
 
-  const today = new Date().toDateString()
+  const todayStr = new Date().toISOString().split('T')[0]!  // 'YYYY-MM-DD'
 
   const filtered = useMemo(() => {
     return localBookings.filter((b) => {
-      if (!showPast && new Date(b.checkout_date) < new Date(today)) return false
+      if (!showPast && b.checkout_date < todayStr) return false
       if (filterProperty !== 'all' && b.property_id !== filterProperty) return false
       if (filterStatus   !== 'all' && b.status     !== filterStatus)    return false
       if (filterSource   !== 'all' && b.source     !== filterSource)    return false
       return true
     })
-  }, [localBookings, showPast, filterProperty, filterStatus, filterSource, today])
+  }, [localBookings, showPast, filterProperty, filterStatus, filterSource, todayStr])
 
   // Stats
-  const upcoming   = localBookings.filter((b) => b.status === 'confirmed' && new Date(b.checkin_date) >= new Date(today))
+  const upcoming   = localBookings.filter((b) => b.status === 'confirmed' && b.checkin_date >= todayStr)
   const checkinsToday = localBookings.filter((b) => isToday(b.checkin_date) && b.status === 'confirmed')
   const checkoutsToday = localBookings.filter((b) => isToday(b.checkout_date) && b.status === 'confirmed')
 

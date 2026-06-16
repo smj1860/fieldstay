@@ -65,7 +65,7 @@ export async function createWorkOrder(
     request_quotes ? 'quote_requested' : (vendor_id ? 'assigned' : 'pending')
   )
   const usePortal           = portal_enabled && !request_quotes
-  const completion_token    = usePortal ? crypto.randomUUID().replace(/-/g, '') : null
+  const completion_token    = usePortal ? crypto.randomUUID() : null
   const completion_token_expires_at = usePortal
     ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
     : null
@@ -101,7 +101,7 @@ export async function createWorkOrder(
   // Send RFQ emails to each selected vendor
   if (request_quotes && quote_vendor_ids.length) {
     for (const vendorId of quote_vendor_ids) {
-      const quote_token            = crypto.randomUUID().replace(/-/g, '')
+      const quote_token            = crypto.randomUUID()
       const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
 
       const { data: qr, error: qrError } = await supabase
@@ -565,7 +565,7 @@ export async function sendQuoteRequests(
   let sent = 0
 
   for (const vendorId of toSend) {
-    const quote_token            = crypto.randomUUID().replace(/-/g, '')
+    const quote_token            = crypto.randomUUID()
     const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
 
     const { data: qr, error } = await supabase
@@ -638,7 +638,7 @@ export async function approveQuoteRequest(
     .neq('id', quoteRequestId)
     .in('status', ['pending', 'submitted'])
 
-  const completion_token            = crypto.randomUUID().replace(/-/g, '')
+  const completion_token            = crypto.randomUUID()
   const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
   const { error } = await supabase
@@ -766,7 +766,7 @@ export async function createWorkOrderFromSchedule(
 
   if (!schedule) return { error: 'Schedule not found' }
 
-  const completion_token = crypto.randomUUID().replace(/-/g, '')
+  const completion_token = crypto.randomUUID()
   const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
   const { data: wo, error } = await supabase

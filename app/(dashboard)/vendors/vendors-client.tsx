@@ -115,8 +115,8 @@ export function VendorsClient({ vendors, showComplianceNudge }: Props) {
         <NudgeBanner
           id="compliance-vault-intro"
           message="Vendors without a current COI can be auto-blocked from new work orders."
-          href="/vendors?tab=compliance"
-          linkText="Set up compliance tracking"
+          href={vendors.length > 0 ? `/vendors/${vendors[0]!.id}#compliance` : '/vendors'}
+          linkText={vendors.length > 0 ? 'Add COI to first vendor →' : 'Add your first vendor →'}
         />
       )}
       <div className="card">

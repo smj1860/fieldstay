@@ -72,64 +72,79 @@ export const handleBookingDetected = inngest.createFunction(
   { event: 'booking/detected' as const },
   async ({ event, step, logger }) => {
     const { booking_id, property_id, org_id } = event.data
-
+    // Step 1: Revenue posting — NON-FATAL.
+    // A failure here must NEVER block turnover generation.
+    // These are independent operations. Wrap entirely in try/catch.
     await step.run('create-booking-revenue-transaction', async () => {
       const supabase = createServiceClient()
-
-      const { data: prop } = await supabase
-        .from('properties')
-        .select('avg_nightly_rate')
-        .eq('id', property_id)
-        .single()
-
-      if (!prop?.avg_nightly_rate) return
-
-      const { count } = await supabase
-        .from('owner_transactions')
-        .select('id', { count: 'exact', head: true })
-        .eq('source_reference_id', booking_id)
-        .eq('source', 'booking_revenue')
-
-      if ((count ?? 0) > 0) return
-
-      const { data: booking } = await supabase
-        .from('bookings')
-        .select('checkin_date, checkout_date, guest_name')
-        .eq('id', booking_id)
-        .single()
-
-      if (!booking) return
-
-      const checkin  = new Date(booking.checkin_date + 'T00:00:00')
-      const checkout = new Date(booking.checkout_date + 'T00:00:00')
-      const nights   = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
-      if (nights <= 0) return
-
-      const amount     = parseFloat((nights * prop.avg_nightly_rate).toFixed(2))
-      const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
-
-      await supabase.from('owner_transactions').insert({
-        property_id,
-        org_id,
-        booking_id,
-        source:              'booking_revenue',
-        source_reference_id: booking_id,
-        transaction_type:    'revenue',
-        category:            'booking_revenue',
-        amount,
-        description:         `${nights} night${nights !== 1 ? 's' : ''}${guestLabel}`,
-        transaction_date:    booking.checkin_date,
-        notes:               `iCal · ${booking.checkin_date} to ${booking.checkout_date}`,
-      })
+      try {
+        const { data: prop } = await supabase
+          .from('properties')
+          .select('avg_nightly_rate')
+          .eq('id', property_id)
+          .single()
+        if (!prop?.avg_nightly_rate) return { skipped: 'no_rate' }
+        const { count } = await supabase
+          .from('owner_transactions')
+          .select('id', { count: 'exact', head: true })
+          .eq('source_reference_id', booking_id)
+          .eq('source', 'booking_revenue')
+        if ((count ?? 0) > 0) return { skipped: 'already_posted' }
+        const { data: booking } = await supabase
+          .from('bookings')
+          .select('checkin_date, checkout_date, guest_name')
+          .eq('id', booking_id)
+          .single()
+        if (!booking) return { skipped: 'booking_not_found' }
+        const checkin  = new Date(booking.checkin_date + 'T00:00:00')
+        const checkout = new Date(booking.checkout_date + 'T00:00:00')
+        const nights   = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
+        if (nights <= 0) return { skipped: 'zero_nights' }
+        const amount     = parseFloat((nights * prop.avg_nightly_rate).toFixed(2))
+        const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
+        const { error } = await supabase.from('owner_transactions').insert({
+          property_id,
+          org_id,
+          booking_id,
+          source:              'booking_revenue',
+          source_reference_id: booking_id,
+          transaction_type:    'revenue',
+          category:            'booking_revenue',
+          amount,
+          description:         `${nights} night${nights !== 1 ? 's' : ''}${guestLabel}`,
+          transaction_date:    booking.checkin_date,
+          notes:               `Manual · ${booking.checkin_date} to ${booking.checkout_date}`,
+        })
+        // Log but DO NOT throw — let step 2 run regardless
+        if (error) {
+          logger.error('[booking-detected] revenue insert failed (non-fatal)', {
+            error: error.message, code: error.code, booking_id,
+          })
+          return { error: error.message }
+        }
+        return { posted: amount }
+      } catch (err) {
+        // Catch-all safety net — log and continue to step 2
+        logger.error('[booking-detected] revenue step threw (non-fatal)', {
+          error: String(err), booking_id,
+        })
+        return { error: String(err) }
+      }
     })
-
-    logger.info(`Booking revenue posted for ${booking_id}`)
-
+    // Step 2: Turnover generation — CRITICAL. Always runs.
     const newTurnoverIds = await step.run('generate-turnovers', async () => {
       const supabase = createServiceClient()
-      return generateTurnoversForProperty(property_id, org_id, supabase)
+      try {
+        const ids = await generateTurnoversForProperty(property_id, org_id, supabase)
+        logger.info(`[booking-detected] generated ${ids.length} turnover(s)`, { property_id })
+        return ids
+      } catch (err) {
+        logger.error('[booking-detected] generate-turnovers threw', {
+          error: String(err), property_id,
+        })
+        throw err  // re-throw so Inngest retries this step
+      }
     })
-
     return { booking_id, newTurnoverIds }
   }
 )
