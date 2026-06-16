@@ -12,7 +12,7 @@ import { NudgeBanner } from '@/components/nudge-banner'
 
 interface TurnoverAssignment {
   id:           string
-  crew_members: { id: string; name: string } | { id: string; name: string }[] | null
+  crew_member: { id: string; name: string } | { id: string; name: string }[] | null
 }
 
 interface Turnover {
@@ -171,7 +171,7 @@ function TurnoverCard({
       : []
 
   const crew = assignments.flatMap((a) => {
-    const cm = a.crew_members
+    const cm = a.crew_member
     return cm ? (Array.isArray(cm) ? cm : [cm]) : []
   })
 
