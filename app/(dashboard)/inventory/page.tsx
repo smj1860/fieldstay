@@ -69,8 +69,8 @@ export default async function InventoryPage() {
     supabase
       .from('inventory_count_drafts')
       .select(`
-        id, property_id, status, submitted_at, notes,
-        crew_members(name),
+        id, property_id, status, notes,
+        crew_members!submitted_by(name),
         inventory_count_draft_items(
           id, inventory_item_id, previous_quantity, submitted_quantity,
           inventory_items(name, unit)
@@ -78,14 +78,14 @@ export default async function InventoryPage() {
       `)
       .eq('org_id', membership.org_id)
       .eq('status', 'pending_review')
-      .order('submitted_at', { ascending: false }),
+      .order('created_at', { ascending: false }),
   ])
 
   const { data: cartMilestone } = await supabase
     .from('org_milestones')
     .select('value')
     .eq('org_id', membership.org_id)
-    .eq('key', 'last_cart_build')
+    .eq('milestone', 'last_cart_build')
     .maybeSingle()
 
   const template  = templates?.[0] ?? null

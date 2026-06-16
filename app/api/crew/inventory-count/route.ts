@@ -47,12 +47,11 @@ export async function POST(request: NextRequest) {
     const { data: draft } = await supabase
       .from('inventory_count_drafts')
       .insert({
-        org_id:         crew.org_id,
-        property_id:    propertyId,
-        crew_member_id: crew.id,
-        status:         'pending_review',
-        submitted_at:   new Date().toISOString(),
-        notes:          notes || null,
+        org_id:      crew.org_id,
+        property_id: propertyId,
+        submitted_by: crew.id,
+        status:      'pending_review',
+        notes:       notes || null,
       })
       .select('id')
       .single()
