@@ -1,5 +1,6 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 
 // ── Booking Confirmed (OwnerRez / Uplisting) ─────────────────────────────────
 
@@ -123,6 +124,12 @@ export const handleBookingDetected = inngest.createFunction(
     })
 
     logger.info(`Booking revenue posted for ${booking_id}`)
-    return { booking_id }
+
+    const newTurnoverIds = await step.run('generate-turnovers', async () => {
+      const supabase = createServiceClient()
+      return generateTurnoversForProperty(property_id, org_id, supabase)
+    })
+
+    return { booking_id, newTurnoverIds }
   }
 )
