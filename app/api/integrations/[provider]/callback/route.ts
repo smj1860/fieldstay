@@ -264,9 +264,9 @@ export async function GET(
   revalidatePath('/inventory')
 
   // ── 7. Success — redirect to dashboard ────────────────────
-  const returnTo  = stateRecord.return_to ?? '/ops'
+  const returnTo  = stateRecord.return_to ?? '/settings?tab=integrations'
   // Guard against open redirects: only allow paths starting with /
-  const safePath  = returnTo.startsWith('/') ? returnTo : '/ops'
+  const safePath  = returnTo.startsWith('/') ? returnTo : '/settings?tab=integrations'
   const returnUrl = new URL(safePath, appUrl)
 
   // Pass a success flag so the UI can show a "Connected!" toast
