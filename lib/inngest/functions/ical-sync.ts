@@ -292,11 +292,13 @@ export const syncIcalFeed = inngest.createFunction(
 
       // Fetch full booking data — filter to confirmed only in case a booking
       // was cancelled between the upsert step and this step
-      const { data: bookingDetails } = await supabase
+      const { data: bookingDetails, error: detailsError } = await supabase
         .from('bookings')
         .select('id, guest_name, guest_email, checkin_date, checkout_date')
         .in('id', (newBookings as Array<{ id: string }>).map((b) => b.id))
         .eq('status', 'confirmed')
+
+      if (detailsError) throw new Error(`Failed to fetch booking details: ${detailsError.message}`)
 
       for (const booking of (bookingDetails as BookingDetail[] ?? [])) {
         events.push({
