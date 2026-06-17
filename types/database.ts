@@ -225,6 +225,7 @@ export interface CrewMember {
   role:               CrewRole
   is_active:          boolean
   notes:              string | null
+  home_zip:           string | null
   home_lat:           number | null
   home_lng:           number | null
   reliability_score:  number | null
