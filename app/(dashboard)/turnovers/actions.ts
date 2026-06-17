@@ -447,6 +447,13 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
 export async function dismissSuggestion(turnoverId: string): Promise<TurnoverActionState> {
   const { supabase, membership } = await requireOrgMember()
 
+  const { data: turnover } = await supabase
+    .from('turnovers')
+    .select('suggested_crew_ids')
+    .eq('id', turnoverId)
+    .eq('org_id', membership.org_id)
+    .single()
+
   const { error } = await supabase
     .from('turnovers')
     .update({ suggestion_status: 'dismissed' })
@@ -456,6 +463,22 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
   if (error) {
     console.error('[dismissSuggestion]', error)
     return { error: 'Operation failed. Please try again.' }
+  }
+
+  const crewIds = (turnover?.suggested_crew_ids as string[] | null) ?? []
+  if (crewIds.length) {
+    try {
+      const { createServiceClient } = await import('@/lib/supabase/server')
+      const service = createServiceClient()
+      for (const crewId of crewIds) {
+        await service.from('assignment_outcomes').upsert(
+          { turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: false },
+          { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
+        )
+      }
+    } catch {
+      // Outcome recording must not break the dismissal flow
+    }
   }
 
   revalidatePath('/turnovers')
