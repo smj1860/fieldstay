@@ -138,6 +138,7 @@ export async function addCrewMember(
   const specialty         = (formData.get('specialty') as string)?.trim() || ''
   const preferred_contact = (formData.get('preferred_contact') as ContactPref) || 'email'
   const role              = ((formData.get('role') as CrewRole) || 'general') as CrewRole
+  const home_zip          = (formData.get('home_zip') as string)?.trim() || null
 
   if (!name) return { error: 'Name is required' }
   if (!email && !phone) return { error: 'Email or phone is required' }
@@ -150,12 +151,21 @@ export async function addCrewMember(
     specialty,
     preferred_contact,
     role,
+    home_zip,
     is_active: true,
   }).select('id').single()
 
   if (error) {
     console.error('[addCrewMember]', error)
     return { error: 'Operation failed. Please try again.' }
+  }
+
+  // Geocode from home ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
+  if (home_zip) {
+    const coords = await geocodeZip(home_zip)
+    if (coords) {
+      await supabase.from('crew_members').update({ home_lat: coords.lat, home_lng: coords.lng }).eq('id', newCrew.id)
+    }
   }
 
   await logAuditEvent({
@@ -182,9 +192,17 @@ export async function updateCrewMember(
     preferred_contact: ContactPref
     notes: string
     role: CrewRole
+    home_zip: string
   }>
 ): Promise<SettingsActionState> {
   const { supabase, membership, user } = await requireOrgMember()
+
+  const { data: existing } = await supabase
+    .from('crew_members')
+    .select('home_zip')
+    .eq('id', crewId)
+    .eq('org_id', membership.org_id)
+    .single()
 
   const { error } = await supabase
     .from('crew_members')
@@ -195,6 +213,16 @@ export async function updateCrewMember(
   if (error) {
     console.error('[updateCrewMember]', error)
     return { error: 'Operation failed. Please try again.' }
+  }
+
+  // Re-geocode when home ZIP changes — Mapbox postcode endpoint requires a ZIP, not a full address
+  const zipChanged = data.home_zip !== undefined && data.home_zip !== (existing?.home_zip ?? null)
+
+  if (zipChanged && data.home_zip) {
+    const coords = await geocodeZip(data.home_zip)
+    if (coords) {
+      await supabase.from('crew_members').update({ home_lat: coords.lat, home_lng: coords.lng }).eq('id', crewId)
+    }
   }
 
   if (data.role !== undefined) {

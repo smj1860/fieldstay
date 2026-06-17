@@ -129,11 +129,12 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
 
   return (
     <div
-      className="rounded-xl overflow-hidden"
+      className="rounded-xl overflow-hidden flex flex-col min-h-[420px]"
       style={{ border: '1px solid var(--border)' }}
     >
-      {/* Scroll container */}
-      <div className="overflow-x-auto">
+      {/* Scroll container — flex-1 so a short property list still fills the
+          card instead of leaving a gap of bare page background beneath it */}
+      <div className="overflow-x-auto flex-1">
         <div style={{ minWidth: LABEL_W + totalW }}>
 
           {/* ── Header row ── */}

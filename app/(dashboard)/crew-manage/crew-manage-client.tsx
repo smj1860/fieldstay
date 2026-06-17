@@ -466,6 +466,10 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
             <label htmlFor="crew-specialty" className="label">Specialty</label>
             <input id="crew-specialty" name="specialty" type="text" className="input" placeholder="e.g. Cleaning, HVAC" />
           </div>
+          <div>
+            <label htmlFor="crew-home-zip" className="label">Home ZIP</label>
+            <input id="crew-home-zip" name="home_zip" type="text" className="input" placeholder="e.g. 78701" />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -709,6 +713,7 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
   const [specialty, setSpecialty]     = useState(member.specialty)
   const [email, setEmail]             = useState(member.email ?? '')
   const [phone, setPhone]             = useState(member.phone ?? '')
+  const [homeZip, setHomeZip]         = useState(member.home_zip ?? '')
   const [pref, setPref]               = useState(member.preferred_contact)
   const [rowError, setRowError]       = useState<string | null>(null)
   const [saving, startSave]           = useTransition()
@@ -731,7 +736,7 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
     startSave(async () => {
       const result = await updateCrewMember(member.id, {
         name, email: email || undefined, phone: phone || undefined, specialty,
-        preferred_contact: pref, role: roleVal,
+        preferred_contact: pref, role: roleVal, home_zip: homeZip || undefined,
       })
       if (result.error) setRowError(result.error)
       else              setEditing(false)
@@ -758,7 +763,10 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
           </select>
         </td>
         <td className="py-2 pr-4">
-          <input value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="input py-1 text-sm" placeholder="Specialty" />
+          <div className="space-y-1">
+            <input value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="input py-1 text-sm" placeholder="Specialty" />
+            <input value={homeZip} onChange={(e) => setHomeZip(e.target.value)} className="input py-1 text-sm" placeholder="Home ZIP" />
+          </div>
         </td>
         <td className="py-2 pr-4">
           <div className="space-y-1">
