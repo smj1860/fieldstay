@@ -115,10 +115,15 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
     ? [{ href: '/reviews', label: 'Reviews', icon: MessageSquareDot, roles: ['admin', 'manager'] as const, group: 'management' as const }]
     : []
 
-  const filteredNav = [
-    ...NAV_ITEMS.filter((item) => item.roles.includes(effectiveRole as never)),
-    ...REPUGUARD_NAV.filter(item => item.roles.includes(effectiveRole as 'admin' | 'manager')),
-  ]
+  const baseNav   = NAV_ITEMS.filter((item) => item.roles.includes(effectiveRole as never))
+  const reviewsNav = REPUGUARD_NAV.filter(item => item.roles.includes(effectiveRole as 'admin' | 'manager'))
+
+  // Splice Reviews in directly after Properties rather than appending at the
+  // end, so it sits where PMs expect it instead of trailing after Settings.
+  const propertiesIdx = baseNav.findIndex((item) => item.href === '/properties')
+  const filteredNav = propertiesIdx === -1
+    ? [...baseNav, ...reviewsNav]
+    : [...baseNav.slice(0, propertiesIdx + 1), ...reviewsNav, ...baseNav.slice(propertiesIdx + 1)]
 
   // Split into Ops (daily-use) and Management (weekly-use) tiers, rendered
   // as two groups with a divider to keep the sidebar scannable.
