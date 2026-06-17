@@ -98,16 +98,36 @@ export const handleWorkOrderCreated = inngest.createFunction(
       })
 
       if (scheduledDate) {
-        await step.sendEvent('schedule-overdue-check', {
-          name: 'work-order/overdue' as const,
-          data: {
-            work_order_id,
-            property_id,
-            org_id,
-            scheduled_date: scheduledDate,
-            days_overdue:   3,
-          },
+        // Don't check overdue status until 3 days past the scheduled date —
+        // sending the event immediately produced a "3 days overdue" alert
+        // within minutes of WO creation.
+        const overdueCheckDate = new Date(scheduledDate)
+        overdueCheckDate.setDate(overdueCheckDate.getDate() + 3)
+
+        await step.sleepUntil('wait-until-overdue-threshold', overdueCheckDate)
+
+        const stillOpen = await step.run('check-still-open-before-overdue-event', async () => {
+          const supabase = createServiceClient()
+          const { data: wo } = await supabase
+            .from('work_orders')
+            .select('status')
+            .eq('id', work_order_id)
+            .single()
+          return wo ? wo.status !== 'completed' && wo.status !== 'cancelled' : false
         })
+
+        if (stillOpen) {
+          await step.sendEvent('schedule-overdue-check', {
+            name: 'work-order/overdue' as const,
+            data: {
+              work_order_id,
+              property_id,
+              org_id,
+              scheduled_date: scheduledDate,
+              days_overdue:   3,
+            },
+          })
+        }
       }
     }
 

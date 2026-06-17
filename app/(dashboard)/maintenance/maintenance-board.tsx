@@ -347,6 +347,7 @@ function CreateWorkOrderModal({
   vendorCompliance = [],
   orgId = '',
   onClose,
+  onWarning,
 }: {
   properties:       PropertyOptionWithCoords[]
   vendors:          VendorOptionWithCoords[]
@@ -355,6 +356,7 @@ function CreateWorkOrderModal({
   vendorCompliance?: VendorComplianceRow[]
   orgId?:           string
   onClose:          () => void
+  onWarning?:       (msg: string) => void
 }) {
   const [state, action, pending]          = useActionState(createWorkOrder, null)
   const [assignMode,         setAssignMode]         = useState<'vendor' | 'crew' | 'quotes'>('vendor')
@@ -391,6 +393,8 @@ function CreateWorkOrderModal({
   // After successful WO creation, upload photos
   useEffect(() => {
     if (!state?.success || !state.workOrderId) return
+
+    if (state.warning) onWarning?.(state.warning)
 
     // No photos attached — close immediately
     if (!photoFiles.length) {
@@ -2000,6 +2004,13 @@ export function MaintenanceBoard({
   const [viewMode,       setViewMode]       = useState<'list' | 'calendar' | 'kanban'>('list')
 
   const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
+  const [warning,    setWarning]    = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!warning) return
+    const t = setTimeout(() => setWarning(null), 5000)
+    return () => clearTimeout(t)
+  }, [warning])
 
   // Filter work orders
   const filtered = workOrders.filter((wo) => {
@@ -2016,6 +2027,24 @@ export function MaintenanceBoard({
 
   return (
     <>
+      {/* Vendor-notification warning toast */}
+      {warning && (
+        <div
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 text-sm"
+          style={{
+            background: 'var(--accent-amber-dim)',
+            border:     '1px solid var(--accent-amber)',
+            color:      'var(--accent-amber)',
+          }}
+        >
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          {warning}
+          <button onClick={() => setWarning(null)} className="ml-2">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="page-header flex items-start justify-between">
         <div>
@@ -2295,6 +2324,7 @@ export function MaintenanceBoard({
           vendorCompliance={vendorCompliance}
           orgId={orgId}
           onClose={() => setShowCreate(false)}
+          onWarning={setWarning}
         />
       )}
 
