@@ -11,7 +11,7 @@ import type { WoStatus, ScheduleFrequency, ScheduleType, VendorSpecialty } from 
 import { PriorityLevelSchema, WoStatusSchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string }
+export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string; warning?: string }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -149,6 +149,13 @@ export async function createWorkOrder(
     })
   }
 
+  // Warn the PM when a vendor was assigned but no notification will be
+  // sent — otherwise they're left assuming the vendor was notified.
+  let warning: string | undefined
+  if (vendor_id && !usePortal) {
+    warning = 'Work order created, but the vendor was not notified because the portal link is disabled for this vendor. Enable the portal in Vendor settings or notify them manually.'
+  }
+
   await logAuditEvent({
     orgId:      membership.org_id,
     actorId:    user.id,
@@ -159,7 +166,7 @@ export async function createWorkOrder(
   })
 
   revalidatePath('/maintenance')
-  return { success: true, workOrderId: wo.id }
+  return { success: true, workOrderId: wo.id, warning }
 }
 
 // ── Rate Work Order Vendor ────────────────────────────────────────────────────
