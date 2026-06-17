@@ -183,6 +183,9 @@ export function translateSyncError(err: unknown): string {
   if (err instanceof RateLimitError) {
     return 'OwnerRez sync paused due to rate limiting — will retry automatically'
   }
+  if (err instanceof TokenRevokedError) {
+    return 'OwnerRez authorization expired — reconnect your account to resume syncing'
+  }
   const msg = err instanceof Error ? err.message : String(err)
   const lower = msg.toLowerCase()
   if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid_token')) {

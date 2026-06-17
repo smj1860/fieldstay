@@ -120,7 +120,10 @@ export class OwnerRezApiClient {
     })
 
     if (res.status === 401) {
-      // Token has been revoked — mark connection as error
+      // Token has been revoked (or rejected) — capture OwnerRez's reason before
+      // marking the connection as error, since the token itself is never logged
+      const body = await res.text().catch(() => '')
+      console.error(`[OwnerRez:${this.userId}] 401 on ${path}: ${body}`)
       await this.markConnectionError()
       throw new TokenRevokedError(this.userId)
     }
