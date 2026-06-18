@@ -59,11 +59,14 @@ export default async function CommsLogPage() {
       .limit(100),
   ])
 
+  const toPersonOption = (rows: { id: string; name: string; specialty: string | null }[] | null) =>
+    (rows ?? []).map((r) => ({ id: r.id, name: r.name, specialty: r.specialty ?? undefined }))
+
   return (
     <CommsLogClient
       logs={(logs ?? []) as never}
-      vendors={vendors   ?? []}
-      crew={crew         ?? []}
+      vendors={toPersonOption(vendors)}
+      crew={toPersonOption(crew)}
       properties={properties ?? []}
       workOrders={workOrders ?? []}
     />
