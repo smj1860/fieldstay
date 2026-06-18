@@ -680,6 +680,7 @@ function BoardSection({
   propertyMap,
   crewMembers,
   defaultOpen = true,
+  forceOpen = false,
   variant = 'default',
   selectedIds,
   onToggle,
@@ -690,12 +691,25 @@ function BoardSection({
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
   defaultOpen?: boolean
+  forceOpen?: boolean
   variant?: 'default' | 'urgent' | 'muted'
   selectedIds: Set<string>
   onToggle: (id: string) => void
   onWarning?: (msg: string) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
+  const prevLengthRef = useRef(turnovers.length)
+
+  // This section's mounted instance persists across filter/tab changes (it's
+  // always rendered, just conditionally returns null below), so `open` can go
+  // stale relative to `defaultOpen`/`forceOpen` — re-evaluate on every change
+  // instead of trusting the useState initial value alone.
+  useEffect(() => {
+    const becameNonEmpty = prevLengthRef.current === 0 && turnovers.length > 0
+    prevLengthRef.current = turnovers.length
+    if (becameNonEmpty || forceOpen) setOpen(true)
+  }, [turnovers.length, forceOpen])
+
   if (!turnovers.length) return null
 
   return (
@@ -705,9 +719,9 @@ function BoardSection({
         className="flex items-center gap-2 mb-3 group w-full text-left"
       >
         <span className={cn(
-          'text-sm font-semibold',
+          'text-sm font-semibold transition-colors',
           variant === 'urgent' ? 'text-red-600' :
-          variant === 'muted'  ? 'text-muted-themed' : 'text-secondary-themed'
+          variant === 'muted'  ? 'text-muted-themed' : 'text-secondary-themed group-hover:text-primary-themed'
         )}>
           {label}
         </span>
@@ -717,7 +731,7 @@ function BoardSection({
         )}>
           {turnovers.length}
         </span>
-        <ChevronDown className={cn('w-3.5 h-3.5 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
+        <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
       </button>
 
       {open && (
@@ -899,6 +913,15 @@ export function TurnoverBoard({
       : setSelectedIds(new Set(filtered.map(t => t.id)))
 
   const groups = groupTurnovers(filtered)
+
+  const hasUrgentVisibleContent =
+    groups.urgent.length > 0 || groups.today.length > 0 ||
+    groups.tomorrow.length > 0 || groups.week.length > 0
+
+  // If nothing in the "always open" sections has content, force Upcoming
+  // open even though its own default might otherwise be false — a PM
+  // should never load this page and see nothing.
+  const upcomingForceOpen = !hasUrgentVisibleContent && groups.upcoming.length > 0
 
   const totalActive = turnovers.filter((t) =>
     t.status !== 'completed' && t.status !== 'cancelled'
@@ -1132,7 +1155,8 @@ export function TurnoverBoard({
                 turnovers={groups.upcoming}
                 propertyMap={propertyMap}
                 crewMembers={crewMembers}
-                defaultOpen={false}
+                defaultOpen={true}
+                forceOpen={upcomingForceOpen}
                 selectedIds={selectedIds}
                 onToggle={toggleSelect}
                 onWarning={setAssignmentWarning}
