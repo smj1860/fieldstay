@@ -21,12 +21,12 @@ export type PropertyType        = 'house' | 'condo' | 'cabin' | 'cottage' | 'tow
 export type IcalSource          = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other'
 export type SyncStatus          = 'pending' | 'success' | 'error'
 export type BookingStatus       = 'confirmed' | 'cancelled' | 'blocked' | 'tentative'
-export type BookingSource       = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'manual' | 'other'
+export type BookingSource       = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'manual' | 'ownerrez' | 'other'
 export type TurnoverStatus      = 'pending_assignment' | 'assigned' | 'in_progress' | 'completed' | 'flagged' | 'cancelled'
 export type PriorityLevel       = 'low' | 'medium' | 'high' | 'urgent'
 export type ContactPref         = 'email' | 'sms' | 'both'
 export type ChecklistStatus     = 'not_started' | 'in_progress' | 'completed'
-export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom_linens' | 'outdoor' | 'maintenance_safety' | 'guest_experience' | 'technology' | 'other'
+export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom' | 'bedroom_linens' | 'outdoor' | 'maintenance_safety' | 'guest_experience' | 'technology' | 'other'
 export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
@@ -122,22 +122,21 @@ export interface Property {
   org_id:                  string
   name:                    string
   address:                 string | null
-  address_line1:           string | null
   city:                    string | null
   state:                   string | null
   zip:                     string | null
   access_instructions:     string | null
-  property_type:           PropertyType
-  bedrooms:                number
+  property_type:           PropertyType | null
+  bedrooms:                number | null
   bathrooms:               number | null
-  max_guests:              number
-  avg_stay_length:         number
-  avg_turnovers_per_month: number
+  max_guests:              number | null
+  avg_stay_length:         number | null
+  avg_turnovers_per_month: number | null
   wifi_name:               string | null
   wifi_password:           string | null
   door_code:               string | null
-  checkout_time:           string
-  checkin_time:            string
+  checkout_time:           string | null
+  checkin_time:            string | null
   internal_notes:          string | null
   setup_steps_completed:   Record<string, boolean>
   is_active:               boolean
@@ -183,9 +182,9 @@ export interface IcalFeed {
   org_id:           string
   name:             string
   url:              string
-  source:           IcalSource
+  source:           IcalSource | null
   last_synced_at:   string | null
-  last_sync_status: SyncStatus
+  last_sync_status: SyncStatus | null
   last_sync_error:  string | null
   is_active:        boolean
   created_at:       string
@@ -219,17 +218,17 @@ export interface CrewMember {
   name:               string
   email:              string | null
   phone:              string | null
-  preferred_contact:  ContactPref
+  preferred_contact:  ContactPref | null
   sms_carrier:        string | null
-  specialty:          string
+  specialty:          string | null
   role:               CrewRole
   is_active:          boolean
   notes:              string | null
   home_zip:           string | null
   home_lat:           number | null
   home_lng:           number | null
-  reliability_score:  number | null
-  capacity_score:     number | null
+  reliability_score:  number
+  capacity_score:     number
   invite_token:       string | null
   invite_sent_at:     string | null
   invite_accepted_at: string | null
@@ -260,7 +259,7 @@ export interface Vendor {
   contact_name:         string | null
   email:                string | null
   phone:                string | null
-  specialty:            VendorSpecialty
+  specialty:            VendorSpecialty | null
   portal_enabled:       boolean
   notes:                string | null
   is_active:            boolean
@@ -327,7 +326,7 @@ export interface Turnover {
   is_same_day_turnover:  boolean
   suggested_crew_ids:    string[] | null
   suggestion_reasoning:  string | null
-  suggestion_status:     SuggestionStatus | null
+  suggestion_status:     string | null
   created_at:            string
   updated_at:            string
   turnover_assignments:  TurnoverAssignment[]
@@ -978,9 +977,9 @@ export interface PropertyAsset {
   warranty_provider:          string | null
   warranty_notes:             string | null
   placed_in_service_date:     string | null
-  macrs_class:                MacrsClass
-  depreciation_method:        string
-  salvage_value:              number
+  macrs_class:                MacrsClass | null
+  depreciation_method:        string | null
+  salvage_value:              number | null
   health_score:               number | null
   health_score_updated_at:    string | null
   is_active:                  boolean
