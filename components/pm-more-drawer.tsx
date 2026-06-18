@@ -8,9 +8,12 @@ import {
 } from 'lucide-react'
 import type { MemberRole } from '@/types/database'
 
+// Order mirrors the desktop sidebar's combined nav (dashboard-shell.tsx):
+// Reviews is spliced in directly after Properties there, so it must be here too.
 const MORE_ITEMS = [
   { href: '/bookings',        label: 'Bookings',        icon: CalendarCheck, roles: ['admin','manager','viewer'] },
   { href: '/properties',      label: 'Properties',      icon: Building2,     roles: ['admin','manager','viewer'] },
+  { href: '/reviews',         label: 'Reviews',         icon: Star,          roles: ['admin','manager']          },
   { href: '/assets',          label: 'Asset Health',    icon: ShieldCheck,   roles: ['admin','manager']          },
   { href: '/capital-planning',label: 'Capital Planning',icon: TrendingUp,    roles: ['admin','manager']          },
   { href: '/crew-manage',     label: 'Crew',            icon: Users2,        roles: ['admin','manager']          },
@@ -18,7 +21,6 @@ const MORE_ITEMS = [
   { href: '/vendors',         label: 'Vendors',         icon: Briefcase,     roles: ['admin','manager']          },
   { href: '/comms-log',       label: 'Comms Log',       icon: Mail,          roles: ['admin','manager']          },
   { href: '/owners',          label: 'Owner Portal',    icon: BarChart3,     roles: ['admin','manager']          },
-  { href: '/reviews',         label: 'Reviews',         icon: Star,          roles: ['admin','manager']          },
   { href: '/settings',        label: 'Settings',        icon: Settings,      roles: ['admin']                    },
 ] as const
 

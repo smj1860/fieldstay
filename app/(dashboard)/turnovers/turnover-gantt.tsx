@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo } from 'react'
-import Link        from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
+import Link                             from 'next/link'
 
 // ── Types (match what TurnoverBoard already receives) ─────────────────────
 
@@ -38,13 +38,32 @@ interface Props {
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
+// Sizing is viewport-dependent (see useIsMobile below) — mobile gets a
+// narrower day range and smaller cells so the chart fits without forcing
+// the whole card into horizontal scroll on small phones.
 
-const DAYS_BACK  = 3   // days of history to show
-const DAYS_AHEAD = 18  // days of future to show
-const TOTAL_DAYS = DAYS_BACK + 1 + DAYS_AHEAD  // 22 total
-const COL_W      = 52  // px per day column
-const ROW_H      = 72  // px per property row
-const LABEL_W    = 164 // px for the sticky property label column
+const DAYS_BACK = 3 // days of history to show, both viewports
+
+// blockH + 2*cellPad must stay <= rowH or the booking and turnover blocks
+// (one anchored top, one anchored bottom) will visually overlap.
+const DESKTOP_SIZING = { daysAhead: 18, colW: 52, rowH: 72, labelW: 164, blockH: 28, cellPad: 8 }
+const MOBILE_SIZING  = { daysAhead: 7,  colW: 36, rowH: 56, labelW: 100, blockH: 20, cellPad: 4 }
+
+const MOBILE_BREAKPOINT = 640 // matches the `sm` breakpoint used elsewhere in the app
+
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+    setIsMobile(mql.matches)
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [])
+
+  return isMobile
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -79,6 +98,11 @@ function turnoverColors(status: string, isTight: boolean) {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
+  const isMobile = useIsMobile()
+  const { daysAhead, colW: COL_W, rowH: ROW_H, labelW: LABEL_W, blockH: BLOCK_H, cellPad: CELL_PAD } =
+    isMobile ? MOBILE_SIZING : DESKTOP_SIZING
+  const TOTAL_DAYS = DAYS_BACK + 1 + daysAhead
+
   const today      = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d }, [])
   const todayStr   = localDateStr(today)
 
@@ -95,7 +119,7 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
       d.setDate(d.getDate() + i)
       return d
     }),
-    [windowStart]
+    [windowStart, TOTAL_DAYS]
   )
 
   // Index data by property
@@ -278,12 +302,13 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
                       return (
                         <div
                           key={booking.id}
-                          className="absolute top-2 rounded-md px-2 flex items-center
+                          className="absolute rounded-md px-2 flex items-center
                                      text-[10px] font-medium truncate"
                           style={{
                             left:       leftPx + 1,
                             width:      widthPx,
-                            height:     28,
+                            top:        CELL_PAD,
+                            height:     BLOCK_H,
                             background: 'var(--accent-blue-dim)',
                             color:      'var(--accent-blue)',
                             border:     '1px solid var(--accent-blue)',
@@ -320,13 +345,14 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
                         <Link
                           key={turnover.id}
                           href={`/turnovers/${turnover.id}`}
-                          className="absolute bottom-2 rounded flex items-center
+                          className="absolute rounded flex items-center
                                      justify-center text-[10px] font-semibold
                                      transition-opacity hover:opacity-80 truncate px-1.5"
                           style={{
                             left:       leftPx,
                             width:      COL_W - 4,
-                            height:     28,
+                            bottom:     CELL_PAD,
+                            height:     BLOCK_H,
                             background: colors.bg,
                             color:      colors.fg,
                             border:     `1px solid ${colors.border}`,
