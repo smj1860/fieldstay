@@ -11,7 +11,7 @@ export default async function DetailsPage({ params }: Props) {
   const { property } = await requireProperty(id)
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-accent-900 mb-1">Property Details</h2>
+      <h2 className="text-lg font-semibold text-primary-themed mb-1">Property Details</h2>
       <p className="text-sm text-accent-500 mb-6">Name, address, check-in/out times, and access info.</p>
       <DetailsForm property={property} />
     </div>

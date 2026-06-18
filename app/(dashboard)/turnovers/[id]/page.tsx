@@ -105,15 +105,15 @@ export default async function TurnoverDetailPage({ params }: Props) {
           <div className="space-y-3 text-sm">
             <div>
               <p className="text-accent-400 text-xs">Checkout</p>
-              <p className="font-semibold text-accent-900">{formatDateTime(turnover.checkout_datetime)}</p>
+              <p className="font-semibold text-primary-themed">{formatDateTime(turnover.checkout_datetime)}</p>
             </div>
             <div>
               <p className="text-accent-400 text-xs">Next Check-in</p>
-              <p className="font-semibold text-accent-900">{formatDateTime(turnover.checkin_datetime)}</p>
+              <p className="font-semibold text-primary-themed">{formatDateTime(turnover.checkin_datetime)}</p>
             </div>
             <div className="flex items-center gap-2 pt-1 border-t border-accent-100">
               <Clock className="w-4 h-4 text-accent-400" />
-              <span className="font-bold text-accent-700">
+              <span className="font-bold text-secondary-themed">
                 {formatWindow(turnover.window_minutes ?? 0)} window
               </span>
             </div>
@@ -126,7 +126,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
           {incomingBooking && (
             <div className="mb-3">
               <p className="text-xs text-accent-400">Incoming Guest</p>
-              <p className="text-sm font-medium text-accent-800">
+              <p className="text-sm font-medium text-primary-themed">
                 {incomingBooking.guest_name ?? 'Unknown'} · {incomingBooking.source}
               </p>
             </div>
@@ -140,7 +140,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
                     {crew?.name[0]?.toUpperCase()}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-accent-800">{crew?.name}</p>
+                    <p className="text-sm font-medium text-primary-themed">{crew?.name}</p>
                     <p className="text-xs text-accent-400">
                       Assigned {new Date(a.assigned_at).toLocaleDateString()}
                     </p>
@@ -163,13 +163,13 @@ export default async function TurnoverDetailPage({ params }: Props) {
           {turnover.notes && (
             <div className="mb-3">
               <p className="section-header">Notes</p>
-              <p className="text-sm text-accent-700">{turnover.notes}</p>
+              <p className="text-sm text-secondary-themed">{turnover.notes}</p>
             </div>
           )}
           {turnover.completion_notes && (
             <div>
               <p className="section-header">Completion Notes</p>
-              <p className="text-sm text-accent-700">{turnover.completion_notes}</p>
+              <p className="text-sm text-secondary-themed">{turnover.completion_notes}</p>
             </div>
           )}
         </div>
@@ -179,7 +179,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
       {totalCount > 0 && (
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-accent-900">Cleaning Checklist</h3>
+            <h3 className="font-semibold text-primary-themed">Cleaning Checklist</h3>
             <div className="flex items-center gap-3">
               <span className="text-sm text-accent-500">{completedCount}/{totalCount}</span>
               <div className="w-24 h-1.5 bg-accent-100 rounded-full overflow-hidden">
@@ -217,7 +217,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
                           {item.is_completed && <CheckCircle2 className="w-3 h-3 text-white" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className={cn('text-sm', item.is_completed ? 'text-green-700 line-through' : 'text-accent-700')}>
+                          <p className={cn('text-sm', item.is_completed ? 'text-green-700 line-through' : 'text-secondary-themed')}>
                             {item.task}
                           </p>
                           {item.crew_notes && (

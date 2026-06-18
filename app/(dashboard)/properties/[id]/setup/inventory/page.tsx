@@ -61,7 +61,7 @@ export default async function InventoryPage({ params }: Props) {
 
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-accent-900 mb-1">Inventory</h2>
+      <h2 className="text-lg font-semibold text-primary-themed mb-1">Inventory</h2>
       <p className="text-sm text-accent-500 mb-6">
         Add items to track for this property. Set a par level — when crew counts
         fall below it, FieldStay generates a purchase order for you.

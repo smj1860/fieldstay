@@ -72,7 +72,7 @@ export default async function SetupLayout({ children, params }: Props) {
                   )}
                   <span className={cn(
                     'font-medium truncate',
-                    done ? 'text-accent-600' : 'text-accent-700'
+                    done ? 'text-accent-600' : 'text-secondary-themed'
                   )}>
                     {step.label}
                   </span>

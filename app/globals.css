@@ -3,6 +3,21 @@
 @tailwind utilities;
 
 /* ── Dark theme (default) ────────────────────────────────────── */
+/* This block is live by default on every page. The `:root.light` block
+ * below only takes effect once `<html>` gets the `light` class, toggled
+ * by the PM dashboard's theme switch (see dashboard-shell.tsx) and
+ * persisted via localStorage('fs-theme'), applied pre-paint in
+ * app/layout.tsx. The crew app and public portal pages (vendor portal,
+ * crew invite, onboarding) never add `.light` and use static Tailwind
+ * colors (bg-white/bg-accent-50) instead of these vars, so they're
+ * unaffected by either block.
+ *
+ * Anything using `.card` / `--bg-card` (or `--bg-base` / `--bg-canvas`)
+ * must pair with theme-aware text — use the `-themed` utility classes
+ * (text-primary-themed / text-secondary-themed / text-muted-themed,
+ * defined further down this file) rather than static Tailwind grays like
+ * text-accent-700/800/900, which were designed for a permanently-light
+ * card and go near-invisible against this dark default. */
 :root {
   --bg-base:        #0a1628;
   --bg-canvas:      #0e1e3e;

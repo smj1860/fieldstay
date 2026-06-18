@@ -18,7 +18,7 @@ export default async function IcalPage({ params }: Props) {
 
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-accent-900 mb-1">Calendar Feeds</h2>
+      <h2 className="text-lg font-semibold text-primary-themed mb-1">Calendar Feeds</h2>
       <p className="text-sm text-accent-500 mb-6">
         Connect your Airbnb and VRBO calendars. FieldStay syncs bookings every 4 hours
         and automatically creates turnovers in the gaps between stays.
