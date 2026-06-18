@@ -7,6 +7,35 @@ import { readIntegrationToken, revokeIntegrationToken } from '@/lib/integrations
 import { getProvider }                   from '@/lib/integrations/registry'
 import { logAuditEvent }                 from '@/lib/audit'
 
+export async function getSyncProgress(providerId: string): Promise<{
+  propertiesFound: number | null
+  bookingsFound:   number | null
+  lastSyncStatus:  string | null
+} | null> {
+  try {
+    const { user } = await requireOrgMember()
+    const supabase = createServiceClient()
+
+    const { data } = await supabase
+      .from('integration_connections')
+      .select('metadata')
+      .eq('user_id', user.id)
+      .eq('provider_id', providerId)
+      .maybeSingle()
+
+    if (!data) return null
+
+    const meta = (data.metadata as Record<string, unknown> | null) ?? {}
+    return {
+      propertiesFound: typeof meta.properties_found === 'number' ? meta.properties_found : null,
+      bookingsFound:   typeof meta.bookings_found   === 'number' ? meta.bookings_found   : null,
+      lastSyncStatus:  typeof meta.last_sync_status === 'string' ? meta.last_sync_status : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function disconnectIntegration(
   providerId: string
 ): Promise<{ error?: string }> {
