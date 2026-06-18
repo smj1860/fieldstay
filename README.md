@@ -115,6 +115,8 @@ psql $DATABASE_URL -f fieldstay_migration_v2.sql
 
 > All migrations are idempotent. Re-running them is safe.
 
+> `fieldstay_migration_v1.sql`/`v2.sql` are superseded — current schema additions live as timestamped files in [`supabase/migrations/`](supabase/migrations/), including `20260618000002_baseline_schema_snapshot.sql`, which backfills CREATE TABLE/RLS/constraints/indexes/policies/grants for tables that predate this migration history. See `supabase/schema_reference.sql` for the full live-schema reference.
+
 ### 4. Generate TypeScript types
 
 ```bash
