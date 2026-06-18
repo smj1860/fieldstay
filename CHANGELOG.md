@@ -6,10 +6,21 @@ All notable changes to FieldStay are documented here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Fixed
+- Mobile "More" drawer nav order now matches the desktop sidebar order (Reviews moved directly after Properties)
+- Turnover Gantt chart now scales column width, row height, and visible day range for mobile viewports instead of forcing horizontal scroll
+- RLS SELECT policy gaps: `org_master_checklist_items`, `org_master_maintenance_schedules`, and `owner_transactions` previously had only an admin/manager `ALL` policy, so crew/viewer roles got zero rows on a plain `SELECT`. Added the standard `_select` policy (any org member) to all three
+- Documented `oauth_states`' intentional zero-policy (service-role only) design in a migration comment, matching the precedent for `stripe_processed_events`/`wo_number_counters`
+
+### Verified (no code change needed — already fixed by a prior commit)
+- `auto-assign-turnover.ts` autopilot path already checks the `turnover_assignments` insert error and only treats `23505` (duplicate) as a no-op, re-throwing anything else
+- `auto-assign-turnover.ts` `record-outcomes` step already upserts on `(turnover_id, crew_member_id)` instead of unconditionally inserting
+- `work-order-events.ts` `handleWorkOrderCompleted` already uses `actual_cost` only (no `estimated_cost` fallback) before posting the expense
+- `work-order-events.ts` `handleWorkOrderCompletedViaPortal` no longer writes to `owner_transactions` at all (PM notification only), eliminating the dual-handler double-post race with `handleWorkOrderCompleted`
+
 ### In Progress
 - UI/UX audit implementation: sidebar navigation grouping, dark-mode CSS token fixes, notification bell wiring
 - Supabase-generated TypeScript types (replacing hand-maintained `types/database.ts`)
-- Remaining Security Audit #2 findings: two Critical, three High priority items
 
 ---
 
