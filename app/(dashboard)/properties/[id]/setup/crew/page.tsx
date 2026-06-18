@@ -18,7 +18,7 @@ export default async function CrewPage({ params }: Props) {
 
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-accent-900 mb-1">Crew</h2>
+      <h2 className="text-lg font-semibold text-primary-themed mb-1">Crew</h2>
       <p className="text-sm text-accent-500 mb-6">
         Add the cleaning and maintenance crew members you work with. You'll assign
         specific crew to each turnover when it's created.

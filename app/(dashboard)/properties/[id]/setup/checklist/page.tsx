@@ -46,7 +46,7 @@ export default async function ChecklistPage({ params }: Props) {
 
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-accent-900 mb-1">Cleaning Checklist</h2>
+      <h2 className="text-lg font-semibold text-primary-themed mb-1">Cleaning Checklist</h2>
       <p className="text-sm text-accent-500 mb-6">
         Build the checklist your crew follows for every turnover. Organize by room or area.
         Flag items that require a photo for accountability.

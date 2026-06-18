@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import type { CrewMember, CrewAvailabilityEntry } from '@/types/database'
 
 // Deterministic color palette — index-stable across renders
@@ -30,6 +30,10 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Props) {
   // (matches the 2-month data window fetched server-side)
   const [viewDate, setViewDate] = useState<Date>(thisMonth)
 
+  // Selected day for the detail modal — independent of viewDate so closing
+  // the modal never resets the calendar's current month.
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+
   const year       = viewDate.getFullYear()
   const month      = viewDate.getMonth()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
@@ -45,6 +49,9 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Props) {
 
   // Invert availabilityMap: date → array of unavailable CrewMember
   const dateToUnavailable = new Map<string, CrewMember[]>()
+  // Invert availabilityMap: date → every availability record for that date
+  // (both available and unavailable), used by the day-detail modal.
+  const dateToRecords = new Map<string, { member: CrewMember; entry: CrewAvailabilityEntry }[]>()
   for (const [crewId, entries] of Object.entries(availabilityMap)) {
     const member = crewById.get(crewId)
     if (!member) continue
@@ -55,6 +62,10 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Props) {
         }
         dateToUnavailable.get(entry.available_date)!.push(member)
       }
+      if (!dateToRecords.has(entry.available_date)) {
+        dateToRecords.set(entry.available_date, [])
+      }
+      dateToRecords.get(entry.available_date)!.push({ member, entry })
     }
   }
 
@@ -155,9 +166,11 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Props) {
           const overflow = unavailable.length - SHOW_MAX
 
           return (
-            <div
+            <button
               key={dateStr}
-              className="min-h-[80px] p-1.5 flex flex-col"
+              type="button"
+              onClick={() => setSelectedDate(dateStr)}
+              className="min-h-[80px] p-1.5 flex flex-col text-left cursor-pointer transition-colors"
               style={{
                 background:   isToday
                   ? 'rgba(252,209,22,0.07)'
@@ -214,7 +227,7 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Props) {
                   </span>
                 )}
               </div>
-            </div>
+            </button>
           )
         })}
       </div>
@@ -254,6 +267,102 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Props) {
           )}
         </div>
       )}
+
+      {selectedDate && (
+        <DayAvailabilityModal
+          dateStr={selectedDate}
+          records={dateToRecords.get(selectedDate) ?? []}
+          crewColor={crewColor}
+          onClose={() => setSelectedDate(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Day detail modal ────────────────────────────────────────────────────────
+
+function DayAvailabilityModal({
+  dateStr,
+  records,
+  crewColor,
+  onClose,
+}: {
+  dateStr:   string
+  records:   { member: CrewMember; entry: CrewAvailabilityEntry }[]
+  crewColor: Map<string, string>
+  onClose:   () => void
+}) {
+  const dateLabel = new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month:   'long',
+    day:     'numeric',
+    year:    'numeric',
+  })
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      onClick={onClose}
+    >
+      <div
+        className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto"
+        style={{ background: 'var(--bg-card)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <h3 className="font-semibold text-base text-primary-themed">{dateLabel}</h3>
+          <button onClick={onClose} className="btn-ghost p-1.5 -mt-1 -mr-1">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {records.length === 0 ? (
+          <p className="text-sm text-muted-themed">
+            No availability changes recorded for this day — all crew are assumed available.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {records.map(({ member, entry }) => (
+              <div
+                key={member.id}
+                className="flex items-center gap-3 p-2 rounded-lg"
+                style={{ background: 'var(--bg-raised)' }}
+              >
+                <span
+                  className="w-7 h-7 rounded-full flex-shrink-0 flex items-center
+                             justify-center text-[11px] font-bold"
+                  style={{ background: crewColor.get(member.id), color: '#fff' }}
+                >
+                  {member.name[0]?.toUpperCase()}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-primary-themed truncate">
+                    {member.name}
+                  </p>
+                  {entry.notes && (
+                    <p className="text-xs text-muted-themed truncate">{entry.notes}</p>
+                  )}
+                </div>
+                <span
+                  className="text-xs font-semibold flex items-center gap-1.5 flex-shrink-0"
+                  style={{
+                    color: entry.is_available ? 'var(--accent-green)' : 'var(--accent-red)',
+                  }}
+                >
+                  <span
+                    className="w-1.5 h-1.5 rounded-full"
+                    style={{
+                      background: entry.is_available ? 'var(--accent-green)' : 'var(--accent-red)',
+                    }}
+                  />
+                  {entry.is_available ? 'Available' : 'Unavailable'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
