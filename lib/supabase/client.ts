@@ -1,9 +1,9 @@
 'use client'
 
 import { createBrowserClient } from '@supabase/ssr'
+import type { Database } from '@/types/database.generated'
 
-// Omit <Database> type arg — see lib/supabase/server.ts for explanation.
-let client: ReturnType<typeof createBrowserClient> | undefined
+let client: ReturnType<typeof createBrowserClient<Database>> | undefined
 
 /**
  * Browser-side Supabase client for use in Client Components.
@@ -12,7 +12,7 @@ let client: ReturnType<typeof createBrowserClient> | undefined
 export function createClient() {
   if (client) return client
 
-  client = createBrowserClient(
+  client = createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )

@@ -59,10 +59,10 @@ export async function POST(request: NextRequest) {
     if (!draft) return NextResponse.json({ error: 'Failed to create draft' }, { status: 500 })
 
     const draftItems = Object.entries(counts).map(([id, qty]) => ({
-      draft_id:           draft.id,
-      inventory_item_id:  id,
-      previous_quantity:  prevMap[id] ?? 0,
-      submitted_quantity: qty,
+      draft_id:          draft.id,
+      item_id:           id,
+      previous_quantity: prevMap[id] ?? 0,
+      counted_qty:       qty,
     }))
 
     if (draftItems.length > 0) {

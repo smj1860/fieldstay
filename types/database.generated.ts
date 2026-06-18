@@ -2,7 +2,7 @@
  * FieldStay — Generated Supabase Types (Reference)
  *
  * Auto-generated from the live Supabase project (vpmznjktllhmmbfnxuvk)
- * via the Supabase MCP generate_typescript_types tool on 2026-06-10.
+ * via the Supabase MCP generate_typescript_types tool on 2026-06-18.
  *
  * This file is NOT imported anywhere in the app. types/database.ts is the
  * hand-maintained file that the codebase actually imports from (flat
@@ -353,6 +353,7 @@ export type Database = {
           section_name: string
           sort_order: number
           task: string
+          turnover_id: string | null
           updated_at: string
         }
         Insert: {
@@ -370,6 +371,7 @@ export type Database = {
           section_name: string
           sort_order?: number
           task: string
+          turnover_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -387,6 +389,7 @@ export type Database = {
           section_name?: string
           sort_order?: number
           task?: string
+          turnover_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -404,6 +407,13 @@ export type Database = {
             referencedRelation: "checklist_instances"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "checklist_instance_items_turnover_id_fkey"
+            columns: ["turnover_id"]
+            isOneToOne: false
+            referencedRelation: "turnovers"
+            referencedColumns: ["id"]
+          },
         ]
       }
       checklist_instances: {
@@ -412,6 +422,7 @@ export type Database = {
           created_at: string
           id: string
           org_id: string
+          section_photo_path: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["checklist_status"]
           template_id: string | null
@@ -424,6 +435,7 @@ export type Database = {
           created_at?: string
           id?: string
           org_id: string
+          section_photo_path?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["checklist_status"]
           template_id?: string | null
@@ -436,6 +448,7 @@ export type Database = {
           created_at?: string
           id?: string
           org_id?: string
+          section_photo_path?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["checklist_status"]
           template_id?: string | null
@@ -740,6 +753,7 @@ export type Database = {
           email: string | null
           home_lat: number | null
           home_lng: number | null
+          home_zip: string | null
           id: string
           invite_accepted_at: string | null
           invite_sent_at: string | null
@@ -763,6 +777,7 @@ export type Database = {
           email?: string | null
           home_lat?: number | null
           home_lng?: number | null
+          home_zip?: string | null
           id?: string
           invite_accepted_at?: string | null
           invite_sent_at?: string | null
@@ -786,6 +801,7 @@ export type Database = {
           email?: string | null
           home_lat?: number | null
           home_lng?: number | null
+          home_zip?: string | null
           id?: string
           invite_accepted_at?: string | null
           invite_sent_at?: string | null
@@ -809,143 +825,6 @@ export type Database = {
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      guest_message_templates: {
-        Row: {
-          body: string
-          created_at: string
-          days_before: number | null
-          id: string
-          is_active: boolean
-          name: string
-          org_id: string
-          property_id: string
-          subject: string
-          trigger: Database["public"]["Enums"]["message_trigger"]
-          updated_at: string
-        }
-        Insert: {
-          body: string
-          created_at?: string
-          days_before?: number | null
-          id?: string
-          is_active?: boolean
-          name: string
-          org_id: string
-          property_id: string
-          subject: string
-          trigger: Database["public"]["Enums"]["message_trigger"]
-          updated_at?: string
-        }
-        Update: {
-          body?: string
-          created_at?: string
-          days_before?: number | null
-          id?: string
-          is_active?: boolean
-          name?: string
-          org_id?: string
-          property_id?: string
-          subject?: string
-          trigger?: Database["public"]["Enums"]["message_trigger"]
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "guest_message_templates_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "guest_message_templates_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "properties"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      guest_messages_sent: {
-        Row: {
-          body_rendered: string
-          booking_id: string | null
-          created_at: string
-          id: string
-          org_id: string
-          property_id: string
-          recipient_email: string
-          recipient_name: string | null
-          resend_message_id: string | null
-          sent_at: string
-          status: Database["public"]["Enums"]["message_status"]
-          subject: string
-          template_id: string | null
-          trigger: Database["public"]["Enums"]["message_trigger"]
-        }
-        Insert: {
-          body_rendered: string
-          booking_id?: string | null
-          created_at?: string
-          id?: string
-          org_id: string
-          property_id: string
-          recipient_email: string
-          recipient_name?: string | null
-          resend_message_id?: string | null
-          sent_at?: string
-          status?: Database["public"]["Enums"]["message_status"]
-          subject: string
-          template_id?: string | null
-          trigger: Database["public"]["Enums"]["message_trigger"]
-        }
-        Update: {
-          body_rendered?: string
-          booking_id?: string | null
-          created_at?: string
-          id?: string
-          org_id?: string
-          property_id?: string
-          recipient_email?: string
-          recipient_name?: string | null
-          resend_message_id?: string | null
-          sent_at?: string
-          status?: Database["public"]["Enums"]["message_status"]
-          subject?: string
-          template_id?: string | null
-          trigger?: Database["public"]["Enums"]["message_trigger"]
-        }
-        Relationships: [
-          {
-            foreignKeyName: "guest_messages_sent_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "guest_messages_sent_org_id_fkey"
-            columns: ["org_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "guest_messages_sent_property_id_fkey"
-            columns: ["property_id"]
-            isOneToOne: false
-            referencedRelation: "properties"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "guest_messages_sent_template_id_fkey"
-            columns: ["template_id"]
-            isOneToOne: false
-            referencedRelation: "guest_message_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -1014,11 +893,14 @@ export type Database = {
         Row: {
           connected_at: string
           created_at: string
+          expires_at: string | null
           external_user_id: string | null
           id: string
           last_used_at: string | null
           metadata: Json
+          org_id: string | null
           provider_id: string
+          refresh_token_vault_secret_id: string | null
           scope: string | null
           status: string
           updated_at: string
@@ -1028,11 +910,14 @@ export type Database = {
         Insert: {
           connected_at?: string
           created_at?: string
+          expires_at?: string | null
           external_user_id?: string | null
           id?: string
           last_used_at?: string | null
           metadata?: Json
+          org_id?: string | null
           provider_id: string
+          refresh_token_vault_secret_id?: string | null
           scope?: string | null
           status?: string
           updated_at?: string
@@ -1042,11 +927,14 @@ export type Database = {
         Update: {
           connected_at?: string
           created_at?: string
+          expires_at?: string | null
           external_user_id?: string | null
           id?: string
           last_used_at?: string | null
           metadata?: Json
+          org_id?: string | null
           provider_id?: string
+          refresh_token_vault_secret_id?: string | null
           scope?: string | null
           status?: string
           updated_at?: string
@@ -1054,6 +942,13 @@ export type Database = {
           vault_secret_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "integration_connections_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "integration_connections_provider_id_fkey"
             columns: ["provider_id"]
@@ -1124,6 +1019,7 @@ export type Database = {
           id: string
           item_id: string
           note: string | null
+          previous_quantity: number
         }
         Insert: {
           counted_qty?: number
@@ -1131,6 +1027,7 @@ export type Database = {
           id?: string
           item_id: string
           note?: string | null
+          previous_quantity?: number
         }
         Update: {
           counted_qty?: number
@@ -1138,6 +1035,7 @@ export type Database = {
           id?: string
           item_id?: string
           note?: string | null
+          previous_quantity?: number
         }
         Relationships: [
           {
@@ -1193,6 +1091,13 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_count_drafts_submitted_by_fkey"
+            columns: ["submitted_by"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
             referencedColumns: ["id"]
           },
         ]
@@ -1366,9 +1271,11 @@ export type Database = {
       }
       inventory_template_items: {
         Row: {
+          catalog_item_id: string | null
           category: string | null
           id: string
           name: string
+          notes: string | null
           par_level: number
           par_qty: number
           preferred_brand: string | null
@@ -1377,9 +1284,11 @@ export type Database = {
           unit: string | null
         }
         Insert: {
+          catalog_item_id?: string | null
           category?: string | null
           id?: string
           name: string
+          notes?: string | null
           par_level?: number
           par_qty?: number
           preferred_brand?: string | null
@@ -1388,9 +1297,11 @@ export type Database = {
           unit?: string | null
         }
         Update: {
+          catalog_item_id?: string | null
           category?: string | null
           id?: string
           name?: string
+          notes?: string | null
           par_level?: number
           par_qty?: number
           preferred_brand?: string | null
@@ -1399,6 +1310,13 @@ export type Database = {
           unit?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "inventory_template_items_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "inventory_template_items_template_id_fkey"
             columns: ["template_id"]
@@ -1432,8 +1350,111 @@ export type Database = {
         }
         Relationships: []
       }
+      maintenance_catalog_items: {
+        Row: {
+          asset_category: string | null
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+          suggested_recurrence: string | null
+        }
+        Insert: {
+          asset_category?: string | null
+          category: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+          suggested_recurrence?: string | null
+        }
+        Update: {
+          asset_category?: string | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+          suggested_recurrence?: string | null
+        }
+        Relationships: []
+      }
+      maintenance_completions: {
+        Row: {
+          asset_category: string | null
+          completed_at: string
+          completed_by: string | null
+          created_at: string
+          id: string
+          maintenance_schedule_id: string
+          next_due_date_set: string | null
+          notes: string | null
+          org_id: string
+          property_id: string
+          work_order_id: string | null
+        }
+        Insert: {
+          asset_category?: string | null
+          completed_at?: string
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          maintenance_schedule_id: string
+          next_due_date_set?: string | null
+          notes?: string | null
+          org_id: string
+          property_id: string
+          work_order_id?: string | null
+        }
+        Update: {
+          asset_category?: string | null
+          completed_at?: string
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          maintenance_schedule_id?: string
+          next_due_date_set?: string | null
+          notes?: string | null
+          org_id?: string
+          property_id?: string
+          work_order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "maintenance_completions_maintenance_schedule_id_fkey"
+            columns: ["maintenance_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "maintenance_schedules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maintenance_completions_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maintenance_completions_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       maintenance_schedule_template_items: {
         Row: {
+          active_from_month: number | null
+          active_to_month: number | null
+          asset_category: string | null
           created_at: string
           description: string | null
           estimated_cost: number | null
@@ -1448,6 +1469,9 @@ export type Database = {
             | null
         }
         Insert: {
+          active_from_month?: number | null
+          active_to_month?: number | null
+          asset_category?: string | null
           created_at?: string
           description?: string | null
           estimated_cost?: number | null
@@ -1462,6 +1486,9 @@ export type Database = {
             | null
         }
         Update: {
+          active_from_month?: number | null
+          active_to_month?: number | null
+          asset_category?: string | null
           created_at?: string
           description?: string | null
           estimated_cost?: number | null
@@ -1514,6 +1541,9 @@ export type Database = {
       }
       maintenance_schedules: {
         Row: {
+          active_from_month: number | null
+          active_to_month: number | null
+          asset_category: string | null
           assigned_vendor_id: string | null
           auto_create_wo: boolean
           created_at: string
@@ -1524,6 +1554,7 @@ export type Database = {
           id: string
           instructions: string | null
           is_active: boolean
+          is_from_standard_template: boolean
           last_completed_date: string | null
           month_due: number | null
           name: string
@@ -1531,12 +1562,17 @@ export type Database = {
           org_id: string
           property_id: string
           schedule_type: Database["public"]["Enums"]["schedule_type"]
+          source_catalog_item_id: string | null
+          source_template_item_id: string | null
           updated_at: string
           vendor_specialty_hint:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
         }
         Insert: {
+          active_from_month?: number | null
+          active_to_month?: number | null
+          asset_category?: string | null
           assigned_vendor_id?: string | null
           auto_create_wo?: boolean
           created_at?: string
@@ -1547,6 +1583,7 @@ export type Database = {
           id?: string
           instructions?: string | null
           is_active?: boolean
+          is_from_standard_template?: boolean
           last_completed_date?: string | null
           month_due?: number | null
           name: string
@@ -1554,12 +1591,17 @@ export type Database = {
           org_id: string
           property_id: string
           schedule_type?: Database["public"]["Enums"]["schedule_type"]
+          source_catalog_item_id?: string | null
+          source_template_item_id?: string | null
           updated_at?: string
           vendor_specialty_hint?:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
         }
         Update: {
+          active_from_month?: number | null
+          active_to_month?: number | null
+          asset_category?: string | null
           assigned_vendor_id?: string | null
           auto_create_wo?: boolean
           created_at?: string
@@ -1570,6 +1612,7 @@ export type Database = {
           id?: string
           instructions?: string | null
           is_active?: boolean
+          is_from_standard_template?: boolean
           last_completed_date?: string | null
           month_due?: number | null
           name?: string
@@ -1577,6 +1620,8 @@ export type Database = {
           org_id?: string
           property_id?: string
           schedule_type?: Database["public"]["Enums"]["schedule_type"]
+          source_catalog_item_id?: string | null
+          source_template_item_id?: string | null
           updated_at?: string
           vendor_specialty_hint?:
             | Database["public"]["Enums"]["vendor_specialty"]
@@ -1609,6 +1654,13 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maintenance_schedules_source_template_item_id_fkey"
+            columns: ["source_template_item_id"]
+            isOneToOne: false
+            referencedRelation: "maintenance_schedule_template_items"
             referencedColumns: ["id"]
           },
         ]
@@ -2147,48 +2199,18 @@ export type Database = {
           },
         ]
       }
-      powersync_crew_instances: {
+      ownerrez_processed_webhooks: {
         Row: {
-          instance_id: string
-          user_id: string
+          processed_at: string
+          webhook_id: string
         }
         Insert: {
-          instance_id: string
-          user_id: string
+          processed_at?: string
+          webhook_id: string
         }
         Update: {
-          instance_id?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
-      powersync_crew_properties: {
-        Row: {
-          property_id: string
-          user_id: string
-        }
-        Insert: {
-          property_id: string
-          user_id: string
-        }
-        Update: {
-          property_id?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
-      powersync_crew_turnovers: {
-        Row: {
-          turnover_id: string
-          user_id: string
-        }
-        Insert: {
-          turnover_id: string
-          user_id: string
-        }
-        Update: {
-          turnover_id?: string
-          user_id?: string
+          processed_at?: string
+          webhook_id?: string
         }
         Relationships: []
       }
@@ -2870,7 +2892,10 @@ export type Database = {
           id: string
           notification_type: Database["public"]["Enums"]["contact_pref"] | null
           notified_at: string | null
+          org_id: string | null
+          property_id: string | null
           turnover_id: string
+          user_id: string | null
         }
         Insert: {
           assigned_at?: string
@@ -2879,7 +2904,10 @@ export type Database = {
           id?: string
           notification_type?: Database["public"]["Enums"]["contact_pref"] | null
           notified_at?: string | null
+          org_id?: string | null
+          property_id?: string | null
           turnover_id: string
+          user_id?: string | null
         }
         Update: {
           assigned_at?: string
@@ -2888,7 +2916,10 @@ export type Database = {
           id?: string
           notification_type?: Database["public"]["Enums"]["contact_pref"] | null
           notified_at?: string | null
+          org_id?: string | null
+          property_id?: string | null
           turnover_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -2896,6 +2927,20 @@ export type Database = {
             columns: ["crew_member_id"]
             isOneToOne: false
             referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turnover_assignments_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turnover_assignments_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
             referencedColumns: ["id"]
           },
           {
@@ -3361,12 +3406,19 @@ export type Database = {
           estimated_cost: number | null
           id: string
           invoice_reference: string | null
+          lockbox_code: string | null
           nte_amount: number | null
           org_id: string
+          parking_notes: string | null
           portal_enabled: boolean
           priority: Database["public"]["Enums"]["priority_level"]
           property_id: string
+          public_signed_off_at: string | null
+          public_token: string | null
+          public_token_expires_at: string | null
+          public_viewed_at: string | null
           scheduled_date: string | null
+          sign_off_notes: string | null
           source: Database["public"]["Enums"]["wo_source"]
           source_schedule_id: string | null
           source_turnover_id: string | null
@@ -3375,6 +3427,7 @@ export type Database = {
           updated_at: string
           vendor_acknowledged_at: string | null
           vendor_acknowledged_by: string | null
+          vendor_dispatch_email: string | null
           vendor_id: string | null
           vendor_rating: number | null
           vendor_rating_notes: string | null
@@ -3398,12 +3451,19 @@ export type Database = {
           estimated_cost?: number | null
           id?: string
           invoice_reference?: string | null
+          lockbox_code?: string | null
           nte_amount?: number | null
           org_id: string
+          parking_notes?: string | null
           portal_enabled?: boolean
           priority?: Database["public"]["Enums"]["priority_level"]
           property_id: string
+          public_signed_off_at?: string | null
+          public_token?: string | null
+          public_token_expires_at?: string | null
+          public_viewed_at?: string | null
           scheduled_date?: string | null
+          sign_off_notes?: string | null
           source?: Database["public"]["Enums"]["wo_source"]
           source_schedule_id?: string | null
           source_turnover_id?: string | null
@@ -3412,6 +3472,7 @@ export type Database = {
           updated_at?: string
           vendor_acknowledged_at?: string | null
           vendor_acknowledged_by?: string | null
+          vendor_dispatch_email?: string | null
           vendor_id?: string | null
           vendor_rating?: number | null
           vendor_rating_notes?: string | null
@@ -3435,12 +3496,19 @@ export type Database = {
           estimated_cost?: number | null
           id?: string
           invoice_reference?: string | null
+          lockbox_code?: string | null
           nte_amount?: number | null
           org_id?: string
+          parking_notes?: string | null
           portal_enabled?: boolean
           priority?: Database["public"]["Enums"]["priority_level"]
           property_id?: string
+          public_signed_off_at?: string | null
+          public_token?: string | null
+          public_token_expires_at?: string | null
+          public_viewed_at?: string | null
           scheduled_date?: string | null
+          sign_off_notes?: string | null
           source?: Database["public"]["Enums"]["wo_source"]
           source_schedule_id?: string | null
           source_turnover_id?: string | null
@@ -3449,6 +3517,7 @@ export type Database = {
           updated_at?: string
           vendor_acknowledged_at?: string | null
           vendor_acknowledged_by?: string | null
+          vendor_dispatch_email?: string | null
           vendor_id?: string | null
           vendor_rating?: number | null
           vendor_rating_notes?: string | null
@@ -3554,6 +3623,7 @@ export type Database = {
         }[]
       }
       get_crew_member_id: { Args: never; Returns: string }
+      get_crew_turnover_ids: { Args: never; Returns: string[] }
       get_repeat_issues: {
         Args: { since_date: string }
         Returns: {
@@ -3572,6 +3642,11 @@ export type Database = {
         Returns: boolean
       }
       next_wo_number: { Args: { p_org_id: string }; Returns: string }
+      purge_expired_audit_events: { Args: never; Returns: Json }
+      read_integration_refresh_token: {
+        Args: { p_provider_id: string; p_user_id: string }
+        Returns: string
+      }
       read_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: string
@@ -3583,6 +3658,15 @@ export type Database = {
       revoke_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: undefined
+      }
+      store_integration_refresh_token: {
+        Args: {
+          p_expires_at?: string
+          p_provider_id: string
+          p_refresh_token: string
+          p_user_id: string
+        }
+        Returns: string
       }
       store_integration_token: {
         Args: {
@@ -3626,6 +3710,7 @@ export type Database = {
         | "direct"
         | "manual"
         | "other"
+        | "ownerrez"
       booking_status: "confirmed" | "cancelled" | "blocked" | "tentative"
       checklist_status: "not_started" | "in_progress" | "completed"
       comm_channel: "email" | "sms" | "phone" | "in_person" | "note"
@@ -3667,9 +3752,7 @@ export type Database = {
         | "39_year"
         | "section_179"
       member_role: "admin" | "manager" | "crew" | "viewer" | "owner"
-      message_status: "sent" | "failed" | "bounced"
-      message_trigger: "booking_confirmed" | "pre_checkout"
-      org_plan: "starter" | "growth" | "pro" | "enterprise"
+      org_plan: "starter" | "growth" | "pro" | "enterprise" | "portfolio"
       org_plan_status:
         | "trialing"
         | "active"
@@ -3918,6 +4001,7 @@ export const Constants = {
         "direct",
         "manual",
         "other",
+        "ownerrez",
       ],
       booking_status: ["confirmed", "cancelled", "blocked", "tentative"],
       checklist_status: ["not_started", "in_progress", "completed"],
@@ -3958,9 +4042,7 @@ export const Constants = {
       ],
       macrs_class: ["5_year", "15_year", "27_5_year", "39_year", "section_179"],
       member_role: ["admin", "manager", "crew", "viewer", "owner"],
-      message_status: ["sent", "failed", "bounced"],
-      message_trigger: ["booking_confirmed", "pre_checkout"],
-      org_plan: ["starter", "growth", "pro", "enterprise"],
+      org_plan: ["starter", "growth", "pro", "enterprise", "portfolio"],
       org_plan_status: [
         "trialing",
         "active",

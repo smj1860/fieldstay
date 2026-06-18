@@ -476,7 +476,7 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
 
   const { data: draftItems } = await supabase
     .from('inventory_count_draft_items')
-    .select('inventory_item_id, submitted_quantity')
+    .select('item_id, counted_qty')
     .eq('draft_id', draftId)
 
   if (!draftItems) return { error: 'Draft not found' }
@@ -485,8 +485,8 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
     draftItems.map(item =>
       supabase
         .from('inventory_items')
-        .update({ current_quantity: item.submitted_quantity })
-        .eq('id', item.inventory_item_id)
+        .update({ current_quantity: item.counted_qty })
+        .eq('id', item.item_id)
     )
   )
 

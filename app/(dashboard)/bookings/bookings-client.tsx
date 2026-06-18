@@ -73,6 +73,7 @@ const SOURCE_LABELS: Record<BookingSource, string> = {
   booking_com: 'Booking.com',
   direct:      'Direct',
   manual:      'Manual',
+  ownerrez:    'OwnerRez',
   other:       'Other',
 }
 
@@ -82,6 +83,7 @@ const SOURCE_COLORS: Record<BookingSource, string> = {
   booking_com: 'badge-blue',
   direct:      'badge-green',
   manual:      'badge-gold',
+  ownerrez:    'badge-blue',
   other:       'badge-slate',
 }
 
