@@ -415,7 +415,6 @@ function CreateWorkOrderModal({
         if (!uploadErr) {
           await supabase.from('work_order_photos').insert({
             work_order_id: workOrderId,
-            org_id:        orgId,
             storage_path:  path,
           })
         }
