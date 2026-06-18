@@ -55,6 +55,32 @@ class SupabaseConnector {
           .update({ current_quantity: op.opData?.current_quantity })
           .eq('id', op.id)
       }
+      if (op.table === 'crew_availability' && op.op === 'PUT') {
+        const isAvailable = op.opData?.is_available === 1
+        if (op.opData?.org_id) {
+          // Full INSERT — upsert on primary key to handle any duplicate
+          await this.supabase
+            .from('crew_availability')
+            .upsert({
+              id:             op.id,
+              org_id:         op.opData.org_id,
+              crew_member_id: op.opData.crew_member_id,
+              available_date: op.opData.available_date,
+              is_available:   isAvailable,
+              notes:          op.opData.notes ?? null,
+              created_at:     op.opData.created_at,
+            })
+        } else {
+          // UPDATE of existing row — only push changed fields
+          await this.supabase
+            .from('crew_availability')
+            .update({
+              is_available: isAvailable,
+              notes:        op.opData?.notes ?? null,
+            })
+            .eq('id', op.id)
+        }
+      }
     }
     await transaction.complete()
   }
