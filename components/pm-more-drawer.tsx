@@ -80,8 +80,8 @@ export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: P
           </button>
         </div>
 
-        {/* Nav items grid */}
-        <div className="grid grid-cols-3 gap-2 px-4 py-2">
+        {/* Nav items — single column list, same order as desktop sidebar */}
+        <div className="flex flex-col gap-0.5 px-3 py-2">
           {items.map((item) => {
             const Icon   = item.icon
             const active = pathname === item.href || pathname.startsWith(item.href + '/')
@@ -90,14 +90,15 @@ export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: P
                 key={item.href}
                 href={item.href}
                 onClick={onClose}
-                className="flex flex-col items-center gap-2 py-4 rounded-xl transition-all"
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
                 style={{
-                  background: active ? 'var(--accent-gold-dim)' : 'var(--bg-raised)',
-                  color:      active ? 'var(--accent-gold)'     : 'var(--text-secondary)',
+                  background: active ? 'var(--bg-raised)' : 'transparent',
+                  color:      active ? 'var(--text-primary)' : 'var(--text-muted)',
+                  borderLeft: active ? '2px solid var(--accent-gold)' : '2px solid transparent',
                 }}
               >
-                <Icon className="w-5 h-5" />
-                <span className="text-xs font-medium text-center leading-tight">{item.label}</span>
+                <Icon className="w-5 h-5 flex-shrink-0" />
+                <span>{item.label}</span>
               </Link>
             )
           })}
