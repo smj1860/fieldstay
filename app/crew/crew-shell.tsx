@@ -112,7 +112,7 @@ function CrewBottomNav({ userId }: { userId: string }) {
 
   const tabs = [
     { href: '/crew',              label: 'Assignments',  icon: CalendarCheck },
-    { href: '/crew/availability', label: 'Availability', icon: CalendarDays },
+    { href: '/crew/availability', label: 'Time Off',     icon: CalendarDays },
     { href: '/crew/messages',     label: 'Messages',     icon: MessageSquare, badge: unreadCount },
   ]
 

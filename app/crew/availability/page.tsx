@@ -1,6 +1,6 @@
-import { redirect }             from 'next/navigation'
-import { createClient }         from '@/lib/supabase/server'
-import { AvailabilityCalendar } from '@/components/crew/availability-calendar'
+import { redirect }        from 'next/navigation'
+import { createClient }    from '@/lib/supabase/server'
+import { TimeOffRequest }  from '@/components/crew/time-off-request'
 
 export default async function CrewAvailabilityPage() {
   const supabase                = await createClient()
@@ -17,18 +17,10 @@ export default async function CrewAvailabilityPage() {
 
   return (
     <div className="px-4 pt-4 pb-24">
-      <h1 className="text-xl font-bold text-accent-900 mb-1">My Availability</h1>
-      <p className="text-sm text-accent-500 mb-6">
-        Mark days you&apos;re unavailable so your manager can schedule
-        accordingly. Changes sync instantly when you&apos;re online.
-      </p>
-
-      <div className="bg-white rounded-2xl border border-accent-100 shadow-sm p-4">
-        <AvailabilityCalendar
-          crewMemberId={crewMember.id as string}
-          orgId={crewMember.org_id as string}
-        />
-      </div>
+      <TimeOffRequest
+        crewMemberId={crewMember.id as string}
+        orgId={crewMember.org_id as string}
+      />
     </div>
   )
 }
