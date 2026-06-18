@@ -1,8 +1,9 @@
 import { inngest }            from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
-import { RateLimitError }      from '@/lib/integrations/types'
+import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import type { OwnerRezReview } from '@/lib/integrations/types'
+import { logAuditEvent }       from '@/lib/audit'
 
 export const ownerRezReviewsSync = inngest.createFunction(
   {
@@ -50,6 +51,77 @@ export const ownerRezReviewsSync = inngest.createFunction(
           reviews = await step.run(`fetch-reviews-retry-${userId}`, async () => {
             return new OwnerRezApiClient(userId).getReviews({ sinceUtc: cursor })
           })
+        } else if (err instanceof TokenRevokedError) {
+          const humanError = translateSyncError(err)
+          await step.run(`mark-revoked-${userId}`, async () => {
+            const admin = createServiceClient()
+            const { data: existing } = await admin
+              .from('integration_connections')
+              .select('id, metadata')
+              .eq('user_id', userId)
+              .eq('provider_id', 'ownerrez')
+              .maybeSingle()
+            const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
+
+            await admin
+              .from('integration_connections')
+              .update({
+                status:   'revoked',
+                metadata: {
+                  ...existingMeta,
+                  last_sync_status: 'error',
+                  last_sync_error:  humanError,
+                  last_synced_at:   new Date().toISOString(),
+                },
+              })
+              .eq('user_id', userId)
+              .eq('provider_id', 'ownerrez')
+
+            await logAuditEvent({
+              orgId:      orgId,
+              actorId:    userId,
+              action:     'integration.sync_failed',
+              targetType: 'integration_connection',
+              targetId:   'ownerrez',
+              metadata:   { provider_id: 'ownerrez', reason: 'token_revoked' },
+            })
+
+            // Fire PM notification — throttled to once per 4 hours per connection
+            if (existing?.id) {
+              const milestoneKey = `integration_error_notified:${existing.id}`
+              const { data: recentNotification } = await admin
+                .from('org_milestones')
+                .select('value, achieved_at')
+                .eq('org_id', orgId)
+                .eq('milestone', milestoneKey)
+                .order('achieved_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
+              const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
+                ?.notified_at
+              const tooSoon = lastNotifiedAt &&
+                Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
+
+              if (!tooSoon) {
+                await step.sendEvent(`notify-revoked-${userId}`, {
+                  name: 'integration/connection.error',
+                  data: {
+                    user_id:     userId,
+                    org_id:      orgId,
+                    provider_id: 'ownerrez',
+                    reason:      humanError,
+                  },
+                })
+                await admin.from('org_milestones').upsert({
+                  org_id:    orgId,
+                  milestone: milestoneKey,
+                  value:     { notified_at: new Date().toISOString() },
+                }, { onConflict: 'org_id,milestone' })
+              }
+            }
+          })
+          continue
         } else {
           logger.error(`[OwnerRez:${userId}] Reviews fetch failed: ${err instanceof Error ? err.message : String(err)}`)
           continue
