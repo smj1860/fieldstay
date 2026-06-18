@@ -443,12 +443,12 @@ export interface InventoryCountDraft {
 }
 
 export interface InventoryCountDraftItem {
-  id:                 string
-  draft_id:           string
-  inventory_item_id:  string
-  previous_quantity:  number
-  submitted_quantity: number
-  created_at:         string
+  id:                string
+  draft_id:          string
+  item_id:           string
+  previous_quantity: number
+  counted_qty:       number
+  note:              string | null
 }
 
 export interface PurchaseOrder {

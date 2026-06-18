@@ -123,10 +123,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'RepuGuard is not enabled for this account.' }, { status: 403 })
   }
 
-  // Fetch review with property name
+  // Fetch review with property name + internal notes (staff-only context for the AI)
   const { data: review } = await admin
     .from('reviews')
-    .select('*, properties(name)')
+    .select('*, properties(name, internal_notes)')
     .eq('id', reviewId)
     .eq('org_id', orgId)
     .single()
@@ -135,13 +135,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Review not found' }, { status: 404 })
   }
 
-  const propertyData  = review.properties as { name?: string } | null
+  const propertyData  = review.properties as { name?: string; internal_notes?: string | null } | null
   const propertyName  = propertyData?.name ?? 'the property'
   const guestName     = (review.guest_name as string | null) ?? 'Guest'
   const reviewText    = review.review_text as string
   const starRating    = review.rating as number
   const MAX_INTERNAL_NOTES_LENGTH = 1000
-  const rawNotes = (review.internal_notes as string | null) ?? null
+  const rawNotes = propertyData?.internal_notes ?? null
   const internalNotes = rawNotes
     ? rawNotes
         .slice(0, MAX_INTERNAL_NOTES_LENGTH)

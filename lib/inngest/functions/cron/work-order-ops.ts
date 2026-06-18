@@ -123,7 +123,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
             subject: `Work order escalated to Urgent — open ${daysOpen} days`,
             html:    await renderPmAlert({
               heading:  'Work order auto-escalated to Urgent',
-              body:     `${wo.category.replace(/_/g, ' ')} has been open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without an update and was auto-escalated to Urgent priority.`,
+              body:     `${(wo.category ?? 'Work order').replace(/_/g, ' ')} has been open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without an update and was auto-escalated to Urgent priority.`,
               details: [
                 { label: 'Opened', value: new Date(wo.created_at).toLocaleDateString() },
               ],
@@ -164,12 +164,12 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
         const { data: existing } = await supabase
           .from('org_milestones')
-          .select('created_at')
+          .select('achieved_at')
           .eq('org_id', group.org_id)
           .eq('milestone', milestoneKey)
           .maybeSingle()
 
-        if (existing && new Date(existing.created_at) > thirtyDaysAgo) continue
+        if (existing && new Date(existing.achieved_at) > thirtyDaysAgo) continue
 
         await inngest.send({
           name: 'maintenance/repeat-issue-detected' as const,

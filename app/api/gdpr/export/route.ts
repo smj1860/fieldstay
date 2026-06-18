@@ -22,24 +22,30 @@ export async function GET() {
     { data: profile },
     { data: memberships },
     { data: crewMember },
-    { data: pushSubs },
     { data: auditEvents },
   ] = await Promise.all([
     admin.from('profiles').select('id, full_name, avatar_url, created_at').eq('id', user.id).single(),
     admin.from('organization_members').select('org_id, role, invite_accepted_at').eq('user_id', user.id),
     admin.from('crew_members').select('id, name, role, reliability_score, capacity_score, created_at').eq('user_id', user.id).maybeSingle(),
-    admin.from('push_subscriptions').select('endpoint, created_at').eq('user_id', user.id),
     admin.from('audit_events').select('action, target_type, target_id, created_at').eq('actor_id', user.id).order('created_at', { ascending: false }).limit(500),
   ])
 
-  const crewAssignments = crewMember
-    ? (await admin
-        .from('turnover_assignments')
-        .select('turnover_id, assigned_at')
-        .eq('crew_member_id', crewMember.id)
-        .order('assigned_at', { ascending: false })
-        .limit(200)).data
-    : []
+  const [crewAssignments, pushSubs] = crewMember
+    ? await Promise.all([
+        admin
+          .from('turnover_assignments')
+          .select('turnover_id, assigned_at')
+          .eq('crew_member_id', crewMember.id)
+          .order('assigned_at', { ascending: false })
+          .limit(200)
+          .then((r) => r.data),
+        admin
+          .from('push_subscriptions')
+          .select('endpoint, created_at')
+          .eq('crew_member_id', crewMember.id)
+          .then((r) => r.data),
+      ])
+    : [[], []]
 
   const orgIds = (memberships ?? []).map((m) => m.org_id)
 

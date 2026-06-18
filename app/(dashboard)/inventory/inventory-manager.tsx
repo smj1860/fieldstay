@@ -50,9 +50,9 @@ interface InventoryCount {
 
 interface DraftItem {
   id: string
-  inventory_item_id: string
+  item_id: string
   previous_quantity: number
-  submitted_quantity: number
+  counted_qty: number
   inventory_items: { name: string; unit: string }[]
 }
 
@@ -62,7 +62,7 @@ interface PendingDraft {
   status: string
   created_at: string
   notes: string | null
-  crew_members: { name: string }[] | null
+  crew_members: { name: string } | null
   inventory_count_draft_items: DraftItem[]
 }
 
@@ -1067,8 +1067,8 @@ function PendingCountReview({
             >
               <div className="flex-1 min-w-0">
                 <span className="text-sm font-medium text-primary-themed">{propName(draft.property_id)}</span>
-                {draft.crew_members?.[0] && (
-                  <span className="text-xs text-muted-themed ml-2">by {draft.crew_members[0]?.name ?? 'Unknown'}</span>
+                {draft.crew_members && (
+                  <span className="text-xs text-muted-themed ml-2">by {draft.crew_members.name ?? 'Unknown'}</span>
                 )}
                 {draft.created_at && (
                   <span className="text-xs text-muted-themed ml-2">· {formatDate(draft.created_at)}</span>
@@ -1089,7 +1089,7 @@ function PendingCountReview({
                       <span className="text-right">Change</span>
                     </div>
                     {draftItems.map(di => {
-                      const diff = di.submitted_quantity - di.previous_quantity
+                      const diff = di.counted_qty - di.previous_quantity
                       return (
                         <div key={di.id} className="grid grid-cols-[1fr_80px_80px_80px] gap-2 px-4 py-2.5 border-b border-themed last:border-0 text-sm items-center">
                           <div>
@@ -1107,7 +1107,7 @@ function PendingCountReview({
                               color: diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--accent-amber)',
                             }}
                           >
-                            {di.submitted_quantity}
+                            {di.counted_qty}
                           </span>
                           <span
                             className="text-right text-xs tabular-nums"
