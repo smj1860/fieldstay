@@ -232,7 +232,7 @@ function OrgTab({ org, connections }: { org: Organization; connections: Record<s
         {(() => {
           const conn            = connections.ownerrez
           const isConnected     = conn?.status === 'active'
-          const isError         = conn?.status === 'error'
+          const isError         = conn?.status === 'error' || conn?.status === 'revoked'
           const meta            = (conn?.metadata ?? {}) as Record<string, unknown>
           const lastSyncAt      = meta.last_synced_at as string | undefined
           const lastSyncStatus  = meta.last_sync_status as string | undefined

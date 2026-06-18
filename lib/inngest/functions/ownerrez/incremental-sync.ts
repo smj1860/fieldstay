@@ -19,7 +19,7 @@
 import { inngest }                      from '@/lib/inngest/client'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
-import { RateLimitError, translateSyncError } from '@/lib/integrations/types'
+import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
 
 const PROVIDER = 'ownerrez'
@@ -203,6 +203,71 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               .eq('id', conn.id)
 
             return  // exit this step cleanly without failing it
+          }
+
+          if (err instanceof TokenRevokedError) {
+            const humanError = translateSyncError(err)
+            logger.error(`[OwnerRez:${conn.user_id}] Token revoked — marking connection as revoked`)
+
+            await supabase
+              .from('integration_connections')
+              .update({
+                status:   'revoked',
+                metadata: {
+                  ...metadata,
+                  last_sync_status: 'error',
+                  last_sync_error:  humanError,
+                  last_synced_at:   new Date().toISOString(),
+                },
+              })
+              .eq('id', conn.id)
+
+            await logAuditEvent({
+              orgId:      conn.org_id,
+              action:     'integration.sync_failed',
+              targetType: 'integration_connection',
+              targetId:   conn.id,
+              metadata:   { provider_id: PROVIDER, reason: 'token_revoked' },
+            })
+
+            // Fire PM notification — throttled to once per 4 hours per connection.
+            // Revoked tokens are the most important case to notify on: only the PM
+            // can fix them by reconnecting, and they never self-resolve on retry.
+            try {
+              const milestoneKey = `integration_error_notified:${conn.id}`
+              const { data: recentNotification } = await supabase
+                .from('org_milestones')
+                .select('value, achieved_at')
+                .eq('org_id', conn.org_id)
+                .eq('milestone', milestoneKey)
+                .order('achieved_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
+              const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
+                ?.notified_at
+              const tooSoon = lastNotifiedAt &&
+                Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
+
+              if (!tooSoon) {
+                await step.sendEvent('notify-revoked-connection', {
+                  name: 'integration/connection.error',
+                  data: {
+                    user_id:     conn.user_id,
+                    org_id:      conn.org_id ?? '',
+                    provider_id: PROVIDER,
+                    reason:      humanError,
+                  },
+                })
+                await supabase.from('org_milestones').upsert({
+                  org_id:    conn.org_id,
+                  milestone: milestoneKey,
+                  value:     { notified_at: new Date().toISOString() },
+                }, { onConflict: 'org_id,milestone' })
+              }
+            } catch { /* non-fatal — connection status was already written */ }
+
+            return  // exit this step cleanly; connection is dead, no retry needed
           }
 
           const humanError = translateSyncError(err)

@@ -270,10 +270,11 @@ export const ownerRezInitialSync = inngest.createFunction(
 
       await step.run('handle-sync-failure', async () => {
         const supabase = createServiceClient()
+        const isRevoked = err instanceof TokenRevokedError
 
         const { data: existing } = await supabase
           .from('integration_connections')
-          .select('metadata')
+          .select('id, metadata')
           .eq('user_id', user_id)
           .eq('provider_id', PROVIDER)
           .maybeSingle()
@@ -283,7 +284,7 @@ export const ownerRezInitialSync = inngest.createFunction(
         await supabase
           .from('integration_connections')
           .update({
-            status:   'error',
+            status:   isRevoked ? 'revoked' : 'error',
             metadata: {
               ...existingMeta,
               last_sync_status: 'error',
@@ -300,8 +301,51 @@ export const ownerRezInitialSync = inngest.createFunction(
           action:     'integration.sync_failed',
           targetType: 'integration_connection',
           targetId:   PROVIDER,
-          metadata:   { provider_id: PROVIDER, error: humanError, workflow_id: workflowId, sync_type: 'initial' },
+          metadata:   {
+            provider_id: PROVIDER,
+            error:       humanError,
+            workflow_id: workflowId,
+            sync_type:   'initial',
+            ...(isRevoked ? { reason: 'token_revoked' } : {}),
+          },
         })
+
+        // Fire PM notification — throttled to once per 4 hours per connection.
+        // Revoked tokens are the most important case to notify on: only the PM
+        // can fix them by reconnecting, and they never self-resolve on retry.
+        if (existing?.id) {
+          const milestoneKey = `integration_error_notified:${existing.id}`
+          const { data: recentNotification } = await supabase
+            .from('org_milestones')
+            .select('value, achieved_at')
+            .eq('org_id', org_id)
+            .eq('milestone', milestoneKey)
+            .order('achieved_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+
+          const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
+            ?.notified_at
+          const tooSoon = lastNotifiedAt &&
+            Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
+
+          if (!tooSoon) {
+            await step.sendEvent('notify-connection-error', {
+              name: 'integration/connection.error',
+              data: {
+                user_id:     user_id,
+                org_id:      org_id,
+                provider_id: PROVIDER,
+                reason:      humanError,
+              },
+            })
+            await supabase.from('org_milestones').upsert({
+              org_id:    org_id,
+              milestone: milestoneKey,
+              value:     { notified_at: new Date().toISOString() },
+            }, { onConflict: 'org_id,milestone' })
+          }
+        }
       })
 
       return { user_id, synced: false }
