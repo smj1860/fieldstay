@@ -597,6 +597,61 @@ export async function inviteCrewMember(
   return { success: true }
 }
 
+export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (!['owner', 'admin', 'manager'].includes(membership.role)) {
+    return { sent: 0, error: 'Permission denied' }
+  }
+
+  const { data: uninvited } = await supabase
+    .from('crew_members')
+    .select('id, name, email, invite_token')
+    .eq('org_id', membership.org_id)
+    .eq('is_active', true)
+    .is('user_id', null)
+    .is('invite_sent_at', null)
+    .not('email', 'is', null)
+
+  if (!uninvited?.length) return { sent: 0 }
+
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('name')
+    .eq('id', membership.org_id)
+    .single()
+
+  const { resend: resendClient, FROM: from } = await import('@/lib/resend/client')
+
+  let sent = 0
+  for (const crew of uninvited) {
+    if (!crew.email) continue
+    const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
+    const html = await renderCrewInviteEmail({
+      crewName:  crew.name,
+      orgName:   org?.name ?? 'Your property manager',
+      inviteUrl,
+    })
+    const { error: emailError } = await resendClient.emails.send({
+      from:    from,
+      to:      crew.email,
+      replyTo: 'help@fieldstay.app',
+      subject: `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
+      html,
+    })
+    if (!emailError) {
+      await supabase
+        .from('crew_members')
+        .update({ invite_sent_at: new Date().toISOString() })
+        .eq('id', crew.id)
+      sent++
+    }
+  }
+
+  revalidatePath('/crew-manage')
+  return { sent }
+}
+
 export async function updateAutoAssignMode(
   mode: 'suggest' | 'autopilot' | 'disabled'
 ): Promise<SettingsActionState> {

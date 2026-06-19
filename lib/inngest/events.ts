@@ -22,7 +22,7 @@ export type FieldStayEvents = {
   }
 
   'ical/sync.all.requested': {
-    data: Record<string, never>
+    data: { org_id?: string }
   }
 
   // ----------------------------------------------------------

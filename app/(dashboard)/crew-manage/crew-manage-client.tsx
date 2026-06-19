@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useTransition, useActionState, useRef } from 'react'
-import { Pencil, X, Check, Loader2, Upload, Users2, FileText, CalendarDays } from 'lucide-react'
+import { useState, useTransition, useActionState, useRef, useEffect } from 'react'
+import { Pencil, X, Check, Loader2, Upload, Users2, FileText, CalendarDays, Send } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
 import type { ContactPref } from '@/types/database'
@@ -11,6 +11,7 @@ import {
   updateCrewMember,
   deactivateCrewMember,
   inviteCrewMember,
+  inviteAllUninvitedCrew,
   bulkImportCrew,
   type SettingsActionState,
 } from '../settings/actions'
@@ -114,6 +115,18 @@ type ViewMode = 'list' | 'add' | 'bulk' | 'calendar'
 export function CrewManageClient({ crew, availabilityMap }: Props) {
   const [view, setView]                 = useState<ViewMode>('list')
   const [selectedMember, setSelectedMember] = useState<CrewMember | null>(null)
+  const [inviting,       startInviteAll]    = useTransition()
+  const [inviteResult,   setInviteResult]   = useState<string | null>(null)
+
+  const uninvitedCount = crew.filter(
+    c => c.is_active && !c.user_id && !c.invite_sent_at && c.email
+  ).length
+
+  useEffect(() => {
+    if (!inviteResult) return
+    const t = setTimeout(() => setInviteResult(null), 4000)
+    return () => clearTimeout(t)
+  }, [inviteResult])
 
   return (
     <div className="space-y-6">
@@ -125,8 +138,36 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
               Crew Members
               <span className="ml-2 badge badge-slate">{crew.length}</span>
             </h2>
+            {inviteResult && (
+              <span className="text-xs" style={{ color: 'var(--accent-green)' }}>
+                {inviteResult}
+              </span>
+            )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            {uninvitedCount > 0 && (
+              <button
+                disabled={inviting}
+                onClick={() =>
+                  startInviteAll(async () => {
+                    const result = await inviteAllUninvitedCrew()
+                    if (result.error) {
+                      setInviteResult(result.error)
+                    } else {
+                      setInviteResult(
+                        result.sent > 0
+                          ? `${result.sent} invite${result.sent !== 1 ? 's' : ''} sent`
+                          : 'No new invites to send'
+                      )
+                    }
+                  })
+                }
+                className="btn-secondary text-sm"
+              >
+                <Send className="w-4 h-4" />
+                {inviting ? 'Sending…' : `Invite All (${uninvitedCount})`}
+              </button>
+            )}
             <button
               onClick={() => setView(view === 'calendar' ? 'list' : 'calendar')}
               className="btn-secondary text-sm"
