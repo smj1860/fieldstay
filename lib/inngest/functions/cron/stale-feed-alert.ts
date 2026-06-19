@@ -40,14 +40,17 @@ export const staleFeedAlert = inngest.createFunction(
       const cutoff   = new Date()
       cutoff.setHours(cutoff.getHours() - STALE_HOURS)
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('ical_feeds')
         .select('id, name, org_id, last_synced_at, properties ( name )')
         .eq('is_active', true)
         .or(`last_synced_at.is.null,last_synced_at.lt.${cutoff.toISOString()}`)
 
+      if (error) {
+        throw new Error(`Failed to query stale iCal feeds: ${error.message}`)
+      }
+
       return (data ?? []) as StaleRow[]
-    })
 
     if (staleFeeds.length === 0) {
       logger.info('No stale iCal feeds found')
