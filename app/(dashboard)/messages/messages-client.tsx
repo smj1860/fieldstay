@@ -124,6 +124,10 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
         const result = await sendMessageToCrew(selectedThread.crew.id, content)
         if (result.success) {
           setDraft('')
+          if (result.message) {
+            const sent = result.message
+            setMessages((prev) => (prev.some((m) => m.id === sent.id) ? prev : [...prev, sent]))
+          }
         } else {
           setSendError(result.error ?? 'Failed to send message')
         }
