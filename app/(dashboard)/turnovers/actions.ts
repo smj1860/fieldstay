@@ -17,7 +17,7 @@ export async function assignCrew(
   // Verify all turnovers belong to this org
   const { data: turnovers } = await supabase
     .from('turnovers')
-    .select('id')
+    .select('id, checkout_datetime')
     .in('id', turnoverIds)
     .eq('org_id', membership.org_id)
 
@@ -34,6 +34,18 @@ export async function assignCrew(
   if (!crew) return { error: 'Crew member not found' }
 
   const ids = turnovers.map(t => t.id)
+
+  // Time-off check — non-blocking, since a PM may want to override
+  const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
+  const { data: timeOff } = await supabase
+    .from('crew_availability')
+    .select('available_date')
+    .eq('org_id', membership.org_id)
+    .eq('crew_member_id', crewMemberId)
+    .eq('is_available', false)
+    .in('available_date', turnoverDates)
+
+  const timeOffCount = timeOff?.length ?? 0
 
   // Batch: remove other-crew assignments across all turnovers in one query
   await supabase
@@ -96,6 +108,12 @@ export async function assignCrew(
   }
 
   revalidatePath('/turnovers')
+  if (timeOffCount > 0) {
+    return {
+      success: true,
+      warning: `${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`,
+    }
+  }
   return { success: true }
 }
 
@@ -342,13 +360,24 @@ export async function addCrewToTurnover(
     }
   }
 
+  // Time-off check — non-blocking, since a PM may want to override
+  const turnoverDates = [...new Set(turnovers.map(t => t.checkout_datetime.split('T')[0]))]
+  const { data: timeOff } = await supabase
+    .from('crew_availability')
+    .select('available_date')
+    .eq('org_id', membership.org_id)
+    .eq('crew_member_id', crewMemberId)
+    .eq('is_available', false)
+    .in('available_date', turnoverDates)
+
+  const timeOffCount = timeOff?.length ?? 0
+
   revalidatePath('/turnovers')
-  if (conflictCount > 0) {
-    return {
-      success: true,
-      warning: `${crew.name} may have a scheduling conflict with ${conflictCount} other turnover(s).`,
-    }
-  }
+  const warnings: string[] = []
+  if (conflictCount > 0) warnings.push(`${crew.name} may have a scheduling conflict with ${conflictCount} other turnover(s).`)
+  if (timeOffCount > 0)  warnings.push(`${crew.name} marked time off on ${timeOffCount} of the assigned date(s).`)
+
+  if (warnings.length > 0) return { success: true, warning: warnings.join(' ') }
   return { success: true }
 }
 
