@@ -86,7 +86,15 @@ export default async function DashboardLayout({
   const isPastDue = planStatus === 'past_due'
 
   if (isBlocked) {
-    redirect('/billing-wall')
+    const billingHeadersList = await headers()
+    const billingPathname    = billingHeadersList.get('x-pathname') ?? ''
+    const isBillingExempt =
+      billingPathname.startsWith('/settings')    ||
+      billingPathname.startsWith('/help')        ||
+      billingPathname.startsWith('/billing-wall')
+    if (!isBillingExempt) {
+      redirect('/billing-wall')
+    }
   }
   // ── End billing gate ──────────────────────────────────────────────────────
 

@@ -168,6 +168,7 @@ export function InventorySetup({
               value={cloneSource}
               onChange={e => setCloneSource(e.target.value)}
               className="input w-full mb-4"
+              style={{ color: '#1a1d20' }}
             >
               <option value="">Select a property…</option>
               {sourceProperties.map(p => (
@@ -241,11 +242,10 @@ export function InventorySetup({
                     <div className="flex items-center gap-1">
                       <span className="text-xs text-muted-themed">Par:</span>
                       <input
-                        type="number" min="0" value={item.par_level}
+                        type="number" min="0" step="0.5" value={item.par_level}
                         onChange={(e) => {
                           const raw = e.target.value
-                          // Allow clearing the field — treat empty as 0 only on blur
-                          const n = raw === '' ? 0 : Math.max(0, parseInt(raw, 10) || 0)
+                          const n = raw === '' ? 0 : Math.max(0, parseFloat(raw) || 0)
                           updateItem(idx, 'par_level', n)
                         }}
                         onBlur={(e) => {
@@ -259,7 +259,8 @@ export function InventorySetup({
                     <select
                       value={item.unit}
                       onChange={(e) => updateItem(idx, 'unit', e.target.value)}
-                      className="text-xs border border-themed rounded px-1 py-0.5 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+                      className="text-xs border border-themed rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+                      style={{ color: '#1a1d20', backgroundColor: '#ffffff' }}
                     >
                       {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                     </select>
@@ -360,22 +361,22 @@ export function InventorySetup({
             </div>
             <div>
               <label className="label">Category</label>
-              <select value={customItem.category} onChange={(e) => setCustomItem((p) => ({ ...p, category: e.target.value }))} className="input">
+              <select value={customItem.category} onChange={(e) => setCustomItem((p) => ({ ...p, category: e.target.value }))} className="input" style={{ color: '#1a1d20' }}>
                 {Object.entries(INVENTORY_CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </div>
             <div>
               <label className="label">Unit</label>
-              <select value={customItem.unit} onChange={(e) => setCustomItem((p) => ({ ...p, unit: e.target.value }))} className="input">
+              <select value={customItem.unit} onChange={(e) => setCustomItem((p) => ({ ...p, unit: e.target.value }))} className="input" style={{ color: '#1a1d20' }}>
                 {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
             </div>
             <div>
               <label className="label">Par Level</label>
               <input
-                type="number" min="0" value={customItem.par_level}
+                type="number" min="0" step="0.5" value={customItem.par_level}
                 onChange={(e) => {
-                  const n = e.target.value === '' ? 0 : Math.max(0, parseInt(e.target.value, 10) || 0)
+                  const n = e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0)
                   setCustomItem((p) => ({ ...p, par_level: n }))
                 }}
                 className="input"
