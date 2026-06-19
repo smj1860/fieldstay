@@ -34,6 +34,7 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
   const [selectedId, setSelected] = useState<string | null>(null)
   const [search, setSearch]       = useState('')
   const [draft, setDraft]         = useState('')
+  const [sendError, setSendError] = useState<string | null>(null)
   const [sending, startSend]      = useTransition()
   const bottomRef                 = useRef<HTMLDivElement>(null)
 
@@ -117,11 +118,17 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
   function handleSend() {
     const content = draft.trim()
     if (!content || !selectedThread) return
+    setSendError(null)
     startSend(async () => {
       try {
-        await sendMessageToCrew(selectedThread.crew.id, content)
-        setDraft('')
+        const result = await sendMessageToCrew(selectedThread.crew.id, content)
+        if (result.success) {
+          setDraft('')
+        } else {
+          setSendError(result.error ?? 'Failed to send message')
+        }
       } catch {
+        setSendError('Failed to send message')
         // Draft is preserved in state — user can retry
       }
     })
@@ -268,7 +275,13 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
               <div ref={bottomRef} />
             </div>
 
-            <div className="p-3 border-t flex items-end gap-2" style={{ borderColor: 'var(--border)' }}>
+            <div className="border-t" style={{ borderColor: 'var(--border)' }}>
+            {sendError && (
+              <div className="px-3 pt-2 text-xs" style={{ color: 'var(--accent-red, #dc2626)' }}>
+                {sendError}
+              </div>
+            )}
+            <div className="p-3 flex items-end gap-2">
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -291,6 +304,7 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
               >
                 <Send className="w-4 h-4" />
               </button>
+            </div>
             </div>
           </>
         )}
