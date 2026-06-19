@@ -604,7 +604,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
     return { sent: 0, error: 'Permission denied' }
   }
 
-  const { data: uninvited } = await supabase
+  const { data: uninvited, error: queryError } = await supabase
     .from('crew_members')
     .select('id, name, email, invite_token')
     .eq('org_id', membership.org_id)
@@ -612,6 +612,11 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
     .is('user_id', null)
     .is('invite_sent_at', null)
     .not('email', 'is', null)
+
+  if (queryError) {
+    console.error('[inviteAllUninvitedCrew] query failed')
+    return { sent: 0, error: 'Failed to load crew members. Please try again.' }
+  }
 
   if (!uninvited?.length) return { sent: 0 }
 
