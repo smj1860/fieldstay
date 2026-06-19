@@ -544,7 +544,7 @@ export async function inviteCrewMember(
 
   const { data: crew } = await supabase
     .from('crew_members')
-    .select('id, name, email, invite_token, user_id')
+    .select('id, name, email, invite_token, user_id, invite_sent_at')
     .eq('id', crewMemberId)
     .eq('org_id', membership.org_id)
     .single()
@@ -552,6 +552,13 @@ export async function inviteCrewMember(
   if (!crew)        return { error: 'Crew member not found' }
   if (!crew.email)  return { error: 'No email address on file for this crew member' }
   if (crew.user_id) return { error: 'This crew member already has an active account' }
+
+  // Guard against duplicate sends from a double-click or two tabs firing this
+  // action within the same moment — a deliberate "Resend Invite" click won't
+  // realistically land inside this window.
+  if (crew.invite_sent_at && Date.now() - Date.parse(crew.invite_sent_at) < 10_000) {
+    return { success: true }
+  }
 
   const { data: org } = await supabase
     .from('organizations')
