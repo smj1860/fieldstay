@@ -1,10 +1,8 @@
 import { requireOrgMember } from '@/lib/auth'
-import { calcSetupProgress } from '@/lib/wizard'
 import Link from 'next/link'
-import { Plus, AlertCircle, CheckCircle2, Settings } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { Plus } from 'lucide-react'
 import { NudgeBanner } from '@/components/nudge-banner'
-import { CopyFromButton } from './property-card-actions'
+import { PropertiesGrid } from './properties-grid'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Properties' }
@@ -12,20 +10,54 @@ export const metadata: Metadata = { title: 'Properties' }
 export default async function PropertiesPage() {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: properties } = await supabase
-    .from('properties')
-    .select('id, name, address, city, state, property_type, bedrooms, bathrooms, setup_steps_completed, is_active')
-    .eq('org_id', membership.org_id)
-    .eq('is_active', true)
-    .order('name')
+  const [
+    { data: properties },
+    { count: ownerPortalTokenCount },
+    { data: openWOs },
+    { data: unassignedTOs },
+    { data: erroredFeeds },
+  ] = await Promise.all([
+    supabase
+      .from('properties')
+      .select('id, name, address, city, state, property_type, bedrooms, bathrooms, setup_steps_completed, is_active')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('name'),
 
-  const atLimit = (properties?.length ?? 0) >= membership.org.max_properties
+    supabase
+      .from('owner_portal_tokens')
+      .select('id, property_owners!inner(org_id)', { count: 'exact', head: true })
+      .eq('property_owners.org_id', membership.org_id),
 
-  const { count: ownerPortalTokenCount } = await supabase
-    .from('owner_portal_tokens')
-    .select('id, property_owners!inner(org_id)', { count: 'exact', head: true })
-    .eq('property_owners.org_id', membership.org_id)
+    supabase
+      .from('work_orders')
+      .select('property_id')
+      .eq('org_id', membership.org_id)
+      .not('status', 'in', '("completed","cancelled")'),
 
+    supabase
+      .from('turnovers')
+      .select('property_id')
+      .eq('org_id', membership.org_id)
+      .eq('status', 'pending_assignment'),
+
+    supabase
+      .from('ical_feeds')
+      .select('property_id')
+      .eq('org_id', membership.org_id)
+      .eq('last_sync_status', 'error'),
+  ])
+
+  const opsCountsByProperty: Record<string, { openWorkOrders: number; unassignedTurnovers: number; syncErrors: number }> = {}
+  const bump = (propertyId: string, key: 'openWorkOrders' | 'unassignedTurnovers' | 'syncErrors') => {
+    opsCountsByProperty[propertyId] ??= { openWorkOrders: 0, unassignedTurnovers: 0, syncErrors: 0 }
+    opsCountsByProperty[propertyId][key]++
+  }
+  for (const wo of openWOs ?? [])       bump(wo.property_id, 'openWorkOrders')
+  for (const to of unassignedTOs ?? []) bump(to.property_id, 'unassignedTurnovers')
+  for (const f of erroredFeeds ?? [])   bump(f.property_id, 'syncErrors')
+
+  const atLimit            = (properties?.length ?? 0) >= membership.org.max_properties
   const showOwnerPortalNudge = (ownerPortalTokenCount ?? 0) === 0
 
   return (
@@ -61,100 +93,7 @@ export default async function PropertiesPage() {
       {!properties?.length ? (
         <EmptyState />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {properties.map((p) => {
-            const steps    = (p.setup_steps_completed as Record<string, boolean>) ?? {}
-            const progress = calcSetupProgress(steps)
-            const complete = progress === 100
-
-            return (
-              <div key={p.id} className="card flex flex-col gap-4 hover:shadow-card-md transition-shadow">
-                {/* Header */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h3 className="font-semibold text-primary-themed truncate">{p.name}</h3>
-                    {p.address && (
-                      <p className="text-xs text-muted-themed mt-0.5 truncate">{p.address}</p>
-                    )}
-                    {(p.city || p.state) && (
-                      <p className="text-xs text-muted-themed truncate">
-                        {[p.city, p.state].filter(Boolean).join(', ')}
-                      </p>
-                    )}
-                  </div>
-                  <Link
-                    href={`/properties/${p.id}/setup/details`}
-                    className="flex-shrink-0 text-muted-themed hover:text-secondary-themed transition-colors p-1"
-                    title="Property settings"
-                  >
-                    <Settings className="w-4 h-4" />
-                  </Link>
-                </div>
-
-                {/* Meta */}
-                <div className="flex gap-3 text-xs text-muted-themed">
-                  <span className="capitalize">{p.property_type}</span>
-                  <span>·</span>
-                  <span>{p.bedrooms} bed</span>
-                  <span>·</span>
-                  <span>{p.bathrooms} bath</span>
-                </div>
-
-                {/* Setup progress */}
-                {!complete ? (
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
-                        <AlertCircle className="w-3 h-3" />
-                        Setup {progress}% complete
-                      </span>
-                      <Link
-                        href={`/properties/${p.id}/setup/details`}
-                        className="text-xs font-medium hover:underline"
-                        style={{ color: 'var(--accent-gold)' }}
-                      >
-                        Continue →
-                      </Link>
-                    </div>
-                    <div className="h-1.5 bg-raised-themed rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{ width: `${progress}%`, background: 'var(--accent-amber)' }}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
-                    <CheckCircle2 className="w-3 h-3" />
-                    Setup complete
-                  </p>
-                )}
-
-                {/* Actions */}
-                <div className="flex gap-2 pt-1 border-t border-themed">
-                  <Link
-                    href={`/properties/${p.id}`}
-                    className="btn-secondary text-xs px-3 py-1.5 flex-1 justify-center"
-                  >
-                    View
-                  </Link>
-                  <Link
-                    href={`/properties/${p.id}/setup/details`}
-                    className="btn-ghost text-xs px-3 py-1.5"
-                  >
-                    Setup
-                  </Link>
-                  <CopyFromButton
-                    targetProperty={{ id: p.id, name: p.name }}
-                    otherProperties={(properties ?? [])
-                      .filter((other) => other.id !== p.id)
-                      .map((other) => ({ id: other.id, name: other.name }))}
-                  />
-                </div>
-              </div>
-            )
-          })}
-        </div>
+        <PropertiesGrid properties={properties} opsCountsByProperty={opsCountsByProperty} />
       )}
     </div>
   )

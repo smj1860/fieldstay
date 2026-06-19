@@ -3,6 +3,7 @@ import Link                    from 'next/link'
 import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { IntegrationsClient }  from './integrations-client'
+import { ChannelHealthTable }  from './channel-health-table'
 
 export const metadata: Metadata = { title: 'Integrations — FieldStay' }
 
@@ -21,6 +22,12 @@ export default async function IntegrationsPage() {
     .from('integration_connections')
     .select('id, provider_id, status, external_user_id, created_at, metadata')
     .eq('org_id', membership.org_id)
+
+  const { data: icalFeeds } = await admin
+    .from('ical_feeds')
+    .select('id, property_id, name, source, last_synced_at, last_sync_status, last_sync_error, properties ( name )')
+    .eq('org_id', membership.org_id)
+    .eq('is_active', true)
 
   const connectionsByProvider = Object.fromEntries(
     (connections ?? []).map((c) => [c.provider_id, c])
@@ -47,6 +54,8 @@ export default async function IntegrationsPage() {
         providers={providers ?? []}
         connectionsByProvider={connectionsByProvider}
       />
+
+      <ChannelHealthTable feeds={(icalFeeds ?? []) as never} />
     </div>
   )
 }

@@ -7,6 +7,7 @@ import {
   Plus, RefreshCw, X, ChevronDown, ChevronUp,
   Calendar, Users, Home, Clock, AlertTriangle,
   CheckCircle2, Ban, HelpCircle, ExternalLink,
+  Search, Download,
 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { createBooking, cancelBooking, triggerSync } from './actions'
@@ -475,6 +476,7 @@ export function BookingsClient({
   const [filterProperty,   setFilterProperty]  = useState('all')
   const [filterStatus,     setFilterStatus]    = useState<'all' | BookingStatus>('all')
   const [filterSource,     setFilterSource]    = useState<'all' | BookingSource>('all')
+  const [searchQuery,      setSearchQuery]     = useState('')
   const [showPast,         setShowPast]        = useState(false)
   const [localBookings,    setLocalBookings]   = useState(bookings)
   const [justAdded,        setJustAdded]       = useState(false)
@@ -497,16 +499,17 @@ export function BookingsClient({
       if (filterProperty !== 'all' && b.property_id !== filterProperty) return false
       if (filterStatus   !== 'all' && b.status     !== filterStatus)    return false
       if (filterSource   !== 'all' && b.source     !== filterSource)    return false
+      if (searchQuery.trim() && !(b.guest_name ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase())) return false
       return true
     })
-  }, [localBookings, showPast, filterProperty, filterStatus, filterSource, todayStr])
+  }, [localBookings, showPast, filterProperty, filterStatus, filterSource, searchQuery, todayStr])
 
   // Stats
   const upcoming   = localBookings.filter((b) => b.status === 'confirmed' && b.checkin_date >= todayStr)
   const checkinsToday = localBookings.filter((b) => isToday(b.checkin_date) && b.status === 'confirmed')
   const checkoutsToday = localBookings.filter((b) => isToday(b.checkout_date) && b.status === 'confirmed')
 
-  const hasFilters = filterProperty !== 'all' || filterStatus !== 'all' || filterSource !== 'all'
+  const hasFilters = filterProperty !== 'all' || filterStatus !== 'all' || filterSource !== 'all' || searchQuery.trim() !== ''
 
   const handleCancel = (id: string) => {
     setLocalBookings((prev) =>
@@ -516,6 +519,21 @@ export function BookingsClient({
 
   const handleSync = () => {
     startSync(async () => { await triggerSync() })
+  }
+
+  const handleExportCsv = () => {
+    const rows = ['Guest,Property,Check-in,Check-out,Status,Source']
+    for (const b of filtered) {
+      const propertyName = b.properties?.name ?? ''
+      rows.push(`"${b.guest_name ?? ''}","${propertyName}",${b.checkin_date},${b.checkout_date},${b.status},${b.source}`)
+    }
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `bookings-${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -597,6 +615,17 @@ export function BookingsClient({
 
       {/* Filters */}
       <div className="flex items-center gap-2 mb-5 flex-wrap">
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search guest name…"
+            className="input pl-8 text-sm py-1.5 w-auto"
+          />
+        </div>
+
         {properties.length > 1 && (
           <select
             value={filterProperty}
@@ -647,6 +676,7 @@ export function BookingsClient({
               setFilterProperty('all')
               setFilterStatus('all')
               setFilterSource('all')
+              setSearchQuery('')
             }}
             className="btn-ghost text-xs py-1.5"
             style={{ color: 'var(--text-muted)' }}
@@ -654,6 +684,10 @@ export function BookingsClient({
             <X className="w-3 h-3" /> Clear
           </button>
         )}
+
+        <button onClick={handleExportCsv} className="btn-ghost text-xs py-1.5" style={{ color: 'var(--text-muted)' }}>
+          <Download className="w-3 h-3" /> Export CSV
+        </button>
       </div>
 
       {/* Count */}
