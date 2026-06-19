@@ -11,17 +11,17 @@ interface WorkOrderInfo {
   scheduled_date: string | null
   estimated_cost: number | null
   wo_number:      string | null
-  wo_category:    string | null
-  priority_level: string | null
+  category:       string | null
+  priority:       string | null
   nte_amount:     number | null
 }
 
 interface PropertyInfo {
-  name:          string
-  address_line1: string | null
-  city:          string | null
-  state:         string | null
-  zip:           string | null
+  name:    string
+  address: string | null
+  city:    string | null
+  state:   string | null
+  zip:     string | null
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -65,13 +65,13 @@ function PortalShell({ children }: { children: React.ReactNode }) {
 }
 
 function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: PropertyInfo | null }) {
-  const categoryLabel  = workOrder.wo_category ? (CATEGORY_LABELS[workOrder.wo_category] ?? workOrder.wo_category) : null
-  const priorityStyle  = workOrder.priority_level ? (PRIORITY_STYLES[workOrder.priority_level] ?? PRIORITY_STYLES.low) : null
-  const priorityLabel  = workOrder.priority_level
-    ? workOrder.priority_level.charAt(0).toUpperCase() + workOrder.priority_level.slice(1)
+  const categoryLabel  = workOrder.category ? (CATEGORY_LABELS[workOrder.category] ?? workOrder.category) : null
+  const priorityStyle  = workOrder.priority ? (PRIORITY_STYLES[workOrder.priority] ?? PRIORITY_STYLES.low) : null
+  const priorityLabel  = workOrder.priority
+    ? workOrder.priority.charAt(0).toUpperCase() + workOrder.priority.slice(1)
     : null
 
-  const addressLine = property?.address_line1 ?? null
+  const addressLine = property?.address ?? null
   const cityState   = [property?.city, property?.state].filter(Boolean).join(', ')
   const zipSuffix   = property?.zip ? ` ${property.zip}` : ''
   const fullAddress = addressLine

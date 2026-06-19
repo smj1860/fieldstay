@@ -25,11 +25,11 @@ export const handleWorkOrderCreated = inngest.createFunction(
         const { data: wo } = await supabase
           .from('work_orders')
           .select(`
-            id, title, description, wo_number, wo_category, priority_level,
+            id, title, description, wo_number, category, priority,
             scheduled_date, estimated_cost, nte_amount, completion_token,
             completion_token_expires_at,
             vendors ( name, email ),
-            properties ( name, address_line1, city, state, zip )
+            properties ( name, address, city, state, zip )
           `)
           .eq('id', work_order_id)
           .single()
@@ -333,9 +333,9 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
         .select(`
           id, quote_token, status,
           work_orders (
-            id, title, description, wo_number, wo_category, priority_level,
+            id, title, description, wo_number, category, priority,
             scheduled_date, estimated_cost, nte_amount,
-            properties (name, address_line1, city, state, zip)
+            properties (name, address, city, state, zip)
           ),
           vendors (name, email)
         `)
