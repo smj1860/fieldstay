@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
+import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import type { BookingSource } from '@/types/database'
 
 export type BookingActionState = { error?: string; success?: boolean }
@@ -73,6 +74,8 @@ export async function createBooking(
     metadata:   { property_id, checkin_date, checkout_date, source, guest_name },
   })
 
+  await detectAndFlagOverlaps(supabase, property_id)
+
   // Fire booking/detected so Inngest auto-generates a turnover
   await inngest.send({
     name: 'booking/detected',
@@ -100,11 +103,13 @@ export async function cancelBooking(
   const { user, supabase, membership } = await requireOrgMember()
 
   // 1. Cancel the booking
-  const { error } = await supabase
+  const { data: cancelled, error } = await supabase
     .from('bookings')
     .update({ status: 'cancelled' })
     .eq('id', bookingId)
     .eq('org_id', membership.org_id)
+    .select('property_id')
+    .single()
 
   if (error) {
     console.error('[cancelBooking]', error)
@@ -159,6 +164,10 @@ export async function cancelBooking(
         visible_to_owner:    true,
       })
     }
+  }
+
+  if (cancelled?.property_id) {
+    await detectAndFlagOverlaps(supabase, cancelled.property_id)
   }
 
   revalidatePath('/bookings')

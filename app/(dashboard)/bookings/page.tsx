@@ -22,7 +22,7 @@ export default async function BookingsPage() {
       .select(`
         id, property_id, guest_name, guest_email,
         checkin_date, checkout_date, checkin_time, checkout_time,
-        source, status, notes, created_at,
+        source, status, notes, has_overlap_conflict, created_at,
         properties ( id, name, city, state ),
         turnovers   ( id, status )
       `)
