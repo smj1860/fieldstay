@@ -32,6 +32,7 @@ interface InventoryItem {
   low_stock_threshold_pct: number
   notes: string | null
   catalog_item_id: string | null
+  first_count_recorded_at: string | null
 }
 
 interface CatalogItem {
@@ -76,6 +77,7 @@ interface PortfolioItem {
   property_id: string
   preferred_brand: string | null
   property: { name: string } | null
+  first_count_recorded_at: string | null
 }
 
 interface TemplateItem {
@@ -114,9 +116,10 @@ interface PurchaseOrder {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-type StockStatus = 'critical' | 'low' | 'healthy'
+type StockStatus = 'uncounted' | 'critical' | 'low' | 'healthy'
 
 function getStockStatus(item: InventoryItem): StockStatus {
+  if (!item.first_count_recorded_at) return 'uncounted'
   if (item.current_quantity <= item.par_level) return 'critical'
   if (item.current_quantity <= item.par_level * 1.2) return 'low'
   return 'healthy'
@@ -124,8 +127,9 @@ function getStockStatus(item: InventoryItem): StockStatus {
 
 function StockBadge({ item }: { item: InventoryItem }) {
   const status = getStockStatus(item)
-  if (status === 'critical') return <span className="badge badge-red">At/Below Par</span>
-  if (status === 'low')      return <span className="badge badge-amber">Low</span>
+  if (status === 'uncounted') return <span className="badge badge-slate">Needs Count</span>
+  if (status === 'critical')  return <span className="badge badge-red">At/Below Par</span>
+  if (status === 'low')       return <span className="badge badge-amber">Low</span>
   return <span className="badge badge-green">Healthy</span>
 }
 
@@ -677,6 +681,7 @@ function CategoryRows({ category, items }: { category: InventoryCategory; items:
             unit={item.unit}
             parLevel={item.par_level}
             currentQuantity={item.current_quantity}
+            uncounted={!item.first_count_recorded_at}
             variant="pm"
           />
         ))}
@@ -968,8 +973,9 @@ function PropertyInventoryCard({
   items: InventoryItem[]
   onSelect: () => void
 }) {
-  const criticalCount = items.filter((i) => getStockStatus(i) === 'critical').length
-  const lowCount      = items.filter((i) => getStockStatus(i) === 'low').length
+  const criticalCount  = items.filter((i) => getStockStatus(i) === 'critical').length
+  const lowCount       = items.filter((i) => getStockStatus(i) === 'low').length
+  const uncountedCount = items.filter((i) => getStockStatus(i) === 'uncounted').length
 
   return (
     <div className="card flex flex-col gap-4 hover:shadow-card-md transition-shadow">
@@ -997,7 +1003,10 @@ function PropertyInventoryCard({
         {lowCount > 0 && criticalCount === 0 && (
           <span className="badge badge-amber">{lowCount} low</span>
         )}
-        {criticalCount === 0 && lowCount === 0 && items.length > 0 && (
+        {uncountedCount > 0 && (
+          <span className="badge badge-slate">{uncountedCount} needs count</span>
+        )}
+        {criticalCount === 0 && lowCount === 0 && uncountedCount === 0 && items.length > 0 && (
           <span className="badge badge-green">All healthy</span>
         )}
         {items.length === 0 && (
@@ -1183,9 +1192,10 @@ export function InventoryManager({
   const [cartPending, startCartTransition] = useTransition()
   const [cartTriggered, setCartTriggered]  = useState(false)
 
-  const totalItems    = items.length
-  const totalCritical = items.filter((i) => getStockStatus(i) === 'critical').length
-  const totalLow      = items.filter((i) => getStockStatus(i) === 'low').length
+  const totalItems     = items.length
+  const totalCritical  = items.filter((i) => getStockStatus(i) === 'critical').length
+  const totalLow       = items.filter((i) => getStockStatus(i) === 'low').length
+  const totalUncounted = items.filter((i) => getStockStatus(i) === 'uncounted').length
 
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
 
@@ -1218,6 +1228,9 @@ export function InventoryManager({
             )}
             {totalLow > 0 && (
               <span className="badge badge-amber">{totalLow} low</span>
+            )}
+            {totalUncounted > 0 && (
+              <span className="badge badge-slate">{totalUncounted} needs count</span>
             )}
           </div>
         </div>
