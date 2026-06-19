@@ -18,6 +18,28 @@ import { logAuditEvent }        from '@/lib/audit'
 
 const PROVIDER = 'ownerrez'
 
+async function writeSyncCount(
+  user_id: string,
+  field: 'properties_found' | 'bookings_found',
+  value: number
+) {
+  const supabase = createServiceClient()
+  const { data: existing } = await supabase
+    .from('integration_connections')
+    .select('metadata')
+    .eq('user_id', user_id)
+    .eq('provider_id', PROVIDER)
+    .maybeSingle()
+
+  const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
+
+  await supabase
+    .from('integration_connections')
+    .update({ metadata: { ...existingMeta, [field]: value } })
+    .eq('user_id', user_id)
+    .eq('provider_id', PROVIDER)
+}
+
 export const ownerRezInitialSync = inngest.createFunction(
   {
     id:      'ownerrez-initial-sync',
@@ -54,6 +76,14 @@ export const ownerRezInitialSync = inngest.createFunction(
             throw err // Inngest will retry
           }
           throw err
+        }
+
+        try {
+          await writeSyncCount(user_id, 'properties_found', properties.length)
+        } catch (countErr) {
+          logger.warn(
+            `[OwnerRez:${user_id}] writeSyncCount properties_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
+          )
         }
 
         if (!properties.length) return { ids: [] as number[], patchData: [] as typeof patchData }
@@ -154,7 +184,16 @@ export const ownerRezInitialSync = inngest.createFunction(
       // ── Step 2: Fetch and upsert bookings ───────────────────────────────────
 
       const fetchBookingsResult = await step.run('fetch-bookings', async () => {
-        if (!fetchPropsResult.ids.length) return { cursor: new Date().toISOString(), count: 0 }
+        if (!fetchPropsResult.ids.length) {
+          try {
+            await writeSyncCount(user_id, 'bookings_found', 0)
+          } catch (countErr) {
+            logger.warn(
+              `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
+            )
+          }
+          return { cursor: new Date().toISOString(), count: 0 }
+        }
 
         // MEDIUM-3: capture pre-fetch timestamp as cursor value.
         // Using post-fetch time would miss bookings modified during the fetch window
@@ -223,6 +262,14 @@ export const ownerRezInitialSync = inngest.createFunction(
           }
 
           logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
+        }
+
+        try {
+          await writeSyncCount(user_id, 'bookings_found', bookings.length)
+        } catch (countErr) {
+          logger.warn(
+            `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
+          )
         }
 
         return { cursor: fetchStartedAt, count: bookings.length }  // MEDIUM-3: pre-fetch timestamp
