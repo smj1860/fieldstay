@@ -649,6 +649,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
         .from('crew_members')
         .update({ invite_sent_at: new Date().toISOString() })
         .eq('id', crew.id)
+        .eq('org_id', membership.org_id)
       sent++
     }
   }
