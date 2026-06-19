@@ -34,6 +34,22 @@ export const handleWorkOrderCreated = inngest.createFunction(
           .eq('id', work_order_id)
           .single()
 
+        // Diagnostic for the silent-exit bug (Item 14, dashboard walkthrough):
+        // confirms whether the nested-embed join below actually resolves
+        // `vendors` / `properties`, without logging email or the completion
+        // token themselves. Keep this in place after the root cause is found —
+        // it doubles as the template for auditing the other nested-join
+        // queries in this file (quote-requested, overdue, etc.).
+        logger.info(`[handleWorkOrderCreated] wo join shape for ${work_order_id}: ` + JSON.stringify({
+          hasWo:              !!wo,
+          hasCompletionToken: !!wo?.completion_token,
+          vendorsType:        Array.isArray(wo?.vendors) ? 'array' : typeof wo?.vendors,
+          vendorsIsNull:      wo?.vendors === null,
+          hasVendorEmail:     !!(Array.isArray(wo?.vendors) ? wo?.vendors[0]?.email : wo?.vendors?.email),
+          propertiesType:     Array.isArray(wo?.properties) ? 'array' : typeof wo?.properties,
+          propertiesIsNull:   wo?.properties === null,
+        }))
+
         if (!wo?.completion_token) return
 
         const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
