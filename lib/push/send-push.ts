@@ -2,12 +2,6 @@ import 'server-only'
 import webpush from 'web-push'
 import { createServiceClient } from '@/lib/supabase/server'
 
-webpush.setVapidDetails(
-  `mailto:${process.env.VAPID_EMAIL}`,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-)
-
 export interface SendPushPayload {
   title: string
   body:  string
@@ -17,7 +11,19 @@ export interface SendPushPayload {
 // Sends a web push notification to every subscription registered for the
 // crew member linked to the given auth user. Cleans up subscriptions that
 // the push service reports as gone (HTTP 410).
+//
+// VAPID details are set lazily (not at module scope) so a missing/invalid
+// push config can't throw during import and take down every server action
+// in this file's module graph (e.g. message sending).
 export async function sendPushToUser(userId: string, payload: SendPushPayload): Promise<void> {
+  const vapidPublicKey  = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
+  const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY
+  if (!vapidPublicKey || !vapidPrivateKey) {
+    console.error('[sendPushToUser] VAPID keys not configured — skipping push notification')
+    return
+  }
+  webpush.setVapidDetails(`mailto:${process.env.VAPID_EMAIL}`, vapidPublicKey, vapidPrivateKey)
+
   const supabase = createServiceClient()
 
   const { data: crewMember } = await supabase

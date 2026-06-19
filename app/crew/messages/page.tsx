@@ -16,10 +16,11 @@ type MessageRow = {
 }
 
 export default function CrewMessagesPage() {
-  const [userId, setUserId]   = useState<string | null>(null)
-  const [draft, setDraft]     = useState('')
-  const [sending, startSend]  = useTransition()
-  const bottomRef             = useRef<HTMLDivElement>(null)
+  const [userId, setUserId]     = useState<string | null>(null)
+  const [draft, setDraft]       = useState('')
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [sending, startSend]    = useTransition()
+  const bottomRef               = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const supabase = createClient()
@@ -57,9 +58,14 @@ export default function CrewMessagesPage() {
   function handleSend() {
     const content = draft.trim()
     if (!content) return
-    setDraft('')
+    setSendError(null)
     startSend(async () => {
-      await sendMessageToPM(content)
+      const result = await sendMessageToPM(content)
+      if (result.success) {
+        setDraft('')
+      } else {
+        setSendError(result.error ?? 'Failed to send message')
+      }
     })
   }
 
@@ -97,7 +103,11 @@ export default function CrewMessagesPage() {
         <div ref={bottomRef} />
       </div>
 
-      <div className="p-3 border-t border-accent-200 bg-white flex items-end gap-2">
+      <div className="border-t border-accent-200 bg-white">
+        {sendError && (
+          <div className="px-3 pt-2 text-xs text-red-600">{sendError}</div>
+        )}
+        <div className="p-3 flex items-end gap-2">
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -118,6 +128,7 @@ export default function CrewMessagesPage() {
         >
           <Send className="w-4 h-4" />
         </button>
+        </div>
       </div>
     </div>
   )
