@@ -137,7 +137,7 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
               }
             >
               <CalendarDays className="w-4 h-4" />
-              {view === 'calendar' ? 'List View' : 'Calendar'}
+              {view === 'calendar' ? 'List View' : 'Availability Calendar'}
             </button>
             <button
               onClick={() => setView(view === 'bulk' ? 'list' : 'bulk')}

@@ -147,13 +147,16 @@ function CrewAssignment({
   crewMembers,
   assignedCrew,
   onWarning,
+  open,
+  onOpenChange,
 }: {
   turnover:     Turnover
   crewMembers:  CrewMember[]
   assignedCrew: AssignedCrewMember[]
   onWarning?:   (msg: string) => void
+  open:         boolean
+  onOpenChange: (open: boolean) => void
 }) {
-  const [open,     setOpen]     = useState(false)
   const [adding,   startAdd]    = useTransition()
   const [removing, startRemove] = useTransition()
 
@@ -174,7 +177,7 @@ function CrewAssignment({
   }
 
   const handleAdd = (crewId: string) => {
-    setOpen(false)
+    onOpenChange(false)
     startAdd(async () => {
       const result = await addCrewToTurnover([turnover.id], crewId)
       if (result?.warning) onWarning?.(result.warning)
@@ -218,7 +221,7 @@ function CrewAssignment({
       {!isDisabled && (
         <div className="relative">
           <button
-            onClick={() => setOpen(o => !o)}
+            onClick={() => onOpenChange(!open)}
             disabled={adding}
             className={cn(
               'flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-all',
@@ -234,7 +237,7 @@ function CrewAssignment({
 
           {open && available.length > 0 && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} />
               <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg py-1 min-w-[160px]">
                 {available.map(c => (
                   <button
@@ -255,7 +258,7 @@ function CrewAssignment({
 
           {open && available.length === 0 && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} />
               <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg p-3 min-w-[140px]">
                 <p className="text-xs text-muted-themed">All crew assigned</p>
               </div>
@@ -285,6 +288,7 @@ function TurnoverCard({
   onWarning?: (msg: string) => void
 }) {
   const [expanded,        setExpanded]        = useState(false)
+  const [assignOpen,      setAssignOpen]      = useState(false)
   const [updating,        startUpdate]        = useTransition()
   const [accepting,       startAccept]        = useTransition()
   const [dismissing,      startDismiss]       = useTransition()
@@ -408,9 +412,19 @@ function TurnoverCard({
             {property?.city && (
               <span className="text-xs text-muted-themed">{property.city}</span>
             )}
-            <span className={statusBadge(turnover.status)}>
-              {TURNOVER_STATUS_LABELS[turnover.status as keyof typeof TURNOVER_STATUS_LABELS] ?? turnover.status}
-            </span>
+            {turnover.status === 'pending_assignment' ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); setAssignOpen(true) }}
+                className={cn(statusBadge(turnover.status), 'cursor-pointer hover:brightness-95')}
+                title="Click to assign crew"
+              >
+                {TURNOVER_STATUS_LABELS.pending_assignment}
+              </button>
+            ) : (
+              <span className={statusBadge(turnover.status)}>
+                {TURNOVER_STATUS_LABELS[turnover.status as keyof typeof TURNOVER_STATUS_LABELS] ?? turnover.status}
+              </span>
+            )}
             {isOverdue && (
               <span className="badge badge-red flex items-center gap-1">
                 <AlertTriangle className="w-2.5 h-2.5" /> Overdue
@@ -485,6 +499,8 @@ function TurnoverCard({
             crewMembers={crewMembers}
             assignedCrew={assignedCrew}
             onWarning={onWarning}
+            open={assignOpen}
+            onOpenChange={setAssignOpen}
           />
           {turnover.status !== 'completed' && turnover.status !== 'cancelled' && (
             <button
