@@ -56,6 +56,7 @@ export const buildShoppingCart = inngest.createFunction(
               id, name, current_quantity, par_level, unit,
               preferred_brand,
               property_id,
+              first_count_recorded_at,
               properties!inner ( id, name, zip )
             `)
             .eq('org_id', org_id)
@@ -78,8 +79,11 @@ export const buildShoppingCart = inngest.createFunction(
 
       if (!org) throw new Error(`Org ${org_id} not found`)
 
+      // Items that have never had a real count recorded default to
+      // current_quantity = 0, which would otherwise look "below par" on
+      // every freshly-added item — exclude those from auto-cart building.
       const items = (allItems ?? []).filter(
-        item => (item.current_quantity ?? 0) < (item.par_level ?? 1)
+        item => item.first_count_recorded_at && (item.current_quantity ?? 0) < (item.par_level ?? 1)
       )
 
       if (!items.length) return { orgSettings: org, belowParItems: [], connection: conn }

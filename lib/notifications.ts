@@ -22,11 +22,12 @@ interface WorkOrderAlertRow {
 }
 
 interface InventoryAlertRow {
-  id:               string
-  name:             string
-  current_quantity: number
-  par_level:        number
-  properties:       { name: string } | { name: string }[] | null
+  id:                       string
+  name:                     string
+  current_quantity:        number
+  par_level:               number
+  first_count_recorded_at: string | null
+  properties:              { name: string } | { name: string }[] | null
 }
 
 interface VendorComplianceAlertRow {
@@ -67,7 +68,7 @@ export async function getNotifications(orgId: string): Promise<NotificationItem[
 
     supabase
       .from('inventory_items')
-      .select('id, name, current_quantity, par_level, properties(name)')
+      .select('id, name, current_quantity, par_level, first_count_recorded_at, properties(name)')
       .eq('org_id', orgId)
       .eq('is_active', true)
       .limit(200),
@@ -104,7 +105,7 @@ export async function getNotifications(orgId: string): Promise<NotificationItem[
   }
 
   const belowPar = ((inventoryRes.data ?? []) as unknown as InventoryAlertRow[])
-    .filter((i) => i.current_quantity < i.par_level)
+    .filter((i) => i.first_count_recorded_at && i.current_quantity < i.par_level)
     .slice(0, 5)
 
   for (const item of belowPar) {

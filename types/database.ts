@@ -406,6 +406,7 @@ export interface InventoryItem {
   is_active:               boolean
   preferred_brand:         string | null
   notes:                   string | null
+  first_count_recorded_at: string | null
   created_at:              string
   updated_at:              string
 }

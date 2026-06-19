@@ -159,12 +159,26 @@ export async function submitInventoryCount(
       return { error: 'Failed to record inventory count items. Please try again.' }
     }
 
+    // Items that have never had a real count recorded get first_count_recorded_at
+    // stamped now, so the "0 means uncounted, not critical" distinction holds going
+    // forward. Supabase JS can't compare columns in an UPDATE, so check first.
+    const { data: neverCountedRows } = await supabase
+      .from('inventory_items')
+      .select('id')
+      .in('id', updates.map((u) => u.id))
+      .is('first_count_recorded_at', null)
+    const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
+
     // Update current_quantity on each item (org_id guard) — parallel to avoid serial timeout
+    const now = new Date().toISOString()
     await Promise.all(
       updates.map((u) =>
         supabase
           .from('inventory_items')
-          .update({ current_quantity: u.current_quantity })
+          .update({
+            current_quantity: u.current_quantity,
+            ...(neverCountedIds.has(u.id) ? { first_count_recorded_at: now } : {}),
+          })
           .eq('id', u.id)
           .eq('org_id', membership.org_id)
       )
@@ -481,11 +495,22 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
 
   if (!draftItems) return { error: 'Draft not found' }
 
+  const { data: neverCountedRows } = await supabase
+    .from('inventory_items')
+    .select('id')
+    .in('id', draftItems.map((item) => item.inventory_item_id))
+    .is('first_count_recorded_at', null)
+  const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
+
+  const now = new Date().toISOString()
   await Promise.all(
     draftItems.map(item =>
       supabase
         .from('inventory_items')
-        .update({ current_quantity: item.submitted_quantity })
+        .update({
+          current_quantity: item.submitted_quantity,
+          ...(neverCountedIds.has(item.inventory_item_id) ? { first_count_recorded_at: now } : {}),
+        })
         .eq('id', item.inventory_item_id)
     )
   )
@@ -527,7 +552,7 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
   // Limit to 2000 rows (well above any real org's inventory) to prevent unbounded scans.
   const { data: allItems, error } = await supabase
     .from('inventory_items')
-    .select('name, unit, current_quantity, par_level, property_id, property:properties(name)')
+    .select('name, unit, current_quantity, par_level, first_count_recorded_at, property_id, property:properties(name)')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .limit(2000)
@@ -539,6 +564,7 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
 
   const grouped: Record<string, AggregatedItem> = {}
   for (const item of allItems ?? []) {
+    if (!item.first_count_recorded_at) continue
     if ((item.current_quantity ?? 0) > (item.par_level ?? 0)) continue
 
     const key = item.name.toLowerCase()

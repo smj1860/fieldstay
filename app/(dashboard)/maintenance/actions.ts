@@ -156,6 +156,23 @@ export async function createWorkOrder(
     warning = 'Work order created, but the vendor was not notified because the portal link is disabled for this vendor. Enable the portal in Vendor settings or notify them manually.'
   }
 
+  // Warn the PM when the assigned crew member marked time off that day —
+  // non-blocking, since they may want to override.
+  if (assigned_crew_member_id && scheduled_date) {
+    const { data: timeOff } = await supabase
+      .from('crew_availability')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .eq('crew_member_id', assigned_crew_member_id)
+      .eq('available_date', scheduled_date)
+      .eq('is_available', false)
+      .maybeSingle()
+
+    if (timeOff) {
+      warning = 'Work order created, but the assigned crew member marked time off on the scheduled date.'
+    }
+  }
+
   await logAuditEvent({
     orgId:      membership.org_id,
     actorId:    user.id,

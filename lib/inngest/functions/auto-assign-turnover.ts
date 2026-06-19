@@ -50,6 +50,23 @@ export const autoAssignTurnover = inngest.createFunction(
       const mode = (org?.auto_assign_mode ?? 'disabled') as string
       if (mode === 'disabled' || !turnover || !crew?.length) return null
 
+      // Exclude crew who've marked themselves unavailable for the turnover's
+      // date — there's no human in the loop here to override a bad auto-pick,
+      // so this is a hard exclusion rather than a score penalty.
+      const checkoutDate = checkout_datetime.split('T')[0]
+      const { data: timeOff } = await supabase
+        .from('crew_availability')
+        .select('crew_member_id')
+        .eq('org_id', org_id)
+        .eq('available_date', checkoutDate)
+        .eq('is_available', false)
+        .in('crew_member_id', crew.map((c) => c.id))
+
+      const unavailableIds = new Set((timeOff ?? []).map((t) => t.crew_member_id))
+      const availableCrew  = crew.filter((c) => !unavailableIds.has(c.id))
+
+      if (!availableCrew.length) return null
+
       // Familiarity: which crew have been assigned to this property before
       const { data: propertyTurnovers } = await supabase
         .from('turnovers')
@@ -66,7 +83,7 @@ export const autoAssignTurnover = inngest.createFunction(
           .from('turnover_assignments')
           .select('crew_member_id')
           .in('turnover_id', pastTurnoverIds)
-          .in('crew_member_id', crew.map((c) => c.id))
+          .in('crew_member_id', availableCrew.map((c) => c.id))
 
         const historyItems = (history ?? []) as Array<{ crew_member_id: string }>
         familiarCrewIds = [...new Set(historyItems.map((h) => h.crew_member_id))]
@@ -79,7 +96,7 @@ export const autoAssignTurnover = inngest.createFunction(
       const { data: upcoming } = await supabase
         .from('turnover_assignments')
         .select('crew_member_id, turnovers!inner(checkout_datetime)')
-        .in('crew_member_id', crew.map((c) => c.id))
+        .in('crew_member_id', availableCrew.map((c) => c.id))
         .gte('turnovers.checkout_datetime', new Date().toISOString())
         .lte('turnovers.checkout_datetime', windowEnd.toISOString())
 
@@ -92,7 +109,7 @@ export const autoAssignTurnover = inngest.createFunction(
         mode,
         isSameDay:       turnover.is_same_day_turnover ?? false,
         property:        { lat: property?.lat ?? null, lng: property?.lng ?? null },
-        crew,
+        crew:            availableCrew,
         familiarCrewIds,
         workloadMap,
       }

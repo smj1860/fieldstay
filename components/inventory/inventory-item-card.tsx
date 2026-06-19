@@ -3,18 +3,20 @@
 import { useState } from 'react'
 import { Minus, Plus } from 'lucide-react'
 
-type StockStatus = 'critical' | 'low' | 'healthy'
+type StockStatus = 'uncounted' | 'critical' | 'low' | 'healthy'
 
-function getStatus(current: number, par: number): StockStatus {
-  if (current <= par)        return 'critical'
-  if (current <= par * 1.2)  return 'low'
+function getStatus(current: number, par: number, uncounted: boolean): StockStatus {
+  if (uncounted)              return 'uncounted'
+  if (current <= par)         return 'critical'
+  if (current <= par * 1.2)   return 'low'
   return 'healthy'
 }
 
 const STATUS_CONFIG: Record<StockStatus, { label: string; bg: string; color: string }> = {
-  critical: { label: 'At/Below Par', bg: 'var(--accent-red-dim)',   color: 'var(--accent-red)'   },
-  low:      { label: 'Low',          bg: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' },
-  healthy:  { label: 'Healthy',      bg: 'var(--accent-green-dim)', color: 'var(--accent-green)' },
+  uncounted: { label: 'Needs Count',  bg: 'var(--bg-raised)',        color: 'var(--text-muted)'   },
+  critical:  { label: 'At/Below Par', bg: 'var(--accent-red-dim)',   color: 'var(--accent-red)'   },
+  low:       { label: 'Low',          bg: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' },
+  healthy:   { label: 'Healthy',      bg: 'var(--accent-green-dim)', color: 'var(--accent-green)' },
 }
 
 interface InventoryItemCardProps {
@@ -24,6 +26,10 @@ interface InventoryItemCardProps {
   unit:            string
   parLevel:        number
   currentQuantity: number
+  /** True when the item has never had a real count recorded — shown as
+   *  "Needs Count" rather than "At/Below Par" since a default 0 quantity
+   *  on a freshly-added item doesn't mean it's genuinely out of stock. */
+  uncounted?:      boolean
   /** 'crew' — shows stepper only, no par editing
    *  'pm'   — shows stepper + par level inline edit */
   variant:         'crew' | 'pm'
@@ -39,11 +45,12 @@ export function InventoryItemCard({
   unit,
   parLevel,
   currentQuantity,
+  uncounted = false,
   variant,
   onQuantityChange,
 }: InventoryItemCardProps) {
   const [qty, setQty] = useState(currentQuantity)
-  const status        = getStatus(qty, parLevel)
+  const status        = getStatus(qty, parLevel, uncounted)
   const cfg           = STATUS_CONFIG[status]
 
   const decrement = () => {

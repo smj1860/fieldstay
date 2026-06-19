@@ -50,7 +50,7 @@ export default async function OpsSnapshotPage() {
 
     supabase
       .from('inventory_items')
-      .select('id, name, property_id, current_quantity, par_level')
+      .select('id, name, property_id, current_quantity, par_level, first_count_recorded_at')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .limit(200),
@@ -71,7 +71,7 @@ export default async function OpsSnapshotPage() {
     .lte('checkin_date',  monthEndIso)
 
   const lowStockItems = (inventoryItems ?? []).filter(
-    (i) => i.current_quantity <= i.par_level
+    (i) => i.first_count_recorded_at && i.current_quantity <= i.par_level
   )
 
   const admin = createServiceClient()

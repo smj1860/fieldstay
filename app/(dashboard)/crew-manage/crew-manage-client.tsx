@@ -137,7 +137,7 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
               }
             >
               <CalendarDays className="w-4 h-4" />
-              {view === 'calendar' ? 'List View' : 'Calendar'}
+              {view === 'calendar' ? 'List View' : 'Availability Calendar'}
             </button>
             <button
               onClick={() => setView(view === 'bulk' ? 'list' : 'bulk')}
@@ -393,13 +393,18 @@ function CrewCardModal({
 function InviteButton({ memberId, inviteSentAt }: { memberId: string; inviteSentAt: string | null }) {
   const [sent, setSent]   = useState(false)
   const [err, setErr]     = useState<string | null>(null)
-  const [busy, startBusy] = useTransition()
+  const [clicked, setClicked] = useState(false)
+  const [, startBusy]     = useTransition()
+  const busy = clicked
 
   const handle = () => {
+    if (clicked) return
+    setClicked(true)
     startBusy(async () => {
       const result = await inviteCrewMember(memberId)
       if (result.error) setErr(result.error)
       else setSent(true)
+      setClicked(false)
     })
   }
 

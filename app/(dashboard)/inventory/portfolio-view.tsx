@@ -16,6 +16,7 @@ interface PortfolioItem {
   property_id: string
   preferred_brand: string | null
   property: { name: string } | null
+  first_count_recorded_at: string | null
 }
 
 interface AggregatedItem {
@@ -40,9 +41,11 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
   const [copied, setCopied]               = useState(false)
   const [isPending, startTransition]      = useTransition()
 
-  const critical = items.filter(i => i.current_quantity <= i.par_level)
-  const low      = items.filter(i => i.current_quantity > i.par_level && i.current_quantity <= i.par_level * 1.2)
-  const healthy  = items.filter(i => i.current_quantity > i.par_level * 1.2)
+  const uncounted = items.filter(i => !i.first_count_recorded_at)
+  const counted   = items.filter(i => i.first_count_recorded_at)
+  const critical  = counted.filter(i => i.current_quantity <= i.par_level)
+  const low       = counted.filter(i => i.current_quantity > i.par_level && i.current_quantity <= i.par_level * 1.2)
+  const healthy   = counted.filter(i => i.current_quantity > i.par_level * 1.2)
 
   const propName = (item: PortfolioItem) => item.property?.name
 
@@ -86,10 +89,11 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
   return (
     <div>
       {/* Summary stats */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
-        <StatCard label="At/Below Par" value={critical.length} color="var(--accent-red)" />
-        <StatCard label="Low Stock"    value={low.length}      color="var(--accent-amber)" />
-        <StatCard label="Healthy"      value={healthy.length}  color="var(--accent-green)" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <StatCard label="At/Below Par" value={critical.length}   color="var(--accent-red)" />
+        <StatCard label="Low Stock"    value={low.length}        color="var(--accent-amber)" />
+        <StatCard label="Healthy"      value={healthy.length}    color="var(--accent-green)" />
+        <StatCard label="Needs Count"  value={uncounted.length}  color="var(--text-muted)" />
       </div>
 
       {/* Reorder button */}
@@ -173,9 +177,10 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-themed">
-            {[...critical, ...low, ...healthy].map(item => {
-              const isCritical = item.current_quantity <= item.par_level
-              const isLow      = !isCritical && item.current_quantity <= item.par_level * 1.2
+            {[...critical, ...low, ...healthy, ...uncounted].map(item => {
+              const isUncounted = !item.first_count_recorded_at
+              const isCritical  = !isUncounted && item.current_quantity <= item.par_level
+              const isLow       = !isUncounted && !isCritical && item.current_quantity <= item.par_level * 1.2
               return (
                 <tr key={item.id} className="hover:bg-canvas-themed transition-colors">
                   <td className="px-4 py-2.5 font-medium text-primary-themed">{item.name}</td>
@@ -192,13 +197,14 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
                     className="px-4 py-2.5 text-right font-mono font-semibold"
                     style={{ color: isCritical ? 'var(--accent-red)' : isLow ? 'var(--accent-amber)' : 'var(--text-primary)' }}
                   >
-                    {item.current_quantity}
+                    {isUncounted ? '—' : item.current_quantity}
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono text-secondary-themed">{item.par_level}</td>
                   <td className="px-4 py-2.5">
-                    {isCritical ? <span className="badge badge-red">At/Below Par</span>
-                     : isLow    ? <span className="badge badge-amber">Low</span>
-                                : <span className={cn('badge', 'badge-green')}>Healthy</span>}
+                    {isUncounted ? <span className="badge badge-slate">Needs Count</span>
+                     : isCritical ? <span className="badge badge-red">At/Below Par</span>
+                     : isLow      ? <span className="badge badge-amber">Low</span>
+                                  : <span className={cn('badge', 'badge-green')}>Healthy</span>}
                   </td>
                 </tr>
               )
