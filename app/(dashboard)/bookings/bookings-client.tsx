@@ -15,19 +15,20 @@ import type { BookingSource, BookingStatus } from '@/types/database'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface BookingRow {
-  id:            string
-  property_id:   string
-  guest_name:    string | null
-  checkin_date:  string
-  checkout_date: string
-  checkin_time:  string | null
-  checkout_time: string | null
-  source:        BookingSource
-  status:        BookingStatus
-  notes:         string | null
-  created_at:    string
-  properties:    { id: string; name: string; city: string | null; state: string | null } | null
-  turnovers:     { id: string; status: string } | { id: string; status: string }[] | null
+  id:                   string
+  property_id:          string
+  guest_name:           string | null
+  checkin_date:         string
+  checkout_date:        string
+  checkin_time:         string | null
+  checkout_time:        string | null
+  source:               BookingSource
+  status:               BookingStatus
+  notes:                string | null
+  has_overlap_conflict: boolean
+  created_at:           string
+  properties:           { id: string; name: string; city: string | null; state: string | null } | null
+  turnovers:            { id: string; status: string } | { id: string; status: string }[] | null
 }
 
 interface PropertyOption { id: string; name: string }
@@ -182,6 +183,22 @@ function BookingCard({
                 {!isBlocked && (
                   <span className={cn('badge text-xs', SOURCE_COLORS[booking.source])}>
                     {SOURCE_LABELS[booking.source]}
+                  </span>
+                )}
+
+                {/* Overlap conflict badge */}
+                {booking.has_overlap_conflict && (
+                  <span
+                    className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full"
+                    style={{
+                      background: 'var(--accent-red-dim)',
+                      color:      'var(--accent-red)',
+                      border:     '1px solid var(--accent-red)',
+                    }}
+                    title="This booking's dates overlap another confirmed booking at this property"
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                    Possible double-booking
                   </span>
                 )}
               </div>

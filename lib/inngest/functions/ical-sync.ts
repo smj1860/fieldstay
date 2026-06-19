@@ -2,6 +2,11 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { parseIcalFeed, toDateString, toTimeString, isAllDay, type ParsedBooking } from '@/lib/ical/parser'
 import { cancelTurnoversForBooking } from '@/lib/turnovers/generator'
+import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
+import { getPmEmail } from '@/lib/inngest/helpers'
+import { resend, FROM } from '@/lib/resend/client'
+import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
+import type { BookingSource } from '@/types/database'
 
 // H-2: Reject non-HTTPS URLs and private/loopback IP ranges to prevent SSRF
 function assertSafeIcalUrl(url: string): void {
@@ -113,16 +118,16 @@ export const syncIcalFeed = inngest.createFunction(
 
     // ── Step 1: Fetch feed URL and raw data ─────────────────────────────────
 
-    const feedUrl = await step.run('fetch-feed-url', async () => {
+    const { url: feedUrl, source: feedSource } = await step.run('fetch-feed-url', async () => {
       const supabase = createServiceClient()
       const { data, error } = await supabase
         .from('ical_feeds')
-        .select('url')
+        .select('url, source')
         .eq('id', feed_id)
         .single()
 
       if (error || !data) throw new Error(`Feed not found: ${feed_id}`)
-      return data.url
+      return { url: data.url, source: data.source }
     })
 
     let rawIcal: string
@@ -201,7 +206,7 @@ export const syncIcalFeed = inngest.createFunction(
           checkout_date: toDateString(event.end),
           checkin_time:  isAllDay(event.start) ? null : toTimeString(event.start),
           checkout_time: isAllDay(event.end)   ? null : toTimeString(event.end),
-          source:        'airbnb' as const,
+          source:        (feedSource ?? 'other') as BookingSource,
           status:        (event.status === 'cancelled' ? 'cancelled' :
                           event.status === 'blocked'   ? 'blocked'   :
                           event.status === 'tentative' ? 'tentative' : 'confirmed'),
@@ -259,6 +264,51 @@ export const syncIcalFeed = inngest.createFunction(
         for (const bookingId of cancelledBookingIds) {
           await cancelTurnoversForBooking(bookingId, supabase)
         }
+      })
+    }
+
+    // ── Step 4b: Detect booking overlaps for this property ──────────────────
+
+    const newConflicts = await step.run('detect-overlap-conflicts', async () => {
+      const supabase = createServiceClient()
+      return detectAndFlagOverlaps(supabase, property_id)
+    })
+
+    if (newConflicts.length > 0) {
+      await step.run('alert-pm-overlap-conflict', async () => {
+        const supabase = createServiceClient()
+        const pmEmail  = await getPmEmail(supabase, org_id)
+        if (!pmEmail) return
+
+        const { data: property } = await supabase
+          .from('properties').select('name').eq('id', property_id).single()
+
+        await resend.emails.send(
+          {
+            from:    FROM,
+            to:      pmEmail,
+            subject: `⚠️ Possible double-booking — ${property?.name ?? 'a property'}`,
+            html: await renderPmAlert({
+              heading: 'Possible double-booking detected',
+              body:    `${newConflicts.length} confirmed booking${newConflicts.length !== 1 ? 's' : ''} at ${property?.name ?? 'this property'} overlap another confirmed booking. Review before guests arrive.`,
+              table: {
+                headers: ['Source', 'Guest', 'Check-in', 'Check-out'],
+                rows: newConflicts.map(c => [
+                  c.source,
+                  c.guestName ?? '—',
+                  c.checkinDate,
+                  c.checkoutDate,
+                ]),
+              },
+              ctaLabel: 'Review Bookings →',
+              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/bookings`,
+            }),
+          },
+          // Keyed per property per day — if a new conflict appears later the same
+          // day it still sends (different newConflicts content = fine to re-send
+          // manually if needed), but retries of the *same* step won't double-send.
+          { idempotencyKey: `overlap-conflict-${property_id}-${new Date().toISOString().split('T')[0]}` }
+        )
       })
     }
 

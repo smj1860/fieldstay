@@ -193,23 +193,24 @@ export interface IcalFeed {
 }
 
 export interface Booking {
-  id:            string
-  property_id:   string
-  org_id:        string
-  ical_feed_id:  string | null
-  ical_uid:      string | null
-  guest_name:    string | null
-  guest_email:   string | null
-  checkin_date:  string
-  checkout_date: string
-  checkin_time:  string | null
-  checkout_time: string | null
-  source:        BookingSource
-  status:        BookingStatus
-  notes:         string | null
-  raw_ical_data: Record<string, unknown> | null
-  created_at:    string
-  updated_at:    string
+  id:                   string
+  property_id:          string
+  org_id:               string
+  ical_feed_id:         string | null
+  ical_uid:             string | null
+  guest_name:           string | null
+  guest_email:          string | null
+  checkin_date:         string
+  checkout_date:        string
+  checkin_time:         string | null
+  checkout_time:        string | null
+  source:               BookingSource
+  status:               BookingStatus
+  notes:                string | null
+  raw_ical_data:        Record<string, unknown> | null
+  has_overlap_conflict: boolean
+  created_at:           string
+  updated_at:           string
 }
 
 export interface CrewMember {
