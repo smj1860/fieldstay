@@ -57,6 +57,14 @@ const BYPASS_ROUTES = [
   '/robots',
   '/sitemap',
 
+  // PWA manifest and service worker — must always be served as-is.
+  // The matcher below doesn't exclude .webmanifest/.js, so without this
+  // bypass an unauthenticated (or transiently failing) auth refresh here
+  // redirects to /login, returning HTML where the browser expects JSON —
+  // surfaces as a manifest "Syntax error" in devtools.
+  '/manifest.webmanifest',
+  '/sw.js',
+
   // Supabase auth callback (magic links, OAuth email confirmation)
   '/auth/callback',
 

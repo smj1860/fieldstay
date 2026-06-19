@@ -119,7 +119,7 @@ export default function CrewMessagesPage() {
           }}
           placeholder="Type a message..."
           rows={1}
-          className="flex-1 px-3 py-2 rounded-lg text-sm outline-none resize-none border border-accent-200"
+          className="flex-1 px-3 py-2 rounded-lg text-sm outline-none resize-none border border-accent-200 bg-white text-accent-900"
         />
         <button
           onClick={handleSend}
