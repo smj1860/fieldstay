@@ -1,13 +1,15 @@
 'use server'
 
 import { requireOrgMember } from '@/lib/auth'
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { sendPushToUser } from '@/lib/push/send-push'
+import type { Message } from '@/types/database'
 
 export interface MessageActionResult {
   success: boolean
   error?: string
+  message?: Message
 }
 
 // PM → crew message. Sends a push notification to the crew member's device.
@@ -45,7 +47,7 @@ export async function sendMessageToCrew(
         content:       trimmed,
         turnover_id:   contextId ?? null,
       })
-      .select('id, created_at')
+      .select('id, org_id, sender_id, recipient_id, content, read_at, turnover_id, work_order_id, created_at')
       .single()
 
     if (error || !message) {
@@ -70,7 +72,7 @@ export async function sendMessageToCrew(
       url:   '/crew/messages',
     })
 
-    return { success: true }
+    return { success: true, message }
   } catch (err) {
     console.error('[sendMessageToCrew]', err)
     return { success: false, error: 'Failed to send message' }
@@ -95,7 +97,11 @@ export async function sendMessageToPM(content: string): Promise<MessageActionRes
 
     if (!crewMember) return { success: false, error: 'Crew profile not found' }
 
-    const { data: recipient } = await supabase
+    // Crew members have no RLS visibility into organization_members (they're
+    // not members of the org themselves), so this lookup intentionally
+    // bypasses RLS via the service client to find a contact to route to.
+    const admin = createServiceClient()
+    const { data: recipient } = await admin
       .from('organization_members')
       .select('user_id')
       .eq('org_id', crewMember.org_id)
