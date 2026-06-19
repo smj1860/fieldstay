@@ -13,6 +13,7 @@ import {
   createWorkOrder, createWorkOrderFromSchedule,
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
   broadcastMaintenanceTemplate, createMaintenanceScheduleTemplate, updateMaintenanceTemplate, type BroadcastResult,
+  bulkAssignVendor, bulkUpdateWorkOrderStatus,
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency, ComplianceStatus } from '@/types/database'
 import { distanceMiles } from '@/lib/geocoding'
@@ -262,9 +263,13 @@ const STATUS_TABS = [
 function WorkOrderCard({
   wo,
   onClick,
+  isSelected,
+  onToggle,
 }: {
   wo: WorkOrderRow
   onClick: () => void
+  isSelected: boolean
+  onToggle: () => void
 }) {
   const property = getJoined(wo.properties)
   const vendor   = getJoined(wo.vendors)
@@ -280,6 +285,14 @@ function WorkOrderCard({
       )}
     >
       <div className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={onToggle}
+          onClick={(e) => e.stopPropagation()}
+          className="w-4 h-4 rounded border-themed text-brand-600 mt-0.5 flex-shrink-0 cursor-pointer"
+          aria-label="Select work order"
+        />
         <div className="flex-1 min-w-0">
           {/* WO number + title + badges */}
           <div className="flex items-start gap-2 flex-wrap">
@@ -2005,6 +2018,16 @@ export function MaintenanceBoard({
 
   const [selectedWO, setSelectedWO] = useState<WorkOrderDetailData | null>(null)
   const [warning,    setWarning]    = useState<string | null>(null)
+  const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set())
+  const [bulkActing,   startBulkAction] = useTransition()
+
+  const toggleSelect = (id: string) =>
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  const clearSelection = () => setSelectedIds(new Set())
 
   useEffect(() => {
     if (!warning) return
@@ -2213,14 +2236,37 @@ export function MaintenanceBoard({
           )}
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map((wo) => (
-            <WorkOrderCard
-              key={wo.id}
-              wo={wo}
-              onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
-            />
-          ))}
+        <div>
+          {filtered.length > 1 && (
+            <div className="flex items-center gap-3 mb-2">
+              <label className="flex items-center gap-2 text-xs cursor-pointer" style={{ color: 'var(--text-muted)' }}>
+                <input
+                  type="checkbox"
+                  checked={filtered.length > 0 && filtered.every(wo => selectedIds.has(wo.id))}
+                  onChange={() =>
+                    filtered.every(wo => selectedIds.has(wo.id))
+                      ? clearSelection()
+                      : setSelectedIds(new Set(filtered.map(wo => wo.id)))
+                  }
+                  className="w-4 h-4 rounded border-themed text-brand-600 cursor-pointer"
+                />
+                {filtered.every(wo => selectedIds.has(wo.id))
+                  ? `Deselect all (${filtered.length})`
+                  : `Select all visible (${filtered.length})`}
+              </label>
+            </div>
+          )}
+          <div className="space-y-3">
+            {filtered.map((wo) => (
+              <WorkOrderCard
+                key={wo.id}
+                wo={wo}
+                onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
+                isSelected={selectedIds.has(wo.id)}
+                onToggle={() => toggleSelect(wo.id)}
+              />
+            ))}
+          </div>
         </div>
       ))}
 
@@ -2329,6 +2375,62 @@ export function MaintenanceBoard({
       )}
 
       {/* Work Order Detail Slide-Over */}
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div
+          className="fixed bottom-20 md:bottom-6 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:w-auto z-30 flex flex-col gap-2 px-4 py-3 rounded-2xl shadow-xl"
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', maxWidth: '520px', margin: '0 auto' }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--text-primary)' }}>
+              {selectedIds.size} selected
+            </span>
+            <button onClick={clearSelection} className="btn-ghost text-xs flex-shrink-0 flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+              <X className="w-3.5 h-3.5" /> Clear
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              className="input text-sm py-1.5 flex-1"
+              defaultValue=""
+              disabled={bulkActing}
+              onChange={(e) => {
+                if (!e.target.value) return
+                const vendorId = e.target.value
+                e.target.value = ''
+                startBulkAction(async () => {
+                  await bulkAssignVendor([...selectedIds], vendorId)
+                  clearSelection()
+                })
+              }}
+            >
+              <option value="" disabled>Assign vendor…</option>
+              {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            </select>
+            <select
+              className="input text-sm py-1.5 flex-1"
+              defaultValue=""
+              disabled={bulkActing}
+              onChange={(e) => {
+                if (!e.target.value) return
+                const status = e.target.value as WoStatus
+                e.target.value = ''
+                startBulkAction(async () => {
+                  await bulkUpdateWorkOrderStatus([...selectedIds], status)
+                  clearSelection()
+                })
+              }}
+            >
+              <option value="" disabled>Set status…</option>
+              <option value="assigned">Assigned</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+      )}
+
       {selectedWO && (
         <>
           {/* Backdrop */}

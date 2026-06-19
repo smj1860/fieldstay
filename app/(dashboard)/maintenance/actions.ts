@@ -845,6 +845,57 @@ export async function createWorkOrderFromSchedule(
   return { success: true }
 }
 
+// ── Bulk Work Order Actions ──────────────────────────────────────────────────
+
+export async function bulkAssignVendor(
+  workOrderIds: string[],
+  vendorId: string
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: vendor } = await supabase
+    .from('vendors')
+    .select('id')
+    .eq('id', vendorId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!vendor) return { error: 'Vendor not found' }
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({ vendor_id: vendorId, assigned_crew_member_id: null })
+    .in('id', workOrderIds)
+    .eq('org_id', membership.org_id)
+
+  if (error) {
+    console.error('[bulkAssignVendor]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
+  revalidatePath('/maintenance')
+  return {}
+}
+
+export async function bulkUpdateWorkOrderStatus(
+  workOrderIds: string[],
+  status: WoStatus
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({ status })
+    .in('id', workOrderIds)
+    .eq('org_id', membership.org_id)
+
+  if (error) {
+    console.error('[bulkUpdateWorkOrderStatus]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
+  revalidatePath('/maintenance')
+  return {}
+}
+
 // ── Maintenance Schedule CRUD ────────────────────────────────────────────────
 
 export async function createMaintenanceSchedule(
