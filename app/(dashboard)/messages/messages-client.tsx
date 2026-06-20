@@ -147,10 +147,9 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
         .map(uid => byUserId.get(uid))
         .filter((c): c is CrewOption => !!c)
 
-      const label = sorted[0].group_label
-        ?? participants.map(p => p.name).slice(0, 3).join(', ')
+      const participantList = participants.map(p => p.name).slice(0, 3).join(', ')
         + (participants.length > 3 ? '…' : '')
-        || 'Group message'
+      const label = (sorted[0].group_label ?? participantList) || 'Group message'
 
       if (searchLower && !label.toLowerCase().includes(searchLower)) continue
 
