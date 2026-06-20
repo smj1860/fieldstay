@@ -831,6 +831,8 @@ export interface Message {
   read_at:       string | null
   turnover_id:   string | null
   work_order_id: string | null
+  group_id:      string | null
+  group_label:   string | null
   created_at:    string
 }
 

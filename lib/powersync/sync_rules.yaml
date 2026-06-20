@@ -116,6 +116,6 @@ bucket_definitions:
         AND is_active = true
     data:
       - SELECT id, org_id, sender_id, recipient_id, content,
-               read_at, turnover_id, created_at
+               read_at, turnover_id, group_id, group_label, created_at
         FROM messages
         WHERE org_id = bucket.org_id

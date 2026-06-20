@@ -72,6 +72,26 @@ export const notifyAssignmentGap = inngest.createFunction(
       if (sent) sentTo.push(sent)
     }
 
+    // Push notifications (best-effort — don't fail the function if push errors)
+    for (const userId of context.managerUserIds) {
+      await step.run(`push-manager-${userId}`, async () => {
+        const supabase = createServiceClient()
+        const { data: subs } = await supabase
+          .from('push_subscriptions')
+          .select('endpoint, p256dh, auth')
+          .eq('user_id', userId)
+
+        if (!subs?.length) return
+
+        const { sendPushToCrewMember } = await import('@/lib/push/client')
+        await sendPushToCrewMember(subs, {
+          title: `No crew for ${context.propertyName}`,
+          body:  `Turnover on ${new Date(turnover_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} needs manual assignment`,
+          url:   `/turnovers/${turnover_id}`,
+        }).catch(() => { /* silently skip failed pushes */ })
+      })
+    }
+
     return { sent: sentTo.length, recipients: sentTo }
   }
 )

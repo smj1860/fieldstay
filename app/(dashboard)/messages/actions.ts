@@ -1,5 +1,6 @@
 'use server'
 
+import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
@@ -145,6 +146,51 @@ export async function sendMessageToPM(content: string): Promise<MessageActionRes
   } catch (err) {
     console.error('[sendMessageToPM]', err)
     return { success: false, error: 'Failed to send message' }
+  }
+}
+
+// Sends a single message to multiple crew members with a shared group_id.
+// Each recipient gets their own row; the group_id ties them together for display.
+export async function sendGroupMessage(
+  crewMemberIds: string[],
+  content: string,
+  groupLabel?: string
+): Promise<{ error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
+    if (crewMemberIds.length < 2) return { error: 'Select at least 2 recipients for a group message' }
+
+    const { data: crewUsers } = await supabase
+      .from('crew_members')
+      .select('id, user_id')
+      .in('id', crewMemberIds)
+      .eq('org_id', membership.org_id)
+
+    if (!crewUsers?.length) return { error: 'No valid recipients found' }
+
+    const groupId = crypto.randomUUID()
+
+    const rows = crewUsers
+      .filter(c => c.user_id)
+      .map(c => ({
+        org_id:       membership.org_id,
+        sender_id:    user.id,
+        recipient_id: c.user_id as string,
+        content,
+        group_id:     groupId,
+        group_label:  groupLabel ?? null,
+      }))
+
+    if (!rows.length) return { error: 'No valid recipients found' }
+
+    const { error } = await supabase.from('messages').insert(rows)
+    if (error) return { error: error.message }
+
+    revalidatePath('/messages')
+    return {}
+  } catch (err) {
+    console.error('[sendGroupMessage]', err)
+    return { error: 'Failed to send group message' }
   }
 }
 
