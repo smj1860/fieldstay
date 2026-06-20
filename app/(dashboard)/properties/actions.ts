@@ -7,6 +7,7 @@ import { slugify } from '@/lib/utils'
 import { geocodeZip } from '@/lib/geocoding'
 import { calculateHealthScore } from '@/lib/assets/health-score'
 import { logAuditEvent } from '@/lib/audit'
+import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import type { AssetType } from '@/types/database'
 
 export type PropertyActionState = {
@@ -95,6 +96,11 @@ export async function createProperty(
       console.warn('[createProperty] geocodeZip returned null for zip:', zip)
     }
   }
+
+  await applyMasterChecklistToProperty(property.id, membership.org_id, supabase, {
+    force:   false,
+    actorId: user.id,
+  })
 
   await logAuditEvent({
     orgId:      membership.org_id,

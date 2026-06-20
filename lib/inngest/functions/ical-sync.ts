@@ -127,11 +127,12 @@ export const syncIcalFeed = inngest.createFunction(
       const supabase = createServiceClient()
       const { data, error } = await supabase
         .from('ical_feeds')
-        .select('url, source')
+        .select('url, source, org_id')
         .eq('id', feed_id)
         .single()
 
       if (error || !data) throw new Error(`Feed not found: ${feed_id}`)
+      if (data.org_id !== org_id) throw new Error(`Feed ${feed_id} org mismatch — expected ${org_id}, got ${data.org_id}`)
       return { url: data.url, source: data.source }
     })
 

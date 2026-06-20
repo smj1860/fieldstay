@@ -70,14 +70,21 @@ export function WelcomeEmail({
           <Column>
             <Text style={stepTitle}>Set up your first property</Text>
             <Text style={stepDesc}>
-              Add inventory, cleaning checklists, and maintenance schedules.{' '}
+              Add inventory with par levels, your cleaning checklist, assets, and maintenance schedules.{' '}
               <Link href={propertiesUrl} style={link}>View properties →</Link>
             </Text>
           </Column>
         </Row>
       </Section>
 
-      <Text style={{ ...body, marginTop: 36 }}>
+      <Text style={{ ...body, marginTop: 36, padding: '14px 18px', borderRadius: 10,
+                      background: '#f0f4ff', borderLeft: '4px solid #FCD116' }}>
+        Once your first property is fully set up, FieldStay runs on autopilot — turnovers assign
+        themselves, inventory restocks trigger automatically, and your owners get a live P&amp;L
+        view without you lifting a finger.
+      </Text>
+
+      <Text style={{ ...body, marginTop: 16 }}>
         If you need anything during setup, just reply to this email or use the
         chat in the app. I built FieldStay to make property operations actually
         manageable — and I want to make sure it does that for you.

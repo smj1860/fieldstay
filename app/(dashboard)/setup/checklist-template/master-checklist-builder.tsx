@@ -3,79 +3,8 @@
 import { useState, useTransition, useRef } from 'react'
 import { Plus, X, Upload, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { saveMasterChecklistItems, type ChecklistItemInput } from './actions'
-
-// ── Seeded cleaning task catalog ─────────────────────────────────────────────
-
-export const CLEANING_CATALOG: Record<string, string[]> = {
-  'Kitchen': [
-    'Wipe all countertops and backsplash',
-    'Clean stovetop and burners',
-    'Clean oven interior',
-    'Clean microwave inside and out',
-    'Wipe exterior of refrigerator',
-    'Clean inside refrigerator, remove old items',
-    'Run dishwasher or hand-wash dishes',
-    'Empty and reline trash can',
-    'Wipe cabinet fronts',
-    'Sweep and mop floor',
-    'Restock dish soap, sponge, paper towels',
-  ],
-  'Bathrooms': [
-    'Scrub toilet bowl, seat, and base',
-    'Clean sink and faucet',
-    'Wipe mirror',
-    'Scrub shower/tub and glass doors',
-    'Sweep and mop floor',
-    'Empty trash and reline',
-    'Restock toilet paper, hand soap, shampoo/conditioner',
-    'Replace bath mat if needed',
-    'Wipe exhaust fan cover',
-  ],
-  'Bedrooms': [
-    'Strip bed linens and pillowcases',
-    'Make bed with fresh linens',
-    'Dust furniture surfaces',
-    'Wipe nightstands and lamps',
-    'Vacuum floor and rugs',
-    'Check under bed',
-    'Empty trash',
-    'Check closet and dresser drawers for left items',
-    'Restock extra blankets/pillows if needed',
-  ],
-  'Living Areas': [
-    'Dust all furniture',
-    'Wipe TV screen and remotes',
-    'Fluff and rearrange cushions',
-    'Vacuum upholstered furniture',
-    'Sweep and vacuum floors',
-    'Mop hard floors',
-    'Empty all trash',
-    'Wipe light switches and door handles',
-    'Check windows for smudges',
-  ],
-  'Laundry': [
-    'Run all used towels and linens through washer/dryer',
-    'Fold and return towels to bathrooms',
-    'Wipe washer and dryer exteriors',
-    'Clean lint trap',
-  ],
-  'Outdoor / Entry': [
-    'Sweep front entry and porch',
-    'Wipe outdoor furniture',
-    'Remove any trash or debris from yard',
-    'Check and clear grill grates',
-    'Wipe door handles and keypad',
-  ],
-  'Final Checks': [
-    'Check all windows are closed and locked',
-    'Turn off all lights',
-    'Set thermostat to default temperature',
-    'Lock all doors',
-    'Take photos of each room',
-    'Report any damage or missing items',
-  ],
-}
+import { saveMasterChecklistItems, applyMasterChecklistToProperties, type ChecklistItemInput } from './actions'
+import { CLEANING_CATALOG } from '@/lib/checklists/standard-catalog'
 
 const ALL_SECTIONS = Object.keys(CLEANING_CATALOG)
 
@@ -92,9 +21,11 @@ interface SelectedItem {
 
 export function MasterChecklistBuilder({
   existingItems,
+  properties,
   continueAction,
 }: {
   existingItems: Array<{ id: string; section: string; task: string; sort_order: number; source: 'catalog' | 'custom' | 'upload' }>
+  properties:    Array<{ id: string; name: string }>
   continueAction: () => Promise<void>
 }) {
   const [tab, setTab]     = useState<'catalog' | 'custom' | 'upload'>('catalog')
@@ -104,6 +35,11 @@ export function MasterChecklistBuilder({
   const [saving, startSave]   = useTransition()
   const [success, setSuccess] = useState(false)
   const [error, setError]     = useState<string | null>(null)
+
+  // Apply to all
+  const [applying, startApply]    = useTransition()
+  const [applyResult, setApplyResult] = useState<{ applied?: number; error?: string } | null>(null)
+  const [showConfirm, setShowConfirm] = useState(false)
 
   // Catalog tab
   const [catalogSection, setCatalogSection] = useState<string>(ALL_SECTIONS[0]!)
@@ -230,6 +166,16 @@ export function MasterChecklistBuilder({
   const confirmUpload = () => {
     setItems((prev) => [...prev, ...uploadPreview])
     setUploadPreview([])
+  }
+
+  const handleApplyToAll = () => {
+    setApplyResult(null)
+    startApply(async () => {
+      const ids = properties.map((p) => p.id)
+      const result = await applyMasterChecklistToProperties(ids)
+      setApplyResult(result)
+      setShowConfirm(false)
+    })
   }
 
   const handleSave = (andContinue = false) => {
@@ -486,29 +432,91 @@ export function MasterChecklistBuilder({
       )}
 
       {/* ── Actions ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-3 pt-2 border-t border-themed">
-        <button
-          type="button"
-          onClick={() => handleSave(true)}
-          disabled={saving}
-          className="btn-primary"
-        >
-          {saving ? 'Saving…' : 'Save & Continue →'}
-        </button>
-        <button
-          type="button"
-          onClick={() => handleSave(false)}
-          disabled={saving}
-          className="btn-secondary"
-        >
-          Save Checklist
-        </button>
-        {success && (
-          <span className="text-sm flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
-            <Check className="w-3.5 h-3.5" /> Saved
-          </span>
+      <div className="space-y-3 pt-2 border-t border-themed">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => handleSave(true)}
+            disabled={saving}
+            className="btn-primary"
+          >
+            {saving ? 'Saving…' : 'Save & Continue →'}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSave(false)}
+            disabled={saving}
+            className="btn-secondary"
+          >
+            Save Checklist
+          </button>
+          {success && (
+            <span className="text-sm flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
+              <Check className="w-3.5 h-3.5" /> Saved
+            </span>
+          )}
+        </div>
+
+        {properties.length > 0 && (
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={() => setShowConfirm(true)}
+              disabled={applying || items.length === 0}
+              className="btn-secondary text-sm"
+            >
+              {applying ? 'Applying…' : `Apply to All Properties (${properties.length})`}
+            </button>
+            {applyResult && (
+              <p className="text-xs mt-1.5" style={{ color: applyResult.error ? 'var(--accent-red)' : 'var(--accent-green)' }}>
+                {applyResult.error ?? `Applied to ${applyResult.applied} ${applyResult.applied === 1 ? 'property' : 'properties'}`}
+              </p>
+            )}
+          </div>
         )}
       </div>
+
+      {/* ── Confirm dialog ───────────────────────────────────────────────────── */}
+      {showConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          onClick={() => setShowConfirm(false)}
+        >
+          <div className="absolute inset-0 bg-black/50" />
+          <div
+            className="relative rounded-2xl p-6 w-full max-w-sm mx-4 shadow-xl"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
+              Apply checklist to all properties?
+            </h3>
+            <p className="text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>
+              This will replace the default cleaning template on all {properties.length} {properties.length === 1 ? 'property' : 'properties'} with your current master checklist.
+            </p>
+            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+              Any customisations made per-property will be overwritten.
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={handleApplyToAll}
+                disabled={applying}
+                className="btn-primary flex-1 text-sm"
+              >
+                {applying ? 'Applying…' : 'Yes, apply to all'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowConfirm(false)}
+                className="btn-ghost text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

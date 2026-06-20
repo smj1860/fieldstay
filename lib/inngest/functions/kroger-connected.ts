@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getClientToken, findNearestKrogerStore } from '@/lib/kroger/client'
+import { logAuditEvent } from '@/lib/audit'
 
 export type KrogerConnectedEvent = {
   name: 'integration/kroger.connected'
@@ -82,6 +83,14 @@ export const setupKrogerOnConnect = inngest.createFunction(
         .delete()
         .eq('org_id', org_id)
         .eq('milestone', 'kroger_store_needed')
+
+      await logAuditEvent({
+        orgId:      org_id,
+        action:     'kroger.auto_configured',
+        targetType: 'organization',
+        targetId:   org_id,
+        metadata:   { locationName: store.name },
+      })
 
       return { found: true, locationName: store.name }
     })

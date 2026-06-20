@@ -5,6 +5,7 @@ import { renderWorkOrderEmail } from '@/emails/work-order'
 import { getPmEmail } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { parseLocalDate } from '@/lib/utils/date-validation'
+import { randomBytes } from 'crypto'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -19,90 +20,80 @@ export const handleWorkOrderCreated = inngest.createFunction(
     const { work_order_id, property_id, org_id, portal_enabled } = event.data
 
     if (portal_enabled) {
-      await step.run('send-vendor-portal-link', async () => {
+      await step.run('dispatch-to-vendor', async () => {
         const supabase = createServiceClient()
 
         const { data: wo } = await supabase
           .from('work_orders')
           .select(`
-            id, title, description, wo_number, category, priority,
-            scheduled_date, estimated_cost, nte_amount, completion_token,
-            completion_token_expires_at,
+            id, title, description, wo_number, nte_amount,
+            access_notes, lockbox_code, parking_notes,
+            vendor_id, created_by,
             vendors ( name, email ),
-            properties ( name, address, city, state, zip )
+            properties ( name, address ),
+            organizations ( name )
           `)
           .eq('id', work_order_id)
           .single()
 
-        // Diagnostic for the silent-exit bug (Item 14, dashboard walkthrough):
-        // confirms whether the nested-embed join below actually resolves
-        // `vendors` / `properties`, without logging email or the completion
-        // token themselves. Keep this in place after the root cause is found —
-        // it doubles as the template for auditing the other nested-join
-        // queries in this file (quote-requested, overdue, etc.).
-        const rawVendors    = wo?.vendors as unknown
-        const rawProperties = wo?.properties as unknown
-        logger.info(`[handleWorkOrderCreated] wo join shape for ${work_order_id}: ` + JSON.stringify({
-          hasWo:              !!wo,
-          hasCompletionToken: !!wo?.completion_token,
-          vendorsType:        Array.isArray(rawVendors) ? 'array' : typeof rawVendors,
-          vendorsIsNull:      rawVendors === null,
-          hasVendorEmail:     !!(Array.isArray(rawVendors)
-            ? (rawVendors[0] as { email?: string } | undefined)?.email
-            : (rawVendors as { email?: string } | null | undefined)?.email),
-          propertiesType:     Array.isArray(rawProperties) ? 'array' : typeof rawProperties,
-          propertiesIsNull:   rawProperties === null,
-        }))
+        if (!wo) return
 
-        if (!wo?.completion_token) return
-
-        const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
-        const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+        const vendor   = Array.isArray(wo.vendors)       ? wo.vendors[0]       : wo.vendors
+        const property = Array.isArray(wo.properties)    ? wo.properties[0]    : wo.properties
+        const org      = Array.isArray(wo.organizations) ? wo.organizations[0] : wo.organizations
 
         if (!vendor?.email) {
-          logger.warn(`Work order ${work_order_id}: portal enabled but vendor has no email`)
+          logger.warn(`Work order ${work_order_id}: portal_enabled but vendor has no email`)
           return
         }
 
-        const portalUrl = `${process.env.NEXT_PUBLIC_APP_URL}/work-orders/${wo.completion_token}`
-
+        const token     = randomBytes(32).toString('hex')
         const expiresAt = new Date()
         expiresAt.setDate(expiresAt.getDate() + 30)
+
         await supabase
           .from('work_orders')
-          .update({ completion_token_expires_at: expiresAt.toISOString() })
+          .update({
+            public_token:            token,
+            public_token_expires_at: expiresAt.toISOString(),
+            vendor_dispatch_email:   vendor.email,
+          })
           .eq('id', work_order_id)
 
-        const html = await renderWorkOrderEmail({
-          vendorName:     vendor.name,
-          jobTitle:       wo.title,
-          description:    wo.description ?? undefined,
-          scheduledDate:  (() => {
-            if (!wo.scheduled_date) return undefined
-            try {
-              return parseLocalDate(wo.scheduled_date, 'scheduled_date')
-                .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-            } catch {
-              return undefined
-            }
-          })(),
-          propertyName:   property?.name ?? '',
-          propertyCity:   property?.city ?? undefined,
-          propertyState:  property?.state ?? undefined,
-          portalUrl,
+        // Fetch dispatcher info from the user who created the WO
+        let dispatcherName = 'Your Property Manager'
+        let dispatcherPhone: string | null = null
+        if (wo.created_by) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('full_name, phone')
+            .eq('id', wo.created_by)
+            .single()
+          if (profile?.full_name) dispatcherName = profile.full_name
+          if (profile?.phone)     dispatcherPhone = profile.phone
+        }
+
+        await step.sendEvent('fire-dispatch-event', {
+          name: 'work-order/dispatched' as const,
+          data: {
+            workOrderId:     wo.id,
+            woNumber:        wo.wo_number ?? '',
+            token,
+            publicUrl:       `${process.env.NEXT_PUBLIC_APP_URL}/wo/${token}`,
+            vendorEmail:     vendor.email,
+            vendorName:      vendor.name ?? '',
+            propertyName:    (property as { name: string } | null)?.name    ?? 'Property',
+            propertyAddress: (property as { address: string | null } | null)?.address ?? '',
+            title:           wo.title,
+            description:     wo.description ?? '',
+            nteAmount:       (wo.nte_amount as number | null) ?? 0,
+            dispatcherName,
+            dispatcherOrg:   (org as { name: string } | null)?.name ?? 'FieldStay Property Management',
+            dispatcherPhone,
+          },
         })
 
-        await resend.emails.send(
-          {
-            from:    FROM,
-            to:      vendor.email,
-            subject: `Work order: ${wo.title} — ${property?.name}`,
-            html,
-          },
-          { idempotencyKey: `wo-vendor-portal-${work_order_id}` }
-        )
-
-        logger.info(`Sent vendor portal link to ${vendor.email} for WO ${work_order_id}`)
+        logger.info(`Dispatched WO ${work_order_id} to vendor ${vendor.email} via TradeSuite portal`)
       })
     }
 

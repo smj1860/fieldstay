@@ -5,12 +5,20 @@ import { markStepComplete } from '../actions'
 export default async function OnboardingChecklistTemplatePage() {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: existing } = await supabase
-    .from('org_master_checklist_items')
-    .select('*')
-    .eq('org_id', membership.org_id)
-    .order('section')
-    .order('sort_order')
+  const [{ data: existing }, { data: properties }] = await Promise.all([
+    supabase
+      .from('org_master_checklist_items')
+      .select('*')
+      .eq('org_id', membership.org_id)
+      .order('section')
+      .order('sort_order'),
+    supabase
+      .from('properties')
+      .select('id, name')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('name'),
+  ])
 
   async function continueAction() {
     'use server'
@@ -30,6 +38,7 @@ export default async function OnboardingChecklistTemplatePage() {
 
       <MasterChecklistBuilder
         existingItems={(existing ?? []) as Array<{ id: string; section: string; task: string; sort_order: number; source: 'catalog' | 'custom' | 'upload' }>}
+        properties={(properties ?? []) as Array<{ id: string; name: string }>}
         continueAction={continueAction}
       />
     </div>

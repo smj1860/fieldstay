@@ -105,6 +105,7 @@ function Icon({ d, color = '#6B7280', size = 16 }: { d: string; color?: string; 
 export function WorkOrderPublicClient({ token, workOrder: wo }: Props) {
   const [signed,  setSigned]  = useState(wo.alreadySigned)
   const [notes,   setNotes]   = useState('')
+  const [photos,  setPhotos]  = useState<File[]>([])
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState<string | null>(null)
 
@@ -123,7 +124,7 @@ export function WorkOrderPublicClient({ token, workOrder: wo }: Props) {
   async function handleSignOff() {
     setLoading(true)
     setError(null)
-    const result = await submitWorkOrderSignOff(token, notes)
+    const result = await submitWorkOrderSignOff(token, notes, photos.length > 0 ? photos : undefined)
     setLoading(false)
     if (result.error) {
       setError(result.error)
@@ -360,6 +361,39 @@ export function WorkOrderPublicClient({ token, workOrder: wo }: Props) {
                     e.target.style.boxShadow   = 'none'
                   }}
                 />
+                <div>
+                  <label
+                    htmlFor="signoff-photos"
+                    style={{
+                      display:'block', fontSize:11, fontWeight:700,
+                      color:'#7A7A7A', letterSpacing:'0.14em',
+                      textTransform:'uppercase', marginBottom:6,
+                    }}
+                  >
+                    Photos (optional, up to 5)
+                  </label>
+                  <input
+                    id="signoff-photos"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic"
+                    multiple
+                    onChange={e => {
+                      const files = Array.from(e.target.files ?? []).slice(0, 5)
+                      setPhotos(files)
+                    }}
+                    style={{
+                      width:'100%', fontSize:12, color:'#C0C0C0',
+                      border:'1.5px solid #E0E0E0', borderRadius:10,
+                      padding:'8px 12px', background:'#F7F7F7',
+                      boxSizing:'border-box', cursor:'pointer',
+                    }}
+                  />
+                  {photos.length > 0 && (
+                    <p style={{ margin:'4px 0 0', fontSize:11, color:'#7A7A7A' }}>
+                      {photos.length} photo{photos.length !== 1 ? 's' : ''} selected
+                    </p>
+                  )}
+                </div>
                 {error && (
                   <p style={{ color:'#EF4444', fontSize:12, margin:0, textAlign:'center' }}>
                     {error}

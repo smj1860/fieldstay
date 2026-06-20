@@ -171,11 +171,30 @@ export async function getWorkOrderByToken(token: string): Promise<{
   }
 }
 
+const MAX_PHOTOS      = 5
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024  // 10 MB
+const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
+
 export async function submitWorkOrderSignOff(
-  token: string,
-  notes: string
+  token:   string,
+  notes:   string,
+  photos?: File[]
 ): Promise<{ success?: boolean; error?: string }> {
   if (!token || token.length !== 64) return { error: 'Invalid link' }
+
+  if (photos && photos.length > 0) {
+    if (photos.length > MAX_PHOTOS) {
+      return { error: `Maximum ${MAX_PHOTOS} photos allowed` }
+    }
+    for (const photo of photos) {
+      if (photo.size > MAX_PHOTO_BYTES) {
+        return { error: 'Each photo must be under 10 MB' }
+      }
+      if (!ALLOWED_MIME.has(photo.type)) {
+        return { error: 'Only JPEG, PNG, WebP, or HEIC photos are accepted' }
+      }
+    }
+  }
 
   // Rate limit by token — prevents spam sign-offs on the same work order
   // Uses the token (not IP) so the limit is per work order, not per contractor
@@ -238,6 +257,26 @@ export async function submitWorkOrderSignOff(
 
   const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
   const org      = Array.isArray(wo.organizations) ? wo.organizations[0] : wo.organizations
+
+  // Upload sign-off photos to storage and record in work_order_photos
+  if (photos && photos.length > 0) {
+    for (const photo of photos) {
+      const ext  = photo.type === 'image/png' ? 'png' : photo.type === 'image/webp' ? 'webp' : 'jpg'
+      const path = `work-orders/${wo.id}/signoff/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error: uploadErr } = await supabase.storage
+        .from('work-order-photos')
+        .upload(path, photo, { contentType: photo.type, upsert: false })
+      if (uploadErr) {
+        console.error('[submitWorkOrderSignOff] photo upload', uploadErr)
+        continue
+      }
+      await supabase.from('work_order_photos').insert({
+        work_order_id: wo.id,
+        storage_path:  path,
+        uploaded_at:   new Date().toISOString(),
+      })
+    }
+  }
 
   await inngest.send({
     name: 'work-order/signed-off' as const,

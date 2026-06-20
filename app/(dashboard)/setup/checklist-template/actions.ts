@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
+import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 
 export interface ChecklistItemInput {
   section:    string
@@ -39,73 +40,24 @@ export async function saveMasterChecklistItems(
 export async function applyMasterChecklistToProperties(
   propertyIds: string[]
 ): Promise<{ error?: string; applied: number }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { data: masterItems } = await supabase
     .from('org_master_checklist_items')
-    .select('*')
+    .select('id')
     .eq('org_id', membership.org_id)
-    .order('section')
-    .order('sort_order')
+    .limit(1)
 
-  if (!masterItems?.length) return { error: 'No master checklist items', applied: 0 }
+  if (!masterItems?.length) return { error: 'No master checklist items found. Build your checklist first.', applied: 0 }
 
   let applied = 0
 
   for (const propertyId of propertyIds) {
-    let { data: template } = await supabase
-      .from('checklist_templates')
-      .select('id')
-      .eq('property_id', propertyId)
-      .eq('is_default', true)
-      .single()
-
-    if (!template) {
-      const { data: newTemplate } = await supabase
-        .from('checklist_templates')
-        .insert({
-          org_id:      membership.org_id,
-          property_id: propertyId,
-          name:        'Standard Turnover',
-          is_default:  true,
-        })
-        .select('id')
-        .single()
-      template = newTemplate
-    }
-
-    if (!template) continue
-
-    const sections = [...new Set(masterItems.map((i) => i.section))]
-
-    for (const sectionName of sections) {
-      const sectionItems = masterItems.filter((i) => i.section === sectionName)
-
-      const { data: sectionRow } = await supabase
-        .from('checklist_template_sections')
-        .insert({
-          template_id: template.id,
-          name:        sectionName,
-          sort_order:  sections.indexOf(sectionName),
-        })
-        .select('id')
-        .single()
-
-      if (!sectionRow) continue
-
-      await supabase.from('checklist_template_items').insert(
-        sectionItems.map((item) => ({
-          section_id:     sectionRow.id,
-          template_id:    template!.id,
-          task:           item.task,
-          requires_photo: false,
-          notes:          null,
-          sort_order:     item.sort_order,
-        }))
-      )
-
-      applied += sectionItems.length
-    }
+    await applyMasterChecklistToProperty(propertyId, membership.org_id, supabase, {
+      force:   true,
+      actorId: user.id,
+    })
+    applied++
   }
 
   revalidatePath('/inventory')
