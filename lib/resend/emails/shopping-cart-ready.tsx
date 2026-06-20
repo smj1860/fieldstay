@@ -9,9 +9,12 @@ export interface ShoppingCartReadyEmailProps {
 }
 
 const STATUS_LABELS: Record<CartBuildResult['status'], string> = {
-  cart_added: 'Cart built successfully',
-  partial:    'Cart partially built',
-  list_only:  'Shopping list ready (cart not added)',
+  cart_added:          'Cart built successfully',
+  partial:             'Cart partially built',
+  list_only:           'Shopping list ready (cart not added)',
+  nothing_below_par:   'Nothing below par',
+  retailer_not_kroger: 'Retailer not set to Kroger',
+  no_store_configured: 'No Kroger store configured',
 }
 
 export function ShoppingCartReadyEmail({
