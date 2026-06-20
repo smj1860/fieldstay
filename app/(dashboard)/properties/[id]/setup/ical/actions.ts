@@ -72,7 +72,17 @@ export async function completeIcalStep(propertyId: string): Promise<void> {
 }
 
 export async function triggerSingleFeedSync(feedId: string, propertyId: string): Promise<void> {
-  const { membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: feed } = await supabase
+    .from('ical_feeds')
+    .select('id')
+    .eq('id', feedId)
+    .eq('org_id', membership.org_id)
+    .eq('property_id', propertyId)
+    .maybeSingle()
+
+  if (!feed) return
 
   await inngest.send({
     name: 'ical/sync.requested',

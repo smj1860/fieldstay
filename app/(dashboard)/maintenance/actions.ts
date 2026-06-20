@@ -851,7 +851,7 @@ export async function bulkAssignVendor(
   workOrderIds: string[],
   vendorId: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { data: vendor } = await supabase
     .from('vendors')
@@ -872,6 +872,15 @@ export async function bulkAssignVendor(
     console.error('[bulkAssignVendor]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.bulk_assigned',
+    targetType: 'work_order',
+    metadata:   { workOrderIds, vendorId },
+  })
+
   revalidatePath('/maintenance')
   return {}
 }
@@ -880,7 +889,7 @@ export async function bulkUpdateWorkOrderStatus(
   workOrderIds: string[],
   status: WoStatus
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { error } = await supabase
     .from('work_orders')
@@ -892,6 +901,15 @@ export async function bulkUpdateWorkOrderStatus(
     console.error('[bulkUpdateWorkOrderStatus]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.bulk_status_changed',
+    targetType: 'work_order',
+    metadata:   { workOrderIds, status },
+  })
+
   revalidatePath('/maintenance')
   return {}
 }

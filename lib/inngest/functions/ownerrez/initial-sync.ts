@@ -15,6 +15,7 @@ import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import type { OwnerRezProperty, OwnerRezBooking } from '@/lib/integrations/types'
 import { logAuditEvent }        from '@/lib/audit'
+import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 
 const PROVIDER = 'ownerrez'
 
@@ -179,6 +180,48 @@ export const ownerRezInitialSync = inngest.createFunction(
         }
 
         logger.info(`[OwnerRez:${user_id}] Patched null fields on ${existingProps.length} properties`)
+      })
+
+      // ── Step 1c: Apply master checklist to newly-synced properties ────────────
+      // Only applies to properties that do not yet have a default template.
+      // Skips any property where the PM has already set one up.
+
+      await step.run('apply-checklist-template', async () => {
+        if (!fetchPropsResult.patchData.length) return
+
+        const supabase    = createServiceClient()
+        const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
+
+        const { data: properties } = await supabase
+          .from('properties')
+          .select('id')
+          .eq('org_id', org_id)
+          .eq('external_source', PROVIDER)
+          .in('external_id', externalIds)
+
+        if (!properties?.length) return
+
+        // Filter to properties without an existing default template
+        const { data: existingTemplates } = await supabase
+          .from('checklist_templates')
+          .select('property_id')
+          .eq('org_id', org_id)
+          .eq('is_default', true)
+          .in('property_id', properties.map((p) => p.id))
+
+        const hasTemplate = new Set((existingTemplates ?? []).map((t) => t.property_id as string))
+        const toApply     = properties.filter((p) => !hasTemplate.has(p.id as string))
+
+        for (const property of toApply) {
+          await applyMasterChecklistToProperty(property.id as string, org_id, supabase, {
+            force:   false,
+            actorId: user_id,
+          })
+        }
+
+        logger.info(
+          `[OwnerRez:${user_id}] Applied master checklist to ${toApply.length} of ${properties.length} properties`
+        )
       })
 
       // ── Step 2: Fetch and upsert bookings ───────────────────────────────────

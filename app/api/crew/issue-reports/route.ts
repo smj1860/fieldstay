@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logAuditEvent } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
@@ -65,6 +66,14 @@ export async function POST(request: NextRequest) {
     console.error('[CrewIssueReport]', error)
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
   }
+
+  await logAuditEvent({
+    orgId:      crew.org_id as string,
+    actorId:    user.id,
+    action:     'work_order.created',
+    targetType: 'work_order',
+    metadata:   { source: 'crew_flag', turnover_id, title },
+  })
 
   return NextResponse.json({ success: true })
 }

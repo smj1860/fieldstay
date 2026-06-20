@@ -60,6 +60,10 @@ export type AuditAction =
   | 'booking.created'
   | 'booking.cancelled'
   | 'owner_portal.token.generated'
+  | 'work_order.bulk_assigned'
+  | 'work_order.bulk_status_changed'
+  | 'checklist.master_applied'
+  | 'kroger.auto_configured'
 
 interface AuditParams {
   orgId?:         string
