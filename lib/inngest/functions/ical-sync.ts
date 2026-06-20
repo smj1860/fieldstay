@@ -49,7 +49,7 @@ export const syncAllIcalFeeds = inngest.createFunction(
     { event: 'ical/sync.all.requested' as const },
   ],
   async ({ event, step, logger }) => {
-    const orgId = event?.data?.org_id
+    const orgId = 'org_id' in event.data ? event.data.org_id : undefined
 
     const feeds = await step.run('fetch-active-feeds', async () => {
       const supabase = createServiceClient()
