@@ -88,7 +88,7 @@ export const setupKrogerOnConnect = inngest.createFunction(
 
     logger.info(
       `Kroger setup for org ${org_id}: ${
-        result.found ? `connected to ${result.locationName}` : `no store configured (${result.reason})`
+        'locationName' in result ? `connected to ${result.locationName}` : `no store configured (${result.reason})`
       }`
     )
     return result
