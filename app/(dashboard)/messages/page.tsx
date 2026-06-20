@@ -18,7 +18,7 @@ export default async function MessagesPage() {
 
     supabase
       .from('messages')
-      .select('id, org_id, sender_id, recipient_id, content, read_at, turnover_id, work_order_id, created_at')
+      .select('id, org_id, sender_id, recipient_id, content, read_at, turnover_id, work_order_id, group_id, group_label, created_at')
       .eq('org_id', membership.org_id)
       .or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`)
       .order('created_at', { ascending: true })
