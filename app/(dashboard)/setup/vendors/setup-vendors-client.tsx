@@ -28,6 +28,9 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
     async (prev: SettingsActionState | null, fd: FormData) => {
       const res = await addVendor(prev, fd)
       if (res.success) {
+        if (res.vendor) {
+          setVendors((prev) => [...prev, res.vendor!])
+        }
         setView('list')
         setSavedName((fd.get('name') as string)?.trim() || 'Vendor')
         setTimeout(() => setSavedName(null), 4000)
@@ -45,6 +48,8 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Add service vendors and contractors for maintenance and specialized work.
+          These vendors are available across your whole portfolio — you'll assign
+          them to maintenance work orders for specific properties as needed.
         </p>
       </div>
 

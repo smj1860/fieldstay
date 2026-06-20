@@ -246,10 +246,15 @@ export function TemplateManager({
           ...newItems,
         ],
       } : prev)
+      const addedCount = newItems.length
       setCatalogSelected(new Set())
       setCatalogParLevels({})
       setCatalogUnits({})
       setCatalogBrands({})
+      if (addedCount > 0) {
+        setSuccess(`${addedCount} item${addedCount !== 1 ? 's' : ''} added to your inventory template`)
+        setTimeout(() => setSuccess(null), 5000)
+      }
     })
   }
 
@@ -346,6 +351,11 @@ export function TemplateManager({
           </button>
         )}
       </div>
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        This is your master template — build it once here, then apply it to each
+        property as you set them up. You can adjust quantities per property
+        afterward if needed.
+      </p>
 
       {success && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm"
@@ -504,7 +514,11 @@ export function TemplateManager({
                       Select all ({selectableItems.length})
                     </span>
                   </div>
-                  <div className="max-h-52 overflow-y-auto">
+                  <div className="sticky top-0 z-10 px-3 py-2 text-xs font-medium"
+                       style={{ background: 'var(--bg-card)', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+                    {catalogSelected.size} item{catalogSelected.size !== 1 ? 's' : ''} selected
+                  </div>
+                  <div className="max-h-[28rem] sm:max-h-[36rem] overflow-y-auto">
                     {visibleItems.map(c => {
                       const alreadyInTemplate = templateItems.some(t => t.name.toLowerCase() === c.name.toLowerCase())
                       const isSelected        = catalogSelected.has(c.id)
