@@ -59,6 +59,8 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   const existingMap = useMemo(() => {
     const m = new Map<string, AvailRow>()
@@ -140,10 +142,19 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   }
 
   const cancelUpcoming = async (row: AvailRow) => {
-    await db.execute(
-      `UPDATE crew_availability SET is_available = 1, notes = null WHERE id = ?`,
-      [row.id]
-    )
+    setCancellingId(row.id)
+    setCancelError(null)
+    try {
+      await db.execute(
+        `UPDATE crew_availability SET is_available = 1, notes = null WHERE id = ?`,
+        [row.id]
+      )
+    } catch (err) {
+      setCancelError('Failed to cancel — please try again')
+      console.error('[TimeOffRequest] cancel error:', err)
+    } finally {
+      setCancellingId(null)
+    }
   }
 
   const hasDraftChanges = Object.keys(draft).length > 0
@@ -277,13 +288,17 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
                 </div>
                 <button
                   onClick={() => cancelUpcoming(row)}
-                  className="text-xs text-accent-500 underline"
+                  disabled={cancellingId === row.id}
+                  className="text-xs text-accent-500 underline disabled:opacity-50"
                 >
-                  Cancel
+                  {cancellingId === row.id ? 'Cancelling…' : 'Cancel'}
                 </button>
               </div>
             ))}
           </div>
+          {cancelError && (
+            <p className="text-xs text-red-400 text-center mt-2">{cancelError}</p>
+          )}
         </div>
       )}
     </div>

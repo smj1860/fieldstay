@@ -20,7 +20,7 @@ class SupabaseConnector {
     if (!transaction) return
 
     for (const op of transaction.crud) {
-      if (op.table === 'checklist_instance_items' && op.op === 'PUT') {
+      if (op.table === 'checklist_instance_items' && (op.op === 'PUT' || op.op === 'PATCH')) {
         await this.supabase
           .from('checklist_instance_items')
           .update({
@@ -30,7 +30,7 @@ class SupabaseConnector {
           })
           .eq('id', op.id)
       }
-      if (op.table === 'turnovers' && op.op === 'PUT') {
+      if (op.table === 'turnovers' && (op.op === 'PUT' || op.op === 'PATCH')) {
         if (op.opData?.status === 'completed') {
           // Routed through a Server Route Handler (not a direct table write) so
           // the turnover/completed pipeline (cleaning-fee posting, PM
@@ -62,13 +62,13 @@ class SupabaseConnector {
         })
         if (!res.ok) throw new Error(`Failed to submit issue report ${op.id}`)
       }
-      if (op.table === 'inventory_items' && op.op === 'PUT') {
+      if (op.table === 'inventory_items' && (op.op === 'PUT' || op.op === 'PATCH')) {
         await this.supabase
           .from('inventory_items')
           .update({ current_quantity: op.opData?.current_quantity })
           .eq('id', op.id)
       }
-      if (op.table === 'crew_availability' && op.op === 'PUT') {
+      if (op.table === 'crew_availability' && (op.op === 'PUT' || op.op === 'PATCH')) {
         const isAvailable = op.opData?.is_available === 1
         if (op.opData?.org_id) {
           // Full INSERT — upsert on primary key to handle any duplicate
