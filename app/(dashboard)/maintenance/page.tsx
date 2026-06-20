@@ -28,6 +28,7 @@ export default async function MaintenancePage() {
         portal_enabled, completion_token,
         vendor_acknowledged_at, vendor_acknowledged_by,
         completion_verified_at, completion_verified_by,
+        vendor_dispatch_email,
         created_at, updated_at,
         properties ( name, address, city, state, access_instructions ),
         vendors ( id, name, specialty ),
@@ -48,7 +49,7 @@ export default async function MaintenancePage() {
 
     supabase
       .from('vendors')
-      .select('id, name, specialty, lat, lng')
+      .select('id, name, specialty, lat, lng, email')
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),

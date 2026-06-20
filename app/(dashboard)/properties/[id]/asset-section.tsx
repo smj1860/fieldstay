@@ -330,6 +330,10 @@ function AssetForm({
                 }
                 className="input"
               />
+              <p className="text-xs text-muted-themed mt-1">
+                Also used as the placed-in-service date for tax depreciation. Edit
+                separately if your actual in-service date differs.
+              </p>
               {scanResult?.capacity && (
                 <p className="text-xs mt-1 text-muted-themed">Capacity: {scanResult.capacity}</p>
               )}

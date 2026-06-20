@@ -82,6 +82,14 @@ export default async function CapitalPlanningPage() {
         </div>
       </div>
 
+      <p className="text-xs text-muted-themed mb-6 px-1">
+        Depreciation entries use the Modified Accelerated Cost Recovery System
+        (MACRS) as defined by the IRS. Only assets with both a purchase price and
+        a placed-in-service date are included — assets missing either are
+        silently excluded from the ledger. This tool estimates depreciation for
+        planning purposes; consult your CPA before filing.
+      </p>
+
       {/* Bar chart */}
       <div className="card mb-6">
         <h3 className="font-semibold text-primary-themed mb-4">10-Year Replacement Forecast</h3>

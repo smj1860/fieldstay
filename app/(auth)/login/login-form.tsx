@@ -15,7 +15,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 export function LoginForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
-  const next         = searchParams.get('next') ?? '/properties'
+  const next         = searchParams.get('next') ?? '/ops'
 
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')

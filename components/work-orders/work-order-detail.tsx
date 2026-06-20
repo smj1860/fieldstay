@@ -78,6 +78,7 @@ interface Props {
   workOrder:  WorkOrderDetailData
   userRole:   MemberRole
   onClose?:   () => void
+  vendors?:   { id: string; name: string; email: string | null }[]
 }
 
 // ── Display helpers ───────────────────────────────────────────
@@ -127,7 +128,7 @@ function fmtDate(iso: string | null) {
 
 // ── Component ─────────────────────────────────────────────────
 
-export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
+export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = [] }: Props) {
   const [isPending, startTransition] = useTransition()
   const [actionError, setActionError] = useState<string | null>(null)
   const [nteOverrideConfirmed, setNteOverrideConfirmed] = useState(false)
@@ -140,7 +141,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
 
   // Dispatch modal state
   const [showDispatch,    setShowDispatch]    = useState(false)
-  const [dispatchEmail,   setDispatchEmail]   = useState(wo.vendors?.email ?? wo.vendor_dispatch_email ?? '')
+  const [dispatchEmail,   setDispatchEmail]   = useState(wo.vendor_dispatch_email ?? wo.vendors?.email ?? '')
   const [dispatchName,    setDispatchName]    = useState(wo.vendors?.name ?? '')
   const [dispatching,     setDispatching]     = useState(false)
   const [dispatchError,   setDispatchError]   = useState<string | null>(null)
@@ -718,16 +719,46 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
 
             {!dispatchedUrl ? (
               <>
-                {/* Vendor email */}
+                {/* Vendor selector */}
+                {vendors.filter(v => v.email).length > 0 && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                      Select Vendor
+                    </label>
+                    <select
+                      className="input text-sm w-full"
+                      value={dispatchEmail}
+                      onChange={(e) => {
+                        const selected = vendors.find(v => v.email === e.target.value)
+                        setDispatchEmail(e.target.value)
+                        setDispatchName(selected?.name ?? '')
+                      }}
+                    >
+                      <option value="">Select a vendor…</option>
+                      {vendors.filter(v => v.email).map(v => (
+                        <option key={v.id} value={v.email!}>{v.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Free-text email fallback */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-                    Vendor Email *
+                    {vendors.filter(v => v.email).length > 0
+                      ? 'Or enter an email directly for a one-off contractor:'
+                      : 'Vendor Email *'}
                   </label>
                   <input
                     type="email"
                     value={dispatchEmail}
-                    onChange={e => setDispatchEmail(e.target.value)}
-                    placeholder="vendor@company.com"
+                    onChange={e => {
+                      setDispatchEmail(e.target.value)
+                      if (!vendors.find(v => v.email === e.target.value)) {
+                        setDispatchName('')
+                      }
+                    }}
+                    placeholder="contractor@email.com"
                     className="input w-full text-sm"
                   />
                 </div>
@@ -767,7 +798,11 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose }: Props) {
                   ) : (
                     <Send className="w-4 h-4" />
                   )}
-                  {dispatching ? 'Sending…' : 'Send Work Order'}
+                  {dispatching
+                    ? 'Sending…'
+                    : wo.vendor_dispatch_email
+                      ? (dispatchEmail === wo.vendor_dispatch_email ? 'Resend to Vendor' : 'Send to New Vendor')
+                      : 'Dispatch to Vendor'}
                 </button>
               </>
             ) : (
