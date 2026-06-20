@@ -64,7 +64,8 @@ import { logMessageCommunication } from '@/lib/inngest/functions/log-message-com
 import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist-broadcast'
 
 // Integration error notifications
-import { notifyIntegrationError } from '@/lib/inngest/functions/notify-integration-error'
+import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
+import { notifyAssignmentGap }     from '@/lib/inngest/functions/notify-assignment-gap'
 
 // Work order public dispatch + sign-off
 import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
@@ -144,6 +145,7 @@ export const { GET, POST, PUT } = serve({
 
     // Integration error notifications
     notifyIntegrationError,
+    notifyAssignmentGap,
 
     // Work order public dispatch
     workOrderDispatch,
