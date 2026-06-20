@@ -71,7 +71,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
         const { data: subs } = await supabase
           .from('push_subscriptions')
           .select('endpoint, p256dh, auth')
-          .eq('crew_member_id', mgr.user_id)
+          .eq('user_id', mgr.user_id)
 
         if (!subs?.length) return
 

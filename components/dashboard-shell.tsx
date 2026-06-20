@@ -8,7 +8,7 @@ import {
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Sun, Moon,
   Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
-  LifeBuoy,
+  LifeBuoy, Bell,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -17,6 +17,32 @@ import { BottomNav } from '@/components/bottom-nav'
 import { PmMoreDrawer } from '@/components/pm-more-drawer'
 import { NotificationBell } from '@/components/notification-bell'
 import { SidebarUserMenu } from '@/components/layout/SidebarUserMenu'
+import { InstallBanner } from '@/components/pwa/install-banner'
+
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
+  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
+}
+
+async function subscribeToDashboardPush(reg: ServiceWorkerRegistration) {
+  const sub  = await reg.pushManager.subscribe({
+    userVisibleOnly:      true,
+    applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+  })
+  const json = sub.toJSON()
+  if (!json.keys) return
+  await fetch('/api/dashboard/push-subscribe', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      endpoint: json.endpoint,
+      p256dh:   json.keys.p256dh,
+      auth:     json.keys.auth,
+    }),
+  })
+}
 
 // Ops tier (daily use) first, then Management tier (weekly use) — split
 // below into opsNav/mgmtNav and rendered as two groups with a divider.
@@ -76,6 +102,8 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
   const [moreDrawerOpen, setMoreDrawerOpen] = useState(false)
   const [theme,      setTheme]      = useState<'dark' | 'light'>('dark')
   const [time,       setTime]       = useState('')
+  const [swReg,        setSwReg]        = useState<ServiceWorkerRegistration | null>(null)
+  const [notifVisible, setNotifVisible] = useState(false)
 
   // Live clock
   useEffect(() => {
@@ -96,6 +124,45 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
       if (stored) setTheme(stored)
     } catch {}
   }, [])
+
+  // Register service worker for dashboard push — no permission prompt on mount
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+
+    const register = async () => {
+      try {
+        const reg      = await navigator.serviceWorker.register('/sw.js')
+        setSwReg(reg)
+
+        const existing = await reg.pushManager.getSubscription()
+        if (existing) return
+
+        const permission = Notification.permission
+        if (permission === 'default') {
+          setNotifVisible(true)
+        } else if (permission === 'granted') {
+          await subscribeToDashboardPush(reg)
+        }
+      } catch (err) {
+        console.error('[sw] dashboard registration failed:', err)
+      }
+    }
+
+    register()
+  }, [])
+
+  async function enableDashboardNotifications() {
+    if (!swReg) return
+    const permission = await Notification.requestPermission()
+    setNotifVisible(false)
+    if (permission !== 'granted') return
+    try {
+      await subscribeToDashboardPush(swReg)
+    } catch (err) {
+      console.error('[push] dashboard subscription failed:', err)
+    }
+  }
 
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark'
@@ -424,9 +491,28 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
               }
             </button>
 
+            {notifVisible && (
+              <button
+                onClick={enableDashboardNotifications}
+                title="Enable push notifications"
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-all relative"
+                style={{ color: 'var(--accent-amber, #f59e0b)' }}
+                onMouseOver={(e) => { e.currentTarget.style.background = 'var(--border)' }}
+                onMouseOut={(e)  => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <Bell className="w-4 h-4" />
+                <span
+                  className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
+                  style={{ background: 'var(--accent-amber, #f59e0b)' }}
+                />
+              </button>
+            )}
+
             <NotificationBell items={notifications} />
           </div>
         </header>
+
+        <InstallBanner />
 
         {/* Page content */}
         <main

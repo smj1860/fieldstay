@@ -12,6 +12,8 @@ type MessageRow = {
   recipient_id: string
   content:      string
   read_at:      string | null
+  group_id:     string | null
+  group_label:  string | null
   created_at:   string
 }
 
@@ -93,6 +95,11 @@ export default function CrewMessagesPage() {
                 )}
               >
                 <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
+                {!fromMe && m.group_label && (
+                  <p className="text-[10px] mt-0.5 text-accent-400 italic">
+                    {m.group_label}
+                  </p>
+                )}
                 <p className={cn('text-[10px] mt-1', fromMe ? 'text-brand-200' : 'text-accent-400')}>
                   {formatDateTime(m.created_at)}
                 </p>

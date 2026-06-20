@@ -85,6 +85,8 @@ const messages = new Table({
   content:      column.text,
   read_at:      column.text,
   turnover_id:  column.text,
+  group_id:     column.text,
+  group_label:  column.text,
   created_at:   column.text,
 })
 

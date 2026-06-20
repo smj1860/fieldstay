@@ -1,11 +1,18 @@
+import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard-shell'
+import { DashboardToastProvider } from '@/components/dashboard-toast-provider'
 import { CrispWidget } from '@/components/crisp-widget'
 import { ReviewPrompt } from '@/components/review-prompt'
 import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 import { getNotifications } from '@/lib/notifications'
+
+export const metadata: Metadata = {
+  manifest:   '/dashboard-manifest.json',
+  themeColor: '#0D0E14',
+}
 
 const MILESTONE_MESSAGES: Record<string, string> = {
   first_ical_sync:            'Your first bookings are syncing.',
@@ -131,7 +138,7 @@ export default async function DashboardLayout({
     'User'
 
   return (
-    <>
+    <DashboardToastProvider orgId={membership.org_id} userId={user.id}>
       <DashboardShell
         role={membership.role}
         orgName={org?.name ?? 'FieldStay'}
@@ -179,6 +186,6 @@ export default async function DashboardLayout({
         userName={displayName}
         orgName={org?.name}
       />
-    </>
+    </DashboardToastProvider>
   )
 }
