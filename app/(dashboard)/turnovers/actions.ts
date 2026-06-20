@@ -67,6 +67,15 @@ export async function assignCrew(
     .in('id', ids)
     .eq('status', 'pending_assignment')
 
+  await inngest.send({
+    name: 'turnover/crew-assigned',
+    data: {
+      crew_member_id: crewMemberId,
+      turnover_ids:   turnovers.map(t => t.id),
+      org_id:         membership.org_id,
+    },
+  })
+
   // Send push notification to the assigned crew member
   try {
     const { createServiceClient } = await import('@/lib/supabase/server')
@@ -367,6 +376,15 @@ export async function addCrewToTurnover(
   if (pendingIds.length > 0) {
     await supabase.from('turnovers').update({ status: 'assigned' }).in('id', pendingIds)
   }
+
+  await inngest.send({
+    name: 'turnover/crew-assigned',
+    data: {
+      crew_member_id: crewMemberId,
+      turnover_ids:   turnovers.map(t => t.id),
+      org_id:         membership.org_id,
+    },
+  })
 
   // Conflict detection — check for overlapping assignments for this crew member
   const { data: existingAssignments } = await supabase
