@@ -88,6 +88,26 @@ const messages = new Table({
   created_at:   column.text,
 })
 
+const turnover_issue_reports = new Table({
+  turnover_id: column.text,
+  org_id:      column.text,
+  property_id: column.text,
+  title:       column.text,
+  description: column.text,
+  priority:    column.text,
+}, { insertOnly: true })
+
+const pending_photo_uploads = new Table({
+  target_table:   column.text,
+  target_id:      column.text,
+  target_column:  column.text,
+  storage_path:   column.text,
+  local_blob_key: column.text,
+  mime_type:      column.text,
+  retry_count:    column.integer,
+  created_at:     column.text,
+}, { localOnly: true })
+
 export const AppSchema = new Schema({
   turnovers,
   checklist_instances,
@@ -98,4 +118,6 @@ export const AppSchema = new Schema({
   crew_members,
   turnover_assignments,
   messages,
+  turnover_issue_reports,
+  pending_photo_uploads,
 })

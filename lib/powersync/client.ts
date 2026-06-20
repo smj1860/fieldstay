@@ -49,6 +49,19 @@ class SupabaseConnector {
             .eq('id', op.id)
         }
       }
+      if (op.table === 'turnover_issue_reports' && op.op === 'PUT') {
+        const res = await fetch('/api/crew/issue-reports', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            turnover_id: op.opData?.turnover_id,
+            title:       op.opData?.title,
+            description: op.opData?.description,
+            priority:    op.opData?.priority,
+          }),
+        })
+        if (!res.ok) throw new Error(`Failed to submit issue report ${op.id}`)
+      }
       if (op.table === 'inventory_items' && op.op === 'PUT') {
         await this.supabase
           .from('inventory_items')
