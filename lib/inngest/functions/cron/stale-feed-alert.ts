@@ -1,8 +1,8 @@
-import { inngest }                from '@/lib/inngest/client'
-import { createServiceClient }   from '@/lib/supabase/server'
-import { resend, FROM }          from '@/lib/resend/client'
-import { getPmEmailsByOrgIds }   from '@/lib/inngest/helpers'
-import { renderPmAlert }         from '@/lib/resend/emails/pm-alert'
+import { inngest }               from '@/lib/inngest/client'
+import { createServiceClient }  from '@/lib/supabase/server'
+import { resend, FROM }         from '@/lib/resend/client'
+import { getPmEmailsByOrgIds }  from '@/lib/inngest/helpers'
+import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
 
 const STALE_HOURS = 6
 
@@ -19,13 +19,21 @@ function propertyName(row: StaleRow): string {
   return row.properties?.name ?? 'Unknown property'
 }
 
+function formatSyncTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    month:  'short',
+    day:    'numeric',
+    hour:   'numeric',
+    minute: '2-digit',
+  })
+}
+
 /**
  * SCHEDULED: 3pm UTC daily.
  *
- * Finds all active iCal feeds that haven't successfully synced
- * in the past 6 hours (or have never synced), groups them by org,
- * and sends one alert email per org. Idempotency prevents duplicate
- * emails if the step is retried.
+ * Finds all active iCal feeds that haven't synced in the past 6 hours (or
+ * have never synced), groups by org, and sends one alert email per org.
+ * Idempotency prevents duplicate emails if the step is retried.
  */
 export const staleFeedAlert = inngest.createFunction(
   {
@@ -62,9 +70,9 @@ export const staleFeedAlert = inngest.createFunction(
     // Group by org
     const byOrg = new Map<string, StaleRow[]>()
     for (const feed of staleFeeds) {
-      const existing = byOrg.get(feed.org_id) ?? []
-      existing.push(feed)
-      byOrg.set(feed.org_id, existing)
+      const group = byOrg.get(feed.org_id) ?? []
+      group.push(feed)
+      byOrg.set(feed.org_id, group)
     }
 
     const today  = new Date().toISOString().split('T')[0]
@@ -78,33 +86,29 @@ export const staleFeedAlert = inngest.createFunction(
         const pmEmail = emailsByOrg.get(orgId)
         if (!pmEmail) continue
 
-        await resend.emails.send(
-          {
-            from:    FROM,
-            to:      pmEmail,
-            subject: `⚠️ ${feeds.length} iCal feed${feeds.length !== 1 ? 's' : ''} haven't synced in ${STALE_HOURS}+ hours`,
-            html: await renderPmAlert({
-              heading: 'iCal feeds are stale',
-              body:    `The following feed${feeds.length !== 1 ? 's' : ''} haven't synced in over ${STALE_HOURS} hours. Your booking calendar may be out of date.`,
-              table: {
-                headers: ['Feed Name', 'Property', 'Last Synced'],
-                rows: feeds.map(f => [
-                  f.name,
-                  propertyName(f),
-                  f.last_synced_at
-                    ? new Date(f.last_synced_at).toLocaleString('en-US', {
-                        month:  'short',
-                        day:    'numeric',
-                        hour:   'numeric',
-                        minute: '2-digit',
-                      })
-                    : 'Never',
-                ]),
-              },
-              ctaLabel: 'View Integrations →',
-              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/settings/integrations`,
-            }),
+        const feedCount   = feeds.length
+        const feedWord    = feedCount !== 1 ? 'feeds' : 'feed'
+        const subject     = `Warning: ${feedCount} iCal ${feedWord} haven't synced in ${STALE_HOURS}+ hours`
+        const bodyText    = `The following ${feedWord} haven't synced in over ${STALE_HOURS} hours. Your booking calendar may be out of date.`
+        const tableRows   = feeds.map(f => [
+          f.name,
+          propertyName(f),
+          f.last_synced_at ? formatSyncTime(f.last_synced_at) : 'Never',
+        ])
+
+        const html = await renderPmAlert({
+          heading:  'iCal feeds are stale',
+          body:     bodyText,
+          table: {
+            headers: ['Feed Name', 'Property', 'Last Synced'],
+            rows:    tableRows,
           },
+          ctaLabel: 'View Integrations',
+          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/settings/integrations`,
+        })
+
+        await resend.emails.send(
+          { from: FROM, to: pmEmail, subject, html },
           { idempotencyKey: `stale-feed-alert-${orgId}-${today}` }
         )
       }
