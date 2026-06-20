@@ -40,7 +40,11 @@ import {
 } from '@/lib/inngest/functions/work-order-events'
 
 // Shopping cart
-import { buildShoppingCart } from '@/lib/inngest/functions/build-shopping-cart'
+import { buildShoppingCart }        from '@/lib/inngest/functions/build-shopping-cart'
+import { setupKrogerOnConnect }     from '@/lib/inngest/functions/kroger-connected'
+
+// RepuGuard
+import { repuguardBatchGenerate }   from '@/lib/inngest/functions/repuguard-batch-generate'
 
 // Geocoding backfill (one-time manual trigger)
 import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
@@ -113,8 +117,12 @@ export const { GET, POST, PUT } = serve({
     handleWorkOrderQuoteRequested,
     handleWorkOrderQuoteSubmitted,
 
-    // Shopping cart
+    // Shopping cart + Kroger setup
     buildShoppingCart,
+    setupKrogerOnConnect,
+
+    // RepuGuard batch
+    repuguardBatchGenerate,
 
     // Geocoding backfill
     geocodingBackfill,

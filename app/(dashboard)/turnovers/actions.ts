@@ -117,6 +117,35 @@ export async function assignCrew(
   return { success: true }
 }
 
+// ── Split assignment — different crew per turnover, one submit ──────────────
+//
+// Groups the picks by crew member and calls the existing assignCrew() once
+// per group, so every existing guarantee (org/crew validation, time-off
+// warnings, push notifications, pending_assignment → assigned transition)
+// stays in one place instead of being duplicated here.
+
+export async function assignCrewIndividually(
+  assignments: { turnoverId: string; crewMemberId: string }[]
+): Promise<TurnoverActionState> {
+  if (!assignments.length) return { error: 'No assignments to apply' }
+
+  const groups = new Map<string, string[]>()
+  for (const a of assignments) {
+    const list = groups.get(a.crewMemberId) ?? []
+    list.push(a.turnoverId)
+    groups.set(a.crewMemberId, list)
+  }
+
+  const warnings: string[] = []
+  for (const [crewMemberId, turnoverIds] of groups.entries()) {
+    const result = await assignCrew(turnoverIds, crewMemberId)
+    if (result.error) return result
+    if (result.warning) warnings.push(result.warning)
+  }
+
+  return warnings.length ? { success: true, warning: warnings.join(' ') } : { success: true }
+}
+
 // ── Status update ────────────────────────────────────────────────────────────
 
 export async function updateTurnoverStatus(

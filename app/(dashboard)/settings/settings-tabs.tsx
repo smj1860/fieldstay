@@ -90,11 +90,12 @@ export interface ConnectionInfo {
 }
 
 interface Props {
-  org: Organization
-  connections?: Record<string, ConnectionInfo>
+  org:               Organization
+  connections?:      Record<string, ConnectionInfo>
+  krogerNeedsStore?: boolean
 }
 
-export function SettingsTabs({ org, connections = {} }: Props) {
+export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }: Props) {
   const searchParams = useSearchParams()
   const requestedTab = searchParams.get('tab') as Tab | null
   const initialTab   = requestedTab && (TABS as readonly string[]).includes(requestedTab)
@@ -131,7 +132,7 @@ export function SettingsTabs({ org, connections = {} }: Props) {
       </div>
 
       {/* Tab panels */}
-      {activeTab === 'Organization'  && <OrgTab org={org} connections={connections} />}
+      {activeTab === 'Organization'  && <OrgTab org={org} connections={connections} krogerNeedsStore={krogerNeedsStore} />}
       {activeTab === 'Billing'       && <BillingTab org={org} />}
       {activeTab === 'Security'      && <SecurityTab />}
       {activeTab === 'Notifications' && <NotificationsTab org={org} />}
@@ -144,7 +145,7 @@ export function SettingsTabs({ org, connections = {} }: Props) {
 
 // ── Organization tab ─────────────────────────────────────────────────────────
 
-function OrgTab({ org, connections }: { org: Organization; connections: Record<string, ConnectionInfo> }) {
+function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; connections: Record<string, ConnectionInfo>; krogerNeedsStore?: boolean }) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
   const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
@@ -366,6 +367,12 @@ function OrgTab({ org, connections }: { org: Organization; connections: Record<s
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
                 Below-par items are added to your Kroger Family cart automatically when you click Build Cart.
               </p>
+              {krogerNeedsStore && (
+                <p className="text-xs mt-1.5 font-medium" style={{ color: 'var(--accent-amber)' }}>
+                  ⚠️ We couldn&apos;t find a Kroger store near your properties. Add a
+                  property with a ZIP code, then click Reconnect below.
+                </p>
+              )}
             </div>
             <a href="/api/integrations/kroger/connect" className="btn-secondary text-sm flex-shrink-0">Reconnect</a>
           </div>

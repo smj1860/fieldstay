@@ -27,6 +27,13 @@ export default async function SettingsPage() {
     (connections ?? []).map((c) => [c.provider_id, c as ConnectionInfo])
   )
 
+  const { data: krogerStoreNeeded } = await admin
+    .from('org_milestones')
+    .select('id')
+    .eq('org_id', membership.org_id)
+    .eq('milestone', 'kroger_store_needed')
+    .maybeSingle()
+
   return (
     <div>
       <div className="page-header">
@@ -35,7 +42,11 @@ export default async function SettingsPage() {
       </div>
 
       <Suspense fallback={null}>
-        <SettingsTabs org={org as unknown as Organization} connections={connectionsByProvider} />
+        <SettingsTabs
+          org={org as unknown as Organization}
+          connections={connectionsByProvider}
+          krogerNeedsStore={!!krogerStoreNeeded}
+        />
       </Suspense>
     </div>
   )

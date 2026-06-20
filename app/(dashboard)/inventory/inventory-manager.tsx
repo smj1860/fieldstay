@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useState, useActionState, useTransition } from 'react'
+import { Fragment, useState, useActionState, useTransition, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, ClipboardList, ChevronDown, X,
@@ -1192,6 +1192,29 @@ export function InventoryManager({
   const [cartPending, startCartTransition] = useTransition()
   const [cartTriggered, setCartTriggered]  = useState(false)
 
+  const cartBuiltAtRef = useRef<string | null>(cartData?.built_at ?? null)
+
+  useEffect(() => {
+    if (!cartTriggered) return
+
+    let attempts = 0
+    const interval = setInterval(() => {
+      attempts++
+      router.refresh()
+      if (attempts >= 15) clearInterval(interval)
+    }, 2000)
+
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cartTriggered])
+
+  useEffect(() => {
+    if (cartData?.built_at && cartData.built_at !== cartBuiltAtRef.current) {
+      cartBuiltAtRef.current = cartData.built_at
+      setCartTriggered(false)
+    }
+  }, [cartData])
+
   const totalItems     = items.length
   const totalCritical  = items.filter((i) => getStockStatus(i) === 'critical').length
   const totalLow       = items.filter((i) => getStockStatus(i) === 'low').length
@@ -1300,13 +1323,28 @@ export function InventoryManager({
                 : <><ShoppingCart className="w-4 h-4" /> Build Cart 🛒</>}
             </button>
           </div>
-          {cartTriggered && !cartData && (
-            <div className="mb-4 text-sm rounded-xl px-4 py-3 border border-themed"
+          {cartTriggered && (
+            <div className="mb-4 text-sm rounded-xl px-4 py-3 border border-themed flex items-center gap-2"
                  style={{ color: 'var(--text-muted)', background: 'var(--bg-canvas)' }}>
-              Building your Kroger cart… refresh in a moment to see the result.
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Building your Kroger cart…
             </div>
           )}
-          {cartData && <CartReadyBanner cartData={cartData} />}
+          {cartData?.status === 'nothing_below_par' && (
+            <div className="mb-4 text-sm rounded-xl px-4 py-3 border border-themed" style={{ color: 'var(--text-muted)' }}>
+              Nothing is currently below par — no cart needed.
+            </div>
+          )}
+          {(cartData?.status === 'retailer_not_kroger' || cartData?.status === 'no_store_configured') && (
+            <div className="mb-4 text-sm rounded-xl px-4 py-3 border"
+                 style={{ color: 'var(--accent-amber)', background: 'var(--accent-amber-dim)', borderColor: 'var(--accent-amber)' }}>
+              Kroger isn&apos;t fully connected yet.{' '}
+              <a href="/settings?tab=integrations" className="underline font-medium">Check your connection →</a>
+            </div>
+          )}
+          {cartData && ['cart_added', 'list_only', 'partial'].includes(cartData.status) && (
+            <CartReadyBanner cartData={cartData} />
+          )}
           <PortfolioInventoryView items={allInventoryItems} />
         </>
       )}

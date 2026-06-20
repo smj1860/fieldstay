@@ -39,6 +39,15 @@ export const buildShoppingCart = inngest.createFunction(
   async ({ event, step, runId }) => {
     const { org_id, requested_by, property_ids, modality } = event.data
 
+    const persistCartStatus = async (status: string, extra: Record<string, unknown> = {}) => {
+      const supabase = createServiceClient()
+      await supabase.from('org_milestones').upsert({
+        org_id,
+        milestone: 'last_cart_build',
+        value: { built_at: new Date().toISOString(), requested_by, status, ...extra },
+      }, { onConflict: 'org_id,milestone' })
+    }
+
     // ── Step 1: Load org settings + below-par items + Kroger connection ──
     const { orgSettings, belowParItems, connection } = await step.run('load-inventory-data', async () => {
       const supabase = createServiceClient()
@@ -92,10 +101,12 @@ export const buildShoppingCart = inngest.createFunction(
     })
 
     if (!belowParItems.length) {
+      await persistCartStatus('nothing_below_par')
       return { status: 'nothing_below_par', items_checked: 0 }
     }
 
     if (orgSettings.preferred_retailer !== 'kroger') {
+      await persistCartStatus('retailer_not_kroger')
       return { status: 'retailer_not_kroger', preferred: orgSettings.preferred_retailer }
     }
 
@@ -108,6 +119,7 @@ export const buildShoppingCart = inngest.createFunction(
         org_id,
         milestone: 'kroger_store_needed',
       }, { onConflict: 'org_id,milestone', ignoreDuplicates: true })
+      await persistCartStatus('no_store_configured')
       return { status: 'no_store_configured', action_required: 'connect_kroger_store' }
     }
 
