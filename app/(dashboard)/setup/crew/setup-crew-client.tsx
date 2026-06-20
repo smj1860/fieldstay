@@ -26,6 +26,9 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
     async (prev: SettingsActionState | null, fd: FormData) => {
       const res = await addCrewMember(prev, fd)
       if (res.success) {
+        if (res.crewMember) {
+          setCrew((prev) => [...prev, res.crewMember!])
+        }
         setView('list')
         setSavedName((fd.get('name') as string)?.trim() || 'Crew member')
         setTimeout(() => setSavedName(null), 4000)
@@ -43,6 +46,8 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Add cleaning and maintenance team members. Invite them to the crew app after adding.
+          These team members belong to your organization and can be assigned to any property —
+          you'll choose who works which turnover as bookings come in.
         </p>
       </div>
 

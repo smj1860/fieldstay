@@ -33,6 +33,8 @@ export default async function OnboardingChecklistTemplatePage() {
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Build your standard turnover checklist. Apply it to properties to create their cleaning templates.
+          This master checklist can be applied to individual properties during
+          property setup, with room to customize per property if needed.
         </p>
       </div>
 

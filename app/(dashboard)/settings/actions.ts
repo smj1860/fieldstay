@@ -10,7 +10,13 @@ import { logAuditEvent } from '@/lib/audit'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
 
-export type SettingsActionState = { error?: string; success?: boolean; redirectUrl?: string }
+export type SettingsActionState = {
+  error?: string
+  success?: boolean
+  redirectUrl?: string
+  crewMember?: { id: string; name: string; role: string | null; specialty: string | null; email: string | null; invite_sent_at: null; user_id: null }
+  vendor?: { id: string; name: string; specialty: string; contact_name: string | null }
+}
 
 // ── Organization ─────────────────────────────────────────────
 
@@ -179,7 +185,18 @@ export async function addCrewMember(
 
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
-  return { success: true }
+  return {
+    success: true,
+    crewMember: {
+      id:            newCrew.id,
+      name,
+      role,
+      specialty,
+      email,
+      invite_sent_at: null as null,
+      user_id:        null as null,
+    },
+  }
 }
 
 export async function updateCrewMember(
@@ -371,7 +388,15 @@ export async function addVendor(
 
   revalidatePath('/vendors')
   revalidatePath('/settings')
-  return { success: true }
+  return {
+    success: true,
+    vendor: {
+      id: vendor.id,
+      name,
+      specialty,
+      contact_name,
+    },
+  }
 }
 
 export async function updateVendor(

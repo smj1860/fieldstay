@@ -51,8 +51,9 @@ export function MasterMaintenanceBuilder({
       : []
   )
   const [saving, startSave] = useTransition()
-  const [success, setSuccess] = useState(false)
-  const [error, setError]     = useState<string | null>(null)
+  const [success, setSuccess]           = useState(false)
+  const [error, setError]               = useState<string | null>(null)
+  const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set())
 
   const update = (i: number, patch: Partial<MaintenanceScheduleInput>) => {
     setSchedules((prev) => prev.map((s, idx) => idx === i ? { ...s, ...patch } : s))
@@ -77,60 +78,96 @@ export function MasterMaintenanceBuilder({
     })
   }
 
+  const selectableSuggestions = suggestionItems.filter(
+    (s) => !schedules.some((e) => e.title === s.title)
+  )
+
   return (
     <div className="space-y-4">
-      {/* Quick-add suggestions */}
+      {/* Suggested Schedules — checkbox list */}
       {suggestionItems.length > 0 && (
-        <div
-          className="rounded-xl p-4"
-          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
-        >
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-semibold uppercase tracking-wide"
-               style={{ color: 'var(--text-muted)' }}>
-              Suggested Schedules — tap to add
-            </p>
-            {suggestionItems.some((s) => !schedules.some((existing) => existing.title === s.title)) && (
+        <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+          {/* Select-all header */}
+          <div className="flex items-center gap-3 px-4 py-2.5 border-b border-themed"
+               style={{ background: 'var(--bg-raised)' }}>
+            <input
+              type="checkbox"
+              checked={selectableSuggestions.length > 0 && selectableSuggestions.every((s) => selectedSuggestions.has(s.title))}
+              onChange={() => {
+                const allSelected = selectableSuggestions.every((s) => selectedSuggestions.has(s.title))
+                setSelectedSuggestions((prev) => {
+                  const next = new Set(prev)
+                  if (allSelected) {
+                    selectableSuggestions.forEach((s) => next.delete(s.title))
+                  } else {
+                    selectableSuggestions.forEach((s) => next.add(s.title))
+                  }
+                  return next
+                })
+              }}
+              className="w-4 h-4 rounded"
+            />
+            <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+              Select all ({selectableSuggestions.length})
+            </span>
+          </div>
+
+          {/* Scrollable rows */}
+          <div className="max-h-[28rem] overflow-y-auto">
+            {suggestionItems.map((s) => {
+              const alreadyAdded = schedules.some((e) => e.title === s.title)
+              const isSelected   = selectedSuggestions.has(s.title)
+              return (
+                <div
+                  key={s.title}
+                  className={`flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0 transition-colors${alreadyAdded ? ' opacity-40' : ' cursor-pointer'}`}
+                  style={isSelected && !alreadyAdded ? { background: 'var(--accent-gold-dim)' } : {}}
+                  onClick={() => {
+                    if (alreadyAdded) return
+                    setSelectedSuggestions((prev) => {
+                      const next = new Set(prev)
+                      next.has(s.title) ? next.delete(s.title) : next.add(s.title)
+                      return next
+                    })
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected || alreadyAdded}
+                    readOnly
+                    disabled={alreadyAdded}
+                    className="w-4 h-4 rounded flex-shrink-0"
+                  />
+                  <span className="flex-1 text-sm font-medium text-primary-themed">{s.title}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    {FREQUENCY_LABELS[s.frequency] ?? s.frequency}
+                  </span>
+                  {alreadyAdded && (
+                    <span className="text-xs italic ml-1" style={{ color: 'var(--text-muted)' }}>added</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Batch-add button */}
+          {selectedSuggestions.size > 0 && (
+            <div className="px-4 py-3 border-t border-themed" style={{ background: 'var(--bg-raised)' }}>
               <button
                 type="button"
                 onClick={() => {
                   const toAdd = suggestionItems
-                    .filter((s) => !schedules.some((existing) => existing.title === s.title))
+                    .filter((s) => selectedSuggestions.has(s.title) && !schedules.some((e) => e.title === s.title))
                     .map((s) => ({ title: s.title, description: s.description, frequency: s.frequency, specialty: s.specialty, estimated_cost: s.estimated_cost }))
                   setSchedules((prev) => [...prev, ...toAdd])
+                  setSelectedSuggestions(new Set())
                 }}
-                className="text-xs font-medium"
-                style={{ color: 'var(--accent-gold)' }}
+                className="btn-primary text-sm w-full"
               >
-                Add all
+                Add {selectedSuggestions.size} schedule{selectedSuggestions.size !== 1 ? 's' : ''}
               </button>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {suggestionItems
-              .filter((s) => !schedules.some((existing) => existing.title === s.title))
-              .map((s) => (
-                <button
-                  key={s.title}
-                  type="button"
-                  onClick={() => setSchedules((prev) => [
-                    ...prev,
-                    { title: s.title, description: s.description, frequency: s.frequency, specialty: s.specialty, estimated_cost: s.estimated_cost },
-                  ])}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors"
-                  style={{
-                    background: 'var(--bg-card)',
-                    color:      'var(--text-secondary)',
-                    border:     '1px solid var(--border)',
-                  }}
-                >
-                  + {s.title}
-                  <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                    ({FREQUENCY_LABELS[s.frequency] ?? s.frequency})
-                  </span>
-                </button>
-              ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
