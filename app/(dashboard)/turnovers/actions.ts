@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvent } from '@/lib/audit'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
@@ -12,7 +13,7 @@ export async function assignCrew(
   turnoverIds: string[],
   crewMemberId: string
 ): Promise<TurnoverActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   // Verify all turnovers belong to this org
   const { data: turnovers } = await supabase
@@ -74,6 +75,15 @@ export async function assignCrew(
       turnover_ids:   turnovers.map(t => t.id),
       org_id:         membership.org_id,
     },
+  })
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.crew.assigned',
+    targetType: 'crew_member',
+    targetId:   crewMemberId,
+    metadata:   { turnover_ids: turnovers.map(t => t.id) },
   })
 
   // Send push notification to the assigned crew member
@@ -331,7 +341,7 @@ export async function addCrewToTurnover(
   turnoverIds: string[],
   crewMemberId: string
 ): Promise<TurnoverActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { data: turnovers } = await supabase
     .from('turnovers')
@@ -386,6 +396,15 @@ export async function addCrewToTurnover(
     },
   })
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.crew.assigned',
+    targetType: 'crew_member',
+    targetId:   crewMemberId,
+    metadata:   { turnover_ids: turnovers.map(t => t.id) },
+  })
+
   // Conflict detection — check for overlapping assignments for this crew member
   const { data: existingAssignments } = await supabase
     .from('turnover_assignments')
@@ -434,7 +453,7 @@ export async function removeCrewFromTurnover(
   turnoverId: string,
   crewMemberId: string
 ): Promise<TurnoverActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { data: turnover } = await supabase
     .from('turnovers')
@@ -462,6 +481,15 @@ export async function removeCrewFromTurnover(
       .update({ status: 'pending_assignment' })
       .eq('id', turnoverId)
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.crew.removed',
+    targetType: 'crew_member',
+    targetId:   crewMemberId,
+    metadata:   { turnover_id: turnoverId },
+  })
 
   revalidatePath('/turnovers')
   return { success: true }
@@ -511,7 +539,7 @@ export async function triggerManualSync(orgId: string): Promise<void> {
 // ── Accept auto-assignment suggestion ────────────────────────────────────────
 
 export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { data: turnover } = await supabase
     .from('turnovers')
@@ -548,6 +576,15 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
     // Outcome recording must not break the acceptance flow
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.suggestion.accepted',
+    targetType: 'turnover',
+    targetId:   turnoverId,
+    metadata:   { crew_ids: crewIds },
+  })
+
   revalidatePath('/turnovers')
   return { success: true }
 }
@@ -555,7 +592,7 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
 // ── Dismiss auto-assignment suggestion ───────────────────────────────────────
 
 export async function dismissSuggestion(turnoverId: string): Promise<TurnoverActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgMember()
 
   const { data: turnover } = await supabase
     .from('turnovers')
@@ -590,6 +627,15 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
       // Outcome recording must not break the dismissal flow
     }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.suggestion.dismissed',
+    targetType: 'turnover',
+    targetId:   turnoverId,
+    metadata:   { crew_ids: crewIds },
+  })
 
   revalidatePath('/turnovers')
   return { success: true }

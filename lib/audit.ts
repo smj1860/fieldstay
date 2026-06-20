@@ -64,6 +64,11 @@ export type AuditAction =
   | 'work_order.bulk_status_changed'
   | 'checklist.master_applied'
   | 'kroger.auto_configured'
+  | 'turnover.crew.assigned'
+  | 'turnover.crew.removed'
+  | 'turnover.suggestion.accepted'
+  | 'turnover.suggestion.dismissed'
+  | 'turnover.autopilot.assigned'
 
 interface AuditParams {
   orgId?:         string

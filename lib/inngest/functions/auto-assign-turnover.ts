@@ -233,6 +233,21 @@ export const autoAssignTurnover = inngest.createFunction(
             suggestion_status:    'accepted',
           })
           .eq('id', turnover_id)
+
+        const { logAuditEvent } = await import('@/lib/audit')
+        await logAuditEvent({
+          orgId:      org_id,
+          actorId:    undefined,
+          action:     'turnover.autopilot.assigned',
+          targetType: 'turnover',
+          targetId:   turnover_id,
+          metadata:   {
+            crew_member_id: top.crew_member_id,
+            reasoning,
+            score:           top.score,
+          },
+        })
+
         return { action: 'autopilot_assigned' as const }
       }
 
