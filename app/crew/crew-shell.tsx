@@ -7,6 +7,7 @@ import { PowerSyncContext }         from '@powersync/react'
 import { usePowerSync, usePowerSyncQuery } from '@powersync/react'
 import { getPowerSyncDb, disconnectPowerSync } from '@/lib/powersync/client'
 import { createClient }             from '@/lib/supabase/client'
+import { processPendingPhotoUploads } from '@/lib/powersync/photo-sync'
 import { cn }                       from '@/lib/utils'
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -73,6 +74,20 @@ export function CrewShell({
 
     register()
   }, [])
+
+  useEffect(() => {
+    const supabase = createClient()
+    const run = () => { void processPendingPhotoUploads(db, supabase) }
+
+    run()  // attempt once on mount, in case items were queued in a prior session
+    window.addEventListener('online', run)
+    const interval = setInterval(run, 30_000)
+
+    return () => {
+      window.removeEventListener('online', run)
+      clearInterval(interval)
+    }
+  }, [db])
 
   return (
     <PowerSyncContext.Provider value={db}>

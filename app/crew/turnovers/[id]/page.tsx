@@ -9,7 +9,8 @@ import {
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { createClient }       from '@/lib/supabase/client'
-import { reportTurnoverIssue } from '@/app/crew/turnovers/actions'
+import { savePendingPhotoBlob } from '@/lib/powersync/photo-queue'
+import { processPendingPhotoUploads } from '@/lib/powersync/photo-sync'
 
 type TurnoverRow   = { id: string; status: string; priority: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number; notes: string | null; property_id: string; org_id: string }
 type InstanceRow   = { id: string; turnover_id: string; status: string }
@@ -53,6 +54,13 @@ export default function CrewTurnoverPage() {
     `SELECT * FROM inventory_items WHERE property_id = ? ORDER BY category, name`,
     [turnover?.property_id ?? '']
   )
+
+  type PendingUploadRow = { id: string; target_id: string; target_table: string }
+
+  const pendingUploads = usePowerSyncQuery<PendingUploadRow>(
+    `SELECT id, target_id, target_table FROM pending_photo_uploads WHERE target_table = 'checklist_instance_items'`
+  )
+  const pendingUploadIds = new Set((pendingUploads ?? []).map(p => p.target_id))
 
   const completedCount = items?.filter((i) => i.is_completed).length ?? 0
   const totalCount     = items?.length ?? 0
@@ -100,31 +108,32 @@ export default function CrewTurnoverPage() {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const ext  = file.name.split('.').pop() ?? 'jpg'
-    const path = `turnover-${id}/section-${sectionName.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.${ext}`
+    const ext     = file.name.split('.').pop() ?? 'jpg'
+    const path    = `turnover-${id}/section-${sectionName.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.${ext}`
+    const blobKey = `photo-section-${sectionName}-${Date.now()}`
 
     try {
-      const { error: uploadErr } = await supabase.storage
-        .from('turnover-photos')
-        .upload(path, file, { contentType: file.type, upsert: true })
-
-      if (uploadErr) {
-        setUploadError('Section photo upload failed. Please try again.')
-        return
-      }
-
-      // Write path to the checklist_instances row for this section
-      // Find the instance_id from the first item in this section
       const sectionItem = items?.find((i) => i.section_name === sectionName)
-      if (sectionItem) {
-        await db.execute(
-          `UPDATE checklist_instances SET section_photo_path = ? WHERE id = ?`,
-          [path, sectionItem.instance_id]
-        )
-      }
+      if (!sectionItem) return
+
+      await savePendingPhotoBlob(blobKey, file)
+      await db.execute(
+        `INSERT INTO pending_photo_uploads
+           (id, target_table, target_id, target_column, storage_path, local_blob_key, mime_type, retry_count, created_at)
+         VALUES (
+           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+           substr(lower(hex(randomblob(2))),2) || '-' ||
+           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
+           lower(hex(randomblob(6))),
+           'checklist_instances', ?, 'section_photo_path', ?, ?, ?, 0, datetime('now')
+         )`,
+        [sectionItem.instance_id, path, blobKey, file.type]
+      )
+
+      void processPendingPhotoUploads(db, supabase)
     } catch (err) {
-      console.error('Section photo upload failed:', err)
-      setUploadError('Section photo upload failed. Make sure you have a connection and try again.')
+      console.error('Section photo queueing failed:', err)
+      setUploadError('Could not save section photo. Please try again.')
     } finally {
       setSectionPhotoPrompt(null)
       e.target.value = ''
@@ -135,19 +144,34 @@ export default function CrewTurnoverPage() {
     setUploadingItemId(itemId)
     setUploadError(null)
     try {
-      const ext  = file.name.split('.').pop() ?? 'jpg'
-      const path = `turnover-${id}/${itemId}-${Date.now()}.${ext}`
-      const { error } = await supabase.storage
-        .from('turnover-photos')
-        .upload(path, file, { contentType: file.type, upsert: true })
-      if (error) throw new Error(error.message)
+      const ext     = file.name.split('.').pop() ?? 'jpg'
+      const path    = `turnover-${id}/${itemId}-${Date.now()}.${ext}`
+      const blobKey = `photo-${itemId}-${Date.now()}`
+
+      await savePendingPhotoBlob(blobKey, file)
       await db.execute(
-        `UPDATE checklist_instance_items SET photo_storage_path = ?, is_completed = 1 WHERE id = ?`,
-        [path, itemId]
+        `INSERT INTO pending_photo_uploads
+           (id, target_table, target_id, target_column, storage_path, local_blob_key, mime_type, retry_count, created_at)
+         VALUES (
+           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+           substr(lower(hex(randomblob(2))),2) || '-' ||
+           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
+           lower(hex(randomblob(6))),
+           'checklist_instance_items', ?, 'photo_storage_path', ?, ?, ?, 0, datetime('now')
+         )`,
+        [itemId, path, blobKey, file.type]
       )
+      await db.execute(
+        `UPDATE checklist_instance_items SET is_completed = 1 WHERE id = ?`,
+        [itemId]
+      )
+
+      // Attempt immediately in case we're actually online — no need to wait
+      // for the next interval tick or a reconnect event.
+      void processPendingPhotoUploads(db, supabase)
     } catch (err) {
-      console.error('Photo upload failed:', err)
-      setUploadError('Photo upload failed. Make sure you have a connection and try again.')
+      console.error('Photo queueing failed:', err)
+      setUploadError('Could not save photo. Please try again.')
     } finally {
       setUploadingItemId(null)
     }
@@ -324,7 +348,12 @@ export default function CrewTurnoverPage() {
                             <ImageIcon className="w-3 h-3" /> Photo attached
                           </p>
                         )}
-                        {needsPhoto && !uploading && (
+                        {!item.photo_storage_path && pendingUploadIds.has(item.id) && (
+                          <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" /> Photo saved — uploading when back online
+                          </p>
+                        )}
+                        {needsPhoto && !uploading && !pendingUploadIds.has(item.id) && (
                           <p className="text-xs text-amber-600 mt-0.5">Photo required before completing</p>
                         )}
                       </div>
@@ -510,9 +539,10 @@ function IssueReportModal({
   turnover,
   onClose,
 }: {
-  turnover: { id: string }
+  turnover: { id: string; org_id: string; property_id: string }
   onClose: () => void
 }) {
+  const db = usePowerSync()
   const [title,      setTitle]      = useState('')
   const [details,    setDetails]    = useState('')
   const [priority,   setPriority]   = useState<'medium' | 'high' | 'urgent'>('medium')
@@ -527,8 +557,18 @@ function IssueReportModal({
     setError(null)
 
     try {
-      const result = await reportTurnoverIssue(turnover.id, title, details, priority)
-      if (result.error) throw new Error(result.error)
+      await db.execute(
+        `INSERT INTO turnover_issue_reports
+           (id, turnover_id, org_id, property_id, title, description, priority)
+         VALUES (
+           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+           substr(lower(hex(randomblob(2))),2) || '-' ||
+           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
+           lower(hex(randomblob(6))),
+           ?, ?, ?, ?, ?, ?
+         )`,
+        [turnover.id, turnover.org_id, turnover.property_id, title.trim(), details.trim() || null, priority]
+      )
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message)
@@ -545,7 +585,8 @@ function IssueReportModal({
             <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
             <h3 className="font-semibold text-accent-900 mb-1">Issue Reported</h3>
             <p className="text-sm text-accent-500 mb-4">
-              The property manager will be notified and a work order has been created.
+              Saved. The property manager will be notified and a work order created as
+              soon as your phone has a connection.
             </p>
             <button onClick={onClose} className="btn-primary w-full">Done</button>
           </div>
