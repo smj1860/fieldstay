@@ -48,7 +48,7 @@ export async function sendMessageToCrew(
         content:       trimmed,
         turnover_id:   contextId ?? null,
       })
-      .select('id, org_id, sender_id, recipient_id, content, read_at, turnover_id, work_order_id, created_at')
+      .select('id, org_id, sender_id, recipient_id, content, read_at, turnover_id, work_order_id, group_id, group_label, created_at')
       .single()
 
     if (error || !message) {
