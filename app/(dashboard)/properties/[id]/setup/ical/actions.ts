@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
+import { inngest } from '@/lib/inngest/client'
 
 export type IcalState = { error?: string; success?: boolean }
 
@@ -68,4 +69,15 @@ export async function deleteIcalFeed(feedId: string, propertyId: string): Promis
 export async function completeIcalStep(propertyId: string): Promise<void> {
   await markStepComplete(propertyId, 'ical')
   redirect(`/properties/${propertyId}/setup/inventory`)
+}
+
+export async function triggerSingleFeedSync(feedId: string, propertyId: string): Promise<void> {
+  const { membership } = await requireOrgMember()
+
+  await inngest.send({
+    name: 'ical/sync.requested',
+    data: { feed_id: feedId, property_id: propertyId, org_id: membership.org_id },
+  })
+
+  revalidatePath(`/properties/${propertyId}/setup/ical`)
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useState } from 'react'
-import { addIcalFeed, deleteIcalFeed, completeIcalStep } from './actions'
+import { addIcalFeed, deleteIcalFeed, completeIcalStep, triggerSingleFeedSync } from './actions'
 import { Plus, Trash2, RefreshCw, Link as LinkIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { IcalFeed } from '@/types/database'
@@ -63,6 +63,13 @@ export function IcalManager({
                 {feed.last_sync_status === 'pending' && (
                   <span className="badge badge-slate">Pending</span>
                 )}
+                <button
+                  onClick={async () => { await triggerSingleFeedSync(feed.id, propertyId) }}
+                  className="text-muted-themed hover:text-secondary-themed transition-colors p-1"
+                  title="Sync this feed now"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </button>
                 <form action={async () => {
                   await deleteIcalFeed(feed.id, propertyId)
                 }}>

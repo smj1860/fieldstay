@@ -249,6 +249,13 @@ export async function GET(
         },
       })
     }
+
+    if (providerId === 'kroger' && membership?.org_id) {
+      await inngest.send({
+        name: 'integration/kroger.connected',
+        data: { org_id: membership.org_id, user_id: appUserId },
+      })
+    }
   } catch (err) {
     console.error(`[OAuth:${providerId}] Vault storage failed:`, err)
     return errorRedirect('storage_failed')

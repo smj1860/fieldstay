@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
 import {
-  assignCrew, addCrewToTurnover, removeCrewFromTurnover,
+  assignCrew, assignCrewIndividually, addCrewToTurnover, removeCrewFromTurnover,
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
   bulkUpdateTurnoverStatus,
   acceptSuggestion, dismissSuggestion,
@@ -843,6 +843,129 @@ function AddTurnoverModal({
   )
 }
 
+// ── Split Assign Modal ───────────────────────────────────────────────────────
+
+function SplitAssignModal({
+  turnoverIds,
+  turnovers,
+  propertyMap,
+  crewMembers,
+  onClose,
+  onApplied,
+}: {
+  turnoverIds: string[]
+  turnovers:   Turnover[]
+  propertyMap: Record<string, Property>
+  crewMembers: CrewMember[]
+  onClose:     () => void
+  onApplied:   (warning?: string) => void
+}) {
+  const selected = turnovers.filter(t => turnoverIds.includes(t.id))
+
+  const [picks, setPicks] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {}
+    for (const t of selected) {
+      if (t.suggested_crew_ids?.[0]) initial[t.id] = t.suggested_crew_ids[0]
+    }
+    return initial
+  })
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError]           = useState<string | null>(null)
+
+  const pickedCount = Object.values(picks).filter(Boolean).length
+
+  const handleApply = async () => {
+    setSubmitting(true)
+    setError(null)
+    const assignments = selected
+      .filter(t => picks[t.id])
+      .map(t => ({ turnoverId: t.id, crewMemberId: picks[t.id]! }))
+
+    const result = await assignCrewIndividually(assignments)
+    setSubmitting(false)
+
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    onApplied(result.warning)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg p-6 max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between mb-4 flex-shrink-0">
+          <div>
+            <h3 className="text-lg font-semibold text-primary-themed">Assign Individually</h3>
+            <p className="text-xs text-muted-themed mt-0.5">
+              {selected.length} turnovers — pick a crew member for each
+            </p>
+          </div>
+          <button onClick={onClose} className="btn-ghost p-1.5">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4 flex-shrink-0">
+            {error}
+          </div>
+        )}
+
+        <div className="overflow-y-auto flex-1 space-y-2 -mx-1 px-1">
+          {selected.map(t => {
+            const property = propertyMap[t.property_id]
+            const date = new Date(t.checkout_datetime).toLocaleDateString('en-US', {
+              weekday: 'short', month: 'short', day: 'numeric',
+            })
+            return (
+              <div
+                key={t.id}
+                className="flex items-center justify-between gap-3 py-2 px-3 rounded-xl"
+                style={{ background: 'var(--bg-raised)' }}
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                    {property?.name ?? 'Unknown property'}
+                  </p>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{date}</p>
+                </div>
+                <select
+                  className="input text-sm py-1.5 flex-shrink-0"
+                  style={{ maxWidth: '160px' }}
+                  value={picks[t.id] ?? ''}
+                  onChange={e => setPicks(prev => ({ ...prev, [t.id]: e.target.value }))}
+                >
+                  <option value="">Unassigned</option>
+                  {crewMembers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )
+          })}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-themed flex-shrink-0">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {pickedCount} of {selected.length} assigned
+          </p>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
+            <button
+              onClick={handleApply}
+              disabled={submitting || pickedCount === 0}
+              className="btn-primary text-sm"
+            >
+              {submitting ? 'Applying…' : 'Apply Assignments'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Main Board ───────────────────────────────────────────────────────────────
 
 export function TurnoverBoard({
@@ -868,6 +991,7 @@ export function TurnoverBoard({
   const urlStatus    = searchParams.get('status')
 
   const [showAdd,           setShowAdd]           = useState(false)
+  const [splitAssignOpen,   setSplitAssignOpen]   = useState(false)
   const [syncing,           startSync]            = useTransition()
   const [filterProp,        setFilterProp]        = useState<string>('all')
   const [filterStatus,      setFilterStatus]      = useState<string>(
@@ -1250,6 +1374,16 @@ export function TurnoverBoard({
             Mark Complete
           </button>
 
+          {selectedIds.size > 1 && (
+            <button
+              onClick={() => setSplitAssignOpen(true)}
+              className="btn-ghost text-xs flex-shrink-0"
+              style={{ color: 'var(--accent-gold)' }}
+            >
+              Split assign…
+            </button>
+          )}
+
           <button
             onClick={clearSelection}
             className="btn-ghost text-xs flex-shrink-0 flex items-center gap-1"
@@ -1266,6 +1400,21 @@ export function TurnoverBoard({
         <AddTurnoverModal
           properties={properties}
           onClose={() => setShowAdd(false)}
+        />
+      )}
+
+      {splitAssignOpen && (
+        <SplitAssignModal
+          turnoverIds={[...selectedIds]}
+          turnovers={turnovers}
+          propertyMap={propertyMap}
+          crewMembers={crewMembers}
+          onClose={() => setSplitAssignOpen(false)}
+          onApplied={(warning) => {
+            setSplitAssignOpen(false)
+            clearSelection()
+            if (warning) setAssignmentWarning(warning)
+          }}
         />
       )}
     </CrewAvailabilityContext.Provider>

@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { requestBatchGeneration } from './actions'
 
 interface ReviewResponseRow {
   id: string
@@ -103,6 +104,16 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
   const [generating, setGenerating]     = useState(false)
   const [savingStatus, setSavingStatus] = useState<string | null>(null)
   const [postConfirm, setPostConfirm]   = useState(false)
+  const [batchRequesting, setBatchRequesting] = useState(false)
+  const [batchMessage, setBatchMessage]       = useState<string | null>(null)
+
+  const pendingCount = reviews.filter(r => r.response_status === 'pending').length
+
+  useEffect(() => {
+    if (!batchMessage) return
+    const t = setTimeout(() => setBatchMessage(null), 4000)
+    return () => clearTimeout(t)
+  }, [batchMessage])
 
   const openPanel = (review: ReviewRow) => {
     setSelected(review)
@@ -209,7 +220,7 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
   return (
     <div className="relative">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div>
           <h1
             className="font-black text-2xl tracking-tight"
@@ -218,13 +229,40 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
             Reviews
           </h1>
         </div>
-        <span
-          className="text-xs font-semibold px-3 py-1 rounded-full"
-          style={{ background: 'rgba(252,209,22,0.15)', color: '#D97706' }}
-        >
-          Powered by RepuGuard
-        </span>
+        <div className="flex items-center gap-3 flex-wrap">
+          {pendingCount > 0 && (
+            <button
+              onClick={async () => {
+                setBatchRequesting(true)
+                const result = await requestBatchGeneration()
+                setBatchMessage(
+                  result.error ?? `Drafting ${Math.min(pendingCount, 25)} review${pendingCount !== 1 ? 's' : ''} — we'll email you when it's done.`
+                )
+                setBatchRequesting(false)
+              }}
+              disabled={batchRequesting}
+              className="btn-secondary text-sm"
+            >
+              {batchRequesting ? 'Starting…' : `Generate All Drafts (${pendingCount})`}
+            </button>
+          )}
+          <span
+            className="text-xs font-semibold px-3 py-1 rounded-full"
+            style={{ background: 'rgba(252,209,22,0.15)', color: '#D97706' }}
+          >
+            Powered by RepuGuard
+          </span>
+        </div>
       </div>
+
+      {batchMessage && (
+        <div
+          className="mb-4 text-sm rounded-xl px-4 py-3 border"
+          style={{ color: 'var(--text-muted)', background: 'var(--bg-canvas)', borderColor: 'var(--border)' }}
+        >
+          {batchMessage}
+        </div>
+      )}
 
       {/* Reviews list */}
       {reviews.length === 0 ? (

@@ -287,6 +287,14 @@ export type FieldStayEvents = {
   }
 
   // ----------------------------------------------------------
+  // Integrations — Kroger
+  // ----------------------------------------------------------
+
+  'integration/kroger.connected': {
+    data: { org_id: string; user_id: string }
+  }
+
+  // ----------------------------------------------------------
   // RepuGuard
   // ----------------------------------------------------------
 
@@ -295,6 +303,10 @@ export type FieldStayEvents = {
       org_id: string
     }
   },
+
+  'repuguard/batch_generate.requested': {
+    data: { org_id: string; requested_by: string }
+  }
 
   // ----------------------------------------------------------
   // Geocoding backfill (one-time, manual trigger)

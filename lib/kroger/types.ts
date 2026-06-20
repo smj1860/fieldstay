@@ -52,7 +52,7 @@ export interface KrogerCartItem {
 }
 
 export interface CartBuildResult {
-  status:          'cart_added' | 'list_only' | 'partial'
+  status:          'cart_added' | 'list_only' | 'partial' | 'nothing_below_par' | 'retailer_not_kroger' | 'no_store_configured'
   matched_items:   MatchedItem[]
   unmatched_items: string[]
   cart_url?:       string
