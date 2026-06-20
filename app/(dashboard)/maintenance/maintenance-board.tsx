@@ -47,6 +47,7 @@ interface WorkOrderRow {
   vendor_acknowledged_by: string | null
   completion_verified_at: string | null
   completion_verified_by: string | null
+  vendor_dispatch_email: string | null
   created_at: string
   updated_at: string
   properties: { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null } | { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null }[] | null
@@ -69,6 +70,7 @@ interface VendorOption {
   id: string
   name: string
   specialty: VendorSpecialty
+  email: string | null
 }
 
 interface CrewMemberOption {
@@ -183,6 +185,7 @@ function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
       name:      vend.name,
       specialty: vend.specialty as WorkOrderDetailData['vendors'] extends { specialty: infer S } | null ? S : never,
     } : null,
+    vendor_dispatch_email: wo.vendor_dispatch_email,
     work_order_line_items: (wo.work_order_line_items ?? []) as WorkOrderDetailData['work_order_line_items'],
   }
 }
@@ -2469,6 +2472,7 @@ export function MaintenanceBoard({
                 workOrder={selectedWO}
                 userRole={role as 'admin' | 'manager' | 'crew' | 'viewer'}
                 onClose={() => setSelectedWO(null)}
+                vendors={vendors.map(v => ({ id: v.id, name: v.name, email: v.email }))}
               />
             </div>
           </div>

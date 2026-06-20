@@ -310,6 +310,7 @@ export async function createAsset(
         model,
         serial_number,
         installation_date,
+        placed_in_service_date:    installation_date,
         purchase_price,
         estimated_replacement_cost,
         expected_lifespan_years:   lifespan,
@@ -377,7 +378,8 @@ export async function updateAsset(
       .from('property_assets')
       .update({
         name, make, model, serial_number,
-        installation_date, purchase_price, estimated_replacement_cost,
+        installation_date, placed_in_service_date: installation_date,
+        purchase_price, estimated_replacement_cost,
         expected_lifespan_years, warranty_expiry_date, warranty_provider, notes,
       })
       .eq('id', assetId)
@@ -461,6 +463,7 @@ export async function bulkImportAssets(
         model:                      row.model,
         serial_number:              row.serial_number,
         installation_date:          row.installation_date,
+        placed_in_service_date:     row.installation_date,
         purchase_price:             row.purchase_price,
         estimated_replacement_cost: row.estimated_replacement_cost,
         warranty_expiry_date:       row.warranty_expiry_date,

@@ -955,7 +955,7 @@ function BillingTab({ org }: { org: Organization }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {DISPLAY_PLANS.map((plan) => {
-            const isCurrent = org.plan === plan.key
+            const isCurrent = org.plan === plan.key && org.plan_status === 'active'
             const isPending = checkoutPlan === plan.key && checkoutPending
 
             return (

@@ -15,6 +15,7 @@ export default async function WorkOrderPage({ params }: Props) {
     { data: wo },
     { data: lineItems },
     { data: photos },
+    { data: orgVendors },
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -28,6 +29,7 @@ export default async function WorkOrderPage({ params }: Props) {
         vendor_acknowledged_at, vendor_acknowledged_by,
         completion_verified_at, completion_verified_by,
         vendor_rating, vendor_rating_notes,
+        vendor_dispatch_email,
         created_at, updated_at,
         properties ( name, address, city, state, access_instructions ),
         vendors ( id, name, specialty )
@@ -47,6 +49,13 @@ export default async function WorkOrderPage({ params }: Props) {
       .select('id, storage_path')
       .eq('work_order_id', id)
       .order('created_at', { ascending: true }),
+
+    supabase
+      .from('vendors')
+      .select('id, name, email')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .order('name'),
   ])
 
   if (!wo) notFound()
@@ -90,6 +99,7 @@ export default async function WorkOrderPage({ params }: Props) {
       name:      vendor.name,
       specialty: vendor.specialty as WorkOrderDetailData['vendors'] extends { specialty: infer S } | null ? S : never,
     } : null,
+    vendor_dispatch_email: wo.vendor_dispatch_email ?? null,
     work_order_line_items: (lineItems ?? []) as WorkOrderDetailData['work_order_line_items'],
     work_order_photos:     (photos    ?? []) as WorkOrderDetailData['work_order_photos'],
   }
@@ -112,6 +122,7 @@ export default async function WorkOrderPage({ params }: Props) {
         <WorkOrderDetail
           workOrder={workOrderData}
           userRole={membership.role as 'admin' | 'manager' | 'crew' | 'viewer'}
+          vendors={(orgVendors ?? []).map(v => ({ id: v.id, name: v.name, email: v.email ?? null }))}
         />
       </div>
     </div>

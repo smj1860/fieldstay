@@ -318,6 +318,18 @@ export function InventorySetup({
                   </span>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-muted-themed">{available.length} available</span>
+                    {available.length > 0 && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          available.forEach((ci) => addFromCatalog(ci))
+                        }}
+                        className="text-xs font-medium hover:underline"
+                        style={{ color: 'var(--accent-gold)' }}
+                      >
+                        Add all
+                      </button>
+                    )}
                     {isOpen ? <ChevronDown className="w-4 h-4 text-muted-themed" /> : <ChevronRight className="w-4 h-4 text-muted-themed" />}
                   </div>
                 </button>

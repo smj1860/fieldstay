@@ -177,7 +177,7 @@ export async function generateTurnoversForProperty(
   return newTurnoverIds
 }
 
-async function snapshotChecklist(
+export async function snapshotChecklist(
   supabase:   DBClient,
   turnoverID: string,
   orgId:      string,
