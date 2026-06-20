@@ -16,6 +16,7 @@ import { dailyWorkOrderOps }             from '@/lib/inngest/functions/cron/work
 import { dailyAssetHealth }              from '@/lib/inngest/functions/cron/asset-health'
 import { dailyCommsRetention }           from '@/lib/inngest/functions/cron/comms-retention'
 import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audit-retention'
+import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale-feed-alert'
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
@@ -90,6 +91,7 @@ export const { GET, POST, PUT } = serve({
     dailyAssetHealth,
     dailyCommsRetention,
     auditRetentionCron,
+    staleFeedAlert,
 
     // Inventory → PO
     handleInventoryCountSubmitted,

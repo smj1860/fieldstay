@@ -48,19 +48,24 @@ export const syncAllIcalFeeds = inngest.createFunction(
     { cron: '0 * * * *' },                        // every hour
     { event: 'ical/sync.all.requested' as const },
   ],
-  async ({ step, logger }) => {
+  async ({ event, step, logger }) => {
+    const orgId = 'org_id' in event.data ? event.data.org_id : undefined
+
     const feeds = await step.run('fetch-active-feeds', async () => {
       const supabase = createServiceClient()
-      const { data, error } = await supabase
+      let query = supabase
         .from('ical_feeds')
         .select('id, property_id, org_id')
         .eq('is_active', true)
 
+      if (orgId) query = query.eq('org_id', orgId)
+
+      const { data, error } = await query
       if (error) throw new Error(`Failed to fetch feeds: ${error.message}`)
       return data ?? []
     })
 
-    logger.info(`Syncing ${feeds.length} iCal feeds`)
+    logger.info(`Syncing ${feeds.length} iCal feeds${orgId ? ` for org ${orgId}` : ' (all orgs)'}`)
 
     if (feeds.length === 0) return { synced: 0 }
 

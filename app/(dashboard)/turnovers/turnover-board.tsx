@@ -11,6 +11,7 @@ import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/
 import {
   assignCrew, addCrewToTurnover, removeCrewFromTurnover,
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
+  bulkUpdateTurnoverStatus,
   acceptSuggestion, dismissSuggestion,
 } from './actions'
 import { TurnoverGantt } from './turnover-gantt'
@@ -1234,6 +1235,20 @@ export function TurnoverBoard({
               ))}
             </select>
           </div>
+
+          <button
+            disabled={bulkAssigning}
+            onClick={() =>
+              startBulkAssign(async () => {
+                await bulkUpdateTurnoverStatus([...selectedIds], 'completed')
+                clearSelection()
+              })
+            }
+            className="btn-secondary text-xs flex-shrink-0 flex items-center gap-1"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Mark Complete
+          </button>
 
           <button
             onClick={clearSelection}

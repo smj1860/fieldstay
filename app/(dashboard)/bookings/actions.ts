@@ -178,5 +178,6 @@ export async function cancelBooking(
 // ── Trigger manual iCal sync ─────────────────────────────────────────────────
 
 export async function triggerSync(): Promise<void> {
-  await inngest.send({ name: 'ical/sync.all.requested', data: {} })
+  const { membership } = await requireOrgMember()
+  await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: membership.org_id } })
 }

@@ -420,10 +420,44 @@ export async function removeCrewFromTurnover(
   return { success: true }
 }
 
+// ── Bulk turnover status update ──────────────────────────────────────────────
+
+export async function bulkUpdateTurnoverStatus(
+  turnoverIds: string[],
+  status: 'completed'
+): Promise<TurnoverActionState> {
+  const { supabase, membership } = await requireOrgMember()
+
+  // Only update turnovers that belong to this org and aren't already terminal
+  const { data: eligible } = await supabase
+    .from('turnovers')
+    .select('id')
+    .in('id', turnoverIds)
+    .eq('org_id', membership.org_id)
+    .in('status', ['pending_assignment', 'assigned', 'in_progress', 'flagged'])
+
+  if (!eligible?.length) return { success: true }
+
+  const ids = eligible.map(t => t.id)
+
+  const { error } = await supabase
+    .from('turnovers')
+    .update({ status, completed_at: new Date().toISOString() })
+    .in('id', ids)
+
+  if (error) {
+    console.error('[bulkUpdateTurnoverStatus]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}
+
 // ── Trigger manual iCal sync ─────────────────────────────────────────────────
 
 export async function triggerManualSync(orgId: string): Promise<void> {
-  await inngest.send({ name: 'ical/sync.all.requested', data: {} })
+  await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: orgId } })
   revalidatePath('/turnovers')
 }
 
