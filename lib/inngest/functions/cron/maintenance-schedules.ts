@@ -356,6 +356,118 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
       })
     }
 
+    // ── Pass 3: Vacancy-gap maintenance suggestions ─────────────────────────
+    const STRONG_GAP_DAYS = 30
+    const LIGHT_GAP_DAYS  = 14
+    const LOOKAHEAD_DAYS  = 90
+
+    const gapSuggestions = await step.run('find-vacancy-gaps', async () => {
+      const supabase = createServiceClient()
+
+      const { data: properties } = await supabase
+        .from('properties')
+        .select('id, org_id, name')
+        .eq('is_active', true)
+
+      const results: Array<{
+        property_id: string; org_id: string; property_name: string
+        gap_start: string; gap_end: string | null; gap_days: number; tier: 'strong' | 'light'
+        candidates: Array<{ id: string; name: string; next_due_date: string; estimated_cost: number | null; assigned_vendor_id: string | null }>
+      }> = []
+
+      for (const property of properties ?? []) {
+        const { data: bookings } = await supabase
+          .from('bookings')
+          .select('checkin_date, checkout_date')
+          .eq('property_id', property.id)
+          .in('status', ['confirmed', 'tentative'])
+          .gte('checkout_date', todayStr)
+          .order('checkin_date', { ascending: true })
+
+        if (!bookings?.length) continue
+
+        for (let i = 0; i < bookings.length; i++) {
+          const checkoutDate = bookings[i]!.checkout_date
+          const nextCheckin  = bookings[i + 1]?.checkin_date ?? null
+
+          const gapDays = nextCheckin
+            ? Math.round((new Date(nextCheckin).getTime() - new Date(checkoutDate).getTime()) / 86_400_000)
+            : LOOKAHEAD_DAYS
+
+          if (gapDays < LIGHT_GAP_DAYS) continue
+
+          const windowEnd = new Date(new Date(checkoutDate).getTime() + Math.min(gapDays, LOOKAHEAD_DAYS) * 86_400_000)
+
+          const { data: candidates } = await supabase
+            .from('maintenance_schedules')
+            .select('id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
+            .eq('property_id', property.id)
+            .eq('is_active', true)
+            .lte('next_due_date', windowEnd.toISOString().split('T')[0])
+
+          const eligible = (candidates ?? []).filter(c =>
+            isMaintenanceItemActiveThisMonth(c.active_from_month ?? null, c.active_to_month ?? null)
+          )
+
+          if (!eligible.length) continue
+
+          results.push({
+            property_id:   property.id,
+            org_id:        property.org_id,
+            property_name: property.name,
+            gap_start:     checkoutDate,
+            gap_end:       nextCheckin,
+            gap_days:      gapDays,
+            tier:          gapDays >= STRONG_GAP_DAYS ? 'strong' : 'light',
+            candidates:    eligible,
+          })
+        }
+      }
+
+      return results
+    })
+
+    if (gapSuggestions.length) {
+      const gapPmEmails = await step.run('find-pm-emails-gaps', async () => {
+        const supabase = createServiceClient()
+        const orgIds = Array.from(new Set(gapSuggestions.map(g => g.org_id)))
+        const emails = await getPmEmailsByOrgIds(supabase, orgIds)
+        return Array.from(emails.entries())
+      })
+      const gapPmByOrg = new Map(gapPmEmails)
+
+      for (const gap of gapSuggestions) {
+        await step.run(`notify-gap-${gap.property_id}-${gap.gap_start}`, async () => {
+          const pmEmail = gapPmByOrg.get(gap.org_id)
+          if (!pmEmail) return
+
+          const tierLabel = gap.tier === 'strong' ? 'Vacancy opportunity' : 'Possible vacancy window'
+          const items = gap.candidates
+            .map(c => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
+            .join(', ')
+
+          await resend.emails.send(
+            {
+              from:    FROM,
+              to:      pmEmail,
+              subject: `${tierLabel} — ${gap.property_name}, ${gap.gap_days} days`,
+              html: await renderPmAlert({
+                heading: tierLabel,
+                body:    `${gap.property_name} has a ${gap.gap_days}-day gap starting ${new Date(gap.gap_start).toLocaleDateString()}${gap.gap_end ? '' : ' (no booking on the books yet)'}. Consider scheduling: ${items}.`,
+                details: gap.candidates.slice(0, 5).map(c => ({
+                  label: c.name,
+                  value: c.estimated_cost ? `~$${c.estimated_cost}` : 'Cost TBD',
+                })),
+                ctaLabel: 'Review Maintenance →',
+                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
+              }),
+            },
+            { idempotencyKey: `vacancy-gap-${gap.property_id}-${gap.gap_start}` }
+          )
+        })
+      }
+    }
+
     // ── Thirty-day milestone ────────────────────────────────────────────────
     await step.run('check-thirty-day-milestone', async () => {
       const supabase = createServiceClient()
@@ -374,8 +486,9 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     })
 
     return {
-      checked:   dueSchedules.length,
-      escalated: overdueSchedules.length,
+      checked:        dueSchedules.length,
+      escalated:      overdueSchedules.length,
+      gapSuggestions: gapSuggestions.length,
     }
   }
 )

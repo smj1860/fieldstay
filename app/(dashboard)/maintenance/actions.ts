@@ -332,7 +332,7 @@ export async function updateWorkOrderStatus(
 
   const { data: current } = await supabase
     .from('work_orders')
-    .select('status, source_schedule_id, actual_cost, estimated_cost, title, property_id')
+    .select('status, source_schedule_id, source, actual_cost, estimated_cost, title, property_id')
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
     .single()
@@ -368,7 +368,7 @@ export async function updateWorkOrderStatus(
     })
 
     if (current.source_schedule_id) {
-      await advanceScheduleAfterCompletion(supabase, current.source_schedule_id, membership.org_id)
+      await advanceScheduleAfterCompletion(supabase, current.source_schedule_id, membership.org_id, current.source ?? undefined)
     }
   }
 
@@ -391,7 +391,8 @@ export async function updateWorkOrderStatus(
 async function advanceScheduleAfterCompletion(
   supabase: SupabaseClient,
   scheduleId: string,
-  orgId: string
+  orgId: string,
+  workOrderSource?: string
 ) {
   const { data: schedule } = await supabase
     .from('maintenance_schedules')
@@ -405,8 +406,15 @@ async function advanceScheduleAfterCompletion(
   const lastCompleted = isoDate()
 
   if (schedule.schedule_type === 'routine' && schedule.frequency) {
-    const currentDue = new Date(schedule.next_due_date)
-    const nextDue    = calcNextDueDate(schedule.frequency as ScheduleFrequency, currentDue)
+    // Bumped (gap-driven) completions anchor to the ACTUAL completion date —
+    // anchoring to the original scheduled date would discard the benefit of
+    // having done the work early and silently desync the cadence over time.
+    // Normal on-time completions keep the existing fixed-calendar anchor.
+    const anchor = workOrderSource === 'vacancy_gap_suggestion'
+      ? new Date(lastCompleted)
+      : new Date(schedule.next_due_date)
+
+    const nextDue = calcNextDueDate(schedule.frequency as ScheduleFrequency, anchor)
 
     await supabase
       .from('maintenance_schedules')
