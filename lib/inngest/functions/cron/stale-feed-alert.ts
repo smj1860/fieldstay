@@ -59,6 +59,7 @@ export const staleFeedAlert = inngest.createFunction(
       }
 
       return (data ?? []) as StaleRow[]
+    })
 
     if (staleFeeds.length === 0) {
       logger.info('No stale iCal feeds found')
