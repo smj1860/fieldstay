@@ -5,7 +5,8 @@ import { redirect } from 'next/navigation'
 import { CrewShell } from './crew-shell'
 
 export const metadata: Metadata = {
-  manifest: '/manifest.webmanifest',
+  manifest: '/manifest.json',
+  themeColor: '#0D0E14',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',

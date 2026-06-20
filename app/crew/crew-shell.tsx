@@ -2,19 +2,38 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
-import { CalendarCheck, CalendarDays, MessageSquare, LogOut } from 'lucide-react'
+import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X } from 'lucide-react'
 import { PowerSyncContext }         from '@powersync/react'
 import { usePowerSync, usePowerSyncQuery } from '@powersync/react'
 import { getPowerSyncDb, disconnectPowerSync } from '@/lib/powersync/client'
 import { createClient }             from '@/lib/supabase/client'
 import { processPendingPhotoUploads } from '@/lib/powersync/photo-sync'
 import { cn }                       from '@/lib/utils'
+import { InstallBanner }            from '@/components/pwa/install-banner'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
   const rawData = window.atob(base64)
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
+}
+
+async function subscribeToPush(reg: ServiceWorkerRegistration) {
+  const sub  = await reg.pushManager.subscribe({
+    userVisibleOnly:      true,
+    applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
+  })
+  const json = sub.toJSON()
+  if (!json.keys) return
+  await fetch('/api/crew/push-subscribe', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      endpoint: json.endpoint,
+      p256dh:   json.keys.p256dh,
+      auth:     json.keys.auth,
+    }),
+  })
 }
 
 export function CrewShell({
@@ -30,6 +49,9 @@ export function CrewShell({
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
+  const [swReg, setSwReg]               = useState<ServiceWorkerRegistration | null>(null)
+  const [notifVisible, setNotifVisible] = useState(false)
+
   async function handleLogout() {
     await disconnectPowerSync()
     const supabase = createClient()
@@ -37,6 +59,7 @@ export function CrewShell({
     startTransition(() => router.push('/crew/login'))
   }
 
+  // Register SW silently on mount — no permission prompt
   useEffect(() => {
     if (typeof window === 'undefined') return
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
@@ -44,36 +67,38 @@ export function CrewShell({
     const register = async () => {
       try {
         const reg      = await navigator.serviceWorker.register('/sw.js')
+        setSwReg(reg)
+
         const existing = await reg.pushManager.getSubscription()
-        if (existing) return
+        if (existing) return // Already subscribed — nothing to do
 
-        const permission = await Notification.requestPermission()
-        if (permission !== 'granted') return
-
-        const sub  = await reg.pushManager.subscribe({
-          userVisibleOnly:      true,
-          applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
-        })
-
-        const json = sub.toJSON()
-        if (!json.keys) return
-
-        await fetch('/api/crew/push-subscribe', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            endpoint: json.endpoint,
-            p256dh:   json.keys.p256dh,
-            auth:     json.keys.auth,
-          }),
-        })
+        const permission = Notification.permission
+        if (permission === 'default') {
+          setNotifVisible(true) // Show "Enable Notifications" prompt
+        } else if (permission === 'granted') {
+          // Previously granted but subscription was lost — resubscribe silently
+          await subscribeToPush(reg)
+        }
+        // 'denied' — respect the user's choice, don't prompt
       } catch (err) {
-        console.error('[push] registration failed:', err)
+        console.error('[sw] registration failed:', err)
       }
     }
 
     register()
   }, [])
+
+  async function enableNotifications() {
+    if (!swReg) return
+    const permission = await Notification.requestPermission()
+    setNotifVisible(false)
+    if (permission !== 'granted') return
+    try {
+      await subscribeToPush(swReg)
+    } catch (err) {
+      console.error('[push] subscription failed:', err)
+    }
+  }
 
   useEffect(() => {
     const supabase = createClient()
@@ -109,6 +134,43 @@ export function CrewShell({
             </button>
           </div>
         </header>
+
+        <InstallBanner />
+
+        {notifVisible && (
+          <div
+            className="mx-4 mt-2 rounded-xl p-4 flex items-center gap-3"
+            style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
+          >
+            <Bell className="w-5 h-5 shrink-0" style={{ color: 'var(--accent-gold)' }} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Stay in the loop
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Get notified when you&apos;re assigned a new job.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setNotifVisible(false)}
+                aria-label="Dismiss notification prompt"
+                className="p-1 rounded-lg transition-opacity active:opacity-60"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <button
+                onClick={enableNotifications}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-opacity active:opacity-80"
+                style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+              >
+                Enable
+              </button>
+            </div>
+          </div>
+        )}
+
         <main className="flex-1 px-4 py-6">{children}</main>
         <CrewBottomNav userId={userId} />
       </div>
