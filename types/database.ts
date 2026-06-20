@@ -30,7 +30,7 @@ export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath
 export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
-export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report'
+export type WoSource            = 'manual' | 'maintenance_schedule' | 'crew_flag' | 'guest_report' | 'vacancy_gap_suggestion'
 export type WoCategory          =
   | 'hvac' | 'plumbing' | 'electrical' | 'appliance' | 'cleaning'
   | 'landscaping' | 'roofing' | 'flooring' | 'windows_doors'
@@ -267,6 +267,8 @@ export interface Vendor {
   is_active:            boolean
   avg_rating:           number | null
   rating_count:         number
+  on_time_pct:          number | null
+  on_time_sample_size:  number
   address:              string | null
   city:                 string | null
   state:                string | null

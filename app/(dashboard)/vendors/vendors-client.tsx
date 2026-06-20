@@ -339,6 +339,14 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
                 {vendor.portal_enabled ? 'Enabled' : 'Disabled'}
               </span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-muted-themed">On-Time Completion</span>
+              <span className="text-secondary-themed">
+                {vendor.on_time_pct !== null
+                  ? `${vendor.on_time_pct}% (${vendor.on_time_sample_size} jobs)`
+                  : 'Not enough data yet'}
+              </span>
+            </div>
             {vendor.notes && (
               <div>
                 <p className="text-muted-themed mb-1">Notes</p>
@@ -657,7 +665,7 @@ function StarRating({ rating, count }: { rating: number | null; count: number })
 
 // ── Vendor row ────────────────────────────────────────────────────────────────
 
-function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Array<{ vendor_rating: number | null }> }; onSelect?: (v: Vendor) => void }) {
+function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Array<{ vendor_rating: number | null }>; on_time_pct?: number | null; on_time_sample_size?: number }; onSelect?: (v: Vendor) => void }) {
   const [portalEnabled, setPortalEnabled] = useState(vendor.portal_enabled)
   const [togglingPortal, startToggle]     = useTransition()
   const [deactivating,   startDeact]      = useTransition()
@@ -678,6 +686,13 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
         <div className="font-medium text-primary-themed">{vendor.name}</div>
         {vendor.contact_name && <div className="text-xs text-muted-themed">{vendor.contact_name}</div>}
         <StarRating rating={vendor.avg_rating ?? null} count={vendor.rating_count ?? 0} />
+        {vendor.on_time_pct !== null && vendor.on_time_pct !== undefined ? (
+          <span className="text-xs text-muted-themed">
+            {vendor.on_time_pct}% on-time ({vendor.on_time_sample_size})
+          </span>
+        ) : (
+          <span className="text-xs text-muted-themed">Not enough data yet</span>
+        )}
       </td>
       <td className="py-2.5 pr-4">
         <span className="badge badge-blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>

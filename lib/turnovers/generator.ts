@@ -134,7 +134,8 @@ export async function generateTurnoversForProperty(
       await supabase
         .from('turnovers')
         .update({
-          prev_booking_id:  incoming.id,
+          booking_id:       incoming.id,
+          prev_booking_id:  outgoing.id,
           checkin_datetime: checkinDT.toISOString(),
           window_minutes:   windowMinutes,
           priority,

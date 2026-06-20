@@ -18,6 +18,7 @@ import { dailyAssetHealth }              from '@/lib/inngest/functions/cron/asse
 import { dailyCommsRetention }           from '@/lib/inngest/functions/cron/comms-retention'
 import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audit-retention'
 import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale-feed-alert'
+import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turnover-priority-decay'
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
@@ -99,6 +100,7 @@ export const { GET, POST, PUT } = serve({
     dailyCommsRetention,
     auditRetentionCron,
     staleFeedAlert,
+    turnoverPriorityDecay,
 
     // Inventory → PO
     handleInventoryCountSubmitted,
