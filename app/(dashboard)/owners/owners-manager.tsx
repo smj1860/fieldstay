@@ -710,9 +710,14 @@ function OwnerCard({
   const [monthlyRevenue, setMonthlyRevenue] = useState('')
   const [monthlyMonth, setMonthlyMonth]     = useState(currentMonthIso)
   const [revSuccess, setRevSuccess]         = useState<string | null>(null)
+  const [revError, setRevError]             = useState<string | null>(null)
   const [, startRev]                        = useTransition()
 
   const handleSaveMonthlyRevenue = () => {
+    if (!owner.property_id) {
+      setRevError('This owner is not linked to a property yet.')
+      return
+    }
     if (!monthlyRevenue || isNaN(parseFloat(monthlyRevenue))) return
     const amount = parseFloat(monthlyRevenue)
     if (amount <= 0) return
@@ -720,6 +725,7 @@ function OwnerCard({
     const txnDate  = `${year}-${month}-01`
     const d        = new Date(txnDate + 'T00:00:00')
     const monthLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    setRevError(null)
     startRev(async () => {
       const formData = new FormData()
       formData.set('property_id',      owner.property_id)
@@ -733,6 +739,8 @@ function OwnerCard({
         setMonthlyRevenue('')
         setRevSuccess(`$${amount.toFixed(2)} recorded for ${monthLabel}`)
         setTimeout(() => setRevSuccess(null), 4000)
+      } else {
+        setRevError(result.error)
       }
     })
   }
@@ -802,6 +810,9 @@ function OwnerCard({
         </div>
         {revSuccess && (
           <p className="text-xs mt-1" style={{ color: 'var(--accent-green)' }}>{revSuccess}</p>
+        )}
+        {revError && (
+          <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }}>{revError}</p>
         )}
         <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
           Visible to owner on the portal. OwnerRez integration will auto-populate when connected.
