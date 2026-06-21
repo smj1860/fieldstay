@@ -7,10 +7,11 @@ import {
   Plus, RefreshCw, X, ChevronDown, ChevronUp,
   Calendar, Users, Home, Clock, AlertTriangle,
   CheckCircle2, Ban, HelpCircle, ExternalLink,
-  Search, Download,
+  Search, Download, LayoutList,
 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { createBooking, cancelBooking, triggerSync } from './actions'
+import { BookingsCalendar } from './bookings-calendar'
 import type { BookingSource, BookingStatus } from '@/types/database'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -482,6 +483,7 @@ export function BookingsClient({
 
   const [showAdd,          setShowAdd]         = useState(false)
   const [syncing,          startSync]          = useTransition()
+  const [viewMode,         setViewMode]        = useState<'list' | 'calendar'>('list')
   const [filterProperty,   setFilterProperty]  = useState('all')
   const [filterStatus,     setFilterStatus]    = useState<'all' | BookingStatus>('all')
   const [filterSource,     setFilterSource]    = useState<'all' | BookingSource>('all')
@@ -725,6 +727,38 @@ export function BookingsClient({
         <button onClick={handleExportCsv} className="btn-ghost text-xs py-1.5" style={{ color: 'var(--text-muted)' }}>
           <Download className="w-3 h-3" /> Export CSV
         </button>
+
+        <div
+          className="flex items-center gap-0.5 rounded-lg p-0.5 ml-auto"
+          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
+        >
+          <button
+            onClick={() => setViewMode('list')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors"
+            style={{
+              background: viewMode === 'list' ? 'var(--bg-card)' : 'transparent',
+              color:      viewMode === 'list' ? 'var(--text-primary)' : 'var(--text-muted)',
+              boxShadow:  viewMode === 'list' ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
+            }}
+            title="List view"
+          >
+            <LayoutList className="w-3.5 h-3.5" />
+            List
+          </button>
+          <button
+            onClick={() => setViewMode('calendar')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors"
+            style={{
+              background: viewMode === 'calendar' ? 'var(--bg-card)' : 'transparent',
+              color:      viewMode === 'calendar' ? 'var(--text-primary)' : 'var(--text-muted)',
+              boxShadow:  viewMode === 'calendar' ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
+            }}
+            title="Calendar view"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            Calendar
+          </button>
+        </div>
       </div>
 
       {/* Count */}
@@ -733,8 +767,17 @@ export function BookingsClient({
         {hasFilters || showPast ? ` shown` : ` upcoming`}
       </p>
 
-      {/* Booking list */}
-      {filtered.length === 0 ? (
+      {/* Booking list / calendar */}
+      {viewMode === 'calendar' ? (
+        <BookingsCalendar
+          bookings={filtered}
+          properties={properties}
+          onViewInList={(guestName) => {
+            setSearchQuery(guestName)
+            setViewMode('list')
+          }}
+        />
+      ) : filtered.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
           <Calendar className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
           <h3 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
