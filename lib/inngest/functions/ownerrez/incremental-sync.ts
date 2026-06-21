@@ -21,6 +21,7 @@ import { createServiceClient }          from '@/lib/supabase/server'
 import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
+import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 
 const PROVIDER = 'ownerrez'
 
@@ -74,7 +75,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       let rateLimited       = false
       let retryAfterSeconds = 60
 
-      await step.run(`sync-user-${conn.user_id}`, async () => {
+      const syncResult = await step.run(`sync-user-${conn.user_id}`, async () => {
         const supabase = createServiceClient()
         const metadata = (conn.metadata ?? {}) as Record<string, unknown>
         const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
@@ -111,6 +112,8 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
         try {
           const bookings = await client.getBookings({ sinceUtc, propertyIds, includeGuest: true })
+
+          let affectedPropertyIds: string[] = []
 
           if (bookings.length) {
             // CRITICAL-2: resolve FieldStay property IDs from OwnerRez external IDs.
@@ -171,6 +174,10 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               logger.error(`[OwnerRez:${conn.user_id}] bookings upsert: ${error.message}`)
               throw new Error(error.message)
             }
+
+            affectedPropertyIds = Array.from(new Set(
+              bookingRows.map((b) => b.property_id).filter((id): id is string => id != null)
+            ))
           }
 
           // MEDIUM-3: use pre-fetch timestamp as cursor — not post-fetch
@@ -204,6 +211,8 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             const redis = getRedis()
             await redis.del('ownerrez:circuit:consecutive_failures')
           } catch { /* non-fatal */ }
+
+          return affectedPropertyIds
 
         } catch (err) {
           if (err instanceof RateLimitError) {
@@ -363,6 +372,26 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           } catch { /* non-fatal — data was already written to metadata */ }
         }
       })
+
+      // Generate turnovers for any properties that received booking updates.
+      // Called once per property (not per booking) so the generator sees the
+      // full booking list and can apply its two-pass pairing logic correctly.
+      const affectedIds = Array.isArray(syncResult) ? syncResult : []
+      if (affectedIds.length) {
+        await step.run(`generate-turnovers-${conn.user_id}`, async () => {
+          const supabase = createServiceClient()
+          for (const propertyId of affectedIds) {
+            try {
+              await generateTurnoversForProperty(propertyId, conn.org_id, supabase)
+            } catch (err) {
+              logger.error(
+                `[OwnerRez:${conn.user_id}] Turnover generation failed for property ${propertyId}: ${err}`
+              )
+              // Don't let one property's failure block the others
+            }
+          }
+        })
+      }
 
       // HIGH-1: step.sleep called at top level — NOT inside step.run
       if (rateLimited) {
