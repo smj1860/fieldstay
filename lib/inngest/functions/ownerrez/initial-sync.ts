@@ -365,13 +365,15 @@ export const ownerRezInitialSync = inngest.createFunction(
       // Called once per property (not per booking) so the generator sees the
       // full booking list and can apply its two-pass pairing logic correctly.
 
-      await step.run('generate-turnovers', async () => {
+      const newTurnoverIds = await step.run('generate-turnovers', async () => {
         const propertyIds = fetchBookingsResult.affectedPropertyIds
-        if (!propertyIds.length) return
+        if (!propertyIds.length) return []
         const supabase = createServiceClient()
+        const ids: string[] = []
         for (const propertyId of propertyIds) {
           try {
-            await generateTurnoversForProperty(propertyId, org_id, supabase)
+            const newIds = await generateTurnoversForProperty(propertyId, org_id, supabase)
+            ids.push(...newIds)
           } catch (err) {
             logger.error(
               `[OwnerRez:${user_id}] Turnover generation failed for property ${propertyId}: ${err}`
@@ -379,7 +381,35 @@ export const ownerRezInitialSync = inngest.createFunction(
             // Don't let one property's failure block the others
           }
         }
+        return ids
       })
+
+      if (newTurnoverIds.length > 0) {
+        const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
+          const supabase = createServiceClient()
+          type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
+          const { data: turnovers } = await supabase
+            .from('turnovers')
+            .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
+            .in('id', newTurnoverIds)
+
+          return (turnovers as TurnoverRow[] ?? []).map((t) => ({
+            name: 'turnover/created' as const,
+            data: {
+              turnover_id:       t.id,
+              property_id:       t.property_id,
+              org_id,
+              checkout_datetime: t.checkout_datetime,
+              checkin_datetime:  t.checkin_datetime,
+              window_minutes:    t.window_minutes ?? 0,
+            },
+          }))
+        })
+
+        if (turnoverEvents.length > 0) {
+          await step.sendEvent('fire-turnover-created-events', turnoverEvents)
+        }
+      }
     } catch (err) {
       const humanError = translateSyncError(err)
       logger.error(

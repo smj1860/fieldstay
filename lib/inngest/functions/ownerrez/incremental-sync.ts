@@ -431,11 +431,13 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       // full booking list and can apply its two-pass pairing logic correctly.
       const affectedIds = Array.isArray(syncResult) ? syncResult : []
       if (affectedIds.length) {
-        await step.run(`generate-turnovers-${conn.user_id}`, async () => {
+        const allNewTurnoverIds = await step.run(`generate-turnovers-${conn.user_id}`, async () => {
           const supabase = createServiceClient()
+          const ids: string[] = []
           for (const propertyId of affectedIds) {
             try {
-              await generateTurnoversForProperty(propertyId, conn.org_id, supabase)
+              const newIds = await generateTurnoversForProperty(propertyId, conn.org_id, supabase)
+              ids.push(...newIds)
             } catch (err) {
               logger.error(
                 `[OwnerRez:${conn.user_id}] Turnover generation failed for property ${propertyId}: ${err}`
@@ -443,7 +445,35 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               // Don't let one property's failure block the others
             }
           }
+          return ids
         })
+
+        if (allNewTurnoverIds.length > 0) {
+          const turnoverEvents = await step.run(`fetch-new-turnover-data-${conn.user_id}`, async () => {
+            const supabase = createServiceClient()
+            type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
+            const { data: turnovers } = await supabase
+              .from('turnovers')
+              .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
+              .in('id', allNewTurnoverIds)
+
+            return (turnovers as TurnoverRow[] ?? []).map((t) => ({
+              name: 'turnover/created' as const,
+              data: {
+                turnover_id:       t.id,
+                property_id:       t.property_id,
+                org_id:            conn.org_id,
+                checkout_datetime: t.checkout_datetime,
+                checkin_datetime:  t.checkin_datetime,
+                window_minutes:    t.window_minutes ?? 0,
+              },
+            }))
+          })
+
+          if (turnoverEvents.length > 0) {
+            await step.sendEvent(`fire-turnover-created-events-${conn.user_id}`, turnoverEvents)
+          }
+        }
       }
 
       // HIGH-1: step.sleep called at top level — NOT inside step.run
