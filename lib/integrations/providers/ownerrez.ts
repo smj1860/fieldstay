@@ -163,55 +163,57 @@ export const ownerRezProvider: IntegrationProvider = {
   },
 
   // Handles OwnerRez-specific webhook events beyond the generic revocation.
-  // The revocation event is handled centrally by the webhook route handler.
+  // OwnerRez uses generic action names (entity_insert/entity_update/entity_delete)
+  // with entity type carried separately in the entity_type field.
   async handleWebhookEvent({ action, payload, externalUserId, correlationId }) {
+    const data       = payload as Record<string, unknown>
+    const entityType = String(data.entity_type ?? '')
+    const entityId   = String(data.entity_id ?? '')
+
     switch (action) {
       case 'application_authorization_revoked':
         // Handled by the generic webhook route — nothing to do here
         break
 
-      case 'booking.created':
-      case 'booking.modified':
-      case 'booking.cancelled': {
-        const { inngest } = await import('@/lib/inngest/client')
-        await inngest.send({
-          name: 'integration/ownerrez.sync.requested',
-          data: {
-            provider_id:    'ownerrez',
-            event_type:     action,
-            entity_type:    'booking',
-            entity_id:      String((payload as Record<string, unknown>)?.id ?? ''),
-            triggered_at:   new Date().toISOString(),
-            correlation_id: correlationId ?? null,
-          },
-        })
-        break
-      }
-
-      case 'guest.created':
-      case 'guest.updated': {
-        const { inngest } = await import('@/lib/inngest/client')
-        await inngest.send({
-          name: 'integration/ownerrez.sync.requested',
-          data: {
-            provider_id:    'ownerrez',
-            event_type:     action,
-            entity_type:    'guest',
-            entity_id:      String((payload as Record<string, unknown>)?.id ?? ''),
-            triggered_at:   new Date().toISOString(),
-            correlation_id: correlationId ?? null,
-          },
-        })
+      case 'entity_insert':
+      case 'entity_update':
+      case 'entity_delete': {
+        if (entityType === 'booking') {
+          const { inngest } = await import('@/lib/inngest/client')
+          await inngest.send({
+            name: 'integration/ownerrez.sync.requested',
+            data: {
+              provider_id:    'ownerrez',
+              event_type:     action,
+              entity_type:    'booking',
+              entity_id:      entityId,
+              triggered_at:   new Date().toISOString(),
+              correlation_id: correlationId ?? null,
+            },
+          })
+        } else if (entityType === 'guest') {
+          const { inngest } = await import('@/lib/inngest/client')
+          await inngest.send({
+            name: 'integration/ownerrez.sync.requested',
+            data: {
+              provider_id:    'ownerrez',
+              event_type:     action,
+              entity_type:    'guest',
+              entity_id:      entityId,
+              triggered_at:   new Date().toISOString(),
+              correlation_id: correlationId ?? null,
+            },
+          })
+        } else {
+          // property, review, etc. — not yet wired to a specific handler.
+          // Distinct from an unrecognized action: known entity type, no handler yet.
+          console.log(`[OwnerRez] entity_type "${entityType}" webhook received, no specific handler yet (action=${action})`)
+        }
         break
       }
 
       default: {
-        const safeLog = {
-          action,
-          external_id: typeof payload === 'object' && payload !== null
-            ? (payload as Record<string, unknown>).id ?? null
-            : null,
-        }
+        const safeLog = { action, entity_id: entityId || null }
         console.warn('[OwnerRez] Unhandled webhook action', safeLog)
       }
     }
