@@ -71,28 +71,31 @@ export const handleCrewAssigned = inngest.createFunction(
         ? `Turnover assigned — ${(Array.isArray(turnovers[0]!.properties) ? turnovers[0]!.properties[0] : turnovers[0]!.properties)?.name ?? 'Property'}`
         : `${turnovers.length} turnovers assigned to you`
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      crew.email,
-        subject,
-        html: `
-          <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-            <h2>You've been assigned ${turnovers.length === 1 ? 'a turnover' : `${turnovers.length} turnovers`}</h2>
-            <table style="border-collapse:collapse;width:100%;margin:16px 0">
-              <thead>
-                <tr style="text-align:left;color:#64748b;font-size:12px">
-                  <th style="padding:8px">Property</th>
-                  <th style="padding:8px">Checkout</th>
-                  <th style="padding:8px">Window</th>
-                  <th style="padding:8px">Priority</th>
-                </tr>
-              </thead>
-              <tbody>${rows}</tbody>
-            </table>
-            <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/crew" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">View Assignments →</a></p>
-          </div>
-        `,
-      })
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      crew.email,
+          subject,
+          html: `
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+              <h2>You've been assigned ${turnovers.length === 1 ? 'a turnover' : `${turnovers.length} turnovers`}</h2>
+              <table style="border-collapse:collapse;width:100%;margin:16px 0">
+                <thead>
+                  <tr style="text-align:left;color:#64748b;font-size:12px">
+                    <th style="padding:8px">Property</th>
+                    <th style="padding:8px">Checkout</th>
+                    <th style="padding:8px">Window</th>
+                    <th style="padding:8px">Priority</th>
+                  </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+              </table>
+              <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/crew" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">View Assignments →</a></p>
+            </div>
+          `,
+        },
+        { idempotencyKey: `crew-assigned-${crew_member_id}-${turnover_ids.join('-')}` }
+      )
     })
 
     return { notified: true, crew_member_id, count: turnovers.length }
