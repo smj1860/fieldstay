@@ -80,6 +80,29 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
         const client   = new OwnerRezApiClient(conn.user_id)
 
+        // When no cursor exists yet (e.g. fresh reconnect before initial sync sets one),
+        // fall back to property_ids so OwnerRez receives at least one required parameter.
+        let propertyIds: number[] | undefined
+        if (!sinceUtc) {
+          const { data: connectedProps } = await supabase
+            .from('properties')
+            .select('external_id')
+            .eq('org_id', conn.org_id)
+            .eq('external_source', PROVIDER)
+
+          const ids = ((connectedProps ?? []) as Array<{ external_id: string | null }>)
+            .map((p) => Number(p.external_id))
+            .filter((id) => !Number.isNaN(id))
+
+          if (!ids.length) {
+            // No connected properties yet (initial sync hasn't run/completed) —
+            // skip rather than calling OwnerRez with neither required param.
+            console.log(`[OwnerRez:${conn.user_id}] No connected properties and no sync cursor — skipping`)
+            return { skipped: true, reason: 'no_cursor_no_properties' }
+          }
+          propertyIds = ids
+        }
+
         // MEDIUM-3: capture timestamp BEFORE the fetch to close the race window.
         // Bookings modified during the fetch have a modified_at between fetchStartedAt
         // and the end of the fetch. Using fetchStartedAt as the new cursor ensures
@@ -87,7 +110,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         const fetchStartedAt = new Date().toISOString()
 
         try {
-          const bookings = await client.getBookings({ sinceUtc, includeGuest: true })
+          const bookings = await client.getBookings({ sinceUtc, propertyIds, includeGuest: true })
 
           if (bookings.length) {
             // CRITICAL-2: resolve FieldStay property IDs from OwnerRez external IDs.
