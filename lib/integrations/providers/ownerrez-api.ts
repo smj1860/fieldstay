@@ -199,14 +199,9 @@ export class OwnerRezApiClient {
       if (nextPageToken) pageParams['page_token'] = nextPageToken
 
       const page = await this.fetch<OwnerRezPagedResponse<T>>(path, pageParams)
-
-      if (!Array.isArray(page?.items)) {
-        throw new Error(
-          `[OwnerRez] ${path} returned an unexpected response shape (no items array): ${JSON.stringify(page)}`
-        )
-      }
-      results.push(...page.items)
-      nextPageToken = page.next_page_token
+      const items = Array.isArray(page?.items) ? page.items : []
+      results.push(...items)
+      nextPageToken = page?.next_page_token ?? null
     } while (nextPageToken)
 
     return results
