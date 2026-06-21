@@ -2,9 +2,12 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import Timeline, { TimelineMarkers, TodayMarker } from 'react-calendar-timeline'
+import type { Id, TimelineItemBase } from 'react-calendar-timeline'
 import dayjs from 'dayjs'
 import { X, ExternalLink } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { useToast } from '@/components/dashboard-toast-provider'
+import { updateBookingDates } from './calendar-actions'
 import type { BookingSource, BookingStatus } from '@/types/database'
 import 'react-calendar-timeline/style.css'
 import './bookings-calendar.css'
@@ -14,17 +17,29 @@ import './bookings-calendar.css'
 // the grid and detail panel actually use.
 
 interface BookingRow {
-  id:            string
-  property_id:   string
-  guest_name:    string | null
-  checkin_date:  string
-  checkout_date: string
-  checkin_time:  string | null
-  checkout_time: string | null
-  status:        BookingStatus
-  source:        BookingSource
-  notes:         string | null
-  properties:    { id: string; name: string; city: string | null; state: string | null } | null
+  id:              string
+  property_id:     string
+  guest_name:      string | null
+  checkin_date:    string
+  checkout_date:   string
+  checkin_time:    string | null
+  checkout_time:   string | null
+  status:          BookingStatus
+  source:          BookingSource
+  notes:           string | null
+  ical_feed_id:    string | null
+  external_source: string | null
+  properties:      { id: string; name: string; city: string | null; state: string | null } | null
+}
+
+// A booking is owned by FieldStay — and therefore safe to drag/resize —
+// only if it didn't arrive via an external system of record. iCal feeds
+// (ical_feed_id) and direct integrations like OwnerRez (external_source)
+// are both sources of truth FieldStay doesn't own; dragging one would
+// silently diverge from the real reservation until the next sync
+// overwrites the drag with no indication to the PM that it was ever real.
+function isManualBooking(b: BookingRow): boolean {
+  return b.ical_feed_id === null && b.external_source === null
 }
 
 interface PropertyOption { id: string; name: string }
@@ -169,11 +184,15 @@ export function BookingsCalendar({
   bookings,
   properties,
   onViewInList,
+  onCanvasClick,
 }: {
-  bookings:     BookingRow[]
-  properties:   PropertyOption[]
-  onViewInList: (guestName: string) => void
+  bookings:      BookingRow[]
+  properties:    PropertyOption[]
+  onViewInList:  (guestName: string) => void
+  onCanvasClick: (propertyId: string, checkinDate: string) => void
 }) {
+  const { push } = useToast()
+
   const groups = useMemo(
     () => properties.map((p) => ({ id: p.id, title: p.name })),
     [properties]
@@ -183,19 +202,24 @@ export function BookingsCalendar({
     () =>
       bookings.map((b) => {
         const style = SOURCE_STYLE[b.source] ?? SOURCE_STYLE.other
+        const isManual = isManualBooking(b)
         return {
           id: b.id,
           group: b.property_id,
           title: bookingTitle(b),
           start_time: dayjs(b.checkin_date).valueOf(),
           end_time: dayjs(b.checkout_date).valueOf(),
-          canMove: false,   // Stage 1: read-only. Stage 2 enables this.
-          canResize: false,
+          // Only manually-entered bookings are owned by FieldStay — see
+          // isManualBooking(). Bookings synced from an iCal feed or an
+          // integration like OwnerRez render here but are never draggable.
+          canMove: isManual,
+          canResize: isManual ? ('both' as const) : false,
+          canChangeGroup: false,   // a booking never moves to a different property
           itemProps: {
             style: {
               background: style.bg,
               color: style.fg,
-              border: `1px solid ${style.border}`,
+              border: `1px ${isManual ? 'dashed' : 'solid'} ${style.border}`,
               opacity: STATUS_OPACITY[b.status] ?? 1,
               borderRadius: '4px',
               fontSize: '12px',
@@ -230,6 +254,111 @@ export function BookingsCalendar({
     setVisibleRange({ start: canvasTimeStart, end: canvasTimeEnd })
   }, [])
 
+  // Client-side pre-check so a drag/resize snaps back instantly on an
+  // invalid drop instead of waiting on a server round-trip. The server
+  // action re-validates authoritatively — this only protects UX latency.
+  //
+  // `item` here is the library's own TimelineItemBase, not our BookingRow,
+  // so external-source/ical provenance must be looked up from `bookings`.
+  const moveResizeValidator = useCallback(
+    (
+      action: 'move' | 'resize',
+      item: TimelineItemBase<number>,
+      time: number,
+      resizeEdge?: 'left' | 'right' | null
+    ): number => {
+      const booking = bookings.find((b) => b.id === item.id)
+      const originalBoundary =
+        action === 'move'
+          ? item.start_time
+          : resizeEdge === 'left' ? item.start_time : item.end_time
+
+      // canMove/canResize already gate interaction for non-manual bookings,
+      // but this is the correctness backstop — never let a synced booking's
+      // dates change client-side under any path.
+      if (!booking || !isManualBooking(booking)) return originalBoundary
+
+      // Snap to whole days — this is a nightly-stay calendar, not hourly
+      const snapped = dayjs(time).startOf('day').valueOf()
+
+      // Reject moving/resizing into the past — a true no-op, not just a
+      // visual snap, so the rejected drag never reaches the server
+      if (snapped < dayjs().startOf('day').valueOf()) return originalBoundary
+
+      const proposedStart =
+        action === 'move' ? snapped : resizeEdge === 'left' ? snapped : item.start_time
+      const proposedEnd =
+        action === 'move'
+          ? snapped + (item.end_time - item.start_time)
+          : resizeEdge === 'right' ? snapped : item.end_time
+
+      if (proposedEnd <= proposedStart) return originalBoundary
+
+      // Client-side overlap pre-check against other bookings on the same
+      // property. detectAndFlagOverlaps() remains the authoritative,
+      // server-side recheck after the move/resize actually persists.
+      const wouldOverlap = bookings.some((other) => {
+        if (other.id === booking.id || other.property_id !== booking.property_id) return false
+        if (other.status === 'cancelled') return false
+        const otherStart = dayjs(other.checkin_date).valueOf()
+        const otherEnd = dayjs(other.checkout_date).valueOf()
+        return proposedStart < otherEnd && otherStart < proposedEnd
+      })
+
+      if (wouldOverlap) return originalBoundary
+
+      return snapped
+    },
+    [bookings]
+  )
+
+  const handleItemMove = useCallback(
+    async (itemId: Id, dragTime: number) => {
+      const booking = bookings.find((b) => b.id === itemId)
+      if (!booking) return
+      const duration = dayjs(booking.checkout_date).valueOf() - dayjs(booking.checkin_date).valueOf()
+      const newCheckin  = dayjs(dragTime).format('YYYY-MM-DD')
+      const newCheckout = dayjs(dragTime + duration).format('YYYY-MM-DD')
+      const result = await updateBookingDates(String(itemId), newCheckin, newCheckout)
+      if (result.error) {
+        push({
+          title:    'Booking move not saved',
+          subtitle: result.error,
+          href:     '/bookings',
+          severity: 'red',
+        })
+      }
+    },
+    [bookings, push]
+  )
+
+  const handleItemResize = useCallback(
+    async (itemId: Id, time: number, edge: 'left' | 'right') => {
+      const booking = bookings.find((b) => b.id === itemId)
+      if (!booking) return
+      const newDate = dayjs(time).format('YYYY-MM-DD')
+      const newCheckin  = edge === 'left'  ? newDate : booking.checkin_date
+      const newCheckout = edge === 'right' ? newDate : booking.checkout_date
+      const result = await updateBookingDates(String(itemId), newCheckin, newCheckout)
+      if (result.error) {
+        push({
+          title:    'Booking resize not saved',
+          subtitle: result.error,
+          href:     '/bookings',
+          severity: 'red',
+        })
+      }
+    },
+    [bookings, push]
+  )
+
+  const handleCanvasClick = useCallback(
+    (groupId: Id, time: number) => {
+      onCanvasClick(String(groupId), dayjs(time).startOf('day').format('YYYY-MM-DD'))
+    },
+    [onCanvasClick]
+  )
+
   if (properties.length === 0) {
     return (
       <div
@@ -250,6 +379,11 @@ export function BookingsCalendar({
         defaultTimeEnd={visibleRange.end}
         onBoundsChange={handleBoundsChange}
         onItemClick={handleItemClick}
+        onItemMove={handleItemMove}
+        onItemResize={handleItemResize}
+        onCanvasClick={handleCanvasClick}
+        moveResizeValidator={moveResizeValidator}
+        dragSnap={24 * 60 * 60 * 1000}
         sidebarWidth={180}
         lineHeight={44}
         itemHeightRatio={0.75}
