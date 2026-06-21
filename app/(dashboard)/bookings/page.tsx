@@ -14,7 +14,7 @@ export default async function BookingsPage() {
   to.setDate(to.getDate() + 180)
 
   const [
-    { data: bookings },
+    { data: bookings, error: bookingsError },
     { data: properties },
   ] = await Promise.all([
     supabase
@@ -24,7 +24,7 @@ export default async function BookingsPage() {
         checkin_date, checkout_date, checkin_time, checkout_time,
         source, status, notes, has_overlap_conflict, created_at,
         properties ( id, name, city, state ),
-        turnovers   ( id, status )
+        turnovers:turnovers!turnovers_booking_id_fkey ( id, status )
       `)
       .eq('org_id', membership.org_id)
       .gte('checkout_date', from.toISOString().split('T')[0])
@@ -38,6 +38,10 @@ export default async function BookingsPage() {
       .eq('is_active', true)
       .order('name'),
   ])
+
+  if (bookingsError) {
+    console.error('[BookingsPage] Failed to fetch bookings:', bookingsError.message)
+  }
 
   return (
     <BookingsClient
