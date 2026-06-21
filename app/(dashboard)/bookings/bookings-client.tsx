@@ -12,6 +12,7 @@ import {
 import { cn, formatDate } from '@/lib/utils'
 import { createBooking, cancelBooking, triggerSync } from './actions'
 import { BookingsCalendar } from './bookings-calendar'
+import type { VacancyGap } from './page'
 import type { BookingSource, BookingStatus } from '@/types/database'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -32,7 +33,9 @@ interface BookingRow {
   ical_feed_id:         string | null
   external_source:      string | null
   properties:           { id: string; name: string; city: string | null; state: string | null } | null
-  turnovers:            { id: string; status: string } | { id: string; status: string }[] | null
+  turnovers:            { id: string; status: string; checkout_datetime: string }
+                       | { id: string; status: string; checkout_datetime: string }[]
+                       | null
 }
 
 interface PropertyOption { id: string; name: string }
@@ -480,10 +483,12 @@ export function BookingsClient({
   bookings,
   properties,
   connections,
+  vacancyGaps,
 }: {
   bookings:    BookingRow[]
   properties:  PropertyOption[]
   connections: ConnectionRow[]
+  vacancyGaps: VacancyGap[]
 }) {
   const router = useRouter()
 
@@ -779,6 +784,7 @@ export function BookingsClient({
         <BookingsCalendar
           bookings={filtered}
           properties={properties}
+          vacancyGaps={vacancyGaps}
           onViewInList={(guestName) => {
             setSearchQuery(guestName)
             setViewMode('list')
