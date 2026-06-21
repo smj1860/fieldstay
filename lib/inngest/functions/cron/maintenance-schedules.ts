@@ -6,6 +6,7 @@ import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { parseLocalDate } from '@/lib/utils/date-validation'
+import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 
 const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
 const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
@@ -396,17 +397,11 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
           if (gapDays < LIGHT_GAP_DAYS) continue
 
-          const windowEnd = new Date(new Date(checkoutDate).getTime() + Math.min(gapDays, LOOKAHEAD_DAYS) * 86_400_000)
-
-          const { data: candidates } = await supabase
-            .from('maintenance_schedules')
-            .select('id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
-            .eq('property_id', property.id)
-            .eq('is_active', true)
-            .lte('next_due_date', windowEnd.toISOString().split('T')[0])
-
-          const eligible = (candidates ?? []).filter(c =>
-            isMaintenanceItemActiveThisMonth(c.active_from_month ?? null, c.active_to_month ?? null)
+          const eligible = await findMaintenanceCandidatesForWindow(
+            supabase,
+            property.id,
+            checkoutDate,
+            nextCheckin
           )
 
           if (!eligible.length) continue

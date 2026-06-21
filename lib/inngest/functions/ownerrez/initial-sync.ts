@@ -296,6 +296,7 @@ export const ownerRezInitialSync = inngest.createFunction(
             status:          mapBookingStatus(b.status),
             external_id:     String(b.id),
             external_source: PROVIDER,
+            is_block:        b.is_block ?? false,
           }))
 
           const { error } = await supabase
