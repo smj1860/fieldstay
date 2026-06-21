@@ -62,7 +62,9 @@ const BYPASS_ROUTES = [
   // bypass an unauthenticated (or transiently failing) auth refresh here
   // redirects to /login, returning HTML where the browser expects JSON —
   // surfaces as a manifest "Syntax error" in devtools.
-  '/manifest.webmanifest',
+  '/manifest.json',              // crew PWA manifest (public/manifest.json)
+  '/dashboard-manifest.json',    // PM dashboard PWA manifest (public/dashboard-manifest.json)
+  '/manifest.webmanifest',       // kept for forward-compatibility
   '/sw.js',
 
   // Supabase auth callback (magic links, OAuth email confirmation)
