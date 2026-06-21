@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import Timeline, { TimelineMarkers, TodayMarker } from 'react-calendar-timeline'
 import type { Id, TimelineItemBase } from 'react-calendar-timeline'
 import dayjs from 'dayjs'
@@ -8,6 +9,7 @@ import { X, ExternalLink } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { useToast } from '@/components/dashboard-toast-provider'
 import { updateBookingDates } from './calendar-actions'
+import type { VacancyGap } from './page'
 import type { BookingSource, BookingStatus } from '@/types/database'
 import 'react-calendar-timeline/style.css'
 import './bookings-calendar.css'
@@ -30,6 +32,9 @@ interface BookingRow {
   ical_feed_id:    string | null
   external_source: string | null
   properties:      { id: string; name: string; city: string | null; state: string | null } | null
+  turnovers:       { id: string; status: string; checkout_datetime: string }
+                  | { id: string; status: string; checkout_datetime: string }[]
+                  | null
 }
 
 // A booking is owned by FieldStay — and therefore safe to drag/resize —
@@ -84,6 +89,24 @@ const STATUS_BADGE_STYLE: Record<BookingStatus, React.CSSProperties> = {
 
 function bookingTitle(b: BookingRow): string {
   return b.status === 'blocked' ? 'Blocked' : (b.guest_name ?? 'Guest')
+}
+
+function getTurnover(b: BookingRow): { id: string; status: string } | null {
+  if (!b.turnovers) return null
+  return Array.isArray(b.turnovers) ? (b.turnovers[0] ?? null) : b.turnovers
+}
+
+// Mirrors bookings-client.tsx's TURNOVER_STATUS_COLORS exactly — same
+// status reads as the same color whether you're in the list view's
+// turnover link or the calendar's checkout dot. No CSS var for "purple"
+// exists in this codebase, so in_progress reuses gold rather than
+// introducing a new hardcoded hex (CLAUDE.md: no hardcoded colors).
+const TURNOVER_STATUS_CONFIG: Record<string, { color: string; label: string }> = {
+  pending_assignment: { color: 'var(--accent-amber)', label: 'Needs crew' },
+  assigned:            { color: 'var(--accent-blue)',  label: 'Assigned' },
+  in_progress:         { color: 'var(--accent-gold)',  label: 'In progress' },
+  completed:           { color: 'var(--accent-green)', label: 'Completed' },
+  flagged:             { color: 'var(--accent-red)',   label: 'Flagged' },
 }
 
 // ── Detail panel ─────────────────────────────────────────────────────────────
@@ -183,15 +206,18 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 export function BookingsCalendar({
   bookings,
   properties,
+  vacancyGaps,
   onViewInList,
   onCanvasClick,
 }: {
   bookings:      BookingRow[]
   properties:    PropertyOption[]
+  vacancyGaps:   VacancyGap[]
   onViewInList:  (guestName: string) => void
   onCanvasClick: (propertyId: string, checkinDate: string) => void
 }) {
   const { push } = useToast()
+  const router = useRouter()
 
   const groups = useMemo(
     () => properties.map((p) => ({ id: p.id, title: p.name })),
@@ -231,6 +257,70 @@ export function BookingsCalendar({
     [bookings]
   )
 
+  // Synthetic items appended to the real booking items above — same array,
+  // same Timeline render pipeline, distinguished only by an id prefix. Kept
+  // visually tiny/secondary (12px dot, dashed outline) so booking bars stay
+  // the primary thing the eye lands on.
+  const turnoverItems = useMemo(() => {
+    return bookings.flatMap((b) => {
+      const turnover = getTurnover(b)
+      if (!turnover || turnover.status === 'cancelled') return []
+      const config = TURNOVER_STATUS_CONFIG[turnover.status]
+      if (!config) return []
+
+      const checkoutMs = dayjs(b.checkout_date).valueOf()
+      return [{
+        id: `turnover-${turnover.id}`,
+        group: b.property_id,
+        title: config.label,
+        start_time: checkoutMs,
+        end_time: checkoutMs + 3 * 60 * 60 * 1000, // visual width only, not a real duration
+        canMove: false,
+        canResize: false,
+        itemProps: {
+          style: {
+            background: config.color,
+            opacity: 0.85,
+            border: 'none',
+            borderRadius: '50%',
+            width: '12px',
+            height: '12px',
+            color: 'transparent', // icon-only, no text label inside the dot
+          },
+        },
+      }]
+    })
+  }, [bookings])
+
+  const gapItems = useMemo(() => {
+    return vacancyGaps.map((gap, i) => {
+      const midpoint = (dayjs(gap.gap_start).valueOf() + dayjs(gap.gap_end).valueOf()) / 2
+      return {
+        id: `gap-${gap.property_id}-${i}`,
+        group: gap.property_id,
+        title: `${gap.candidates.length} maintenance item(s) could fit this window`,
+        start_time: midpoint - 12 * 60 * 60 * 1000,
+        end_time: midpoint + 12 * 60 * 60 * 1000,
+        canMove: false,
+        canResize: false,
+        itemProps: {
+          style: {
+            background: 'transparent',
+            border: '2px dashed var(--accent-amber)',
+            borderRadius: '4px',
+            color: 'var(--accent-amber)',
+            fontSize: '10px',
+          },
+        },
+      }
+    })
+  }, [vacancyGaps])
+
+  const allItems = useMemo(
+    () => [...items, ...turnoverItems, ...gapItems],
+    [items, turnoverItems, gapItems]
+  )
+
   const [selectedBooking, setSelectedBooking] = useState<BookingRow | null>(null)
   const [visibleRange, setVisibleRange] = useState(() => ({
     start: dayjs().subtract(7, 'day').valueOf(),
@@ -239,10 +329,18 @@ export function BookingsCalendar({
 
   const handleItemClick = useCallback(
     (itemId: string) => {
+      if (itemId.startsWith('turnover-')) {
+        router.push(`/turnovers/${itemId.replace('turnover-', '')}`)
+        return
+      }
+      if (itemId.startsWith('gap-')) {
+        router.push('/maintenance')
+        return
+      }
       const booking = bookings.find((b) => b.id === itemId)
       if (booking) setSelectedBooking(booking)
     },
-    [bookings]
+    [bookings, router]
   )
 
   // Stage 1: bounds tracking only, to inform a future lazy-load. The
@@ -374,7 +472,7 @@ export function BookingsCalendar({
     <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
       <Timeline
         groups={groups}
-        items={items}
+        items={allItems}
         defaultTimeStart={visibleRange.start}
         defaultTimeEnd={visibleRange.end}
         onBoundsChange={handleBoundsChange}
