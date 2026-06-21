@@ -198,6 +198,8 @@ export interface Booking {
   org_id:               string
   ical_feed_id:         string | null
   ical_uid:             string | null
+  external_id:          string | null
+  external_source:      string | null
   guest_name:           string | null
   guest_email:          string | null
   checkin_date:         string

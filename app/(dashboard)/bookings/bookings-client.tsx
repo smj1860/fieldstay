@@ -29,6 +29,8 @@ interface BookingRow {
   notes:                string | null
   has_overlap_conflict: boolean
   created_at:           string
+  ical_feed_id:         string | null
+  external_source:      string | null
   properties:           { id: string; name: string; city: string | null; state: string | null } | null
   turnovers:            { id: string; status: string } | { id: string; status: string }[] | null
 }
@@ -357,13 +359,17 @@ function AddBookingModal({
   properties,
   onClose,
   onSuccess,
+  initialPropertyId,
+  initialCheckinDate,
 }: {
-  properties: PropertyOption[]
-  onClose:    () => void
-  onSuccess:  () => void
+  properties:          PropertyOption[]
+  onClose:             () => void
+  onSuccess:           () => void
+  initialPropertyId?:  string
+  initialCheckinDate?: string
 }) {
   const [state, action, pending] = useActionState(createBooking, null)
-  const [checkinVal, setCheckinVal] = useState('')
+  const [checkinVal, setCheckinVal] = useState(initialCheckinDate ?? '')
   const todayStr = new Date().toISOString().split('T')[0]!
 
   if (state?.success) { onSuccess(); onClose(); return null }
@@ -398,7 +404,7 @@ function AddBookingModal({
         <form action={action} className="space-y-4">
           <div>
             <label className="label">Property <span className="text-red-500">*</span></label>
-            <select name="property_id" required className="input">
+            <select name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
               <option value="">Select property…</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -491,6 +497,7 @@ export function BookingsClient({
   const [showPast,         setShowPast]        = useState(false)
   const [localBookings,    setLocalBookings]   = useState(bookings)
   const [justAdded,        setJustAdded]       = useState(false)
+  const [calendarPrefill,  setCalendarPrefill] = useState<{ propertyId: string; checkinDate: string } | null>(null)
 
   useEffect(() => {
     setLocalBookings(bookings)
@@ -776,6 +783,7 @@ export function BookingsClient({
             setSearchQuery(guestName)
             setViewMode('list')
           }}
+          onCanvasClick={(propertyId, checkinDate) => setCalendarPrefill({ propertyId, checkinDate })}
         />
       ) : filtered.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
@@ -812,11 +820,13 @@ export function BookingsClient({
         </div>
       )}
 
-      {showAdd && (
+      {(showAdd || calendarPrefill) && (
         <AddBookingModal
           properties={properties}
-          onClose={() => setShowAdd(false)}
-          onSuccess={() => { setJustAdded(true); router.refresh() }}
+          initialPropertyId={calendarPrefill?.propertyId}
+          initialCheckinDate={calendarPrefill?.checkinDate}
+          onClose={() => { setShowAdd(false); setCalendarPrefill(null) }}
+          onSuccess={() => { setJustAdded(true); setCalendarPrefill(null); router.refresh() }}
         />
       )}
     </div>

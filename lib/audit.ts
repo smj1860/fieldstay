@@ -59,6 +59,7 @@ export type AuditAction =
   | 'security.route.mismatch'
   | 'booking.created'
   | 'booking.cancelled'
+  | 'booking.dates_updated'
   | 'owner_portal.token.generated'
   | 'work_order.bulk_assigned'
   | 'work_order.bulk_status_changed'
