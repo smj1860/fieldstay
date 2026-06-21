@@ -16,6 +16,7 @@ import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/int
 import type { OwnerRezProperty, OwnerRezBooking } from '@/lib/integrations/types'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
+import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
 
 const PROVIDER = 'ownerrez'
 
@@ -235,7 +236,7 @@ export const ownerRezInitialSync = inngest.createFunction(
               `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
             )
           }
-          return { cursor: new Date().toISOString(), count: 0 }
+          return { cursor: new Date().toISOString(), count: 0, affectedPropertyIds: [] as string[] }
         }
 
         // MEDIUM-3: capture pre-fetch timestamp as cursor value.
@@ -253,6 +254,8 @@ export const ownerRezInitialSync = inngest.createFunction(
           }
           throw err
         }
+
+        let affectedPropertyIds: string[] = []
 
         if (bookings.length) {
           const supabase   = createServiceClient()
@@ -305,6 +308,10 @@ export const ownerRezInitialSync = inngest.createFunction(
           }
 
           logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
+
+          affectedPropertyIds = Array.from(new Set(
+            bookingRows.map((b) => b.property_id).filter((id): id is string => id != null)
+          ))
         }
 
         try {
@@ -315,7 +322,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           )
         }
 
-        return { cursor: fetchStartedAt, count: bookings.length }  // MEDIUM-3: pre-fetch timestamp
+        return { cursor: fetchStartedAt, count: bookings.length, affectedPropertyIds }  // MEDIUM-3: pre-fetch timestamp
       })
 
       // ── Step 3: Update sync metadata ────────────────────────────────────────
@@ -350,6 +357,26 @@ export const ownerRezInitialSync = inngest.createFunction(
         // MEDIUM-2: throw on cursor failure — a stale cursor causes full re-syncs
         if (error) {
           throw new Error(`[OwnerRez:${user_id}] Failed to persist sync cursor: ${error.message}`)
+        }
+      })
+
+      // ── Step 4: Generate turnovers for synced properties ─────────────────────
+      // Called once per property (not per booking) so the generator sees the
+      // full booking list and can apply its two-pass pairing logic correctly.
+
+      await step.run('generate-turnovers', async () => {
+        const propertyIds = fetchBookingsResult.affectedPropertyIds
+        if (!propertyIds.length) return
+        const supabase = createServiceClient()
+        for (const propertyId of propertyIds) {
+          try {
+            await generateTurnoversForProperty(propertyId, org_id, supabase)
+          } catch (err) {
+            logger.error(
+              `[OwnerRez:${user_id}] Turnover generation failed for property ${propertyId}: ${err}`
+            )
+            // Don't let one property's failure block the others
+          }
         }
       })
     } catch (err) {
