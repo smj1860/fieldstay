@@ -81,10 +81,16 @@ export default function CrewDashboardPage() {
 
             {/* Address */}
             {fullAddress && (
-              <p className="text-xs text-accent-500 flex items-center gap-1 mb-2">
+              <a
+                href={`https://maps.google.com/?q=${encodeURIComponent(fullAddress)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-xs text-accent-500 flex items-center gap-1 mb-2 hover:underline"
+              >
                 <MapPin className="w-3 h-3 flex-shrink-0" />
                 {fullAddress}
-              </p>
+              </a>
             )}
 
             {/* Status + time */}

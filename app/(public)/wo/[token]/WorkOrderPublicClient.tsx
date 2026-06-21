@@ -103,11 +103,12 @@ function Icon({ d, color = '#6B7280', size = 16 }: { d: string; color?: string; 
 }
 
 export function WorkOrderPublicClient({ token, workOrder: wo }: Props) {
-  const [signed,  setSigned]  = useState(wo.alreadySigned)
-  const [notes,   setNotes]   = useState('')
-  const [photos,  setPhotos]  = useState<File[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState<string | null>(null)
+  const [signed,     setSigned]     = useState(wo.alreadySigned)
+  const [notes,      setNotes]      = useState('')
+  const [photos,     setPhotos]     = useState<File[]>([])
+  const [actualCost, setActualCost] = useState('')
+  const [loading,    setLoading]    = useState(false)
+  const [error,      setError]      = useState<string | null>(null)
 
   const nteFormatted = wo.nteAmount
     ? new Intl.NumberFormat('en-US', { style:'currency', currency:'USD',
@@ -124,7 +125,8 @@ export function WorkOrderPublicClient({ token, workOrder: wo }: Props) {
   async function handleSignOff() {
     setLoading(true)
     setError(null)
-    const result = await submitWorkOrderSignOff(token, notes, photos.length > 0 ? photos : undefined)
+    const cost = actualCost.trim() ? parseFloat(actualCost) : undefined
+    const result = await submitWorkOrderSignOff(token, notes, photos.length > 0 ? photos : undefined, cost)
     setLoading(false)
     if (result.error) {
       setError(result.error)
@@ -361,6 +363,54 @@ export function WorkOrderPublicClient({ token, workOrder: wo }: Props) {
                     e.target.style.boxShadow   = 'none'
                   }}
                 />
+                <div>
+                  <label
+                    htmlFor="signoff-cost"
+                    style={{
+                      display:'block', fontSize:11, fontWeight:700,
+                      color:'#7A7A7A', letterSpacing:'0.14em',
+                      textTransform:'uppercase', marginBottom:6,
+                    }}
+                  >
+                    Total cost (optional)
+                  </label>
+                  <div style={{ position:'relative' }}>
+                    <span style={{
+                      position:'absolute', left:12, top:'50%', transform:'translateY(-50%)',
+                      color:'#ABABAB', fontSize:13, pointerEvents:'none',
+                    }}>
+                      $
+                    </span>
+                    <input
+                      id="signoff-cost"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={actualCost}
+                      onChange={e => setActualCost(e.target.value)}
+                      placeholder="0.00"
+                      style={{
+                        width:'100%', fontSize:13, color:'#1A1A1A',
+                        border:'1.5px solid #E0E0E0', borderRadius:12,
+                        padding:'10px 12px 10px 26px', background:'#F7F7F7',
+                        outline:'none', boxSizing:'border-box',
+                        fontFamily:'inherit', transition:'all 0.15s'
+                      }}
+                      onFocus={e => {
+                        e.target.style.borderColor = ORANGE
+                        e.target.style.boxShadow   = `0 0 0 3px rgba(255,107,0,0.1)`
+                      }}
+                      onBlur={e => {
+                        e.target.style.borderColor = '#E0E0E0'
+                        e.target.style.boxShadow   = 'none'
+                      }}
+                    />
+                  </div>
+                  <p style={{ color:'#AAA', fontSize:11, margin:'4px 0 0' }}>
+                    Include labor and materials if you have the total handy — saves a follow-up call.
+                  </p>
+                </div>
                 <div>
                   <label
                     htmlFor="signoff-photos"

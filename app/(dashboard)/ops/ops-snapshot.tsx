@@ -334,6 +334,17 @@ function getDayLabel(day: string, todayDate: string): string {
   })
 }
 
+// ── Urgency sort ─────────────────────────────────────────────────
+
+function urgencyRank(t: Turnover): number {
+  const unassigned = t.status === 'pending_assignment'
+  const urgent     = t.priority === 'urgent' || t.priority === 'high'
+  if (unassigned && urgent) return 0
+  if (unassigned)           return 1
+  if (urgent)               return 2
+  return 3
+}
+
 // ── Main Component ─────────────────────────────────────────────
 
 export function OpsSnapshot({
@@ -368,7 +379,13 @@ export function OpsSnapshot({
   const byDay = Object.fromEntries(
     days.map((day) => [
       day,
-      turnovers.filter((t) => t.checkout_datetime.startsWith(day)),
+      turnovers
+        .filter((t) => t.checkout_datetime.startsWith(day))
+        .sort((a, b) => {
+          const rankDiff = urgencyRank(a) - urgencyRank(b)
+          if (rankDiff !== 0) return rankDiff
+          return a.checkout_datetime.localeCompare(b.checkout_datetime)
+        }),
     ])
   )
 
