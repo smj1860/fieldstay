@@ -125,6 +125,7 @@ export interface OwnerRezBooking {
   arrival:       string
   departure:     string
   status:        string
+  is_block?:     boolean
   property_id?:  number
   channel_name?: string
   guest?: {

@@ -209,6 +209,7 @@ export interface Booking {
   notes:                string | null
   raw_ical_data:        Record<string, unknown> | null
   has_overlap_conflict: boolean
+  is_block:             boolean
   created_at:           string
   updated_at:           string
 }

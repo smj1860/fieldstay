@@ -22,6 +22,7 @@ export async function generateTurnoversForProperty(
     .from('bookings')
     .select('id, checkin_date, checkout_date, checkin_time, checkout_time')
     .eq('property_id', propertyId)
+    .eq('is_block', false)
     .in('status', ['confirmed', 'tentative'])
     .order('checkin_date', { ascending: true })
   if (!bookings?.length) return []

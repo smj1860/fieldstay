@@ -22,6 +22,9 @@ import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/owner
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
+import { resend, FROM }                 from '@/lib/resend/client'
+import { getPmEmail }                   from '@/lib/inngest/helpers'
+import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 
 const PROVIDER = 'ownerrez'
 
@@ -164,6 +167,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               status:          mapBookingStatus(b.status),
               external_id:     String(b.id),
               external_source: PROVIDER,
+              is_block:        b.is_block ?? false,
             }))
 
             const { error } = await supabase
@@ -178,6 +182,55 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             affectedPropertyIds = Array.from(new Set(
               bookingRows.map((b) => b.property_id).filter((id): id is string => id != null)
             ))
+
+            // Send immediate maintenance-suggestion emails for owner blocks.
+            // Blocks never generate turnovers (filtered at the generator query level),
+            // but a known vacancy window is the best signal for scheduling maintenance.
+            // Don't wait for the next cron cycle — notify the PM right away.
+            const pmEmail = await getPmEmail(supabase, conn.org_id)
+            if (pmEmail) {
+              for (const row of bookingRows) {
+                if (!row.is_block || !row.property_id) continue
+
+                const candidates = await findMaintenanceCandidatesForWindow(
+                  supabase,
+                  row.property_id,
+                  row.checkin_date,
+                  row.checkout_date
+                )
+
+                if (!candidates.length) continue
+
+                const { data: property } = await supabase
+                  .from('properties')
+                  .select('name')
+                  .eq('id', row.property_id)
+                  .single()
+
+                const items = candidates
+                  .map((c) => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
+                  .join(', ')
+
+                await resend.emails.send({
+                  from:    FROM,
+                  to:      pmEmail,
+                  subject: `Maintenance opportunity — ${property?.name ?? 'Property'} blocked for owner use`,
+                  html: `
+                    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+                      <h2>Owner block scheduled</h2>
+                      <p>
+                        ${property?.name ?? 'This property'} is blocked
+                        ${new Date(row.checkin_date).toLocaleDateString()} –
+                        ${new Date(row.checkout_date).toLocaleDateString()}.
+                        Want to schedule maintenance during this window? Candidates:
+                        ${items}.
+                      </p>
+                      <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">Review Maintenance →</a></p>
+                    </div>
+                  `,
+                })
+              }
+            }
           }
 
           // MEDIUM-3: use pre-fetch timestamp as cursor — not post-fetch
