@@ -176,9 +176,10 @@ const MAX_PHOTO_BYTES = 10 * 1024 * 1024  // 10 MB
 const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
 
 export async function submitWorkOrderSignOff(
-  token:   string,
-  notes:   string,
-  photos?: File[]
+  token:       string,
+  notes:       string,
+  photos?:     File[],
+  actualCost?: number
 ): Promise<{ success?: boolean; error?: string }> {
   if (!token || token.length !== 64) return { error: 'Invalid link' }
 
@@ -194,6 +195,10 @@ export async function submitWorkOrderSignOff(
         return { error: 'Only JPEG, PNG, WebP, or HEIC photos are accepted' }
       }
     }
+  }
+
+  if (actualCost !== undefined && (actualCost < 0 || actualCost > 1_000_000)) {
+    return { error: 'Cost must be a valid amount' }
   }
 
   // Rate limit by token — prevents spam sign-offs on the same work order
@@ -247,6 +252,7 @@ export async function submitWorkOrderSignOff(
       sign_off_notes:         notes.trim() || null,
       status:                 'completed',
       vendor_acknowledged_at: now,
+      actual_cost:            actualCost ?? null,
     })
     .eq('id', wo.id)
 

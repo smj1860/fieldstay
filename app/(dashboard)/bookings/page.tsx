@@ -16,6 +16,7 @@ export default async function BookingsPage() {
   const [
     { data: bookings, error: bookingsError },
     { data: properties },
+    { data: connections },
   ] = await Promise.all([
     supabase
       .from('bookings')
@@ -37,6 +38,11 @@ export default async function BookingsPage() {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
+
+    supabase
+      .from('integration_connections')
+      .select('provider_id, status, last_used_at, metadata')
+      .eq('org_id', membership.org_id),
   ])
 
   if (bookingsError) {
@@ -47,6 +53,7 @@ export default async function BookingsPage() {
     <BookingsClient
       bookings={(bookings ?? []) as never}
       properties={properties ?? []}
+      connections={connections ?? []}
     />
   )
 }

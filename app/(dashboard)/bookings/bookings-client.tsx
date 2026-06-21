@@ -34,6 +34,13 @@ interface BookingRow {
 
 interface PropertyOption { id: string; name: string }
 
+interface ConnectionRow {
+  provider_id:   string
+  status:        string
+  last_used_at:  string | null
+  metadata:      Record<string, unknown> | null
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function nightCount(checkin: string, checkout: string): number {
@@ -465,9 +472,11 @@ function AddBookingModal({
 export function BookingsClient({
   bookings,
   properties,
+  connections,
 }: {
-  bookings:   BookingRow[]
-  properties: PropertyOption[]
+  bookings:    BookingRow[]
+  properties:  PropertyOption[]
+  connections: ConnectionRow[]
 }) {
   const router = useRouter()
 
@@ -541,10 +550,38 @@ export function BookingsClient({
       {/* Header */}
       <div className="page-header flex items-start justify-between gap-4">
         <div>
-          <h1 className="page-title">Bookings</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="page-title">Bookings</h1>
+            {connections.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                {connections.map((c) => {
+                  const isHealthy = c.status === 'active'
+                  return (
+                    <span
+                      key={c.provider_id}
+                      title={
+                        isHealthy
+                          ? `${c.provider_id} connected${c.last_used_at ? ` — last synced ${new Date(c.last_used_at).toLocaleString()}` : ''}`
+                          : `${c.provider_id}: ${(c.metadata?.last_sync_error as string) ?? 'connection needs attention'}`
+                      }
+                      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+                      style={{
+                        background: isHealthy ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)',
+                        color:      isHealthy ? 'var(--accent-green)'     : 'var(--accent-red)',
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
+                      {c.provider_id}
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+          </div>
           <p className="page-subtitle">
-            Log bookings not synced via iCal — direct, social media, or phone.
-            Calendar syncs automatically every hour.
+            Log bookings not synced automatically — direct, social media, or phone.
+            Connected accounts sync in real time via webhook, with a backup sync
+            every 30 minutes.
           </p>
         </div>
         <div className="flex items-center gap-2">
