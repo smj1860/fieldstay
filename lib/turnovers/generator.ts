@@ -224,7 +224,7 @@ export async function snapshotChecklist(
       const signal = signalMap.get(`${section.name}|${item.task}`)
       const dynamicRequired = !!signal
       return {
-        instance_id: instance.id, section_name: section.name,
+        instance_id: instance.id, turnover_id: turnoverID, section_name: section.name,
         task: item.task,
         requires_photo: item.requires_photo || dynamicRequired,
         photo_reason: !item.requires_photo && dynamicRequired ? signal!.reason : null,

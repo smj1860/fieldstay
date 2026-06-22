@@ -372,21 +372,23 @@ export interface ChecklistInstance {
 }
 
 export interface ChecklistInstanceItem {
-  id:                   string
-  instance_id:          string
-  section_name:         string
-  task:                 string
-  requires_photo:       boolean
-  notes:                string | null
-  sort_order:           number
-  is_completed:         boolean
-  completed_at:         string | null
-  completed_by_crew_id: string | null
-  photo_storage_path:   string | null
-  crew_notes:           string | null
-  photo_reason:         string | null
-  created_at:           string
-  updated_at:           string
+  id:                    string
+  instance_id:           string
+  turnover_id:           string | null
+  section_name:          string
+  task:                  string
+  requires_photo:        boolean
+  notes:                 string | null
+  sort_order:            number
+  is_completed:          boolean
+  completed_at:          string | null
+  completed_by_crew_id:  string | null
+  photo_storage_path:    string | null
+  crew_notes:            string | null
+  photo_reason:          string | null
+  is_section_final_item: boolean
+  created_at:            string
+  updated_at:            string
 }
 
 export interface ChecklistItemSignal {

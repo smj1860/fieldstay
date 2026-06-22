@@ -19,15 +19,19 @@ const checklist_instances = new Table({
 })
 
 const checklist_instance_items = new Table({
-  instance_id:        column.text,
-  section_name:       column.text,
-  task:               column.text,
-  is_completed:       column.integer,
-  completed_at:       column.text,
-  requires_photo:     column.integer,
-  photo_storage_path: column.text,
-  crew_notes:         column.text,
-  sort_order:         column.integer,
+  instance_id:           column.text,
+  turnover_id:           column.text,
+  section_name:          column.text,
+  task:                  column.text,
+  is_completed:          column.integer,
+  completed_at:          column.text,
+  completed_by_crew_id:  column.text,
+  requires_photo:        column.integer,
+  photo_reason:          column.text,
+  photo_storage_path:    column.text,
+  crew_notes:            column.text,
+  sort_order:            column.integer,
+  is_section_final_item: column.integer,
 })
 
 const inventory_items = new Table({
