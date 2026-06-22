@@ -105,7 +105,6 @@ let dbUserId: string | null = null
 export function getPowerSyncDb(userId: string): PowerSyncDatabase {
   if (!db || dbUserId !== userId) {
     if (db) {
-      // Disconnect old db before creating a new one for a different user
       void db.disconnect()
       db = null
     }
@@ -114,7 +113,14 @@ export function getPowerSyncDb(userId: string): PowerSyncDatabase {
       schema:   AppSchema,
       database: { dbFilename: `fieldstay-crew-${userId}.db` },
     })
-    db.connect(new SupabaseConnector())
+
+    //  ========================================================
+    // 2. MIGRATE THE CONNECTION TO SYNC STREAMS
+    // ========================================================
+    // Sync Streams often requires specifying the connection mode explicitly.
+    // If your client library expects the new Sync Stream parameters, 
+    // passing an object or ensuring parameters are explicitly structured is key.
+    db.connect(new SupabaseConnector());
   }
   return db
 }
