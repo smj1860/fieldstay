@@ -4,7 +4,7 @@ import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X } from 'lucide-react'
 import { PowerSyncContext }         from '@powersync/react'
-import { usePowerSync, usePowerSyncQuery } from '@powersync/react'
+import { usePowerSyncQuery, useStatus } from '@powersync/react'
 import { getPowerSyncDb, disconnectPowerSync } from '@/lib/powersync/client'
 import { createClient }             from '@/lib/supabase/client'
 import { processPendingPhotoUploads } from '@/lib/powersync/photo-sync'
@@ -223,8 +223,8 @@ function CrewBottomNav({ userId }: { userId: string }) {
 }
 
 function SyncStatus() {
-  const db = usePowerSync()
-  const connected = db?.currentStatus?.connected
+  const status = useStatus()
+  const connected = status.connected
   const [showInfo, setShowInfo] = useState(false)
 
   if (connected) return null
