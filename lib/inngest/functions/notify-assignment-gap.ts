@@ -42,29 +42,32 @@ export const notifyAssignmentGap = inngest.createFunction(
           weekday: 'long', month: 'short', day: 'numeric',
         })
 
-        await resend.emails.send({
-          from:    FROM,
-          to:      email,
-          subject: `Action required — No crew available for ${context.propertyName} on ${dateStr}`,
-          html: `
-            <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-              <h2>Crew coverage gap</h2>
-              <p>
-                ${context.propertyName} has a turnover scheduled for
-                <strong>${dateStr}</strong> with no available crew member to
-                auto-assign (needed ${crew_needed}, found ${crew_found}).
-              </p>
-              <p>This turnover is unassigned and waiting on manual assignment.</p>
-              <p>
-                <a href="${appUrl}/turnovers/${turnover_id}"
-                   style="background:#093b31;color:white;padding:10px 20px;
-                          text-decoration:none;border-radius:6px;display:inline-block">
-                  View Turnover →
-                </a>
-              </p>
-            </div>
-          `,
-        })
+        await resend.emails.send(
+          {
+            from:    FROM,
+            to:      email,
+            subject: `Action required — No crew available for ${context.propertyName} on ${dateStr}`,
+            html: `
+              <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+                <h2>Crew coverage gap</h2>
+                <p>
+                  ${context.propertyName} has a turnover scheduled for
+                  <strong>${dateStr}</strong> with no available crew member to
+                  auto-assign (needed ${crew_needed}, found ${crew_found}).
+                </p>
+                <p>This turnover is unassigned and waiting on manual assignment.</p>
+                <p>
+                  <a href="${appUrl}/turnovers/${turnover_id}"
+                     style="background:#093b31;color:white;padding:10px 20px;
+                            text-decoration:none;border-radius:6px;display:inline-block">
+                    View Turnover →
+                  </a>
+                </p>
+              </div>
+            `,
+          },
+          { idempotencyKey: `assignment-gap-${turnover_id}-${userId}` }
+        )
 
         return email
       })

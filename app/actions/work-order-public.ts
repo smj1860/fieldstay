@@ -5,6 +5,7 @@ import { requireOrgMember }    from '@/lib/auth'
 import { randomBytes }         from 'crypto'
 import { inngest }             from '@/lib/inngest/client'
 import { revalidatePath }      from 'next/cache'
+import { logAuditEvent }       from '@/lib/audit'
 
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
@@ -263,6 +264,18 @@ export async function submitWorkOrderSignOff(
 
   const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
   const org      = Array.isArray(wo.organizations) ? wo.organizations[0] : wo.organizations
+
+  await logAuditEvent({
+    orgId:      wo.org_id,
+    actorId:    undefined,
+    action:     'work_order.vendor_signoff',
+    targetType: 'work_order',
+    targetId:   wo.id,
+    metadata:   {
+      actual_cost: actualCost ?? null,
+      has_photos:  Boolean(photos?.length),
+    },
+  })
 
   // Upload sign-off photos to storage and record in work_order_photos
   if (photos && photos.length > 0) {

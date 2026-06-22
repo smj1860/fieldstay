@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
+import { logAuditEvent } from '@/lib/audit'
 
 export type DetailsState = { error?: string; success?: boolean }
 
@@ -61,6 +62,23 @@ export async function saveDetails(
     console.error('[saveDetails]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  // Simplification: logs on every details save (not just when rates actually
+  // changed) — fetching before/after values would require an extra query.
+  // Future cleanup could compare against pre-update values to only log on
+  // real rate changes.
+  const { data: { user } } = await supabase.auth.getUser()
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user?.id,
+    action:     'property.rates.updated',
+    targetType: 'property',
+    targetId:   propertyId,
+    metadata: {
+      avg_nightly_rate,
+      same_day_premium_pct,
+    },
+  })
 
   await markStepComplete(propertyId, 'details')
   revalidatePath(`/properties/${propertyId}`)

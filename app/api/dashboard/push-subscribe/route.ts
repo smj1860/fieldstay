@@ -15,11 +15,15 @@ export async function POST(request: NextRequest) {
   if (!membership) return NextResponse.json({ error: 'Not an org member' }, { status: 403 })
 
   const body = await request.json().catch(() => null)
-  if (!body?.endpoint || !body?.p256dh || !body?.auth) {
+  if (
+    typeof body?.endpoint !== 'string' ||
+    typeof body?.p256dh   !== 'string' ||
+    typeof body?.auth     !== 'string'
+  ) {
     return NextResponse.json({ error: 'Invalid subscription data' }, { status: 400 })
   }
 
-  await supabase
+  const { error } = await supabase
     .from('push_subscriptions')
     .upsert(
       {
@@ -31,6 +35,11 @@ export async function POST(request: NextRequest) {
       },
       { onConflict: 'user_id,endpoint' }
     )
+
+  if (error) {
+    console.error('[push-subscribe] upsert failed:', error.message)
+    return NextResponse.json({ error: 'Failed to save subscription' }, { status: 500 })
+  }
 
   return NextResponse.json({ success: true })
 }

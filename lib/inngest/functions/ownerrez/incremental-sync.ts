@@ -211,24 +211,27 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                   .map((c) => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
                   .join(', ')
 
-                await resend.emails.send({
-                  from:    FROM,
-                  to:      pmEmail,
-                  subject: `Maintenance opportunity — ${property?.name ?? 'Property'} blocked for owner use`,
-                  html: `
-                    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-                      <h2>Owner block scheduled</h2>
-                      <p>
-                        ${property?.name ?? 'This property'} is blocked
-                        ${new Date(row.checkin_date).toLocaleDateString()} –
-                        ${new Date(row.checkout_date).toLocaleDateString()}.
-                        Want to schedule maintenance during this window? Candidates:
-                        ${items}.
-                      </p>
-                      <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">Review Maintenance →</a></p>
-                    </div>
-                  `,
-                })
+                await resend.emails.send(
+                  {
+                    from:    FROM,
+                    to:      pmEmail,
+                    subject: `Maintenance opportunity — ${property?.name ?? 'Property'} blocked for owner use`,
+                    html: `
+                      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+                        <h2>Owner block scheduled</h2>
+                        <p>
+                          ${property?.name ?? 'This property'} is blocked
+                          ${new Date(row.checkin_date).toLocaleDateString()} –
+                          ${new Date(row.checkout_date).toLocaleDateString()}.
+                          Want to schedule maintenance during this window? Candidates:
+                          ${items}.
+                        </p>
+                        <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">Review Maintenance →</a></p>
+                      </div>
+                    `,
+                  },
+                  { idempotencyKey: `ownerrez-maint-opportunity-${row.external_id}` }
+                )
               }
             }
           }

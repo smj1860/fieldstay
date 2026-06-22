@@ -70,6 +70,8 @@ export type AuditAction =
   | 'turnover.suggestion.accepted'
   | 'turnover.suggestion.dismissed'
   | 'turnover.autopilot.assigned'
+  | 'work_order.vendor_signoff'
+  | 'property.rates.updated'
 
 interface AuditParams {
   orgId?:         string
