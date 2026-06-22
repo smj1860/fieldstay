@@ -1026,6 +1026,9 @@ export interface AssetTypeStandard {
   macrs_class_default:       MacrsClass
   vendor_specialty_default:  string | null
   notes:                     string | null
+  age_weight:                number  // default 60, range 30-70
+  condition_weight:          number  // default 40, range 30-70
+  weight_updated_at:         string | null
 }
 
 // ── Asset Depreciation ────────────────────────────────────────────────────────
