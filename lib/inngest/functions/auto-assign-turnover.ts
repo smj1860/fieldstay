@@ -215,6 +215,7 @@ export const autoAssignTurnover = inngest.createFunction(
         const { error: assignError } = await supabase.from('turnover_assignments').insert({
           turnover_id,
           crew_member_id: top.crew_member_id,
+          org_id,
         })
 
         if (assignError) {

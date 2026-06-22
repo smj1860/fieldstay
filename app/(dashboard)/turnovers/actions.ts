@@ -56,10 +56,14 @@ export async function assignCrew(
     .neq('crew_member_id', crewMemberId)
 
   // Batch: upsert this crew member for all turnovers at once
-  await supabase.from('turnover_assignments').upsert(
-    ids.map(id => ({ turnover_id: id, crew_member_id: crewMemberId })),
+  const { error: assignError } = await supabase.from('turnover_assignments').upsert(
+    ids.map(id => ({ turnover_id: id, crew_member_id: crewMemberId, org_id: membership.org_id })),
     { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: true }
   )
+  if (assignError) {
+    console.error('[assignCrew]', assignError)
+    return { error: 'Failed to assign crew. Please try again.' }
+  }
 
   // Batch: advance status for all pending_assignment turnovers at once
   await supabase
@@ -374,9 +378,13 @@ export async function addCrewToTurnover(
   // Batch insert only the missing assignments
   const toInsert = verifiedIds.filter(id => !alreadyAssigned.has(id))
   if (toInsert.length > 0) {
-    await supabase.from('turnover_assignments').insert(
-      toInsert.map(id => ({ turnover_id: id, crew_member_id: crewMemberId }))
+    const { error: insertError } = await supabase.from('turnover_assignments').insert(
+      toInsert.map(id => ({ turnover_id: id, crew_member_id: crewMemberId, org_id: membership.org_id }))
     )
+    if (insertError) {
+      console.error('[addCrewToTurnover]', insertError)
+      return { error: 'Failed to assign crew. Please try again.' }
+    }
   }
 
   // Batch advance pending_assignment turnovers to assigned
@@ -553,10 +561,14 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
   const crewIds = (turnover.suggested_crew_ids as string[] | null) ?? []
   if (!crewIds.length) return { error: 'No suggestion to accept' }
 
-  await supabase.from('turnover_assignments').upsert(
-    crewIds.map(crewId => ({ turnover_id: turnoverId, crew_member_id: crewId })),
+  const { error: assignError } = await supabase.from('turnover_assignments').upsert(
+    crewIds.map(crewId => ({ turnover_id: turnoverId, crew_member_id: crewId, org_id: membership.org_id })),
     { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: true }
   )
+  if (assignError) {
+    console.error('[acceptSuggestion]', assignError)
+    return { error: 'Failed to accept suggestion. Please try again.' }
+  }
 
   await supabase
     .from('turnovers')
