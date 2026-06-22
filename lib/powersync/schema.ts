@@ -85,7 +85,7 @@ const maintenance_schedules = new Table({
   active_to_month:           column.integer,
   asset_category:            column.text,
   next_due_date:             column.text,
-  estimated_cost:            column.real,
+  estimated_cost:            column.text,
   instructions:              column.text,
   auto_create_wo:            column.integer,
   is_from_standard_template: column.integer,
@@ -103,7 +103,7 @@ const maintenance_completions = new Table({
   completed_by:            column.text,
   notes:                   column.text,
   work_order_id:           column.text,
-  next_due_date_set:       column.integer,
+  next_due_date_set:       column.text,
   created_at:              column.text,
 })
 
