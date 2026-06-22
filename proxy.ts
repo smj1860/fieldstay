@@ -33,6 +33,10 @@ const BYPASS_ROUTES = [
   // Team invite accept page — unauthenticated users arrive here from email links
   '/accept-invite',
 
+  // Crew invite accept/signup page — unauthenticated crew members arrive here
+  // from email links to set their password and activate their account
+  '/crew-invite',
+
   // Internal event runners
   '/api/inngest',
 
