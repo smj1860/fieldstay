@@ -5,7 +5,7 @@ import { useState, useRef }                from 'react'
 import {
   ArrowLeft, Camera, CheckCircle2, Circle,
   Loader2, ImageIcon, AlertCircle, AlertTriangle, X,
-  Minus, Plus, MapPin,
+  Minus, Plus, MapPin, CheckSquare, ChevronRight, Package,
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { createClient }       from '@/lib/supabase/client'
@@ -30,6 +30,7 @@ export default function CrewTurnoverPage() {
   const [showFlagModal,     setShowFlagModal]     = useState(false)
   const [counts,            setCounts]            = useState<Record<string, number>>({})
   const [sectionPhotoPrompt, setSectionPhotoPrompt] = useState<string | null>(null)
+  const [view, setView] = useState<'hub' | 'checklist' | 'inventory'>('hub')
   const fileInputRefs      = useRef<Record<string, HTMLInputElement | null>>({})
   const sectionPhotoRefs   = useRef<Record<string, HTMLInputElement | null>>({})
 
@@ -217,17 +218,17 @@ export default function CrewTurnoverPage() {
   const fullAddress = [property?.address, property?.city, property?.state].filter(Boolean).join(', ')
 
   return (
-    <div>
-      {/* Back button — icon only */}
+    <div className="min-h-screen pb-24" style={{ background: 'var(--bg-page)' }}>
+      {/* Back button — always visible */}
       <button
-        onClick={() => router.push('/crew')}
+        onClick={() => view === 'hub' ? router.push('/crew') : setView('hub')}
         className="flex items-center justify-center w-8 h-8 rounded-lg text-accent-400 hover:text-accent-700 hover:bg-accent-100 transition-colors mb-4"
-        aria-label="Back to assignments"
+        aria-label={view === 'hub' ? 'Back to assignments' : 'Back to turnover'}
       >
         <ArrowLeft className="w-4 h-4" />
       </button>
 
-      {/* Property info card */}
+      {/* Property info card — always visible across all views */}
       <div className="bg-white rounded-xl border border-accent-200 p-4 mb-4">
         <p className="font-bold text-accent-900 text-lg leading-tight">
           {property?.name ?? 'Loading property…'}
@@ -286,6 +287,103 @@ export default function CrewTurnoverPage() {
           <p className="text-sm text-red-700">{uploadError}</p>
         </div>
       )}
+
+      {/* ── HUB VIEW ── */}
+      {view === 'hub' && (
+        <div className="space-y-3 mt-4">
+          {/* Progress summary — show checklist completion at a glance */}
+          {totalCount > 0 && (
+            <div className="rounded-xl px-4 py-3 flex items-center justify-between"
+                 style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                Checklist progress
+              </span>
+              <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {completedCount} / {totalCount}
+              </span>
+            </div>
+          )}
+
+          {/* Start Turnover — only if status === 'assigned' */}
+          {turnover.status === 'assigned' && (
+            <button onClick={markInProgress} className="btn-secondary w-full py-4 text-base">
+              Start Turnover
+            </button>
+          )}
+
+          {/* Navigation buttons */}
+          <button
+            onClick={() => setView('checklist')}
+            className="w-full py-4 rounded-xl flex items-center justify-between px-5 text-base font-medium"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+          >
+            <div className="flex items-center gap-3">
+              <CheckSquare className="w-5 h-5" style={{ color: 'var(--accent-green)' }} />
+              Cleaning Checklist
+            </div>
+            <div className="flex items-center gap-2">
+              {totalCount > 0 && (
+                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                  {completedCount}/{totalCount}
+                </span>
+              )}
+              <ChevronRight className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            </div>
+          </button>
+
+          {inventoryItems && inventoryItems.length > 0 && (
+            <button
+              onClick={() => setView('inventory')}
+              className="w-full py-4 rounded-xl flex items-center justify-between px-5 text-base font-medium"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+            >
+              <div className="flex items-center gap-3">
+                <Package className="w-5 h-5" style={{ color: 'var(--accent-blue, #3b82f6)' }} />
+                Inventory
+              </div>
+              <ChevronRight className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            </button>
+          )}
+
+          {/* Mark Complete */}
+          <button
+            onClick={markComplete}
+            disabled={completing || turnover.status === 'completed'}
+            className="btn-cta w-full py-4 text-base flex items-center justify-center gap-2
+                       disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {completing
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+              : turnover.status === 'completed'
+              ? '✓ Marked Complete'
+              : 'Mark as Complete'}
+          </button>
+
+          {/* Report an Issue — secondary, at the bottom */}
+          <button
+            onClick={() => setShowFlagModal(true)}
+            className="w-full py-3 rounded-xl text-sm font-medium flex items-center
+                       justify-center gap-2 border border-amber-300 bg-amber-50
+                       text-amber-700 hover:bg-amber-100 transition-colors"
+          >
+            <AlertTriangle className="w-4 h-4" />
+            Report an Issue
+          </button>
+        </div>
+      )}
+
+      {/* ── CHECKLIST VIEW ── */}
+      {view === 'checklist' && (
+      <div className="mt-2">
+        {/* Section header */}
+        <div className="flex items-center justify-between mb-3 px-1">
+          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Cleaning Checklist
+          </h2>
+          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            {completedCount} of {totalCount}
+          </span>
+        </div>
 
       {/* Checklist section */}
       {totalCount > 0 && (
@@ -438,6 +536,25 @@ export default function CrewTurnoverPage() {
         </div>
       )}
 
+        {/* After the checklist, a sticky "Done" button to return to hub */}
+        <div className="sticky bottom-0 pt-3 pb-6" style={{ background: 'var(--bg-page)' }}>
+          <button
+            onClick={() => setView('hub')}
+            className="btn-secondary w-full py-3"
+          >
+            ← Back to Turnover
+          </button>
+        </div>
+      </div>
+      )}
+
+      {/* ── INVENTORY VIEW ── */}
+      {view === 'inventory' && (
+      <div className="mt-2">
+        <h2 className="text-base font-semibold mb-3 px-1" style={{ color: 'var(--text-primary)' }}>
+          Inventory
+        </h2>
+
       {/* Inventory section */}
       {inventoryItems && inventoryItems.length > 0 && (
         <div className="mb-4">
@@ -497,35 +614,18 @@ export default function CrewTurnoverPage() {
         </div>
       )}
 
-      {/* Actions */}
-      <div className="space-y-3 pb-8 mt-4">
-        <button
-          onClick={() => setShowFlagModal(true)}
-          className="w-full py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-2 border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
-        >
-          <AlertTriangle className="w-4 h-4" />
-          Report an Issue
-        </button>
-
-        {turnover.status === 'assigned' && (
-          <button onClick={markInProgress} className="btn-secondary w-full py-3">
-            Start Turnover
+        <div className="sticky bottom-0 pt-3 pb-6" style={{ background: 'var(--bg-page)' }}>
+          <button
+            onClick={() => setView('hub')}
+            className="btn-secondary w-full py-3"
+          >
+            ← Back to Turnover
           </button>
-        )}
-        <button
-          onClick={markComplete}
-          disabled={completing || turnover.status === 'completed'}
-          className="btn-cta w-full py-3 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {completing
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-            : turnover.status === 'completed'
-            ? '✓ Marked Complete'
-            : 'Mark as Complete'
-          }
-        </button>
+        </div>
       </div>
+      )}
 
+      {/* Flag modal — always available regardless of view */}
       {showFlagModal && (
         <IssueReportModal
           turnover={turnover}
