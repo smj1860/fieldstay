@@ -14,7 +14,7 @@ import { processPendingPhotoUploads } from '@/lib/powersync/photo-sync'
 
 type TurnoverRow   = { id: string; status: string; priority: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number; notes: string | null; property_id: string; org_id: string }
 type InstanceRow   = { id: string; turnover_id: string; status: string }
-type ChecklistItem = { id: string; instance_id: string; section_name: string; task: string; notes: string | null; is_completed: number; completed_at: string | null; requires_photo: number; photo_storage_path: string | null; crew_notes: string | null; sort_order: number }
+type ChecklistItem = { id: string; instance_id: string; section_name: string; task: string; notes: string | null; is_completed: number; completed_at: string | null; requires_photo: number; photo_storage_path: string | null; crew_notes: string | null; photo_reason: string | null; sort_order: number }
 type InvRow        = { id: string; name: string; category: string; unit: string; par_level: number; current_quantity: number; property_id: string }
 type PropertyRow   = { id: string; name: string; address: string | null; city: string | null; state: string | null }
 
@@ -355,6 +355,9 @@ export default function CrewTurnoverPage() {
                         )}
                         {needsPhoto && !uploading && !pendingUploadIds.has(item.id) && (
                           <p className="text-xs text-amber-600 mt-0.5">Photo required before completing</p>
+                        )}
+                        {item.requires_photo && item.photo_reason && (
+                          <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
                         )}
                       </div>
 

@@ -77,6 +77,9 @@ import { sendOwnerRezConnectedEmail } from '@/lib/inngest/functions/email-ownerr
 import { handleTrialLifecycle }       from '@/lib/inngest/functions/email-trial-lifecycle'
 import { sendSubscriberCheckin }      from '@/lib/inngest/functions/email-subscriber-checkin'
 
+// Checklist signal intelligence
+import { computeChecklistSignals } from '@/lib/inngest/functions/cron/checklist-signals'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -101,6 +104,7 @@ export const { GET, POST, PUT } = serve({
     auditRetentionCron,
     staleFeedAlert,
     turnoverPriorityDecay,
+    computeChecklistSignals,
 
     // Inventory → PO
     handleInventoryCountSubmitted,

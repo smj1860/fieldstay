@@ -27,7 +27,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
       ),
       checklist_instances (
         id, status, started_at, completed_at,
-        checklist_instance_items ( id, section_name, task, is_completed, requires_photo, photo_storage_path, crew_notes )
+        checklist_instance_items ( id, section_name, task, is_completed, requires_photo, photo_storage_path, crew_notes, photo_reason )
       )
     `)
     .eq('id', id)
@@ -50,7 +50,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
 
   const checklistItems = checklistInstance
     ? Array.isArray((checklistInstance as { checklist_instance_items: unknown }).checklist_instance_items)
-      ? (checklistInstance as { checklist_instance_items: Array<{ id: string; section_name: string; task: string; is_completed: boolean; requires_photo: boolean; photo_storage_path: string | null; crew_notes: string | null }> }).checklist_instance_items
+      ? (checklistInstance as { checklist_instance_items: Array<{ id: string; section_name: string; task: string; is_completed: boolean; requires_photo: boolean; photo_storage_path: string | null; crew_notes: string | null; photo_reason: string | null }> }).checklist_instance_items
       : []
     : []
 
@@ -222,6 +222,9 @@ export default async function TurnoverDetailPage({ params }: Props) {
                           </p>
                           {item.crew_notes && (
                             <p className="text-xs text-accent-400 mt-0.5">{item.crew_notes}</p>
+                          )}
+                          {item.requires_photo && item.photo_reason && (
+                            <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
