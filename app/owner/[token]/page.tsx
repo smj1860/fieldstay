@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
+import { computeOccupancy } from '@/lib/owner-portal/occupancy'
 import type { Metadata } from 'next'
 import type { TxnType } from '@/types/database'
 
@@ -294,6 +295,30 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
     (t) => toMonthParam(t.transaction_date) === selectedMonth
   )
 
+  // Occupancy — fetch a rolling 13-month booking window in one query and
+  // derive current month / same-month-last-year / rolling-12mo from it.
+  const thirteenMonthsAgo = new Date()
+  thirteenMonthsAgo.setMonth(thirteenMonthsAgo.getMonth() - 13)
+
+  const { data: bookingsRaw } = await supabase
+    .from('bookings')
+    .select('id, property_id, checkin_date, checkout_date, status')
+    .in('property_id', txnPropertyIds)
+    .eq('is_block', false)
+    .in('status', ['confirmed', 'tentative'])
+    .gte('checkout_date', thirteenMonthsAgo.toISOString().split('T')[0]!)
+    .order('checkin_date', { ascending: true })
+
+  const occupancy = computeOccupancy(
+    bookingsRaw ?? [],
+    selectedMonth,
+    selectedProperty === 'all' ? txnPropertyIds.length : 1
+  )
+
+  const lastYearMonthLabel = formatMonthLabel(
+    `${Number(selectedMonth.split('-')[0]) - 1}-${selectedMonth.split('-')[1]}`
+  )
+
   // Summary from filtered transactions
   const totalRevenue  = filteredTxns
     .filter((t) => (t.transaction_type as TxnType) === 'revenue')
@@ -436,6 +461,41 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
               {formatCurrency(netIncome)}
             </p>
           </div>
+        </div>
+
+        {/* Occupancy */}
+        <div className="bg-white rounded-xl border border-gray-200 p-5 mb-8">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Occupancy</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-gray-900">{occupancy.currentMonth.rate}%</p>
+              <p className="text-xs mt-0.5 text-gray-500">{formatMonthLabel(selectedMonth)}</p>
+              <p className="text-xs text-gray-400">
+                {occupancy.currentMonth.bookedNights} of {occupancy.currentMonth.totalNights} nights
+              </p>
+            </div>
+            {occupancy.sameMonthLastYear && (
+              <div className="text-center">
+                <p className="text-2xl font-bold text-gray-500">{occupancy.sameMonthLastYear.rate}%</p>
+                <p className="text-xs mt-0.5 text-gray-500">{lastYearMonthLabel}</p>
+                <p className="text-xs text-gray-400">Same month last year</p>
+              </div>
+            )}
+            <div className="text-center">
+              <p className="text-2xl font-bold text-gray-500">{occupancy.rolling12Month.rate}%</p>
+              <p className="text-xs mt-0.5 text-gray-500">12-month avg</p>
+            </div>
+          </div>
+
+          {occupancy.sameMonthLastYear && (() => {
+            const diff = occupancy.currentMonth.rate - occupancy.sameMonthLastYear.rate
+            if (diff === 0) return null
+            return (
+              <p className={`text-xs text-center mt-3 font-medium ${diff > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {diff > 0 ? '↑' : '↓'} {Math.abs(diff)}pp vs same month last year
+              </p>
+            )
+          })()}
         </div>
 
         {/* Transaction list */}

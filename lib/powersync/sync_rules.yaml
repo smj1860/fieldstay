@@ -30,7 +30,7 @@ bucket_definitions:
 
       - SELECT id, instance_id, turnover_id, section_name, task,
                is_completed, completed_at, requires_photo,
-               photo_storage_path, crew_notes, sort_order
+               photo_storage_path, crew_notes, photo_reason, sort_order
         FROM checklist_instance_items
         WHERE turnover_id = bucket.turnover_id
 

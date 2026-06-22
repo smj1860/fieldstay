@@ -384,8 +384,25 @@ export interface ChecklistInstanceItem {
   completed_by_crew_id: string | null
   photo_storage_path:   string | null
   crew_notes:           string | null
+  photo_reason:         string | null
   created_at:           string
   updated_at:           string
+}
+
+export interface ChecklistItemSignal {
+  id:                     string
+  org_id:                 string
+  property_id:            string
+  section_name:           string
+  task:                   string
+  alpha:                  number
+  beta:                   number
+  flag_probability:       number  // generated, read-only
+  dynamic_photo_required: boolean // generated, read-only
+  reason:                 string | null
+  total_completions:      number
+  total_flags:            number
+  computed_at:            string
 }
 
 export interface InventoryCatalogItem {
