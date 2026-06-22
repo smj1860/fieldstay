@@ -13,8 +13,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
     "@hookform/resolvers": "^3.9.1",
-    "@powersync/react": "^1.5.0",
-    "@powersync/web": "^1.10.0",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
     "@supabase/ssr": "^0.10.3",

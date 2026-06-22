@@ -1,8 +1,8 @@
-// lib/powersync/photo-queue.ts
+// lib/dexie/photo-queue.ts
 //
 // Minimal IndexedDB blob store for photos captured while offline. The
-// pending_photo_uploads PowerSync table (localOnly) tracks which target row
-// each queued photo belongs to; the actual image bytes live here.
+// pending_photo_uploads Dexie table tracks which target row each queued
+// photo belongs to; the actual image bytes live here.
 
 const DB_NAME    = 'fieldstay-photo-queue'
 const STORE_NAME = 'photos'

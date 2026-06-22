@@ -1,40 +1,27 @@
 'use client'
-import { usePowerSyncQuery } from '@powersync/react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useDexieDb } from '@/lib/dexie/context'
 import Link from 'next/link'
 import { CalendarCheck, Clock, AlertCircle, MapPin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type TurnoverRow = {
-  id:                string
-  status:            string
-  priority:          string
-  checkout_datetime: string
-  checkin_datetime:  string
-  window_minutes:    number | null
-  property_id:       string
-}
-
-type PropertyRow = {
-  id:      string
-  name:    string
-  address: string | null
-  city:    string | null
-  state:   string | null
-}
-
 export default function CrewDashboardPage() {
+  const db = useDexieDb()
   const today   = new Date().toISOString().split('T')[0]
   const weekOut = new Date(Date.now() + 7 * 86_400_000).toISOString().split('T')[0]
 
-  const turnovers = usePowerSyncQuery<TurnoverRow>(
-    `SELECT * FROM turnovers
-     WHERE date(checkout_datetime) >= ? AND date(checkout_datetime) <= ?
-       AND status != 'completed' AND status != 'cancelled'
-     ORDER BY checkout_datetime ASC`,
+  const turnovers = useLiveQuery(
+    () => db.turnovers
+      .filter((t) => {
+        const date = t.checkout_datetime.split('T')[0]
+        return date >= today && date <= weekOut
+          && t.status !== 'completed' && t.status !== 'cancelled'
+      })
+      .sortBy('checkout_datetime'),
     [today, weekOut]
   )
 
-  const propertiesRaw = usePowerSyncQuery<PropertyRow>('SELECT * FROM properties', [])
+  const propertiesRaw = useLiveQuery(() => db.properties.toArray(), [])
   const propertyMap   = Object.fromEntries((propertiesRaw ?? []).map((p) => [p.id, p]))
 
   if (!turnovers?.length) {

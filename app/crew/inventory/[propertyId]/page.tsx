@@ -1,5 +1,6 @@
 'use client'
-import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useDexieDb } from '@/lib/dexie/context'
 import { useParams, useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { ArrowLeft, Package } from 'lucide-react'
@@ -9,17 +10,17 @@ import type { InventoryCategory } from '@/types/database'
 
 export default function CrewInventoryPage() {
   const { propertyId } = useParams<{ propertyId: string }>()
-  const db             = usePowerSync()
+  const db             = useDexieDb()
   const router         = useRouter()
   const [counts, setCounts]       = useState<Record<string, number>>({})
   const [submitting, setSubmitting] = useState(false)
   const [notes, setNotes]         = useState('')
 
   type InvRow = { id: string; name: string; category: InventoryCategory; unit: string; par_level: number; current_quantity: number }
-  const items = usePowerSyncQuery<InvRow>(
-    `SELECT * FROM inventory_items WHERE property_id = ? ORDER BY category, name`,
+  const items = useLiveQuery(
+    () => db.inventory_items.where('property_id').equals(propertyId).sortBy('name') as unknown as Promise<InvRow[]>,
     [propertyId]
-  )
+  ) ?? []
 
   const grouped = items.reduce<Record<string, InvRow[]>>((acc: Record<string, InvRow[]>, item: InvRow) => {
     const cat = item.category as InventoryCategory
