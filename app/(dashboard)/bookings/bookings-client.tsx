@@ -496,7 +496,7 @@ export function BookingsClient({
   const [syncing,          startSync]          = useTransition()
   const [viewMode,         setViewMode]        = useState<'list' | 'calendar'>('list')
   const [filterProperty,   setFilterProperty]  = useState('all')
-  const [filterStatus,     setFilterStatus]    = useState<'all' | BookingStatus>('all')
+  const [filterStatus,     setFilterStatus]    = useState<'all' | 'active' | BookingStatus>('active')
   const [filterSource,     setFilterSource]    = useState<'all' | BookingSource>('all')
   const [searchQuery,      setSearchQuery]     = useState('')
   const [showPast,         setShowPast]        = useState(false)
@@ -520,7 +520,8 @@ export function BookingsClient({
     return localBookings.filter((b) => {
       if (!showPast && b.checkout_date < todayStr) return false
       if (filterProperty !== 'all' && b.property_id !== filterProperty) return false
-      if (filterStatus   !== 'all' && b.status     !== filterStatus)    return false
+      if (filterStatus   === 'active' && b.status     === 'cancelled') return false
+      if (filterStatus   !== 'all' && filterStatus !== 'active' && b.status !== filterStatus) return false
       if (filterSource   !== 'all' && b.source     !== filterSource)    return false
       if (searchQuery.trim() && !(b.guest_name ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase())) return false
       return true
@@ -696,6 +697,7 @@ export function BookingsClient({
           className="input text-sm py-1.5 w-auto"
         >
           <option value="all">All Statuses</option>
+          <option value="active">Active only</option>
           <option value="confirmed">Confirmed</option>
           <option value="tentative">Tentative</option>
           <option value="blocked">Blocked</option>
