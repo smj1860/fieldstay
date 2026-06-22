@@ -24,6 +24,8 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dayjs": "^1.11.21",
+    "dexie": "^4.4.4",
+    "dexie-react-hooks": "^4.4.0",
     "ical.js": "^2.0.1",
     "inngest": "^3.22.0",
     "lucide-react": "^0.454.0",
