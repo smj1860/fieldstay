@@ -74,6 +74,39 @@ const crew_members = new Table({
   invite_accepted_at: column.text,
 })
 
+const maintenance_schedules = new Table({
+  property_id:               column.text,
+  org_id:                    column.text,
+  name:                      column.text,
+  description:               column.text,
+  schedule_type:             column.text,
+  frequency:                 column.text,
+  active_from_month:         column.integer,
+  active_to_month:           column.integer,
+  asset_category:            column.text,
+  next_due_date:             column.text,
+  estimated_cost:            column.real,
+  instructions:              column.text,
+  auto_create_wo:            column.integer,
+  is_from_standard_template: column.integer,
+  is_active:                 column.integer,
+  created_at:                column.text,
+  updated_at:                column.text,
+})
+
+const maintenance_completions = new Table({
+  maintenance_schedule_id: column.text,
+  property_id:             column.text,
+  org_id:                  column.text,
+  asset_category:          column.text,
+  completed_at:            column.text,
+  completed_by:            column.text,
+  notes:                   column.text,
+  work_order_id:           column.text,
+  next_due_date_set:       column.integer,
+  created_at:              column.text,
+})
+
 const turnover_assignments = new Table({
   turnover_id:    column.text,
   crew_member_id: column.text,
@@ -122,6 +155,8 @@ export const AppSchema = new Schema({
   properties,
   crew_availability,
   crew_members,
+  maintenance_schedules,
+  maintenance_completions,
   turnover_assignments,
   messages,
   turnover_issue_reports,
