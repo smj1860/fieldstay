@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState }           from 'react'
 import { useLiveQuery }   from 'dexie-react-hooks'
 import { useDexieDb }     from '@/lib/dexie/context'
 
@@ -95,7 +96,38 @@ function EmptyColumn({ label }: { label: string }) {
   )
 }
 
+function CrewPageSkeleton() {
+  return (
+    <div className="flex flex-col min-h-full">
+      <div className="px-4 py-3 mb-4" style={{ background: '#FCD116' }}>
+        <div className="h-4 w-32 rounded bg-brand-900/20 animate-pulse" />
+        <div className="h-3 w-48 rounded bg-brand-800/20 mt-2 animate-pulse" />
+      </div>
+      <div className="flex flex-1 gap-0">
+        {[0, 1].map((col) => (
+          <div key={col} className="flex-1 min-w-0 px-3">
+            <div className="flex justify-center mb-3">
+              <div className="h-6 w-32 rounded-full bg-accent-100 animate-pulse" />
+            </div>
+            {[0, 1].map((i) => (
+              <div
+                key={i}
+                className="rounded-xl border border-accent-200 bg-white p-3 mb-2 h-20 animate-pulse"
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function CrewDashboardPage() {
+  const [isMounted, setIsMounted] = useState(false)
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
   const { crewName } = useCrewContext()
   const firstName    = crewName.split(' ')[0] ?? crewName
 
@@ -125,6 +157,8 @@ export default function CrewDashboardPage() {
   const upcomingTurnovers = (allTurnovers as TurnoverRow[]).filter(
     (t) => new Date(t.checkout_datetime).toDateString() !== todayStr
   )
+
+  if (!isMounted) return <CrewPageSkeleton />
 
   return (
     <div className="flex flex-col min-h-full">
