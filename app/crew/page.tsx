@@ -8,6 +8,9 @@ import Link                              from 'next/link'
 import { AlertCircle, MapPin, Clock }    from 'lucide-react'
 import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
+import { distanceMiles }                 from '@/lib/geocoding'
+
+const AVG_DRIVE_SPEED_MPH = 30
 
 type TurnoverRow = {
   id:                string
@@ -25,6 +28,25 @@ type PropertyRow = {
   address: string | null
   city:    string | null
   state:   string | null
+  lat:     number | null
+  lng:     number | null
+}
+
+function calcTravelSummary(turnovers: TurnoverRow[], propertyMap: Record<string, PropertyRow>) {
+  const stops = turnovers.map((t) => propertyMap[t.property_id]).filter(Boolean) as PropertyRow[]
+  if (stops.length < 2) return { miles: 0, minutes: 0, available: stops.length > 0 }
+
+  let miles = 0
+  for (let i = 0; i < stops.length - 1; i++) {
+    const a = stops[i]!
+    const b = stops[i + 1]!
+    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) {
+      return { miles: 0, minutes: 0, available: false }
+    }
+    miles += distanceMiles(a.lat, a.lng, b.lat, b.lng)
+  }
+  const minutes = Math.round((miles / AVG_DRIVE_SPEED_MPH) * 60)
+  return { miles, minutes, available: true }
 }
 
 function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow }) {
@@ -51,16 +73,10 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
       </div>
 
       {fullAddress && (
-        <a
-          href={`https://maps.google.com/?q=${encodeURIComponent(fullAddress)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="text-xs text-accent-500 flex items-center gap-1 mb-1.5 hover:underline"
-        >
+        <div className="text-xs text-accent-500 flex items-center gap-1 mb-1.5">
           <MapPin className="w-3 h-3 flex-shrink-0" />
           <span className="truncate">{fullAddress}</span>
-        </a>
+        </div>
       )}
 
       <div className="flex items-center gap-1.5 flex-wrap">
@@ -158,6 +174,8 @@ export default function CrewDashboardPage() {
     (t) => new Date(t.checkout_datetime).toDateString() !== todayStr
   )
 
+  const travelSummary = calcTravelSummary(todayTurnovers, propertyMap as Record<string, PropertyRow>)
+
   if (!isMounted) return <CrewPageSkeleton />
 
   return (
@@ -192,6 +210,13 @@ export default function CrewDashboardPage() {
               Today's Turnovers
             </span>
           </div>
+          {todayTurnovers.length > 0 && (
+            <p className="text-xs text-center text-accent-500 mb-3">
+              {travelSummary.available
+                ? `Total Travel Time: ${travelSummary.miles.toFixed(1)} mi, ${Math.floor(travelSummary.minutes / 60)}:${String(travelSummary.minutes % 60).padStart(2, '0')}`
+                : 'Total Travel Time: unavailable'}
+            </p>
+          )}
           {todayTurnovers.length === 0
             ? <EmptyColumn label="Today's Turnovers" />
             : todayTurnovers.map((t) => (

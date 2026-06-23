@@ -427,7 +427,10 @@ export default function CrewTurnoverPage() {
                           : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-accent-300')} />}
                       </button>
 
-                      <div className="flex-1 min-w-0">
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
+                      >
                         <p className={cn('text-sm leading-snug',
                           item.is_completed ? 'text-green-700 line-through' : 'text-accent-800')}>
                           {item.task}
@@ -586,6 +589,14 @@ export default function CrewTurnoverPage() {
                             min={0}
                             value={qty}
                             onChange={(e) => handleCountChange(item.id, parseInt(e.target.value, 10) || 0)}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return
+                              e.preventDefault()
+                              const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-inv-count-input]'))
+                              const idx = inputs.indexOf(e.currentTarget)
+                              inputs[idx + 1]?.focus()
+                            }}
+                            data-inv-count-input
                             className="w-12 text-center text-sm font-semibold text-accent-900 border border-accent-200 rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-brand-400"
                           />
                           <button
@@ -703,7 +714,7 @@ function IssueReportModal({
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
-                <label className="label">What's the issue? *</label>
+                <label className="label text-accent-900">What's the issue? *</label>
                 <input
                   type="text"
                   value={title}
@@ -714,7 +725,7 @@ function IssueReportModal({
                 />
               </div>
               <div>
-                <label className="label">Details (optional)</label>
+                <label className="label text-accent-900">Details (optional)</label>
                 <textarea
                   value={details}
                   onChange={(e) => setDetails(e.target.value)}
@@ -724,7 +735,7 @@ function IssueReportModal({
                 />
               </div>
               <div>
-                <label className="label">Urgency</label>
+                <label className="label text-accent-900">Urgency</label>
                 <div className="flex gap-2">
                   {(['medium', 'high', 'urgent'] as const).map((p) => (
                     <button

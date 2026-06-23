@@ -117,7 +117,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (propertyIds.length) {
         const { data: properties } = await supabase
           .from('properties')
-          .select('id, org_id, name, address, city, state')
+          .select('id, org_id, name, address, city, state, lat, lng')
           .in('id', propertyIds)
         if (properties?.length) await db.properties.bulkPut(properties as PropertyRow[])
 
