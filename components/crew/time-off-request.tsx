@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useMemo }     from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { saveCrewAvailability } from '@/lib/dexie/helpers'
-import { XCircle, CheckCircle2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, XCircle, CheckCircle2 } from 'lucide-react'
 
 interface Props {
   crewMemberId: string
@@ -22,18 +22,26 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   const db     = useDexieDb()
   const userId = useDexieUserId()
 
-  // Build 14-day window starting tomorrow
-  const days = useMemo(() => {
-    return Array.from({ length: 14 }, (_, i) => {
-      const d = new Date()
-      d.setDate(d.getDate() + i + 1)
-      d.setHours(0, 0, 0, 0)
+  const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, 1 = next, -1 = prev
+
+  // Build 7-day window starting tomorrow + (weekOffset * 7) days
+  const { days, windowStart, windowEnd } = useMemo(() => {
+    const start = new Date()
+    start.setDate(start.getDate() + 1 + (weekOffset * 7))
+    start.setHours(0, 0, 0, 0)
+
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start)
+      d.setDate(d.getDate() + i)
       return d
     })
-  }, [])
 
-  const windowStart = days[0].toISOString().slice(0, 10)
-  const windowEnd   = days[13].toISOString().slice(0, 10)
+    return {
+      days,
+      windowStart: days[0]!.toISOString().slice(0, 10),
+      windowEnd:   days[6]!.toISOString().slice(0, 10),
+    }
+  }, [weekOffset])
 
   // Read existing availability records for this window from the local cache
   const existingRows = useLiveQuery(
@@ -44,7 +52,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
     [crewMemberId, windowStart, windowEnd]
   )
 
-  // Read upcoming time-off records beyond the 14-day window (for the list below)
+  // Read upcoming time-off records beyond the 7-day window (for the list below)
   const upcomingTimeOff = useLiveQuery(
     () => db.crew_availability
       .where('crew_member_id').equals(crewMemberId)
@@ -61,6 +69,11 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   const [savedAt, setSavedAt] = useState<Date | null>(null)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
+
+  // Clear unsaved draft changes when navigating to a different week
+  useEffect(() => {
+    setDraft({})
+  }, [weekOffset])
 
   const existingMap = useMemo(() => {
     const m = new Map<string, AvailRow>()
@@ -157,13 +170,42 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   return (
     <div className="space-y-6 pb-24">
       <div>
-        <h2 className="text-lg font-bold text-white mb-1">Time Off Request</h2>
-        <p className="text-sm text-accent-400">
+        <h2 className="text-lg font-bold text-accent-900 mb-1">Time Off Request</h2>
+        <p className="text-sm text-accent-500 mb-4">
           Tap any day to mark it as time off. Add a note if needed. Tap Save when done.
         </p>
+
+        {/* Week navigation */}
+        <div className="flex items-center justify-between mt-4 mb-2">
+          <button
+            onClick={() => setWeekOffset(w => w - 1)}
+            className="flex items-center gap-1 text-sm font-medium text-accent-600
+                       hover:text-accent-900 px-3 py-2 rounded-lg hover:bg-accent-100
+                       transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Prev Week
+          </button>
+
+          <span className="text-sm font-semibold text-accent-700">
+            {new Date(windowStart + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            {' – '}
+            {new Date(windowEnd + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          </span>
+
+          <button
+            onClick={() => setWeekOffset(w => w + 1)}
+            className="flex items-center gap-1 text-sm font-medium text-accent-600
+                       hover:text-accent-900 px-3 py-2 rounded-lg hover:bg-accent-100
+                       transition-colors"
+          >
+            Next Week
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      {/* 14-day list */}
+      {/* 7-day list */}
       <div className="space-y-2">
         {days.map((day) => {
           const dateStr   = isoDate(day)

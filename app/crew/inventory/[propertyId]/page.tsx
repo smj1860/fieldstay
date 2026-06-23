@@ -47,7 +47,7 @@ export default function CrewInventoryPage() {
         className="flex items-center gap-1.5 text-sm text-accent-400 hover:text-accent-600 mb-4"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
-        Back
+        Back to Turnover
       </button>
 
       <h2 className="text-lg font-bold text-accent-900 mb-4">Inventory Count</h2>
@@ -96,12 +96,16 @@ export default function CrewInventoryPage() {
               placeholder="Any notes about this count…"
             />
           </div>
+          <p className="text-xs text-center text-accent-400">
+            Each count saves automatically as you enter it.
+            Tap below when you&apos;re done.
+          </p>
           <button
             onClick={handleSubmit}
             disabled={submitting}
             className="btn-primary w-full py-3"
           >
-            {submitting ? 'Submitting…' : 'Submit Count'}
+            {submitting ? 'Saving…' : 'Inventory Complete'}
           </button>
         </div>
       )}
