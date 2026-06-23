@@ -168,6 +168,14 @@ export interface PendingPhotoUploadRow {
   created_at:     string
 }
 
+// Tracks incremental-sync watermarks (e.g. the last `turnover_assignments.created_at`
+// pulled from Supabase), so initialSync can fetch only what changed since last time
+// instead of re-pulling everything whenever the local cache is already populated.
+export interface SyncMetaRow {
+  key:   string
+  value: string
+}
+
 export type MutationOp = 'PUT' | 'PATCH' | 'DELETE'
 
 export interface MutationRow {
@@ -195,6 +203,7 @@ export class FieldStayDexie extends Dexie {
   turnover_issue_reports!:   Table<TurnoverIssueReportRow, string>
   pending_photo_uploads!:    Table<PendingPhotoUploadRow, string>
   mutations!:                Table<MutationRow, number>
+  sync_meta!:                Table<SyncMetaRow, string>
 
   constructor(userId: string) {
     super(`fieldstay-crew-${userId}`)
@@ -235,6 +244,24 @@ export class FieldStayDexie extends Dexie {
       // ++id = auto-incrementing outbox key; table/targetId are indexed so
       // processOutbox() can replay mutations in insertion order per record.
       mutations:                '++id, table, targetId',
+    })
+
+    this.version(3).stores({
+      turnovers:                'id, property_id, org_id, status',
+      checklist_instances:      'id, turnover_id, org_id, status',
+      checklist_instance_items: 'id, instance_id, turnover_id, is_completed',
+      inventory_items:          'id, property_id, org_id',
+      properties:               'id, org_id',
+      crew_availability:        'id, org_id, crew_member_id, available_date',
+      crew_members:             'id, org_id, user_id',
+      maintenance_schedules:    'id, property_id, org_id, next_due_date',
+      maintenance_completions:  'id, maintenance_schedule_id, property_id, org_id',
+      turnover_assignments:     'id, turnover_id, crew_member_id, org_id',
+      messages:                 'id, org_id, turnover_id, recipient_id, created_at',
+      turnover_issue_reports:   'id, turnover_id, org_id',
+      pending_photo_uploads:    'id, target_id, target_table, retry_count',
+      mutations:                '++id, table, targetId',
+      sync_meta:                'key',
     })
   }
 }

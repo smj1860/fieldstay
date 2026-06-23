@@ -73,39 +73,41 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     return () => window.removeEventListener('online', flush)
   }, [userId])
 
-  // One-time population from Supabase on first load for this user — Dexie
-  // starts empty (unlike PowerSync, which streams an initial sync
-  // automatically), so this seeds the local cache before any UI query runs.
+  // Populate Dexie from Supabase — bootstraps the full cache on first run for
+  // this user, then stays current via a `turnover_assignments` watermark
+  // (lib/dexie/schema.ts SyncMetaRow) plus a Realtime subscription, instead
+  // of the old "re-sync only if the cache is empty" check, which silently
+  // stopped picking up new assignments made after a crew member's first
+  // session (assignment lives in Supabase + RLS-correct, just never pulled
+  // into IndexedDB).
   useEffect(() => {
     if (!userId) return
 
-    async function initialSync() {
+    const supabase = createClient()
+    let cancelled = false
+
+    async function syncAssignedTurnovers(crewMemberId: string): Promise<void> {
       const db = getDexieDb(userId!)
-      const [turnoverCount, checklistItemCount, propertyCount] = await Promise.all([
-        db.turnovers.count(),
-        db.checklist_instance_items.count(),
-        db.properties.count(),
-      ])
-      // Re-sync if any critical table is empty, even if turnovers already loaded
-      if (turnoverCount > 0 && checklistItemCount > 0 && propertyCount > 0) return // already populated
+      const watermark = await db.sync_meta.get('turnover_assignments_synced_at')
+      const since = watermark?.value ?? null
+      const syncStartedAt = new Date().toISOString()
 
-      const supabase = createClient()
-
-      const { data: crewMember } = await supabase
-        .from('crew_members')
-        .select('id, org_id')
-        .eq('user_id', userId!)
-        .eq('is_active', true)
-        .maybeSingle()
-      if (!crewMember) return
-
-      const { data: assignments } = await supabase
+      let query = supabase
         .from('turnover_assignments')
-        .select('turnover_id')
-        .eq('crew_member_id', crewMember.id)
+        .select('turnover_id, created_at')
+        .eq('crew_member_id', crewMemberId)
+      if (since) query = query.gt('created_at', since)
+      const { data: assignments, error } = await query
+      if (error) {
+        console.error('[DexieProvider] turnover_assignments sync failed:', error)
+        return
+      }
 
       const turnoverIds = [...new Set((assignments ?? []).map((a: { turnover_id: string }) => a.turnover_id))]
-      if (!turnoverIds.length) return
+      if (!turnoverIds.length) {
+        await db.sync_meta.put({ key: 'turnover_assignments_synced_at', value: syncStartedAt })
+        return
+      }
 
       const { data: turnovers } = await supabase
         .from('turnovers')
@@ -155,6 +157,11 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         }
       }
 
+      await db.sync_meta.put({ key: 'turnover_assignments_synced_at', value: syncStartedAt })
+    }
+
+    async function syncMessages(): Promise<void> {
+      const db = getDexieDb(userId!)
       const { data: messages } = await supabase
         .from('messages')
         .select('id, org_id, sender_id, recipient_id, content, read_at, turnover_id, group_id, group_label, created_at')
@@ -163,7 +170,40 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (messages?.length) await db.messages.bulkPut(messages as MessageRow[])
     }
 
-    initialSync().catch((err) => console.error('[DexieProvider] initial sync failed:', err))
+    let channel: ReturnType<typeof supabase.channel> | null = null
+
+    async function run() {
+      const { data: crewMember } = await supabase
+        .from('crew_members')
+        .select('id, org_id')
+        .eq('user_id', userId!)
+        .eq('is_active', true)
+        .maybeSingle()
+      if (!crewMember || cancelled) return
+
+      // messages have no incremental watermark of their own yet — cheap
+      // enough to re-pull in full each load.
+      await Promise.all([syncAssignedTurnovers(crewMember.id), syncMessages()])
+      if (cancelled) return
+
+      // Catches reassignments that happen while the crew member is online,
+      // rather than waiting for their next app open to pick them up.
+      channel = supabase
+        .channel(`turnover-assignments-${crewMember.id}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${crewMember.id}` },
+          () => { void syncAssignedTurnovers(crewMember.id) }
+        )
+        .subscribe()
+    }
+
+    run().catch((err) => console.error('[DexieProvider] sync failed:', err))
+
+    return () => {
+      cancelled = true
+      if (channel) supabase.removeChannel(channel)
+    }
   }, [userId])
 
   const db = userId ? getDexieDb(userId) : null
