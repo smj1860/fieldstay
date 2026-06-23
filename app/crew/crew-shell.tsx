@@ -5,6 +5,7 @@ import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X } from 'lucide-react'
 import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
+import { CrewContext }              from '@/lib/crew/crew-context'
 import { closeDexieDb }             from '@/lib/dexie/schema'
 import { getSyncEngine }            from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -120,6 +121,7 @@ export function CrewShell({
   }, [userId])
 
   return (
+    <CrewContext.Provider value={{ crewName, userId }}>
     <DexieProvider userId={userId}>
       <div className="min-h-screen bg-accent-50 flex flex-col max-w-lg mx-auto">
         <header className="bg-brand-800 text-white px-4 py-4 flex items-center justify-between sticky top-0 z-10">
@@ -180,6 +182,7 @@ export function CrewShell({
         <CrewBottomNav userId={userId} />
       </div>
     </DexieProvider>
+    </CrewContext.Provider>
   )
 }
 
