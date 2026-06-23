@@ -6,6 +6,9 @@ All notable changes to FieldStay are documented here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Changed
+- **Migrated client-side offline sync from PowerSync to Dexie.js.** Client reads now come from a local IndexedDB database (`lib/dexie/schema.ts`) instead of PowerSync's local SQLite layer. Mutations are queued in a local `mutations` outbox table and drained by a custom `SyncEngine` (`lib/dexie/syncService.ts`), mirroring PowerSync's per-record retry behavior but pushing/pulling against Supabase directly instead of through the PowerSync Cloud relay. `lib/powersync/` has been removed and the `powersync` package dropped from `package.json` in favor of `dexie` / `dexie-react-hooks`. `NEXT_PUBLIC_POWERSYNC_URL` is no longer required. (Note: several Supabase view names, e.g. `powersync_crew_*`, still carry the old name — renaming those is a separate follow-up, not part of this migration.)
+
 ### Fixed
 - Mobile "More" drawer nav order now matches the desktop sidebar order (Reviews moved directly after Properties)
 - Turnover Gantt chart now scales column width, row height, and visible day range for mobile viewports instead of forcing horizontal scroll
