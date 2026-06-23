@@ -67,29 +67,19 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
   useEffect(() => {
     if (!userId) return
 
-    const flush = () => { void getSyncEngine(userId).processOutbox() }
-    flush() // attempt once on mount, in case mutations were queued in a prior session
-    window.addEventListener('online', flush)
-    return () => window.removeEventListener('online', flush)
-  }, [userId])
-
-  // Populate Dexie from Supabase — bootstraps the full cache on first run for
-  // this user, then stays current via a `turnover_assignments` watermark
-  // (lib/dexie/schema.ts SyncMetaRow) plus a Realtime subscription, instead
-  // of the old "re-sync only if the cache is empty" check, which silently
-  // stopped picking up new assignments made after a crew member's first
-  // session (assignment lives in Supabase + RLS-correct, just never pulled
-  // into IndexedDB).
-  useEffect(() => {
-    if (!userId) return
-
     const supabase = createClient()
     let cancelled = false
 
-    async function syncAssignedTurnovers(crewMemberId: string): Promise<void> {
+    async function syncAssignedTurnovers(
+      crewMemberId: string,
+      force = false,
+    ): Promise<void> {
       const db = getDexieDb(userId!)
       const watermark = await db.sync_meta.get('turnover_assignments_synced_at')
-      const since = watermark?.value ?? null
+
+      // force=true on initial mount — full pull regardless of watermark.
+      // Protects against a stale/premature watermark locking out existing assignments.
+      const since = force ? null : (watermark?.value ?? null)
       const syncStartedAt = new Date().toISOString()
 
       let query = supabase
@@ -97,52 +87,82 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .select('turnover_id, created_at')
         .eq('crew_member_id', crewMemberId)
       if (since) query = query.gt('created_at', since)
-      const { data: assignments, error } = await query
-      if (error) {
-        console.error('[DexieProvider] turnover_assignments sync failed:', error)
+
+      const { data: assignments, error: assignError } = await query
+      if (assignError) {
+        console.error('[DexieProvider] turnover_assignments fetch failed:', assignError)
         return
       }
 
-      const turnoverIds = [...new Set((assignments ?? []).map((a: { turnover_id: string }) => a.turnover_id))]
+      const turnoverIds = [
+        ...new Set((assignments ?? []).map((a: { turnover_id: string }) => a.turnover_id)),
+      ]
+
       if (!turnoverIds.length) {
-        await db.sync_meta.put({ key: 'turnover_assignments_synced_at', value: syncStartedAt })
+        // Only advance watermark on a full pull (no since filter).
+        // Incremental pull with zero new results is a no-op — don't move the cursor.
+        if (!since) {
+          await db.sync_meta.put({ key: 'turnover_assignments_synced_at', value: syncStartedAt })
+        }
         return
       }
 
-      const { data: turnovers } = await supabase
+      const { data: turnovers, error: tErr } = await supabase
         .from('turnovers')
         .select('id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes')
         .in('id', turnoverIds)
+      if (tErr) {
+        console.error('[DexieProvider] turnovers fetch failed:', tErr)
+        return
+      }
       if (turnovers?.length) await db.turnovers.bulkPut(turnovers as TurnoverRow[])
 
-      const propertyIds = [...new Set((turnovers ?? []).map((t: { property_id: string }) => t.property_id))]
+      const propertyIds = [
+        ...new Set((turnovers ?? []).map((t: { property_id: string }) => t.property_id)),
+      ]
       if (propertyIds.length) {
-        const { data: properties } = await supabase
+        const { data: properties, error: pErr } = await supabase
           .from('properties')
           .select('id, org_id, name, address, city, state, lat, lng')
           .in('id', propertyIds)
+        if (pErr) {
+          console.error('[DexieProvider] properties fetch failed:', pErr)
+          return
+        }
         if (properties?.length) await db.properties.bulkPut(properties as PropertyRow[])
 
-        const { data: inventory } = await supabase
+        const { data: inventory, error: invErr } = await supabase
           .from('inventory_items')
           .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
           .in('property_id', propertyIds)
           .eq('is_active', true)
+        if (invErr) {
+          console.error('[DexieProvider] inventory fetch failed:', invErr)
+          return
+        }
         if (inventory?.length) await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
       }
 
-      const { data: instances } = await supabase
+      const { data: instances, error: ciErr } = await supabase
         .from('checklist_instances')
         .select('id, turnover_id, org_id, status, section_photo_path')
         .in('turnover_id', turnoverIds)
+      if (ciErr) {
+        console.error('[DexieProvider] checklist_instances fetch failed:', ciErr)
+        return
+      }
       if (instances?.length) await db.checklist_instances.bulkPut(instances as ChecklistInstanceRow[])
 
       if (instances?.length) {
         const instanceIds = instances.map((i: { id: string }) => i.id)
-        const { data: items } = await supabase
+        const { data: items, error: itemErr } = await supabase
           .from('checklist_instance_items')
           .select('id, instance_id, turnover_id, section_name, task, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item')
           .in('instance_id', instanceIds)
+        if (itemErr) {
+          console.error('[DexieProvider] checklist_instance_items fetch failed:', itemErr)
+          return
+        }
         if (items?.length) {
           const normalized = items.map((item: Record<string, unknown>) => ({
             ...item,
@@ -157,6 +177,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         }
       }
 
+      // Only advance watermark after everything landed successfully
       await db.sync_meta.put({ key: 'turnover_assignments_synced_at', value: syncStartedAt })
     }
 
@@ -181,19 +202,16 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .maybeSingle()
       if (!crewMember || cancelled) return
 
-      // messages have no incremental watermark of their own yet — cheap
-      // enough to re-pull in full each load.
-      await Promise.all([syncAssignedTurnovers(crewMember.id), syncMessages()])
+      // force=true: full pull on mount, bypasses any stale watermark
+      await Promise.all([syncAssignedTurnovers(crewMember.id, true), syncMessages()])
       if (cancelled) return
 
-      // Catches reassignments that happen while the crew member is online,
-      // rather than waiting for their next app open to pick them up.
       channel = supabase
         .channel(`turnover-assignments-${crewMember.id}`)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${crewMember.id}` },
-          () => { void syncAssignedTurnovers(crewMember.id) }
+          () => { void syncAssignedTurnovers(crewMember.id, false) }
         )
         .subscribe()
     }
