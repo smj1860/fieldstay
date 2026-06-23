@@ -59,6 +59,8 @@ export interface PropertyRow {
   address: string
   city:    string
   state:   string
+  lat:     number | null
+  lng:     number | null
 }
 
 export interface CrewAvailabilityRow {
