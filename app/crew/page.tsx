@@ -51,16 +51,10 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
       </div>
 
       {fullAddress && (
-        <a
-          href={`https://maps.google.com/?q=${encodeURIComponent(fullAddress)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="text-xs text-accent-500 flex items-center gap-1 mb-1.5 hover:underline"
-        >
+        <div className="text-xs text-accent-500 flex items-center gap-1 mb-1.5">
           <MapPin className="w-3 h-3 flex-shrink-0" />
           <span className="truncate">{fullAddress}</span>
-        </a>
+        </div>
       )}
 
       <div className="flex items-center gap-1.5 flex-wrap">

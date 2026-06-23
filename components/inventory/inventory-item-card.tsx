@@ -71,6 +71,14 @@ export function InventoryItemCard({
     onQuantityChange?.(id, next)
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-inv-count-input]'))
+    const idx = inputs.indexOf(e.currentTarget)
+    inputs[idx + 1]?.focus()
+  }
+
   return (
     <div
       className="rounded-xl p-4"
@@ -133,6 +141,8 @@ export function InventoryItemCard({
             min={0}
             value={qty}
             onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            data-inv-count-input
             className="text-center text-sm font-semibold rounded-lg"
             style={{
               width:      52,
