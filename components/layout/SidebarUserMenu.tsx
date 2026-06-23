@@ -40,18 +40,18 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
       >
         <div
           className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold"
-          style={{ background: 'var(--accent-gold)', color: '#0a1628' }}
+          style={{ background: 'var(--chrome-gold)', color: 'var(--chrome-bg)' }}
         >
           {initials}
         </div>
 
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold truncate"
-               style={{ color: 'var(--sidebar-text, #0a1628)' }}>
+               style={{ color: 'var(--chrome-text)' }}>
             {userName}
           </div>
           <div className="text-xs truncate opacity-60"
-               style={{ color: 'var(--sidebar-text, #0a1628)' }}>
+               style={{ color: 'var(--chrome-text-muted)' }}>
             {orgName}
           </div>
         </div>
@@ -59,7 +59,7 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
         <svg
           className="w-3.5 h-3.5 shrink-0 opacity-50"
           style={{
-            color:      'var(--sidebar-text, #0a1628)',
+            color:      'var(--chrome-text-muted)',
             transform:  open ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 0.15s',
           }}

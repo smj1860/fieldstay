@@ -36,8 +36,8 @@ export function BottomNav({ role, onMore }: BottomNavProps) {
     <nav
       className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden"
       style={{
-        background:   'var(--bg-base)',
-        borderTop:    '1px solid var(--border)',
+        background:   'var(--chrome-bg)',
+        borderTop:    '1px solid var(--chrome-border)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
@@ -49,12 +49,12 @@ export function BottomNav({ role, onMore }: BottomNavProps) {
             key={item.href}
             href={item.href}
             className="relative flex flex-col items-center justify-center flex-1 py-2 gap-0.5 text-xs font-medium transition-colors"
-            style={{ color: active ? 'var(--accent-gold)' : 'var(--text-muted)' }}
+            style={{ color: active ? 'var(--chrome-gold)' : 'var(--chrome-text-muted)' }}
           >
             {active && (
               <span
                 className="absolute inset-x-2 top-1 bottom-1 rounded-xl"
-                style={{ background: 'var(--accent-gold-dim)' }}
+                style={{ background: 'var(--chrome-gold-dim)' }}
               />
             )}
             <Icon className="relative z-10 w-5 h-5" />
@@ -65,12 +65,12 @@ export function BottomNav({ role, onMore }: BottomNavProps) {
       <button
         onClick={onMore}
         className="relative flex flex-col items-center justify-center flex-1 py-2 gap-0.5 text-xs font-medium transition-colors"
-        style={{ color: moreActive ? 'var(--accent-gold)' : 'var(--text-muted)' }}
+        style={{ color: moreActive ? 'var(--chrome-gold)' : 'var(--chrome-text-muted)' }}
       >
         {moreActive && (
           <span
             className="absolute inset-x-2 top-1 bottom-1 rounded-xl"
-            style={{ background: 'var(--accent-gold-dim)' }}
+            style={{ background: 'var(--chrome-gold-dim)' }}
           />
         )}
         <MoreHorizontal className="relative z-10 w-5 h-5" />

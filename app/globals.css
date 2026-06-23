@@ -75,6 +75,17 @@
   --kpi-blue-dim:  rgba(77, 166, 255, 0.16);
   --kpi-red:       #f05454;
   --kpi-red-dim:   rgba(240, 84, 84, 0.16);
+
+  /* Persistent navy chrome — sidebar, mobile bottom nav, sidebar user row.
+   * Same "branded chrome over neutral canvas" pattern as --kpi-*: not
+   * redefined in :root.light, so these stay constant across themes. */
+  --chrome-bg:         #0a1628;
+  --chrome-bg-raised:  #1a3464;
+  --chrome-border:     rgba(255, 255, 255, 0.08);
+  --chrome-text:       #ffffff;
+  --chrome-text-muted: #9ab5cc;
+  --chrome-gold:       #FCD116;
+  --chrome-gold-dim:   rgba(252, 209, 22, 0.14);
 }
 
 /* ── Light theme override ─────────────────────────────────────── */
@@ -117,15 +128,6 @@
   --border-medium:  rgba(10, 22, 40, 0.15);
 }
 
-/* ── Light mode: sidebar stays dark navy — branded chrome over the canvas ── */
-:root.light aside {
-  background: #0a1628 !important;
-}
-:root.light aside a,
-:root.light aside span,
-:root.light aside p {
-  /* sidebar text uses inline styles — nav overrides handle this */
-}
 
 /* ── Base ─────────────────────────────────────────────────────── */
 @layer base {
