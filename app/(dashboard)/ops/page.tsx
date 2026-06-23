@@ -36,7 +36,7 @@ export default async function OpsSnapshotPage() {
 
     supabase
       .from('properties')
-      .select('id, name, city, state')
+      .select('id, name, city, state, lat, lng')
       .eq('org_id', membership.org_id)
       .eq('is_active', true),
 
