@@ -57,7 +57,7 @@ export function CrewShell({
     await closeDexieDb()
     const supabase = createClient()
     await supabase.auth.signOut()
-    startTransition(() => router.push('/crew/login'))
+    startTransition(() => router.push('/login?next=/crew'))
   }
 
   // Register SW silently on mount — no permission prompt

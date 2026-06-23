@@ -133,11 +133,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Authenticated user hitting a public route → redirect into the app
-  // (except '/' which doubles as the marketing homepage)
+  // Authenticated user hitting a public route → redirect into the app.
+  // If the original destination was a crew route (carried in ?next=), honour it.
+  // Otherwise default to /ops (PM dashboard).
   if (user && isPublic && pathname !== '/') {
     const url = request.nextUrl.clone()
-    url.pathname = '/ops'
+    const next = request.nextUrl.searchParams.get('next') ?? ''
+    url.pathname = next.startsWith('/crew') ? '/crew' : '/ops'
     url.search   = ''
     return NextResponse.redirect(url)
   }
