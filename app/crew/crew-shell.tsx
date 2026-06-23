@@ -234,12 +234,15 @@ function CrewBottomNav({ userId }: { userId: string }) {
 }
 
 function SyncStatus() {
-  const [isOnline, setIsOnline] = useState(
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  )
+  // Always render `true` (no banner) on both the server and the initial
+  // client paint — reading navigator.onLine during render would let the
+  // client's real value diverge from the server's, causing a hydration
+  // mismatch. The real value is applied only after mount.
+  const [isOnline, setIsOnline] = useState(true)
   const [showInfo, setShowInfo] = useState(false)
 
   useEffect(() => {
+    setIsOnline(navigator.onLine)
     const on  = () => setIsOnline(true)
     const off = () => setIsOnline(false)
     window.addEventListener('online', on)
