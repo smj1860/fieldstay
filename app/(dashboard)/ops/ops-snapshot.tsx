@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import {
   Clock, User, Wrench, Package, ChevronDown, ChevronRight, Car,
+  RefreshCw, AlertCircle, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
@@ -64,6 +65,8 @@ function KpiCard({
   label,
   value,
   accentColor = 'var(--accent-gold)',
+  accentDim = 'var(--accent-gold-dim)',
+  icon: Icon,
   alert = false,
   href,
   breakdown,
@@ -71,6 +74,8 @@ function KpiCard({
   label:        string
   value:        number
   accentColor?: string
+  accentDim?:   string
+  icon?:        LucideIcon
   alert?:       boolean
   href?:        string
   breakdown?:   React.ReactNode
@@ -78,14 +83,19 @@ function KpiCard({
   const inner = (
     <div
       className={cn('kpi-card', href && 'cursor-pointer hover:shadow-md hover:border-[var(--accent-gold)] transition-colors')}
-      style={{ '--kpi-accent': accentColor } as React.CSSProperties}
+      style={{ '--kpi-accent': accentColor, '--kpi-accent-dim': accentDim } as React.CSSProperties}
     >
+      {Icon && (
+        <div className="kpi-icon">
+          <Icon className="w-4 h-4" />
+        </div>
+      )}
       <div className="kpi-value" style={alert && value > 0 ? { color: accentColor } : undefined}>
         {value}
       </div>
       <div className="kpi-label mt-1">{label}</div>
       {breakdown && (
-        <div className="mt-1.5 text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>
+        <div className="mt-1.5 text-xs leading-snug" style={{ color: 'var(--kpi-text-muted)' }}>
           {breakdown}
         </div>
       )}
@@ -537,7 +547,9 @@ export function OpsSnapshot({
         <KpiCard
           label="Turnovers Today"
           value={kpis.turnoversToday}
-          accentColor="var(--accent-gold)"
+          accentColor="var(--kpi-gold)"
+          accentDim="var(--kpi-gold-dim)"
+          icon={RefreshCw}
           href="/turnovers"
           breakdown={
             kpis.turnoversToday === 0 ? 'No turnovers today' :
@@ -555,7 +567,9 @@ export function OpsSnapshot({
         <KpiCard
           label="Unassigned"
           value={kpis.unassigned}
-          accentColor="var(--accent-amber)"
+          accentColor="var(--kpi-amber)"
+          accentDim="var(--kpi-amber-dim)"
+          icon={AlertCircle}
           alert
           href="/turnovers?status=pending_assignment"
           breakdown={kpis.unassigned > 0 ? 'Tap to assign crew' : undefined}
@@ -563,7 +577,9 @@ export function OpsSnapshot({
         <KpiCard
           label="Open Work Orders"
           value={kpis.openWorkOrders}
-          accentColor="var(--accent-blue)"
+          accentColor="var(--kpi-blue)"
+          accentDim="var(--kpi-blue-dim)"
+          icon={Wrench}
           alert
           href="/maintenance?filter=urgent"
           breakdown={
@@ -575,7 +591,9 @@ export function OpsSnapshot({
         <KpiCard
           label="Below Par"
           value={kpis.belowPar}
-          accentColor="var(--accent-red)"
+          accentColor="var(--kpi-red)"
+          accentDim="var(--kpi-red-dim)"
+          icon={Package}
           alert
           href="/inventory?filter=below_par"
           breakdown={kpis.belowPar > 0 ? 'Tap to view inventory' : undefined}
