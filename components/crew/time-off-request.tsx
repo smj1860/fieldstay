@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useMemo }     from 'react'
-import { usePowerSync, usePowerSyncQuery } from '@powersync/react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
+import { saveCrewAvailability } from '@/lib/dexie/helpers'
 import { XCircle, CheckCircle2 } from 'lucide-react'
 
 interface Props {
@@ -12,12 +14,13 @@ interface Props {
 type AvailRow = {
   id:             string
   available_date: string
-  is_available:   number   // PowerSync SQLite: 1 = available, 0 = not
+  is_available:   number   // 1 = available, 0 = not
   notes:          string | null
 }
 
 export function TimeOffRequest({ crewMemberId, orgId }: Props) {
-  const db = usePowerSync()
+  const db     = useDexieDb()
+  const userId = useDexieUserId()
 
   // Build 14-day window starting tomorrow
   const days = useMemo(() => {
@@ -32,24 +35,21 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   const windowStart = days[0].toISOString().slice(0, 10)
   const windowEnd   = days[13].toISOString().slice(0, 10)
 
-  // Read existing availability records for this window from local SQLite
-  const existingRows = usePowerSyncQuery<AvailRow>(
-    `SELECT id, available_date, is_available, notes
-     FROM crew_availability
-     WHERE crew_member_id = ?
-       AND available_date >= ?
-       AND available_date <= ?`,
+  // Read existing availability records for this window from the local cache
+  const existingRows = useLiveQuery(
+    () => db.crew_availability
+      .where('crew_member_id').equals(crewMemberId)
+      .filter((r) => r.available_date >= windowStart && r.available_date <= windowEnd)
+      .toArray() as unknown as Promise<AvailRow[]>,
     [crewMemberId, windowStart, windowEnd]
   )
 
   // Read upcoming time-off records beyond the 14-day window (for the list below)
-  const upcomingTimeOff = usePowerSyncQuery<AvailRow>(
-    `SELECT id, available_date, is_available, notes
-     FROM crew_availability
-     WHERE crew_member_id = ?
-       AND available_date > ?
-       AND is_available = 0
-     ORDER BY available_date ASC`,
+  const upcomingTimeOff = useLiveQuery(
+    () => db.crew_availability
+      .where('crew_member_id').equals(crewMemberId)
+      .filter((r) => r.available_date > windowEnd && r.is_available === 0)
+      .sortBy('available_date') as unknown as Promise<AvailRow[]>,
     [crewMemberId, windowEnd]
   )
 
@@ -111,24 +111,15 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
     try {
       for (const [dateStr, change] of Object.entries(draft)) {
         const existing = existingMap.get(dateStr)
-        const newIsAvailable = change.timeOff ? 0 : 1
 
-        if (existing) {
-          // UPDATE existing row
-          await db.execute(
-            `UPDATE crew_availability
-             SET is_available = ?, notes = ?
-             WHERE id = ?`,
-            [newIsAvailable, change.note || null, existing.id]
-          )
-        } else {
-          // INSERT new row — UUID generated via SQLite randomblob (gen_random_uuid() is Postgres-only)
-          await db.execute(
-            `INSERT INTO crew_availability (id, org_id, crew_member_id, available_date, is_available, notes, created_at)
-             VALUES (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))), ?, ?, ?, ?, ?, datetime('now'))`,
-            [orgId, crewMemberId, dateStr, newIsAvailable, change.note || null]
-          )
-        }
+        await saveCrewAvailability(userId, {
+          id:           existing?.id,
+          orgId,
+          crewMemberId,
+          date:         dateStr,
+          isAvailable:  !change.timeOff,
+          notes:        change.note || null,
+        })
       }
 
       setDraft({})
@@ -145,10 +136,14 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
     setCancellingId(row.id)
     setCancelError(null)
     try {
-      await db.execute(
-        `UPDATE crew_availability SET is_available = 1, notes = null WHERE id = ?`,
-        [row.id]
-      )
+      await saveCrewAvailability(userId, {
+        id:           row.id,
+        orgId,
+        crewMemberId,
+        date:         row.available_date,
+        isAvailable:  true,
+        notes:        null,
+      })
     } catch (err) {
       setCancelError('Failed to cancel — please try again')
       console.error('[TimeOffRequest] cancel error:', err)

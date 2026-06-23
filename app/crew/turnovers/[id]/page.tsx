@@ -1,5 +1,6 @@
 'use client'
-import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { useParams, useRouter }            from 'next/navigation'
 import { useState, useRef }                from 'react'
 import {
@@ -9,19 +10,16 @@ import {
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { createClient }       from '@/lib/supabase/client'
-import { savePendingPhotoBlob } from '@/lib/powersync/photo-queue'
-import { processPendingPhotoUploads } from '@/lib/powersync/photo-sync'
-
-type TurnoverRow   = { id: string; status: string; priority: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number; notes: string | null; property_id: string; org_id: string }
-type InstanceRow   = { id: string; turnover_id: string; status: string }
-type ChecklistItem = { id: string; instance_id: string; section_name: string; task: string; notes: string | null; is_completed: number; completed_at: string | null; requires_photo: number; photo_storage_path: string | null; crew_notes: string | null; photo_reason: string | null; sort_order: number }
-type InvRow        = { id: string; name: string; category: string; unit: string; par_level: number; current_quantity: number; property_id: string }
-type PropertyRow   = { id: string; name: string; address: string | null; city: string | null; state: string | null }
+import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
+import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
+import { updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitIssueReport } from '@/lib/dexie/helpers'
+import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow } from '@/lib/dexie/schema'
 
 export default function CrewTurnoverPage() {
   const { id }   = useParams<{ id: string }>()
   const router   = useRouter()
-  const db       = usePowerSync()
+  const db       = useDexieDb()
+  const userId   = useDexieUserId()
   const supabase = createClient()
 
   const [uploadingItemId,   setUploadingItemId]   = useState<string | null>(null)
@@ -34,32 +32,37 @@ export default function CrewTurnoverPage() {
   const fileInputRefs      = useRef<Record<string, HTMLInputElement | null>>({})
   const sectionPhotoRefs   = useRef<Record<string, HTMLInputElement | null>>({})
 
-  const turnovers      = usePowerSyncQuery<TurnoverRow>('SELECT * FROM turnovers WHERE id = ?', [id])
-  const turnover       = turnovers?.[0]
+  const turnover = useLiveQuery(() => db.turnovers.get(id), [id])
 
-  const propertiesRaw  = usePowerSyncQuery<PropertyRow>(
-    'SELECT * FROM properties WHERE id = ?',
-    [turnover?.property_id ?? '']
-  )
-  const property = propertiesRaw?.[0] ?? null
+  const property = useLiveQuery(
+    () => turnover ? db.properties.get(turnover.property_id) : undefined,
+    [turnover?.property_id]
+  ) ?? null
 
-  const instances = usePowerSyncQuery<InstanceRow>('SELECT * FROM checklist_instances WHERE turnover_id = ?', [id])
-  const instance  = instances?.[0]
-
-  const items = usePowerSyncQuery<ChecklistItem>(
-    `SELECT * FROM checklist_instance_items WHERE instance_id = ? ORDER BY section_name, sort_order`,
-    [instance?.id ?? '']
+  const instance = useLiveQuery(
+    () => db.checklist_instances.where('turnover_id').equals(id).first(),
+    [id]
   )
 
-  const inventoryItems = usePowerSyncQuery<InvRow>(
-    `SELECT * FROM inventory_items WHERE property_id = ? ORDER BY category, name`,
-    [turnover?.property_id ?? '']
+  const items = useLiveQuery(
+    () => instance
+      ? db.checklist_instance_items
+          .where('instance_id').equals(instance.id)
+          .sortBy('sort_order')
+      : [],
+    [instance?.id]
   )
 
-  type PendingUploadRow = { id: string; target_id: string; target_table: string }
+  const inventoryItems = useLiveQuery(
+    () => turnover
+      ? db.inventory_items.where('property_id').equals(turnover.property_id).sortBy('name')
+      : [],
+    [turnover?.property_id]
+  )
 
-  const pendingUploads = usePowerSyncQuery<PendingUploadRow>(
-    `SELECT id, target_id, target_table FROM pending_photo_uploads WHERE target_table = 'checklist_instance_items'`
+  const pendingUploads = useLiveQuery(
+    () => db.pending_photo_uploads.where('target_table').equals('checklist_instance_items').toArray(),
+    []
   )
   const pendingUploadIds = new Set((pendingUploads ?? []).map(p => p.target_id))
 
@@ -91,10 +94,7 @@ export default function CrewTurnoverPage() {
       fileInputRefs.current[itemId]?.click()
       return
     }
-    await db.execute(
-      'UPDATE checklist_instance_items SET is_completed = ?, completed_at = ? WHERE id = ?',
-      [current ? 0 : 1, current ? null : new Date().toISOString(), itemId]
-    )
+    await updateChecklistItem(userId, itemId, { isCompleted: !current })
     // Check if section is now fully complete
     if (!current) {
       const sectionItems = sections[sectionName] ?? []
@@ -118,20 +118,19 @@ export default function CrewTurnoverPage() {
       if (!sectionItem) return
 
       await savePendingPhotoBlob(blobKey, file)
-      await db.execute(
-        `INSERT INTO pending_photo_uploads
-           (id, target_table, target_id, target_column, storage_path, local_blob_key, mime_type, retry_count, created_at)
-         VALUES (
-           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
-           substr(lower(hex(randomblob(2))),2) || '-' ||
-           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
-           lower(hex(randomblob(6))),
-           'checklist_instances', ?, 'section_photo_path', ?, ?, ?, 0, datetime('now')
-         )`,
-        [sectionItem.instance_id, path, blobKey, file.type]
-      )
+      await db.pending_photo_uploads.add({
+        id:             crypto.randomUUID(),
+        target_table:   'checklist_instances',
+        target_id:      sectionItem.instance_id,
+        target_column:  'section_photo_path',
+        storage_path:   path,
+        local_blob_key: blobKey,
+        mime_type:      file.type,
+        retry_count:    0,
+        created_at:     new Date().toISOString(),
+      })
 
-      void processPendingPhotoUploads(db, supabase)
+      void processPendingPhotoUploads(supabase, userId)
     } catch (err) {
       console.error('Section photo queueing failed:', err)
       setUploadError('Could not save section photo. Please try again.')
@@ -150,26 +149,22 @@ export default function CrewTurnoverPage() {
       const blobKey = `photo-${itemId}-${Date.now()}`
 
       await savePendingPhotoBlob(blobKey, file)
-      await db.execute(
-        `INSERT INTO pending_photo_uploads
-           (id, target_table, target_id, target_column, storage_path, local_blob_key, mime_type, retry_count, created_at)
-         VALUES (
-           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
-           substr(lower(hex(randomblob(2))),2) || '-' ||
-           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
-           lower(hex(randomblob(6))),
-           'checklist_instance_items', ?, 'photo_storage_path', ?, ?, ?, 0, datetime('now')
-         )`,
-        [itemId, path, blobKey, file.type]
-      )
-      await db.execute(
-        `UPDATE checklist_instance_items SET is_completed = 1 WHERE id = ?`,
-        [itemId]
-      )
+      await db.pending_photo_uploads.add({
+        id:             crypto.randomUUID(),
+        target_table:   'checklist_instance_items',
+        target_id:      itemId,
+        target_column:  'photo_storage_path',
+        storage_path:   path,
+        local_blob_key: blobKey,
+        mime_type:      file.type,
+        retry_count:    0,
+        created_at:     new Date().toISOString(),
+      })
+      await updateChecklistItem(userId, itemId, { isCompleted: true })
 
       // Attempt immediately in case we're actually online — no need to wait
       // for the next interval tick or a reconnect event.
-      void processPendingPhotoUploads(db, supabase)
+      void processPendingPhotoUploads(supabase, userId)
     } catch (err) {
       console.error('Photo queueing failed:', err)
       setUploadError('Could not save photo. Please try again.')
@@ -181,17 +176,14 @@ export default function CrewTurnoverPage() {
   const handleCountChange = async (itemId: string, newQty: number) => {
     const qty = Math.max(0, newQty)
     setCounts((prev) => ({ ...prev, [itemId]: qty }))
-    await db.execute(
-      'UPDATE inventory_items SET current_quantity = ? WHERE id = ?',
-      [qty, itemId]
-    )
+    await updateInventoryQuantity(userId, itemId, qty)
   }
 
   const getCount = (item: InvRow) =>
     counts[item.id] !== undefined ? counts[item.id] : item.current_quantity
 
   const markInProgress = async () => {
-    await db.execute('UPDATE turnovers SET status = ? WHERE id = ?', ['in_progress', id])
+    await startTurnover(userId, id)
   }
 
   const markComplete = async () => {
@@ -202,7 +194,7 @@ export default function CrewTurnoverPage() {
       if (!ok) return
     }
     setCompleting(true)
-    await db.execute('UPDATE turnovers SET status = ? WHERE id = ?', ['completed', id])
+    await completeTurnover(userId, id)
     router.push('/crew')
   }
 
@@ -440,7 +432,7 @@ export default function CrewTurnoverPage() {
                           item.is_completed ? 'text-green-700 line-through' : 'text-accent-800')}>
                           {item.task}
                         </p>
-                        {item.notes && <p className="text-xs text-accent-400 mt-0.5">{item.notes}</p>}
+                        {item.crew_notes && <p className="text-xs text-accent-400 mt-0.5">{item.crew_notes}</p>}
                         {item.photo_storage_path && (
                           <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
                             <ImageIcon className="w-3 h-3" /> Photo attached
@@ -629,6 +621,7 @@ export default function CrewTurnoverPage() {
       {showFlagModal && (
         <IssueReportModal
           turnover={turnover}
+          userId={userId}
           onClose={() => setShowFlagModal(false)}
         />
       )}
@@ -640,12 +633,13 @@ export default function CrewTurnoverPage() {
 
 function IssueReportModal({
   turnover,
+  userId,
   onClose,
 }: {
   turnover: { id: string; org_id: string; property_id: string }
-  onClose: () => void
+  userId:   string
+  onClose:  () => void
 }) {
-  const db = usePowerSync()
   const [title,      setTitle]      = useState('')
   const [details,    setDetails]    = useState('')
   const [priority,   setPriority]   = useState<'medium' | 'high' | 'urgent'>('medium')
@@ -660,18 +654,14 @@ function IssueReportModal({
     setError(null)
 
     try {
-      await db.execute(
-        `INSERT INTO turnover_issue_reports
-           (id, turnover_id, org_id, property_id, title, description, priority)
-         VALUES (
-           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
-           substr(lower(hex(randomblob(2))),2) || '-' ||
-           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
-           lower(hex(randomblob(6))),
-           ?, ?, ?, ?, ?, ?
-         )`,
-        [turnover.id, turnover.org_id, turnover.property_id, title.trim(), details.trim() || null, priority]
-      )
+      await submitIssueReport(userId, {
+        turnoverId:  turnover.id,
+        orgId:       turnover.org_id,
+        propertyId:  turnover.property_id,
+        title:       title.trim(),
+        description: details.trim() || null,
+        priority,
+      })
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message)

@@ -3,11 +3,13 @@ import { useEffect, useState, useTransition } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X } from 'lucide-react'
-import { PowerSyncContext }         from '@powersync/react'
-import { usePowerSyncQuery, useStatus } from '@powersync/react'
-import { getPowerSyncDb, disconnectPowerSync } from '@/lib/powersync/client'
+import { useLiveQuery }             from 'dexie-react-hooks'
+import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
+import { CrewContext }              from '@/lib/crew/crew-context'
+import { closeDexieDb }             from '@/lib/dexie/schema'
+import { getSyncEngine }            from '@/lib/dexie/syncService'
+import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { createClient }             from '@/lib/supabase/client'
-import { processPendingPhotoUploads } from '@/lib/powersync/photo-sync'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
 
@@ -45,7 +47,6 @@ export function CrewShell({
   userId:   string
   children: React.ReactNode
 }) {
-  const db     = getPowerSyncDb(userId)
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -53,7 +54,7 @@ export function CrewShell({
   const [notifVisible, setNotifVisible] = useState(false)
 
   async function handleLogout() {
-    await disconnectPowerSync()
+    await closeDexieDb()
     const supabase = createClient()
     await supabase.auth.signOut()
     startTransition(() => router.push('/crew/login'))
@@ -101,8 +102,13 @@ export function CrewShell({
   }
 
   useEffect(() => {
+    if (!userId) return
     const supabase = createClient()
-    const run = () => { void processPendingPhotoUploads(db, supabase) }
+
+    const run = async () => {
+      await getSyncEngine(userId).processOutbox()
+      await processPendingPhotoUploads(supabase, userId)
+    }
 
     run()  // attempt once on mount, in case items were queued in a prior session
     window.addEventListener('online', run)
@@ -112,10 +118,11 @@ export function CrewShell({
       window.removeEventListener('online', run)
       clearInterval(interval)
     }
-  }, [db])
+  }, [userId])
 
   return (
-    <PowerSyncContext.Provider value={db}>
+    <CrewContext.Provider value={{ crewName, userId }}>
+    <DexieProvider userId={userId}>
       <div className="min-h-screen bg-accent-50 flex flex-col max-w-lg mx-auto">
         <header className="bg-brand-800 text-white px-4 py-4 flex items-center justify-between sticky top-0 z-10">
           <div>
@@ -174,18 +181,22 @@ export function CrewShell({
         <main className="flex-1 px-4 py-6">{children}</main>
         <CrewBottomNav userId={userId} />
       </div>
-    </PowerSyncContext.Provider>
+    </DexieProvider>
+    </CrewContext.Provider>
   )
 }
 
 function CrewBottomNav({ userId }: { userId: string }) {
   const pathname = usePathname()
+  const db = useDexieDb()
 
-  const unread = usePowerSyncQuery<{ count: number }>(
-    `SELECT COUNT(*) as count FROM messages WHERE recipient_id = ? AND read_at IS NULL`,
+  const unreadCount = useLiveQuery(
+    () => db.messages
+      .where('recipient_id').equals(userId)
+      .filter((m) => !m.read_at)
+      .count(),
     [userId]
-  )
-  const unreadCount = unread?.[0]?.count ?? 0
+  ) ?? 0
 
   const tabs = [
     { href: '/crew',              label: 'Assignments',  icon: CalendarCheck },
@@ -223,11 +234,23 @@ function CrewBottomNav({ userId }: { userId: string }) {
 }
 
 function SyncStatus() {
-  const status = useStatus()
-  const connected = status.connected
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  )
   const [showInfo, setShowInfo] = useState(false)
 
-  if (connected) return null
+  useEffect(() => {
+    const on  = () => setIsOnline(true)
+    const off = () => setIsOnline(false)
+    window.addEventListener('online', on)
+    window.addEventListener('offline', off)
+    return () => {
+      window.removeEventListener('online', on)
+      window.removeEventListener('offline', off)
+    }
+  }, [])
+
+  if (isOnline) return null
   return (
     <>
       <button

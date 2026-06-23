@@ -1,43 +1,24 @@
 'use client'
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { usePowerSyncQuery } from '@powersync/react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { Send, MessageSquare } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
-import { createClient } from '@/lib/supabase/client'
 import { sendMessageToPM, markConversationRead } from '@/app/(dashboard)/messages/actions'
 
-type MessageRow = {
-  id:           string
-  sender_id:    string
-  recipient_id: string
-  content:      string
-  read_at:      string | null
-  group_id:     string | null
-  group_label:  string | null
-  created_at:   string
-}
-
 export default function CrewMessagesPage() {
-  const [userId, setUserId]     = useState<string | null>(null)
+  const db = useDexieDb()
+  const userId = useDexieUserId()
   const [draft, setDraft]       = useState('')
   const [sendError, setSendError] = useState<string | null>(null)
   const [sending, startSend]    = useTransition()
   const bottomRef               = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const supabase = createClient()
-    const loadUser = async () => {
-      const { data } = await supabase.auth.getUser()
-      setUserId(data.user?.id ?? null)
-    }
-    loadUser()
-  }, [])
-
-  const messages = usePowerSyncQuery<MessageRow>(
-    `SELECT * FROM messages
-     WHERE sender_id = ? OR recipient_id = ?
-     ORDER BY created_at ASC`,
-    [userId ?? '', userId ?? '']
+  const messages = useLiveQuery(
+    () => db.messages
+      .filter((m) => m.sender_id === userId || m.recipient_id === userId)
+      .sortBy('created_at'),
+    [userId]
   )
 
   const conversation = useMemo(() => messages ?? [], [messages])
