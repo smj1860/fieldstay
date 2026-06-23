@@ -81,8 +81,13 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
     async function initialSync() {
       const db = getDexieDb(userId!)
-      const turnoverCount = await db.turnovers.count()
-      if (turnoverCount > 0) return // already populated
+      const [turnoverCount, checklistItemCount, propertyCount] = await Promise.all([
+        db.turnovers.count(),
+        db.checklist_instance_items.count(),
+        db.properties.count(),
+      ])
+      // Re-sync if any critical table is empty, even if turnovers already loaded
+      if (turnoverCount > 0 && checklistItemCount > 0 && propertyCount > 0) return // already populated
 
       const supabase = createClient()
 
