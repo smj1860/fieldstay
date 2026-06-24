@@ -28,6 +28,9 @@ import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initia
 import { ownerRezIncrementalSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
 import { ownerRezReviewsSync }     from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
 
+// Hostaway integration
+import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sync'
+
 // Turnover flag → WO
 import { flaggedTurnoverToWO } from '@/lib/inngest/functions/flagged-turnover-wo'
 
@@ -114,6 +117,9 @@ export const { GET, POST, PUT } = serve({
     ownerRezInitialSync,
     ownerRezIncrementalSync,
     ownerRezReviewsSync,
+
+    // Hostaway sync
+    hostawayInitialSync,
 
     // Flagged turnover → WO
     flaggedTurnoverToWO,
