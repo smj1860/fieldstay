@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PriorityLevel } from '@/types/database'
+import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DBClient = SupabaseClient<any>
@@ -232,6 +233,14 @@ export async function snapshotChecklist(
       }
     })
   )
+
+  // Progressive Asset Discovery: inject system-mandated, non-deletable tasks
+  // for any required asset type not yet verified on this property.
+  const missingAssetTypes = await getMissingAssetDiscoveryTypes(supabase, propertyId)
+  if (missingAssetTypes.length > 0) {
+    items.push(...buildAssetDiscoveryItems(instance.id, turnoverID, missingAssetTypes, items.length))
+  }
+
   if (items.length > 0) await supabase.from('checklist_instance_items').insert(items)
 }
 
