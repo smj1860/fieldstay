@@ -35,6 +35,21 @@ export async function POST(request: NextRequest) {
   }
 
   if (submitAsDraft) {
+    // Idempotency — same as the legacy commit path below: a double-tap submit or a
+    // PowerSync/Dexie retry after a connectivity blip must not create a second draft.
+    const draftWindowStart = new Date(Date.now() - 5 * 60 * 1000).toISOString()
+    const { data: recentDraft } = await supabase
+      .from('inventory_count_drafts')
+      .select('id')
+      .eq('property_id', propertyId)
+      .eq('submitted_by', crew.id)
+      .gte('created_at', draftWindowStart)
+      .maybeSingle()
+
+    if (recentDraft) {
+      return NextResponse.json({ success: true, draftId: recentDraft.id })
+    }
+
     // Fetch previous quantities for the diff
     const itemIds = Object.keys(counts)
     const { data: currentItems } = await supabase

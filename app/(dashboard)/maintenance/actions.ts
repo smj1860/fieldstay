@@ -339,6 +339,10 @@ export async function updateWorkOrderStatus(
 
   if (!current) return { error: 'Work order not found' }
 
+  // Already completed (e.g. double-click or retried request) — no-op rather
+  // than re-firing work-order/completed and double-advancing its schedule.
+  if (current.status === 'completed') return { success: true }
+
   const update: Record<string, unknown> = { status }
   if (status === 'completed') {
     update.completed_date   = isoDate()
@@ -797,6 +801,20 @@ export async function createWorkOrderFromSchedule(
     .single()
 
   if (!schedule) return { error: 'Schedule not found' }
+
+  // Idempotency: skip if an open WO already exists for this schedule + date —
+  // mirrors the auto-create check in the maintenance-schedule cron, so a
+  // double-click on "Create Work Order Now" doesn't create a duplicate while
+  // still allowing the next cycle's WO once this one is completed/cancelled.
+  const { data: existingWO } = await supabase
+    .from('work_orders')
+    .select('id')
+    .eq('source_schedule_id', scheduleId)
+    .eq('scheduled_date', schedule.next_due_date)
+    .not('status', 'in', '("completed","cancelled")')
+    .maybeSingle()
+
+  if (existingWO) return { success: true }
 
   const completion_token = crypto.randomUUID()
   const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()

@@ -28,7 +28,7 @@ function isPublicPath(pathname: string): boolean {
  *
  * If the session is missing or fails to refresh on a protected route,
  * redirect to login rather than leaving the user in a broken offline
- * state with no explanation (PowerSync can't authenticate either).
+ * state with no explanation (Dexie's SyncEngine can't authenticate either).
  */
 export function SessionRefreshGuard() {
   const router = useRouter()

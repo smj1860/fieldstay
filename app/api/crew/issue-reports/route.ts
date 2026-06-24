@@ -36,9 +36,9 @@ export async function POST(request: NextRequest) {
 
   if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
 
-  // Idempotency — PowerSync may retry the same upload after a connectivity
-  // blip. Treat a matching report submitted in the last 10 minutes as
-  // already processed instead of creating a duplicate work order.
+  // Idempotency — the Dexie SyncEngine outbox may retry the same upload after a
+  // connectivity blip. Treat a matching report submitted in the last 10 minutes
+  // as already processed instead of creating a duplicate work order.
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
   const { data: existing } = await supabase
     .from('work_orders')
