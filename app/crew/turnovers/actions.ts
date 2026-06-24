@@ -1,11 +1,8 @@
 'use server'
 
 import { createClient, createServiceClient } from '@/lib/supabase/server'
-import {
-  REQUIRED_ASSET_TYPES,
-  ASSET_TYPE_ENUM_MAP,
-  type RequiredAssetType,
-} from '@/lib/asset-discovery/config'
+import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discovery/config'
+import type { AssetType } from '@/types/database'
 
 export type ReportIssueResult = { success?: boolean; error?: string }
 
@@ -83,7 +80,7 @@ export interface AssetDiscoveryPayload {
  */
 export async function submitAssetDiscovery(
   propertyId: string,
-  assetType:  RequiredAssetType,
+  assetType:  AssetType,
   payload:    AssetDiscoveryPayload,
 ): Promise<SubmitAssetDiscoveryResult> {
   try {
@@ -111,13 +108,12 @@ export async function submitAssetDiscovery(
     if (!assignedTurnover) return { error: 'Property not found' }
 
     const admin = createServiceClient()
-    const enumAssetType = ASSET_TYPE_ENUM_MAP[assetType]
 
     const { data: existing } = await admin
       .from('property_assets')
       .select('id')
       .eq('property_id', propertyId)
-      .eq('asset_type', enumAssetType)
+      .eq('asset_type', assetType)
       .eq('is_active', true)
       .maybeSingle()
 
@@ -134,8 +130,8 @@ export async function submitAssetDiscovery(
       : await admin.from('property_assets').insert({
           org_id:      crew.org_id,
           property_id: propertyId,
-          name:        assetType,
-          asset_type:  enumAssetType,
+          name:        assetTypeDisplayName(assetType),
+          asset_type:  assetType,
           is_active:   true,
           ...fields,
         })
