@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useActionState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook, RefreshCw, AlertTriangle } from 'lucide-react'
+import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { Organization } from '@/types/database'
 import {
@@ -14,7 +14,6 @@ import {
   updateAutoAssignMode,
   updateCommsRetention,
   updateSlackWebhook,
-  syncOwnerRezNow,
   type SettingsActionState,
 } from './actions'
 
@@ -38,45 +37,6 @@ const PLAN_STATUS_BADGES: Record<string, string> = {
   past_due:  'badge-red',
   cancelled: 'badge-red',
   paused:    'badge-slate',
-}
-
-// ── Sync Now button (OwnerRez) ─────────────────────────────────────────────────
-
-function SyncNowButton() {
-  const [isPending, startTransition] = useTransition()
-  const [message, setMessage]        = useState<string | null>(null)
-
-  const handleSync = () => {
-    startTransition(async () => {
-      const result = await syncOwnerRezNow()
-      if (result.error) {
-        setMessage(result.error)
-      } else {
-        setMessage('Sync started — updates will appear within a minute')
-        // Clear the success message after 5 seconds
-        setTimeout(() => setMessage(null), 5000)
-      }
-    })
-  }
-
-  return (
-    <div>
-      <button
-        onClick={handleSync}
-        disabled={isPending}
-        className="btn-ghost text-sm flex items-center gap-1.5 flex-shrink-0"
-        style={{ color: 'var(--text-muted)' }}
-      >
-        <RefreshCw className={cn('w-3.5 h-3.5', isPending && 'animate-spin')} />
-        {isPending ? 'Syncing…' : 'Sync Now'}
-      </button>
-      {message && (
-        <p className="text-xs mt-1.5 text-right" style={{ color: 'var(--text-muted)' }}>
-          {message}
-        </p>
-      )}
-    </div>
-  )
 }
 
 // ── Root component ───────────────────────────────────────────────────────────
@@ -214,134 +174,18 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
         </form>
       </div>
 
-      {/* OwnerRez */}
+      {/* Connected Accounts — managed centrally on the Integrations page */}
       <div className="card">
-        <div className="flex items-start justify-between gap-2 mb-1">
-          <h2 className="text-base font-semibold text-primary-themed">OwnerRez</h2>
-          <span
-            className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide flex-shrink-0"
-            style={{ background: 'rgba(61,139,79,0.12)', color: '#4ade80' }}
-          >
-            PMS
-          </span>
-        </div>
-        <p className="text-xs text-muted-themed mb-4">
-          Syncs bookings, properties, and guest reviews. Enables RepuGuard and
-          automatic revenue posting to owner ledgers.
+        <h2 className="text-base font-semibold text-primary-themed mb-1">
+          Connected Accounts
+        </h2>
+        <p className="text-xs text-muted-themed mb-3">
+          Connect OwnerRez, Hostaway, Guesty, and other platforms to sync
+          bookings and properties automatically.
         </p>
-
-        {(() => {
-          const conn            = connections.ownerrez
-          const isConnected     = conn?.status === 'active'
-          const isError         = conn?.status === 'error' || conn?.status === 'revoked'
-          const meta            = (conn?.metadata ?? {}) as Record<string, unknown>
-          const lastSyncAt      = meta.last_synced_at as string | undefined
-          const lastSyncStatus  = meta.last_sync_status as string | undefined
-          const lastSyncError   = meta.last_sync_error as string | undefined
-          const lastSyncCount   = meta.last_sync_count as number | undefined
-
-          // Format relative time for last sync
-          const lastSyncLabel = lastSyncAt
-            ? (() => {
-                const diff = Date.now() - new Date(lastSyncAt).getTime()
-                const mins = Math.floor(diff / 60_000)
-                if (mins < 1)  return 'just now'
-                if (mins < 60) return `${mins}m ago`
-                const hrs = Math.floor(mins / 60)
-                if (hrs < 24)  return `${hrs}h ago`
-                return `${Math.floor(hrs / 24)}d ago`
-              })()
-            : null
-
-          if (isConnected) {
-            return (
-              <div className="space-y-3">
-                {/* Status row */}
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                  <div>
-                    <p className="text-sm font-medium flex items-center gap-1.5"
-                       style={{ color: 'var(--text-primary)' }}>
-                      <span style={{ color: 'var(--accent-green)' }}>●</span>
-                      Connected
-                    </p>
-                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                      {lastSyncLabel && (
-                        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                          Last synced {lastSyncLabel}
-                          {lastSyncCount != null && lastSyncCount > 0 && (
-                            <span> · {lastSyncCount} booking{lastSyncCount !== 1 ? 's' : ''}</span>
-                          )}
-                        </p>
-                      )}
-                      {lastSyncStatus === 'rate_limited' && (
-                        <span className="text-xs" style={{ color: 'var(--accent-amber)' }}>
-                          · Rate limited
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <SyncNowButton />
-                    <a
-                      href="/api/integrations/ownerrez/connect"
-                      className="btn-ghost text-sm flex-shrink-0"
-                      style={{ color: 'var(--text-muted)' }}
-                    >
-                      Reconnect
-                    </a>
-                  </div>
-                </div>
-
-                {/* Error state within an otherwise-active connection (partial errors) */}
-                {lastSyncError && lastSyncStatus !== 'success' && lastSyncStatus !== 'rate_limited' && (
-                  <div
-                    className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs"
-                    style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                    <span>{lastSyncError}</span>
-                  </div>
-                )}
-              </div>
-            )
-          }
-
-          if (isError) {
-            return (
-              <div className="space-y-3">
-                {/* Error banner */}
-                <div
-                  className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-xs"
-                  style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
-                >
-                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                  <span>{lastSyncError ?? 'Sync connection error — bookings are no longer updating.'}</span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {lastSyncLabel ? `Last successful sync: ${lastSyncLabel}` : 'Reconnect to resume syncing'}
-                  </p>
-                  <a
-                    href="/api/integrations/ownerrez/connect"
-                    className="btn-primary text-sm flex-shrink-0"
-                  >
-                    Reconnect
-                  </a>
-                </div>
-              </div>
-            )
-          }
-
-          // Not connected
-          return (
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Not connected</p>
-              <a href="/api/integrations/ownerrez/connect" className="btn-primary text-sm flex-shrink-0">
-                Connect OwnerRez
-              </a>
-            </div>
-          )
-        })()}
+        <a href="/settings/integrations" className="btn-secondary text-sm inline-flex items-center gap-1.5">
+          Manage Integrations →
+        </a>
       </div>
 
       {/* Kroger — Grocery Cart Automation */}

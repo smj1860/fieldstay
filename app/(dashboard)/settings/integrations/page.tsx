@@ -1,4 +1,5 @@
 import type { Metadata }       from 'next'
+import { Suspense }            from 'react'
 import Link                    from 'next/link'
 import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -14,7 +15,7 @@ export default async function IntegrationsPage() {
 
   const { data: providers } = await admin
     .from('integration_providers')
-    .select('id, display_name, is_active')
+    .select('id, display_name, auth_type, is_active')
     .eq('is_active', true)
     .order('display_name')
 
@@ -50,10 +51,12 @@ export default async function IntegrationsPage() {
         </p>
       </div>
 
-      <IntegrationsClient
-        providers={providers ?? []}
-        connectionsByProvider={connectionsByProvider}
-      />
+      <Suspense fallback={null}>
+        <IntegrationsClient
+          providers={providers ?? []}
+          connectionsByProvider={connectionsByProvider}
+        />
+      </Suspense>
 
       <ChannelHealthTable feeds={(icalFeeds ?? []) as never} />
     </div>
