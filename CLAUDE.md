@@ -28,7 +28,7 @@ created from a maintenance schedule, the right vendor is selected and notified.
 | Hosting | Vercel | Edge runtime where applicable |
 | Database | Supabase (PostgreSQL) | RLS on every table, no exceptions |
 | Auth | Supabase Auth | `createServerClient` from `@supabase/ssr` |
-| Sync | PowerSync | Client reads SQLite only — never Supabase directly |
+| Sync | Dexie (IndexedDB) | Crew PWA reads/writes local IndexedDB only — never Supabase directly for reads |
 | Background jobs | Inngest | All async work, crons, multi-step workflows |
 | Email | Resend + React Email | Transactional only, never marketing |
 | Payments | Stripe | Webhook signature verification required |
@@ -36,7 +36,8 @@ created from a maintenance schedule, the right vendor is selected and notified.
 | Geocoding | Mapbox | Properties and vendors — one call on save |
 
 **Never introduce:** Vite, Turborepo, tRPC, Prisma, or any ORM.
-**Never add** client-side Supabase reads that bypass PowerSync.
+**Never add** client-side Supabase reads that bypass the Dexie local-first sync layer
+in the crew PWA (`lib/dexie/*`).
 
 ---
 
@@ -307,21 +308,50 @@ import { createServiceClient } from '@/lib/supabase/server'
 const supabase = createServiceClient()
 ```
 
-### PowerSync — Client-Side Data Access
-```typescript
-// Client components read from local SQLite via PowerSync hooks
-// NEVER call supabase directly from a client component for reads
-import { usePowerSync } from '@powersync/react'
+### Dexie — Client-Side Data Access (Crew PWA)
+The crew PWA (`app/crew/*`) is local-first, but it does **not** use PowerSync —
+that was the original design and is referenced in `lib/dexie/*` code comments
+purely as a frame of reference (those comments document which parts of the
+PowerSync design Dexie's tables/sync logic mirror). The actual sync layer is a
+hand-rolled Dexie (IndexedDB) cache plus a local mutation outbox:
 
-function MyComponent() {
-  const db = usePowerSync()
-  const results = db.getAll('SELECT * FROM turnovers WHERE property_id = ?', [propertyId])
+- `lib/dexie/schema.ts` — `FieldStayDexie`, the Dexie database class. Table
+  shapes mirror the Supabase tables they cache. Get an instance via
+  `getDexieDb(userId)`.
+- `lib/dexie/context.tsx` — `DexieProvider` pulls turnovers/properties/
+  inventory/checklists/messages from Supabase into Dexie tables on an interval
+  and on reconnect; client components read from Dexie, never from Supabase
+  directly.
+- `lib/dexie/syncService.ts` — `enqueueMutation()` queues a local write into
+  the `mutations` outbox table and fires `SyncEngine.processOutbox()` in the
+  background, which drains the outbox in insertion order and pushes each
+  mutation to Supabase (or a Route Handler, for flows like turnover
+  completion that need server-side side effects), retrying on failure and
+  stopping the drain on first error so later mutations against the same
+  record aren't applied out of order.
+
+```typescript
+// Client components read from the local Dexie cache, not Supabase directly
+import { getDexieDb } from '@/lib/dexie/schema'
+import { useLiveQuery } from 'dexie-react-hooks'
+
+function MyComponent({ userId, propertyId }: { userId: string; propertyId: string }) {
+  const turnovers = useLiveQuery(
+    () => getDexieDb(userId).turnovers.where({ property_id: propertyId }).toArray(),
+    [userId, propertyId],
+  )
 }
 
-// Mutations go through Server Actions, which write to Supabase
-// PowerSync then streams the change back to the local SQLite cache
-// This is the core local-first pattern — never short-circuit it
+// Writes go through enqueueMutation(), which queues to the local outbox and
+// syncs to Supabase in the background — this is the core local-first pattern
+// for the crew PWA, never short-circuit it with a direct Supabase write.
+import { enqueueMutation } from '@/lib/dexie/syncService'
+await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', { status: 'in_progress' })
 ```
+
+The rest of the app (PM dashboard) reads Supabase directly via Server
+Components/Server Actions per the patterns above — Dexie is scoped to the
+crew PWA only.
 
 ### Inngest Functions
 
@@ -592,7 +622,7 @@ Current state summary:
 | Adding a DB column via migration without updating `types/database.ts` | Every migration that adds a column must also add that column to the matching interface in `types/database.ts` in the same commit. Supabase's TS client infers return types from this file, not from the live DB. Missing columns here cause build failures even when the query and select string are correct |
 | Adding a new event to `events.ts` outside the closing `}` of `FieldStayEvents` | The final `}` in `events.ts` closes the `FieldStayEvents` type. Every new event entry must be placed before it, with a comma after the preceding entry's closing brace |
 | `.modify(q => ...)` on a Supabase query | Not a real method. Build the query conditionally with `if` blocks before awaiting it |
-| Direct Supabase reads in client components | PowerSync hooks + local SQLite |
+| Direct Supabase reads in crew PWA client components (`app/crew/*`) | Dexie (`getDexieDb` / `useLiveQuery`) reading the local IndexedDB cache |
 | Service role key in client code | Server Actions and Inngest steps only |
 | Hardcoded colors in components | CSS variables (`var(--text-primary)` etc.) |
 | Creating a table without RLS | Always `ENABLE ROW LEVEL SECURITY` + policies |
