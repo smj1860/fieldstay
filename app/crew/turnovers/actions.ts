@@ -45,16 +45,20 @@ export async function reportTurnoverIssue(
     if (!turnover) return { error: 'Turnover not found' }
 
     const { error } = await supabase.from('work_orders').insert({
-      org_id:      turnover.org_id,
-      property_id: turnover.property_id,
-      title:       title.trim(),
-      description: description?.trim() || null,
+      org_id:             turnover.org_id,
+      property_id:        turnover.property_id,
+      source_turnover_id: turnover.id,
+      title:              title.trim(),
+      description:        description?.trim() || null,
       priority,
       status: 'pending',
       source: 'crew_flag',
     })
 
     if (error) {
+      // wo_crew_flag_source_unique — a duplicate flag on this turnover
+      // (double-submit) is a no-op, not a failure.
+      if (error.code === '23505') return { success: true }
       console.error('[reportTurnoverIssue]', error)
       return { error: 'Operation failed. Please try again.' }
     }

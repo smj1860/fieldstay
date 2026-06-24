@@ -46,11 +46,12 @@ export const sendSubscriberCheckin = inngest.createFunction(
         : 'I know running your operation keeps you constantly busy'
 
       // Plain text — intentionally NOT a React Email template
-      await resend.emails.send({
-        from:    'Stephen <stephen@fieldstay.app>',
-        to:      user_email,
-        subject: 'checking in',
-        text: `Hi ${first_name},
+      await resend.emails.send(
+        {
+          from:    'Stephen <stephen@fieldstay.app>',
+          to:      user_email,
+          subject: 'checking in',
+          text: `Hi ${first_name},
 
 You've been on FieldStay for a few weeks now and I wanted to reach out personally — how's it going?
 
@@ -63,7 +64,9 @@ We're building fast and your feedback goes directly into what we prioritize next
 — Stephen
 
 P.S. If you ever hit a snag or have a question, just reply here. I'm reachable.`,
-      })
+        },
+        { idempotencyKey: `subscriber-checkin-${org_id}` }
+      )
     })
   }
 )

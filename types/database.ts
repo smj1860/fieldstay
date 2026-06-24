@@ -260,6 +260,25 @@ export interface CrewAvailabilityEntry {
   notes:          string | null
 }
 
+export interface AssignmentOutcome {
+  id:                 string
+  org_id:             string
+  turnover_id:        string
+  crew_member_id:     string
+  property_id:        string | null
+  suggested_score:    number | null
+  score_breakdown:    Record<string, unknown> | null
+  was_suggestion:     boolean
+  was_accepted:       boolean | null
+  override_reason:    string | null
+  started_at:         string | null
+  completed_at:       string | null
+  duration_minutes:   number | null
+  pm_rating:          number | null
+  property_bedrooms:  number | null
+  created_at:         string
+}
+
 export interface Vendor {
   id:                   string
   org_id:               string
@@ -819,6 +838,38 @@ export interface StripeProcessedEvent {
   processed_at:    string
 }
 
+// ── RepuGuard ────────────────────────────────────────────────────────────────
+export interface Review {
+  id:              string
+  org_id:          string
+  property_id:     string | null
+  external_id:     string
+  external_source: string
+  guest_name:      string | null
+  rating:          number
+  review_text:     string
+  review_date:     string | null
+  response_status: string
+  external_url:    string | null
+  created_at:      string
+  updated_at:      string
+}
+
+export interface ReviewResponse {
+  id:                  string
+  review_id:           string
+  org_id:              string
+  generated_response:  string | null
+  edited_response:     string | null
+  word_count:          number | null
+  tone_used:           string | null
+  flags:               string[]
+  flag_reason:         string | null
+  generated_at:        string | null
+  created_at:          string
+  updated_at:          string
+}
+
 export interface QuoteRequest {
   id:                     string
   work_order_id:          string
@@ -864,6 +915,15 @@ export interface Message {
   group_id:      string | null
   group_label:   string | null
   created_at:    string
+}
+
+// ── Inventory template ───────────────────────────────────────────────────────
+export interface InventoryTemplate {
+  id:          string
+  org_id:      string
+  name:        string
+  description: string | null
+  created_at:  string
 }
 
 // ── Inventory template item ──────────────────────────────────────────────────
@@ -971,20 +1031,6 @@ export interface OAuthState {
   created_at:  string
   /** Expires after 10 minutes to match OwnerRez temporary code lifetime */
   expires_at:  string
-}
-
-// ── Audit Log ────────────────────────────────────────────────────────────────
-
-export interface AuditEvent {
-  id:          string
-  org_id:      string | null
-  actor_id:    string | null
-  action:      string
-  target_type: string | null
-  target_id:   string | null
-  metadata:    Record<string, unknown> | null
-  ip_address:  string | null
-  created_at:  string
 }
 
 export interface OwnerRezProcessedWebhook {

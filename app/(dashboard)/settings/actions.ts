@@ -578,12 +578,22 @@ export async function inviteCrewMember(
   if (!crew.email)  return { error: 'No email address on file for this crew member' }
   if (crew.user_id) return { error: 'This crew member already has an active account' }
 
-  // Guard against duplicate sends from a double-click or two tabs firing this
-  // action within the same moment — a deliberate "Resend Invite" click won't
-  // realistically land inside this window.
-  if (crew.invite_sent_at && Date.now() - Date.parse(crew.invite_sent_at) < 10_000) {
-    return { success: true }
-  }
+  // Atomically claim the send via a conditional update keyed on the same 10s
+  // window the old heuristic used — closes the race where two concurrent
+  // requests (double-click, two tabs) both read the same invite_sent_at and
+  // both proceed to send. A deliberate "Resend Invite" click after the
+  // window still claims successfully and sends.
+  const windowStart = new Date(Date.now() - 10_000).toISOString()
+  const { data: claimed } = await supabase
+    .from('crew_members')
+    .update({ invite_sent_at: new Date().toISOString() })
+    .eq('id', crewMemberId)
+    .eq('org_id', membership.org_id)
+    .or(`invite_sent_at.is.null,invite_sent_at.lt.${windowStart}`)
+    .select('id')
+    .maybeSingle()
+
+  if (!claimed) return { success: true }
 
   const { data: org } = await supabase
     .from('organizations')
@@ -609,13 +619,13 @@ export async function inviteCrewMember(
 
   if (emailError) {
     console.error('[inviteCrewMember] email send failed')
+    // Release the claim so a retry isn't blocked by the window above
+    await supabase
+      .from('crew_members')
+      .update({ invite_sent_at: crew.invite_sent_at })
+      .eq('id', crewMemberId)
     return { error: 'Failed to send invite email. Please try again.' }
   }
-
-  await supabase
-    .from('crew_members')
-    .update({ invite_sent_at: new Date().toISOString() })
-    .eq('id', crewMemberId)
 
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
@@ -656,6 +666,21 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
   let sent = 0
   for (const crew of uninvited) {
     if (!crew.email) continue
+
+    // Atomically claim this crew member before sending — closes the race
+    // where a double-click fires two concurrent invocations that both query
+    // the same "uninvited" list and each send a duplicate invite to everyone.
+    const { data: claimed } = await supabase
+      .from('crew_members')
+      .update({ invite_sent_at: new Date().toISOString() })
+      .eq('id', crew.id)
+      .eq('org_id', membership.org_id)
+      .is('invite_sent_at', null)
+      .select('id')
+      .maybeSingle()
+
+    if (!claimed) continue
+
     const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
     const html = await renderCrewInviteEmail({
       crewName:  crew.name,
@@ -670,12 +695,14 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
       html,
     })
     if (!emailError) {
+      sent++
+    } else {
+      // Release the claim so a future bulk run or manual resend can retry
       await supabase
         .from('crew_members')
-        .update({ invite_sent_at: new Date().toISOString() })
+        .update({ invite_sent_at: null })
         .eq('id', crew.id)
         .eq('org_id', membership.org_id)
-      sent++
     }
   }
 

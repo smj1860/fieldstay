@@ -5,7 +5,7 @@ import { inngest } from '@/lib/inngest/client'
 /**
  * POST /api/crew/turnovers/[id]/start
  *
- * Called by the PowerSync upload connector when a crew member taps
+ * Called by the Dexie SyncEngine outbox when a crew member taps
  * "Start Turnover" in the crew PWA. Routes through the server so
  * started_at is set authoritatively (not from client clock) and the
  * transition is validated against crew membership.

@@ -28,13 +28,17 @@ export const notifyIntegrationError = inngest.createFunction(
       const reconnectUrl = `${appUrl}/settings/integrations`
 
       const html = await renderIntegrationErrorEmail({ providerName, reason, reconnectUrl })
+      const today = new Date().toISOString().split('T')[0]
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      pmEmail,
-        subject: `Action required — Your ${providerName} connection needs attention`,
-        html,
-      })
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      pmEmail,
+          subject: `Action required — Your ${providerName} connection needs attention`,
+          html,
+        },
+        { idempotencyKey: `integration-error-${user_id}-${provider_id}-${today}` }
+      )
     })
 
     return { sent: true, to: pmEmail }

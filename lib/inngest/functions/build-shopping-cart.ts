@@ -376,7 +376,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
       total_est:       totalEst > 0 ? Math.round(totalEst * 100) / 100 : undefined,
     }
 
-    // ── Step 7: Persist result for PowerSync UI sync ─────────────
+    // ── Step 7: Persist result for dashboard UI ─────────────
     await step.run('persist-result', async () => {
       const supabase = createServiceClient()
       await supabase.from('org_milestones').upsert({

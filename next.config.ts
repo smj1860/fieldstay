@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self' https: localhost:* =>*; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://*.powersync.journeyapps.com wss://*.powersync.journeyapps.com http://localhost:* ws://localhost:*;"
+            value: "default-src 'self' https: localhost:* =>*; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com http://localhost:* ws://localhost:*;"
           }
         ]
       }

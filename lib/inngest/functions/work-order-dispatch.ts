@@ -15,7 +15,7 @@ export const workOrderDispatch = inngest.createFunction(
 
   async ({ event, step }) => {
     const {
-      woNumber, publicUrl, vendorEmail, vendorName,
+      workOrderId, woNumber, publicUrl, vendorEmail, vendorName,
       propertyName, propertyAddress, title, description,
       nteAmount, dispatcherName, dispatcherOrg, dispatcherPhone,
     } = event.data
@@ -35,12 +35,15 @@ export const workOrderDispatch = inngest.createFunction(
         dispatcherOrg,
         dispatcherPhone,
       }))
-      const { error } = await resend.emails.send({
-        from:    FROM,
-        to:      [vendorEmail],
-        subject: `Work Order ${woNumber} — ${propertyName}`,
-        html,
-      })
+      const { error } = await resend.emails.send(
+        {
+          from:    FROM,
+          to:      [vendorEmail],
+          subject: `Work Order ${woNumber} — ${propertyName}`,
+          html,
+        },
+        { idempotencyKey: `work-order-dispatch-${workOrderId}-${vendorEmail}` }
+      )
       if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
     })
 
@@ -56,6 +59,17 @@ export const workOrderDispatch = inngest.createFunction(
 
       if (!wo) return { skipped: 'work order not found for comms log' }
 
+      const subject = `Work Order ${woNumber} — ${propertyName}`
+
+      const { data: existing } = await supabase
+        .from('communication_logs')
+        .select('id')
+        .eq('work_order_id', wo.id)
+        .eq('subject', subject)
+        .maybeSingle()
+
+      if (existing) return { logged: false, alreadyExisted: true }
+
       const { error } = await supabase.from('communication_logs').insert({
         org_id:          wo.org_id,
         channel:         'email',
@@ -63,7 +77,7 @@ export const workOrderDispatch = inngest.createFunction(
         vendor_id:       wo.vendor_id ?? null,
         work_order_id:   wo.id,
         property_id:     wo.property_id,
-        subject:         `Work Order ${woNumber} — ${propertyName}`,
+        subject,
         body:            `Work order dispatched to ${vendorEmail}. Public URL: ${publicUrl}`,
         source:          'system',
         communicated_at: new Date().toISOString(),
@@ -143,12 +157,15 @@ export const workOrderSignedOff = inngest.createFunction(
         signedOffAt,
         pmName:       pmEmail.fullName,
       }))
-      const { error } = await resend.emails.send({
-        from:    FROM,
-        to:      [pmEmail.email!],
-        subject: `✓ Work Complete — ${woNumber} · ${propertyName}`,
-        html,
-      })
+      const { error } = await resend.emails.send(
+        {
+          from:    FROM,
+          to:      [pmEmail.email!],
+          subject: `✓ Work Complete — ${woNumber} · ${propertyName}`,
+          html,
+        },
+        { idempotencyKey: `work-order-signed-off-pm-${workOrderId}` }
+      )
       if (error) throw new Error(`Resend sign-off error: ${JSON.stringify(error)}`)
     })
 
@@ -164,6 +181,17 @@ export const workOrderSignedOff = inngest.createFunction(
 
       if (!wo) return { skipped: true }
 
+      const subject = `Work Order Signed Off — ${woNumber}`
+
+      const { data: existing } = await supabase
+        .from('communication_logs')
+        .select('id')
+        .eq('work_order_id', workOrderId)
+        .eq('subject', subject)
+        .maybeSingle()
+
+      if (existing) return { logged: false, alreadyExisted: true }
+
       const { error } = await supabase.from('communication_logs').insert({
         org_id:          wo.org_id,
         channel:         'note',
@@ -171,7 +199,7 @@ export const workOrderSignedOff = inngest.createFunction(
         vendor_id:       wo.vendor_id ?? null,
         work_order_id:   workOrderId,
         property_id:     wo.property_id,
-        subject:         `Work Order Signed Off — ${woNumber}`,
+        subject,
         body:            signOffNotes
                            ? `Vendor signed off. Notes: ${signOffNotes}`
                            : 'Vendor signed off with no notes.',
