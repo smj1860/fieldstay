@@ -838,6 +838,38 @@ export interface StripeProcessedEvent {
   processed_at:    string
 }
 
+// ── RepuGuard ────────────────────────────────────────────────────────────────
+export interface Review {
+  id:              string
+  org_id:          string
+  property_id:     string | null
+  external_id:     string
+  external_source: string
+  guest_name:      string | null
+  rating:          number
+  review_text:     string
+  review_date:     string | null
+  response_status: string
+  external_url:    string | null
+  created_at:      string
+  updated_at:      string
+}
+
+export interface ReviewResponse {
+  id:                  string
+  review_id:           string
+  org_id:              string
+  generated_response:  string | null
+  edited_response:     string | null
+  word_count:          number | null
+  tone_used:           string | null
+  flags:               string[]
+  flag_reason:         string | null
+  generated_at:        string | null
+  created_at:          string
+  updated_at:          string
+}
+
 export interface QuoteRequest {
   id:                     string
   work_order_id:          string
