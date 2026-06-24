@@ -260,6 +260,25 @@ export interface CrewAvailabilityEntry {
   notes:          string | null
 }
 
+export interface AssignmentOutcome {
+  id:                 string
+  org_id:             string
+  turnover_id:        string
+  crew_member_id:     string
+  property_id:        string | null
+  suggested_score:    number | null
+  score_breakdown:    Record<string, unknown> | null
+  was_suggestion:     boolean
+  was_accepted:       boolean | null
+  override_reason:    string | null
+  started_at:         string | null
+  completed_at:       string | null
+  duration_minutes:   number | null
+  pm_rating:          number | null
+  property_bedrooms:  number | null
+  created_at:         string
+}
+
 export interface Vendor {
   id:                   string
   org_id:               string
@@ -866,6 +885,15 @@ export interface Message {
   created_at:    string
 }
 
+// ── Inventory template ───────────────────────────────────────────────────────
+export interface InventoryTemplate {
+  id:          string
+  org_id:      string
+  name:        string
+  description: string | null
+  created_at:  string
+}
+
 // ── Inventory template item ──────────────────────────────────────────────────
 export interface InventoryTemplateItem {
   id:              string
@@ -971,20 +999,6 @@ export interface OAuthState {
   created_at:  string
   /** Expires after 10 minutes to match OwnerRez temporary code lifetime */
   expires_at:  string
-}
-
-// ── Audit Log ────────────────────────────────────────────────────────────────
-
-export interface AuditEvent {
-  id:          string
-  org_id:      string | null
-  actor_id:    string | null
-  action:      string
-  target_type: string | null
-  target_id:   string | null
-  metadata:    Record<string, unknown> | null
-  ip_address:  string | null
-  created_at:  string
 }
 
 export interface OwnerRezProcessedWebhook {
