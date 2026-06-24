@@ -2,6 +2,7 @@
 
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discovery/config'
+import { logAuditEvent } from '@/lib/audit'
 import type { AssetType } from '@/types/database'
 
 export type ReportIssueResult = { success?: boolean; error?: string }
@@ -20,7 +21,7 @@ async function requireCrewMember() {
     .single()
   if (!crew) throw new Error('Crew member not found')
 
-  return { supabase, crew }
+  return { supabase, crew, user }
 }
 
 export async function reportTurnoverIssue(
@@ -92,7 +93,7 @@ export async function submitAssetDiscovery(
       return { error: 'Provide asset details or mark as not applicable' }
     }
 
-    const { supabase, crew } = await requireCrewMember()
+    const { supabase, crew, user } = await requireCrewMember()
 
     // Crew must be assigned to an active turnover at this property — same
     // gate used by the checklist_instance_items crew RLS policy.
@@ -125,21 +126,38 @@ export async function submitAssetDiscovery(
       verified_at: new Date().toISOString(),
     }
 
-    const { error } = existing
-      ? await admin.from('property_assets').update(fields).eq('id', existing.id)
-      : await admin.from('property_assets').insert({
-          org_id:      crew.org_id,
-          property_id: propertyId,
-          name:        assetTypeDisplayName(assetType),
-          asset_type:  assetType,
-          is_active:   true,
-          ...fields,
-        })
+    let assetId = existing?.id ?? null
+    let writeError = null
+    if (existing) {
+      const result = await admin.from('property_assets').update(fields).eq('id', existing.id)
+      writeError = result.error
+    } else {
+      const result = await admin.from('property_assets').insert({
+        org_id:      crew.org_id,
+        property_id: propertyId,
+        name:        assetTypeDisplayName(assetType),
+        asset_type:  assetType,
+        is_active:   true,
+        ...fields,
+      }).select('id').single()
+      assetId = result.data?.id ?? null
+      writeError = result.error
+    }
 
-    if (error) {
-      console.error('[submitAssetDiscovery]', error)
+    if (writeError) {
+      console.error('[submitAssetDiscovery]', writeError)
       return { error: 'Operation failed. Please try again.' }
     }
+
+    await logAuditEvent({
+      orgId:      crew.org_id,
+      actorId:    user.id,
+      action:     existing ? 'asset.updated' : 'asset.created',
+      targetType: 'property_asset',
+      targetId:   assetId ?? undefined,
+      metadata:   { property_id: propertyId, asset_type: assetType, source: 'progressive_discovery', crew_member_id: crew.id, is_na: is_na ?? false },
+    })
+
     return { success: true }
   } catch (err) {
     console.error('[submitAssetDiscovery]', err)
