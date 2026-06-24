@@ -387,6 +387,9 @@ export interface ChecklistInstanceItem {
   crew_notes:            string | null
   photo_reason:          string | null
   is_section_final_item: boolean
+  is_mandatory:          boolean
+  non_deletable:         boolean
+  asset_discovery_type:  string | null
   created_at:            string
   updated_at:            string
 }
@@ -1014,6 +1017,9 @@ export interface PropertyAsset {
   is_active:                  boolean
   replaced_by_asset_id:       string | null
   notes:                      string | null
+  photo_url:                  string | null
+  is_na:                      boolean
+  verified_at:                string | null
   created_at:                 string
   updated_at:                 string
 }
