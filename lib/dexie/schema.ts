@@ -73,64 +73,6 @@ export interface CrewAvailabilityRow {
   created_at:     string
 }
 
-export interface CrewMemberRow {
-  id:                 string
-  org_id:             string
-  name:               string
-  email:              string
-  phone:              string
-  role:               string
-  specialty:          string
-  is_active:          number
-  user_id:            string
-  invite_sent_at:     string
-  invite_accepted_at: string
-}
-
-export interface MaintenanceScheduleRow {
-  id:                        string
-  property_id:               string
-  org_id:                    string
-  name:                      string
-  description:               string
-  schedule_type:             string
-  frequency:                 string
-  active_from_month:         number
-  active_to_month:           number
-  asset_category:            string
-  next_due_date:             string
-  estimated_cost:            string
-  instructions:              string
-  auto_create_wo:            number
-  is_from_standard_template: number
-  is_active:                 number
-  created_at:                string
-  updated_at:                string
-}
-
-export interface MaintenanceCompletionRow {
-  id:                      string
-  maintenance_schedule_id: string
-  property_id:             string
-  org_id:                  string
-  asset_category:          string
-  completed_at:            string
-  completed_by:            string
-  notes:                   string
-  work_order_id:           string
-  next_due_date_set:       string
-  created_at:              string
-}
-
-export interface TurnoverAssignmentRow {
-  id:             string
-  turnover_id:    string
-  crew_member_id: string
-  org_id:         string
-  assigned_at:    string
-  assigned_by:    string
-}
-
 export interface MessageRow {
   id:           string
   org_id:       string
@@ -195,10 +137,6 @@ export class FieldStayDexie extends Dexie {
   inventory_items!:          Table<InventoryItemRow, string>
   properties!:               Table<PropertyRow, string>
   crew_availability!:        Table<CrewAvailabilityRow, string>
-  crew_members!:             Table<CrewMemberRow, string>
-  maintenance_schedules!:    Table<MaintenanceScheduleRow, string>
-  maintenance_completions!:  Table<MaintenanceCompletionRow, string>
-  turnover_assignments!:     Table<TurnoverAssignmentRow, string>
   messages!:                 Table<MessageRow, string>
   turnover_issue_reports!:   Table<TurnoverIssueReportRow, string>
   pending_photo_uploads!:    Table<PendingPhotoUploadRow, string>
@@ -262,6 +200,18 @@ export class FieldStayDexie extends Dexie {
       pending_photo_uploads:    'id, target_id, target_table, retry_count',
       mutations:                '++id, table, targetId',
       sync_meta:                'key',
+    })
+
+    // crew_members, maintenance_schedules, maintenance_completions, and
+    // turnover_assignments were never read or written anywhere in the crew
+    // app — DexieProvider derives turnover/property/inventory/checklist data
+    // straight from Supabase without ever populating these stores. Dropped
+    // as dead schema; null deletes the object store on upgrade.
+    this.version(4).stores({
+      crew_members:            null,
+      maintenance_schedules:   null,
+      maintenance_completions: null,
+      turnover_assignments:    null,
     })
   }
 }
