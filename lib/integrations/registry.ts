@@ -13,14 +13,14 @@
 import type { IntegrationProvider } from './types'
 import { ownerRezProvider } from './providers/ownerrez'
 import { krogerProvider } from './providers/kroger'
+import { hostawayProvider } from './providers/hostaway'
 // Future: import { guestyProvider } from './providers/guesty'
-// Future: import { hostawayProvider } from './providers/hostaway'
 
 const providers = new Map<string, IntegrationProvider>([
   ['ownerrez', ownerRezProvider],
   ['kroger',   krogerProvider],
+  ['hostaway', hostawayProvider],
   // ['guesty',   guestyProvider],
-  // ['hostaway', hostawayProvider],
 ])
 
 /**

@@ -523,4 +523,18 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Hostaway Integration
+  // ----------------------------------------------------------
+
+  'integration/hostaway.sync.requested': {
+    data: {
+      user_id:     string
+      org_id:      string
+      provider_id: string
+      full_sync:   boolean
+      since?:      string  // ISO date — for incremental sync
+    }
+  }
+
 }

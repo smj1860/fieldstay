@@ -5,7 +5,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { slugify } from '@/lib/utils'
 
-export type OnboardingState = { error?: string }
+export type OnboardingState = { error?: string; success?: boolean }
 
 export async function createOrganization(
   _prev: OnboardingState | null,
@@ -64,6 +64,5 @@ export async function createOrganization(
     },
   })
 
-  redirect('/setup')
-  return {}
+  return { success: true }
 }
