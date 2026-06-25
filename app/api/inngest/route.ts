@@ -66,6 +66,7 @@ import { logMessageCommunication } from '@/lib/inngest/functions/log-message-com
 
 // Checklist broadcasting
 import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist-broadcast'
+import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-master-checklist'
 
 // Integration error notifications
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
@@ -82,6 +83,9 @@ import { sendSubscriberCheckin }      from '@/lib/inngest/functions/email-subscr
 
 // Checklist signal intelligence
 import { computeChecklistSignals } from '@/lib/inngest/functions/cron/checklist-signals'
+
+// Dead-letter handler for failed function runs
+import { onFunctionFailure } from '@/lib/inngest/functions/on-failure'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -154,6 +158,7 @@ export const { GET, POST, PUT } = serve({
 
     // Checklist broadcasting
     broadcastChecklistTemplateJob,
+    applyMasterChecklistJob,
 
     // Integration error notifications
     notifyIntegrationError,
@@ -168,5 +173,8 @@ export const { GET, POST, PUT } = serve({
     sendOwnerRezConnectedEmail,
     handleTrialLifecycle,
     sendSubscriberCheckin,
+
+    // Dead-letter handler — listens for inngest/function.failed
+    onFunctionFailure,
   ],
 })

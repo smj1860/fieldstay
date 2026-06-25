@@ -117,7 +117,7 @@ export default function CrewTurnoverPage() {
       const sectionItem = items?.find((i) => i.section_name === sectionName)
       if (!sectionItem) return
 
-      await savePendingPhotoBlob(blobKey, file)
+      await savePendingPhotoBlob(userId, blobKey, file)
       await db.pending_photo_uploads.add({
         id:             crypto.randomUUID(),
         target_table:   'checklist_instances',
@@ -148,7 +148,7 @@ export default function CrewTurnoverPage() {
       const path    = `turnover-${id}/${itemId}-${Date.now()}.${ext}`
       const blobKey = `photo-${itemId}-${Date.now()}`
 
-      await savePendingPhotoBlob(blobKey, file)
+      await savePendingPhotoBlob(userId, blobKey, file)
       await db.pending_photo_uploads.add({
         id:             crypto.randomUUID(),
         target_table:   'checklist_instance_items',

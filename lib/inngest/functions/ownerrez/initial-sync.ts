@@ -10,6 +10,7 @@
  */
 
 import { inngest }              from '@/lib/inngest/client'
+import { NonRetriableError }    from 'inngest'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
@@ -496,7 +497,19 @@ export const ownerRezInitialSync = inngest.createFunction(
         }
       })
 
-      return { user_id, synced: false }
+      // MEDIUM-6: token revocation is permanent — retrying just re-hits the
+      // same revoked token, burning all 3 retries for nothing. Throw
+      // NonRetriableError (after the side effects above already completed)
+      // so Inngest stops immediately and the dashboard distinguishes this
+      // from a transient failure.
+      if (err instanceof TokenRevokedError) {
+        throw new NonRetriableError(humanError)
+      }
+
+      // RE-THROW so Inngest records this as a failure and retries it.
+      // Do NOT return { synced: false } — that silently marks the run
+      // as successful and prevents retries.
+      throw err
     }
 
     // ── Step 4: Auto-activate RepuGuard ────────────────────────────────────────

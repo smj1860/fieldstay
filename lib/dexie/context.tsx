@@ -183,11 +183,14 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
     async function syncMessages(): Promise<void> {
       const db = getDexieDb(userId!)
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 86_400_000).toISOString()
       const { data: messages } = await supabase
         .from('messages')
         .select('id, org_id, sender_id, recipient_id, content, read_at, turnover_id, group_id, group_label, created_at')
         .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`)
+        .gte('created_at', ninetyDaysAgo)
         .order('created_at', { ascending: true })
+        .limit(500)
       if (messages?.length) await db.messages.bulkPut(messages as MessageRow[])
     }
 

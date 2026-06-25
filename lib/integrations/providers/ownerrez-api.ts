@@ -193,8 +193,16 @@ export class OwnerRezApiClient {
   ): Promise<T[]> {
     const results: T[] = []
     let nextPageToken: string | null | undefined = undefined
+    let pageCount = 0
+    const MAX_PAGES = 200  // 200 × 100 items = 20,000 results — generous ceiling
 
     do {
+      pageCount++
+      if (pageCount > MAX_PAGES) {
+        console.error(`[OwnerRez] fetchAllPages: exceeded ${MAX_PAGES} pages — aborting to prevent infinite loop`)
+        break
+      }
+
       const pageParams = { ...params } as Record<string, string | number | undefined>
       if (nextPageToken) pageParams['page_token'] = nextPageToken
 

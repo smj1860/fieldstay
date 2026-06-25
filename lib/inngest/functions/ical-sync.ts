@@ -150,7 +150,7 @@ export const syncIcalFeed = inngest.createFunction(
         return response.text()
       })
     } catch (err) {
-      // Mark feed as errored and exit cleanly (don't retry fetch errors)
+      // Mark feed as errored, then re-throw so Inngest's retry mechanism fires.
       const supabase = createServiceClient()
       await supabase.from('ical_feeds').update({
         last_synced_at:   new Date().toISOString(),
@@ -159,7 +159,7 @@ export const syncIcalFeed = inngest.createFunction(
       }).eq('id', feed_id)
 
       logger.error(`Feed ${feed_id} fetch failed: ${err}`)
-      return { success: false, error: String(err) }
+      throw err
     }
 
     // ── Step 2: Parse iCal data ──────────────────────────────────────────────

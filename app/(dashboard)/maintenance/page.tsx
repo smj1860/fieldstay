@@ -38,6 +38,7 @@ export default async function MaintenancePage() {
         )
       `)
       .eq('org_id', membership.org_id)
+      .in('status', ['pending', 'quote_requested', 'assigned', 'in_progress'])
       .order('created_at', { ascending: false }),
 
     supabase

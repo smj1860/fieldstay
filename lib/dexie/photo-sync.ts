@@ -43,7 +43,7 @@ export async function processPendingPhotoUploads(
         continue
       }
 
-      const blob = await getPendingPhotoBlob(row.local_blob_key)
+      const blob = await getPendingPhotoBlob(userId, row.local_blob_key)
       if (!blob) {
         // Blob missing (cleared browser storage, etc.) — nothing to upload
         await db.pending_photo_uploads.delete(row.id)
@@ -73,7 +73,7 @@ export async function processPendingPhotoUploads(
       }
 
       await db.pending_photo_uploads.delete(row.id)
-      await deletePendingPhotoBlob(row.local_blob_key)
+      await deletePendingPhotoBlob(userId, row.local_blob_key)
     }
   } finally {
     processing = false

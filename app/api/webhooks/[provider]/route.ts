@@ -139,28 +139,31 @@ export async function POST(
     return NextResponse.json({ received: true }, { status: 200 })
   }
 
-  // ── 5a. Dedup OwnerRez webhooks using payload.id ──────────
-  //    OwnerRez retries failed webhooks up to 10 times (exponential backoff).
-  //    A successful DB write that times out before the 2-second response window
+  // ── 5a. Dedup webhooks using the provider's own correlation id ──────────
+  //    Most providers retry failed webhooks several times (exponential backoff).
+  //    A successful DB write that times out before the response window
   //    generates retries — all of which we must discard after the first success.
-  if (providerId === 'ownerrez') {
-    const webhookId = payload.id != null ? String(payload.id) : null
+  //    Keyed by `${providerId}:${payload.id}` in the same ledger table OwnerRez
+  //    already used, so two providers can never collide on the same raw id.
+  //    payload.id (not the synthesized crypto.randomUUID() fallback in
+  //    correlationId above) is required — without a real id from the
+  //    provider there's nothing stable to dedup against.
+  const webhookId = payload.id != null ? String(payload.id) : null
 
-    if (webhookId) {
-      const admin = createServiceClient()
+  if (webhookId) {
+    const admin = createServiceClient()
 
-      const { error: dedupErr } = await admin
-        .from('ownerrez_processed_webhooks')
-        .insert({ webhook_id: webhookId })
+    const { error: dedupErr } = await admin
+      .from('ownerrez_processed_webhooks')
+      .insert({ webhook_id: `${providerId}:${webhookId}` })
 
-      if (dedupErr) {
-        if (dedupErr.code === '23505') {
-          // Unique constraint violation — already processed; discard the retry
-          return NextResponse.json({ received: true, duplicate: true }, { status: 200 })
-        }
-        // Non-fatal dedup failure — log and continue to avoid losing the event
-        console.error(`[Webhook:ownerrez] Dedup insert failed: ${dedupErr.message}`)
+    if (dedupErr) {
+      if (dedupErr.code === '23505') {
+        // Unique constraint violation — already processed; discard the retry
+        return NextResponse.json({ received: true, duplicate: true }, { status: 200 })
       }
+      // Non-fatal dedup failure — log and continue to avoid losing the event
+      console.error(`[Webhook:${providerId}] Dedup insert failed: ${dedupErr.message}`)
     }
   }
 

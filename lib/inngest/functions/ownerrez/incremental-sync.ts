@@ -17,6 +17,7 @@
  */
 
 import { inngest }                      from '@/lib/inngest/client'
+import { NonRetriableError }            from 'inngest'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
@@ -78,7 +79,9 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       let rateLimited       = false
       let retryAfterSeconds = 60
 
-      const syncResult = await step.run(`sync-user-${conn.user_id}`, async () => {
+      let syncResult: string[] | { skipped: boolean; reason: string } | null | undefined
+      try {
+      syncResult = await step.run(`sync-user-${conn.user_id}`, async () => {
         const supabase = createServiceClient()
         const metadata = (conn.metadata ?? {}) as Record<string, unknown>
         const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
@@ -355,7 +358,14 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               }
             } catch { /* non-fatal — connection status was already written */ }
 
-            return  // exit this step cleanly; connection is dead, no retry needed
+            // MEDIUM-6: token revocation is permanent — retrying will only hit
+            // the same revoked token again. Throw NonRetriableError (after the
+            // side effects above already completed) so this is recorded as a
+            // distinct non-retriable failure in Inngest's dashboard instead of
+            // silently looking like a success. The per-connection loop below
+            // catches this so one revoked connection can't block the rest of
+            // this tick's batch.
+            throw new NonRetriableError(humanError)
           }
 
           const humanError = translateSyncError(err)
@@ -428,6 +438,18 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           } catch { /* non-fatal — data was already written to metadata */ }
         }
       })
+      } catch (err) {
+        // The token-revoked branch above throws NonRetriableError after its
+        // side effects (status update, audit log, notification) already
+        // completed — Inngest still records that step as a distinct
+        // non-retriable failure. Swallow it here so one revoked connection
+        // doesn't stop the rest of this tick's connections from syncing.
+        if (err instanceof NonRetriableError) {
+          logger.warn(`[OwnerRez:${conn.user_id}] Skipping — ${err.message}`)
+          continue
+        }
+        throw err
+      }
 
       // Generate turnovers for any properties that received booking updates.
       // Called once per property (not per booking) so the generator sees the

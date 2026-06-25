@@ -63,6 +63,11 @@ export async function POST(request: NextRequest) {
   })
 
   if (error) {
+    // MEDIUM-8: wo_crew_flag_source_unique — the Dexie outbox can retry this
+    // POST after a connectivity blip that drops the response but not the
+    // write. A duplicate flag on this turnover is a no-op, not a failure —
+    // mirrors the same check in app/crew/turnovers/actions.ts.
+    if (error.code === '23505') return NextResponse.json({ success: true, duplicate: true })
     console.error('[CrewIssueReport]', error)
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
   }
