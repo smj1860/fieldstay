@@ -1,6 +1,38 @@
 import { inngest }           from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 
+interface TemplateItem {
+  task:           string
+  requires_photo: boolean
+  notes:          string | null
+  sort_order:     number
+}
+
+interface TemplateSection {
+  name:                     string
+  sort_order:               number
+  requires_section_photo:   boolean | null
+  checklist_template_items: TemplateItem[] | null
+}
+
+// Content fingerprint used to skip a redundant rebroadcast — avoids the
+// delete-then-insert window (briefly empty sections) when the target
+// property's template already matches the source exactly.
+function templateSignature(sections: TemplateSection[]): string {
+  return JSON.stringify(
+    [...sections]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((s) => ({
+        name:                   s.name,
+        sort_order:             s.sort_order,
+        requires_section_photo: s.requires_section_photo ?? false,
+        items: [...(s.checklist_template_items ?? [])]
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((i) => ({ task: i.task, requires_photo: i.requires_photo, notes: i.notes, sort_order: i.sort_order })),
+      }))
+  )
+}
+
 export const broadcastChecklistTemplateJob = inngest.createFunction(
   { id: 'checklist-template-broadcast', name: 'Broadcast Checklist Template', retries: 2 },
   { event: 'checklist/template-broadcast' },
@@ -45,6 +77,21 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
           .single()
 
         if (!newTemplate) return false
+
+        const { data: existingSections } = await supabase
+          .from('checklist_template_sections')
+          .select(`
+            name, sort_order, requires_section_photo,
+            checklist_template_items (task, requires_photo, notes, sort_order)
+          `)
+          .eq('template_id', newTemplate.id)
+
+        const sourceSignature = templateSignature((sourceTemplate.checklist_template_sections ?? []) as TemplateSection[])
+
+        if (existingSections?.length && templateSignature(existingSections as TemplateSection[]) === sourceSignature) {
+          // Already up to date — skip the delete-then-insert rebuild entirely
+          return true
+        }
 
         // Full replace: delete existing sections
         await supabase

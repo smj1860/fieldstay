@@ -1560,3 +1560,44 @@ export async function recordMaintenanceCompletion(
     return { error: 'Operation failed. Please try again.' }
   }
 }
+
+// ── Fetch Completed/Cancelled Work Orders (on demand) ───────────────────────
+// The maintenance page query defaults to active-status work orders only
+// (see app/(dashboard)/maintenance/page.tsx). This fetches the rest, for the
+// "Show completed" toggle in the client board — same select shape as the
+// page's initial query.
+
+export async function fetchArchivedWorkOrders() {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select(`
+      id, property_id, vendor_id, assigned_crew_member_id,
+      wo_number, title, description, category, priority, status, source,
+      scheduled_date, completed_date,
+      estimated_cost, nte_amount, actual_cost,
+      access_notes, completion_notes, invoice_reference,
+      portal_enabled, completion_token,
+      vendor_acknowledged_at, vendor_acknowledged_by,
+      completion_verified_at, completion_verified_by,
+      vendor_dispatch_email,
+      created_at, updated_at,
+      properties ( name, address, city, state, access_instructions ),
+      vendors ( id, name, specialty ),
+      work_order_line_items (
+        id, line_type, description, quantity, unit,
+        unit_cost, line_total, sort_order, created_at
+      )
+    `)
+    .eq('org_id', membership.org_id)
+    .in('status', ['completed', 'cancelled'])
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[fetchArchivedWorkOrders]', error)
+    return []
+  }
+
+  return data ?? []
+}

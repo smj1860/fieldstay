@@ -109,15 +109,19 @@ export const computeChecklistSignals = inngest.createFunction(
       })
     }
 
-    // Upsert in chunks of 200 to stay well under Supabase's payload limits
-    const CHUNK = 200
-    for (let i = 0; i < upserts.length; i += CHUNK) {
-      await supabase
-        .from('checklist_item_signals')
-        .upsert(upserts.slice(i, i + CHUNK), {
-          onConflict: 'property_id,section_name,task',
-        })
-    }
+    // Upsert in chunks of 200 to stay well under Supabase's payload limits.
+    // Wrapped in a single step so it's memoized — a mid-loop failure won't
+    // force re-running the expensive read + grouping pass above.
+    await step.run('persist-signals', async () => {
+      const CHUNK = 200
+      for (let i = 0; i < upserts.length; i += CHUNK) {
+        await supabase
+          .from('checklist_item_signals')
+          .upsert(upserts.slice(i, i + CHUNK), {
+            onConflict: 'property_id,section_name,task',
+          })
+      }
+    })
 
     const required = upserts.filter((u) => {
       const typed = u as { alpha: number; beta: number }

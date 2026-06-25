@@ -36,22 +36,31 @@ export const geocodingBackfill = inngest.createFunction(
 
       if (!properties?.length) return { geocoded: 0, skipped: 0 }
 
+      // LOW-4: properties sharing a zip code resolve to the same coordinates —
+      // geocode each unique zip once instead of once per property.
+      const uniqueZips = [...new Set(properties.map((p) => p.zip!))]
+      const zipCoords  = new Map<string, { lat: number; lng: number } | null>()
+
+      for (const batch of chunk(uniqueZips, 10)) {
+        for (const zip of batch) {
+          zipCoords.set(zip, await geocodeZip(zip))
+          await sleep(200)
+        }
+      }
+
       let geocoded = 0
       let skipped  = 0
 
-      for (const batch of chunk(properties, 10)) {
-        for (const prop of batch) {
-          const coords = await geocodeZip(prop.zip!)
-          if (coords) {
-            await supabase
-              .from('properties')
-              .update({ lat: coords.lat, lng: coords.lng })
-              .eq('id', prop.id)
-            geocoded++
-          } else {
-            skipped++
-          }
-          await sleep(200)
+      for (const prop of properties) {
+        const coords = zipCoords.get(prop.zip!)
+        if (coords) {
+          await supabase
+            .from('properties')
+            .update({ lat: coords.lat, lng: coords.lng })
+            .eq('id', prop.id)
+          geocoded++
+        } else {
+          skipped++
         }
       }
 
@@ -69,22 +78,31 @@ export const geocodingBackfill = inngest.createFunction(
 
       if (!vendors?.length) return { geocoded: 0, skipped: 0 }
 
+      // LOW-4: vendors sharing a service zip resolve to the same coordinates —
+      // geocode each unique zip once instead of once per vendor.
+      const uniqueZips = [...new Set(vendors.map((v) => v.service_zip!))]
+      const zipCoords  = new Map<string, { lat: number; lng: number } | null>()
+
+      for (const batch of chunk(uniqueZips, 10)) {
+        for (const zip of batch) {
+          zipCoords.set(zip, await geocodeZip(zip))
+          await sleep(200)
+        }
+      }
+
       let geocoded = 0
       let skipped  = 0
 
-      for (const batch of chunk(vendors, 10)) {
-        for (const vendor of batch) {
-          const coords = await geocodeZip(vendor.service_zip!)
-          if (coords) {
-            await supabase
-              .from('vendors')
-              .update({ lat: coords.lat, lng: coords.lng })
-              .eq('id', vendor.id)
-            geocoded++
-          } else {
-            skipped++
-          }
-          await sleep(200)
+      for (const vendor of vendors) {
+        const coords = zipCoords.get(vendor.service_zip!)
+        if (coords) {
+          await supabase
+            .from('vendors')
+            .update({ lat: coords.lat, lng: coords.lng })
+            .eq('id', vendor.id)
+          geocoded++
+        } else {
+          skipped++
         }
       }
 

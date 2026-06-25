@@ -13,7 +13,7 @@ import {
   createWorkOrder, createWorkOrderFromSchedule,
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
   broadcastMaintenanceTemplate, createMaintenanceScheduleTemplate, updateMaintenanceTemplate, type BroadcastResult,
-  bulkAssignVendor, bulkUpdateWorkOrderStatus,
+  bulkAssignVendor, bulkUpdateWorkOrderStatus, fetchArchivedWorkOrders,
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency, ComplianceStatus } from '@/types/database'
 import { distanceMiles } from '@/lib/geocoding'
@@ -2024,6 +2024,27 @@ export function MaintenanceBoard({
   const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set())
   const [bulkActing,   startBulkAction] = useTransition()
 
+  // "Show completed" toggle — the page query excludes completed/cancelled WOs
+  // by default, so this fetches them lazily on first toggle.
+  const [showCompleted,   setShowCompleted]   = useState(false)
+  const [archivedWOs,     setArchivedWOs]     = useState<WorkOrderRow[]>([])
+  const [archivedLoaded,  setArchivedLoaded]  = useState(false)
+  const [loadingArchived, startLoadArchived]  = useTransition()
+
+  const toggleShowCompleted = () => {
+    const next = !showCompleted
+    setShowCompleted(next)
+    if (next && !archivedLoaded) {
+      startLoadArchived(async () => {
+        const archived = await fetchArchivedWorkOrders()
+        setArchivedWOs(archived as unknown as WorkOrderRow[])
+        setArchivedLoaded(true)
+      })
+    }
+  }
+
+  const allWorkOrders = showCompleted ? [...workOrders, ...archivedWOs] : workOrders
+
   const toggleSelect = (id: string) =>
     setSelectedIds(prev => {
       const next = new Set(prev)
@@ -2039,7 +2060,7 @@ export function MaintenanceBoard({
   }, [warning])
 
   // Filter work orders
-  const filtered = workOrders.filter((wo) => {
+  const filtered = allWorkOrders.filter((wo) => {
     if (activeTab !== 'all' && wo.status !== activeTab) return false
     if (filterProperty !== 'all' && wo.property_id !== filterProperty) return false
     if (filterPriority !== 'all' && wo.priority !== filterPriority) return false
@@ -2100,8 +2121,8 @@ export function MaintenanceBoard({
       <div className="flex flex-wrap items-center gap-1 bg-card-themed border border-themed rounded-lg px-1 py-1 max-w-full mb-4">
         {STATUS_TABS.map((tab) => {
           const count = tab.key === 'all'
-            ? workOrders.length
-            : workOrders.filter((w) => w.status === tab.key).length
+            ? allWorkOrders.length
+            : allWorkOrders.filter((w) => w.status === tab.key).length
           return (
             <button
               key={tab.key}
@@ -2164,6 +2185,16 @@ export function MaintenanceBoard({
             <X className="w-3 h-3" /> Clear filters
           </button>
         )}
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer text-muted-themed">
+          <input
+            type="checkbox"
+            checked={showCompleted}
+            onChange={toggleShowCompleted}
+            disabled={loadingArchived}
+            className="w-3.5 h-3.5 rounded border-themed text-brand-600 cursor-pointer"
+          />
+          {loadingArchived ? 'Loading completed…' : 'Show completed'}
+        </label>
 
         {/* View toggle */}
         <div className="flex items-center gap-1 ml-auto flex-shrink-0 bg-card-themed border border-themed rounded-lg px-1 py-1">
@@ -2215,7 +2246,7 @@ export function MaintenanceBoard({
       {/* Calendar View */}
       {viewMode === 'calendar' && (
         <MaintenanceCalendar
-          workOrders={workOrders.filter(wo => wo.scheduled_date)}
+          workOrders={allWorkOrders.filter(wo => wo.scheduled_date)}
           schedules={schedules}
         />
       )}
@@ -2226,12 +2257,12 @@ export function MaintenanceBoard({
           <Wrench className="w-10 h-10 text-muted-themed mx-auto mb-3" />
           <h3 className="font-semibold text-secondary-themed mb-1">No work orders found</h3>
           <p className="text-sm text-muted-themed mb-4">
-            {workOrders.length === 0
+            {allWorkOrders.length === 0
               ? 'Create your first work order to track maintenance tasks.'
               : 'No work orders match the current filters.'
             }
           </p>
-          {workOrders.length === 0 && (
+          {allWorkOrders.length === 0 && (
             <button onClick={() => setShowCreate(true)} className="btn-primary mx-auto">
               <Plus className="w-4 h-4" />
               New Work Order

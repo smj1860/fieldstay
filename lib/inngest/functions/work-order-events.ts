@@ -1,4 +1,5 @@
 import { inngest } from '@/lib/inngest/client'
+import { NonRetriableError } from 'inngest'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderWorkOrderEmail } from '@/emails/work-order'
@@ -20,7 +21,23 @@ export const handleWorkOrderCreated = inngest.createFunction(
     const { work_order_id, property_id, org_id, portal_enabled } = event.data
 
     if (portal_enabled) {
-      await step.run('dispatch-to-vendor', async () => {
+      // step.sendEvent must not be called from inside a step.run callback —
+      // step.run's return value is memoized as plain data, so the event send
+      // is hoisted out into its own step below the DB work.
+      // MEDIUM-6: "work order not found" and "vendor has no email" are
+      // permanent failures — retrying will never make them succeed. They're
+      // thrown as NonRetriableError (instead of silently returning null) so
+      // they show up distinctly in Inngest's dashboard. The try/catch below
+      // swallows that so the independent overdue-check logic further down
+      // still runs even when dispatch can't proceed.
+      let dispatchEventData: {
+        workOrderId: string; woNumber: string; token: string; publicUrl: string
+        vendorEmail: string; vendorName: string; propertyName: string; propertyAddress: string
+        title: string; description: string; nteAmount: number
+        dispatcherName: string; dispatcherOrg: string; dispatcherPhone: string | null
+      } | null = null
+      try {
+      dispatchEventData = await step.run('build-dispatch', async () => {
         const supabase = createServiceClient()
 
         const { data: wo } = await supabase
@@ -36,15 +53,14 @@ export const handleWorkOrderCreated = inngest.createFunction(
           .eq('id', work_order_id)
           .single()
 
-        if (!wo) return
+        if (!wo) throw new NonRetriableError(`Work order ${work_order_id} not found`)
 
         const vendor   = Array.isArray(wo.vendors)       ? wo.vendors[0]       : wo.vendors
         const property = Array.isArray(wo.properties)    ? wo.properties[0]    : wo.properties
         const org      = Array.isArray(wo.organizations) ? wo.organizations[0] : wo.organizations
 
         if (!vendor?.email) {
-          logger.warn(`Work order ${work_order_id}: portal_enabled but vendor has no email`)
-          return
+          throw new NonRetriableError(`Work order ${work_order_id}: portal_enabled but vendor has no email`)
         }
 
         const token     = randomBytes(32).toString('hex')
@@ -73,28 +89,39 @@ export const handleWorkOrderCreated = inngest.createFunction(
           if (profile?.phone)     dispatcherPhone = profile.phone
         }
 
-        await step.sendEvent('fire-dispatch-event', {
+        return {
+          workOrderId:     wo.id,
+          woNumber:        wo.wo_number ?? '',
+          token,
+          publicUrl:       `${process.env.NEXT_PUBLIC_APP_URL}/wo/${token}`,
+          vendorEmail:     vendor.email,
+          vendorName:      vendor.name ?? '',
+          propertyName:    (property as { name: string } | null)?.name    ?? 'Property',
+          propertyAddress: (property as { address: string | null } | null)?.address ?? '',
+          title:           wo.title,
+          description:     wo.description ?? '',
+          nteAmount:       (wo.nte_amount as number | null) ?? 0,
+          dispatcherName,
+          dispatcherOrg:   (org as { name: string } | null)?.name ?? 'FieldStay Property Management',
+          dispatcherPhone,
+        }
+      })
+      } catch (err) {
+        if (err instanceof NonRetriableError) {
+          logger.warn(`Work order ${work_order_id}: skipping dispatch — ${err.message}`)
+        } else {
+          throw err
+        }
+      }
+
+      if (dispatchEventData) {
+        await step.sendEvent('send-dispatch-event', {
           name: 'work-order/dispatched' as const,
-          data: {
-            workOrderId:     wo.id,
-            woNumber:        wo.wo_number ?? '',
-            token,
-            publicUrl:       `${process.env.NEXT_PUBLIC_APP_URL}/wo/${token}`,
-            vendorEmail:     vendor.email,
-            vendorName:      vendor.name ?? '',
-            propertyName:    (property as { name: string } | null)?.name    ?? 'Property',
-            propertyAddress: (property as { address: string | null } | null)?.address ?? '',
-            title:           wo.title,
-            description:     wo.description ?? '',
-            nteAmount:       (wo.nte_amount as number | null) ?? 0,
-            dispatcherName,
-            dispatcherOrg:   (org as { name: string } | null)?.name ?? 'FieldStay Property Management',
-            dispatcherPhone,
-          },
+          data: dispatchEventData,
         })
 
-        logger.info(`Dispatched WO ${work_order_id} to vendor ${vendor.email} via TradeSuite portal`)
-      })
+        logger.info(`Dispatched WO ${work_order_id} to vendor ${dispatchEventData.vendorEmail} via TradeSuite portal`)
+      }
     }
 
     if (event.data.vendor_id) {
@@ -199,7 +226,7 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
     retries: 2,
   },
   { event: 'work-order/completed-via-portal' as const },
-  async ({ event, step }) => {
+  async ({ event, step, logger }) => {
     const { work_order_id } = event.data
 
     await step.run('notify-pm-of-completion', async () => {
@@ -219,7 +246,10 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
       if (!wo) return
 
       const pmEmail = await getPmEmail(supabase, wo.org_id)
-      if (!pmEmail) return
+      if (!pmEmail) {
+        logger.warn(`No PM email for org_id=${wo.org_id} work_order_id=${work_order_id} event=work-order/completed-via-portal — skipping notification`)
+        return
+      }
 
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
@@ -264,7 +294,7 @@ export const handleWorkOrderOverdue = inngest.createFunction(
     retries: 1,
   },
   { event: 'work-order/overdue' as const },
-  async ({ event, step }) => {
+  async ({ event, step, logger }) => {
     const { work_order_id, org_id, days_overdue } = event.data
 
     await step.run('check-and-alert', async () => {
@@ -279,7 +309,10 @@ export const handleWorkOrderOverdue = inngest.createFunction(
       if (!wo || wo.status === 'completed' || wo.status === 'cancelled') return
 
       const pmEmail = await getPmEmail(supabase, org_id)
-      if (!pmEmail) return
+      if (!pmEmail) {
+        logger.warn(`No PM email for org_id=${org_id} work_order_id=${work_order_id} event=work-order/overdue — skipping alert`)
+        return
+      }
 
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
@@ -384,7 +417,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
     retries: 2,
   },
   { event: 'work-order/quote-submitted' as const },
-  async ({ event, step }) => {
+  async ({ event, step, logger }) => {
     const { work_order_id, quote_request_id, org_id, quoted_amount, quote_notes } = event.data
 
     await step.run('notify-pm-of-quote', async () => {
@@ -402,7 +435,10 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
       const pmEmail = await getPmEmail(supabase, org_id)
-      if (!pmEmail) return
+      if (!pmEmail) {
+        logger.warn(`No PM email for org_id=${org_id} work_order_id=${work_order_id} event=work-order/quote-submitted — skipping notification`)
+        return
+      }
 
       await resend.emails.send({
         from:    FROM,

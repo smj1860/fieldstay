@@ -138,8 +138,16 @@ export async function hostawayFetchListings(
   const listings: HostawayListing[] = []
   const LIMIT = 100
   let offset  = 0
+  let pageCount = 0
+  const MAX_PAGES = 200
 
   while (true) {
+    pageCount++
+    if (pageCount > MAX_PAGES) {
+      console.error(`[Hostaway] listings pagination exceeded ${MAX_PAGES} pages — aborting`)
+      break
+    }
+
     const res = await fetch(
       `${BASE_URL}/listings?limit=${LIMIT}&offset=${offset}&includeResources=0`,
       { headers: hostawayProvider.getApiHeaders(token) }
@@ -172,11 +180,19 @@ export async function hostawayFetchReservations(
   const reservations: HostawayReservation[] = []
   const LIMIT  = 100
   let   offset = 0
+  let pageCount = 0
+  const MAX_PAGES = 200
 
   const fromDate = since
     ?? new Date(Date.now() - 90 * 86_400_000).toISOString().split('T')[0]
 
   while (true) {
+    pageCount++
+    if (pageCount > MAX_PAGES) {
+      console.error(`[Hostaway] reservations pagination exceeded ${MAX_PAGES} pages — aborting`)
+      break
+    }
+
     const params = new URLSearchParams({
       limit:     String(LIMIT),
       offset:    String(offset),
