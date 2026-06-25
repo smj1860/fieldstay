@@ -901,6 +901,7 @@ export interface CommunicationLog {
   communicated_at:   string
   created_at:        string
   deleted_at:        string | null
+  dedup_key:         string | null
 }
 
 export interface Message {

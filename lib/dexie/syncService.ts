@@ -33,11 +33,33 @@ export class SyncEngine {
           await this.uploadOne(mutation)
           await db.mutations.delete(id)
         } catch (err) {
-          console.error(`[SyncEngine] mutation ${id} (${mutation.table}) failed, will retry:`, err)
-          await db.mutations.update(id, { retryCount: mutation.retryCount + 1 })
-          // Stop draining on first failure so later mutations against the
-          // same record aren't applied out of order.
-          break
+          const newRetryCount = mutation.retryCount + 1
+          console.error(
+            `[SyncEngine] mutation ${id} (${mutation.table}) failed ` +
+            `(attempt ${newRetryCount}):`, err
+          )
+
+          const MAX_RETRIES = 5
+          if (newRetryCount >= MAX_RETRIES) {
+            // Dead-letter: remove from queue after exhausting retries
+            // so it doesn't permanently block everything behind it.
+            // The mutation's data is lost — log clearly for investigation.
+            console.error(
+              `[SyncEngine] mutation ${id} (${mutation.table}) exceeded ` +
+              `${MAX_RETRIES} retries — removing from outbox. ` +
+              `Payload:`, JSON.stringify({ table: mutation.table, op: mutation.op, targetId: mutation.targetId })
+            )
+            await db.mutations.delete(id)
+          } else {
+            await db.mutations.update(id, { retryCount: newRetryCount })
+            // Only block the queue on transient failures, not permanent ones.
+            // If we've retried >= 3 times, skip this mutation and continue
+            // draining so later mutations (which may be independent) still go through.
+            if (newRetryCount >= 3) continue
+            // Stop draining on first/second failure so later mutations against
+            // the same record aren't applied out of order.
+            break
+          }
         }
       }
     } finally {

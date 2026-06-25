@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState }           from 'react'
+import { useEffect, useState, useMemo }  from 'react'
 import { useLiveQuery }   from 'dexie-react-hooks'
 import { useDexieDb }     from '@/lib/dexie/context'
 
@@ -162,7 +162,18 @@ export default function CrewDashboardPage() {
       .sortBy('checkout_datetime'),
     [today, weekOut]
   ) ?? []
-  const propertiesArr = useLiveQuery(() => db.properties.toArray()) ?? []
+
+  const assignedPropertyIds = useMemo(
+    () => new Set((allTurnovers as TurnoverRow[]).map((t) => t.property_id)),
+    [allTurnovers]
+  )
+
+  const propertiesArr = useLiveQuery(
+    () => assignedPropertyIds.size > 0
+      ? db.properties.where('id').anyOf([...assignedPropertyIds]).toArray()
+      : Promise.resolve<PropertyRow[]>([]),
+    [[...assignedPropertyIds].join(',')]   // stable dependency — Set identity changes every render
+  ) ?? []
 
   const propertyMap = Object.fromEntries(propertiesArr.map((p) => [p.id, p]))
 

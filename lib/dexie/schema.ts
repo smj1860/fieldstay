@@ -230,8 +230,28 @@ export function getDexieDb(userId: string): FieldStayDexie {
 
 export async function closeDexieDb(): Promise<void> {
   if (db) {
+    const dbName = db.name
+    const formerUserId = dbUserId
     db.close()
     db = null
     dbUserId = null
+    // Delete the entire IndexedDB database so no crew data persists
+    // on the device after sign-out. Crew-app data is re-synced fresh
+    // on next login; nothing is lost that can't be re-fetched.
+    try {
+      await Dexie.delete(dbName)
+    } catch (err) {
+      console.error('[Dexie] Failed to delete DB on logout:', err)
+      // Non-fatal: the closed connection already prevents reads;
+      // the delete just ensures no residual storage remains.
+    }
+    // Also delete the user-namespaced photo blob store (lib/dexie/photo-queue.ts)
+    if (formerUserId) {
+      try {
+        await Dexie.delete(`fieldstay-photo-queue-${formerUserId}`)
+      } catch (err) {
+        console.error('[Dexie] Failed to delete photo blob store on logout:', err)
+      }
+    }
   }
 }

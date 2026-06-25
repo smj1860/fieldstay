@@ -368,12 +368,6 @@ export const dailyAssetHealth = inngest.createFunction(
 
           const docLabel = `${doc.document_name} (${doc.document_type.replace(/_/g, ' ')})`
 
-          // Record dedup BEFORE sending so a retry after a failed send doesn't re-send
-          await supabase.from('org_milestones').insert({
-            org_id:    doc.org_id,
-            milestone: milestoneKey,
-          })
-
           await resend.emails.send({
             from:    FROM,
             to:      pmEmail,
@@ -388,6 +382,14 @@ export const dailyAssetHealth = inngest.createFunction(
               ctaLabel: 'Update Compliance Docs →',
               ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/vendors/${doc.vendor_id}`,
             }),
+          })
+
+          // Record AFTER a successful send. A retry on send failure will
+          // attempt to send again (acceptable duplicate) rather than silently
+          // drop the alert (unacceptable data loss).
+          await supabase.from('org_milestones').insert({
+            org_id:    doc.org_id,
+            milestone: milestoneKey,
           })
         }
 

@@ -68,7 +68,20 @@ export const repuguardBatchGenerate = inngest.createFunction(
             internalNotes,
           })
         } catch (err) {
-          logger.error(`RepuGuard batch: failed to generate for review ${review.id}: ${err}`)
+          const msg = err instanceof Error ? err.message : String(err)
+          const isTransient = msg.includes('rate') || msg.includes('timeout') ||
+                              msg.includes('503') || msg.includes('429') ||
+                              msg.includes('network')
+
+          if (isTransient) {
+            // Re-throw transient errors so the step.run retries them
+            // (each review is its own step.run, so this only retries that review)
+            logger.warn(`RepuGuard batch: transient failure for review ${review.id}, will retry: ${msg}`)
+            throw err
+          }
+
+          // Permanent failure (malformed review, missing fields, etc.)
+          logger.error(`RepuGuard batch: permanent failure for review ${review.id}: ${msg}`)
           skipped++
           return
         }

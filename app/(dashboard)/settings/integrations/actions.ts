@@ -127,11 +127,16 @@ export async function connectWithApiKey(
     // Link to the org and record expiry — storeIntegrationToken doesn't
     // know about org_id or expires_at, so patch them in after.
     const admin = createServiceClient()
+    // Scope to rows with no org_id yet (first connect — storeIntegrationToken
+    // doesn't set org_id on insert) or already matching this org (reconnect).
+    // Never let this silently repoint a connection that belongs to a
+    // different org the user is also a member of.
     const { error: linkErr } = await admin
       .from('integration_connections')
       .update({ org_id: membership.org_id, expires_at: expiresAt })
       .eq('user_id', user.id)
       .eq('provider_id', providerId)
+      .or(`org_id.is.null,org_id.eq.${membership.org_id}`)
 
     if (linkErr) throw new Error(linkErr.message)
 

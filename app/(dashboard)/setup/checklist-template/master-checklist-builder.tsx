@@ -38,7 +38,7 @@ export function MasterChecklistBuilder({
 
   // Apply to all
   const [applying, startApply]    = useTransition()
-  const [applyResult, setApplyResult] = useState<{ applied?: number; error?: string } | null>(null)
+  const [applyResult, setApplyResult] = useState<{ queued?: number; error?: string } | null>(null)
   const [showConfirm, setShowConfirm] = useState(false)
 
   // Catalog tab
@@ -469,7 +469,7 @@ export function MasterChecklistBuilder({
             </button>
             {applyResult && (
               <p className="text-xs mt-1.5" style={{ color: applyResult.error ? 'var(--accent-red)' : 'var(--accent-green)' }}>
-                {applyResult.error ?? `Applied to ${applyResult.applied} ${applyResult.applied === 1 ? 'property' : 'properties'}`}
+                {applyResult.error ?? `Queued — applying to ${applyResult.queued} ${applyResult.queued === 1 ? 'property' : 'properties'} in the background`}
               </p>
             )}
           </div>

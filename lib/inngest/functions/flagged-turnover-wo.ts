@@ -3,8 +3,9 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 export const flaggedTurnoverToWO = inngest.createFunction(
   {
-    id:   'flagged-turnover-to-work-order',
-    name: 'Create Draft WO from Flagged Turnover',
+    id:      'flagged-turnover-to-work-order',
+    name:    'Create Draft WO from Flagged Turnover',
+    retries: 2,
   },
   { event: 'turnover/flagged' as const },
   async ({ event, step }) => {

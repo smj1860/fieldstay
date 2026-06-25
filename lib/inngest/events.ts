@@ -472,6 +472,14 @@ export type FieldStayEvents = {
     }
   }
 
+  'checklist/master-template.apply.requested': {
+    data: {
+      org_id:        string
+      property_ids:  string[]
+      triggered_by:  string
+    }
+  }
+
   // ----------------------------------------------------------
   // In-App Messaging
   // ----------------------------------------------------------

@@ -14,7 +14,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { scanLimiter } from '@/lib/rate-limit'
 import Anthropic from '@anthropic-ai/sdk'
 
-export const maxDuration = 30  // prevents Vercel 10s default timeout
+export const maxDuration = 60  // vision calls can run longer than text-only LLM calls
 
 interface ScanResponse {
   make:             string | null

@@ -382,6 +382,10 @@ export async function addCrewToTurnover(
       toInsert.map(id => ({ turnover_id: id, crew_member_id: crewMemberId, org_id: membership.org_id }))
     )
     if (insertError) {
+      // 23505 = unique_violation — assignment already exists (concurrent request)
+      if (insertError.code === '23505') {
+        return { success: true }
+      }
       console.error('[addCrewToTurnover]', insertError)
       return { error: 'Failed to assign crew. Please try again.' }
     }
@@ -578,12 +582,10 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
   try {
     const { createServiceClient } = await import('@/lib/supabase/server')
     const service = createServiceClient()
-    for (const crewId of crewIds) {
-      await service.from('assignment_outcomes').upsert(
-        { turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: true },
-        { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
-      )
-    }
+    await service.from('assignment_outcomes').upsert(
+      crewIds.map(crewId => ({ turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: true })),
+      { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
+    )
   } catch {
     // Outcome recording must not break the acceptance flow
   }
@@ -629,12 +631,10 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
     try {
       const { createServiceClient } = await import('@/lib/supabase/server')
       const service = createServiceClient()
-      for (const crewId of crewIds) {
-        await service.from('assignment_outcomes').upsert(
-          { turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: false },
-          { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
-        )
-      }
+      await service.from('assignment_outcomes').upsert(
+        crewIds.map(crewId => ({ turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: false })),
+        { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
+      )
     } catch {
       // Outcome recording must not break the dismissal flow
     }
