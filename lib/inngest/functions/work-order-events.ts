@@ -226,7 +226,7 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
     retries: 2,
   },
   { event: 'work-order/completed-via-portal' as const },
-  async ({ event, step }) => {
+  async ({ event, step, logger }) => {
     const { work_order_id } = event.data
 
     await step.run('notify-pm-of-completion', async () => {
@@ -246,7 +246,10 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
       if (!wo) return
 
       const pmEmail = await getPmEmail(supabase, wo.org_id)
-      if (!pmEmail) return
+      if (!pmEmail) {
+        logger.warn(`No PM email for org_id=${wo.org_id} work_order_id=${work_order_id} event=work-order/completed-via-portal — skipping notification`)
+        return
+      }
 
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
@@ -291,7 +294,7 @@ export const handleWorkOrderOverdue = inngest.createFunction(
     retries: 1,
   },
   { event: 'work-order/overdue' as const },
-  async ({ event, step }) => {
+  async ({ event, step, logger }) => {
     const { work_order_id, org_id, days_overdue } = event.data
 
     await step.run('check-and-alert', async () => {
@@ -306,7 +309,10 @@ export const handleWorkOrderOverdue = inngest.createFunction(
       if (!wo || wo.status === 'completed' || wo.status === 'cancelled') return
 
       const pmEmail = await getPmEmail(supabase, org_id)
-      if (!pmEmail) return
+      if (!pmEmail) {
+        logger.warn(`No PM email for org_id=${org_id} work_order_id=${work_order_id} event=work-order/overdue — skipping alert`)
+        return
+      }
 
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
@@ -411,7 +417,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
     retries: 2,
   },
   { event: 'work-order/quote-submitted' as const },
-  async ({ event, step }) => {
+  async ({ event, step, logger }) => {
     const { work_order_id, quote_request_id, org_id, quoted_amount, quote_notes } = event.data
 
     await step.run('notify-pm-of-quote', async () => {
@@ -429,7 +435,10 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
       const pmEmail = await getPmEmail(supabase, org_id)
-      if (!pmEmail) return
+      if (!pmEmail) {
+        logger.warn(`No PM email for org_id=${org_id} work_order_id=${work_order_id} event=work-order/quote-submitted — skipping notification`)
+        return
+      }
 
       await resend.emails.send({
         from:    FROM,

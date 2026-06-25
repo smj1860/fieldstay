@@ -4,8 +4,17 @@ import { CommsLogClient } from './comms-log-client'
 
 export const metadata: Metadata = { title: 'Comms Log' }
 
-export default async function CommsLogPage() {
+const PAGE_SIZE = 100
+
+export default async function CommsLogPage({
+  searchParams,
+}: {
+  searchParams: { page?: string }
+}) {
   const { supabase, membership } = await requireOrgMember()
+
+  const page   = Math.max(1, parseInt(searchParams.page ?? '1', 10) || 1)
+  const offset = (page - 1) * PAGE_SIZE
 
   const [
     { data: logs },
@@ -27,7 +36,8 @@ export default async function CommsLogPage() {
       .eq('org_id', membership.org_id)
       .is('deleted_at', null)
       .order('communicated_at', { ascending: false })
-      .limit(500),
+      // Fetch one extra row to detect a next page without a separate count query.
+      .range(offset, offset + PAGE_SIZE),
 
     supabase
       .from('vendors')
@@ -62,13 +72,19 @@ export default async function CommsLogPage() {
   const toPersonOption = (rows: { id: string; name: string; specialty: string | null }[] | null) =>
     (rows ?? []).map((r) => ({ id: r.id, name: r.name, specialty: r.specialty ?? undefined }))
 
+  const fetched = logs ?? []
+  const hasMore = fetched.length > PAGE_SIZE
+  const pageLogs = hasMore ? fetched.slice(0, PAGE_SIZE) : fetched
+
   return (
     <CommsLogClient
-      logs={(logs ?? []) as never}
+      logs={pageLogs as never}
       vendors={toPersonOption(vendors)}
       crew={toPersonOption(crew)}
       properties={properties ?? []}
       workOrders={workOrders ?? []}
+      page={page}
+      hasMore={hasMore}
     />
   )
 }

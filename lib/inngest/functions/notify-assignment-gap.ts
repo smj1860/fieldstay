@@ -17,7 +17,8 @@ export const notifyAssignmentGap = inngest.createFunction(
           .from('organization_members')
           .select('user_id')
           .eq('org_id', org_id)
-          .in('role', ['admin', 'owner', 'manager']),
+          .in('role', ['admin', 'owner', 'manager'])
+          .limit(10),   // reasonable ceiling; orgs >10 managers are edge cases
       ])
 
       return {

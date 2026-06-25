@@ -408,12 +408,16 @@ export function CommsLogClient({
   crew,
   properties,
   workOrders,
+  page,
+  hasMore,
 }: {
   logs:       LogEntry[]
   vendors:    PersonOption[]
   crew:       PersonOption[]
   properties: PropertyOption[]
   workOrders: WorkOrderOption[]
+  page:       number
+  hasMore:    boolean
 }) {
   const [showAdd, setShowAdd]               = useState(false)
   const [search, setSearch]                 = useState('')
@@ -559,6 +563,22 @@ export function CommsLogClient({
           {filtered.map((entry) => (
             <LogRow key={entry.id} entry={entry} />
           ))}
+        </div>
+      )}
+
+      {(page > 1 || hasMore) && (
+        <div className="flex items-center justify-between mt-4 text-xs">
+          {page > 1 ? (
+            <Link href={`/comms-log?page=${page - 1}`} className="font-medium" style={{ color: 'var(--accent-gold)' }}>
+              ← Previous
+            </Link>
+          ) : <span />}
+          <span style={{ color: 'var(--text-muted)' }}>Page {page}</span>
+          {hasMore ? (
+            <Link href={`/comms-log?page=${page + 1}`} className="font-medium" style={{ color: 'var(--accent-gold)' }}>
+              Next →
+            </Link>
+          ) : <span />}
         </div>
       )}
 

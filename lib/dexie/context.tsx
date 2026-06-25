@@ -170,7 +170,10 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
             requires_photo:        Number(item.requires_photo ?? 0),
             is_section_final_item: item.is_section_final_item != null ? Number(item.is_section_final_item) : 0,
             completed_by_crew_id:  item.completed_by_crew_id ?? '',
-            crew_notes:            item.crew_notes ?? '',
+            // Only retain crew_notes if this crew member authored them —
+            // nullify notes from other crew members on multi-crew turnovers
+            // before they land in this device's local cache.
+            crew_notes:            item.completed_by_crew_id === crewMemberId ? (item.crew_notes ?? '') : '',
             photo_reason:          item.photo_reason ?? '',
           }))
           await db.checklist_instance_items.bulkPut(normalized as ChecklistInstanceItemRow[])

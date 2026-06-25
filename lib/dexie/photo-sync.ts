@@ -40,6 +40,12 @@ export async function processPendingPhotoUploads(
       if (ALLOWED_TARGETS[row.target_table] !== row.target_column) {
         console.error(`[photo-sync] Unexpected target ${row.target_table}.${row.target_column} — dropping`)
         await db.pending_photo_uploads.delete(row.id)
+        // Remove the underlying blob so it doesn't accumulate as dead storage
+        try {
+          await deletePendingPhotoBlob(userId, row.local_blob_key)
+        } catch (blobErr) {
+          console.warn('[photo-sync] Failed to delete orphaned blob:', blobErr)
+        }
         continue
       }
 
