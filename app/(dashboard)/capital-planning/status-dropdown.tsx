@@ -31,7 +31,7 @@ export function StatusDropdown({
   function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const next = e.target.value as ReplacementStatus
     setStatus(next)
-    startUpdate(() => updateReplacementStatus(assetId, next))
+    startUpdate(() => void updateReplacementStatus(assetId, next))
   }
 
   return (
