@@ -1,31 +1,51 @@
-import Link from 'next/link'
-import { requireOrgMember } from '@/lib/auth'
-import { markStepComplete } from '../actions'
+import Link                    from 'next/link'
+import { requireOrgMember }    from '@/lib/auth'
+import { createServiceClient } from '@/lib/supabase/server'
+import { markStepComplete }    from '../actions'
+
+// All PMS provider IDs — excludes non-PMS integrations (e.g. kroger, repuguard)
+const PMS_PROVIDER_IDS = ['ownerrez', 'hostaway', 'guesty'] as const
 
 export default async function OnboardingPmsPage() {
-  const { supabase, membership } = await requireOrgMember()
+  const { membership } = await requireOrgMember()
+  const admin = createServiceClient()
 
-  const { data: connection } = await supabase
+  const { data: providers } = await admin
+    .from('integration_providers')
+    .select('id, display_name, auth_type')
+    .in('id', PMS_PROVIDER_IDS)
+    .eq('is_active', true)
+    .order('display_name')
+
+  const { data: connections } = await admin
     .from('integration_connections')
-    .select('id, connected_at, external_user_id')
-    .eq('org_id' as never, membership.org_id)
-    .eq('provider_id', 'ownerrez')
-    .eq('status', 'active')
-    .maybeSingle()
+    .select('id, provider_id, status, external_user_id')
+    .eq('org_id', membership.org_id)
+    .in('provider_id', PMS_PROVIDER_IDS)
 
-  const { data: properties } = connection
-    ? await supabase
+  const connectionsByProvider = Object.fromEntries(
+    (connections ?? []).map((c) => [c.provider_id, c])
+  )
+
+  // Count active connections across all PMS providers
+  const activeConnections = (connections ?? []).filter((c) => c.status === 'active')
+
+  const { data: properties } = activeConnections.length
+    ? await admin
         .from('properties')
         .select('id, name, city, state')
         .eq('org_id', membership.org_id)
         .eq('is_active', true)
         .order('name')
+        .limit(10)
     : { data: [] }
 
   async function continueAction() {
     'use server'
     await markStepComplete('pms', '/setup/crew')
   }
+
+  const anyConnected = activeConnections.length > 0
 
   return (
     <div className="space-y-6">
@@ -34,77 +54,93 @@ export default async function OnboardingPmsPage() {
           Connect Your PMS
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Connect OwnerRez to automatically import your properties and sync bookings.
+          Connect your property management system to automatically import properties and sync bookings.
         </p>
       </div>
 
-      {connection ? (
-        <>
-          <div
-            className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium"
-            style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}
-          >
-            <span className="text-base">✓</span>
-            OwnerRez connected
-            {connection.external_user_id && (
-              <span className="ml-1 text-xs opacity-70">· User {connection.external_user_id}</span>
-            )}
-          </div>
+      {anyConnected && (
+        <div
+          className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium"
+          style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}
+        >
+          <span className="text-base">✓</span>
+          {activeConnections.length === 1
+            ? `${(providers ?? []).find((p) => p.id === activeConnections[0].provider_id)?.display_name ?? 'PMS'} connected`
+            : `${activeConnections.length} integrations connected`}
+        </div>
+      )}
 
-          {properties && properties.length > 0 && (
-            <div>
-              <p className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
-                {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'} imported
-              </p>
-              <div className="border border-themed rounded-xl overflow-hidden">
-                {properties.map((p) => (
-                  <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0">
-                    <span className="text-sm font-medium text-primary-themed">{p.name}</span>
-                    {(p.city || p.state) && (
-                      <span className="text-xs text-muted-themed">
-                        {[p.city, p.state].filter(Boolean).join(', ')}
-                      </span>
-                    )}
-                  </div>
-                ))}
+      {/* Provider cards */}
+      <div className="space-y-3">
+        {(providers ?? []).map((provider) => {
+          const connection = connectionsByProvider[provider.id]
+          const isConnected = connection?.status === 'active'
+
+          // api_key providers: open credential modal in settings/integrations
+          // oauth2 providers: kick off OAuth redirect directly
+          const connectHref = provider.auth_type === 'api_key'
+            ? `/settings/integrations?connect=${provider.id}`
+            : `/api/integrations/${provider.id}/connect`
+
+          return (
+            <div
+              key={provider.id}
+              className="card flex items-center justify-between gap-4"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>
+                    {provider.display_name}
+                  </span>
+                  {isConnected && (
+                    <span className="badge badge-green text-xs">Connected</span>
+                  )}
+                </div>
+                {isConnected && connection.external_user_id && (
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    Account: {connection.external_user_id}
+                  </p>
+                )}
               </div>
-            </div>
-          )}
 
-          <form action={continueAction}>
-            <button type="submit" className="btn-primary">
-              Continue →
-            </button>
-          </form>
-        </>
-      ) : (
-        <div className="card p-6 text-center space-y-4">
-          <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto text-2xl"
-            style={{ background: 'var(--bg-raised)' }}
-          >
-            🔗
-          </div>
-          <div>
-            <h3 className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-              OwnerRez not connected
-            </h3>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Connect your OwnerRez account to automatically import properties and sync bookings in real time.
-            </p>
-          </div>
-          <Link href="/api/integrations/ownerrez/connect" className="btn-primary inline-flex">
-            Connect OwnerRez
-          </Link>
-          <div>
-            <form action={continueAction}>
-              <button type="submit" className="btn-ghost text-xs" style={{ color: 'var(--text-muted)' }}>
-                Skip for now →
-              </button>
-            </form>
+              {!isConnected && (
+                <Link href={connectHref} className="btn-secondary text-sm shrink-0">
+                  Connect
+                </Link>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Properties preview if any are imported */}
+      {(properties ?? []).length > 0 && (
+        <div>
+          <p className="text-sm font-medium mb-2" style={{ color: 'var(--text-secondary)' }}>
+            {properties!.length} propert{properties!.length !== 1 ? 'ies' : 'y'} imported
+          </p>
+          <div className="border border-themed rounded-xl overflow-hidden">
+            {properties!.map((p) => (
+              <div key={p.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0">
+                <span className="text-sm font-medium text-primary-themed">{p.name}</span>
+                {(p.city || p.state) && (
+                  <span className="text-xs text-muted-themed">
+                    {[p.city, p.state].filter(Boolean).join(', ')}
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
+
+      <div className="flex flex-col gap-2">
+        <form action={continueAction}>
+          <button type="submit" className="btn-primary">
+            {anyConnected ? 'Continue →' : 'Skip for now →'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

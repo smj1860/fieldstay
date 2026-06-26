@@ -315,7 +315,7 @@ export default function PrivacyPage() {
           </section>
 
           {/* ── 7. Cookies and Local Storage ─────────────────────────────────────────── */}
-          <section>
+          <section id="cookies">
             <h2 className="text-xl font-semibold text-gray-900 mb-3">7. Cookies and Local Storage</h2>
             <p>
               We use only strictly necessary cookies for session management (keeping you logged in)
