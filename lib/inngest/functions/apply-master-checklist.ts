@@ -17,8 +17,25 @@ export const applyMasterChecklistJob = inngest.createFunction(
 
       const batchApplied = await step.run(`apply-batch-${i / BATCH_SIZE}`, async () => {
         const supabase = createServiceClient()
+
+        // Explicit ownership check — service client bypasses RLS so we must
+        // enforce org isolation ourselves. One bulk query per batch; no per-row calls.
+        const { data: ownedProps } = await supabase
+          .from('properties')
+          .select('id')
+          .in('id', batch)
+          .eq('org_id', org_id)
+
+        const ownedIds = new Set((ownedProps ?? []).map((p: { id: string }) => p.id))
+
         let count = 0
         for (const propertyId of batch) {
+          if (!ownedIds.has(propertyId)) {
+            console.warn(
+              `[apply-master-checklist] property ${propertyId} not owned by org ${org_id} — skipping`
+            )
+            continue
+          }
           await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
             force:   true,
             actorId: triggered_by,

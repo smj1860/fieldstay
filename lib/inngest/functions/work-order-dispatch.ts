@@ -51,24 +51,18 @@ export const workOrderDispatch = inngest.createFunction(
     await step.run('log-to-comms', async () => {
       const supabase = createServiceClient()
 
+      // Use PK (workOrderId) — not wo_number — to avoid cross-org ambiguity
+      // if two orgs share the same wo_number string.
       const { data: wo } = await supabase
         .from('work_orders')
         .select('id, org_id, vendor_id, property_id')
-        .eq('wo_number', woNumber)
+        .eq('id', workOrderId)
         .single()
 
       if (!wo) return { skipped: 'work order not found for comms log' }
 
-      const subject = `Work Order ${woNumber} — ${propertyName}`
-
-      const { data: existing } = await supabase
-        .from('communication_logs')
-        .select('id')
-        .eq('work_order_id', wo.id)
-        .eq('subject', subject)
-        .maybeSingle()
-
-      if (existing) return { logged: false, alreadyExisted: true }
+      const subject  = `Work Order ${woNumber} — ${propertyName}`
+      const dedupKey = `wo-dispatch:${workOrderId}`
 
       const { error } = await supabase.from('communication_logs').insert({
         org_id:          wo.org_id,
@@ -81,8 +75,13 @@ export const workOrderDispatch = inngest.createFunction(
         body:            `Work order dispatched to ${vendorEmail}. Public URL: ${publicUrl}`,
         source:          'system',
         communicated_at: new Date().toISOString(),
+        dedup_key:       dedupKey,
       })
-      if (error) console.error('[workOrderDispatch] comms log insert', error)
+
+      if (error) {
+        if (error.code === '23505') return { logged: false, alreadyExisted: true }
+        throw error
+      }
 
       return { logged: true }
     })
@@ -181,16 +180,8 @@ export const workOrderSignedOff = inngest.createFunction(
 
       if (!wo) return { skipped: true }
 
-      const subject = `Work Order Signed Off — ${woNumber}`
-
-      const { data: existing } = await supabase
-        .from('communication_logs')
-        .select('id')
-        .eq('work_order_id', workOrderId)
-        .eq('subject', subject)
-        .maybeSingle()
-
-      if (existing) return { logged: false, alreadyExisted: true }
+      const subject  = `Work Order Signed Off — ${woNumber}`
+      const dedupKey = `wo-signoff:${workOrderId}`
 
       const { error } = await supabase.from('communication_logs').insert({
         org_id:          wo.org_id,
@@ -205,8 +196,13 @@ export const workOrderSignedOff = inngest.createFunction(
                            : 'Vendor signed off with no notes.',
         source:          'system',
         communicated_at: signedOffAt,
+        dedup_key:       dedupKey,
       })
-      if (error) console.error('[workOrderSignedOff] comms log insert', error)
+
+      if (error) {
+        if (error.code === '23505') return { logged: false, alreadyExisted: true }
+        throw error
+      }
     })
 
     return { notified: true, pmEmail: pmEmail.email, woNumber }

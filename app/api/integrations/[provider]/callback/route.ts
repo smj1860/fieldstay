@@ -236,6 +236,10 @@ export async function GET(
         .update({ org_id: membership.org_id })
         .eq('user_id', appUserId)
         .eq('provider_id', providerId)
+        // Only update rows with no org yet (first connect) or already belonging
+        // to this org (reconnect). Never silently repoint a connection owned by
+        // a different org the user is also a member of. Mirrors connectWithApiKey.
+        .or(`org_id.is.null,org_id.eq.${membership.org_id}`)
     }
 
     // ── 7. Kick off initial data sync ─────────────────────────────

@@ -543,8 +543,9 @@ export async function bulkUpdateTurnoverStatus(
 
 // ── Trigger manual iCal sync ─────────────────────────────────────────────────
 
-export async function triggerManualSync(orgId: string): Promise<void> {
-  await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: orgId } })
+export async function triggerManualSync(): Promise<void> {
+  const { membership } = await requireOrgMember()
+  await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: membership.org_id } })
   revalidatePath('/turnovers')
 }
 

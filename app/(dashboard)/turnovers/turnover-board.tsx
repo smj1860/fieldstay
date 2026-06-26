@@ -1117,7 +1117,7 @@ export function TurnoverBoard({
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => startSync(() => triggerManualSync(orgId))}
+            onClick={() => startSync(() => triggerManualSync())}
             disabled={syncing}
             className="btn-secondary"
             title="Sync calendars now"
