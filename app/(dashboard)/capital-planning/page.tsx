@@ -3,6 +3,7 @@ import Link                          from 'next/link'
 import { TriggerLedgerButton }       from './trigger-ledger-button'
 import { TriggerProjectionsButton }  from './trigger-projections-button'
 import { StatusDropdown }            from './status-dropdown'
+import { PropertyFilterSelect }      from './property-filter-select'
 import type { Metadata }             from 'next'
 import type {
   CapExProjectionPayload,
@@ -109,11 +110,6 @@ export default async function CapitalPlanningPage({
 
   const selectedProperty = properties?.find((p) => p.id === selectedPropertyId) ?? null
 
-  function buildHref(propertyId: string | null): string {
-    if (!propertyId) return '/capital-planning'
-    return `/capital-planning?property=${propertyId}`
-  }
-
   return (
     <div className="max-w-4xl">
       <div className="page-header">
@@ -132,32 +128,11 @@ export default async function CapitalPlanningPage({
 
       {/* Property filter */}
       {(properties?.length ?? 0) > 1 && (
-        <div className="flex gap-2 overflow-x-auto pb-1 mb-6 -mx-1 px-1">
-          <Link
-            href={buildHref(null)}
-            className={[
-              'px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors',
-              !selectedPropertyId
-                ? 'bg-brand-800 text-white'
-                : 'bg-white border border-themed text-secondary-themed hover:border-accent-400',
-            ].join(' ')}
-          >
-            All Properties
-          </Link>
-          {properties?.map((p) => (
-            <Link
-              key={p.id}
-              href={buildHref(p.id)}
-              className={[
-                'px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors',
-                selectedPropertyId === p.id
-                  ? 'bg-brand-800 text-white'
-                  : 'bg-white border border-themed text-secondary-themed hover:border-accent-400',
-              ].join(' ')}
-            >
-              {p.name}
-            </Link>
-          ))}
+        <div className="mb-6">
+          <PropertyFilterSelect
+            properties={properties ?? []}
+            selectedPropertyId={selectedPropertyId}
+          />
         </div>
       )}
 
