@@ -72,6 +72,11 @@ export type AuditAction =
   | 'turnover.autopilot.assigned'
   | 'work_order.vendor_signoff'
   | 'property.rates.updated'
+  | 'vendor.stripe_connect.onboarded'
+  | 'vendor.stripe_connect.charges_disabled'
+  | 'work_order.invoice.created'
+  | 'work_order.invoice.paid'
+  | 'work_order.invoice.cancelled'
 
 interface AuditParams {
   orgId?:         string

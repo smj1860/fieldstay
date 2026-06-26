@@ -1,0 +1,92 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { createServiceClient }       from '@/lib/supabase/server'
+import { stripe }                    from '@/lib/stripe/client'
+
+/**
+ * GET /api/vendor-connect/[token]/onboard
+ *
+ * Public endpoint. Generates a fresh Stripe Connect account link for the
+ * vendor identified by their stripe_connect_token and redirects to it.
+ *
+ * If the vendor does not yet have a Connect account, creates one first.
+ * Account links expire quickly — always generate fresh on each visit.
+ */
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  const { token } = await params
+
+  if (!token || token.length < 10) {
+    return NextResponse.json({ error: 'Invalid link' }, { status: 400 })
+  }
+
+  const supabase = createServiceClient()
+
+  const { data: vendor } = await supabase
+    .from('vendors')
+    .select('id, org_id, email, name, stripe_connect_account_id, stripe_connect_charges_enabled')
+    .eq('stripe_connect_token', token)
+    .eq('is_active', true)
+    .single()
+
+  if (!vendor) {
+    return NextResponse.json({ error: 'Invalid or expired link' }, { status: 404 })
+  }
+
+  // Already fully onboarded — show confirmation page
+  if (vendor.stripe_connect_charges_enabled) {
+    return NextResponse.redirect(
+      `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${token}/return?already_onboarded=true`
+    )
+  }
+
+  try {
+    let accountId = vendor.stripe_connect_account_id
+
+    // Create account if it doesn't exist yet (e.g. vendor received WO before cron ran)
+    if (!accountId) {
+      const account = await stripe.accounts.create({
+        type:  'express',
+        ...(vendor.email ? { email: vendor.email } : {}),
+        metadata: {
+          vendor_id: vendor.id,
+          org_id:    vendor.org_id,
+        },
+        capabilities: {
+          card_payments: { requested: true },
+          transfers:     { requested: true },
+        },
+      })
+
+      accountId = account.id
+
+      await supabase
+        .from('vendors')
+        .update({
+          stripe_connect_account_id:    accountId,
+          stripe_connect_invite_sent_at: new Date().toISOString(),
+        })
+        .eq('id', vendor.id)
+        .eq('org_id', vendor.org_id)
+    }
+
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL!
+
+    // Account links expire in minutes — always create fresh
+    const accountLink = await stripe.accountLinks.create({
+      account:     accountId,
+      refresh_url: `${baseUrl}/api/vendor-connect/${token}/refresh`,
+      return_url:  `${baseUrl}/api/vendor-connect/${token}/return`,
+      type:        'account_onboarding',
+    })
+
+    return NextResponse.redirect(accountLink.url)
+  } catch (err) {
+    console.error('[vendor-connect/onboard] Stripe error:', err)
+    return NextResponse.json(
+      { error: 'Could not generate onboarding link. Please try again.' },
+      { status: 500 }
+    )
+  }
+}
