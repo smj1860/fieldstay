@@ -11,6 +11,7 @@ import {
   addOwnerTransaction,
   deleteOwnerTransaction,
   toggleTransactionVisibility,
+  toggleCapitalPlanSharing,
   type OwnersActionState,
 } from './actions'
 
@@ -29,13 +30,14 @@ interface PortalToken {
 }
 
 interface Owner {
-  id: string
-  name: string
-  email: string | null
-  phone: string | null
-  revenue_share_pct: number | null
-  notes: string | null
-  property_id: string
+  id:                 string
+  name:               string
+  email:              string | null
+  phone:              string | null
+  revenue_share_pct:  number | null
+  notes:              string | null
+  property_id:        string
+  share_capital_plan: boolean
   properties: { name: string } | { name: string }[] | null
   owner_portal_tokens: PortalToken | PortalToken[] | null
 }
@@ -819,7 +821,71 @@ function OwnerCard({
         </p>
       </div>
 
+      {/* Capital plan sharing toggle */}
+      <CapitalPlanToggle ownerId={owner.id} initialShared={owner.share_capital_plan} />
+
       <TransactionPanel propertyId={owner.property_id} transactions={transactions} />
+    </div>
+  )
+}
+
+// ── Capital Plan Toggle ──────────────────────────────────────────────────────
+
+function CapitalPlanToggle({
+  ownerId,
+  initialShared,
+}: {
+  ownerId:       string
+  initialShared: boolean
+}) {
+  const [shared, setShared]    = useState(initialShared)
+  const [pending, startToggle] = useTransition()
+  const [error, setError]      = useState<string | null>(null)
+
+  function handleToggle() {
+    const next = !shared
+    setShared(next)
+    setError(null)
+    startToggle(async () => {
+      const result = await toggleCapitalPlanSharing(ownerId, next)
+      if (result.error) {
+        setShared(!next) // revert on failure
+        setError(result.error)
+      }
+    })
+  }
+
+  return (
+    <div className="flex items-center justify-between px-4 py-3 border-t border-themed">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-primary-themed">Share Capital Plan</p>
+        <p className="text-xs text-muted-themed mt-0.5">
+          {shared
+            ? 'Owner can see projected replacements in their portal'
+            : 'Capital plan is hidden from the owner portal'}
+        </p>
+        {error && <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }}>{error}</p>}
+      </div>
+      <button
+        onClick={handleToggle}
+        disabled={pending}
+        aria-pressed={shared}
+        aria-label={shared ? 'Hide capital plan from owner' : 'Share capital plan with owner'}
+        className={[
+          'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent',
+          'transition-colors duration-200 ease-in-out focus:outline-none',
+          'disabled:opacity-50',
+          shared ? 'bg-brand-600' : 'bg-accent-300',
+        ].join(' ')}
+      >
+        <span
+          className={[
+            'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow',
+            'transition duration-200 ease-in-out',
+            shared ? 'translate-x-5' : 'translate-x-0',
+          ].join(' ')}
+        />
+      </button>
     </div>
   )
 }

@@ -19,6 +19,7 @@ export default async function OwnersPage() {
       revenue_share_pct,
       notes,
       property_id,
+      share_capital_plan,
       properties ( name ),
       owner_portal_tokens (
         id,

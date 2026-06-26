@@ -156,16 +156,17 @@ export interface Property {
 }
 
 export interface PropertyOwner {
-  id:                string
-  org_id:            string
-  property_id:       string
-  name:              string
-  email:             string | null
-  phone:             string | null
-  revenue_share_pct: number | null
-  notes:             string | null
-  created_at:        string
-  updated_at:        string
+  id:                 string
+  org_id:             string
+  property_id:        string
+  name:               string
+  email:              string | null
+  phone:              string | null
+  revenue_share_pct:  number | null
+  notes:              string | null
+  share_capital_plan: boolean
+  created_at:         string
+  updated_at:         string
 }
 
 export interface OwnerPortalToken {
@@ -1090,6 +1091,7 @@ export interface PropertyAsset {
   salvage_value:              number
   health_score:               number | null
   health_score_updated_at:    string | null
+  replacement_status:         'projected' | 'budgeted' | 'approved' | 'deferred'
   is_active:                  boolean
   replaced_by_asset_id:       string | null
   notes:                      string | null

@@ -13,6 +13,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 export interface CapExProjectionItem {
   asset_id:         string
   asset_name:       string
+  property_id:      string   // required for owner portal property-scoped filtering
   property_name:    string
   asset_type:       string
   replacement_year: number
@@ -104,6 +105,7 @@ export const generateCapexProjections = inngest.createFunction(
           projections[replacementYear].items.push({
             asset_id:         asset.id,
             asset_name:       asset.name,
+            property_id:      asset.property_id,
             property_name:    (propertyMap[asset.property_id] as string) ?? 'Unknown',
             asset_type:       asset.asset_type as string,
             replacement_year: replacementYear,

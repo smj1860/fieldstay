@@ -58,8 +58,9 @@ import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
 import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
 
 // Asset Health — CapEx & Depreciation
-import { generateCapexProjections }   from '@/lib/inngest/functions/capex-projections'
-import { generateDepreciationLedger } from '@/lib/inngest/functions/depreciation-ledger'
+import { generateCapexProjections }      from '@/lib/inngest/functions/capex-projections'
+import { triggerCapexProjectionForOrg }  from '@/lib/inngest/functions/capex-projection-trigger'
+import { generateDepreciationLedger }    from '@/lib/inngest/functions/depreciation-ledger'
 
 // In-app messaging
 import { logMessageCommunication } from '@/lib/inngest/functions/log-message-comm'
@@ -157,6 +158,7 @@ export const { GET, POST, PUT } = serve({
 
     // Asset Health — CapEx projections + depreciation ledger
     generateCapexProjections,
+    triggerCapexProjectionForOrg,
     generateDepreciationLedger,
 
     // In-app messaging

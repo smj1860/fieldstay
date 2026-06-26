@@ -428,6 +428,12 @@ export type FieldStayEvents = {
     }
   }
 
+  'asset/capex-projection-requested': {
+    data: {
+      org_id: string
+    }
+  }
+
   'asset/depreciation-ledger-requested': {
     data: {
       org_id:   string
