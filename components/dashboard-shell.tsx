@@ -512,6 +512,36 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 pb-24 md:pb-7">
             {children}
           </div>
+
+          {/* Legal footer — always visible at the bottom of every PM page */}
+          <div
+            className="flex items-center justify-center gap-4 py-4 border-t"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <a
+              href="/privacy"
+              className="text-xs hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Privacy Policy
+            </a>
+            <span style={{ color: 'var(--border)' }}>·</span>
+            <a
+              href="/terms"
+              className="text-xs hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Terms of Service
+            </a>
+            <span style={{ color: 'var(--border)' }}>·</span>
+            <a
+              href="/dpa"
+              className="text-xs hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              DPA
+            </a>
+          </div>
         </main>
       </div>
 

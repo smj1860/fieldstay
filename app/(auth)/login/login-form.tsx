@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import Link from 'next/link'
 
 const ERROR_MESSAGES: Record<string, string> = {
   auth_callback:              'Sign-in failed. Please try again.',
@@ -110,6 +111,32 @@ export function LoginForm() {
         {loading ? 'Signing in…' : 'Sign In'}
       </button>
       </form>
+
+      <div className="flex items-center justify-center gap-4 pt-2">
+        <Link
+          href="/privacy"
+          className="text-xs hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Privacy
+        </Link>
+        <span style={{ color: 'var(--border)' }}>·</span>
+        <Link
+          href="/terms"
+          className="text-xs hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Terms
+        </Link>
+        <span style={{ color: 'var(--border)' }}>·</span>
+        <Link
+          href="/dpa"
+          className="text-xs hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          DPA
+        </Link>
+      </div>
     </div>
   )
 }

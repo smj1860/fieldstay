@@ -19,7 +19,7 @@ import {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team', 'Audit Log', 'Account'] as const
+const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team', 'Audit Log', 'Account', 'Legal'] as const
 type Tab = typeof TABS[number]
 
 const PLAN_INFO = {
@@ -99,6 +99,7 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }
       {activeTab === 'Team'          && <TeamTabRedirect />}
       {activeTab === 'Audit Log'     && <AuditLogTabRedirect />}
       {activeTab === 'Account'       && <AccountTabRedirect />}
+      {activeTab === 'Legal'         && <LegalTab />}
     </div>
   )
 }
@@ -661,6 +662,77 @@ function AccountTabRedirect() {
   const router = useRouter()
   useEffect(() => { router.push('/settings/account') }, [router])
   return null
+}
+
+// ── Legal tab ─────────────────────────────────────────────────────────────────
+
+function LegalTab() {
+  const docs = [
+    {
+      title:       'Privacy Policy',
+      description: 'How FieldStay collects, uses, and protects your data.',
+      href:        '/privacy',
+      updated:     'Effective June 9, 2026',
+    },
+    {
+      title:       'Terms of Service',
+      description: 'The agreement governing your use of FieldStay.',
+      href:        '/terms',
+      updated:     'Effective June 9, 2026',
+    },
+    {
+      title:       'Data Processing Agreement',
+      description: 'GDPR-compliant DPA for business customers processing personal data through FieldStay.',
+      href:        '/dpa',
+      updated:     'Effective June 9, 2026',
+    },
+  ]
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        FieldStay&apos;s legal documents governing your account and data.
+      </p>
+      {docs.map((doc) => (
+        <div key={doc.href} className="card flex items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>
+              {doc.title}
+            </p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+              {doc.description}
+            </p>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)', opacity: 0.7 }}>
+              {doc.updated}
+            </p>
+          </div>
+          <a
+            href={doc.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-secondary text-sm flex-shrink-0"
+          >
+            View →
+          </a>
+        </div>
+      ))}
+
+      <div className="card mt-4">
+        <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
+          Questions about your data?
+        </p>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          Contact us at{' '}
+          <a
+            href="mailto:privacy@fieldstay.app"
+            className="underline underline-offset-2 hover:opacity-80"
+          >
+            privacy@fieldstay.app
+          </a>
+        </p>
+      </div>
+    </div>
+  )
 }
 
 // ── Billing tab ───────────────────────────────────────────────────────────────
