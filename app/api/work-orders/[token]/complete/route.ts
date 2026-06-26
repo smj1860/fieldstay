@@ -8,9 +8,7 @@ import { inngest } from '@/lib/inngest/client'
  * Public endpoint — no auth required.
  * Vendor submits completion via their tokenized portal link.
  *
- * Body: FormData
- *   notes:  string (optional)
- *   photos: File[] (optional, uploaded to Supabase Storage)
+ * Body: JSON (line items + invoice — new flow) or FormData (legacy, notes only)
  */
 export async function POST(
   request: NextRequest,
@@ -22,7 +20,7 @@ export async function POST(
   // Validate token
   const { data: workOrder } = await supabase
     .from('work_orders')
-    .select('id, org_id, property_id, status, portal_enabled, completion_token_expires_at')
+    .select('id, org_id, property_id, vendor_id, status, portal_enabled, completion_token_expires_at')
     .eq('completion_token', token)
     .single()
 
@@ -45,102 +43,171 @@ export async function POST(
     return NextResponse.json({ error: 'Link has expired' }, { status: 410 })
   }
 
-  // Parse form data
-  const formData    = await request.formData()
-  const notes       = formData.get('notes') as string | null
-  const photoFiles  = formData.getAll('photos') as File[]
-  const photosPaths: string[] = []
+  // Verify the assigned vendor's org matches the work order's org before any
+  // invoice record can be created against it.
+  if (workOrder.vendor_id) {
+    const { data: vendorRow } = await supabase
+      .from('vendors')
+      .select('org_id')
+      .eq('id', workOrder.vendor_id)
+      .single()
 
-  const MAX_PHOTOS     = 10
-  const MAX_FILE_BYTES = 10 * 1024 * 1024  // 10 MB per photo
-  const ALLOWED_TYPES  = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
-
-  if (photoFiles.length > MAX_PHOTOS) {
-    return NextResponse.json(
-      { error: `Maximum ${MAX_PHOTOS} photos allowed.` },
-      { status: 400 }
-    )
-  }
-
-  for (const file of photoFiles) {
-    if (!(file instanceof File)) continue
-    if (!ALLOWED_TYPES.has(file.type)) {
-      return NextResponse.json(
-        { error: 'Only JPEG, PNG, WebP, and HEIC photos are accepted.' },
-        { status: 400 }
-      )
-    }
-    if (file.size > MAX_FILE_BYTES) {
-      return NextResponse.json(
-        { error: 'Each photo must be under 10 MB.' },
-        { status: 400 }
-      )
+    if (!vendorRow || vendorRow.org_id !== workOrder.org_id) {
+      return NextResponse.json({ error: 'Vendor not authorized for this work order' }, { status: 403 })
     }
   }
 
-  // Atomically claim the completion — only succeeds once (idempotency gate)
+  // Parse body — supports both JSON (new line items flow) and FormData (legacy)
+  const contentType = request.headers.get('content-type') ?? ''
+  let notes:     string | null            = null
+  let lineItemsPayload: {
+    line_type:   string
+    description: string
+    quantity:    number
+    unit_cost:   number
+    line_total:  number
+  }[] = []
+  let subtotal = 0
+
+  if (contentType.includes('application/json')) {
+    const body = await request.json().catch(() => ({}))
+    notes          = typeof body.notes === 'string' ? body.notes.trim() || null : null
+    lineItemsPayload = Array.isArray(body.lineItems) ? body.lineItems : []
+    subtotal       = typeof body.subtotal === 'number' ? body.subtotal : 0
+  } else {
+    const formData = await request.formData()
+    notes          = (formData.get('notes') as string | null)?.trim() || null
+  }
+
+  // Validate line items if provided
+  const VALID_LINE_TYPES = new Set(['labor', 'material', 'equipment', 'subcontractor', 'other'])
+  const safeLineItems = lineItemsPayload.filter((item) =>
+    VALID_LINE_TYPES.has(item.line_type) &&
+    typeof item.description === 'string' &&
+    item.description.trim().length > 0 &&
+    typeof item.unit_cost === 'number' && item.unit_cost > 0 &&
+    typeof item.quantity === 'number' && item.quantity > 0
+  )
+
+  // Atomically claim the completion — only succeeds once
   const { data: claimed } = await supabase
     .from('work_orders')
     .update({
       status:           'completed',
       completed_date:   new Date().toISOString().split('T')[0],
       completion_notes: notes,
+      actual_cost:      subtotal > 0 ? subtotal : undefined,
     })
     .eq('id', workOrder.id)
     .in('status', ['pending', 'assigned', 'in_progress'])
-    .select('id')
+    .select('id, org_id, vendor_id, property_id, wo_number')
     .single()
 
   if (!claimed) {
     return NextResponse.json({ error: 'Work order already closed' }, { status: 409 })
   }
 
-  // Upload photos to Supabase Storage in parallel (only after claiming completion)
-  const uploadResults = await Promise.all(
-    photoFiles
-      .filter((f): f is File => f instanceof File)
-      .map(async (file) => {
-        const ext  = file.name.split('.').pop() ?? 'jpg'
-        const path = `work-orders/${workOrder.id}/vendor-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-        const { error } = await supabase.storage
-          .from('work-order-photos')
-          .upload(path, file, { contentType: file.type })
-        return error ? null : path
-      })
-  )
-  photosPaths.push(...uploadResults.filter((p): p is string => p !== null))
-
-  // Record photo rows
-  if (photosPaths.length > 0) {
-    await supabase.from('work_order_photos').insert(
-      photosPaths.map((path) => ({
-        work_order_id: workOrder.id,
-        storage_path:  path,
-        uploaded_by:   'vendor_portal',
+  // Insert vendor-submitted line items
+  if (safeLineItems.length > 0) {
+    await supabase.from('work_order_line_items').insert(
+      safeLineItems.map((item, idx) => ({
+        work_order_id:    claimed.id,
+        org_id:           claimed.org_id,
+        line_type:        item.line_type,
+        description:      item.description.trim(),
+        quantity:         item.quantity,
+        unit_cost:        item.unit_cost,
+        line_total:       Math.round(item.unit_cost * item.quantity * 100) / 100,
+        sort_order:       idx,
+        vendor_submitted: true,
       }))
     )
   }
 
+  // Create invoice record if line items were submitted
+  let invoiceId: string | null = null
+  if (safeLineItems.length > 0 && claimed.vendor_id) {
+    // Generate invoice number: INV-YYYY-NNNNN (per-org sequence via count)
+    const { count } = await supabase
+      .from('work_order_invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', claimed.org_id)
+
+    const seq           = String((count ?? 0) + 1).padStart(5, '0')
+    const invoiceNumber = `INV-${new Date().getFullYear()}-${seq}`
+
+    const platformFeePct = parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0') / 100
+    const platformFee    = Math.round(subtotal * platformFeePct * 100) / 100
+
+    const { data: invoice } = await supabase
+      .from('work_order_invoices')
+      .upsert(
+        {
+          org_id:              claimed.org_id,
+          work_order_id:       claimed.id,
+          vendor_id:           claimed.vendor_id,
+          property_id:         claimed.property_id,
+          invoice_number:      invoiceNumber,
+          status:              'pending_payment',
+          subtotal,
+          total:               subtotal,
+          platform_fee_amount: platformFee,
+        },
+        { onConflict: 'work_order_id', ignoreDuplicates: true }
+      )
+      .select('id')
+      .single()
+
+    if (invoice) {
+      invoiceId = invoice.id
+    } else {
+      // UNIQUE(work_order_id) conflict — ignoreDuplicates means the upsert
+      // inserted nothing, so fetch the existing invoice instead of dropping
+      // the reference (never create a second invoice for the same WO).
+      const { data: existing } = await supabase
+        .from('work_order_invoices')
+        .select('id')
+        .eq('work_order_id', claimed.id)
+        .single()
+      invoiceId = existing?.id ?? null
+    }
+  }
+
   // Record status update
   await supabase.from('work_order_updates').insert({
-    work_order_id:             workOrder.id,
-    org_id:                    workOrder.org_id,
+    work_order_id:             claimed.id,
+    org_id:                    claimed.org_id,
     updated_via_vendor_portal: true,
     status_from:               workOrder.status as 'pending' | 'assigned' | 'in_progress',
     status_to:                 'completed',
     notes,
   })
 
-  // Fire Inngest event so PM gets notified
-  await inngest.send({
-    name: 'work-order/completed-via-portal',
-    data: {
-      work_order_id:    workOrder.id,
-      completion_token: token,
-      notes:            notes ?? null,
-      photo_paths:      photosPaths,
-    },
-  })
+  // Fire Inngest event
+  if (invoiceId) {
+    await inngest.send({
+      name: 'work-order/invoice-submitted',
+      data: {
+        work_order_id: claimed.id,
+        invoice_id:    invoiceId,
+        org_id:        claimed.org_id,
+        vendor_id:     claimed.vendor_id!,
+        property_id:   claimed.property_id,
+        total:         subtotal,
+      },
+    })
+  } else {
+    // Legacy path (no line items) — existing portal completion event
+    await inngest.send({
+      name: 'work-order/completed-via-portal',
+      data: {
+        work_order_id:    claimed.id,
+        completion_token: token,
+        notes:            notes ?? null,
+        photo_paths:      [],
+      },
+    })
+  }
 
   return NextResponse.json({ success: true })
 }
