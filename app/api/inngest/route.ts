@@ -90,6 +90,9 @@ import { onFunctionFailure } from '@/lib/inngest/functions/on-failure'
 // Stripe Connect vendor onboarding
 import { vendorConnectOnboardingCron } from '@/lib/inngest/functions/cron/vendor-connect-onboarding'
 
+// Work order invoices
+import { handleWorkOrderInvoiceSubmitted } from '@/lib/inngest/functions/work-order-invoice'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -182,5 +185,8 @@ export const { GET, POST, PUT } = serve({
 
     // Stripe Connect vendor onboarding cron
     vendorConnectOnboardingCron,
+
+    // Work order invoices
+    handleWorkOrderInvoiceSubmitted,
   ],
 })

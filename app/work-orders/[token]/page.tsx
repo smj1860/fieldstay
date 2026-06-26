@@ -21,7 +21,13 @@ export default async function VendorPortalPage({
       id, title, description, status, portal_enabled,
       scheduled_date, estimated_cost, completion_token_expires_at,
       wo_number, category, priority, nte_amount,
-      properties ( name, address, city, state, zip )
+      properties ( name, address, city, state, zip ),
+      vendors (
+        name,
+        email,
+        stripe_connect_token,
+        stripe_connect_charges_enabled
+      )
     `)
     .eq('completion_token', token)
     .eq('portal_enabled', true)
@@ -37,6 +43,10 @@ export default async function VendorPortalPage({
   const property = Array.isArray(workOrder.properties)
     ? workOrder.properties[0]
     : workOrder.properties
+
+  const vendor = Array.isArray(workOrder.vendors)
+    ? workOrder.vendors[0]
+    : workOrder.vendors
 
   return (
     <VendorPortal
@@ -55,6 +65,8 @@ export default async function VendorPortalPage({
       }}
       property={property ?? null}
       expired={!!expired}
+      vendorConnectToken={vendor?.stripe_connect_token ?? ''}
+      vendorChargesEnabled={vendor?.stripe_connect_charges_enabled ?? false}
     />
   )
 }
