@@ -551,4 +551,29 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Work Order Invoices (CLAUDE_58_0)
+  // ----------------------------------------------------------
+
+  'work-order/invoice-submitted': {
+    data: {
+      work_order_id: string
+      invoice_id:    string
+      org_id:        string
+      vendor_id:     string
+      property_id:   string
+      total:         number
+    }
+  }
+
+  'work-order/invoice-paid': {
+    data: {
+      work_order_id: string
+      invoice_id:    string
+      org_id:        string
+      property_id:   string
+      amount_paid:   number
+    }
+  }
+
 }

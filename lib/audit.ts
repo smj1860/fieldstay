@@ -76,6 +76,11 @@ export type AuditAction =
   | 'asset.replacement_status.updated'
   | 'owner.capital_plan.sharing_toggled'
   | 'owner_portal.capital_plan.accessed'
+  | 'vendor.stripe_connect.onboarded'
+  | 'vendor.stripe_connect.charges_disabled'
+  | 'work_order.invoice.created'
+  | 'work_order.invoice.paid'
+  | 'work_order.invoice.cancelled'
 
 interface AuditParams {
   orgId?:         string

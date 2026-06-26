@@ -159,34 +159,95 @@ function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: P
   )
 }
 
-// ── Completion portal (existing) ──────────────────────────────────────────────
+// ── Completion portal (TradeSuite-branded) ────────────────────────────────────
 
 export function VendorPortal({
   token,
   workOrder,
   property,
   expired,
+  vendorConnectToken,
+  vendorChargesEnabled,
 }: {
-  token: string
-  workOrder: WorkOrderInfo
-  property: PropertyInfo | null
-  expired: boolean
+  token:                string
+  workOrder:            WorkOrderInfo
+  property:             PropertyInfo | null
+  expired:              boolean
+  vendorConnectToken:   string
+  vendorChargesEnabled: boolean
 }) {
-  const [notes, setNotes]       = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [success, setSuccess]   = useState(false)
-  const [error, setError]       = useState<string | null>(null)
+  const [notes,       setNotes]       = useState('')
+  const [submitting,  setSubmitting]  = useState(false)
+  const [success,     setSuccess]     = useState(false)
+  const [error,       setError]       = useState<string | null>(null)
+  const [lineItems,   setLineItems]   = useState<LineItemInput[]>([
+    { type: 'labor',    description: 'Labor', quantity: 1, unitCost: '' },
+    { type: 'material', description: '',      quantity: 1, unitCost: '' },
+  ])
 
   const alreadyDone = workOrder.status === 'completed' || workOrder.status === 'cancelled'
 
+  const subtotal = lineItems.reduce((sum, item) => {
+    const cost = parseFloat(item.unitCost) || 0
+    return sum + (cost * item.quantity)
+  }, 0)
+
+  function addLineItem() {
+    setLineItems((prev) => [...prev, { type: 'material', description: '', quantity: 1, unitCost: '' }])
+  }
+
+  function removeLineItem(idx: number) {
+    setLineItems((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  function updateLineItem(idx: number, field: keyof LineItemInput, value: string | number) {
+    setLineItems((prev) => prev.map((item, i) =>
+      i === idx ? { ...item, [field]: value } : item
+    ))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+
+    const validItems = lineItems.filter(
+      (item) => item.description.trim() && (parseFloat(item.unitCost) || 0) > 0
+    )
+
+    if (validItems.length === 0) {
+      setError('Add at least one line item with a description and cost.')
+      return
+    }
+
+    if (subtotal <= 0) {
+      setError('Invoice total must be greater than $0.')
+      return
+    }
+
+    if (workOrder.nte_amount && subtotal > workOrder.nte_amount * 1.05) {
+      setError(`Total of $${subtotal.toFixed(2)} exceeds the Not-to-Exceed amount of $${workOrder.nte_amount.toFixed(2)}. Please contact the property manager before submitting.`)
+      return
+    }
+
     setSubmitting(true)
     setError(null)
+
     try {
-      const formData = new FormData()
-      formData.set('notes', notes)
-      const res = await fetch(`/api/work-orders/${token}/complete`, { method: 'POST', body: formData })
+      const res = await fetch(`/api/work-orders/${token}/complete`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          notes,
+          lineItems: validItems.map((item) => ({
+            line_type:   item.type,
+            description: item.description.trim(),
+            quantity:    item.quantity,
+            unit_cost:   parseFloat(item.unitCost),
+            line_total:  parseFloat(item.unitCost) * item.quantity,
+          })),
+          subtotal,
+        }),
+      })
+
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         setError(body.error ?? 'Something went wrong. Please try again.')
@@ -200,79 +261,323 @@ export function VendorPortal({
     }
   }
 
-  return (
-    <PortalShell>
-      {success ? (
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 className="w-8 h-8 text-green-600" />
+  // ── TradeSuite shell ─────────────────────────────────────────────────────
+  const shell = (children: React.ReactNode) => (
+    <div style={{
+      minHeight:       '100vh',
+      backgroundColor: '#1A1A1A',
+      backgroundImage: 'repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(255,255,255,0.015) 4px,rgba(255,255,255,0.015) 8px)',
+      display:         'flex',
+      alignItems:      'center',
+      justifyContent:  'center',
+      padding:         '16px',
+      fontFamily:      '-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
+    }}>
+      <div style={{
+        backgroundColor: '#ffffff',
+        borderRadius:    16,
+        width:           '100%',
+        maxWidth:        480,
+        overflow:        'hidden',
+        boxShadow:       '0 24px 64px rgba(0,0,0,0.5)',
+      }}>
+        {/* Header */}
+        <div style={{
+          backgroundColor: '#1A1A1A',
+          borderBottom:    '3px solid #FF6B00',
+          padding:         '20px 24px',
+          display:         'flex',
+          alignItems:      'center',
+          justifyContent:  'space-between',
+        }}>
+          <div>
+            <p style={{ color: '#FF6B00', fontSize: 16, fontWeight: 800, letterSpacing: '-0.3px', margin: 0 }}>
+              TradeSuite
+            </p>
+            <p style={{ color: '#C0C0C0', fontSize: 10, margin: '2px 0 0', letterSpacing: '0.1em' }}>
+              POWERED BY FIELDSTAY
+            </p>
           </div>
-          <h2 className="text-xl font-semibold text-accent-900 mb-2">Work Order Complete!</h2>
-          <p className="text-sm text-accent-500">Thank you. The property manager has been notified.</p>
-          {notes && (
-            <div className="mt-4 p-3 bg-accent-50 rounded-lg text-left">
-              <p className="text-xs font-medium text-accent-500 mb-1">Your notes:</p>
-              <p className="text-sm text-accent-700">{notes}</p>
-            </div>
+          {workOrder.wo_number && (
+            <span style={{ color: '#C0C0C0', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em' }}>
+              WO-{workOrder.wo_number}
+            </span>
           )}
         </div>
-      ) : expired ? (
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
-            <Clock className="w-8 h-8 text-amber-600" />
-          </div>
-          <h2 className="text-xl font-semibold text-accent-900 mb-2">Link Expired</h2>
-          <p className="text-sm text-accent-500">Contact the property manager for a new link.</p>
+
+        <div style={{ padding: '24px' }}>
+          {children}
         </div>
-      ) : alreadyDone ? (
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-full bg-blue-100 flex items-center justify-center mx-auto mb-4">
-            <CheckCircle2 className="w-8 h-8 text-blue-600" />
-          </div>
-          <h2 className="text-xl font-semibold text-accent-900 mb-2">
-            Already {workOrder.status === 'completed' ? 'Completed' : 'Closed'}
-          </h2>
-          <p className="text-sm text-accent-500">
-            This work order has already been {workOrder.status === 'completed' ? 'marked complete' : 'closed'}.
+      </div>
+    </div>
+  )
+
+  // ── State: already done ──────────────────────────────────────────────────
+  if (success) {
+    return shell(
+      <div style={{ textAlign: 'center', padding: '8px 0' }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+          Invoice Submitted!
+        </h2>
+        <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: 0 }}>
+          Your invoice has been sent to the property manager.
+          Payment will be deposited to your Stripe payout account once approved.
+        </p>
+      </div>
+    )
+  }
+
+  if (expired) {
+    return shell(
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>⏰</div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>Link Expired</h2>
+        <p style={{ fontSize: 14, color: '#64748b' }}>Contact the property manager for a new link.</p>
+      </div>
+    )
+  }
+
+  if (alreadyDone) {
+    return shell(
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 36, marginBottom: 12 }}>✓</div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+          Already {workOrder.status === 'completed' ? 'Completed' : 'Closed'}
+        </h2>
+        <p style={{ fontSize: 14, color: '#64748b' }}>This work order has already been closed.</p>
+      </div>
+    )
+  }
+
+  // ── State: Connect gate ──────────────────────────────────────────────────
+  if (!vendorChargesEnabled) {
+    const onboardUrl = `/api/vendor-connect/${vendorConnectToken}/onboard`
+    return shell(
+      <>
+        <WOInfo workOrder={workOrder} property={property} />
+        <div style={{
+          backgroundColor: '#fff7ed',
+          border:          '1px solid #fed7aa',
+          borderRadius:    10,
+          padding:         '16px',
+          marginBottom:    16,
+        }}>
+          <p style={{ fontSize: 14, fontWeight: 700, color: '#9a3412', margin: '0 0 6px' }}>
+            ⚡ Set up payouts before submitting
+          </p>
+          <p style={{ fontSize: 13, color: '#7c2d12', lineHeight: 1.55, margin: 0 }}>
+            Invoices are paid via Stripe Connect directly to your bank.
+            Setting up takes about 2 minutes — you'll need your bank details.
           </p>
         </div>
-      ) : (
-        <>
-          <WOInfo workOrder={workOrder} property={property} />
-          {error && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
-              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              {error}
-            </div>
-          )}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="portal-notes" className="label">Completion Notes (optional)</label>
-              <textarea
-                id="portal-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={4}
-                className="input resize-none"
-                placeholder="Describe what was done, any issues found, parts used, etc."
+        <a
+          href={onboardUrl}
+          style={{
+            display:         'block',
+            backgroundColor: '#FF6B00',
+            color:           '#ffffff',
+            borderRadius:    10,
+            padding:         '14px',
+            fontSize:        15,
+            fontWeight:      700,
+            textAlign:       'center',
+            textDecoration:  'none',
+          }}
+        >
+          Set Up Stripe Payout Account →
+        </a>
+        <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 12 }}>
+          Come back to this page after setup to submit your invoice.
+        </p>
+      </>
+    )
+  }
+
+  // ── State: Line items form ───────────────────────────────────────────────
+  return shell(
+    <>
+      <WOInfo workOrder={workOrder} property={property} />
+
+      {error && (
+        <div style={{
+          backgroundColor: '#fef2f2',
+          border:          '1px solid #fecaca',
+          borderRadius:    8,
+          padding:         '10px 12px',
+          marginBottom:    16,
+          fontSize:        13,
+          color:           '#b91c1c',
+        }}>
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit}>
+        {/* Line items */}
+        <p style={{ fontSize: 13, fontWeight: 700, color: '#374151', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Invoice Line Items
+        </p>
+
+        <div style={{ display: 'flex', gap: 6, marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #e5e7eb' }}>
+          <span style={{ flex: '0 0 80px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Type</span>
+          <span style={{ flex: 1, fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase' }}>Description</span>
+          <span style={{ flex: '0 0 50px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Qty</span>
+          <span style={{ flex: '0 0 70px', fontSize: 10, color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', textAlign: 'right' }}>Unit $</span>
+          <span style={{ width: 24 }} />
+        </div>
+
+        {lineItems.map((item, idx) => (
+          <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
+            <select
+              value={item.type}
+              onChange={(e) => updateLineItem(idx, 'type', e.target.value)}
+              style={{
+                flex: '0 0 80px', fontSize: 12, padding: '6px 4px',
+                border: '1px solid #d1d5db', borderRadius: 6, color: '#374151',
+              }}
+            >
+              <option value="labor">Labor</option>
+              <option value="material">Material</option>
+              <option value="equipment">Equipment</option>
+              <option value="subcontractor">Sub</option>
+              <option value="other">Other</option>
+            </select>
+
+            <input
+              type="text"
+              value={item.description}
+              onChange={(e) => updateLineItem(idx, 'description', e.target.value)}
+              placeholder="Description"
+              style={{
+                flex: 1, fontSize: 13, padding: '6px 8px',
+                border: '1px solid #d1d5db', borderRadius: 6, color: '#374151',
+              }}
+            />
+
+            <input
+              type="number"
+              min="1"
+              value={item.quantity}
+              onChange={(e) => updateLineItem(idx, 'quantity', parseInt(e.target.value) || 1)}
+              style={{
+                flex: '0 0 50px', fontSize: 13, padding: '6px 4px',
+                border: '1px solid #d1d5db', borderRadius: 6, textAlign: 'right', color: '#374151',
+              }}
+            />
+
+            <div style={{ flex: '0 0 70px', position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: '#9ca3af', fontSize: 12 }}>$</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={item.unitCost}
+                onChange={(e) => updateLineItem(idx, 'unitCost', e.target.value)}
+                placeholder="0.00"
+                style={{
+                  width: '100%', fontSize: 13, padding: '6px 6px 6px 18px',
+                  border: '1px solid #d1d5db', borderRadius: 6, textAlign: 'right', color: '#374151',
+                  boxSizing: 'border-box',
+                }}
               />
             </div>
-            <button type="submit" disabled={submitting} className="w-full btn-primary py-3 text-base">
-              {submitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <Clock className="w-4 h-4 animate-spin" /> Submitting…
-                </span>
-              ) : (
-                <span className="flex items-center justify-center gap-2">
-                  <CheckCircle2 className="w-4 h-4" /> Mark Complete
-                </span>
-              )}
+
+            <button
+              type="button"
+              onClick={() => removeLineItem(idx)}
+              disabled={lineItems.length <= 1}
+              style={{
+                width: 24, height: 24, border: 'none', background: 'none',
+                cursor: lineItems.length <= 1 ? 'not-allowed' : 'pointer',
+                color: lineItems.length <= 1 ? '#d1d5db' : '#ef4444', fontSize: 16,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 0,
+              }}
+            >
+              ×
             </button>
-          </form>
-        </>
-      )}
-    </PortalShell>
+          </div>
+        ))}
+
+        <button
+          type="button"
+          onClick={addLineItem}
+          style={{
+            fontSize: 13, color: '#FF6B00', background: 'none',
+            border: '1px dashed #fed7aa', borderRadius: 6,
+            padding: '6px 12px', cursor: 'pointer', marginBottom: 16, width: '100%',
+          }}
+        >
+          + Add line item
+        </button>
+
+        {/* Total */}
+        <div style={{
+          backgroundColor: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: 8,
+          padding: '12px 16px',
+          marginBottom: 16,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#374151' }}>Invoice Total</span>
+          <span style={{ fontSize: 20, fontWeight: 800, color: '#0f172a' }}>
+            ${subtotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+
+        {workOrder.nte_amount != null && subtotal > workOrder.nte_amount && (
+          <p style={{ fontSize: 12, color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '8px 10px', marginBottom: 12 }}>
+            ⚠️ Total exceeds the Not-to-Exceed amount of ${workOrder.nte_amount.toFixed(2)}. Contact the PM before submitting.
+          </p>
+        )}
+
+        {/* Completion notes */}
+        <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+          Completion Notes <span style={{ fontWeight: 400, color: '#9ca3af' }}>(optional)</span>
+        </label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+          placeholder="Describe what was done, any issues found, parts used, follow-up needed…"
+          style={{
+            width: '100%', fontSize: 13, padding: '10px 12px',
+            border: '1px solid #d1d5db', borderRadius: 8, resize: 'none',
+            color: '#374151', boxSizing: 'border-box', marginBottom: 16,
+          }}
+        />
+
+        <button
+          type="submit"
+          disabled={submitting || subtotal <= 0}
+          style={{
+            width: '100%', backgroundColor: submitting || subtotal <= 0 ? '#d1d5db' : '#FF6B00',
+            color: '#ffffff', border: 'none', borderRadius: 10,
+            padding: '14px', fontSize: 15, fontWeight: 700, cursor: submitting || subtotal <= 0 ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {submitting ? 'Submitting…' : `Submit Invoice — $${subtotal.toFixed(2)}`}
+        </button>
+
+        <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 10 }}>
+          Payment processed via Stripe Connect · FieldStay · TradeSuite
+        </p>
+      </form>
+    </>
   )
+}
+
+// ── Line item state type ──────────────────────────────────────────────────────
+
+interface LineItemInput {
+  type:        'labor' | 'material' | 'equipment' | 'subcontractor' | 'other'
+  description: string
+  quantity:    number
+  unitCost:    string  // string for controlled input
 }
 
 // ── Quote portal (new) ────────────────────────────────────────────────────────

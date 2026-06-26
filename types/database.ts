@@ -304,6 +304,11 @@ export interface Vendor {
   lng:                  number | null
   created_at:           string
   updated_at:           string
+  stripe_connect_token:           string
+  stripe_connect_account_id:      string | null
+  stripe_connect_charges_enabled: boolean
+  stripe_connect_onboarded_at:    string | null
+  stripe_connect_invite_sent_at:  string | null
 }
 
 export interface ChecklistTemplate {
@@ -532,17 +537,38 @@ export interface PurchaseOrderItem {
 }
 
 export interface WorkOrderLineItem {
-  id:            string
-  work_order_id: string
-  org_id:        string
-  line_type:     LineItemType
-  description:   string
-  quantity:      number
-  unit:          string | null
-  unit_cost:     number
-  line_total:    number
-  sort_order:    number
-  created_at:    string
+  id:               string
+  work_order_id:    string
+  org_id:           string
+  line_type:        LineItemType
+  description:      string
+  quantity:         number
+  unit:             string | null
+  unit_cost:        number
+  line_total:       number
+  sort_order:       number
+  created_at:       string
+  vendor_submitted: boolean
+}
+
+export type InvoiceStatus = 'pending_payment' | 'paid' | 'cancelled'
+
+export interface WorkOrderInvoice {
+  id:                         string
+  org_id:                     string
+  work_order_id:              string
+  vendor_id:                  string
+  property_id:                string
+  invoice_number:             string
+  status:                     InvoiceStatus
+  subtotal:                   number
+  total:                      number
+  platform_fee_amount:        number
+  stripe_checkout_session_id: string | null
+  stripe_payment_intent_id:   string | null
+  paid_at:                    string | null
+  submitted_at:               string
+  created_at:                 string
 }
 
 export interface WorkOrder {

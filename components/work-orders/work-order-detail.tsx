@@ -45,6 +45,8 @@ export interface WorkOrderDetailData {
   access_notes:            string | null
   completion_notes:        string | null
   invoice_reference:       string | null
+  invoiceStatus?:          'pending_payment' | 'paid' | 'cancelled' | null
+  invoiceId?:              string | null
   vendor_acknowledged_at:  string | null
   completion_verified_at:  string | null
   created_at:              string
@@ -97,6 +99,12 @@ const STATUS_STYLES: Record<WoStatus, { dot: string; label: string }> = {
   in_progress:     { dot: 'bg-yellow-400',  label: 'In Progress'     },
   completed:       { dot: 'bg-emerald-400', label: 'Completed'       },
   cancelled:       { dot: 'bg-red-400',     label: 'Cancelled'       },
+}
+
+const INVOICE_STATUS_STYLES: Record<'pending_payment' | 'paid' | 'cancelled', { badge: string; label: string }> = {
+  paid:            { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: '✓ Paid' },
+  pending_payment: { badge: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',       label: 'Pending Payment →' },
+  cancelled:       { badge: 'bg-slate-500/15 text-slate-400 border border-slate-500/30 line-through', label: 'Cancelled' },
 }
 
 const CATEGORY_LABELS: Record<WoCategory, string> = {
@@ -400,7 +408,17 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
             </>
           )}
 
-          {wo.invoice_reference && (
+          {wo.invoiceStatus && wo.invoiceId ? (
+            <a
+              href={`/invoices/${wo.invoiceId}`}
+              className={cn(
+                'ml-auto px-2.5 py-1 rounded-md text-xs font-bold tracking-wide',
+                INVOICE_STATUS_STYLES[wo.invoiceStatus].badge
+              )}
+            >
+              {INVOICE_STATUS_STYLES[wo.invoiceStatus].label}
+            </a>
+          ) : wo.invoice_reference && (
             <span className="ml-auto text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
               Invoice: {wo.invoice_reference}
             </span>
