@@ -72,6 +72,10 @@ export type AuditAction =
   | 'turnover.autopilot.assigned'
   | 'work_order.vendor_signoff'
   | 'property.rates.updated'
+  | 'asset.capex_projection.triggered'
+  | 'asset.replacement_status.updated'
+  | 'owner.capital_plan.sharing_toggled'
+  | 'owner_portal.capital_plan.accessed'
 
 interface AuditParams {
   orgId?:         string

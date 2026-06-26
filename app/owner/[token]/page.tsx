@@ -4,6 +4,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { computeOccupancy } from '@/lib/owner-portal/occupancy'
 import type { Metadata } from 'next'
 import type { TxnType } from '@/types/database'
+import type { CapExProjectionPayload, CapExProjectionItem } from '@/lib/inngest/functions/capex-projections'
 
 export const metadata: Metadata = { title: 'Owner Portal — FieldStay' }
 
@@ -161,6 +162,7 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
         org_id,
         name,
         revenue_share_pct,
+        share_capital_plan,
         property_id,
         properties (
           id,
@@ -318,6 +320,50 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
   const lastYearMonthLabel = formatMonthLabel(
     `${Number(selectedMonth.split('-')[0]) - 1}-${selectedMonth.split('-')[1]}`
   )
+
+  // Capital plan — only if PM has opted in for this owner
+  const shareCapitalPlan = (ownerRaw as { share_capital_plan?: boolean }).share_capital_plan ?? false
+
+  let capexPayload: CapExProjectionPayload | null = null
+
+  if (shareCapitalPlan && ownerRaw.org_id) {
+    const currentYear = new Date().getFullYear()
+
+    const { data: capexMilestone } = await supabase
+      .from('org_milestones')
+      .select('value')
+      .eq('org_id', ownerRaw.org_id)
+      .eq('milestone', `capex_projection_${currentYear}`)
+      .maybeSingle()
+
+    capexPayload = (capexMilestone?.value as CapExProjectionPayload) ?? null
+
+    if (capexPayload) {
+      // Strict tenant isolation: filter to only this owner's properties.
+      // property_ids comes from the token (server-validated), never from
+      // a user-supplied query parameter.
+      const allowedPropertyIds = new Set(txnPropertyIds)
+
+      for (const year of Object.keys(capexPayload.projections)) {
+        const proj = capexPayload.projections[Number(year)]!
+        proj.items = proj.items.filter((i) => allowedPropertyIds.has(i.property_id))
+        proj.total_low  = proj.items.reduce((s, i) => s + i.cost_low, 0)
+        proj.total_high = proj.items.reduce((s, i) => s + i.cost_high, 0)
+        if (proj.items.length === 0) delete capexPayload.projections[Number(year)]
+      }
+
+      // Audit: log capital plan view (non-blocking — never throws)
+      void logAuditEvent({
+        orgId:      ownerRaw.org_id,
+        action:     'owner_portal.capital_plan.accessed',
+        targetType: 'owner_portal_token',
+        targetId:   portalToken.id,
+        // No owner name or email in metadata — the token ID is sufficient
+        // for investigation without logging PII.
+        metadata:   { property_ids: txnPropertyIds },
+      })
+    }
+  }
 
   // Summary from filtered transactions
   const totalRevenue  = filteredTxns
@@ -497,6 +543,100 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
             )
           })()}
         </div>
+
+        {/* Capital plan — only shown when PM has opted in */}
+        {capexPayload && Object.keys(capexPayload.projections).length > 0 && (() => {
+          const currentYear   = new Date().getFullYear()
+          const horizonYears  = Array.from({ length: 10 }, (_, i) => currentYear + i)
+          const allItems      = horizonYears.flatMap(
+            (y) => capexPayload!.projections[y]?.items ?? []
+          )
+          const totalLow  = allItems.reduce((s, i) => s + i.cost_low, 0)
+          const totalHigh = allItems.reduce((s, i) => s + i.cost_high, 0)
+
+          return (
+            <div className="bg-white rounded-xl border border-gray-200 p-5 mb-8">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">
+                Capital Planning
+              </h3>
+              <p className="text-xs text-gray-400 mb-4">
+                Projected asset replacements over the next 10 years based on
+                age, lifespan, and condition scoring.
+              </p>
+
+              {/* Summary */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-400 mb-0.5">10-Year Projected Cost</p>
+                  <p className="text-lg font-bold text-gray-900">
+                    ${totalLow.toLocaleString()}–${totalHigh.toLocaleString()}
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-400 mb-0.5">Monthly Reserve Target</p>
+                  <p className="text-lg font-bold text-gray-900">
+                    ${Math.round(totalLow / 120).toLocaleString()}–${Math.round(totalHigh / 120).toLocaleString()}/mo
+                  </p>
+                </div>
+              </div>
+
+              {/* Year-by-year items */}
+              <div className="space-y-3">
+                {horizonYears.map((year) => {
+                  const proj = capexPayload!.projections[year]
+                  if (!proj?.items?.length) return null
+                  return (
+                    <div key={year}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm font-semibold text-gray-700">{year}</span>
+                        <span className="text-xs font-medium text-gray-500">
+                          ${proj.total_low.toLocaleString()}–${proj.total_high.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {proj.items.map((item: CapExProjectionItem) => (
+                          <div
+                            key={item.asset_id}
+                            className="flex items-center justify-between text-sm px-3 py-2 bg-gray-50 rounded-lg"
+                          >
+                            <div className="min-w-0">
+                              <span className="font-medium text-gray-800">{item.asset_name}</span>
+                              <span className="text-gray-400 text-xs ml-2">
+                                {item.asset_type.replace(/_/g, ' ')}
+                              </span>
+                            </div>
+                            <div className="text-right flex-shrink-0 ml-4">
+                              <span className="text-xs text-gray-500">
+                                ${item.cost_low.toLocaleString()}
+                                {item.cost_high !== item.cost_low
+                                  ? `–$${item.cost_high.toLocaleString()}`
+                                  : ''}
+                              </span>
+                              {item.health_score != null && (
+                                <span className={`ml-2 text-xs font-medium ${
+                                  item.health_score >= 80 ? 'text-green-600'
+                                  : item.health_score >= 60 ? 'text-amber-600'
+                                  : 'text-red-600'
+                                }`}>
+                                  {item.health_score}/100
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <p className="text-xs text-gray-400 mt-4">
+                Projections are estimates based on asset age and expected lifespan.
+                Actual replacement timing and costs may vary.
+              </p>
+            </div>
+          )
+        })()}
 
         {/* Transaction list */}
         {filteredTxns.length === 0 ? (

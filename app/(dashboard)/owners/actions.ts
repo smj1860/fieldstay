@@ -329,3 +329,51 @@ export async function deleteOwnerTransaction(txnId: string): Promise<void> {
 
   revalidatePath('/owners')
 }
+
+// ── Toggle capital plan sharing with owner ───────────────────────────────────
+
+export async function toggleCapitalPlanSharing(
+  ownerId: string,
+  shared:  boolean,
+): Promise<OwnersActionState> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  // Defense in depth: verify owner belongs to this org before update,
+  // even though RLS enforces the same constraint.
+  const { data: owner } = await supabase
+    .from('property_owners')
+    .select('id, name, property_id')
+    .eq('id', ownerId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!owner) return { error: 'Owner not found' }
+
+  const { error } = await supabase
+    .from('property_owners')
+    .update({ share_capital_plan: shared })
+    .eq('id', ownerId)
+    .eq('org_id', membership.org_id)
+
+  if (error) {
+    console.error('[toggleCapitalPlanSharing]', error)
+    return { error: 'Update failed' }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'owner.capital_plan.sharing_toggled',
+    targetType: 'property_owner',
+    targetId:   ownerId,
+    metadata:   {
+      shared,
+      owner_name:  owner.name,
+      property_id: owner.property_id,
+      // Intentionally omit email/phone — no PII in audit metadata
+    },
+  })
+
+  revalidatePath('/owners')
+  return { success: true }
+}
