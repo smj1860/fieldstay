@@ -1588,7 +1588,8 @@ export async function fetchArchivedWorkOrders() {
       work_order_line_items (
         id, line_type, description, quantity, unit,
         unit_cost, line_total, sort_order, created_at
-      )
+      ),
+      work_order_invoices ( id, status )
     `)
     .eq('org_id', membership.org_id)
     .in('status', ['completed', 'cancelled'])
