@@ -566,6 +566,25 @@ export function VendorPortal({
         <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 10 }}>
           Payment processed via Stripe Connect · FieldStay · TradeSuite
         </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 6 }}>
+          <a
+            href="/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: 11, color: '#94a3b8', textDecoration: 'underline' }}
+          >
+            Privacy
+          </a>
+          <span style={{ color: '#cbd5e1', fontSize: 11 }}>·</span>
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: 11, color: '#94a3b8', textDecoration: 'underline' }}
+          >
+            Terms
+          </a>
+        </div>
       </form>
     </>
   )

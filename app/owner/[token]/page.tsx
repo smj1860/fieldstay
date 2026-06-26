@@ -677,9 +677,30 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
           </div>
         )}
 
-        <p className="text-center text-xs text-gray-400 mt-8">
-          Powered by FieldStay · Data is read-only
-        </p>
+        <div className="flex flex-col items-center gap-2 mt-8">
+          <p className="text-center text-xs text-gray-400">
+            Powered by FieldStay · Data is read-only
+          </p>
+          <div className="flex items-center gap-3">
+            <a
+              href="/privacy"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-gray-400 hover:text-gray-600 transition-colors underline underline-offset-2"
+            >
+              Privacy Policy
+            </a>
+            <span className="text-gray-300">·</span>
+            <a
+              href="/terms"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-gray-400 hover:text-gray-600 transition-colors underline underline-offset-2"
+            >
+              Terms of Service
+            </a>
+          </div>
+        </div>
       </div>
     </div>
   )

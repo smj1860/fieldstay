@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import Link from 'next/link'
 
 export function SignupForm() {
   const router       = useRouter()
@@ -156,6 +157,18 @@ export function SignupForm() {
       >
         {loading ? 'Creating account…' : 'Create Account'}
       </button>
+
+      <p className="text-xs text-center leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+        By creating an account you agree to our{' '}
+        <Link href="/terms" className="underline underline-offset-2 hover:opacity-80">
+          Terms of Service
+        </Link>{' '}
+        and{' '}
+        <Link href="/privacy" className="underline underline-offset-2 hover:opacity-80">
+          Privacy Policy
+        </Link>
+        .
+      </p>
       </form>
     </div>
   )
