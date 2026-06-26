@@ -4,7 +4,10 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { markStepComplete }    from '../actions'
 
 // All PMS provider IDs — excludes non-PMS integrations (e.g. kroger, repuguard)
-const PMS_PROVIDER_IDS = ['ownerrez', 'hostaway', 'guesty'] as const
+// 'guesty' is commented out: it's registered as oauth2 in integration_providers but
+// not yet wired into lib/integrations/registry.ts or connectWithApiKey() — the
+// Connect button would 404. Re-add once that backend support lands.
+const PMS_PROVIDER_IDS = ['ownerrez', 'hostaway' /* , 'guesty' */] as const
 
 export default async function OnboardingPmsPage() {
   const { membership } = await requireOrgMember()
