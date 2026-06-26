@@ -16,6 +16,7 @@ export default async function WorkOrderPage({ params }: Props) {
     { data: lineItems },
     { data: photos },
     { data: orgVendors },
+    { data: invoice },
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -56,6 +57,13 @@ export default async function WorkOrderPage({ params }: Props) {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
+
+    supabase
+      .from('work_order_invoices')
+      .select('id, status')
+      .eq('work_order_id', id)
+      .eq('org_id', membership.org_id)
+      .maybeSingle(),
   ])
 
   if (!wo) notFound()
@@ -82,6 +90,8 @@ export default async function WorkOrderPage({ params }: Props) {
     access_notes:           wo.access_notes,
     completion_notes:       wo.completion_notes,
     invoice_reference:      wo.invoice_reference,
+    invoiceStatus:          invoice?.status as WorkOrderDetailData['invoiceStatus'],
+    invoiceId:              invoice?.id ?? null,
     vendor_acknowledged_at: wo.vendor_acknowledged_at,
     completion_verified_at: wo.completion_verified_at,
     vendor_rating:          wo.vendor_rating,

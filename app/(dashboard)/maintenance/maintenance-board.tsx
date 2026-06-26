@@ -57,6 +57,8 @@ interface WorkOrderRow {
     quantity: number; unit: string | null; unit_cost: number; line_total: number
     sort_order: number; created_at: string
   }>
+  work_order_invoices?: { id: string; status: 'pending_payment' | 'paid' | 'cancelled' }
+    | { id: string; status: 'pending_payment' | 'paid' | 'cancelled' }[] | null
 }
 
 interface PropertyOption {
@@ -148,8 +150,9 @@ function getJoined<T>(val: T | T[] | null): T | null {
 }
 
 function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
-  const prop = getJoined(wo.properties)
-  const vend = getJoined(wo.vendors)
+  const prop    = getJoined(wo.properties)
+  const vend    = getJoined(wo.vendors)
+  const invoice = getJoined(wo.work_order_invoices ?? null)
 
   return {
     id:                     wo.id,
@@ -170,6 +173,8 @@ function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
     access_notes:           wo.access_notes,
     completion_notes:       wo.completion_notes,
     invoice_reference:      wo.invoice_reference,
+    invoiceStatus:          invoice?.status ?? null,
+    invoiceId:              invoice?.id ?? null,
     vendor_acknowledged_at: wo.vendor_acknowledged_at,
     completion_verified_at: wo.completion_verified_at,
     created_at:             wo.created_at,
