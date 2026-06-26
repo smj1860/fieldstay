@@ -7,6 +7,7 @@ import {
   ArrowLeft, Camera, CheckCircle2, Circle,
   Loader2, ImageIcon, AlertCircle, AlertTriangle, X,
   Minus, Plus, MapPin, CheckSquare, ChevronRight, Package,
+  StickyNote,
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { createClient }       from '@/lib/supabase/client'
@@ -31,6 +32,10 @@ export default function CrewTurnoverPage() {
   const [view, setView] = useState<'hub' | 'checklist' | 'inventory'>('hub')
   const fileInputRefs      = useRef<Record<string, HTMLInputElement | null>>({})
   const sectionPhotoRefs   = useRef<Record<string, HTMLInputElement | null>>({})
+
+  // Note entry — one item open at a time; saves on blur
+  const [openNoteItemId, setOpenNoteItemId] = useState<string | null>(null)
+  const [noteText,       setNoteText]       = useState('')
 
   const turnover = useLiveQuery(() => db.turnovers.get(id), [id])
 
@@ -103,6 +108,25 @@ export default function CrewTurnoverPage() {
         setSectionPhotoPrompt(sectionName)
       }
     }
+  }
+
+  async function saveNote(itemId: string, isCompleted: number) {
+    // Only write if text changed from what's already stored
+    const current = items?.find((i) => i.id === itemId)?.crew_notes ?? ''
+    if (noteText === current) {
+      setOpenNoteItemId(null)
+      return
+    }
+    await updateChecklistItem(userId, itemId, {
+      isCompleted: isCompleted === 1,
+      crewNotes:   noteText,
+    })
+    setOpenNoteItemId(null)
+  }
+
+  function openNote(itemId: string, existingNote: string) {
+    setNoteText(existingNote ?? '')
+    setOpenNoteItemId(itemId)
   }
 
   const handleSectionPhoto = async (sectionName: string, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -417,69 +441,129 @@ export default function CrewTurnoverPage() {
                   const uploading  = uploadingItemId === item.id
 
                   return (
-                    <div key={item.id} className={cn('flex items-start gap-3 px-4 py-3', item.is_completed ? 'bg-green-50' : 'bg-white')}>
-                      <button
-                        className="flex-shrink-0 mt-0.5"
-                        onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
-                      >
-                        {item.is_completed
-                          ? <CheckCircle2 className="w-5 h-5 text-green-500" />
-                          : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-accent-300')} />}
-                      </button>
+                    <div key={item.id}>
+                      <div className={cn('flex items-start gap-3 px-4 py-3', item.is_completed ? 'bg-green-50' : 'bg-white')}>
+                        <button
+                          className="flex-shrink-0 mt-0.5"
+                          onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
+                        >
+                          {item.is_completed
+                            ? <CheckCircle2 className="w-5 h-5 text-green-500" />
+                            : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-accent-300')} />}
+                        </button>
 
-                      <div
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
-                      >
-                        <p className={cn('text-sm leading-snug',
-                          item.is_completed ? 'text-green-700 line-through' : 'text-accent-800')}>
-                          {item.task}
-                        </p>
-                        {item.crew_notes && <p className="text-xs text-accent-400 mt-0.5">{item.crew_notes}</p>}
-                        {item.photo_storage_path && (
-                          <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
-                            <ImageIcon className="w-3 h-3" /> Photo attached
+                        <div
+                          className="flex-1 min-w-0 cursor-pointer"
+                          onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
+                        >
+                          <p className={cn('text-sm leading-snug',
+                            item.is_completed ? 'text-green-700 line-through' : 'text-accent-800')}>
+                            {item.task}
                           </p>
-                        )}
-                        {!item.photo_storage_path && pendingUploadIds.has(item.id) && (
-                          <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
-                            <Loader2 className="w-3 h-3 animate-spin" /> Photo saved — uploading when back online
-                          </p>
-                        )}
-                        {needsPhoto && !uploading && !pendingUploadIds.has(item.id) && (
-                          <p className="text-xs text-amber-600 mt-0.5">Photo required before completing</p>
-                        )}
-                        {item.requires_photo && item.photo_reason && (
-                          <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
+                          {item.crew_notes && openNoteItemId !== item.id && (
+                            <p className="text-xs text-accent-400 mt-0.5 italic">Note: {item.crew_notes}</p>
+                          )}
+                          {item.photo_storage_path && (
+                            <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
+                              <ImageIcon className="w-3 h-3" /> Photo attached
+                            </p>
+                          )}
+                          {!item.photo_storage_path && pendingUploadIds.has(item.id) && (
+                            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" /> Photo saved — uploading when back online
+                            </p>
+                          )}
+                          {needsPhoto && !uploading && !pendingUploadIds.has(item.id) && (
+                            <p className="text-xs text-amber-600 mt-0.5">Photo required before completing</p>
+                          )}
+                          {item.requires_photo && item.photo_reason && (
+                            <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
+                          )}
+                        </div>
+
+                        {/* Note toggle button */}
+                        <button
+                          className="flex-shrink-0 mt-0.5 p-1 rounded transition-opacity active:opacity-60"
+                          style={{ color: openNoteItemId === item.id || item.crew_notes ? 'var(--accent-gold)' : 'var(--text-muted)' }}
+                          onClick={() => {
+                            if (openNoteItemId === item.id) {
+                              void saveNote(item.id, item.is_completed)
+                            } else {
+                              openNote(item.id, item.crew_notes ?? '')
+                            }
+                          }}
+                          aria-label={openNoteItemId === item.id ? 'Save note' : 'Add note'}
+                        >
+                          <StickyNote className="w-4 h-4" />
+                        </button>
+
+                        {item.requires_photo && (
+                          <div className="flex-shrink-0">
+                            {uploading ? (
+                              <div className="p-1.5"><Loader2 className="w-4 h-4 text-accent-400 animate-spin" /></div>
+                            ) : (
+                              <button
+                                onClick={() => fileInputRefs.current[item.id]?.click()}
+                                className={cn('p-1.5 rounded-lg transition-colors',
+                                  item.photo_storage_path
+                                    ? 'text-green-600 bg-green-50 hover:bg-green-100'
+                                    : 'text-amber-600 bg-amber-50 hover:bg-amber-100'
+                                )}
+                                title={item.photo_storage_path ? 'Replace photo' : 'Tap to take required photo'}
+                              >
+                                <Camera className="w-4 h-4" />
+                              </button>
+                            )}
+                            <input
+                              ref={(el) => { fileInputRefs.current[item.id] = el }}
+                              type="file" accept="image/*" capture="environment" className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0]
+                                if (file) handlePhotoCapture(item.id, file)
+                                e.target.value = ''
+                              }}
+                            />
+                          </div>
                         )}
                       </div>
 
-                      {item.requires_photo && (
-                        <div className="flex-shrink-0">
-                          {uploading ? (
-                            <div className="p-1.5"><Loader2 className="w-4 h-4 text-accent-400 animate-spin" /></div>
-                          ) : (
-                            <button
-                              onClick={() => fileInputRefs.current[item.id]?.click()}
-                              className={cn('p-1.5 rounded-lg transition-colors',
-                                item.photo_storage_path
-                                  ? 'text-green-600 bg-green-50 hover:bg-green-100'
-                                  : 'text-amber-600 bg-amber-50 hover:bg-amber-100'
-                              )}
-                              title={item.photo_storage_path ? 'Replace photo' : 'Tap to take required photo'}
-                            >
-                              <Camera className="w-4 h-4" />
-                            </button>
-                          )}
-                          <input
-                            ref={(el) => { fileInputRefs.current[item.id] = el }}
-                            type="file" accept="image/*" capture="environment" className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0]
-                              if (file) handlePhotoCapture(item.id, file)
-                              e.target.value = ''
-                            }}
+                      {/* Inline note textarea — appears below the item row */}
+                      {openNoteItemId === item.id && (
+                        <div className="px-4 pb-3 bg-white border-t border-accent-100">
+                          <textarea
+                            autoFocus
+                            value={noteText}
+                            onChange={(e) => setNoteText(e.target.value)}
+                            onBlur={() => void saveNote(item.id, item.is_completed)}
+                            rows={2}
+                            placeholder="Add a note for this item…"
+                            className="w-full mt-2 text-sm rounded-lg px-3 py-2 resize-none border border-accent-200 focus:outline-none focus:border-brand-400"
+                            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
                           />
+                          <div className="flex justify-end gap-2 mt-1.5">
+                            <button
+                              onMouseDown={(e) => {
+                                // mousedown fires before blur — prevent blur from saving
+                                e.preventDefault()
+                                setNoteText(items?.find(i => i.id === item.id)?.crew_notes ?? '')
+                                setOpenNoteItemId(null)
+                              }}
+                              className="text-xs px-2.5 py-1 rounded"
+                              style={{ color: 'var(--text-muted)' }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onMouseDown={(e) => {
+                                e.preventDefault()
+                                void saveNote(item.id, item.is_completed)
+                              }}
+                              className="text-xs px-2.5 py-1 rounded font-medium"
+                              style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+                            >
+                              Save
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
