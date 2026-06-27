@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
 import { upsertPropertyGuidebookConfig } from '@/app/actions/guidebook'
@@ -76,7 +77,7 @@ export function GuidebookClient({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'guidebook_sponsors', filter: `org_id=eq.${orgId}` },
-        (payload) => {
+        (payload: RealtimePostgresChangesPayload<GuidebookSponsor>) => {
           setSponsors((prev) => {
             let next: GuidebookSponsor[]
             if (payload.eventType === 'INSERT') {
@@ -101,7 +102,7 @@ export function GuidebookClient({
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'guidebook_configurations', filter: `org_id=eq.${orgId}` },
-        (payload) => { setConfig(payload.new as GuidebookConfiguration) }
+        (payload: RealtimePostgresChangesPayload<GuidebookConfiguration>) => { setConfig(payload.new as GuidebookConfiguration) }
       )
       .subscribe()
 
