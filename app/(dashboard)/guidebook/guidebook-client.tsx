@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
+import { QRCodeSVG } from 'qrcode.react'
 import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
 import { upsertPropertyGuidebookConfig } from '@/app/actions/guidebook'
@@ -476,9 +477,12 @@ function PropertyGuidebookForm({
             />
           </div>
           {config.isPublished && (
-            <a href={guestUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--accent-blue)', marginTop: '4px', display: 'block' }}>
-              {guestUrl} ↗
-            </a>
+            <>
+              <a href={guestUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: 'var(--accent-blue)', marginTop: '4px', display: 'block' }}>
+                {guestUrl} ↗
+              </a>
+              <GuidebookQrCode url={guestUrl} propertyName={property.name} />
+            </>
           )}
         </div>
 
@@ -549,6 +553,41 @@ function PropertyGuidebookForm({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function GuidebookQrCode({ url, propertyName }: { url: string; propertyName: string }) {
+  const qrId = `guidebook-qr-${propertyName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+
+  function handleDownload() {
+    const svg = document.getElementById(qrId)
+    if (!svg) return
+
+    const svgString = new XMLSerializer().serializeToString(svg)
+    const blob       = new Blob([svgString], { type: 'image/svg+xml' })
+    const blobUrl    = URL.createObjectURL(blob)
+
+    const a = document.createElement('a')
+    a.href     = blobUrl
+    a.download = `${qrId}.svg`
+    a.click()
+    URL.revokeObjectURL(blobUrl)
+  }
+
+  return (
+    <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <QRCodeSVG id={qrId} value={url} size={64} />
+      <button
+        onClick={handleDownload}
+        style={{
+          fontSize: '12px', fontWeight: '500', color: 'var(--text-primary)',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+          padding: '5px 10px', cursor: 'pointer', backgroundColor: 'var(--bg-card)',
+        }}
+      >
+        Download QR Code
+      </button>
     </div>
   )
 }

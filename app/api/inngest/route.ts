@@ -100,6 +100,11 @@ import { guidebookSponsorDeactivated }    from '@/lib/inngest/functions/guideboo
 import { guidebookDailyMonitor }          from '@/lib/inngest/functions/guidebook-daily-monitor'
 import { guidebookBillingCreditHandler }  from '@/lib/inngest/functions/guidebook-billing-credit-handler'
 import { guidebookGraceExpiredHandler }   from '@/lib/inngest/functions/guidebook-grace-expired-handler'
+import { guidebookSponsorPaymentRecovered } from '@/lib/inngest/functions/guidebook-sponsor-payment-recovered'
+import { guidebookGuestOptedIn }            from '@/lib/inngest/functions/guidebook-guest-opted-in'
+import { guidebookPreArrivalEmailCron }     from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
+import { guidebookSmsMorningCron }          from '@/lib/inngest/functions/guidebook-sms-morning-cron'
+import { guidebookSmsEveningCron }          from '@/lib/inngest/functions/guidebook-sms-evening-cron'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -204,5 +209,10 @@ export const { GET, POST, PUT } = serve({
     guidebookDailyMonitor,
     guidebookBillingCreditHandler,
     guidebookGraceExpiredHandler,
+    guidebookSponsorPaymentRecovered,
+    guidebookGuestOptedIn,
+    guidebookPreArrivalEmailCron,
+    guidebookSmsMorningCron,
+    guidebookSmsEveningCron,
   ],
 })

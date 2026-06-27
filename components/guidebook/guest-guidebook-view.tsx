@@ -1,6 +1,7 @@
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 import type { WeatherContext } from '@/lib/weather/tomorrow'
 import { getActiveSlotTypes, getTimeOfDay } from '@/lib/weather/tomorrow'
+import { formatOffer } from '@/lib/sms/telnyx'
 
 const CHARCOAL = '#0E0E0E'
 const CARD     = '#17171A'
@@ -100,29 +101,43 @@ export function GuestGuidebookView({
         {visibleSponsors.length > 0 && (
           <Section title="Recommended Nearby">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {visibleSponsors.map((sponsor) => (
-                <div
-                  key={sponsor.id}
-                  style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', padding: '14px' }}
-                >
-                  <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 4px' }}>
-                    {sponsor.business_name}
-                  </h3>
-                  {sponsor.business_description && (
-                    <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 8px', lineHeight: 1.5 }}>
-                      {sponsor.business_description}
-                    </p>
-                  )}
-                  {sponsor.custom_offer_text && (
-                    <p style={{ fontSize: '13px', color: GOLD, fontWeight: 600, margin: '0 0 4px' }}>
-                      {sponsor.custom_offer_text}
-                    </p>
-                  )}
-                  {sponsor.address && (
-                    <p style={{ fontSize: '12px', color: MUTED, margin: 0 }}>{sponsor.address}</p>
-                  )}
-                </div>
-              ))}
+              {visibleSponsors.map((sponsor) => {
+                const offerLine = formatOffer(
+                  sponsor.offer_type,
+                  sponsor.offer_value,
+                  sponsor.offer_item,
+                  sponsor.custom_offer_text
+                )
+
+                return (
+                  <div
+                    key={sponsor.id}
+                    style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', padding: '14px' }}
+                  >
+                    <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 4px' }}>
+                      {sponsor.business_name}
+                    </h3>
+                    {sponsor.business_description && (
+                      <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 8px', lineHeight: 1.5 }}>
+                        {sponsor.business_description}
+                      </p>
+                    )}
+                    {offerLine && (
+                      <div style={{ display: 'inline-block', background: 'rgba(212,165,55,0.12)', border: `1px solid ${GOLD}`, borderRadius: '8px', padding: '6px 10px', margin: '0 0 8px' }}>
+                        <p style={{ fontSize: '10px', color: GOLD, fontWeight: 700, letterSpacing: '0.06em', margin: '0 0 2px' }}>
+                          GUIDEBOOK EXCLUSIVE
+                        </p>
+                        <p style={{ fontSize: '13px', color: GOLD, fontWeight: 600, margin: 0 }}>
+                          {offerLine}
+                        </p>
+                      </div>
+                    )}
+                    {sponsor.address && (
+                      <p style={{ fontSize: '12px', color: MUTED, margin: 0 }}>{sponsor.address}</p>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </Section>
         )}

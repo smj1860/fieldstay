@@ -1088,6 +1088,8 @@ export type GuidebookSlotType =
 
 export type GuidebookSponsorStatus = 'pending' | 'active' | 'payment_failed' | 'cancelled'
 
+export type GuidebookOfferType = 'percentage' | 'fixed_amount' | 'item' | 'custom' | 'none'
+
 export interface GuidebookSponsor {
   id:                     string
   org_id:                 string
@@ -1097,6 +1099,9 @@ export interface GuidebookSponsor {
   business_phone:         string | null
   business_website:       string | null
   custom_offer_text:      string | null
+  offer_type:             GuidebookOfferType
+  offer_value:            number | null
+  offer_item:             string | null
   featured_item:          string | null
   address:                string | null
   lat:                    number | null
@@ -1127,6 +1132,22 @@ export interface GuidebookPropertyConfig {
   is_published:           boolean
   created_at:             string
   updated_at:             string
+}
+
+export interface GuidebookGuestSmsOptin {
+  id:                    string
+  org_id:                string
+  property_id:           string
+  booking_id:            string
+  phone_e164:            string
+  is_active:             boolean
+  door_code_sent_at:     string | null
+  last_morning_sms_date: string | null
+  last_evening_sms_date: string | null
+  opted_in_at:           string
+  opted_out_at:          string | null
+  created_at:            string
+  updated_at:            string
 }
 
 // ── Asset Health ─────────────────────────────────────────────────────────────
@@ -1312,6 +1333,7 @@ export interface Database {
       guidebook_configurations:    { Row: GuidebookConfiguration;   Insert: Partial<GuidebookConfiguration>;   Update: Partial<GuidebookConfiguration>;   Relationships: [] }
       guidebook_sponsors:          { Row: GuidebookSponsor;         Insert: Partial<GuidebookSponsor>;         Update: Partial<GuidebookSponsor>;         Relationships: [] }
       guidebook_property_configs:  { Row: GuidebookPropertyConfig;  Insert: Partial<GuidebookPropertyConfig>;  Update: Partial<GuidebookPropertyConfig>;  Relationships: [] }
+      guidebook_guest_sms_optins:  { Row: GuidebookGuestSmsOptin;   Insert: Partial<GuidebookGuestSmsOptin>;   Update: Partial<GuidebookGuestSmsOptin>;   Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }

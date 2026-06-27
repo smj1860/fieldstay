@@ -349,6 +349,25 @@ export async function POST(request: NextRequest) {
       break
     }
 
+    case 'invoice.payment_succeeded': {
+      const invoice = event.data.object
+      const subId   = invoice.subscription as string | null
+      if (!subId) break
+
+      const subscription = await stripe.subscriptions.retrieve(subId)
+      if (subscription.metadata?.feature === 'guidebook_sponsor') {
+        const orgId     = subscription.metadata.org_id
+        const sponsorId = subscription.metadata.guidebook_sponsor_id
+        if (orgId && sponsorId) {
+          await inngest.send({
+            name: 'guidebook/sponsor.payment.recovered',
+            data: { subscriptionId: subscription.id, orgId, sponsorId },
+          })
+        }
+      }
+      break
+    }
+
     default:
       // Unhandled event type — ignore
       break

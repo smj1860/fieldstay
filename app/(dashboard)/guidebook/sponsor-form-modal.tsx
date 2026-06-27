@@ -2,7 +2,15 @@
 
 import { useState } from 'react'
 import { upsertSponsor } from '@/app/actions/guidebook'
-import type { GuidebookSponsor, GuidebookSlotType } from '@/types/database'
+import type { GuidebookSponsor, GuidebookSlotType, GuidebookOfferType } from '@/types/database'
+
+const OFFER_TYPE_OPTIONS: { value: GuidebookOfferType; label: string }[] = [
+  { value: 'none',         label: 'No offer' },
+  { value: 'percentage',   label: 'Percentage off' },
+  { value: 'fixed_amount', label: 'Fixed amount off' },
+  { value: 'item',         label: 'Free item' },
+  { value: 'custom',       label: 'Custom text' },
+]
 
 const SLOT_TYPE_OPTIONS: { value: GuidebookSlotType; label: string }[] = [
   { value: 'morning_brew',       label: 'Morning Brew (early hours)' },
@@ -27,6 +35,9 @@ export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSave
   const [businessPhone, setBusinessPhone]              = useState(existing?.business_phone ?? '')
   const [businessWebsite, setBusinessWebsite]          = useState(existing?.business_website ?? '')
   const [customOfferText, setCustomOfferText]          = useState(existing?.custom_offer_text ?? '')
+  const [offerType, setOfferType]                       = useState<GuidebookOfferType>(existing?.offer_type ?? 'none')
+  const [offerValue, setOfferValue]                      = useState(existing?.offer_value?.toString() ?? '')
+  const [offerItem, setOfferItem]                        = useState(existing?.offer_item ?? '')
   const [featuredItem, setFeaturedItem]                = useState(existing?.featured_item ?? '')
   const [address, setAddress]                          = useState(existing?.address ?? '')
   const [slotType, setSlotType]                        = useState<GuidebookSlotType>(existing?.slot_type ?? 'general')
@@ -50,7 +61,10 @@ export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSave
       businessDescription: businessDescription.trim() || null,
       businessPhone:        businessPhone.trim() || null,
       businessWebsite:      businessWebsite.trim() || null,
-      customOfferText:      customOfferText.trim() || null,
+      customOfferText:      offerType === 'custom' ? (customOfferText.trim() || null) : null,
+      offerType,
+      offerValue:           offerType === 'percentage' || offerType === 'fixed_amount' ? (Number(offerValue) || null) : null,
+      offerItem:            offerType === 'item' ? (offerItem.trim() || null) : null,
       featuredItem:          featuredItem.trim() || null,
       address:               address.trim() || null,
       lat:                   existing?.lat ?? null,
@@ -133,13 +147,49 @@ export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSave
             />
           </Field>
 
-          <Field label="Custom Offer Text">
-            <input
-              value={customOfferText}
-              onChange={(e) => setCustomOfferText(e.target.value)}
+          <Field label="Offer Type">
+            <select
+              value={offerType}
+              onChange={(e) => setOfferType(e.target.value as GuidebookOfferType)}
               style={inputStyle}
-            />
+            >
+              {OFFER_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
           </Field>
+
+          {(offerType === 'percentage' || offerType === 'fixed_amount') && (
+            <Field label={offerType === 'percentage' ? 'Percent Off' : 'Amount Off ($)'}>
+              <input
+                type="number"
+                value={offerValue}
+                onChange={(e) => setOfferValue(e.target.value)}
+                style={inputStyle}
+              />
+            </Field>
+          )}
+
+          {offerType === 'item' && (
+            <Field label="Free Item">
+              <input
+                value={offerItem}
+                onChange={(e) => setOfferItem(e.target.value)}
+                placeholder="e.g. coffee"
+                style={inputStyle}
+              />
+            </Field>
+          )}
+
+          {offerType === 'custom' && (
+            <Field label="Custom Offer Text">
+              <input
+                value={customOfferText}
+                onChange={(e) => setCustomOfferText(e.target.value)}
+                style={inputStyle}
+              />
+            </Field>
+          )}
 
           <Field label="Featured Item">
             <input

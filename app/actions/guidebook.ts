@@ -3,7 +3,9 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
 import { requireOrgMember } from '@/lib/auth'
-import type { GuidebookSlotType } from '@/types/database'
+import { inngest } from '@/lib/inngest/client'
+import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
+import type { GuidebookSlotType, GuidebookOfferType } from '@/types/database'
 
 /**
  * Creates a Stripe Checkout Session for a sponsor slot.
@@ -74,6 +76,9 @@ export interface UpsertSponsorInput {
   businessPhone:       string | null
   businessWebsite:     string | null
   customOfferText:     string | null
+  offerType:           GuidebookOfferType
+  offerValue:          number | null
+  offerItem:           string | null
   featuredItem:        string | null
   address:             string | null
   lat:                 number | null
@@ -107,6 +112,9 @@ export async function upsertSponsor(
         business_phone:       input.businessPhone,
         business_website:     input.businessWebsite,
         custom_offer_text:    input.customOfferText,
+        offer_type:           input.offerType,
+        offer_value:          input.offerValue,
+        offer_item:           input.offerItem,
         featured_item:        input.featuredItem,
         address:              input.address,
         lat:                  input.lat,
@@ -173,4 +181,59 @@ export async function upsertPropertyGuidebookConfig(
 
   if (error) return { error: error.message }
   return {}
+}
+
+/**
+ * Guest-facing SMS opt-in. Unauthenticated (no PM session) — org_id is
+ * always derived server-side from the booking's guidebook_token, never
+ * accepted from the client.
+ */
+export async function optInGuestSms(
+  guidebookToken: string,
+  rawPhone:       string
+): Promise<{ success: true } | { error: string }> {
+  const phoneE164 = normalizePhoneToE164(rawPhone)
+  if (!phoneE164) return { error: 'Please enter a valid US phone number.' }
+
+  const supabase = createServiceClient()
+
+  const { data: booking } = await supabase
+    .from('bookings')
+    .select('id, org_id, property_id')
+    .eq('guidebook_token', guidebookToken)
+    .maybeSingle()
+
+  if (!booking) return { error: 'Invalid guidebook link.' }
+
+  const { data: optin, error } = await supabase
+    .from('guidebook_guest_sms_optins')
+    .upsert(
+      {
+        org_id:      booking.org_id,
+        property_id: booking.property_id,
+        booking_id:  booking.id,
+        phone_e164:  phoneE164,
+        is_active:   true,
+        opted_out_at: null,
+        updated_at:  new Date().toISOString(),
+      },
+      { onConflict: 'booking_id' }
+    )
+    .select('id')
+    .single()
+
+  if (error) return { error: error.message }
+
+  await inngest.send({
+    name: 'guidebook/guest.opted.in',
+    data: {
+      optinId:    optin.id,
+      bookingId:  booking.id,
+      orgId:      booking.org_id,
+      propertyId: booking.property_id,
+      phoneE164,
+    },
+  })
+
+  return { success: true }
 }

@@ -611,4 +611,23 @@ export type FieldStayEvents = {
     data: { orgId: string }
   }
 
+  // Self-Funding Guidebook — Phase 3 (CLAUDE_55_2)
+  'guidebook/guest.opted.in': {
+    data: {
+      optinId:    string
+      bookingId:  string
+      orgId:      string
+      propertyId: string
+      phoneE164:  string
+    }
+  }
+
+  'guidebook/sponsor.payment.recovered': {
+    data: {
+      subscriptionId: string
+      orgId:          string
+      sponsorId:      string
+    }
+  }
+
 }
