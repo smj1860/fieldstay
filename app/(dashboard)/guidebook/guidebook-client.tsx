@@ -392,32 +392,35 @@ function PropertyGuidebookForm({
   const [error, setError]   = useState<string | null>(null)
 
   useEffect(() => {
-    supabase
-      .from('guidebook_property_configs')
-      .select('*')
-      .eq('property_id', property.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          setConfig({
-            slug:                 data.slug,
-            checkInInstructions:  data.check_in_instructions ?? '',
-            checkOutInstructions: data.check_out_instructions ?? '',
-            wifiNetwork:          data.wifi_network ?? '',
-            wifiPassword:         data.wifi_password ?? '',
-            houseRules:           data.house_rules ?? '',
-            isPublished:          data.is_published,
-          })
-        } else {
-          const slug = property.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-          setConfig({
-            slug,
-            checkInInstructions: '', checkOutInstructions: '',
-            wifiNetwork: '', wifiPassword: '', houseRules: '',
-            isPublished: false,
-          })
-        }
-      })
+    const load = async () => {
+      const { data } = await supabase
+        .from('guidebook_property_configs')
+        .select('*')
+        .eq('property_id', property.id)
+        .maybeSingle()
+
+      if (data) {
+        setConfig({
+          slug:                 data.slug,
+          checkInInstructions:  data.check_in_instructions ?? '',
+          checkOutInstructions: data.check_out_instructions ?? '',
+          wifiNetwork:          data.wifi_network ?? '',
+          wifiPassword:         data.wifi_password ?? '',
+          houseRules:           data.house_rules ?? '',
+          isPublished:          data.is_published,
+        })
+      } else {
+        const slug = property.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        setConfig({
+          slug,
+          checkInInstructions: '', checkOutInstructions: '',
+          wifiNetwork: '', wifiPassword: '', houseRules: '',
+          isPublished: false,
+        })
+      }
+    }
+
+    load()
   }, [property.id, property.name, supabase])
 
   if (!config) {
