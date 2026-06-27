@@ -2,6 +2,8 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
+import { requireOrgMember } from '@/lib/auth'
+import type { GuidebookSlotType } from '@/types/database'
 
 /**
  * Creates a Stripe Checkout Session for a sponsor slot.
@@ -63,4 +65,112 @@ export async function createSponsorCheckoutSession(
     console.error('[createSponsorCheckoutSession]', err)
     return { error: err instanceof Error ? err.message : 'Unknown Stripe error' }
   }
+}
+
+export interface UpsertSponsorInput {
+  slotNumber:          number
+  businessName:        string
+  businessDescription: string | null
+  businessPhone:       string | null
+  businessWebsite:     string | null
+  customOfferText:     string | null
+  featuredItem:        string | null
+  address:             string | null
+  lat:                 number | null
+  lng:                 number | null
+  slotType:            GuidebookSlotType
+  slotContext:         string | null
+}
+
+/**
+ * Creates or updates a sponsor slot for the authenticated PM's org.
+ * Returns the media_kit_token so the PM can immediately access their media kit.
+ */
+export async function upsertSponsor(
+  input: UpsertSponsorInput
+): Promise<{ mediaKitToken: string } | { error: string }> {
+  const { membership } = await requireOrgMember()
+  const supabase        = createServiceClient()
+
+  if (input.slotNumber < 1 || input.slotNumber > 6) {
+    return { error: 'Slot number must be between 1 and 6.' }
+  }
+
+  const { data, error } = await supabase
+    .from('guidebook_sponsors')
+    .upsert(
+      {
+        org_id:               membership.org_id,
+        slot_number:          input.slotNumber,
+        business_name:        input.businessName,
+        business_description: input.businessDescription,
+        business_phone:       input.businessPhone,
+        business_website:     input.businessWebsite,
+        custom_offer_text:    input.customOfferText,
+        featured_item:        input.featuredItem,
+        address:              input.address,
+        lat:                  input.lat,
+        lng:                  input.lng,
+        slot_type:            input.slotType,
+        slot_context:         input.slotContext,
+        updated_at:           new Date().toISOString(),
+      },
+      { onConflict: 'org_id,slot_number' }
+    )
+    .select('media_kit_token')
+    .single()
+
+  if (error) return { error: error.message }
+  return { mediaKitToken: data.media_kit_token }
+}
+
+export interface UpsertPropertyGuidebookConfigInput {
+  propertyId:           string
+  slug:                 string
+  checkInInstructions:  string | null
+  checkOutInstructions: string | null
+  wifiNetwork:          string | null
+  wifiPassword:         string | null
+  houseRules:           string | null
+  isPublished:          boolean
+}
+
+/**
+ * Saves per-property guidebook content (slug, wifi, check-in instructions).
+ */
+export async function upsertPropertyGuidebookConfig(
+  input: UpsertPropertyGuidebookConfigInput
+): Promise<{ error?: string }> {
+  const { membership } = await requireOrgMember()
+  const supabase        = createServiceClient()
+
+  const { data: property } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('id', input.propertyId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!property) return { error: 'Property not found.' }
+
+  const { error } = await supabase
+    .from('guidebook_property_configs')
+    .upsert(
+      {
+        org_id:                 membership.org_id,
+        property_id:            input.propertyId,
+        slug:                   input.slug.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+        check_in_instructions:  input.checkInInstructions,
+        check_out_instructions: input.checkOutInstructions,
+        wifi_network:           input.wifiNetwork,
+        wifi_password:          input.wifiPassword,
+        house_rules:            input.houseRules,
+        is_published:           input.isPublished,
+        updated_at:             new Date().toISOString(),
+      },
+      { onConflict: 'org_id,property_id' }
+    )
+
+  if (error) return { error: error.message }
+  return {}
 }
