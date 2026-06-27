@@ -116,6 +116,21 @@ export async function POST(request: NextRequest) {
         break
       }
 
+      // ── Guidebook sponsor checkout path ───────────────────────────────────
+      if (session.metadata?.feature === 'guidebook_sponsor') {
+        await inngest.send({
+          name: 'guidebook/sponsor.checkout.completed',
+          data: {
+            checkoutSessionId: session.id,
+            sponsorId:         session.metadata.guidebook_sponsor_id!,
+            orgId:             session.metadata.org_id!,
+            subscriptionId:    session.subscription as string,
+            customerId:        session.customer as string,
+          },
+        })
+        break
+      }
+
       // ── Subscription / billing path (existing) ───────────────────────────
       if (!orgId || !customerId) {
         console.error(
@@ -281,6 +296,19 @@ export async function POST(request: NextRequest) {
         break
       }
 
+      // Guidebook sponsor subscription cancelled
+      if (subscription.metadata?.feature === 'guidebook_sponsor') {
+        const orgId     = subscription.metadata?.org_id
+        const sponsorId = subscription.metadata?.guidebook_sponsor_id
+        if (orgId && sponsorId) {
+          await inngest.send({
+            name: 'guidebook/sponsor.subscription.cancelled',
+            data: { subscriptionId: subscription.id, orgId, sponsorId },
+          })
+        }
+        break
+      }
+
       const { data: org } = await supabase
         .from('organizations')
         .select('id')
@@ -298,6 +326,25 @@ export async function POST(request: NextRequest) {
           action:   'billing.subscription.cancelled',
           metadata: { subscriptionId: subscription.id },
         })
+      }
+      break
+    }
+
+    case 'invoice.payment_failed': {
+      const invoice = event.data.object
+      const subId   = invoice.subscription as string | null
+      if (!subId) break
+
+      const subscription = await stripe.subscriptions.retrieve(subId)
+      if (subscription.metadata?.feature === 'guidebook_sponsor') {
+        const orgId     = subscription.metadata.org_id
+        const sponsorId = subscription.metadata.guidebook_sponsor_id
+        if (orgId && sponsorId) {
+          await inngest.send({
+            name: 'guidebook/sponsor.payment.failed',
+            data: { subscriptionId: subscription.id, orgId, sponsorId },
+          })
+        }
       }
       break
     }

@@ -94,6 +94,13 @@ import { vendorConnectOnboardingCron } from '@/lib/inngest/functions/cron/vendor
 // Work order invoices
 import { handleWorkOrderInvoiceSubmitted } from '@/lib/inngest/functions/work-order-invoice'
 
+// Self-Funding Guidebook — sponsor lifecycle + billing credits
+import { guidebookSponsorActivated }      from '@/lib/inngest/functions/guidebook-sponsor-activated'
+import { guidebookSponsorDeactivated }    from '@/lib/inngest/functions/guidebook-sponsor-deactivated'
+import { guidebookDailyMonitor }          from '@/lib/inngest/functions/guidebook-daily-monitor'
+import { guidebookBillingCreditHandler }  from '@/lib/inngest/functions/guidebook-billing-credit-handler'
+import { guidebookGraceExpiredHandler }   from '@/lib/inngest/functions/guidebook-grace-expired-handler'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -190,5 +197,12 @@ export const { GET, POST, PUT } = serve({
 
     // Work order invoices
     handleWorkOrderInvoiceSubmitted,
+
+    // Self-Funding Guidebook
+    guidebookSponsorActivated,
+    guidebookSponsorDeactivated,
+    guidebookDailyMonitor,
+    guidebookBillingCreditHandler,
+    guidebookGraceExpiredHandler,
   ],
 })
