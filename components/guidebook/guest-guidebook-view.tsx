@@ -54,9 +54,21 @@ export function GuestGuidebookView({
     <div style={{ minHeight: '100vh', background: CHARCOAL, color: TEXT, padding: '24px 16px' }}>
       <div style={{ maxWidth: '560px', margin: '0 auto' }}>
         <h1 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 4px' }}>{property.name}</h1>
-        <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 24px', textTransform: 'capitalize' }}>
+        <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 12px', textTransform: 'capitalize' }}>
           Good {timeOfDay}
         </p>
+
+        {weather && (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', backgroundColor: '#1e293b', borderRadius: '999px', padding: '6px 14px', marginBottom: '24px' }}>
+            <span style={{ fontSize: '16px' }}>
+              {weather.isSnowy ? '❄️' : weather.isRainy ? '🌧️' : weather.isCold ? '🧥' : weather.isHot ? '☀️' : '🌤️'}
+            </span>
+            <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '500' }}>
+              {Math.round(weather.temperature)}°F · Feels {Math.round(weather.temperatureApparent)}°F
+              {weather.isSnowy ? ' · Snow' : weather.isRainy ? ' · Rain likely' : ''}
+            </span>
+          </div>
+        )}
 
         <Section title="Check-In">
           <p style={{ fontSize: '14px', lineHeight: 1.6, color: TEXT, whiteSpace: 'pre-wrap' }}>
