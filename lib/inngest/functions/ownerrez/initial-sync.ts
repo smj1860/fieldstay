@@ -203,18 +203,14 @@ export const ownerRezInitialSync = inngest.createFunction(
 
       await step.run('fetch-property-details', async () => {
         const supabase    = createServiceClient()
-        const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
-
-        if (!externalIds.length) return
-
         const { data: dbProperties } = await supabase
-          .from('properties')
-          .select('id, external_id, wifi_name, wifi_password, access_instructions, house_manual, amenities')
-          .in('external_id', externalIds)
-          .eq('external_source', PROVIDER)
-          .eq('org_id', org_id)
+  .from('properties')
+  .select('id, external_id, wifi_name, wifi_password, access_instructions, house_manual, amenities')
+  .eq('external_source', PROVIDER)
+  .eq('org_id', org_id)
+  .eq('is_active', true)
 
-        if (!dbProperties?.length) return
+if (!dbProperties?.length) return
 
         // Batch fetch amenities for all properties in one call (Addendum)
         let listingByPropertyId = new Map<number, OwnerRezListing>()
