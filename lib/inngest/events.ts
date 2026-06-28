@@ -576,4 +576,58 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Self-Funding Guidebook — sponsor lifecycle (CLAUDE_55_0)
+  // ----------------------------------------------------------
+
+  'guidebook/sponsor.checkout.completed': {
+    data: {
+      checkoutSessionId: string
+      sponsorId:         string
+      orgId:             string
+      subscriptionId:    string
+      customerId:        string
+    }
+  }
+
+  'guidebook/sponsor.subscription.cancelled': {
+    data: { subscriptionId: string; orgId: string; sponsorId: string }
+  }
+
+  'guidebook/sponsor.payment.failed': {
+    data: { subscriptionId: string; orgId: string; sponsorId: string }
+  }
+
+  'guidebook/billing.credit.evaluate': {
+    data: {
+      orgId:             string
+      stripeCustomerId:  string
+      currentPeriodEnd:  number  // Unix timestamp — used as idempotency key seed
+    }
+  }
+
+  // Sponsor grace period (CLAUDE_55_0 addendum)
+  'guidebook/grace.period.expired': {
+    data: { orgId: string }
+  }
+
+  // Self-Funding Guidebook — Phase 3 (CLAUDE_55_2)
+  'guidebook/guest.opted.in': {
+    data: {
+      optinId:    string
+      bookingId:  string
+      orgId:      string
+      propertyId: string
+      phoneE164:  string
+    }
+  }
+
+  'guidebook/sponsor.payment.recovered': {
+    data: {
+      subscriptionId: string
+      orgId:          string
+      sponsorId:      string
+    }
+  }
+
 }

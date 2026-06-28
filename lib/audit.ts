@@ -81,6 +81,14 @@ export type AuditAction =
   | 'work_order.invoice.created'
   | 'work_order.invoice.paid'
   | 'work_order.invoice.cancelled'
+  | 'guidebook.sponsor.activated'
+  | 'guidebook.sponsor.cancelled'
+  | 'guidebook.sponsor.payment_failed'
+  | 'guidebook.sponsor.payment_recovered'
+  | 'guidebook.configuration.locked'
+  | 'guidebook.grace_period.cleared'
+  | 'sms.consent.revoked'
+  | 'sms.consent.restored'
 
 interface AuditParams {
   orgId?:         string

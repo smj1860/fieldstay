@@ -94,6 +94,18 @@ import { vendorConnectOnboardingCron } from '@/lib/inngest/functions/cron/vendor
 // Work order invoices
 import { handleWorkOrderInvoiceSubmitted } from '@/lib/inngest/functions/work-order-invoice'
 
+// Self-Funding Guidebook — sponsor lifecycle + billing credits
+import { guidebookSponsorActivated }      from '@/lib/inngest/functions/guidebook-sponsor-activated'
+import { guidebookSponsorDeactivated }    from '@/lib/inngest/functions/guidebook-sponsor-deactivated'
+import { guidebookDailyMonitor }          from '@/lib/inngest/functions/guidebook-daily-monitor'
+import { guidebookBillingCreditHandler }  from '@/lib/inngest/functions/guidebook-billing-credit-handler'
+import { guidebookGraceExpiredHandler }   from '@/lib/inngest/functions/guidebook-grace-expired-handler'
+import { guidebookSponsorPaymentRecovered } from '@/lib/inngest/functions/guidebook-sponsor-payment-recovered'
+import { guidebookGuestOptedIn }            from '@/lib/inngest/functions/guidebook-guest-opted-in'
+import { guidebookPreArrivalEmailCron }     from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
+import { guidebookSmsMorningCron }          from '@/lib/inngest/functions/guidebook-sms-morning-cron'
+import { guidebookSmsEveningCron }          from '@/lib/inngest/functions/guidebook-sms-evening-cron'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -190,5 +202,17 @@ export const { GET, POST, PUT } = serve({
 
     // Work order invoices
     handleWorkOrderInvoiceSubmitted,
+
+    // Self-Funding Guidebook
+    guidebookSponsorActivated,
+    guidebookSponsorDeactivated,
+    guidebookDailyMonitor,
+    guidebookBillingCreditHandler,
+    guidebookGraceExpiredHandler,
+    guidebookSponsorPaymentRecovered,
+    guidebookGuestOptedIn,
+    guidebookPreArrivalEmailCron,
+    guidebookSmsMorningCron,
+    guidebookSmsEveningCron,
   ],
 })

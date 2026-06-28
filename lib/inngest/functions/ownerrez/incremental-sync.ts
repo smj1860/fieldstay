@@ -14,6 +14,14 @@
  *
  * Each user runs in its own step.run() so failures are isolated.
  * step.sleep() is called at the TOP LEVEL only — never inside step.run().
+ *
+ * TODO(CLAUDE_55_5 Task 7): This function does not currently handle OwnerRez
+ * property entity_update webhooks — it only fetches bookings via since_utc.
+ * Once property-level webhook handling exists here, add a getPropertyDetail()
+ * call (and the guidebook-config patch from initial-sync.ts's
+ * fetch-property-details/sync-guidebook-configs-from-property steps) for the
+ * specific property that was updated, scoped per the patch's
+ * "Do not add webhook handling that isn't already scoped" instruction.
  */
 
 import { inngest }                      from '@/lib/inngest/client'
@@ -26,6 +34,7 @@ import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { resend, FROM }                 from '@/lib/resend/client'
 import { getPmEmail }                   from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
+import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
 
 const PROVIDER = 'ownerrez'
 
@@ -499,6 +508,55 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             await step.sendEvent(`fire-turnover-created-events-${conn.user_id}`, turnoverEvents)
           }
         }
+      }
+
+      // Auto-create guidebook property configs for newly synced properties
+      if (affectedIds.length) {
+        await step.run(`create-guidebook-property-configs-${conn.user_id}`, async () => {
+          const supabase = createServiceClient()
+
+          const { data: propertiesToCheck } = await supabase
+            .from('properties')
+            .select('id, name')
+            .in('id', affectedIds)
+
+          if (!propertiesToCheck?.length) return
+
+          const { data: existingConfigs } = await supabase
+            .from('guidebook_property_configs')
+            .select('property_id')
+            .in('property_id', affectedIds)
+
+          const alreadyConfigured = new Set(
+            (existingConfigs ?? []).map((c) => c.property_id)
+          )
+
+          const newProperties = propertiesToCheck.filter(
+            (p) => !alreadyConfigured.has(p.id)
+          )
+
+          if (newProperties.length === 0) return
+
+          const slugMap = await generateUniqueSlugsForProperties(newProperties)
+
+          const rows = newProperties.map((p) => ({
+            org_id:       conn.org_id,
+            property_id:  p.id,
+            slug:         slugMap.get(p.id) ?? generateBaseSlug(p.name),
+            is_published: false,
+          }))
+
+          const { error } = await supabase
+            .from('guidebook_property_configs')
+            .upsert(rows, {
+              onConflict:       'org_id,property_id',
+              ignoreDuplicates: true,
+            })
+
+          if (error) {
+            logger.error(`[OwnerRez:${conn.user_id}] guidebook config creation failed: ${error.message}`)
+          }
+        })
       }
 
       // HIGH-1: step.sleep called at top level — NOT inside step.run

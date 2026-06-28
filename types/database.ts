@@ -151,6 +151,14 @@ export interface Property {
   square_footage:          number | null
   lat:                     number | null
   lng:                     number | null
+  house_manual:            string | null
+  checkout_instructions:   string | null
+  amenities:               Record<string, boolean> | null
+  smoking_allowed:         boolean | null
+  pets_allowed:            boolean | null
+  max_pets:                number | null
+  events_allowed:          boolean | null
+  min_renter_age:          number | null
   created_at:              string
   updated_at:              string
 }
@@ -216,6 +224,8 @@ export interface Booking {
   raw_ical_data:        Record<string, unknown> | null
   has_overlap_conflict: boolean
   is_block:             boolean
+  guidebook_token:      string | null
+  guidebook_pre_arrival_email_sent_at: string | null
   created_at:           string
   updated_at:           string
 }
@@ -1066,6 +1076,89 @@ export interface OwnerRezProcessedWebhook {
   processed_at: string
 }
 
+// ── Self-Funding Guidebook ────────────────────────────────────────────────────
+
+export interface GuidebookConfiguration {
+  id:                    string
+  org_id:                string
+  is_active:             boolean
+  grace_period_ends_at:  string | null
+  created_at:            string
+  updated_at:            string
+}
+
+export type GuidebookSlotType =
+  | 'morning_brew'
+  | 'dinner_pints'
+  | 'rainy_day'
+  | 'outdoor_adventure'
+  | 'general'
+  | 'other'
+
+export type GuidebookSponsorStatus = 'pending' | 'active' | 'payment_failed' | 'cancelled'
+
+export type GuidebookOfferType = 'percentage' | 'fixed_amount' | 'item' | 'custom' | 'none'
+
+export interface GuidebookSponsor {
+  id:                     string
+  org_id:                 string
+  slot_number:            number
+  business_name:          string
+  business_description:   string | null
+  business_phone:         string | null
+  business_website:       string | null
+  custom_offer_text:      string | null
+  offer_type:             GuidebookOfferType
+  offer_value:            number | null
+  offer_item:             string | null
+  featured_item:          string | null
+  address:                string | null
+  lat:                    number | null
+  lng:                    number | null
+  slot_type:              GuidebookSlotType
+  slot_context:           string | null
+  media_kit_token:        string
+  stripe_customer_id:     string | null
+  stripe_subscription_id: string | null
+  checkout_session_id:    string | null
+  status:                 GuidebookSponsorStatus
+  activated_at:           string | null
+  deactivated_at:         string | null
+  created_at:             string
+  updated_at:             string
+}
+
+export interface GuidebookPropertyConfig {
+  id:                     string
+  org_id:                 string
+  property_id:            string
+  slug:                   string
+  check_in_instructions:  string | null
+  check_out_instructions: string | null
+  wifi_network:           string | null
+  wifi_password:          string | null
+  house_rules:            string | null
+  is_published:           boolean
+  created_at:             string
+  updated_at:             string
+}
+
+export interface GuidebookGuestSmsOptin {
+  id:                    string
+  org_id:                string
+  property_id:           string
+  booking_id:            string
+  phone_e164:            string
+  is_active:             boolean
+  door_code_sent_at:     string | null
+  last_morning_sms_date: string | null
+  last_evening_sms_date: string | null
+  opted_in_at:           string
+  opted_out_at:          string | null
+  created_at:            string
+  updated_at:            string
+}
+
 // ── Asset Health ─────────────────────────────────────────────────────────────
 
 export interface PropertyAsset {
@@ -1244,6 +1337,12 @@ export interface Database {
       integration_connections:        { Row: IntegrationConnection;       Insert: Partial<IntegrationConnection>;       Update: Partial<IntegrationConnection>;       Relationships: [] }
       oauth_states:                   { Row: OAuthState;                  Insert: Partial<OAuthState>;                  Update: Partial<OAuthState>;                  Relationships: [] }
       ownerrez_processed_webhooks:    { Row: OwnerRezProcessedWebhook;    Insert: Partial<OwnerRezProcessedWebhook>;    Update: Partial<OwnerRezProcessedWebhook>;    Relationships: [] }
+
+      // ── Self-Funding Guidebook ───────────────────────────────
+      guidebook_configurations:    { Row: GuidebookConfiguration;   Insert: Partial<GuidebookConfiguration>;   Update: Partial<GuidebookConfiguration>;   Relationships: [] }
+      guidebook_sponsors:          { Row: GuidebookSponsor;         Insert: Partial<GuidebookSponsor>;         Update: Partial<GuidebookSponsor>;         Relationships: [] }
+      guidebook_property_configs:  { Row: GuidebookPropertyConfig;  Insert: Partial<GuidebookPropertyConfig>;  Update: Partial<GuidebookPropertyConfig>;  Relationships: [] }
+      guidebook_guest_sms_optins:  { Row: GuidebookGuestSmsOptin;   Insert: Partial<GuidebookGuestSmsOptin>;   Update: Partial<GuidebookGuestSmsOptin>;   Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }

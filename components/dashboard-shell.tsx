@@ -8,7 +8,7 @@ import {
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Sun, Moon,
   Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
-  LifeBuoy, Bell,
+  LifeBuoy, Bell, BookOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -60,6 +60,7 @@ const NAV_ITEMS = [
   { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager'],          group: 'management' as const },
   { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager'],          group: 'management' as const },
   { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager'],          group: 'management' as const },
+  { href: '/guidebook',   label: 'Guidebook',    icon: BookOpen,        roles: ['admin','manager'],          group: 'management' as const },
   { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin'],                    group: 'management' as const },
 ] as const
 
@@ -77,6 +78,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/vendors':      'Vendors',
   '/comms-log':    'Comms Log',
   '/owners':       'Owner Portal',
+  '/guidebook':    'Guidebook',
   '/reviews':      'Reviews',
   '/settings':     'Settings',
   '/help':         'Help & Support',

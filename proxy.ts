@@ -74,6 +74,10 @@ const BYPASS_ROUTES = [
   // Supabase auth callback (magic links, OAuth email confirmation)
   '/auth/callback',
 
+  // Guest-facing guidebook routes (media kit signup + guest guidebook pages).
+  // Intentionally public — guests and sponsors never have a FieldStay session.
+  '/g/',
+
   // Account deletion — handles its own auth verification server-side
   '/api/account/delete',
 ]
