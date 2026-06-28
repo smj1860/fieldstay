@@ -14,13 +14,22 @@ import { NonRetriableError }    from 'inngest'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
-import type { OwnerRezProperty, OwnerRezBooking } from '@/lib/integrations/types'
+import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing, OwnerRezListingAmenity } from '@/lib/integrations/types'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
 import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
 
 const PROVIDER = 'ownerrez'
+
+function normalizeAmenities(amenities: OwnerRezListingAmenity[]): Record<string, boolean> {
+  return Object.fromEntries(
+    amenities.map((a) => [
+      a.amenity_id.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+      a.available,
+    ])
+  )
+}
 
 async function writeSyncCount(
   user_id: string,
@@ -185,7 +194,122 @@ export const ownerRezInitialSync = inngest.createFunction(
         logger.info(`[OwnerRez:${user_id}] Patched null fields on ${existingProps.length} properties`)
       })
 
-      // ── Step 1c: Apply master checklist to newly-synced properties ────────────
+      // ── Step 1c: Fetch property detail and sync rich fields ──────────────────
+      // The /v2/properties list endpoint returns minimal data.
+      // /v2/properties/{id} returns WiFi, instructions, and rules.
+      // Amenities come from the batch /v2/listings endpoint instead (see Addendum
+      // in CLAUDE_55_5.md — avoids a second per-property call for that field).
+      // We fetch property detail sequentially with a delay to avoid rate limiting.
+
+      await step.run('fetch-property-details', async () => {
+        const supabase    = createServiceClient()
+        const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
+
+        if (!externalIds.length) return
+
+        const { data: dbProperties } = await supabase
+          .from('properties')
+          .select('id, external_id, wifi_name, wifi_password, access_instructions, house_manual, amenities')
+          .in('external_id', externalIds)
+          .eq('external_source', PROVIDER)
+          .eq('org_id', org_id)
+
+        if (!dbProperties?.length) return
+
+        // Batch fetch amenities for all properties in one call (Addendum)
+        let listingByPropertyId = new Map<number, OwnerRezListing>()
+        try {
+          const listings = await client.getListings({ includeAmenities: true })
+          listingByPropertyId = new Map(listings.map((l) => [l.property_id, l]))
+
+          if (listings.length > 0) {
+            logger.info('[OwnerRez] listing shape sample', {
+              listingKeys:      Object.keys(listings[0]),
+              amenityCount:     listings[0]?.amenities?.length ?? 0,
+              firstAmenityKeys: listings[0]?.amenities?.[0] ? Object.keys(listings[0].amenities[0]) : [],
+            })
+          }
+        } catch (err) {
+          logger.warn(`[OwnerRez:${user_id}] getListings failed — continuing without amenities: ${err instanceof Error ? err.message : String(err)}`)
+        }
+
+        let loggedDetailSample = false
+
+        for (const dbProp of dbProperties) {
+          const orId    = Number(dbProp.external_id)
+          const detail  = await client.getPropertyDetail(orId)
+
+          // One-time diagnostic — verify actual OwnerRez field names.
+          // Logs key presence only, never values (may contain WiFi passwords).
+          if (!loggedDetailSample) {
+            loggedDetailSample = true
+            logger.info('[OwnerRez] property detail shape sample', {
+              keys:        detail ? Object.keys(detail) : [],
+              hasWifi:     !!(detail?.wifi_name || detail?.wifi_password),
+              hasAddress:  !!detail?.address,
+            })
+          }
+
+          const patch: Record<string, unknown> = {}
+
+          if (detail) {
+            // WiFi — only fill if currently null, never overwrite PM-entered data
+            if (!dbProp.wifi_name && detail.wifi_name)
+              patch.wifi_name = detail.wifi_name
+            if (!dbProp.wifi_password && detail.wifi_password)
+              patch.wifi_password = detail.wifi_password
+
+            // Guest instructions
+            if (!dbProp.access_instructions && detail.check_in_instructions)
+              patch.access_instructions = detail.check_in_instructions
+            if (!dbProp.house_manual && detail.house_manual)
+              patch.house_manual = detail.house_manual
+
+            // Checkout instructions — OwnerRez is the source of truth
+            if (detail.check_out_instructions)
+              patch.checkout_instructions = detail.check_out_instructions
+
+            // Address — always sync from OwnerRez (source of truth)
+            if (detail.address)   patch.address = detail.address
+            if (detail.city)      patch.city    = detail.city
+            if (detail.state)     patch.state   = detail.state
+            if (detail.zip)       patch.zip     = detail.zip
+            if (detail.latitude)  patch.lat     = detail.latitude
+            if (detail.longitude) patch.lng     = detail.longitude
+
+            // Occupancy and rules — always sync from OwnerRez
+            if (detail.max_occupancy)                 patch.max_guests      = detail.max_occupancy
+            if (detail.smoking_allowed !== undefined)  patch.smoking_allowed = detail.smoking_allowed
+            if (detail.pets_allowed !== undefined)     patch.pets_allowed    = detail.pets_allowed
+            if (detail.max_pets !== undefined)         patch.max_pets        = detail.max_pets
+            if (detail.events_allowed !== undefined)   patch.events_allowed  = detail.events_allowed
+            if (detail.min_renter_age)                 patch.min_renter_age  = detail.min_renter_age
+          }
+
+          // Amenities — from the batch listings call, normalized to a flat map
+          const listing = listingByPropertyId.get(orId)
+          if (listing?.amenities?.length) {
+            patch.amenities = normalizeAmenities(listing.amenities)
+          }
+
+          if (Object.keys(patch).length === 0) continue
+
+          patch.updated_at = new Date().toISOString()
+
+          await supabase
+            .from('properties')
+            .update(patch)
+            .eq('id', dbProp.id)
+            .eq('org_id', org_id) // explicit tenant guard
+
+          // Sequential delay — avoid hitting OwnerRez rate limits
+          await new Promise((r) => setTimeout(r, 150))
+        }
+
+        logger.info(`[OwnerRez:${user_id}] Fetched property details for ${dbProperties.length} properties`)
+      })
+
+      // ── Step 1d: Apply master checklist to newly-synced properties ────────────
       // Only applies to properties that do not yet have a default template.
       // Skips any property where the PM has already set one up.
 
@@ -276,6 +400,58 @@ export const ownerRezInitialSync = inngest.createFunction(
           logger.error(`[OwnerRez:${user_id}] guidebook config creation failed: ${error.message}`)
           // Non-fatal — don't throw, don't block the sync
         }
+      })
+
+      // ── Sync property data into guidebook configs ──────────────────────────
+      // guidebook_property_configs stores guest-facing content. If a PM has
+      // already filled in their check-in instructions in OwnerRez, pre-populate
+      // the guidebook config with that data. Never overwrites PM-entered values.
+
+      await step.run('sync-guidebook-configs-from-property', async () => {
+        const supabase = createServiceClient()
+
+        const { data: props } = await supabase
+          .from('properties')
+          .select('id, wifi_name, wifi_password, access_instructions, house_manual, checkout_instructions')
+          .eq('org_id', org_id)
+          .eq('external_source', PROVIDER)
+          .eq('is_active', true)
+
+        if (!props?.length) return
+
+        const { data: configs } = await supabase
+          .from('guidebook_property_configs')
+          .select('id, property_id, wifi_network, wifi_password, check_in_instructions, house_rules, check_out_instructions')
+          .eq('org_id', org_id)
+          .in('property_id', props.map((p) => p.id))
+
+        const configByPropertyId = new Map(
+          (configs ?? []).map((c) => [c.property_id, c])
+        )
+
+        for (const prop of props) {
+          const config = configByPropertyId.get(prop.id)
+          if (!config) continue // no guidebook config yet — auto-slug step handles creation
+
+          const patch: Record<string, unknown> = {}
+
+          if (!config.wifi_network          && prop.wifi_name)             patch.wifi_network           = prop.wifi_name
+          if (!config.wifi_password         && prop.wifi_password)         patch.wifi_password          = prop.wifi_password
+          if (!config.check_in_instructions && prop.access_instructions)   patch.check_in_instructions  = prop.access_instructions
+          if (!config.house_rules           && prop.house_manual)          patch.house_rules            = prop.house_manual
+          if (!config.check_out_instructions && prop.checkout_instructions) patch.check_out_instructions = prop.checkout_instructions
+
+          if (Object.keys(patch).length === 0) continue
+
+          patch.updated_at = new Date().toISOString()
+
+          await supabase
+            .from('guidebook_property_configs')
+            .update(patch)
+            .eq('id', config.id)
+        }
+
+        logger.info(`[OwnerRez:${user_id}] Synced guidebook configs for org ${org_id}`)
       })
 
       // ── Step 2: Fetch and upsert bookings ───────────────────────────────────

@@ -112,6 +112,53 @@ export interface OwnerRezProperty {
   sqft?:         number
   square_feet?:  number
   size?:         number
+
+  // Address — returned on detail endpoint
+  address?:      string | null  // TODO: verify field name
+  city?:         string | null  // TODO: verify — may be nested in address object
+  state?:        string | null  // TODO: verify
+  zip?:          string | null
+  latitude?:     number | null  // TODO: verify — may be 'lat'
+  longitude?:    number | null  // TODO: verify — may be 'lng'
+
+  // WiFi — returned on detail endpoint
+  wifi_name?:     string | null  // TODO: verify field name
+  wifi_password?: string | null  // TODO: verify field name
+
+  // Guest instructions — returned on detail endpoint
+  // TODO: verify all field names against actual API response
+  check_in_instructions?:  string | null
+  check_out_instructions?: string | null
+  house_manual?:           string | null
+  door_code?:              string | null  // static property-level code if set
+
+  // Rules — returned on detail endpoint
+  // TODO: verify field names and nesting structure
+  smoking_allowed?: boolean | null
+  pets_allowed?:    boolean | null
+  max_pets?:        number | null
+  events_allowed?:  boolean | null
+  min_renter_age?:  number | null
+
+  // Amenities — returned as object or array on detail endpoint
+  // TODO: verify shape — may be { amenity_name: boolean } or [{ id, value }]
+  amenities?: Record<string, boolean> | null
+}
+
+// ── OwnerRez Listings endpoint (Addendum: used for batch amenity sync) ──────
+
+export interface OwnerRezListingAmenity {
+  amenity_id: string   // e.g. "hot_tub", "fire_pit", "private_pool"
+  name:       string   // human-readable name
+  available:  boolean  // TODO: verify field name — may be 'value' or 'enabled'
+}
+
+export interface OwnerRezListing {
+  id:          number    // matches property external_id
+  property_id: number
+  name?:       string
+  amenities?:  OwnerRezListingAmenity[]
+  // TODO: add other listing fields after verifying actual API response shape
 }
 
 export interface OwnerRezGuest {

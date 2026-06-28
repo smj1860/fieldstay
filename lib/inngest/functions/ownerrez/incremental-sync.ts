@@ -14,6 +14,14 @@
  *
  * Each user runs in its own step.run() so failures are isolated.
  * step.sleep() is called at the TOP LEVEL only — never inside step.run().
+ *
+ * TODO(CLAUDE_55_5 Task 7): This function does not currently handle OwnerRez
+ * property entity_update webhooks — it only fetches bookings via since_utc.
+ * Once property-level webhook handling exists here, add a getPropertyDetail()
+ * call (and the guidebook-config patch from initial-sync.ts's
+ * fetch-property-details/sync-guidebook-configs-from-property steps) for the
+ * specific property that was updated, scoped per the patch's
+ * "Do not add webhook handling that isn't already scoped" instruction.
  */
 
 import { inngest }                      from '@/lib/inngest/client'

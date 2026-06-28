@@ -21,6 +21,7 @@ import type {
   OwnerRezUser,
   OwnerRezReview,
   OwnerRezPagedResponse,
+  OwnerRezListing,
 } from '../types'
 
 const BASE_URL   = 'https://api.ownerrez.com'
@@ -219,6 +220,40 @@ export class OwnerRezApiClient {
 
   async getProperties(): Promise<OwnerRezProperty[]> {
     return this.fetchAllPages<OwnerRezProperty>('/v2/properties')
+  }
+
+  /**
+   * Fetches full property detail including WiFi, guest instructions,
+   * occupancy rules, and address. Not used for amenities — see getListings.
+   * Note: this is a separate call per property — callers must invoke it
+   * sequentially with a small delay to avoid hitting OwnerRez rate limits,
+   * not via Promise.all().
+   */
+  async getPropertyDetail(propertyId: number): Promise<OwnerRezProperty | null> {
+    try {
+      return await this.fetch<OwnerRezProperty>(`/v2/properties/${propertyId}`)
+    } catch (err) {
+      if (err instanceof RateLimitError || err instanceof TokenRevokedError) throw err
+      // Non-fatal — return null and let the sync continue with partial data
+      console.error(`[OwnerRez:${this.userId}] getPropertyDetail(${propertyId}) failed:`, err)
+      return null
+    }
+  }
+
+  /**
+   * Fetches listing content including amenity flags for all properties.
+   * FieldStay's partner API access bypasses the WordPress Plugin / Integrated
+   * Websites requirement, so amenities can be fetched in one paginated batch
+   * instead of per-property detail calls.
+   */
+  async getListings(params?: {
+    includeAmenities?:    boolean
+    includeDescriptions?: boolean
+  }): Promise<OwnerRezListing[]> {
+    const queryParams: Record<string, string> = {}
+    if (params?.includeAmenities)    queryParams['includeAmenities']    = 'true'
+    if (params?.includeDescriptions) queryParams['includeDescriptions'] = 'true'
+    return this.fetchAllPages<OwnerRezListing>('/v2/listings', queryParams)
   }
 
   async getBookings(params: {

@@ -151,6 +151,14 @@ export interface Property {
   square_footage:          number | null
   lat:                     number | null
   lng:                     number | null
+  house_manual:            string | null
+  checkout_instructions:   string | null
+  amenities:               Record<string, boolean> | null
+  smoking_allowed:         boolean | null
+  pets_allowed:            boolean | null
+  max_pets:                number | null
+  events_allowed:          boolean | null
+  min_renter_age:          number | null
   created_at:              string
   updated_at:              string
 }
