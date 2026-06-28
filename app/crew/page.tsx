@@ -5,7 +5,7 @@ import { useLiveQuery }   from 'dexie-react-hooks'
 import { useDexieDb }     from '@/lib/dexie/context'
 
 import Link                              from 'next/link'
-import { AlertCircle, MapPin, Clock }    from 'lucide-react'
+import { AlertCircle, MapPin, Clock, MessageCircle } from 'lucide-react'
 import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
 import { distanceMiles }                 from '@/lib/geocoding'
@@ -140,6 +140,7 @@ function CrewPageSkeleton() {
 
 export default function CrewDashboardPage() {
   const [isMounted, setIsMounted] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
   useEffect(() => {
     setIsMounted(true)
   }, [])
@@ -268,6 +269,124 @@ export default function CrewDashboardPage() {
               ))
           }
         </div>
+      </div>
+
+      {/* ── Feedback entry point ────────────────────────────────────────── */}
+      <div className="px-4 pt-6 pb-2 mt-2">
+        <button
+          onClick={() => setShowFeedback(true)}
+          className="w-full py-2.5 rounded-xl text-xs font-semibold border border-accent-200 text-accent-600 hover:text-accent-800 hover:border-accent-300 transition-colors flex items-center justify-center gap-1.5"
+        >
+          <MessageCircle className="w-3.5 h-3.5" />
+          Send feedback
+        </button>
+      </div>
+
+      {showFeedback && <FeedbackModal onClose={() => setShowFeedback(false)} />}
+    </div>
+  )
+}
+
+function FeedbackModal({ onClose }: { onClose: () => void }) {
+  const [text, setText]           = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [error, setError]         = useState<string | null>(null)
+
+  async function handleSubmit() {
+    if (!text.trim()) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/crew/feedback', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ feedbackText: text.trim() }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(data?.error ?? 'Something went wrong')
+      }
+      setText('')
+      setSubmitted(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 50,
+        background: 'rgba(0,0,0,0.4)',
+        display: 'flex', alignItems: 'flex-end',
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          background: '#fff', borderRadius: '16px 16px 0 0',
+          padding: '24px 20px 40px', width: '100%', maxHeight: '85vh', overflowY: 'auto',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0D1F3C' }}>
+            Send feedback
+          </h2>
+          <button onClick={onClose} style={{ fontSize: 20, color: '#94a3b8', padding: 4 }} aria-label="Close">
+            ×
+          </button>
+        </div>
+
+        {submitted ? (
+          <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
+            <p style={{ fontSize: 32, marginBottom: 8 }}>🙌</p>
+            <p style={{ fontSize: 15, fontWeight: 700, color: '#0D1F3C', marginBottom: 4 }}>
+              Thank you!
+            </p>
+            <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 20 }}>
+              Your feedback goes straight to the team that builds this app.
+            </p>
+            <button
+              onClick={onClose}
+              className="w-full py-3 rounded-xl text-sm font-semibold text-white"
+              style={{ background: '#0D1F3C' }}
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 12 }}>
+              What would make this app more helpful for your day-to-day work?
+            </p>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={5}
+              placeholder="Share an idea, a frustration, or anything that would help…"
+              style={{
+                width: '100%', borderRadius: 12, border: '1px solid #e2e8f0',
+                padding: '12px', fontSize: 14, color: '#1e293b', resize: 'none',
+                outline: 'none',
+              }}
+            />
+            {error && (
+              <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>{error}</p>
+            )}
+            <button
+              onClick={handleSubmit}
+              disabled={submitting || !text.trim()}
+              className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-4 disabled:opacity-50"
+              style={{ background: '#0D1F3C' }}
+            >
+              {submitting ? 'Sending…' : 'Submit'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
