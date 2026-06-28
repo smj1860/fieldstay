@@ -14,7 +14,7 @@ import { NonRetriableError }    from 'inngest'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
-import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing, OwnerRezListingAmenity } from '@/lib/integrations/types'
+import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing, OwnerRezListingAmenityCategory } from '@/lib/integrations/types'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
@@ -22,13 +22,21 @@ import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guideb
 
 const PROVIDER = 'ownerrez'
 
-function normalizeAmenities(amenities: OwnerRezListingAmenity[]): Record<string, boolean> {
-  return Object.fromEntries(
-    amenities.map((a) => [
-      a.amenity_id.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
-      a.available,
-    ])
-  )
+// Actual structure is amenity_categories with nested amenities[].title —
+// not a flat array with an amenity_id field.
+function normalizeAmenities(categories: OwnerRezListingAmenityCategory[]): Record<string, boolean> {
+  const result: Record<string, boolean> = {}
+  for (const category of categories ?? []) {
+    for (const amenity of category.amenities ?? []) {
+      if (!amenity.title) continue
+      const key = amenity.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '')
+      result[key] = true // presence in the list = amenity exists at the property
+    }
+  }
+  return result
 }
 
 async function writeSyncCount(
@@ -220,9 +228,9 @@ if (!dbProperties?.length) return
 
           if (listings.length > 0) {
             logger.info('[OwnerRez] listing shape sample', {
-              listingKeys:      Object.keys(listings[0]),
-              amenityCount:     listings[0]?.amenities?.length ?? 0,
-              firstAmenityKeys: listings[0]?.amenities?.[0] ? Object.keys(listings[0].amenities[0]) : [],
+              listingKeys:        Object.keys(listings[0]),
+              amenityCategoryCount: listings[0]?.amenity_categories?.length ?? 0,
+              firstCategoryKeys:  listings[0]?.amenity_categories?.[0] ? Object.keys(listings[0].amenity_categories[0]) : [],
             })
           }
         } catch (err) {
@@ -241,40 +249,32 @@ if (!dbProperties?.length) return
             loggedDetailSample = true
             logger.info('[OwnerRez] property detail shape sample', {
               keys:        detail ? Object.keys(detail) : [],
-              hasWifi:     !!(detail?.wifi_name || detail?.wifi_password),
-              hasAddress:  !!detail?.address,
+              hasAddress:  !!detail?.addresses?.length,
             })
           }
 
           const patch: Record<string, unknown> = {}
 
           if (detail) {
-            // WiFi — only fill if currently null, never overwrite PM-entered data
-            if (!dbProp.wifi_name && detail.wifi_name)
-              patch.wifi_name = detail.wifi_name
-            if (!dbProp.wifi_password && detail.wifi_password)
-              patch.wifi_password = detail.wifi_password
+            // NOTE: WiFi, check-in instructions, and house manual are NOT on
+            // GET /v2/properties/{id} — they live on the listings endpoint
+            // and are mapped from `listing` below instead.
 
-            // Guest instructions
-            if (!dbProp.access_instructions && detail.check_in_instructions)
-              patch.access_instructions = detail.check_in_instructions
-            if (!dbProp.house_manual && detail.house_manual)
-              patch.house_manual = detail.house_manual
+            // Address — nested in an addresses[] array, always sync from OwnerRez
+            const defaultAddress =
+              detail.addresses?.find((a) => a.is_default) ??
+              detail.addresses?.[0]
 
-            // Checkout instructions — OwnerRez is the source of truth
-            if (detail.check_out_instructions)
-              patch.checkout_instructions = detail.check_out_instructions
-
-            // Address — always sync from OwnerRez (source of truth)
-            if (detail.address)   patch.address = detail.address
-            if (detail.city)      patch.city    = detail.city
-            if (detail.state)     patch.state   = detail.state
-            if (detail.zip)       patch.zip     = detail.zip
-            if (detail.latitude)  patch.lat     = detail.latitude
-            if (detail.longitude) patch.lng     = detail.longitude
+            if (defaultAddress) {
+              if (defaultAddress.street1)     patch.address = defaultAddress.street1
+              if (defaultAddress.state)       patch.state   = defaultAddress.state
+              if (defaultAddress.postal_code) patch.zip     = defaultAddress.postal_code
+            }
+            if (detail.latitude)  patch.lat = detail.latitude
+            if (detail.longitude) patch.lng = detail.longitude
 
             // Occupancy and rules — always sync from OwnerRez
-            if (detail.max_occupancy)                 patch.max_guests      = detail.max_occupancy
+            if (detail.max_guests)                     patch.max_guests      = detail.max_guests
             if (detail.smoking_allowed !== undefined)  patch.smoking_allowed = detail.smoking_allowed
             if (detail.pets_allowed !== undefined)     patch.pets_allowed    = detail.pets_allowed
             if (detail.max_pets !== undefined)         patch.max_pets        = detail.max_pets
@@ -282,10 +282,25 @@ if (!dbProperties?.length) return
             if (detail.min_renter_age)                 patch.min_renter_age  = detail.min_renter_age
           }
 
-          // Amenities — from the batch listings call, normalized to a flat map
+          // WiFi, instructions, house manual, and amenities — from the batch
+          // listings call, which is the actual source for these fields
           const listing = listingByPropertyId.get(orId)
-          if (listing?.amenities?.length) {
-            patch.amenities = normalizeAmenities(listing.amenities)
+          if (listing) {
+            if (!dbProp.wifi_name && listing.wifi_network)
+              patch.wifi_name = listing.wifi_network
+
+            if (!dbProp.wifi_password && listing.wifi_password)
+              patch.wifi_password = listing.wifi_password
+
+            if (!dbProp.access_instructions && listing.check_in_instructions)
+              patch.access_instructions = listing.check_in_instructions
+
+            if (!dbProp.house_manual && listing.house_manual)
+              patch.house_manual = listing.house_manual
+
+            if (listing.amenity_categories?.length) {
+              patch.amenities = normalizeAmenities(listing.amenity_categories)
+            }
           }
 
           if (Object.keys(patch).length === 0) continue
