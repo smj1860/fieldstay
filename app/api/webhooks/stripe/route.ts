@@ -354,6 +354,13 @@ export async function POST(request: NextRequest) {
       const subId   = invoice.subscription as string | null
       if (!subId) break
 
+      // Early exit: avoid Stripe API call for non-sponsor invoices.
+      // Only guidebook sponsor subscriptions contain this price ID.
+      const hasSponsorLine = (invoice.lines?.data ?? []).some(
+        (line) => line.price?.id === process.env.STRIPE_PRICE_SPONSOR_MONTHLY
+      )
+      if (!hasSponsorLine) break
+
       const subscription = await stripe.subscriptions.retrieve(subId)
       if (subscription.metadata?.feature === 'guidebook_sponsor') {
         const orgId     = subscription.metadata.org_id

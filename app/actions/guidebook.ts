@@ -193,7 +193,7 @@ export async function optInGuestSms(
   rawPhone:       string
 ): Promise<{ success: true } | { error: string }> {
   const phoneE164 = normalizePhoneToE164(rawPhone)
-  if (!phoneE164) return { error: 'Please enter a valid US phone number.' }
+  if (!phoneE164) return { error: 'Please enter a valid US or Canadian phone number.' }
 
   const supabase = createServiceClient()
 

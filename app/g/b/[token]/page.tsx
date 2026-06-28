@@ -24,7 +24,11 @@ export default async function GuestBookingGuidebookPage({
 
   const { data: config } = await supabase
     .from('guidebook_property_configs')
-    .select('*, properties(id, org_id, name, address, lat, lng)')
+    .select(`
+      id, slug, wifi_network, wifi_password, check_in_instructions,
+      check_out_instructions, house_rules, is_published, org_id,
+      properties(id, name, address, lat, lng)
+    `)
     .eq('property_id', booking.property_id)
     .maybeSingle()
 
@@ -59,7 +63,7 @@ export default async function GuestBookingGuidebookPage({
   return (
     <GuestGuidebookView
       property={property}
-      config={config as GuidebookPropertyConfig}
+      config={config as unknown as GuidebookPropertyConfig}
       sponsors={(sponsors ?? []) as GuidebookSponsor[]}
       isActive={isActive}
       hourOfDay={hourOfDay}

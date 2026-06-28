@@ -9,9 +9,12 @@ const TELNYX_API_URL = 'https://api.telnyx.com/v2/messages'
 export function normalizePhoneToE164(raw: string): string | null {
   const digits = raw.replace(/\D/g, '')
 
-  if (digits.length === 10) return `+1${digits}`
-  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
-
+  if (digits.length === 10) {
+    return /^[2-9]\d{2}[2-9]\d{6}$/.test(digits) ? `+1${digits}` : null
+  }
+  if (digits.length === 11 && digits.startsWith('1')) {
+    return /^1[2-9]\d{2}[2-9]\d{6}$/.test(digits) ? `+${digits}` : null
+  }
   return null
 }
 
@@ -23,13 +26,23 @@ export function formatOffer(
 ): string | null {
   switch (offerType) {
     case 'percentage':
-      return offerValue ? `${offerValue}% off for guests` : null
+      if (!offerValue) return null
+      return offerItem
+        ? `${offerValue}% off ${offerItem} — just show this screen`
+        : `${offerValue}% off — just show this screen`
+
     case 'fixed_amount':
-      return offerValue ? `$${offerValue.toFixed(2)} off for guests` : null
+      if (!offerValue) return null
+      return offerItem
+        ? `$${offerValue % 1 === 0 ? offerValue : offerValue.toFixed(2)} off ${offerItem} — just show this screen`
+        : `$${offerValue % 1 === 0 ? offerValue : offerValue.toFixed(2)} off — just show this screen`
+
     case 'item':
-      return offerItem ? `Free ${offerItem} for guests` : null
+      return offerItem ? `Free ${offerItem} — just show this screen` : null
+
     case 'custom':
       return customOfferText ?? null
+
     case 'none':
     default:
       return null
@@ -81,8 +94,21 @@ export async function sendSMS(toE164: string, body: string): Promise<SendSmsResu
   return { sent: true }
 }
 
-export function buildDoorCodeSMS(propertyName: string, doorCode: string): string {
-  return `Welcome to ${propertyName}! Your door code is: ${doorCode}. Reply STOP to opt out of texts.`
+export function buildDoorCodeSMS(
+  propertyName: string,
+  doorCode:     string,
+  portalUrl:    string
+): string {
+  return [
+    `${propertyName} — you're all set. 🏡`,
+    ``,
+    `Door code: ${doorCode}`,
+    ``,
+    `WiFi password + your local guide:`,
+    portalUrl,
+    ``,
+    `Reply STOP to opt out.`,
+  ].join('\n')
 }
 
 export function buildMorningNudgeSMS(

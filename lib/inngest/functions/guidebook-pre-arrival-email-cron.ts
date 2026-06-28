@@ -69,9 +69,9 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
     let sentCount = 0
 
     for (const booking of eligibleBookings) {
-      await step.run(`send-pre-arrival-email-${booking.id}`, async () => {
+      const wasSent = await step.run(`send-pre-arrival-email-${booking.id}`, async () => {
         const propertyName = propertyMap[booking.property_id]
-        if (!propertyName || !booking.guest_email) return
+        if (!propertyName || !booking.guest_email) return false
 
         const appUrl       = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
         const optInUrl     = `${appUrl}/g/b/${booking.guidebook_token}/opt-in`
@@ -90,8 +90,10 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
           .update({ guidebook_pre_arrival_email_sent_at: new Date().toISOString() })
           .eq('id', booking.id)
 
-        sentCount += 1
+        return true
       })
+
+      if (wasSent) sentCount += 1
     }
 
     return { sent: sentCount, eligible: eligibleBookings.length }

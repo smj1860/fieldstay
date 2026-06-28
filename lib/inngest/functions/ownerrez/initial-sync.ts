@@ -260,14 +260,15 @@ if (!dbProperties?.length) return
             // GET /v2/properties/{id} — they live on the listings endpoint
             // and are mapped from `listing` below instead.
 
-            // Address — nested in an addresses[] array, always sync from OwnerRez
+            // Extract address fields from the addresses array
             const defaultAddress =
-              detail.addresses?.find((a) => a.is_default) ??
-              detail.addresses?.[0]
+              (detail.addresses ?? []).find((a) => a.is_default) ??
+              (detail.addresses ?? [])[0]
 
             if (defaultAddress) {
               if (defaultAddress.street1)     patch.address = defaultAddress.street1
               if (defaultAddress.state)       patch.state   = defaultAddress.state
+              if (defaultAddress.city)        patch.city    = defaultAddress.city
               if (defaultAddress.postal_code) patch.zip     = defaultAddress.postal_code
             }
             if (detail.latitude)  patch.lat = detail.latitude
