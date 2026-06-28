@@ -9,6 +9,7 @@ import { AlertCircle, MapPin, Clock, MessageCircle } from 'lucide-react'
 import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
 import { distanceMiles }                 from '@/lib/geocoding'
+import type { CrewWorkOrderRow }         from '@/lib/dexie/schema'
 
 const AVG_DRIVE_SPEED_MPH = 30
 
@@ -104,6 +105,55 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
   )
 }
 
+function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: PropertyRow }) {
+  const fullAddress = [property?.address, property?.city, property?.state]
+    .filter(Boolean).join(', ')
+
+  return (
+    <Link
+      href={`/crew/work-orders/${wo.id}`}
+      className={cn(
+        'block rounded-xl border p-3 mb-2 transition-shadow active:scale-[0.98]',
+        'bg-amber-50 border-amber-200'
+      )}
+    >
+      <div className="flex items-start justify-between gap-1 mb-1.5">
+        <p className="font-bold text-accent-900 text-sm leading-tight">
+          {wo.title}
+        </p>
+        <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0">
+          WO
+        </span>
+      </div>
+      {property?.name && (
+        <p className="text-xs text-accent-700 font-medium mb-1">{property.name}</p>
+      )}
+      {fullAddress && (
+        <div className="text-xs text-accent-500 flex items-center gap-1 mb-1.5">
+          <MapPin className="w-3 h-3 flex-shrink-0" />
+          <span className="truncate">{fullAddress}</span>
+        </div>
+      )}
+      <div className="flex items-center gap-1.5">
+        <span className={cn(
+          'text-xs font-semibold px-2 py-0.5 rounded-full',
+          wo.status === 'assigned'    ? 'bg-blue-50 text-blue-700' :
+          wo.status === 'in_progress' ? 'bg-purple-50 text-purple-700' :
+          'bg-accent-100 text-accent-600'
+        )}>
+          {wo.status === 'assigned' ? 'Assigned' :
+           wo.status === 'in_progress' ? 'In Progress' : wo.status}
+        </span>
+        {wo.scheduled_date && (
+          <span className="text-xs text-accent-500">
+            Scheduled {new Date(wo.scheduled_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          </span>
+        )}
+      </div>
+    </Link>
+  )
+}
+
 function EmptyColumn({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -164,9 +214,22 @@ export default function CrewDashboardPage() {
     [today, weekOut]
   ) ?? []
 
+  const allWorkOrders = useLiveQuery(
+    () => db.crew_work_orders
+      .filter((wo) =>
+        wo.status !== 'completed' &&
+        wo.status !== 'cancelled'
+      )
+      .toArray(),
+    []
+  ) ?? []
+
   const assignedPropertyIds = useMemo(
-    () => new Set((allTurnovers as TurnoverRow[]).map((t) => t.property_id)),
-    [allTurnovers]
+    () => new Set([
+      ...(allTurnovers as TurnoverRow[]).map((t) => t.property_id),
+      ...(allWorkOrders as CrewWorkOrderRow[]).map((wo) => wo.property_id),
+    ]),
+    [allTurnovers, allWorkOrders]
   )
 
   const propertiesArr = useLiveQuery(
@@ -186,6 +249,15 @@ export default function CrewDashboardPage() {
     (t) => new Date(t.checkout_datetime).toDateString() !== todayStr
   )
 
+  // Work orders split by scheduled_date: today (or overdue) vs upcoming.
+  // WOs with no scheduled date land at the bottom of the Upcoming column.
+  const todayWorkOrders = (allWorkOrders as CrewWorkOrderRow[]).filter(
+    (wo) => wo.scheduled_date != null && wo.scheduled_date <= today
+  )
+  const upcomingWorkOrders = (allWorkOrders as CrewWorkOrderRow[]).filter(
+    (wo) => wo.scheduled_date == null || wo.scheduled_date > today
+  )
+
   const travelSummary = calcTravelSummary(todayTurnovers, propertyMap as Record<string, PropertyRow>)
 
   if (!isMounted) return <CrewPageSkeleton />
@@ -202,9 +274,9 @@ export default function CrewDashboardPage() {
           Welcome, {firstName}
         </p>
         <p className="text-xs text-brand-800 mt-0.5">
-          {allTurnovers.length === 0
+          {allTurnovers.length + allWorkOrders.length === 0
             ? "You're all caught up — no active assignments."
-            : `You have ${allTurnovers.length} active assignment${allTurnovers.length !== 1 ? 's' : ''}.`}
+            : `You have ${allTurnovers.length + allWorkOrders.length} active assignment${allTurnovers.length + allWorkOrders.length !== 1 ? 's' : ''}.`}
         </p>
       </div>
 
@@ -229,15 +301,26 @@ export default function CrewDashboardPage() {
                 : 'Total Travel Time: unavailable'}
             </p>
           )}
-          {todayTurnovers.length === 0
+          {todayTurnovers.length === 0 && todayWorkOrders.length === 0
             ? <EmptyColumn label="Today's Turnovers" />
-            : todayTurnovers.map((t) => (
-                <TurnoverCard
-                  key={t.id}
-                  t={t}
-                  property={propertyMap[t.property_id]}
-                />
-              ))
+            : (
+              <>
+                {todayTurnovers.map((t) => (
+                  <TurnoverCard
+                    key={t.id}
+                    t={t}
+                    property={propertyMap[t.property_id]}
+                  />
+                ))}
+                {todayWorkOrders.map((wo) => (
+                  <WorkOrderCard
+                    key={wo.id}
+                    wo={wo}
+                    property={propertyMap[wo.property_id]}
+                  />
+                ))}
+              </>
+            )
           }
         </div>
 
@@ -258,15 +341,26 @@ export default function CrewDashboardPage() {
               Upcoming
             </span>
           </div>
-          {upcomingTurnovers.length === 0
+          {upcomingTurnovers.length === 0 && upcomingWorkOrders.length === 0
             ? <EmptyColumn label="Upcoming" />
-            : upcomingTurnovers.map((t) => (
-                <TurnoverCard
-                  key={t.id}
-                  t={t}
-                  property={propertyMap[t.property_id]}
-                />
-              ))
+            : (
+              <>
+                {upcomingTurnovers.map((t) => (
+                  <TurnoverCard
+                    key={t.id}
+                    t={t}
+                    property={propertyMap[t.property_id]}
+                  />
+                ))}
+                {upcomingWorkOrders.map((wo) => (
+                  <WorkOrderCard
+                    key={wo.id}
+                    wo={wo}
+                    property={propertyMap[wo.property_id]}
+                  />
+                ))}
+              </>
+            )
           }
         </div>
       </div>

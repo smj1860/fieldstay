@@ -118,6 +118,20 @@ export interface SyncMetaRow {
   value: string
 }
 
+export interface CrewWorkOrderRow {
+  id:                      string
+  org_id:                  string
+  property_id:             string
+  assigned_crew_member_id: string | null
+  title:                   string
+  description:             string | null
+  status:                  string
+  priority:                string
+  scheduled_date:          string | null
+  wo_number:               string | null
+  created_at:              string
+}
+
 export type MutationOp = 'PUT' | 'PATCH' | 'DELETE'
 
 export interface MutationRow {
@@ -142,6 +156,7 @@ export class FieldStayDexie extends Dexie {
   pending_photo_uploads!:    Table<PendingPhotoUploadRow, string>
   mutations!:                Table<MutationRow, number>
   sync_meta!:                Table<SyncMetaRow, string>
+  crew_work_orders!:         Table<CrewWorkOrderRow, string>
 
   constructor(userId: string) {
     super(`fieldstay-crew-${userId}`)
@@ -212,6 +227,12 @@ export class FieldStayDexie extends Dexie {
       maintenance_schedules:   null,
       maintenance_completions: null,
       turnover_assignments:    null,
+    })
+
+    // Crew-assigned work orders surface alongside turnovers in the crew PWA.
+    // Only the new store is declared — Dexie carries forward all prior stores.
+    this.version(5).stores({
+      crew_work_orders: 'id, property_id, org_id, status, scheduled_date',
     })
   }
 }

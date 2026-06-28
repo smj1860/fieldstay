@@ -12,6 +12,7 @@ import {
   type ChecklistInstanceItemRow,
   type InventoryItemRow,
   type MessageRow,
+  type CrewWorkOrderRow,
 } from './schema'
 import { getSyncEngine } from './syncService'
 
@@ -184,6 +185,44 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       await db.sync_meta.put({ key: 'turnover_assignments_synced_at', value: syncStartedAt })
     }
 
+    async function syncWorkOrders(crewMemberId: string): Promise<void> {
+      const db = getDexieDb(userId!)
+      // Match the turnover window: surface WOs scheduled within the last two
+      // weeks onward, plus any with no scheduled date yet.
+      const twoWeeksAgo = new Date(Date.now() - 14 * 86_400_000).toISOString().split('T')[0]!
+
+      const { data: workOrders, error } = await supabase
+        .from('work_orders')
+        .select(
+          'id, org_id, property_id, assigned_crew_member_id, title, description, ' +
+          'status, priority, scheduled_date, wo_number, created_at'
+        )
+        .eq('assigned_crew_member_id', crewMemberId)
+        .not('status', 'in', '("completed","cancelled")')
+        .or(`scheduled_date.is.null,scheduled_date.gte.${twoWeeksAgo}`)
+      if (error) {
+        console.error('[DexieProvider] work_orders fetch failed:', error)
+        return
+      }
+
+      if (workOrders?.length) {
+        await db.crew_work_orders.bulkPut(workOrders as CrewWorkOrderRow[])
+
+        // Ensure the properties referenced by these WOs are cached too, so the
+        // crew home page and detail view can render names/addresses.
+        const propertyIds = [
+          ...new Set((workOrders as { property_id: string }[]).map((w) => w.property_id)),
+        ]
+        if (propertyIds.length) {
+          const { data: properties } = await supabase
+            .from('properties')
+            .select('id, org_id, name, address, city, state, lat, lng')
+            .in('id', propertyIds)
+          if (properties?.length) await db.properties.bulkPut(properties as PropertyRow[])
+        }
+      }
+    }
+
     async function syncMessages(): Promise<void> {
       const db = getDexieDb(userId!)
       const ninetyDaysAgo = new Date(Date.now() - 90 * 86_400_000).toISOString()
@@ -209,7 +248,11 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (!crewMember || cancelled) return
 
       // force=true: full pull on mount, bypasses any stale watermark
-      await Promise.all([syncAssignedTurnovers(crewMember.id, true), syncMessages()])
+      await Promise.all([
+        syncAssignedTurnovers(crewMember.id, true),
+        syncWorkOrders(crewMember.id),
+        syncMessages(),
+      ])
       if (cancelled) return
 
       channel = supabase
@@ -218,6 +261,11 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
           'postgres_changes',
           { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${crewMember.id}` },
           () => { void syncAssignedTurnovers(crewMember.id, false) }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'work_orders', filter: `assigned_crew_member_id=eq.${crewMember.id}` },
+          () => { void syncWorkOrders(crewMember.id) }
         )
         .subscribe()
     }

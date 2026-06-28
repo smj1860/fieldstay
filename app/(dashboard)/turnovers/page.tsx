@@ -29,7 +29,7 @@ export default async function TurnoversPage() {
       .select(`
         id, property_id, checkout_datetime, checkin_datetime,
         window_minutes, status, priority, notes, completed_at, started_at,
-        checklist_template_id, is_same_day_turnover,
+        checklist_template_id, is_same_day_turnover, is_archived,
         suggested_crew_ids, suggestion_reasoning, suggestion_status,
         turnover_assignments (
           id, crew_member_id,

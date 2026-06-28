@@ -79,6 +79,10 @@ import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/w
 // Work order vendor assignment → dispatch
 import { handleWorkOrderVendorAssigned } from '@/lib/inngest/functions/work-order-vendor-assigned'
 
+// Work order internal crew assignment + completion
+import { handleWorkOrderCrewAssigned }  from '@/lib/inngest/functions/work-order-crew-assigned'
+import { handleWorkOrderCrewCompleted } from '@/lib/inngest/functions/work-order-crew-completed'
+
 // Email lifecycle functions
 import { sendWelcomeEmail }           from '@/lib/inngest/functions/email-welcome'
 import { sendOwnerRezConnectedEmail } from '@/lib/inngest/functions/email-ownerrez-connected'
@@ -191,6 +195,8 @@ export const { GET, POST, PUT } = serve({
     workOrderDispatch,
     workOrderSignedOff,
     handleWorkOrderVendorAssigned,
+    handleWorkOrderCrewAssigned,
+    handleWorkOrderCrewCompleted,
 
     // Email lifecycle
     sendWelcomeEmail,
