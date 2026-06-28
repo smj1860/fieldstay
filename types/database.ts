@@ -1093,8 +1093,31 @@ export interface GuidebookConfiguration {
   org_id:                string
   is_active:             boolean
   grace_period_ends_at:  string | null
+  extension_messaging_enabled:   boolean
+  extension_gap_threshold_days:  number
+  extension_discount_pct:        number | null
+  extension_contact_method:      'ownerrez_url' | 'email' | 'sms' | null
+  extension_ownerrez_url:        string | null
+  extension_message_days_before: number
   created_at:            string
   updated_at:            string
+}
+
+export type StayExtensionRequestStatus = 'pending' | 'accepted' | 'declined'
+
+export interface StayExtensionRequest {
+  id:                   string
+  org_id:               string
+  booking_id:           string
+  property_id:          string
+  gap_days:             number
+  discount_pct:         number | null
+  next_booking_checkin: string | null
+  status:               StayExtensionRequestStatus
+  sms_sent_at:          string | null
+  pm_notified_at:       string | null
+  created_at:           string
+  updated_at:           string
 }
 
 export type GuidebookSlotType =
@@ -1353,6 +1376,7 @@ export interface Database {
       guidebook_sponsors:          { Row: GuidebookSponsor;         Insert: Partial<GuidebookSponsor>;         Update: Partial<GuidebookSponsor>;         Relationships: [] }
       guidebook_property_configs:  { Row: GuidebookPropertyConfig;  Insert: Partial<GuidebookPropertyConfig>;  Update: Partial<GuidebookPropertyConfig>;  Relationships: [] }
       guidebook_guest_sms_optins:  { Row: GuidebookGuestSmsOptin;   Insert: Partial<GuidebookGuestSmsOptin>;   Update: Partial<GuidebookGuestSmsOptin>;   Relationships: [] }
+      stay_extension_requests:     { Row: StayExtensionRequest;     Insert: Partial<StayExtensionRequest>;     Update: Partial<StayExtensionRequest>;     Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }

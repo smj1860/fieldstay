@@ -112,6 +112,8 @@ import { guidebookGuestOptedIn }            from '@/lib/inngest/functions/guideb
 import { guidebookPreArrivalEmailCron }     from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
 import { guidebookSmsMorningCron }          from '@/lib/inngest/functions/guidebook-sms-morning-cron'
 import { guidebookSmsEveningCron }          from '@/lib/inngest/functions/guidebook-sms-evening-cron'
+import { guidebookStayExtensionCron }       from '@/lib/inngest/functions/guidebook-stay-extension-cron'
+import { guidebookStayExtensionHandler }    from '@/lib/inngest/functions/guidebook-stay-extension-handler'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -224,5 +226,7 @@ export const { GET, POST, PUT } = serve({
     guidebookPreArrivalEmailCron,
     guidebookSmsMorningCron,
     guidebookSmsEveningCron,
+    guidebookStayExtensionCron,
+    guidebookStayExtensionHandler,
   ],
 })

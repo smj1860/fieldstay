@@ -39,11 +39,20 @@ export default async function GuestBookingGuidebookPage({
 
   const { data: orgConfig } = await supabase
     .from('guidebook_configurations')
-    .select('is_active')
+    .select('is_active, extension_contact_method, extension_ownerrez_url')
     .eq('org_id', booking.org_id)
     .maybeSingle()
 
   const isActive = Boolean(config.is_published) && Boolean(orgConfig?.is_active)
+
+  // Stay-extension ("Gap Night") offer — only surfaces when the cron has
+  // created a pending request for this booking.
+  const { data: extensionRequest } = await supabase
+    .from('stay_extension_requests')
+    .select('id, gap_days, discount_pct, next_booking_checkin, status')
+    .eq('booking_id', booking.id)
+    .eq('status', 'pending')
+    .maybeSingle()
 
   const { data: sponsors } = await supabase
     .from('guidebook_sponsors')
@@ -68,6 +77,15 @@ export default async function GuestBookingGuidebookPage({
       isActive={isActive}
       hourOfDay={hourOfDay}
       weather={weather}
+      extensionRequest={extensionRequest ?? null}
+      extensionConfig={
+        orgConfig
+          ? {
+              extension_contact_method: orgConfig.extension_contact_method,
+              extension_ownerrez_url:   orgConfig.extension_ownerrez_url,
+            }
+          : null
+      }
     />
   )
 }
