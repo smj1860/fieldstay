@@ -387,6 +387,17 @@ export type FieldStayEvents = {
     }
   }
 
+  'work-order/vendor.assigned': {
+    data: {
+      workOrderId: string
+      orgId:       string
+      vendorId:    string
+      // Previous vendor ID — used to detect reassignment vs first assignment.
+      // Null means this is the first vendor assignment on this WO.
+      previousVendorId: string | null
+    }
+  }
+
   // ----------------------------------------------------------
   // Maintenance analytics
   // ----------------------------------------------------------

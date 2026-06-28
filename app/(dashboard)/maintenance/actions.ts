@@ -256,13 +256,24 @@ export async function updateWorkOrder(
 
   const priority = PriorityLevelSchema.safeParse(data.priority).data ?? 'medium'
 
+  // Fetch current vendor_id before updating to detect a vendor change
+  const { data: currentWo } = await supabase
+    .from('work_orders')
+    .select('vendor_id')
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  const previousVendorId = currentWo?.vendor_id ?? null
+  const newVendorId      = data.vendor_id || null
+
   const { error } = await supabase
     .from('work_orders')
     .update({
       title:          data.title,
       description:    data.description || null,
       priority,
-      vendor_id:      data.vendor_id || null,
+      vendor_id:      newVendorId,
       scheduled_date: data.scheduled_date || null,
       estimated_cost: data.estimated_cost || null,
       portal_enabled: data.portal_enabled,
@@ -273,6 +284,19 @@ export async function updateWorkOrder(
   if (error) {
     console.error('[updateWorkOrder]', error)
     return { error: 'Operation failed. Please try again.' }
+  }
+
+  // Fire dispatch if a vendor was set or changed
+  if (newVendorId && newVendorId !== previousVendorId) {
+    await inngest.send({
+      name: 'work-order/vendor.assigned',
+      data: {
+        workOrderId,
+        orgId:           membership.org_id,
+        vendorId:        newVendorId,
+        previousVendorId,
+      },
+    })
   }
 
   await logAuditEvent({
@@ -906,6 +930,21 @@ export async function bulkAssignVendor(
     targetType: 'work_order',
     metadata:   { workOrderIds, vendorId },
   })
+
+  // Dispatch vendor assignment email for each WO
+  if (workOrderIds.length > 0) {
+    await inngest.send(
+      workOrderIds.map((woId) => ({
+        name: 'work-order/vendor.assigned' as const,
+        data: {
+          workOrderId:      woId,
+          orgId:            membership.org_id,
+          vendorId,
+          previousVendorId: null,  // bulk assign doesn't know previous — always dispatch
+        },
+      }))
+    )
+  }
 
   revalidatePath('/maintenance')
   return {}

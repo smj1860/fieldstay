@@ -265,6 +265,15 @@ export interface CrewAvailability {
   created_at:     string
 }
 
+export interface CrewFeedback {
+  id:             string
+  org_id:         string
+  crew_member_id: string
+  property_id:    string | null
+  feedback_text:  string
+  created_at:     string
+}
+
 export interface CrewAvailabilityEntry {
   available_date: string
   is_available:   boolean

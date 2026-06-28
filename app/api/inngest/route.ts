@@ -76,6 +76,9 @@ import { notifyAssignmentGap }     from '@/lib/inngest/functions/notify-assignme
 // Work order public dispatch + sign-off
 import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
 
+// Work order vendor assignment → dispatch
+import { handleWorkOrderVendorAssigned } from '@/lib/inngest/functions/work-order-vendor-assigned'
+
 // Email lifecycle functions
 import { sendWelcomeEmail }           from '@/lib/inngest/functions/email-welcome'
 import { sendOwnerRezConnectedEmail } from '@/lib/inngest/functions/email-ownerrez-connected'
@@ -187,6 +190,7 @@ export const { GET, POST, PUT } = serve({
     // Work order public dispatch
     workOrderDispatch,
     workOrderSignedOff,
+    handleWorkOrderVendorAssigned,
 
     // Email lifecycle
     sendWelcomeEmail,

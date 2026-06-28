@@ -197,12 +197,7 @@ function CrewAssignment({
       {assignedCrew.map(c => (
         <span
           key={c.id}
-          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
-          style={{
-            background: 'rgba(59,130,246,0.1)',
-            border:     '1px solid rgba(59,130,246,0.3)',
-            color:      '#1d4ed8',
-          }}
+          className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700"
         >
           {availabilityBadge(c.id)}
           {c.name}
