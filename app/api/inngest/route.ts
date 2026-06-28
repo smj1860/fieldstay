@@ -22,6 +22,7 @@ import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turno
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
+import { inventoryOrderEmailCron } from '@/lib/inngest/functions/inventory-order-email-cron'
 
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
@@ -112,6 +113,8 @@ import { guidebookGuestOptedIn }            from '@/lib/inngest/functions/guideb
 import { guidebookPreArrivalEmailCron }     from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
 import { guidebookSmsMorningCron }          from '@/lib/inngest/functions/guidebook-sms-morning-cron'
 import { guidebookSmsEveningCron }          from '@/lib/inngest/functions/guidebook-sms-evening-cron'
+import { guidebookStayExtensionCron }       from '@/lib/inngest/functions/guidebook-stay-extension-cron'
+import { guidebookStayExtensionHandler }    from '@/lib/inngest/functions/guidebook-stay-extension-handler'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -142,6 +145,7 @@ export const { GET, POST, PUT } = serve({
     // Inventory → PO
     handleInventoryCountSubmitted,
     handlePurchaseOrderApproved,
+    inventoryOrderEmailCron,
 
     // OwnerRez sync
     ownerRezInitialSync,
@@ -224,5 +228,7 @@ export const { GET, POST, PUT } = serve({
     guidebookPreArrivalEmailCron,
     guidebookSmsMorningCron,
     guidebookSmsEveningCron,
+    guidebookStayExtensionCron,
+    guidebookStayExtensionHandler,
   ],
 })

@@ -73,6 +73,53 @@ export function GuidebookFeatureAnnouncementEmail({
               We built something different.
             </Text>
 
+            {/* ── Contextual SMS examples ────────────────────────────────── */}
+            <Heading as="h2" style={styles.sectionHeading}>
+              It knows your property, too.
+            </Heading>
+            <Text style={styles.body1}>
+              When a guest checks in, FieldStay reads their property — not just the
+              time and weather, but what&apos;s actually there. A hot tub. A fire pit.
+              Kayaks on the dock. Then it sends the right message at exactly the
+              right moment.
+            </Text>
+
+            {/* Example SMS bubbles */}
+            <Section style={styles.smsBubbleSection}>
+
+              <Section style={styles.smsBubble}>
+                <Text style={styles.smsLabel}>3:45 PM · Hot Tub detected at this property</Text>
+                <Text style={styles.smsText}>
+                  The hot tub at Bear Hollow takes about 45 minutes to heat. Set
+                  it to 104° using the panel on the left side of the deck —
+                  perfect timing if you want to be in by 6 PM. 🛁
+                </Text>
+              </Section>
+
+              <Section style={styles.smsBubble}>
+                <Text style={styles.smsLabel}>6:12 PM · Fire Pit + 68°F outside</Text>
+                <Text style={styles.smsText}>
+                  It&apos;s 68° tonight at Bear Hollow — perfect fire pit weather.
+                  Starter logs are on the back porch. Heading out for dinner
+                  first? The Farmhouse Table is 1.1 miles away. 🔥
+                </Text>
+              </Section>
+
+            </Section>
+
+            <Text style={styles.body1}>
+              These aren&apos;t canned messages. They&apos;re generated from what
+              your property actually has — pulled from your OwnerRez listings
+              and updated every sync. A guest at a property with no fire pit
+              never sees a fire pit message. A guest at a lakefront cabin sees
+              kayak timing instead.
+            </Text>
+
+            <Text style={styles.body1}>
+              The guest opted in when they entered their door code. They already
+              expect to hear from you. That&apos;s why these messages open.
+            </Text>
+
             <Hr style={styles.divider} />
 
             {/* ── What it is ─────────────────────────────────────── */}
@@ -361,6 +408,31 @@ const styles = {
     margin:       '0 0 20px',
     lineHeight:   '1.3',
     letterSpacing: '-0.3px',
+  },
+  smsBubbleSection: {
+    margin: '24px 0',
+  },
+  smsBubble: {
+    backgroundColor: '#f8fafc',
+    borderLeft:      '3px solid #FCD116',
+    borderRadius:    '0 10px 10px 0',
+    padding:         '16px 20px',
+    marginBottom:    '16px',
+  },
+  smsLabel: {
+    color:         '#94a3b8',
+    fontSize:      '11px',
+    fontWeight:    '600',
+    letterSpacing: '0.5px',
+    textTransform: 'uppercase' as const,
+    margin:        '0 0 8px',
+  },
+  smsText: {
+    color:      '#1e293b',
+    fontSize:   '15px',
+    lineHeight: '1.65',
+    margin:     '0',
+    fontStyle:  'italic',
   },
   slotGrid: {
     backgroundColor: '#f8fafc',

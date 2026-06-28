@@ -30,31 +30,36 @@ const API_KEY_PROVIDER_FIELDS: Record<string, {
       },
     ],
   },
-  guesty: {
-    description: 'Syncs your Guesty listings and reservations automatically.',
-    fields: [
-      {
-        key:         'clientId',
-        label:       'Client ID',
-        placeholder: 'From Guesty → Integrations → API & Webhooks',
-      },
-      {
-        key:         'clientSecret',
-        label:       'Client Secret',
-        placeholder: 'Your Guesty client secret',
-        sensitive:   true,
-      },
-    ],
-  },
+  // Guesty is not yet wired — hidden until the integration is live.
+  // guesty: {
+  //   description: 'Syncs your Guesty listings and reservations automatically.',
+  //   fields: [
+  //     {
+  //       key:         'clientId',
+  //       label:       'Client ID',
+  //       placeholder: 'From Guesty → Integrations → API & Webhooks',
+  //     },
+  //     {
+  //       key:         'clientSecret',
+  //       label:       'Client Secret',
+  //       placeholder: 'Your Guesty client secret',
+  //       sensitive:   true,
+  //     },
+  //   ],
+  // },
 }
 
 // ── Provider display config (descriptions shown on each card) ─────────────────
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   ownerrez: 'Syncs bookings, properties, and guest reviews. Enables automatic revenue posting to owner ledgers.',
   hostaway: 'Connects your Hostaway account to sync all listings and reservations in real time.',
-  guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
+  // Guesty is not yet wired — hidden until the integration is live.
+  // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
   kroger:   'Builds Kroger grocery carts automatically from below-par inventory items.',
 }
+
+// Providers not yet wired — excluded from the rendered list until live.
+const HIDDEN_PROVIDER_IDS = new Set<string>(['guesty'])
 
 interface Provider {
   id:           string
@@ -109,7 +114,7 @@ export function IntegrationsClient({
 
   return (
     <div className="space-y-4">
-      {providers.map((provider) => {
+      {providers.filter((provider) => !HIDDEN_PROVIDER_IDS.has(provider.id)).map((provider) => {
         const connection = connectionsByProvider[provider.id]
         return (
           <IntegrationCard
@@ -243,12 +248,13 @@ function CredentialModal({
             <strong>Settings → Hostaway API → Create</strong>. The key is only shown once — save it securely.
           </p>
         )}
+        {/* Guesty is not yet wired — hidden until the integration is live.
         {providerId === 'guesty' && (
           <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
             Create these in your Guesty dashboard under{' '}
             <strong>Integrations → API &amp; Webhooks → New Application</strong>.
           </p>
-        )}
+        )} */}
       </div>
     </div>
   )

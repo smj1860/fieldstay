@@ -10,13 +10,28 @@ const TEXT     = '#F4F4F5'
 const MUTED    = '#9A9AA2'
 const GOLD     = '#D4A537'
 
+interface ExtensionRequestProp {
+  id:                   string
+  gap_days:             number
+  discount_pct:         number | null
+  next_booking_checkin: string | null
+  status:               string
+}
+
+interface ExtensionConfigProp {
+  extension_contact_method: 'ownerrez_url' | 'email' | 'sms' | null
+  extension_ownerrez_url:   string | null
+}
+
 interface GuestGuidebookViewProps {
-  property:    Property
-  config:      GuidebookPropertyConfig
-  sponsors:    GuidebookSponsor[]
-  isActive:    boolean
-  hourOfDay:   number
-  weather:     WeatherContext | null
+  property:         Property
+  config:           GuidebookPropertyConfig
+  sponsors:         GuidebookSponsor[]
+  isActive:         boolean
+  hourOfDay:        number
+  weather:          WeatherContext | null
+  extensionRequest?: ExtensionRequestProp | null
+  extensionConfig?:  ExtensionConfigProp | null
 }
 
 export function GuestGuidebookView({
@@ -26,6 +41,8 @@ export function GuestGuidebookView({
   isActive,
   hourOfDay,
   weather,
+  extensionRequest = null,
+  extensionConfig = null,
 }: GuestGuidebookViewProps) {
   if (!isActive) {
     return (
@@ -140,6 +157,47 @@ export function GuestGuidebookView({
               })}
             </div>
           </Section>
+        )}
+
+        {extensionRequest && extensionConfig && (
+          <div style={{
+            margin: '16px 0',
+            border: '1.5px solid #FCD116',
+            borderRadius: 12,
+            padding: '16px',
+            background: '#0f172a',
+          }}>
+            <p style={{ color: '#FCD116', fontSize: 11, fontWeight: 700,
+                        letterSpacing: 1.5, textTransform: 'uppercase', margin: '0 0 6px' }}>
+              Extend Your Stay
+            </p>
+            <p style={{ color: '#e2e8f0', fontSize: 14, margin: '0 0 12px', lineHeight: 1.5 }}>
+              {extensionRequest.gap_days} night{extensionRequest.gap_days !== 1 ? 's' : ''} available
+              after your checkout{extensionRequest.discount_pct
+                ? ` — ${extensionRequest.discount_pct}% off if you book now`
+                : ''}.
+            </p>
+            {extensionConfig.extension_contact_method === 'ownerrez_url' && extensionConfig.extension_ownerrez_url ? (
+              <a
+                href={extensionConfig.extension_ownerrez_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-block',
+                  background: '#FCD116', color: '#0f172a',
+                  fontWeight: 700, fontSize: 14,
+                  padding: '10px 20px', borderRadius: 8,
+                  textDecoration: 'none',
+                }}
+              >
+                Check Availability →
+              </a>
+            ) : (
+              <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
+                Reply to our text message or contact your host directly to extend.
+              </p>
+            )}
+          </div>
         )}
       </div>
     </div>

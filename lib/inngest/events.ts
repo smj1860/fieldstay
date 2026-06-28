@@ -662,4 +662,23 @@ export type FieldStayEvents = {
     }
   }
 
+  // Stay-extension ("Gap Night") messaging
+  'guidebook/stay.extension.cron': {
+    data: Record<string, never>
+  }
+  'guidebook/stay.extension.request': {
+    data: {
+      requestId:          string
+      orgId:              string
+      bookingId:          string
+      propertyId:         string
+      gapDays:            number
+      discountPct:        number | null
+      contactMethod:      'ownerrez_url' | 'email' | 'sms'
+      ownerRezUrl:        string | null
+      guestPhoneE164:     string | null
+      nextBookingCheckin: string | null
+    }
+  }
+
 }

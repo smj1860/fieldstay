@@ -183,6 +183,54 @@ export async function upsertPropertyGuidebookConfig(
   return {}
 }
 
+export interface UpdateStayExtensionSettingsInput {
+  enabled:          boolean
+  gapThresholdDays: number
+  discountPct:      number | null
+  contactMethod:    'ownerrez_url' | 'email' | 'sms'
+  ownerRezUrl:      string | null
+  daysBefore:       number
+}
+
+/**
+ * Saves the org-level "Gap Night" stay-extension messaging settings.
+ */
+export async function updateStayExtensionSettings(
+  input: UpdateStayExtensionSettingsInput
+): Promise<{ error?: string }> {
+  const { membership } = await requireOrgMember()
+  const supabase        = createServiceClient()
+
+  if (input.discountPct !== null && (input.discountPct < 0 || input.discountPct > 100)) {
+    return { error: 'Discount must be between 0 and 100.' }
+  }
+  if (input.gapThresholdDays < 1) {
+    return { error: 'Gap threshold must be at least 1 day.' }
+  }
+  if (input.daysBefore < 1) {
+    return { error: 'Message timing must be at least 1 day before checkout.' }
+  }
+  if (input.contactMethod === 'ownerrez_url' && !input.ownerRezUrl?.trim()) {
+    return { error: 'Please enter your OwnerRez booking page URL.' }
+  }
+
+  const { error } = await supabase
+    .from('guidebook_configurations')
+    .update({
+      extension_messaging_enabled:   input.enabled,
+      extension_gap_threshold_days:  input.gapThresholdDays,
+      extension_discount_pct:        input.discountPct,
+      extension_contact_method:      input.contactMethod,
+      extension_ownerrez_url:        input.contactMethod === 'ownerrez_url' ? input.ownerRezUrl : null,
+      extension_message_days_before: input.daysBefore,
+      updated_at:                    new Date().toISOString(),
+    })
+    .eq('org_id', membership.org_id)
+
+  if (error) return { error: error.message }
+  return {}
+}
+
 /**
  * Guest-facing SMS opt-in. Unauthenticated (no PM session) — org_id is
  * always derived server-side from the booking's guidebook_token, never

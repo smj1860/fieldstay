@@ -51,9 +51,10 @@ interface InventoryCount {
 
 interface DraftItem {
   id: string
-  inventory_item_id: string
+  item_id: string
   previous_quantity: number
-  submitted_quantity: number
+  counted_qty: number
+  notes: string | null
   inventory_items: { name: string; unit: string }[]
 }
 
@@ -1098,7 +1099,7 @@ function PendingCountReview({
                       <span className="text-right">Change</span>
                     </div>
                     {draftItems.map(di => {
-                      const diff = di.submitted_quantity - di.previous_quantity
+                      const diff = di.counted_qty - di.previous_quantity
                       return (
                         <div key={di.id} className="grid grid-cols-[1fr_80px_80px_80px] gap-2 px-4 py-2.5 border-b border-themed last:border-0 text-sm items-center">
                           <div>
@@ -1108,6 +1109,9 @@ function PendingCountReview({
                             {di.inventory_items?.[0]?.unit && (
                               <span className="text-xs text-muted-themed ml-1">({di.inventory_items[0]?.unit})</span>
                             )}
+                            {di.notes && (
+                              <p className="text-xs text-muted-themed mt-0.5 italic">{di.notes}</p>
+                            )}
                           </div>
                           <span className="text-right text-muted-themed tabular-nums">{di.previous_quantity}</span>
                           <span
@@ -1116,7 +1120,7 @@ function PendingCountReview({
                               color: diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--accent-amber)',
                             }}
                           >
-                            {di.submitted_quantity}
+                            {di.counted_qty}
                           </span>
                           <span
                             className="text-right text-xs tabular-nums"

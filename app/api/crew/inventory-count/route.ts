@@ -7,10 +7,11 @@ export async function POST(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { propertyId, counts, notes, submitAsDraft } = await request.json() as {
+  const { propertyId, counts, notes, itemNotes, submitAsDraft } = await request.json() as {
     propertyId: string
     counts: Record<string, number>
     notes: string
+    itemNotes?: Record<string, string>
     submitAsDraft?: boolean
   }
 
@@ -73,11 +74,14 @@ export async function POST(request: NextRequest) {
 
     if (!draft) return NextResponse.json({ error: 'Failed to create draft' }, { status: 500 })
 
+    // Column names match the live schema (item_id / counted_qty), not the
+    // legacy inventory_item_id / submitted_quantity referenced elsewhere.
     const draftItems = Object.entries(counts).map(([id, qty]) => ({
-      draft_id:           draft.id,
-      inventory_item_id:  id,
-      previous_quantity:  prevMap[id] ?? 0,
-      submitted_quantity: qty,
+      draft_id:          draft.id,
+      item_id:           id,
+      previous_quantity: prevMap[id] ?? 0,
+      counted_qty:       qty,
+      notes:             itemNotes?.[id]?.trim() || null,
     }))
 
     if (draftItems.length > 0) {

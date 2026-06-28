@@ -6,7 +6,7 @@ import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { QRCodeSVG } from 'qrcode.react'
 import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
-import { upsertPropertyGuidebookConfig } from '@/app/actions/guidebook'
+import { upsertPropertyGuidebookConfig, updateStayExtensionSettings } from '@/app/actions/guidebook'
 import type { GuidebookSponsor, GuidebookConfiguration, GuidebookSlotType, GuidebookSponsorStatus } from '@/types/database'
 
 type Property = { id: string; name: string; address: string | null; lat: number | null; lng: number | null }
@@ -291,6 +291,8 @@ export function GuidebookClient({
         })}
       </div>
 
+      <GapNightMessagingSection config={config} />
+
       {properties.length > 0 && (
         <div style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
@@ -554,6 +556,179 @@ function PropertyGuidebookForm({
               {saving ? 'Saving…' : 'Save'}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function GapNightMessagingSection({ config }: { config: GuidebookConfiguration | null }) {
+  const [enabled, setEnabled]           = useState(config?.extension_messaging_enabled ?? false)
+  const [gapThreshold, setGapThreshold] = useState(String(config?.extension_gap_threshold_days ?? 7))
+  const [discount, setDiscount]         = useState(
+    config?.extension_discount_pct != null ? String(config.extension_discount_pct) : ''
+  )
+  const [contactMethod, setContactMethod] = useState<'ownerrez_url' | 'email' | 'sms'>(
+    config?.extension_contact_method && config.extension_contact_method !== null
+      ? config.extension_contact_method
+      : 'email'
+  )
+  const [ownerRezUrl, setOwnerRezUrl] = useState(config?.extension_ownerrez_url ?? '')
+  const [daysBefore, setDaysBefore]   = useState(String(config?.extension_message_days_before ?? 2))
+
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState(false)
+  const [error, setError]   = useState<string | null>(null)
+
+  const labelStyle: React.CSSProperties = {
+    fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', display: 'block', marginBottom: '6px',
+  }
+  const inputStyle: React.CSSProperties = {
+    width: '100%', maxWidth: '120px', padding: '8px 10px', fontSize: '14px',
+    color: 'var(--text-primary)', backgroundColor: 'var(--bg-raised)',
+    border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+
+    const result = await updateStayExtensionSettings({
+      enabled,
+      gapThresholdDays: Number(gapThreshold) || 7,
+      discountPct:      discount.trim() === '' ? null : Number(discount),
+      contactMethod,
+      ownerRezUrl:      contactMethod === 'ownerrez_url' ? (ownerRezUrl.trim() || null) : null,
+      daysBefore:       Number(daysBefore) || 2,
+    })
+
+    setSaving(false)
+    if (result.error) { setError(result.error); return }
+    setSaved(true)
+    setTimeout(() => setSaved(false), 2500)
+  }
+
+  return (
+    <div style={{
+      backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-lg)', overflow: 'hidden', marginBottom: '32px',
+    }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+        <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 4px' }}>
+          Gap Night Messaging
+        </h2>
+        <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
+          Offer guests a chance to stay longer when there&apos;s a gap before the next booking.
+        </p>
+      </div>
+
+      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* Enable toggle */}
+        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+            style={{ width: 16, height: 16 }}
+          />
+          <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>
+            Notify guests about staying longer when there&apos;s a gap
+          </span>
+        </label>
+
+        {/* Gap threshold */}
+        <div>
+          <label style={labelStyle}>Only offer when the gap is at least</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="number" min={1} value={gapThreshold}
+              onChange={(e) => setGapThreshold(e.target.value)}
+              style={inputStyle}
+            />
+            <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>days</span>
+          </div>
+        </div>
+
+        {/* Discount offer */}
+        <div>
+          <label style={labelStyle}>Include a discount offer (optional)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="number" min={0} max={100} value={discount}
+              onChange={(e) => setDiscount(e.target.value)}
+              placeholder="—"
+              style={inputStyle}
+            />
+            <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>% off — leave blank for no discount</span>
+          </div>
+        </div>
+
+        {/* Contact method */}
+        <div>
+          <label style={labelStyle}>When a guest is interested</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {([
+              { value: 'ownerrez_url', label: 'Link guests to your OwnerRez booking page' },
+              { value: 'email',        label: 'Send me an email' },
+              { value: 'sms',          label: 'Send me a text' },
+            ] as const).map((opt) => (
+              <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                <input
+                  type="radio"
+                  name="extension-contact-method"
+                  checked={contactMethod === opt.value}
+                  onChange={() => setContactMethod(opt.value)}
+                  style={{ width: 14, height: 14 }}
+                />
+                <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{opt.label}</span>
+              </label>
+            ))}
+          </div>
+          {contactMethod === 'ownerrez_url' && (
+            <input
+              type="url"
+              value={ownerRezUrl}
+              onChange={(e) => setOwnerRezUrl(e.target.value)}
+              placeholder="https://app.ownerrez.com/..."
+              style={{ ...inputStyle, maxWidth: '100%', marginTop: '8px' }}
+            />
+          )}
+        </div>
+
+        {/* Message timing */}
+        <div>
+          <label style={labelStyle}>Send the offer</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="number" min={1} value={daysBefore}
+              onChange={(e) => setDaysBefore(e.target.value)}
+              style={inputStyle}
+            />
+            <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>days before checkout</span>
+          </div>
+        </div>
+
+        {error && (
+          <p style={{ fontSize: '13px', color: 'var(--accent-red)', margin: 0 }}>{error}</p>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              fontSize: '13px', fontWeight: 600, color: 'var(--text-inverse)',
+              backgroundColor: 'var(--accent-gold)', border: 'none',
+              borderRadius: 'var(--radius)', padding: '8px 18px',
+              cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+            }}
+          >
+            {saving ? 'Saving…' : 'Save Settings'}
+          </button>
+          {saved && (
+            <span style={{ fontSize: '13px', color: 'var(--accent-green)' }}>Saved ✓</span>
+          )}
         </div>
       </div>
     </div>

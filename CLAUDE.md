@@ -745,3 +745,70 @@ Read these before working on specific features:
 | `CLAUDE_WO_COMPLETION.md` | For WO detail page and line items implementation |
 | `CLAUDE_9_0.md` | For Phase 9 features (messaging, maintenance broadcast) |
 | `CLAUDE_7_8_PATCH.md` + `CLAUDE_Patch_7_8v2.md` | For patch context and known issues |
+
+---
+
+## Canonical Patterns — Real Signatures and Locations
+
+These were validated against the live codebase. Do not assume from docs or spec files.
+
+### Helper signatures
+
+**getPmEmail**
+```typescript
+getPmEmail(supabase, orgId)  // supabase client FIRST, orgId second
+// Returns: string | null   — the email address directly, not an object
+```
+
+**renderPmAlert**
+```typescript
+renderPmAlert({ ctaLabel, ctaUrl, details })
+// Props are: ctaLabel, ctaUrl, details
+// NOT: actionLabel, actionUrl, heading, body, table, note, pmName
+```
+
+### Auth patterns
+
+**Crew API routes** — no helper exists, use inline pattern from issue-reports:
+```typescript
+const { data: { user } } = await supabase.auth.getUser()
+if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+const { data: crew } = await supabase
+  .from('crew_members').select('id, org_id').eq('user_id', user.id).single()
+if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 403 })
+```
+
+### Table and column names
+
+| What you might assume | What actually exists |
+|---|---|
+| `work_order_notes` | `work_order_updates` |
+| `inventory_count_draft_items.inventory_item_id` | `item_id` |
+| `inventory_count_draft_items.submitted_quantity` | `counted_qty` |
+| `memberships` | `organization_members` |
+| `membership.user_id` | `user.id` |
+| `assigned_crew_id` | `assigned_crew_member_id` |
+
+**Two inventory tables with different column names — do not mix them:**
+- `inventory_count_draft_items`: `item_id`, `counted_qty`, `note`, `notes`, `previous_quantity`
+- `inventory_count_items` (legacy direct-commit): `inventory_item_id`, `quantity_counted`
+
+### UI component locations
+
+- Crew assignment pills on turnovers → `turnovers/turnover-board.tsx` (NOT maintenance-board.tsx)
+- Vendor context → `maintenance/maintenance-board.tsx`
+
+### Inngest constraints
+
+- `step.sleep` at top level only — never nested inside another step
+- `createServiceClient()` inside `step.run()` only — never in outer function scope
+- `for...of` inside `step.run()`: use `continue` to skip iterations, never `return` — `return` aborts the entire step and silently skips all remaining iterations
+- Exactly one `serve()` call in the Inngest route file
+- Every new event registered in `FieldStayEvents` before its closing brace
+
+### Supabase patterns
+
+- All DDL uses `IF NOT EXISTS` / `DROP POLICY IF EXISTS` — idempotent always
+- Nested joins always return arrays, not single objects
+- RLS policies need both `USING` and `WITH CHECK` on UPDATE — `USING` alone is not enough
+- `supabase.raw()` and `.modify()` are not used in this codebase
