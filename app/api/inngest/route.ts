@@ -22,6 +22,7 @@ import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turno
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
+import { inventoryOrderEmailCron } from '@/lib/inngest/functions/inventory-order-email-cron'
 
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
@@ -144,6 +145,7 @@ export const { GET, POST, PUT } = serve({
     // Inventory → PO
     handleInventoryCountSubmitted,
     handlePurchaseOrderApproved,
+    inventoryOrderEmailCron,
 
     // OwnerRez sync
     ownerRezInitialSync,

@@ -539,6 +539,8 @@ export interface PurchaseOrder {
   acknowledged_at:      string | null
   notes:                string | null
   total_estimated_cost: number | null
+  order_email_sent:     boolean
+  is_same_day_flip:     boolean
   created_at:           string
   updated_at:           string
 }
