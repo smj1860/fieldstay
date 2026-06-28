@@ -398,6 +398,27 @@ export type FieldStayEvents = {
     }
   }
 
+  // Internal crew assigned to a work order (no vendor, no portal/dispatch).
+  // The WO surfaces in the crew PWA via Dexie sync; this scaffolds future push.
+  'work-order/crew.assigned': {
+    data: {
+      workOrderId:  string
+      orgId:        string
+      crewMemberId: string
+    }
+  }
+
+  // Crew member marked a crew-assigned work order complete from the PWA.
+  'work-order/crew.completed': {
+    data: {
+      workOrderId:  string
+      orgId:        string
+      crewMemberId: string
+      completedAt:  string
+      notes:        string | null
+    }
+  }
+
   // ----------------------------------------------------------
   // Maintenance analytics
   // ----------------------------------------------------------

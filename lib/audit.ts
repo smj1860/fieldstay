@@ -69,6 +69,8 @@ export type AuditAction =
   | 'turnover.crew.removed'
   | 'turnover.suggestion.accepted'
   | 'turnover.suggestion.dismissed'
+  | 'turnover.archived'
+  | 'turnover.unarchived'
   | 'turnover.autopilot.assigned'
   | 'work_order.vendor_signoff'
   | 'property.rates.updated'

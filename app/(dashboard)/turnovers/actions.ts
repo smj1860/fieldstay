@@ -541,6 +541,71 @@ export async function bulkUpdateTurnoverStatus(
   return { success: true }
 }
 
+// ── Archive / unarchive turnovers ────────────────────────────────────────────
+
+export async function archiveTurnover(
+  turnoverIds: string[]
+): Promise<TurnoverActionState> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  if (!turnoverIds.length) return { error: 'No turnovers selected' }
+
+  // Only completed turnovers can be archived — guard at the query level so a
+  // stale client can't archive an active turnover out from under the board.
+  const { error } = await supabase
+    .from('turnovers')
+    .update({ is_archived: true })
+    .in('id', turnoverIds)
+    .eq('org_id', membership.org_id)
+    .eq('status', 'completed')
+
+  if (error) {
+    console.error('[archiveTurnover]', error)
+    return { error: 'Failed to archive turnover.' }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.archived',
+    targetType: 'turnover',
+    metadata:   { turnover_ids: turnoverIds },
+  })
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}
+
+export async function unarchiveTurnover(
+  turnoverIds: string[]
+): Promise<TurnoverActionState> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  if (!turnoverIds.length) return { error: 'No turnovers selected' }
+
+  const { error } = await supabase
+    .from('turnovers')
+    .update({ is_archived: false })
+    .in('id', turnoverIds)
+    .eq('org_id', membership.org_id)
+
+  if (error) {
+    console.error('[unarchiveTurnover]', error)
+    return { error: 'Failed to unarchive.' }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.unarchived',
+    targetType: 'turnover',
+    metadata:   { turnover_ids: turnoverIds },
+  })
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}
+
 // ── Trigger manual iCal sync ─────────────────────────────────────────────────
 
 export async function triggerManualSync(): Promise<void> {

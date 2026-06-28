@@ -182,6 +182,20 @@ export async function createWorkOrder(
     metadata:   { title, property_id, priority, source: 'manual' },
   })
 
+  // Internal crew assignment: no vendor, no portal/dispatch email. The WO
+  // surfaces in the crew PWA via Dexie sync; this event scaffolds push notify.
+  const isCrew = !vendor_id && !!assigned_crew_member_id
+  if (isCrew) {
+    await inngest.send({
+      name: 'work-order/crew.assigned',
+      data: {
+        workOrderId:  wo.id,
+        orgId:        membership.org_id,
+        crewMemberId: assigned_crew_member_id,
+      },
+    })
+  }
+
   revalidatePath('/maintenance')
   return { success: true, workOrderId: wo.id, warning }
 }

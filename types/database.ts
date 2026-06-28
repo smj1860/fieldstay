@@ -381,6 +381,7 @@ export interface Turnover {
   suggested_crew_ids:    string[] | null
   suggestion_reasoning:  string | null
   suggestion_status:     SuggestionStatus | null
+  is_archived:           boolean
   created_at:            string
   updated_at:            string
   turnover_assignments:  TurnoverAssignment[]
