@@ -53,25 +53,34 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
     const activeOrgIdSet = new Set<string>(activeOrgIds)
     const eligibleBookings = bookings.filter((b) => activeOrgIdSet.has(b.org_id))
 
+    const propertyMap = await step.run('batch-fetch-properties', async () => {
+      const uniquePropertyIds = [...new Set(eligibleBookings.map((b) => b.property_id))]
+
+      const { data, error } = await supabase
+        .from('properties')
+        .select('id, name')
+        .in('id', uniquePropertyIds)
+
+      if (error) throw new Error(`Failed to batch fetch properties: ${error.message}`)
+
+      return Object.fromEntries((data ?? []).map((p) => [p.id, p.name]))
+    })
+
     let sentCount = 0
 
     for (const booking of eligibleBookings) {
       await step.run(`send-pre-arrival-email-${booking.id}`, async () => {
-        const { data: property } = await supabase
-          .from('properties')
-          .select('name')
-          .eq('id', booking.property_id)
-          .single()
+        const propertyName = propertyMap[booking.property_id]
+        if (!propertyName || !booking.guest_email) return
 
-        if (!property || !booking.guest_email) return
-
-        const optInUrl     = `${process.env.NEXT_PUBLIC_APP_URL}/g/b/${booking.guidebook_token}/opt-in`
-        const guidebookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/g/b/${booking.guidebook_token}`
+        const appUrl       = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
+        const optInUrl     = `${appUrl}/g/b/${booking.guidebook_token}/opt-in`
+        const guidebookUrl = `${appUrl}/g/b/${booking.guidebook_token}`
 
         await sendGuestPreArrivalEmail({
           toEmail:      booking.guest_email,
           guestName:    booking.guest_name ?? 'there',
-          propertyName: property.name,
+          propertyName,
           optInUrl,
           guidebookUrl,
         })

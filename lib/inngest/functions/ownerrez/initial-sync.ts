@@ -18,6 +18,7 @@ import type { OwnerRezProperty, OwnerRezBooking } from '@/lib/integrations/types
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
+import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
 
 const PROVIDER = 'ownerrez'
 
@@ -224,6 +225,57 @@ export const ownerRezInitialSync = inngest.createFunction(
         logger.info(
           `[OwnerRez:${user_id}] Applied master checklist to ${toApply.length} of ${properties.length} properties`
         )
+      })
+
+      // ── Auto-create guidebook property configs for new properties ─────────────
+      await step.run('create-guidebook-property-configs', async () => {
+        const supabase = createServiceClient()
+
+        // Find properties in this org that have no guidebook config yet
+        const { data: allProperties } = await supabase
+          .from('properties')
+          .select('id, name')
+          .eq('org_id', org_id)
+          .eq('is_active', true)
+
+        if (!allProperties?.length) return
+
+        const { data: existingConfigs } = await supabase
+          .from('guidebook_property_configs')
+          .select('property_id')
+          .eq('org_id', org_id)
+
+        const alreadyConfigured = new Set(
+          (existingConfigs ?? []).map((c) => c.property_id)
+        )
+
+        const newProperties = allProperties.filter(
+          (p) => !alreadyConfigured.has(p.id)
+        )
+
+        if (newProperties.length === 0) return
+
+        // Generate unique slugs for all new properties in one batch
+        const slugMap = await generateUniqueSlugsForProperties(newProperties)
+
+        const rows = newProperties.map((p) => ({
+          org_id:      org_id,
+          property_id: p.id,
+          slug:        slugMap.get(p.id) ?? generateBaseSlug(p.name),
+          is_published: false,  // PM must explicitly publish
+        }))
+
+        const { error } = await supabase
+          .from('guidebook_property_configs')
+          .upsert(rows, {
+            onConflict:       'org_id,property_id',
+            ignoreDuplicates: true,  // never overwrite an existing config
+          })
+
+        if (error) {
+          logger.error(`[OwnerRez:${user_id}] guidebook config creation failed: ${error.message}`)
+          // Non-fatal — don't throw, don't block the sync
+        }
       })
 
       // ── Step 2: Fetch and upsert bookings ───────────────────────────────────

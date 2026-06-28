@@ -26,6 +26,7 @@ import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { resend, FROM }                 from '@/lib/resend/client'
 import { getPmEmail }                   from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
+import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
 
 const PROVIDER = 'ownerrez'
 
@@ -499,6 +500,55 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             await step.sendEvent(`fire-turnover-created-events-${conn.user_id}`, turnoverEvents)
           }
         }
+      }
+
+      // Auto-create guidebook property configs for newly synced properties
+      if (affectedIds.length) {
+        await step.run(`create-guidebook-property-configs-${conn.user_id}`, async () => {
+          const supabase = createServiceClient()
+
+          const { data: propertiesToCheck } = await supabase
+            .from('properties')
+            .select('id, name')
+            .in('id', affectedIds)
+
+          if (!propertiesToCheck?.length) return
+
+          const { data: existingConfigs } = await supabase
+            .from('guidebook_property_configs')
+            .select('property_id')
+            .in('property_id', affectedIds)
+
+          const alreadyConfigured = new Set(
+            (existingConfigs ?? []).map((c) => c.property_id)
+          )
+
+          const newProperties = propertiesToCheck.filter(
+            (p) => !alreadyConfigured.has(p.id)
+          )
+
+          if (newProperties.length === 0) return
+
+          const slugMap = await generateUniqueSlugsForProperties(newProperties)
+
+          const rows = newProperties.map((p) => ({
+            org_id:       conn.org_id,
+            property_id:  p.id,
+            slug:         slugMap.get(p.id) ?? generateBaseSlug(p.name),
+            is_published: false,
+          }))
+
+          const { error } = await supabase
+            .from('guidebook_property_configs')
+            .upsert(rows, {
+              onConflict:       'org_id,property_id',
+              ignoreDuplicates: true,
+            })
+
+          if (error) {
+            logger.error(`[OwnerRez:${conn.user_id}] guidebook config creation failed: ${error.message}`)
+          }
+        })
       }
 
       // HIGH-1: step.sleep called at top level — NOT inside step.run
