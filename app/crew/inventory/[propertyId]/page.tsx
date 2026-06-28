@@ -13,6 +13,7 @@ export default function CrewInventoryPage() {
   const db             = useDexieDb()
   const router         = useRouter()
   const [counts, setCounts]       = useState<Record<string, number>>({})
+  const [itemNotes, setItemNotes] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [notes, setNotes]         = useState('')
 
@@ -35,7 +36,7 @@ export default function CrewInventoryPage() {
     await fetch('/api/crew/inventory-count', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ propertyId, counts, notes, submitAsDraft: true }),
+      body:    JSON.stringify({ propertyId, counts, notes, itemNotes, submitAsDraft: true }),
     })
     router.push('/crew')
   }
@@ -77,6 +78,10 @@ export default function CrewInventoryPage() {
                 variant="crew"
                 onQuantityChange={(itemId, newQty) =>
                   setCounts((prev) => ({ ...prev, [itemId]: newQty }))
+                }
+                note={itemNotes[item.id]}
+                onNoteChange={(itemId, note) =>
+                  setItemNotes((prev) => ({ ...prev, [itemId]: note }))
                 }
               />
             ))}

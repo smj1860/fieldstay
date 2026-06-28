@@ -26,13 +26,14 @@ const PMS_OPTIONS = [
     connectUrl:  null,  // uses credential modal
     authType:    'api_key' as const,
   },
-  {
-    id:          'guesty',
-    name:        'Guesty',
-    description: 'Bookings, listings, guest messaging',
-    connectUrl:  null,
-    authType:    'api_key' as const,
-  },
+  // Guesty is not yet wired — hidden until the integration is live.
+  // {
+  //   id:          'guesty',
+  //   name:        'Guesty',
+  //   description: 'Bookings, listings, guest messaging',
+  //   connectUrl:  null,
+  //   authType:    'api_key' as const,
+  // },
 ]
 
 export function OnboardingForm({ userEmail }: OnboardingFormProps) {
