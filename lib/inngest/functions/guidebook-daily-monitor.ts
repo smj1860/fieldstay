@@ -55,26 +55,28 @@ export const guidebookDailyMonitor = inngest.createFunction(
       // Check renewal window — only dispatch if billing within 48 hours
       // Store currentPeriodEnd here so the handler has it for idempotency key
       // without needing another Stripe API call
-      await step.run(`check-renewal-${row.org_id}`, async () => {
+      const creditEvent = await step.run(`check-renewal-${row.org_id}`, async () => {
         const subscription = await stripe.subscriptions.retrieve(
           org.stripe_subscription_id!
         )
         const periodEnd = new Date(subscription.current_period_end * 1000)
-        if (periodEnd > now48hrs) return
+        if (periodEnd > now48hrs) return null
 
         // Only dispatch if org has ≥ 5 sponsors (credit threshold)
         const activeSponsorCount = await getActiveSponsorCount(row.org_id)
-        if (activeSponsorCount < 5) return
+        if (activeSponsorCount < 5) return null
 
-        events.push({
-          name: 'guidebook/billing.credit.evaluate',
+        return {
+          name: 'guidebook/billing.credit.evaluate' as const,
           data: {
             orgId:            row.org_id,
             stripeCustomerId: org.stripe_customer_id!,
             currentPeriodEnd: subscription.current_period_end,
           },
-        })
+        }
       })
+
+      if (creditEvent) events.push(creditEvent)
     }
 
     // Grace period expiry check — runs daily alongside billing evaluation

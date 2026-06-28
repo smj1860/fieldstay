@@ -13,7 +13,7 @@ export default async function MediaKitPage({
 
   const { data: sponsor } = await supabase
     .from('guidebook_sponsors')
-    .select('*')
+    .select('id, status, business_name, business_description, custom_offer_text, address, media_kit_token')
     .eq('media_kit_token', media_kit_token)
     .maybeSingle()
 

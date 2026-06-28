@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
+import { logAuditEvent } from '@/lib/audit'
 
 // TODO: verify Telnyx webhook signature (ed25519) before processing —
 // deferred for this session per CLAUDE_55_2 scope.
@@ -27,17 +28,37 @@ export async function POST(req: NextRequest) {
   const supabase = createServiceClient()
 
   if (text === 'STOP' || text === 'STOPALL' || text === 'UNSUBSCRIBE' || text === 'CANCEL' || text === 'END' || text === 'QUIT') {
-    await supabase
+    const { data: updated } = await supabase
       .from('guidebook_guest_sms_optins')
       .update({ is_active: false, opted_out_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('phone_e164', phoneE164)
       .eq('is_active', true)
+      .select('org_id')
+
+    for (const row of updated ?? []) {
+      await logAuditEvent({
+        orgId:      row.org_id,
+        action:     'sms.consent.revoked',
+        targetType: 'guidebook_guest_sms_optin',
+        metadata:   { reason: text },
+      })
+    }
   } else if (text === 'START' || text === 'YES' || text === 'UNSTOP') {
-    await supabase
+    const { data: updated } = await supabase
       .from('guidebook_guest_sms_optins')
       .update({ is_active: true, opted_out_at: null, updated_at: new Date().toISOString() })
       .eq('phone_e164', phoneE164)
       .eq('is_active', false)
+      .select('org_id')
+
+    for (const row of updated ?? []) {
+      await logAuditEvent({
+        orgId:      row.org_id,
+        action:     'sms.consent.restored',
+        targetType: 'guidebook_guest_sms_optin',
+        metadata:   { reason: text },
+      })
+    }
   }
 
   return NextResponse.json({ received: true })

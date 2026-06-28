@@ -29,6 +29,7 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
         .eq('is_block', false)
         .not('guest_email', 'is', null)
         .not('guidebook_token', 'is', null)
+        .is('guidebook_pre_arrival_email_sent_at', null)
 
       if (error) throw new Error(`Failed to fetch bookings: ${error.message}`)
       return data ?? []
@@ -74,6 +75,11 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
           optInUrl,
           guidebookUrl,
         })
+
+        await supabase
+          .from('bookings')
+          .update({ guidebook_pre_arrival_email_sent_at: new Date().toISOString() })
+          .eq('id', booking.id)
 
         sentCount += 1
       })

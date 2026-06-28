@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
 import { getOrgPmEmails } from '@/lib/guidebook/pm-emails'
 import { sendGuidebookGracePeriodEmail } from '@/lib/resend/client'
+import { logAuditEvent } from '@/lib/audit'
 
 export const guidebookSponsorDeactivated = inngest.createFunction(
   { id: 'guidebook-sponsor-deactivated', name: 'Guidebook: Sponsor Deactivated' },
@@ -40,20 +41,29 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
     const gracePeriodEndsAt = await step.run('evaluate-guidebook-lock', async () => {
       if (activeSponsorCount >= 4) return null
 
+      const { data: existingConfig } = await supabase
+        .from('guidebook_configurations')
+        .select('is_active, grace_period_ends_at')
+        .eq('org_id', orgId)
+        .maybeSingle()
+
+      // Already locked, or a grace period is already running — don't reset
+      // the countdown or re-notify the PM on a second deactivation event.
+      if (!existingConfig?.is_active) return null
+      if (existingConfig.grace_period_ends_at) return null
+
       const endsAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
 
-      const { data: config } = await supabase
+      await supabase
         .from('guidebook_configurations')
         .update({
           grace_period_ends_at: endsAt,
           updated_at:           new Date().toISOString(),
         })
         .eq('org_id', orgId)
-        .eq('is_active', true) // no-op if already locked
-        .select('is_active')
-        .maybeSingle()
+        .eq('is_active', true)
 
-      return config?.is_active ? endsAt : null
+      return endsAt
     })
 
     if (gracePeriodEndsAt) {
@@ -76,6 +86,16 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
         )
       })
     }
+
+    await step.run('log-audit-event', async () => {
+      await logAuditEvent({
+        orgId,
+        action:     isCancelled ? 'guidebook.sponsor.cancelled' : 'guidebook.sponsor.payment_failed',
+        targetType: 'guidebook_sponsor',
+        targetId:   sponsorId,
+        metadata:   { activeSponsorCount, gracePeriodEndsAt: gracePeriodEndsAt ?? null },
+      })
+    })
 
     return { activeSponsorCount, sponsorId, orgId }
   }

@@ -23,6 +23,14 @@ export const guidebookGuestOptedIn = inngest.createFunction(
     await step.run('send-door-code-sms', async () => {
       if (!property.door_code) return
 
+      const { data: optin } = await supabase
+        .from('guidebook_guest_sms_optins')
+        .select('door_code_sent_at')
+        .eq('id', optinId)
+        .single()
+
+      if (optin?.door_code_sent_at) return
+
       const result = await sendSMS(phoneE164, buildDoorCodeSMS(property.name, property.door_code))
 
       if (result.sent) {

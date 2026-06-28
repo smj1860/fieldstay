@@ -28,6 +28,7 @@ export async function getOrgPmEmails(orgId: string): Promise<{
     .eq('org_id', orgId)
     .in('role', ['owner', 'admin'])
     .not('user_id', 'is', null)
+    .not('invite_accepted_at', 'is', null)
 
   if (!members?.length) return { emails: [], orgName: org?.name ?? '' }
 

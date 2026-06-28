@@ -217,6 +217,7 @@ export interface Booking {
   has_overlap_conflict: boolean
   is_block:             boolean
   guidebook_token:      string | null
+  guidebook_pre_arrival_email_sent_at: string | null
   created_at:           string
   updated_at:           string
 }

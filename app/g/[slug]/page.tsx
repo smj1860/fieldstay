@@ -35,7 +35,7 @@ export default async function GuestGuidebookPage({
 
   const { data: sponsors } = await supabase
     .from('guidebook_sponsors')
-    .select('*')
+    .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item')
     .eq('org_id', config.org_id)
     .eq('status', 'active')
 

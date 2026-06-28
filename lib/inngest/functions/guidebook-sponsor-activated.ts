@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
+import { logAuditEvent } from '@/lib/audit'
 
 export const guidebookSponsorActivated = inngest.createFunction(
   { id: 'guidebook-sponsor-activated', name: 'Guidebook: Sponsor Activated' },
@@ -45,6 +46,16 @@ export const guidebookSponsorActivated = inngest.createFunction(
           },
           { onConflict: 'org_id' }
         )
+    })
+
+    await step.run('log-audit-event', async () => {
+      await logAuditEvent({
+        orgId,
+        action:     'guidebook.sponsor.activated',
+        targetType: 'guidebook_sponsor',
+        targetId:   sponsorId,
+        metadata:   { activeSponsorCount, guidebookUnlocked: activeSponsorCount >= 4 },
+      })
     })
 
     return { activeSponsorCount, sponsorId, orgId }

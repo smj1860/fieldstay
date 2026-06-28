@@ -215,6 +215,7 @@ export async function optInGuestSms(
         phone_e164:  phoneE164,
         is_active:   true,
         opted_out_at: null,
+        opted_in_at: new Date().toISOString(),
         updated_at:  new Date().toISOString(),
       },
       { onConflict: 'booking_id' }
