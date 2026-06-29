@@ -133,7 +133,18 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-gray-900 mb-3">13. Changes</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">13. SMS Communications</h2>
+            <p>
+              By opting in to SMS communications from FieldStay, you agree to receive text messages
+              related to your reservation including access codes, property information, and
+              recommendations from your property manager. Message frequency varies by stay. Message
+              and data rates may apply. Reply STOP to unsubscribe, HELP for support. For assistance
+              contact <a href="mailto:help@fieldstay.app" className="underline">help@fieldstay.app</a>.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">14. Changes</h2>
             <p>
               We may update these Terms at any time. Continued use of the Service after changes
               constitutes acceptance. Material changes will be communicated by email or in-app notice.
@@ -141,7 +152,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-semibold text-gray-900 mb-3">14. Contact</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">15. Contact</h2>
             <p>
               Questions?{' '}
               <a href="mailto:legal@fieldstay.app" className="underline">legal@fieldstay.app</a>
