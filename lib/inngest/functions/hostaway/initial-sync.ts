@@ -88,8 +88,11 @@ export const hostawayInitialSync = inngest.createFunction(
             .eq('external_source', PROVIDER)
             .in('external_id', listings.map((l) => String(l.id)))
 
+          // O(1) lookups instead of an O(n²) .find() inside the loop
+          const listingById = new Map(listings.map((l) => [String(l.id), l]))
+
           for (const p of fsProps ?? []) {
-            const hostawayId = listings.find((l) => String(l.id) === p.external_id)?.id
+            const hostawayId = listingById.get(p.external_id)?.id
             if (hostawayId != null) idMap[hostawayId] = p.id
           }
         }
