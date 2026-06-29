@@ -5,6 +5,7 @@ import { requireOrgMember }    from '@/lib/auth'
 import { randomBytes }         from 'crypto'
 import { inngest }             from '@/lib/inngest/client'
 import { revalidatePath }      from 'next/cache'
+import { logAuditEvent }       from '@/lib/audit'
 
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
@@ -176,9 +177,10 @@ const MAX_PHOTO_BYTES = 10 * 1024 * 1024  // 10 MB
 const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
 
 export async function submitWorkOrderSignOff(
-  token:   string,
-  notes:   string,
-  photos?: File[]
+  token:       string,
+  notes:       string,
+  photos?:     File[],
+  actualCost?: number
 ): Promise<{ success?: boolean; error?: string }> {
   if (!token || token.length !== 64) return { error: 'Invalid link' }
 
@@ -194,6 +196,10 @@ export async function submitWorkOrderSignOff(
         return { error: 'Only JPEG, PNG, WebP, or HEIC photos are accepted' }
       }
     }
+  }
+
+  if (actualCost !== undefined && (actualCost < 0 || actualCost > 1_000_000)) {
+    return { error: 'Cost must be a valid amount' }
   }
 
   // Rate limit by token — prevents spam sign-offs on the same work order
@@ -247,6 +253,7 @@ export async function submitWorkOrderSignOff(
       sign_off_notes:         notes.trim() || null,
       status:                 'completed',
       vendor_acknowledged_at: now,
+      actual_cost:            actualCost ?? null,
     })
     .eq('id', wo.id)
 
@@ -257,6 +264,18 @@ export async function submitWorkOrderSignOff(
 
   const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
   const org      = Array.isArray(wo.organizations) ? wo.organizations[0] : wo.organizations
+
+  await logAuditEvent({
+    orgId:      wo.org_id,
+    actorId:    undefined,
+    action:     'work_order.vendor_signoff',
+    targetType: 'work_order',
+    targetId:   wo.id,
+    metadata:   {
+      actual_cost: actualCost ?? null,
+      has_photos:  Boolean(photos?.length),
+    },
+  })
 
   // Upload sign-off photos to storage and record in work_order_photos
   if (photos && photos.length > 0) {

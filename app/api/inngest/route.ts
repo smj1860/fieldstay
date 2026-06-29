@@ -22,11 +22,15 @@ import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turno
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
+import { inventoryOrderEmailCron } from '@/lib/inngest/functions/inventory-order-email-cron'
 
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
 import { ownerRezIncrementalSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
 import { ownerRezReviewsSync }     from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
+
+// Hostaway integration
+import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sync'
 
 // Turnover flag → WO
 import { flaggedTurnoverToWO } from '@/lib/inngest/functions/flagged-turnover-wo'
@@ -55,14 +59,16 @@ import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
 import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
 
 // Asset Health — CapEx & Depreciation
-import { generateCapexProjections }   from '@/lib/inngest/functions/capex-projections'
-import { generateDepreciationLedger } from '@/lib/inngest/functions/depreciation-ledger'
+import { generateCapexProjections }      from '@/lib/inngest/functions/capex-projections'
+import { triggerCapexProjectionForOrg }  from '@/lib/inngest/functions/capex-projection-trigger'
+import { generateDepreciationLedger }    from '@/lib/inngest/functions/depreciation-ledger'
 
 // In-app messaging
 import { logMessageCommunication } from '@/lib/inngest/functions/log-message-comm'
 
 // Checklist broadcasting
 import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist-broadcast'
+import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-master-checklist'
 
 // Integration error notifications
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
@@ -71,11 +77,44 @@ import { notifyAssignmentGap }     from '@/lib/inngest/functions/notify-assignme
 // Work order public dispatch + sign-off
 import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
 
+// Work order vendor assignment → dispatch
+import { handleWorkOrderVendorAssigned } from '@/lib/inngest/functions/work-order-vendor-assigned'
+
+// Work order internal crew assignment + completion
+import { handleWorkOrderCrewAssigned }  from '@/lib/inngest/functions/work-order-crew-assigned'
+import { handleWorkOrderCrewCompleted } from '@/lib/inngest/functions/work-order-crew-completed'
+
 // Email lifecycle functions
 import { sendWelcomeEmail }           from '@/lib/inngest/functions/email-welcome'
 import { sendOwnerRezConnectedEmail } from '@/lib/inngest/functions/email-ownerrez-connected'
 import { handleTrialLifecycle }       from '@/lib/inngest/functions/email-trial-lifecycle'
 import { sendSubscriberCheckin }      from '@/lib/inngest/functions/email-subscriber-checkin'
+
+// Checklist signal intelligence
+import { computeChecklistSignals } from '@/lib/inngest/functions/cron/checklist-signals'
+
+// Dead-letter handler for failed function runs
+import { onFunctionFailure } from '@/lib/inngest/functions/on-failure'
+
+// Stripe Connect vendor onboarding
+import { vendorConnectOnboardingCron } from '@/lib/inngest/functions/cron/vendor-connect-onboarding'
+
+// Work order invoices
+import { handleWorkOrderInvoiceSubmitted } from '@/lib/inngest/functions/work-order-invoice'
+
+// Self-Funding Guidebook — sponsor lifecycle + billing credits
+import { guidebookSponsorActivated }      from '@/lib/inngest/functions/guidebook-sponsor-activated'
+import { guidebookSponsorDeactivated }    from '@/lib/inngest/functions/guidebook-sponsor-deactivated'
+import { guidebookDailyMonitor }          from '@/lib/inngest/functions/guidebook-daily-monitor'
+import { guidebookBillingCreditHandler }  from '@/lib/inngest/functions/guidebook-billing-credit-handler'
+import { guidebookGraceExpiredHandler }   from '@/lib/inngest/functions/guidebook-grace-expired-handler'
+import { guidebookSponsorPaymentRecovered } from '@/lib/inngest/functions/guidebook-sponsor-payment-recovered'
+import { guidebookGuestOptedIn }            from '@/lib/inngest/functions/guidebook-guest-opted-in'
+import { guidebookPreArrivalEmailCron }     from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
+import { guidebookSmsMorningCron }          from '@/lib/inngest/functions/guidebook-sms-morning-cron'
+import { guidebookSmsEveningCron }          from '@/lib/inngest/functions/guidebook-sms-evening-cron'
+import { guidebookStayExtensionCron }       from '@/lib/inngest/functions/guidebook-stay-extension-cron'
+import { guidebookStayExtensionHandler }    from '@/lib/inngest/functions/guidebook-stay-extension-handler'
 
 export const { GET, POST, PUT } = serve({
   client: inngest,
@@ -101,15 +140,20 @@ export const { GET, POST, PUT } = serve({
     auditRetentionCron,
     staleFeedAlert,
     turnoverPriorityDecay,
+    computeChecklistSignals,
 
     // Inventory → PO
     handleInventoryCountSubmitted,
     handlePurchaseOrderApproved,
+    inventoryOrderEmailCron,
 
     // OwnerRez sync
     ownerRezInitialSync,
     ownerRezIncrementalSync,
     ownerRezReviewsSync,
+
+    // Hostaway sync
+    hostawayInitialSync,
 
     // Flagged turnover → WO
     flaggedTurnoverToWO,
@@ -137,6 +181,7 @@ export const { GET, POST, PUT } = serve({
 
     // Asset Health — CapEx projections + depreciation ledger
     generateCapexProjections,
+    triggerCapexProjectionForOrg,
     generateDepreciationLedger,
 
     // In-app messaging
@@ -144,6 +189,7 @@ export const { GET, POST, PUT } = serve({
 
     // Checklist broadcasting
     broadcastChecklistTemplateJob,
+    applyMasterChecklistJob,
 
     // Integration error notifications
     notifyIntegrationError,
@@ -152,11 +198,37 @@ export const { GET, POST, PUT } = serve({
     // Work order public dispatch
     workOrderDispatch,
     workOrderSignedOff,
+    handleWorkOrderVendorAssigned,
+    handleWorkOrderCrewAssigned,
+    handleWorkOrderCrewCompleted,
 
     // Email lifecycle
     sendWelcomeEmail,
     sendOwnerRezConnectedEmail,
     handleTrialLifecycle,
     sendSubscriberCheckin,
+
+    // Dead-letter handler — listens for inngest/function.failed
+    onFunctionFailure,
+
+    // Stripe Connect vendor onboarding cron
+    vendorConnectOnboardingCron,
+
+    // Work order invoices
+    handleWorkOrderInvoiceSubmitted,
+
+    // Self-Funding Guidebook
+    guidebookSponsorActivated,
+    guidebookSponsorDeactivated,
+    guidebookDailyMonitor,
+    guidebookBillingCreditHandler,
+    guidebookGraceExpiredHandler,
+    guidebookSponsorPaymentRecovered,
+    guidebookGuestOptedIn,
+    guidebookPreArrivalEmailCron,
+    guidebookSmsMorningCron,
+    guidebookSmsEveningCron,
+    guidebookStayExtensionCron,
+    guidebookStayExtensionHandler,
   ],
 })

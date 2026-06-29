@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PriorityLevel } from '@/types/database'
+import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DBClient = SupabaseClient<any>
@@ -22,6 +23,7 @@ export async function generateTurnoversForProperty(
     .from('bookings')
     .select('id, checkin_date, checkout_date, checkin_time, checkout_time')
     .eq('property_id', propertyId)
+    .eq('is_block', false)
     .in('status', ['confirmed', 'tentative'])
     .order('checkin_date', { ascending: true })
   if (!bookings?.length) return []
@@ -100,7 +102,7 @@ export async function generateTurnoversForProperty(
     if (turnover) {
       newTurnoverIds.push(turnover.id)
       existingStandalones.add(booking.id)
-      await snapshotChecklist(supabase, turnover.id, orgId, defaultTemplate?.id ?? null)
+      await snapshotChecklist(supabase, turnover.id, orgId, propertyId, defaultTemplate?.id ?? null)
     }
   }
   // ── PASS 2: Upgrade standalone → precise pair ────────────────────
@@ -171,7 +173,7 @@ export async function generateTurnoversForProperty(
         }
       } else if (turnover) {
         newTurnoverIds.push(turnover.id)
-        await snapshotChecklist(supabase, turnover.id, orgId, defaultTemplate?.id ?? null)
+        await snapshotChecklist(supabase, turnover.id, orgId, propertyId, defaultTemplate?.id ?? null)
       }
     }
   }
@@ -182,6 +184,7 @@ export async function snapshotChecklist(
   supabase:   DBClient,
   turnoverID: string,
   orgId:      string,
+  propertyId: string,
   templateId: string | null
 ): Promise<void> {
   if (!templateId) return
@@ -198,15 +201,46 @@ export async function snapshotChecklist(
               template_snapshot: sections, status: 'not_started' })
     .select('id').single()
   if (!instance) return
+
+  // Dynamic photo requirements from the nightly Bayesian signal cron.
+  // Minimum completions gate: with zero history, the prior alone puts a
+  // brand-new item at alpha=2/beta=1 → 33% flag probability, which would
+  // require a photo before any real evidence exists. Require at least 3
+  // real completions before trusting the signal.
+  const { data: signals } = await supabase
+    .from('checklist_item_signals')
+    .select('section_name, task, reason')
+    .eq('property_id', propertyId)
+    .eq('dynamic_photo_required', true)
+    .gte('total_completions', 3)
+  const signalMap = new Map(
+    (signals ?? []).map((s: { section_name: string; task: string; reason: string | null }) =>
+      [`${s.section_name}|${s.task}`, s])
+  )
+
   const items = sections.flatMap((section) =>
     (section.checklist_template_items ?? []).map((item: {
       task: string; requires_photo: boolean; notes: string | null; sort_order: number
-    }) => ({
-      instance_id: instance.id, section_name: section.name,
-      task: item.task, requires_photo: item.requires_photo,
-      notes: item.notes, sort_order: item.sort_order, is_completed: false,
-    }))
+    }) => {
+      const signal = signalMap.get(`${section.name}|${item.task}`)
+      const dynamicRequired = !!signal
+      return {
+        instance_id: instance.id, turnover_id: turnoverID, section_name: section.name,
+        task: item.task,
+        requires_photo: item.requires_photo || dynamicRequired,
+        photo_reason: !item.requires_photo && dynamicRequired ? signal!.reason : null,
+        notes: item.notes, sort_order: item.sort_order, is_completed: false,
+      }
+    })
   )
+
+  // Progressive Asset Discovery: inject system-mandated, non-deletable tasks
+  // for any required asset type not yet verified on this property.
+  const missingAssetTypes = await getMissingAssetDiscoveryTypes(supabase, propertyId)
+  if (missingAssetTypes.length > 0) {
+    items.push(...buildAssetDiscoveryItems(instance.id, turnoverID, missingAssetTypes, items.length))
+  }
+
   if (items.length > 0) await supabase.from('checklist_instance_items').insert(items)
 }
 

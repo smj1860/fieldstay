@@ -7,10 +7,12 @@ import {
   Plus, RefreshCw, X, ChevronDown, ChevronUp,
   Calendar, Users, Home, Clock, AlertTriangle,
   CheckCircle2, Ban, HelpCircle, ExternalLink,
-  Search, Download,
+  Search, Download, LayoutList,
 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
 import { createBooking, cancelBooking, triggerSync } from './actions'
+import { BookingsCalendar } from './bookings-calendar'
+import type { VacancyGap } from './page'
 import type { BookingSource, BookingStatus } from '@/types/database'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -28,11 +30,22 @@ interface BookingRow {
   notes:                string | null
   has_overlap_conflict: boolean
   created_at:           string
+  ical_feed_id:         string | null
+  external_source:      string | null
   properties:           { id: string; name: string; city: string | null; state: string | null } | null
-  turnovers:            { id: string; status: string } | { id: string; status: string }[] | null
+  turnovers:            { id: string; status: string; checkout_datetime: string }
+                       | { id: string; status: string; checkout_datetime: string }[]
+                       | null
 }
 
 interface PropertyOption { id: string; name: string }
+
+interface ConnectionRow {
+  provider_id:   string
+  status:        string
+  last_used_at:  string | null
+  metadata:      Record<string, unknown> | null
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -349,13 +362,17 @@ function AddBookingModal({
   properties,
   onClose,
   onSuccess,
+  initialPropertyId,
+  initialCheckinDate,
 }: {
-  properties: PropertyOption[]
-  onClose:    () => void
-  onSuccess:  () => void
+  properties:          PropertyOption[]
+  onClose:             () => void
+  onSuccess:           () => void
+  initialPropertyId?:  string
+  initialCheckinDate?: string
 }) {
   const [state, action, pending] = useActionState(createBooking, null)
-  const [checkinVal, setCheckinVal] = useState('')
+  const [checkinVal, setCheckinVal] = useState(initialCheckinDate ?? '')
   const todayStr = new Date().toISOString().split('T')[0]!
 
   if (state?.success) { onSuccess(); onClose(); return null }
@@ -390,7 +407,7 @@ function AddBookingModal({
         <form action={action} className="space-y-4">
           <div>
             <label className="label">Property <span className="text-red-500">*</span></label>
-            <select name="property_id" required className="input">
+            <select name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
               <option value="">Select property…</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -465,21 +482,27 @@ function AddBookingModal({
 export function BookingsClient({
   bookings,
   properties,
+  connections,
+  vacancyGaps,
 }: {
-  bookings:   BookingRow[]
-  properties: PropertyOption[]
+  bookings:    BookingRow[]
+  properties:  PropertyOption[]
+  connections: ConnectionRow[]
+  vacancyGaps: VacancyGap[]
 }) {
   const router = useRouter()
 
   const [showAdd,          setShowAdd]         = useState(false)
   const [syncing,          startSync]          = useTransition()
+  const [viewMode,         setViewMode]        = useState<'list' | 'calendar'>('list')
   const [filterProperty,   setFilterProperty]  = useState('all')
-  const [filterStatus,     setFilterStatus]    = useState<'all' | BookingStatus>('all')
+  const [filterStatus,     setFilterStatus]    = useState<'all' | 'active' | BookingStatus>('active')
   const [filterSource,     setFilterSource]    = useState<'all' | BookingSource>('all')
   const [searchQuery,      setSearchQuery]     = useState('')
   const [showPast,         setShowPast]        = useState(false)
   const [localBookings,    setLocalBookings]   = useState(bookings)
   const [justAdded,        setJustAdded]       = useState(false)
+  const [calendarPrefill,  setCalendarPrefill] = useState<{ propertyId: string; checkinDate: string } | null>(null)
 
   useEffect(() => {
     setLocalBookings(bookings)
@@ -497,7 +520,8 @@ export function BookingsClient({
     return localBookings.filter((b) => {
       if (!showPast && b.checkout_date < todayStr) return false
       if (filterProperty !== 'all' && b.property_id !== filterProperty) return false
-      if (filterStatus   !== 'all' && b.status     !== filterStatus)    return false
+      if (filterStatus   === 'active' && b.status     === 'cancelled') return false
+      if (filterStatus   !== 'all' && filterStatus !== 'active' && b.status !== filterStatus) return false
       if (filterSource   !== 'all' && b.source     !== filterSource)    return false
       if (searchQuery.trim() && !(b.guest_name ?? '').toLowerCase().includes(searchQuery.trim().toLowerCase())) return false
       return true
@@ -541,10 +565,38 @@ export function BookingsClient({
       {/* Header */}
       <div className="page-header flex items-start justify-between gap-4">
         <div>
-          <h1 className="page-title">Bookings</h1>
+          <div className="flex items-center gap-2.5">
+            <h1 className="page-title">Bookings</h1>
+            {connections.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                {connections.map((c) => {
+                  const isHealthy = c.status === 'active'
+                  return (
+                    <span
+                      key={c.provider_id}
+                      title={
+                        isHealthy
+                          ? `${c.provider_id} connected${c.last_used_at ? ` — last synced ${new Date(c.last_used_at).toLocaleString()}` : ''}`
+                          : `${c.provider_id}: ${(c.metadata?.last_sync_error as string) ?? 'connection needs attention'}`
+                      }
+                      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
+                      style={{
+                        background: isHealthy ? 'var(--accent-green-dim)' : 'var(--accent-red-dim)',
+                        color:      isHealthy ? 'var(--accent-green)'     : 'var(--accent-red)',
+                      }}
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'currentColor' }} />
+                      {c.provider_id}
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+          </div>
           <p className="page-subtitle">
-            Log bookings not synced via iCal — direct, social media, or phone.
-            Calendar syncs automatically every hour.
+            Log bookings not synced automatically — direct, social media, or phone.
+            Connected accounts sync in real time via webhook, with a backup sync
+            every 30 minutes.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -645,6 +697,7 @@ export function BookingsClient({
           className="input text-sm py-1.5 w-auto"
         >
           <option value="all">All Statuses</option>
+          <option value="active">Active only</option>
           <option value="confirmed">Confirmed</option>
           <option value="tentative">Tentative</option>
           <option value="blocked">Blocked</option>
@@ -688,6 +741,38 @@ export function BookingsClient({
         <button onClick={handleExportCsv} className="btn-ghost text-xs py-1.5" style={{ color: 'var(--text-muted)' }}>
           <Download className="w-3 h-3" /> Export CSV
         </button>
+
+        <div
+          className="flex items-center gap-0.5 rounded-lg p-0.5 ml-auto"
+          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
+        >
+          <button
+            onClick={() => setViewMode('list')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors"
+            style={{
+              background: viewMode === 'list' ? 'var(--bg-card)' : 'transparent',
+              color:      viewMode === 'list' ? 'var(--text-primary)' : 'var(--text-muted)',
+              boxShadow:  viewMode === 'list' ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
+            }}
+            title="List view"
+          >
+            <LayoutList className="w-3.5 h-3.5" />
+            List
+          </button>
+          <button
+            onClick={() => setViewMode('calendar')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors"
+            style={{
+              background: viewMode === 'calendar' ? 'var(--bg-card)' : 'transparent',
+              color:      viewMode === 'calendar' ? 'var(--text-primary)' : 'var(--text-muted)',
+              boxShadow:  viewMode === 'calendar' ? '0 1px 2px rgba(0,0,0,0.15)' : 'none',
+            }}
+            title="Calendar view"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            Calendar
+          </button>
+        </div>
       </div>
 
       {/* Count */}
@@ -696,8 +781,19 @@ export function BookingsClient({
         {hasFilters || showPast ? ` shown` : ` upcoming`}
       </p>
 
-      {/* Booking list */}
-      {filtered.length === 0 ? (
+      {/* Booking list / calendar */}
+      {viewMode === 'calendar' ? (
+        <BookingsCalendar
+          bookings={filtered}
+          properties={properties}
+          vacancyGaps={vacancyGaps}
+          onViewInList={(guestName) => {
+            setSearchQuery(guestName)
+            setViewMode('list')
+          }}
+          onCanvasClick={(propertyId, checkinDate) => setCalendarPrefill({ propertyId, checkinDate })}
+        />
+      ) : filtered.length === 0 ? (
         <div className="card text-center py-16 max-w-md mx-auto mt-4">
           <Calendar className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
           <h3 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
@@ -732,11 +828,13 @@ export function BookingsClient({
         </div>
       )}
 
-      {showAdd && (
+      {(showAdd || calendarPrefill) && (
         <AddBookingModal
           properties={properties}
-          onClose={() => setShowAdd(false)}
-          onSuccess={() => { setJustAdded(true); router.refresh() }}
+          initialPropertyId={calendarPrefill?.propertyId}
+          initialCheckinDate={calendarPrefill?.checkinDate}
+          onClose={() => { setShowAdd(false); setCalendarPrefill(null) }}
+          onSuccess={() => { setJustAdded(true); setCalendarPrefill(null); router.refresh() }}
         />
       )}
     </div>

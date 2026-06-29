@@ -37,20 +37,12 @@ export const logMessageCommunication = inngest.createFunction(
 
     const result = await step.run('write-comms-log', async () => {
       const supabase = createServiceClient()
-      // Idempotency: a message's created_at is unique to the millisecond — use
-      // it as the dedup key since communication_logs has no source_reference_id.
-      const { data: existing } = await supabase
-        .from('communication_logs')
-        .select('id')
-        .eq('org_id', org_id)
-        .eq('crew_member_id', crewMember.id)
-        .eq('source', 'system')
-        .eq('communicated_at', message.created_at)
-        .maybeSingle()
+      // MEDIUM-9: dedup_key is backed by a partial unique index — a retried
+      // step can no longer create a duplicate row even under a race between
+      // a check and an insert, unlike the prior pure application-level check.
+      const dedupKey = `message:${message_id}`
 
-      if (existing) return { logged: false, skipped: 'already_logged' }
-
-      await supabase.from('communication_logs').insert({
+      const { error } = await supabase.from('communication_logs').insert({
         org_id,
         recipient_type:    'crew',
         crew_member_id:    crewMember.id,
@@ -61,7 +53,13 @@ export const logMessageCommunication = inngest.createFunction(
         source:            'system',
         logged_by_user_id: sender_id,
         communicated_at:   message.created_at,
+        dedup_key:         dedupKey,
       })
+
+      if (error) {
+        if (error.code === '23505') return { logged: false, skipped: 'already_logged' as string | null }
+        throw error
+      }
 
       return { logged: true, skipped: null as string | null }
     })

@@ -35,13 +35,16 @@ export const sendOwnerRezConnectedEmail = inngest.createFunction(
         dashboardUrl: `${appUrl}/properties`,
       })
 
-      await resend.emails.send({
-        from:     FROM,
-        to:       userEmail,
-        replyTo:  'stephen@fieldstay.app',
-        subject:  'OwnerRez connected — your properties are syncing',
-        html,
-      })
+      await resend.emails.send(
+        {
+          from:     FROM,
+          to:       userEmail,
+          replyTo:  'stephen@fieldstay.app',
+          subject:  'OwnerRez connected — your properties are syncing',
+          html,
+        },
+        { idempotencyKey: `ownerrez-connected-${org_id}-${user_id}` }
+      )
     })
   }
 )

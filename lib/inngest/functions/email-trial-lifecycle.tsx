@@ -62,13 +62,16 @@ export const handleTrialLifecycle = inngest.createFunction(
         subscribeUrl:      `${appUrl}/settings?tab=billing`,
       })
 
-      await resend.emails.send({
-        from:     FROM,
-        to:       user_email,
-        replyTo:  'stephen@fieldstay.app',
-        subject:  'Your FieldStay trial ends in 3 days',
-        html,
-      })
+      await resend.emails.send(
+        {
+          from:     FROM,
+          to:       user_email,
+          replyTo:  'stephen@fieldstay.app',
+          subject:  'Your FieldStay trial ends in 3 days',
+          html,
+        },
+        { idempotencyKey: `trial-expiring-${org_id}` }
+      )
     })
 
     // ── Day 14 + 2h: Trial expired ────────────────────────────────────────
@@ -99,13 +102,16 @@ export const handleTrialLifecycle = inngest.createFunction(
         }),
       })
 
-      await resend.emails.send({
-        from:     FROM,
-        to:       user_email,
-        replyTo:  'stephen@fieldstay.app',
-        subject:  'Your FieldStay trial has ended',
-        html,
-      })
+      await resend.emails.send(
+        {
+          from:     FROM,
+          to:       user_email,
+          replyTo:  'stephen@fieldstay.app',
+          subject:  'Your FieldStay trial has ended',
+          html,
+        },
+        { idempotencyKey: `trial-expired-${org_id}` }
+      )
     })
 
     // ── Day 17: Churn feedback ────────────────────────────────────────────
@@ -125,11 +131,12 @@ export const handleTrialLifecycle = inngest.createFunction(
 
     await step.run('send-churn-feedback-email', async () => {
       // Plain text — intentionally NOT a React Email template
-      await resend.emails.send({
-        from:    'Stephen <stephen@fieldstay.app>',
-        to:      user_email,
-        subject: 'honest question',
-        text: `Hi ${first_name},
+      await resend.emails.send(
+        {
+          from:    'Stephen <stephen@fieldstay.app>',
+          to:      user_email,
+          subject: 'honest question',
+          text: `Hi ${first_name},
 
 I'm truly sorry FieldStay wasn't the right fit for you at this time.
 
@@ -140,7 +147,9 @@ No follow-ups after this. No sales pitch. I just want to build the best product 
 — Stephen
 
 P.S. If you ever want to give us another shot, your data stays for 30 days. ${appUrl}/billing-wall`,
-      })
+        },
+        { idempotencyKey: `trial-churn-feedback-${org_id}` }
+      )
     })
   }
 )

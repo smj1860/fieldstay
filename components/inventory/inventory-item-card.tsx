@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Minus, Plus } from 'lucide-react'
+import { Minus, Plus, StickyNote } from 'lucide-react'
 
 type StockStatus = 'uncounted' | 'critical' | 'low' | 'healthy'
 
@@ -37,6 +37,10 @@ interface InventoryItemCardProps {
   onQuantityChange?: (id: string, newQty: number) => void
   /** PM variant only — called when par level is saved */
   onParLevelSave?: (id: string, newPar: number) => void
+  /** Current note for this item (crew variant only) */
+  note?:         string
+  /** Called when crew adds/changes a note on this item */
+  onNoteChange?: (id: string, note: string) => void
 }
 
 export function InventoryItemCard({
@@ -48,10 +52,21 @@ export function InventoryItemCard({
   uncounted = false,
   variant,
   onQuantityChange,
+  note,
+  onNoteChange,
 }: InventoryItemCardProps) {
   const [qty, setQty] = useState(currentQuantity)
   const status        = getStatus(qty, parLevel, uncounted)
   const cfg           = STATUS_CONFIG[status]
+
+  const [noteText, setNoteText] = useState(note ?? '')
+  // Reveal the note field immediately when an existing note is present on mount.
+  const [showNote, setShowNote] = useState(Boolean(note))
+
+  const handleNoteChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setNoteText(e.target.value)
+    onNoteChange?.(id, e.target.value)
+  }
 
   const decrement = () => {
     const next = Math.max(0, qty - 1)
@@ -69,6 +84,14 @@ export function InventoryItemCard({
     const next = Math.max(0, parseInt(e.target.value) || 0)
     setQty(next)
     onQuantityChange?.(id, next)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-inv-count-input]'))
+    const idx = inputs.indexOf(e.currentTarget)
+    inputs[idx + 1]?.focus()
   }
 
   return (
@@ -89,13 +112,25 @@ export function InventoryItemCard({
             {unit}
           </p>
         </div>
-        {/* Status badge */}
-        <span
-          className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex-shrink-0"
-          style={{ background: cfg.bg, color: cfg.color }}
-        >
-          {cfg.label}
-        </span>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {/* Status badge */}
+          <span
+            className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide"
+            style={{ background: cfg.bg, color: cfg.color }}
+          >
+            {cfg.label}
+          </span>
+          {variant === 'crew' && (
+            <button
+              onClick={() => setShowNote((s) => !s)}
+              aria-label="Add note"
+              className="flex items-center justify-center rounded-lg p-1"
+              style={{ color: noteText ? 'var(--accent-gold)' : 'var(--text-muted)' }}
+            >
+              <StickyNote className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Quantity + stepper */}
@@ -133,6 +168,8 @@ export function InventoryItemCard({
             min={0}
             value={qty}
             onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            data-inv-count-input
             className="text-center text-sm font-semibold rounded-lg"
             style={{
               width:      52,
@@ -159,6 +196,24 @@ export function InventoryItemCard({
           </button>
         </div>
       </div>
+
+      {/* Per-item note (crew variant only) */}
+      {variant === 'crew' && showNote && (
+        <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+          <textarea
+            value={noteText}
+            onChange={handleNoteChange}
+            rows={2}
+            placeholder="Note about this item (unit wrong, reorder from different supplier, etc.)"
+            className="w-full text-xs rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1"
+            style={{
+              background: 'var(--bg-raised)',
+              color:      'var(--text-primary)',
+              border:     '1px solid var(--border)',
+            }}
+          />
+        </div>
+      )}
     </div>
   )
 }

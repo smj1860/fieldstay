@@ -1,27 +1,26 @@
 'use client'
-import { usePowerSyncQuery, usePowerSync } from '@powersync/react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { useParams, useRouter }            from 'next/navigation'
 import { useState, useRef }                from 'react'
 import {
   ArrowLeft, Camera, CheckCircle2, Circle,
   Loader2, ImageIcon, AlertCircle, AlertTriangle, X,
-  Minus, Plus, MapPin,
+  Minus, Plus, MapPin, CheckSquare, ChevronRight, Package,
+  StickyNote,
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { createClient }       from '@/lib/supabase/client'
-import { savePendingPhotoBlob } from '@/lib/powersync/photo-queue'
-import { processPendingPhotoUploads } from '@/lib/powersync/photo-sync'
-
-type TurnoverRow   = { id: string; status: string; priority: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number; notes: string | null; property_id: string; org_id: string }
-type InstanceRow   = { id: string; turnover_id: string; status: string }
-type ChecklistItem = { id: string; instance_id: string; section_name: string; task: string; notes: string | null; is_completed: number; completed_at: string | null; requires_photo: number; photo_storage_path: string | null; crew_notes: string | null; sort_order: number }
-type InvRow        = { id: string; name: string; category: string; unit: string; par_level: number; current_quantity: number; property_id: string }
-type PropertyRow   = { id: string; name: string; address: string | null; city: string | null; state: string | null }
+import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
+import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
+import { updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitIssueReport } from '@/lib/dexie/helpers'
+import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow } from '@/lib/dexie/schema'
 
 export default function CrewTurnoverPage() {
   const { id }   = useParams<{ id: string }>()
   const router   = useRouter()
-  const db       = usePowerSync()
+  const db       = useDexieDb()
+  const userId   = useDexieUserId()
   const supabase = createClient()
 
   const [uploadingItemId,   setUploadingItemId]   = useState<string | null>(null)
@@ -30,35 +29,45 @@ export default function CrewTurnoverPage() {
   const [showFlagModal,     setShowFlagModal]     = useState(false)
   const [counts,            setCounts]            = useState<Record<string, number>>({})
   const [sectionPhotoPrompt, setSectionPhotoPrompt] = useState<string | null>(null)
+  const [view, setView] = useState<'hub' | 'checklist' | 'inventory'>('hub')
   const fileInputRefs      = useRef<Record<string, HTMLInputElement | null>>({})
   const sectionPhotoRefs   = useRef<Record<string, HTMLInputElement | null>>({})
 
-  const turnovers      = usePowerSyncQuery<TurnoverRow>('SELECT * FROM turnovers WHERE id = ?', [id])
-  const turnover       = turnovers?.[0]
+  // Note entry — one item open at a time; saves on blur
+  const [openNoteItemId, setOpenNoteItemId] = useState<string | null>(null)
+  const [noteText,       setNoteText]       = useState('')
 
-  const propertiesRaw  = usePowerSyncQuery<PropertyRow>(
-    'SELECT * FROM properties WHERE id = ?',
-    [turnover?.property_id ?? '']
-  )
-  const property = propertiesRaw?.[0] ?? null
+  const turnover = useLiveQuery(() => db.turnovers.get(id), [id])
 
-  const instances = usePowerSyncQuery<InstanceRow>('SELECT * FROM checklist_instances WHERE turnover_id = ?', [id])
-  const instance  = instances?.[0]
+  const property = useLiveQuery(
+    () => turnover ? db.properties.get(turnover.property_id) : undefined,
+    [turnover?.property_id]
+  ) ?? null
 
-  const items = usePowerSyncQuery<ChecklistItem>(
-    `SELECT * FROM checklist_instance_items WHERE instance_id = ? ORDER BY section_name, sort_order`,
-    [instance?.id ?? '']
-  )
-
-  const inventoryItems = usePowerSyncQuery<InvRow>(
-    `SELECT * FROM inventory_items WHERE property_id = ? ORDER BY category, name`,
-    [turnover?.property_id ?? '']
+  const instance = useLiveQuery(
+    () => db.checklist_instances.where('turnover_id').equals(id).first(),
+    [id]
   )
 
-  type PendingUploadRow = { id: string; target_id: string; target_table: string }
+  const items = useLiveQuery(
+    () => instance
+      ? db.checklist_instance_items
+          .where('instance_id').equals(instance.id)
+          .sortBy('sort_order')
+      : [],
+    [instance?.id]
+  )
 
-  const pendingUploads = usePowerSyncQuery<PendingUploadRow>(
-    `SELECT id, target_id, target_table FROM pending_photo_uploads WHERE target_table = 'checklist_instance_items'`
+  const inventoryItems = useLiveQuery(
+    () => turnover
+      ? db.inventory_items.where('property_id').equals(turnover.property_id).sortBy('name')
+      : [],
+    [turnover?.property_id]
+  )
+
+  const pendingUploads = useLiveQuery(
+    () => db.pending_photo_uploads.where('target_table').equals('checklist_instance_items').toArray(),
+    []
   )
   const pendingUploadIds = new Set((pendingUploads ?? []).map(p => p.target_id))
 
@@ -90,10 +99,7 @@ export default function CrewTurnoverPage() {
       fileInputRefs.current[itemId]?.click()
       return
     }
-    await db.execute(
-      'UPDATE checklist_instance_items SET is_completed = ?, completed_at = ? WHERE id = ?',
-      [current ? 0 : 1, current ? null : new Date().toISOString(), itemId]
-    )
+    await updateChecklistItem(userId, itemId, { isCompleted: !current })
     // Check if section is now fully complete
     if (!current) {
       const sectionItems = sections[sectionName] ?? []
@@ -102,6 +108,25 @@ export default function CrewTurnoverPage() {
         setSectionPhotoPrompt(sectionName)
       }
     }
+  }
+
+  async function saveNote(itemId: string, isCompleted: number) {
+    // Only write if text changed from what's already stored
+    const current = items?.find((i) => i.id === itemId)?.crew_notes ?? ''
+    if (noteText === current) {
+      setOpenNoteItemId(null)
+      return
+    }
+    await updateChecklistItem(userId, itemId, {
+      isCompleted: isCompleted === 1,
+      crewNotes:   noteText,
+    })
+    setOpenNoteItemId(null)
+  }
+
+  function openNote(itemId: string, existingNote: string) {
+    setNoteText(existingNote ?? '')
+    setOpenNoteItemId(itemId)
   }
 
   const handleSectionPhoto = async (sectionName: string, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,21 +141,20 @@ export default function CrewTurnoverPage() {
       const sectionItem = items?.find((i) => i.section_name === sectionName)
       if (!sectionItem) return
 
-      await savePendingPhotoBlob(blobKey, file)
-      await db.execute(
-        `INSERT INTO pending_photo_uploads
-           (id, target_table, target_id, target_column, storage_path, local_blob_key, mime_type, retry_count, created_at)
-         VALUES (
-           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
-           substr(lower(hex(randomblob(2))),2) || '-' ||
-           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
-           lower(hex(randomblob(6))),
-           'checklist_instances', ?, 'section_photo_path', ?, ?, ?, 0, datetime('now')
-         )`,
-        [sectionItem.instance_id, path, blobKey, file.type]
-      )
+      await savePendingPhotoBlob(userId, blobKey, file)
+      await db.pending_photo_uploads.add({
+        id:             crypto.randomUUID(),
+        target_table:   'checklist_instances',
+        target_id:      sectionItem.instance_id,
+        target_column:  'section_photo_path',
+        storage_path:   path,
+        local_blob_key: blobKey,
+        mime_type:      file.type,
+        retry_count:    0,
+        created_at:     new Date().toISOString(),
+      })
 
-      void processPendingPhotoUploads(db, supabase)
+      void processPendingPhotoUploads(supabase, userId)
     } catch (err) {
       console.error('Section photo queueing failed:', err)
       setUploadError('Could not save section photo. Please try again.')
@@ -148,27 +172,23 @@ export default function CrewTurnoverPage() {
       const path    = `turnover-${id}/${itemId}-${Date.now()}.${ext}`
       const blobKey = `photo-${itemId}-${Date.now()}`
 
-      await savePendingPhotoBlob(blobKey, file)
-      await db.execute(
-        `INSERT INTO pending_photo_uploads
-           (id, target_table, target_id, target_column, storage_path, local_blob_key, mime_type, retry_count, created_at)
-         VALUES (
-           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
-           substr(lower(hex(randomblob(2))),2) || '-' ||
-           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
-           lower(hex(randomblob(6))),
-           'checklist_instance_items', ?, 'photo_storage_path', ?, ?, ?, 0, datetime('now')
-         )`,
-        [itemId, path, blobKey, file.type]
-      )
-      await db.execute(
-        `UPDATE checklist_instance_items SET is_completed = 1 WHERE id = ?`,
-        [itemId]
-      )
+      await savePendingPhotoBlob(userId, blobKey, file)
+      await db.pending_photo_uploads.add({
+        id:             crypto.randomUUID(),
+        target_table:   'checklist_instance_items',
+        target_id:      itemId,
+        target_column:  'photo_storage_path',
+        storage_path:   path,
+        local_blob_key: blobKey,
+        mime_type:      file.type,
+        retry_count:    0,
+        created_at:     new Date().toISOString(),
+      })
+      await updateChecklistItem(userId, itemId, { isCompleted: true })
 
       // Attempt immediately in case we're actually online — no need to wait
       // for the next interval tick or a reconnect event.
-      void processPendingPhotoUploads(db, supabase)
+      void processPendingPhotoUploads(supabase, userId)
     } catch (err) {
       console.error('Photo queueing failed:', err)
       setUploadError('Could not save photo. Please try again.')
@@ -180,17 +200,14 @@ export default function CrewTurnoverPage() {
   const handleCountChange = async (itemId: string, newQty: number) => {
     const qty = Math.max(0, newQty)
     setCounts((prev) => ({ ...prev, [itemId]: qty }))
-    await db.execute(
-      'UPDATE inventory_items SET current_quantity = ? WHERE id = ?',
-      [qty, itemId]
-    )
+    await updateInventoryQuantity(userId, itemId, qty)
   }
 
   const getCount = (item: InvRow) =>
     counts[item.id] !== undefined ? counts[item.id] : item.current_quantity
 
   const markInProgress = async () => {
-    await db.execute('UPDATE turnovers SET status = ? WHERE id = ?', ['in_progress', id])
+    await startTurnover(userId, id)
   }
 
   const markComplete = async () => {
@@ -201,7 +218,7 @@ export default function CrewTurnoverPage() {
       if (!ok) return
     }
     setCompleting(true)
-    await db.execute('UPDATE turnovers SET status = ? WHERE id = ?', ['completed', id])
+    await completeTurnover(userId, id)
     router.push('/crew')
   }
 
@@ -217,17 +234,17 @@ export default function CrewTurnoverPage() {
   const fullAddress = [property?.address, property?.city, property?.state].filter(Boolean).join(', ')
 
   return (
-    <div>
-      {/* Back button — icon only */}
+    <div className="min-h-screen pb-24" style={{ background: 'var(--bg-page)' }}>
+      {/* Back button — always visible */}
       <button
-        onClick={() => router.push('/crew')}
+        onClick={() => view === 'hub' ? router.push('/crew') : setView('hub')}
         className="flex items-center justify-center w-8 h-8 rounded-lg text-accent-400 hover:text-accent-700 hover:bg-accent-100 transition-colors mb-4"
-        aria-label="Back to assignments"
+        aria-label={view === 'hub' ? 'Back to assignments' : 'Back to turnover'}
       >
         <ArrowLeft className="w-4 h-4" />
       </button>
 
-      {/* Property info card */}
+      {/* Property info card — always visible across all views */}
       <div className="bg-white rounded-xl border border-accent-200 p-4 mb-4">
         <p className="font-bold text-accent-900 text-lg leading-tight">
           {property?.name ?? 'Loading property…'}
@@ -287,6 +304,103 @@ export default function CrewTurnoverPage() {
         </div>
       )}
 
+      {/* ── HUB VIEW ── */}
+      {view === 'hub' && (
+        <div className="space-y-3 mt-4">
+          {/* Progress summary — show checklist completion at a glance */}
+          {totalCount > 0 && (
+            <div className="rounded-xl px-4 py-3 flex items-center justify-between"
+                 style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+              <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                Checklist progress
+              </span>
+              <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {completedCount} / {totalCount}
+              </span>
+            </div>
+          )}
+
+          {/* Start Turnover — only if status === 'assigned' */}
+          {turnover.status === 'assigned' && (
+            <button onClick={markInProgress} className="btn-secondary w-full py-4 text-base">
+              Start Turnover
+            </button>
+          )}
+
+          {/* Navigation buttons */}
+          <button
+            onClick={() => setView('checklist')}
+            className="w-full py-4 rounded-xl flex items-center justify-between px-5 text-base font-medium"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+          >
+            <div className="flex items-center gap-3">
+              <CheckSquare className="w-5 h-5" style={{ color: 'var(--accent-green)' }} />
+              Cleaning Checklist
+            </div>
+            <div className="flex items-center gap-2">
+              {totalCount > 0 && (
+                <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                  {completedCount}/{totalCount}
+                </span>
+              )}
+              <ChevronRight className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            </div>
+          </button>
+
+          {inventoryItems && inventoryItems.length > 0 && (
+            <button
+              onClick={() => setView('inventory')}
+              className="w-full py-4 rounded-xl flex items-center justify-between px-5 text-base font-medium"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
+            >
+              <div className="flex items-center gap-3">
+                <Package className="w-5 h-5" style={{ color: 'var(--accent-blue, #3b82f6)' }} />
+                Inventory
+              </div>
+              <ChevronRight className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+            </button>
+          )}
+
+          {/* Mark Complete */}
+          <button
+            onClick={markComplete}
+            disabled={completing || turnover.status === 'completed'}
+            className="btn-cta w-full py-4 text-base flex items-center justify-center gap-2
+                       disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {completing
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+              : turnover.status === 'completed'
+              ? '✓ Marked Complete'
+              : 'Mark as Complete'}
+          </button>
+
+          {/* Report an Issue — secondary, at the bottom */}
+          <button
+            onClick={() => setShowFlagModal(true)}
+            className="w-full py-3 rounded-xl text-sm font-medium flex items-center
+                       justify-center gap-2 border border-amber-300 bg-amber-50
+                       text-amber-700 hover:bg-amber-100 transition-colors"
+          >
+            <AlertTriangle className="w-4 h-4" />
+            Report an Issue
+          </button>
+        </div>
+      )}
+
+      {/* ── CHECKLIST VIEW ── */}
+      {view === 'checklist' && (
+      <div className="mt-2">
+        {/* Section header */}
+        <div className="flex items-center justify-between mb-3 px-1">
+          <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+            Cleaning Checklist
+          </h2>
+          <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            {completedCount} of {totalCount}
+          </span>
+        </div>
+
       {/* Checklist section */}
       {totalCount > 0 && (
         <>
@@ -327,63 +441,129 @@ export default function CrewTurnoverPage() {
                   const uploading  = uploadingItemId === item.id
 
                   return (
-                    <div key={item.id} className={cn('flex items-start gap-3 px-4 py-3', item.is_completed ? 'bg-green-50' : 'bg-white')}>
-                      <button
-                        className="flex-shrink-0 mt-0.5"
-                        onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
-                      >
-                        {item.is_completed
-                          ? <CheckCircle2 className="w-5 h-5 text-green-500" />
-                          : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-accent-300')} />}
-                      </button>
+                    <div key={item.id}>
+                      <div className={cn('flex items-start gap-3 px-4 py-3', item.is_completed ? 'bg-green-50' : 'bg-white')}>
+                        <button
+                          className="flex-shrink-0 mt-0.5"
+                          onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
+                        >
+                          {item.is_completed
+                            ? <CheckCircle2 className="w-5 h-5 text-green-500" />
+                            : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-accent-300')} />}
+                        </button>
 
-                      <div className="flex-1 min-w-0">
-                        <p className={cn('text-sm leading-snug',
-                          item.is_completed ? 'text-green-700 line-through' : 'text-accent-800')}>
-                          {item.task}
-                        </p>
-                        {item.notes && <p className="text-xs text-accent-400 mt-0.5">{item.notes}</p>}
-                        {item.photo_storage_path && (
-                          <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
-                            <ImageIcon className="w-3 h-3" /> Photo attached
+                        <div
+                          className="flex-1 min-w-0 cursor-pointer"
+                          onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
+                        >
+                          <p className={cn('text-sm leading-snug',
+                            item.is_completed ? 'text-green-700 line-through' : 'text-accent-800')}>
+                            {item.task}
                           </p>
-                        )}
-                        {!item.photo_storage_path && pendingUploadIds.has(item.id) && (
-                          <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
-                            <Loader2 className="w-3 h-3 animate-spin" /> Photo saved — uploading when back online
-                          </p>
-                        )}
-                        {needsPhoto && !uploading && !pendingUploadIds.has(item.id) && (
-                          <p className="text-xs text-amber-600 mt-0.5">Photo required before completing</p>
+                          {item.crew_notes && openNoteItemId !== item.id && (
+                            <p className="text-xs text-accent-400 mt-0.5 italic">Note: {item.crew_notes}</p>
+                          )}
+                          {item.photo_storage_path && (
+                            <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
+                              <ImageIcon className="w-3 h-3" /> Photo attached
+                            </p>
+                          )}
+                          {!item.photo_storage_path && pendingUploadIds.has(item.id) && (
+                            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" /> Photo saved — uploading when back online
+                            </p>
+                          )}
+                          {needsPhoto && !uploading && !pendingUploadIds.has(item.id) && (
+                            <p className="text-xs text-amber-600 mt-0.5">Photo required before completing</p>
+                          )}
+                          {item.requires_photo && item.photo_reason && (
+                            <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
+                          )}
+                        </div>
+
+                        {/* Note toggle button */}
+                        <button
+                          className="flex-shrink-0 mt-0.5 p-1 rounded transition-opacity active:opacity-60"
+                          style={{ color: openNoteItemId === item.id || item.crew_notes ? 'var(--accent-gold)' : 'var(--text-muted)' }}
+                          onClick={() => {
+                            if (openNoteItemId === item.id) {
+                              void saveNote(item.id, item.is_completed)
+                            } else {
+                              openNote(item.id, item.crew_notes ?? '')
+                            }
+                          }}
+                          aria-label={openNoteItemId === item.id ? 'Save note' : 'Add note'}
+                        >
+                          <StickyNote className="w-4 h-4" />
+                        </button>
+
+                        {item.requires_photo && (
+                          <div className="flex-shrink-0">
+                            {uploading ? (
+                              <div className="p-1.5"><Loader2 className="w-4 h-4 text-accent-400 animate-spin" /></div>
+                            ) : (
+                              <button
+                                onClick={() => fileInputRefs.current[item.id]?.click()}
+                                className={cn('p-1.5 rounded-lg transition-colors',
+                                  item.photo_storage_path
+                                    ? 'text-green-600 bg-green-50 hover:bg-green-100'
+                                    : 'text-amber-600 bg-amber-50 hover:bg-amber-100'
+                                )}
+                                title={item.photo_storage_path ? 'Replace photo' : 'Tap to take required photo'}
+                              >
+                                <Camera className="w-4 h-4" />
+                              </button>
+                            )}
+                            <input
+                              ref={(el) => { fileInputRefs.current[item.id] = el }}
+                              type="file" accept="image/*" capture="environment" className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0]
+                                if (file) handlePhotoCapture(item.id, file)
+                                e.target.value = ''
+                              }}
+                            />
+                          </div>
                         )}
                       </div>
 
-                      {item.requires_photo && (
-                        <div className="flex-shrink-0">
-                          {uploading ? (
-                            <div className="p-1.5"><Loader2 className="w-4 h-4 text-accent-400 animate-spin" /></div>
-                          ) : (
-                            <button
-                              onClick={() => fileInputRefs.current[item.id]?.click()}
-                              className={cn('p-1.5 rounded-lg transition-colors',
-                                item.photo_storage_path
-                                  ? 'text-green-600 bg-green-50 hover:bg-green-100'
-                                  : 'text-amber-600 bg-amber-50 hover:bg-amber-100'
-                              )}
-                              title={item.photo_storage_path ? 'Replace photo' : 'Tap to take required photo'}
-                            >
-                              <Camera className="w-4 h-4" />
-                            </button>
-                          )}
-                          <input
-                            ref={(el) => { fileInputRefs.current[item.id] = el }}
-                            type="file" accept="image/*" capture="environment" className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0]
-                              if (file) handlePhotoCapture(item.id, file)
-                              e.target.value = ''
-                            }}
+                      {/* Inline note textarea — appears below the item row */}
+                      {openNoteItemId === item.id && (
+                        <div className="px-4 pb-3 bg-white border-t border-accent-100">
+                          <textarea
+                            autoFocus
+                            value={noteText}
+                            onChange={(e) => setNoteText(e.target.value)}
+                            onBlur={() => void saveNote(item.id, item.is_completed)}
+                            rows={2}
+                            placeholder="Add a note for this item…"
+                            className="w-full mt-2 text-sm rounded-lg px-3 py-2 resize-none border border-accent-200 focus:outline-none focus:border-brand-400"
+                            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
                           />
+                          <div className="flex justify-end gap-2 mt-1.5">
+                            <button
+                              onMouseDown={(e) => {
+                                // mousedown fires before blur — prevent blur from saving
+                                e.preventDefault()
+                                setNoteText(items?.find(i => i.id === item.id)?.crew_notes ?? '')
+                                setOpenNoteItemId(null)
+                              }}
+                              className="text-xs px-2.5 py-1 rounded"
+                              style={{ color: 'var(--text-muted)' }}
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onMouseDown={(e) => {
+                                e.preventDefault()
+                                void saveNote(item.id, item.is_completed)
+                              }}
+                              className="text-xs px-2.5 py-1 rounded font-medium"
+                              style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+                            >
+                              Save
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -435,6 +615,25 @@ export default function CrewTurnoverPage() {
         </div>
       )}
 
+        {/* After the checklist, a sticky "Done" button to return to hub */}
+        <div className="sticky bottom-0 pt-3 pb-6" style={{ background: 'var(--bg-page)' }}>
+          <button
+            onClick={() => setView('hub')}
+            className="btn-secondary w-full py-3"
+          >
+            ← Back to Turnover
+          </button>
+        </div>
+      </div>
+      )}
+
+      {/* ── INVENTORY VIEW ── */}
+      {view === 'inventory' && (
+      <div className="mt-2">
+        <h2 className="text-base font-semibold mb-3 px-1" style={{ color: 'var(--text-primary)' }}>
+          Inventory
+        </h2>
+
       {/* Inventory section */}
       {inventoryItems && inventoryItems.length > 0 && (
         <div className="mb-4">
@@ -474,6 +673,14 @@ export default function CrewTurnoverPage() {
                             min={0}
                             value={qty}
                             onChange={(e) => handleCountChange(item.id, parseInt(e.target.value, 10) || 0)}
+                            onKeyDown={(e) => {
+                              if (e.key !== 'Enter') return
+                              e.preventDefault()
+                              const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[data-inv-count-input]'))
+                              const idx = inputs.indexOf(e.currentTarget)
+                              inputs[idx + 1]?.focus()
+                            }}
+                            data-inv-count-input
                             className="w-12 text-center text-sm font-semibold text-accent-900 border border-accent-200 rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-brand-400"
                           />
                           <button
@@ -494,38 +701,22 @@ export default function CrewTurnoverPage() {
         </div>
       )}
 
-      {/* Actions */}
-      <div className="space-y-3 pb-8 mt-4">
-        <button
-          onClick={() => setShowFlagModal(true)}
-          className="w-full py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-2 border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
-        >
-          <AlertTriangle className="w-4 h-4" />
-          Report an Issue
-        </button>
-
-        {turnover.status === 'assigned' && (
-          <button onClick={markInProgress} className="btn-secondary w-full py-3">
-            Start Turnover
+        <div className="sticky bottom-0 pt-3 pb-6" style={{ background: 'var(--bg-page)' }}>
+          <button
+            onClick={() => setView('hub')}
+            className="btn-secondary w-full py-3"
+          >
+            ← Back to Turnover
           </button>
-        )}
-        <button
-          onClick={markComplete}
-          disabled={completing || turnover.status === 'completed'}
-          className="btn-cta w-full py-3 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {completing
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-            : turnover.status === 'completed'
-            ? '✓ Marked Complete'
-            : 'Mark as Complete'
-          }
-        </button>
+        </div>
       </div>
+      )}
 
+      {/* Flag modal — always available regardless of view */}
       {showFlagModal && (
         <IssueReportModal
           turnover={turnover}
+          userId={userId}
           onClose={() => setShowFlagModal(false)}
         />
       )}
@@ -537,12 +728,13 @@ export default function CrewTurnoverPage() {
 
 function IssueReportModal({
   turnover,
+  userId,
   onClose,
 }: {
   turnover: { id: string; org_id: string; property_id: string }
-  onClose: () => void
+  userId:   string
+  onClose:  () => void
 }) {
-  const db = usePowerSync()
   const [title,      setTitle]      = useState('')
   const [details,    setDetails]    = useState('')
   const [priority,   setPriority]   = useState<'medium' | 'high' | 'urgent'>('medium')
@@ -557,18 +749,14 @@ function IssueReportModal({
     setError(null)
 
     try {
-      await db.execute(
-        `INSERT INTO turnover_issue_reports
-           (id, turnover_id, org_id, property_id, title, description, priority)
-         VALUES (
-           lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
-           substr(lower(hex(randomblob(2))),2) || '-' ||
-           substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' ||
-           lower(hex(randomblob(6))),
-           ?, ?, ?, ?, ?, ?
-         )`,
-        [turnover.id, turnover.org_id, turnover.property_id, title.trim(), details.trim() || null, priority]
-      )
+      await submitIssueReport(userId, {
+        turnoverId:  turnover.id,
+        orgId:       turnover.org_id,
+        propertyId:  turnover.property_id,
+        title:       title.trim(),
+        description: details.trim() || null,
+        priority,
+      })
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message)
@@ -610,7 +798,7 @@ function IssueReportModal({
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
-                <label className="label">What's the issue? *</label>
+                <label className="label text-accent-900">What's the issue? *</label>
                 <input
                   type="text"
                   value={title}
@@ -621,7 +809,7 @@ function IssueReportModal({
                 />
               </div>
               <div>
-                <label className="label">Details (optional)</label>
+                <label className="label text-accent-900">Details (optional)</label>
                 <textarea
                   value={details}
                   onChange={(e) => setDetails(e.target.value)}
@@ -631,7 +819,7 @@ function IssueReportModal({
                 />
               </div>
               <div>
-                <label className="label">Urgency</label>
+                <label className="label text-accent-900">Urgency</label>
                 <div className="flex gap-2">
                   {(['medium', 'high', 'urgent'] as const).map((p) => (
                     <button

@@ -103,15 +103,77 @@ export interface IntegrationProvider {
 
 // ── OwnerRez API response shapes ─────────────────────────────────────────────
 
+export interface OwnerRezPropertyAddress {
+  street1:     string
+  city?:       string
+  state:       string
+  postal_code: string
+  is_default:  boolean
+}
+
 export interface OwnerRezProperty {
-  id:            number
-  name:          string
-  bedrooms:      number
-  bathrooms:     number
-  max_occupancy: number
-  sqft?:         number
-  square_feet?:  number
-  size?:         number
+  id:               number
+  name:             string
+  key?:             string   // UUID key for this property
+  bedrooms:         number
+  bathrooms:        number
+  bathrooms_full?:  number
+  bathrooms_half?:  number
+  max_occupancy:    number   // returned by the /v2/properties LIST endpoint
+  max_guests?:      number   // confirmed — returned by the /v2/properties/{id} DETAIL endpoint
+  max_adults?:      number
+  max_children?:    number
+  max_pets?:        number
+  living_area?:     number
+  living_area_type?: string
+  sqft?:            number
+  square_feet?:     number
+  size?:            number
+  latitude?:        number  // confirmed field name
+  longitude?:       number  // confirmed field name
+  property_type?:   string
+  addresses?:       OwnerRezPropertyAddress[]  // nested array, not flat fields
+  check_in?:        string
+  check_out?:       string
+  is_snoozed?:      boolean
+
+  // Rules — TODO: verify these field names with Paul or via propertysearch filter.
+  // The propertysearch endpoint accepts pets_allowed and children_allowed as
+  // filters but their presence on the detail endpoint is unconfirmed.
+  smoking_allowed?: boolean | null
+  pets_allowed?:    boolean | null
+  events_allowed?:  boolean | null
+  min_renter_age?:  number | null
+}
+
+// ── OwnerRez Listings endpoint ───────────────────────────────────────────────
+// WiFi, guest instructions, house manual, and amenities all live here —
+// NOT on the property detail endpoint above.
+
+export interface OwnerRezListingAmenity {
+  icon:  string
+  text:  string
+  title: string  // human-readable name e.g. "Hot Tub", "Fire Pit", "Private Pool"
+}
+
+export interface OwnerRezListingAmenityCategory {
+  type:      string  // category type e.g. "pool_and_spa", "outdoor_features"
+  caption:   string  // human-readable category name
+  amenities: OwnerRezListingAmenity[]
+}
+
+export interface OwnerRezListing {
+  property_id:           number
+  wifi_network:          string | null   // NOTE: field is wifi_network, not wifi_name
+  wifi_password:         string | null
+  check_in_instructions: string | null
+  house_manual:          string | null
+  internet_info:         string | null
+  directions:            string | null
+  occupancy_max:         number | null
+  sleeps_max:            number | null
+  amenity_categories:    OwnerRezListingAmenityCategory[]  // nested, not flat
+  amenity_call_outs:     OwnerRezListingAmenity[]
 }
 
 export interface OwnerRezGuest {
@@ -125,6 +187,7 @@ export interface OwnerRezBooking {
   arrival:       string
   departure:     string
   status:        string
+  is_block?:     boolean
   property_id?:  number
   channel_name?: string
   guest?: {

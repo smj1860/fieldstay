@@ -33,6 +33,10 @@ const BYPASS_ROUTES = [
   // Team invite accept page — unauthenticated users arrive here from email links
   '/accept-invite',
 
+  // Crew invite accept/signup page — unauthenticated crew members arrive here
+  // from email links to set their password and activate their account
+  '/crew-invite',
+
   // Internal event runners
   '/api/inngest',
 
@@ -62,11 +66,17 @@ const BYPASS_ROUTES = [
   // bypass an unauthenticated (or transiently failing) auth refresh here
   // redirects to /login, returning HTML where the browser expects JSON —
   // surfaces as a manifest "Syntax error" in devtools.
-  '/manifest.webmanifest',
+  '/manifest.json',              // crew PWA manifest (public/manifest.json)
+  '/dashboard-manifest.json',    // PM dashboard PWA manifest (public/dashboard-manifest.json)
+  '/manifest.webmanifest',       // kept for forward-compatibility
   '/sw.js',
 
   // Supabase auth callback (magic links, OAuth email confirmation)
   '/auth/callback',
+
+  // Guest-facing guidebook routes (media kit signup + guest guidebook pages).
+  // Intentionally public — guests and sponsors never have a FieldStay session.
+  '/g/',
 
   // Account deletion — handles its own auth verification server-side
   '/api/account/delete',
@@ -127,11 +137,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Authenticated user hitting a public route → redirect into the app
-  // (except '/' which doubles as the marketing homepage)
+  // Authenticated user hitting a public route → redirect into the app.
+  // If the original destination was a crew route (carried in ?next=), honour it.
+  // Otherwise default to /ops (PM dashboard).
   if (user && isPublic && pathname !== '/') {
     const url = request.nextUrl.clone()
-    url.pathname = '/ops'
+    const next = request.nextUrl.searchParams.get('next') ?? ''
+    url.pathname = next.startsWith('/crew') ? '/crew' : '/ops'
     url.search   = ''
     return NextResponse.redirect(url)
   }

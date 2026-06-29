@@ -87,7 +87,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
     const pmEmailByOrg = new Map(pmEmailEntries)
 
     for (const wo of agingWOs) {
-      await step.run(`escalate-aging-wo-${wo.id}`, async () => {
+      const escalationEventData = await step.run(`escalate-aging-wo-${wo.id}`, async () => {
         const daysOpen = Math.round((today.getTime() - new Date(wo.created_at).getTime()) / 86_400_000)
 
         await supabase
@@ -102,17 +102,6 @@ export const dailyWorkOrderOps = inngest.createFunction(
           status_from:               wo.status,
           status_to:                 wo.status,
           notes:                     `Priority auto-escalated to Urgent — open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without update`,
-        })
-
-        await inngest.send({
-          name: 'work-order/aging-escalated' as const,
-          data: {
-            work_order_id: wo.id,
-            org_id:        wo.org_id,
-            property_id:   wo.property_id,
-            days_open:     daysOpen,
-            new_priority:  'urgent',
-          },
         })
 
         const pmEmail = pmEmailByOrg.get(wo.org_id) ?? null
@@ -132,11 +121,29 @@ export const dailyWorkOrderOps = inngest.createFunction(
             }),
           })
         }
+
+        return {
+          work_order_id: wo.id,
+          org_id:        wo.org_id,
+          property_id:   wo.property_id,
+          days_open:     daysOpen,
+        }
+      })
+
+      await step.sendEvent(`send-escalation-event-${wo.id}`, {
+        name: 'work-order/aging-escalated' as const,
+        data: {
+          work_order_id: escalationEventData.work_order_id,
+          org_id:        escalationEventData.org_id,
+          property_id:   escalationEventData.property_id,
+          days_open:     escalationEventData.days_open,
+          new_priority:  'urgent',
+        },
       })
     }
 
     // ── 7.2: Repeat Issue Detection ──────────────────────────────────────────
-    await step.run('detect-repeat-issues', async () => {
+    const repeatGroupsToAlert = await step.run('detect-repeat-issues', async () => {
       const ninetyDaysAgo = new Date(today)
       ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
 
@@ -158,6 +165,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
       const repeatGroups = Object.values(groups).filter((g) => g.count >= 3)
       const thirtyDaysAgo = new Date(today.getTime() - 30 * 86_400_000)
+      const toAlert: typeof repeatGroups = []
 
       for (const group of repeatGroups) {
         const milestoneKey = `repeat_issue:${group.property_id}:${group.category}`
@@ -170,17 +178,6 @@ export const dailyWorkOrderOps = inngest.createFunction(
           .maybeSingle()
 
         if (existing && new Date(existing.created_at) > thirtyDaysAgo) continue
-
-        await inngest.send({
-          name: 'maintenance/repeat-issue-detected' as const,
-          data: {
-            org_id:      group.org_id,
-            property_id: group.property_id,
-            wo_category: group.category,
-            count:       group.count,
-            window_days: 90,
-          },
-        })
 
         const pmEmail = pmEmailByOrg.get(group.org_id) ?? null
         if (pmEmail) {
@@ -207,12 +204,29 @@ export const dailyWorkOrderOps = inngest.createFunction(
           .eq('milestone', milestoneKey)
         await supabase.from('org_milestones')
           .insert({ org_id: group.org_id, milestone: milestoneKey })
+
+        toAlert.push(group)
       }
+
+      return toAlert
     })
+
+    for (const group of repeatGroupsToAlert) {
+      await step.sendEvent(`send-repeat-issue-event-${group.org_id}-${group.property_id}-${group.category}`, {
+        name: 'maintenance/repeat-issue-detected' as const,
+        data: {
+          org_id:      group.org_id,
+          property_id: group.property_id,
+          wo_category: group.category,
+          count:       group.count,
+          window_days: 90,
+        },
+      })
+    }
 
     // ── 7.4: Auto-create WOs for due maintenance schedules ───────────────────
     for (const schedule of autoWOSchedules) {
-      await step.run(`auto-create-wo-${schedule.id}`, async () => {
+      const autoCreateEventData = await step.run(`auto-create-wo-${schedule.id}`, async () => {
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
 
         // Idempotency: skip if an open WO already exists for this schedule + date
@@ -224,7 +238,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
           .not('status', 'in', '("completed","cancelled")')
           .maybeSingle()
 
-        if (existingWO) return { skipped: true }
+        if (existingWO) return null
 
         // Vendor selection chain: assigned → specialty hint → null
         let vendorId: string | null = schedule.assigned_vendor_id ?? null
@@ -272,41 +286,43 @@ export const dailyWorkOrderOps = inngest.createFunction(
             .eq('id', schedule.id)
         }
 
-        if (wo) {
-          await inngest.send({
-            name: 'work-order/created' as const,
-            data: {
-              work_order_id:  wo.id,
-              property_id:    schedule.property_id,
-              org_id:         schedule.org_id,
-              vendor_id:      vendorId,
-              portal_enabled: false,
-            },
-          })
+        if (!wo) return null
 
-          const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
-          if (pmEmail) {
-            await resend.emails.send({
-              from:    FROM,
-              to:      pmEmail,
-              subject: `Work order auto-created — ${schedule.name} at ${property?.name}`,
-              html:    await renderPmAlert({
-                heading:  'Scheduled maintenance work order created',
-                body:     `${schedule.name} is due today — a work order has been created.`,
-                details: [
-                  { label: 'Property',  value: property?.name ?? null },
-                  { label: 'Due Date',  value: new Date(schedule.next_due_date! + 'T00:00:00').toLocaleDateString() },
-                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
-                ],
-                ctaLabel: 'View Work Order →',
-                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
-              }),
-            })
-          }
+        const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
+        if (pmEmail) {
+          await resend.emails.send({
+            from:    FROM,
+            to:      pmEmail,
+            subject: `Work order auto-created — ${schedule.name} at ${property?.name}`,
+            html:    await renderPmAlert({
+              heading:  'Scheduled maintenance work order created',
+              body:     `${schedule.name} is due today — a work order has been created.`,
+              details: [
+                { label: 'Property',  value: property?.name ?? null },
+                { label: 'Due Date',  value: new Date(schedule.next_due_date! + 'T00:00:00').toLocaleDateString() },
+                { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
+              ],
+              ctaLabel: 'View Work Order →',
+              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
+            }),
+          })
         }
 
-        return { created: true, wo_id: wo?.id }
+        return {
+          work_order_id:  wo.id,
+          property_id:    schedule.property_id,
+          org_id:         schedule.org_id,
+          vendor_id:      vendorId,
+          portal_enabled: false,
+        }
       })
+
+      if (autoCreateEventData) {
+        await step.sendEvent(`send-auto-create-event-${schedule.id}`, {
+          name: 'work-order/created' as const,
+          data: autoCreateEventData,
+        })
+      }
     }
 
     // ── Webhook inbox TTL cleanup ─────────────────────────────────────────────

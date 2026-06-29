@@ -2,13 +2,69 @@
 
 import { useState, useTransition, useEffect } from 'react'
 import Link                                    from 'next/link'
-import { Loader2, PlugZap, Unplug }            from 'lucide-react'
-import { disconnectIntegration, getSyncProgress } from './actions'
+import { useSearchParams, useRouter }          from 'next/navigation'
+import { Loader2, PlugZap, Unplug, X }         from 'lucide-react'
+import { disconnectIntegration, getSyncProgress, connectWithApiKey } from './actions'
 import { formatDate }                          from '@/lib/utils'
+
+// ── Provider credential definitions ──────────────────────────────────────────
+// Each api_key provider declares what fields the PM needs to fill in.
+
+const API_KEY_PROVIDER_FIELDS: Record<string, {
+  description: string
+  fields: Array<{ key: string; label: string; placeholder: string; sensitive?: boolean }>
+}> = {
+  hostaway: {
+    description: 'Syncs your Hostaway listings and reservations automatically.',
+    fields: [
+      {
+        key:         'accountId',
+        label:       'Account ID',
+        placeholder: 'Find in Settings → Hostaway API',
+      },
+      {
+        key:         'apiKey',
+        label:       'API Key',
+        placeholder: 'Your Hostaway secret API key',
+        sensitive:   true,
+      },
+    ],
+  },
+  // Guesty is not yet wired — hidden until the integration is live.
+  // guesty: {
+  //   description: 'Syncs your Guesty listings and reservations automatically.',
+  //   fields: [
+  //     {
+  //       key:         'clientId',
+  //       label:       'Client ID',
+  //       placeholder: 'From Guesty → Integrations → API & Webhooks',
+  //     },
+  //     {
+  //       key:         'clientSecret',
+  //       label:       'Client Secret',
+  //       placeholder: 'Your Guesty client secret',
+  //       sensitive:   true,
+  //     },
+  //   ],
+  // },
+}
+
+// ── Provider display config (descriptions shown on each card) ─────────────────
+const PROVIDER_DESCRIPTIONS: Record<string, string> = {
+  ownerrez: 'Syncs bookings, properties, and guest reviews. Enables automatic revenue posting to owner ledgers.',
+  hostaway: 'Connects your Hostaway account to sync all listings and reservations in real time.',
+  // Guesty is not yet wired — hidden until the integration is live.
+  // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
+  kroger:   'Builds Kroger grocery carts automatically from below-par inventory items.',
+}
+
+// Providers not yet wired — excluded from the rendered list until live.
+const HIDDEN_PROVIDER_IDS = new Set<string>(['guesty'])
 
 interface Provider {
   id:           string
   display_name: string
+  auth_type:    string
   is_active:    boolean
 }
 
@@ -28,6 +84,20 @@ export function IntegrationsClient({
   providers:             Provider[]
   connectionsByProvider: Record<string, Connection>
 }) {
+  const searchParams = useSearchParams()
+  const router       = useRouter()
+  const [connectingProvider, setConnectingProvider] = useState<string | null>(
+    searchParams.get('connect')
+  )
+
+  // Clear the param from URL once the modal opens, so refresh doesn't reopen it.
+  useEffect(() => {
+    if (searchParams.get('connect')) {
+      router.replace('/settings/integrations', { scroll: false })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   if (!providers.length) {
     return (
       <div className="card text-center py-10">
@@ -38,18 +108,154 @@ export function IntegrationsClient({
     )
   }
 
+  const connectingProviderInfo = connectingProvider
+    ? providers.find((p) => p.id === connectingProvider)
+    : null
+
   return (
     <div className="space-y-4">
-      {providers.map((provider) => {
+      {providers.filter((provider) => !HIDDEN_PROVIDER_IDS.has(provider.id)).map((provider) => {
         const connection = connectionsByProvider[provider.id]
         return (
           <IntegrationCard
             key={provider.id}
             provider={provider}
             connection={connection ?? null}
+            onConnectClick={() => setConnectingProvider(provider.id)}
           />
         )
       })}
+
+      {connectingProviderInfo && API_KEY_PROVIDER_FIELDS[connectingProviderInfo.id] && (
+        <CredentialModal
+          providerId={connectingProviderInfo.id}
+          displayName={connectingProviderInfo.display_name}
+          onClose={() => setConnectingProvider(null)}
+          onSuccess={() => {
+            setConnectingProvider(null)
+            router.refresh()
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function CredentialModal({
+  providerId,
+  displayName,
+  onClose,
+  onSuccess,
+}: {
+  providerId:  string
+  displayName: string
+  onClose:     () => void
+  onSuccess:   (externalUserId: string) => void
+}) {
+  const config = API_KEY_PROVIDER_FIELDS[providerId]
+  if (!config) return null
+
+  const [values, setValues] = useState<Record<string, string>>(
+    Object.fromEntries(config.fields.map((f) => [f.key, '']))
+  )
+  const [error, setError] = useState<string | null>(null)
+  const [pending, startConnect] = useTransition()
+
+  const handleConnect = () => {
+    setError(null)
+    startConnect(async () => {
+      const result = await connectWithApiKey(providerId, values)
+      if (result.error) {
+        setError(result.error)
+      } else if (result.externalUserId) {
+        onSuccess(result.externalUserId)
+      }
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
+      <div
+        className="relative w-full max-w-md rounded-2xl p-6"
+        style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-xl)' }}
+      >
+        <button
+          onClick={onClose}
+          className="absolute right-4 top-4 p-1 rounded-lg"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        <h2 className="text-lg font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
+          Connect {displayName}
+        </h2>
+        <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
+          {config.description}
+        </p>
+
+        {error && (
+          <div
+            className="text-sm rounded-lg px-3 py-2.5 mb-4"
+            style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+          >
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-4 mb-6">
+          {config.fields.map((field) => (
+            <div key={field.key}>
+              <label
+                className="block text-sm font-medium mb-1.5"
+                style={{ color: 'var(--text-secondary)' }}
+              >
+                {field.label}
+              </label>
+              <input
+                type={field.sensitive ? 'password' : 'text'}
+                value={values[field.key] ?? ''}
+                onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                placeholder={field.placeholder}
+                className="input w-full"
+                autoComplete="off"
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleConnect}
+            disabled={pending}
+            className="btn-primary flex-1 flex items-center justify-center gap-2"
+          >
+            {pending ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Connecting…</>
+            ) : (
+              <><PlugZap className="w-4 h-4" /> Connect</>
+            )}
+          </button>
+          <button onClick={onClose} className="btn-secondary px-4">
+            Cancel
+          </button>
+        </div>
+
+        {/* Where to find credentials — provider-specific help text */}
+        {providerId === 'hostaway' && (
+          <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
+            Find these in your Hostaway dashboard under{' '}
+            <strong>Settings → Hostaway API → Create</strong>. The key is only shown once — save it securely.
+          </p>
+        )}
+        {/* Guesty is not yet wired — hidden until the integration is live.
+        {providerId === 'guesty' && (
+          <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
+            Create these in your Guesty dashboard under{' '}
+            <strong>Integrations → API &amp; Webhooks → New Application</strong>.
+          </p>
+        )} */}
+      </div>
     </div>
   )
 }
@@ -68,15 +274,17 @@ function getSyncCopy(propertiesFound: number | null, bookingsFound: number | nul
     const noun = propertiesFound !== 1 ? 'properties' : 'property'
     return `Found ${propertiesFound} ${noun} — pulling in your booking history…`
   }
-  return 'Connecting to OwnerRez…'
+  return 'Connecting…'
 }
 
 function IntegrationCard({
   provider,
   connection,
+  onConnectClick,
 }: {
-  provider:   Provider
-  connection: Connection | null
+  provider:       Provider
+  connection:     Connection | null
+  onConnectClick: () => void
 }) {
   const [disconnecting, startDisconnect] = useTransition()
   const [confirming, setConfirming]      = useState(false)
@@ -172,8 +380,12 @@ function IntegrationCard({
             )}
           </div>
 
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+            {PROVIDER_DESCRIPTIONS[provider.id] ?? ''}
+          </p>
+
           {isConnected && connection && (
-            <div className="text-xs space-y-0.5" style={{ color: 'var(--text-muted)' }}>
+            <div className="text-xs space-y-0.5 mt-1.5" style={{ color: 'var(--text-muted)' }}>
               {connection.external_user_id && (
                 <p>Account ID: {connection.external_user_id}</p>
               )}
@@ -205,13 +417,23 @@ function IntegrationCard({
               </span>
             </div>
           ) : !connection || isError ? (
-            <Link
-              href={`/api/integrations/${provider.id}/connect`}
-              className="btn-secondary text-sm flex items-center gap-1.5"
-            >
-              <PlugZap className="w-3.5 h-3.5" />
-              {isError ? 'Reconnect' : 'Connect'}
-            </Link>
+            provider.auth_type === 'api_key' ? (
+              <button
+                onClick={onConnectClick}
+                className="btn-secondary text-sm flex items-center gap-1.5"
+              >
+                <PlugZap className="w-3.5 h-3.5" />
+                {isError ? 'Reconnect' : 'Connect'}
+              </button>
+            ) : (
+              <Link
+                href={`/api/integrations/${provider.id}/connect`}
+                className="btn-secondary text-sm flex items-center gap-1.5"
+              >
+                <PlugZap className="w-3.5 h-3.5" />
+                {isError ? 'Reconnect' : 'Connect'}
+              </Link>
+            )
           ) : confirming ? (
             <div className="flex items-center gap-2">
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Disconnect?</span>

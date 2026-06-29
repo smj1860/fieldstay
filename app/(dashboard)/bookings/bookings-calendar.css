@@ -1,0 +1,115 @@
+/* Scoped theme overrides for react-calendar-timeline (v0.30.0-beta).
+   Targets the library's actual rct-* classes (see dist/style.css) to match
+   FieldStay's dark navy / brand-yellow system instead of the default
+   light-grey theme. */
+
+.react-calendar-timeline .rct-outer {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.react-calendar-timeline .rct-scroll {
+  border-top: 1px solid var(--border);
+}
+
+/* Sidebar (property names) */
+
+.react-calendar-timeline .rct-sidebar {
+  background: var(--bg-card);
+  border-right: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.react-calendar-timeline .rct-sidebar .rct-sidebar-row {
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+}
+
+.react-calendar-timeline .rct-sidebar .rct-sidebar-row.rct-sidebar-row-odd {
+  background: var(--bg-canvas);
+}
+
+.react-calendar-timeline .rct-sidebar .rct-sidebar-row.rct-sidebar-row-even {
+  background: var(--bg-card);
+}
+
+/* Header (date labels) */
+
+.react-calendar-timeline .rct-header-root {
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border-strong);
+}
+
+.react-calendar-timeline .rct-calendar-header {
+  border: 1px solid var(--border);
+}
+
+.react-calendar-timeline .rct-dateHeader {
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  background-color: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.react-calendar-timeline .rct-dateHeader-primary {
+  background-color: var(--bg-card);
+  border-left: 1px solid var(--border-strong);
+  border-right: 1px solid var(--border-strong);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Grid lines */
+
+.react-calendar-timeline .rct-vertical-lines .rct-vl {
+  border-left: 1px solid var(--border);
+}
+
+.react-calendar-timeline .rct-vertical-lines .rct-vl.rct-vl-first {
+  border-left-width: 1px;
+}
+
+.react-calendar-timeline .rct-vertical-lines .rct-vl.rct-day-0,
+.react-calendar-timeline .rct-vertical-lines .rct-vl.rct-day-6 {
+  background: var(--bg-canvas);
+}
+
+.react-calendar-timeline .rct-horizontal-lines .rct-hl-even,
+.react-calendar-timeline .rct-horizontal-lines .rct-hl-odd {
+  border-bottom: 1px solid var(--border);
+}
+
+.react-calendar-timeline .rct-horizontal-lines .rct-hl-odd {
+  background: var(--bg-canvas);
+}
+
+.react-calendar-timeline .rct-horizontal-lines .rct-hl-even {
+  background: var(--bg-card);
+}
+
+/* "Now" cursor line — kept subtle; the brand-gold TodayMarker is the primary cue */
+
+.react-calendar-timeline .rct-cursor-line {
+  background: var(--accent-blue);
+  opacity: 0.6;
+}
+
+/* Items (booking bars) — colors are set inline per-booking via itemProps;
+   this just normalizes the chrome the library adds around them. */
+
+.react-calendar-timeline .rct-item {
+  box-shadow: none;
+}
+
+.react-calendar-timeline .rct-item:hover {
+  filter: brightness(1.12);
+}
+
+.react-calendar-timeline .rct-item .rct-item-content {
+  font-size: 12px;
+  font-weight: 500;
+}

@@ -14,13 +14,27 @@
  *
  * Each user runs in its own step.run() so failures are isolated.
  * step.sleep() is called at the TOP LEVEL only — never inside step.run().
+ *
+ * TODO(CLAUDE_55_5 Task 7): This function does not currently handle OwnerRez
+ * property entity_update webhooks — it only fetches bookings via since_utc.
+ * Once property-level webhook handling exists here, add a getPropertyDetail()
+ * call (and the guidebook-config patch from initial-sync.ts's
+ * fetch-property-details/sync-guidebook-configs-from-property steps) for the
+ * specific property that was updated, scoped per the patch's
+ * "Do not add webhook handling that isn't already scoped" instruction.
  */
 
 import { inngest }                      from '@/lib/inngest/client'
+import { NonRetriableError }            from 'inngest'
 import { createServiceClient }          from '@/lib/supabase/server'
 import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
+import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
+import { resend, FROM }                 from '@/lib/resend/client'
+import { getPmEmail }                   from '@/lib/inngest/helpers'
+import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
+import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
 
 const PROVIDER = 'ownerrez'
 
@@ -74,11 +88,36 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       let rateLimited       = false
       let retryAfterSeconds = 60
 
-      await step.run(`sync-user-${conn.user_id}`, async () => {
+      let syncResult: string[] | { skipped: boolean; reason: string } | null | undefined
+      try {
+      syncResult = await step.run(`sync-user-${conn.user_id}`, async () => {
         const supabase = createServiceClient()
         const metadata = (conn.metadata ?? {}) as Record<string, unknown>
         const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
         const client   = new OwnerRezApiClient(conn.user_id)
+
+        // When no cursor exists yet (e.g. fresh reconnect before initial sync sets one),
+        // fall back to property_ids so OwnerRez receives at least one required parameter.
+        let propertyIds: number[] | undefined
+        if (!sinceUtc) {
+          const { data: connectedProps } = await supabase
+            .from('properties')
+            .select('external_id')
+            .eq('org_id', conn.org_id)
+            .eq('external_source', PROVIDER)
+
+          const ids = ((connectedProps ?? []) as Array<{ external_id: string | null }>)
+            .map((p) => Number(p.external_id))
+            .filter((id) => !Number.isNaN(id))
+
+          if (!ids.length) {
+            // No connected properties yet (initial sync hasn't run/completed) —
+            // skip rather than calling OwnerRez with neither required param.
+            console.log(`[OwnerRez:${conn.user_id}] No connected properties and no sync cursor — skipping`)
+            return { skipped: true, reason: 'no_cursor_no_properties' }
+          }
+          propertyIds = ids
+        }
 
         // MEDIUM-3: capture timestamp BEFORE the fetch to close the race window.
         // Bookings modified during the fetch have a modified_at between fetchStartedAt
@@ -87,7 +126,9 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         const fetchStartedAt = new Date().toISOString()
 
         try {
-          const bookings = await client.getBookings({ sinceUtc, includeGuest: true })
+          const bookings = await client.getBookings({ sinceUtc, propertyIds, includeGuest: true })
+
+          let affectedPropertyIds: string[] = []
 
           if (bookings.length) {
             // CRITICAL-2: resolve FieldStay property IDs from OwnerRez external IDs.
@@ -138,6 +179,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               status:          mapBookingStatus(b.status),
               external_id:     String(b.id),
               external_source: PROVIDER,
+              is_block:        b.is_block ?? false,
             }))
 
             const { error } = await supabase
@@ -147,6 +189,87 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             if (error) {
               logger.error(`[OwnerRez:${conn.user_id}] bookings upsert: ${error.message}`)
               throw new Error(error.message)
+            }
+
+            affectedPropertyIds = Array.from(new Set(
+              bookingRows.map((b) => b.property_id).filter((id): id is string => id != null)
+            ))
+
+            // Send immediate maintenance-suggestion emails for owner blocks.
+            // Blocks never generate turnovers (filtered at the generator query level),
+            // but a known vacancy window is the best signal for scheduling maintenance.
+            // Don't wait for the next cron cycle — notify the PM right away.
+            const pmEmail = await getPmEmail(supabase, conn.org_id)
+
+            type BookingRow = typeof bookingRows[number]
+            const ownerBlocks = bookingRows.filter(
+              (r): r is BookingRow & { property_id: string } =>
+                Boolean(r.is_block) && r.property_id != null
+            )
+
+            if (pmEmail && ownerBlocks.length) {
+              // Batch-fetch property names for every owner-block property in one
+              // query instead of a per-booking SELECT inside the loop.
+              const uniquePropertyIds = [...new Set(ownerBlocks.map((b) => b.property_id))]
+
+              const { data: blockProperties } = await supabase
+                .from('properties')
+                .select('id, name')
+                .in('id', uniquePropertyIds)
+
+              const propertyNameById = Object.fromEntries(
+                (blockProperties ?? []).map((p) => [p.id, p.name as string | null])
+              ) as Record<string, string | null>
+
+              // Parallel sends — owner-block notifications are independent of each
+              // other. One email failure must not abort the rest.
+              await Promise.all(
+                ownerBlocks.map(async (row) => {
+                  try {
+                    const candidates = await findMaintenanceCandidatesForWindow(
+                      supabase,
+                      row.property_id,
+                      row.checkin_date,
+                      row.checkout_date
+                    )
+
+                    if (!candidates.length) return
+
+                    const propertyName = propertyNameById[row.property_id] ?? 'Property'
+
+                    const items = candidates
+                      .map((c) => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
+                      .join(', ')
+
+                    await resend.emails.send(
+                      {
+                        from:    FROM,
+                        to:      pmEmail,
+                        subject: `Maintenance opportunity — ${propertyName} blocked for owner use`,
+                        html: `
+                      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+                        <h2>Owner block scheduled</h2>
+                        <p>
+                          ${propertyName} is blocked
+                          ${new Date(row.checkin_date).toLocaleDateString()} –
+                          ${new Date(row.checkout_date).toLocaleDateString()}.
+                          Want to schedule maintenance during this window? Candidates:
+                          ${items}.
+                        </p>
+                        <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">Review Maintenance →</a></p>
+                      </div>
+                    `,
+                      },
+                      { idempotencyKey: `ownerrez-maint-opportunity-${row.external_id}` }
+                    )
+                  } catch (err) {
+                    logger.error(
+                      `[OwnerRez] Failed to send owner-block email for booking ${row.external_id}: ${err instanceof Error ? err.message : String(err)}`
+                    )
+                    // Non-fatal — log and continue; don't fail the whole step for one email
+                  }
+                })
+              )
             }
           }
 
@@ -181,6 +304,8 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             const redis = getRedis()
             await redis.del('ownerrez:circuit:consecutive_failures')
           } catch { /* non-fatal */ }
+
+          return affectedPropertyIds
 
         } catch (err) {
           if (err instanceof RateLimitError) {
@@ -267,7 +392,14 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               }
             } catch { /* non-fatal — connection status was already written */ }
 
-            return  // exit this step cleanly; connection is dead, no retry needed
+            // MEDIUM-6: token revocation is permanent — retrying will only hit
+            // the same revoked token again. Throw NonRetriableError (after the
+            // side effects above already completed) so this is recorded as a
+            // distinct non-retriable failure in Inngest's dashboard instead of
+            // silently looking like a success. The per-connection loop below
+            // catches this so one revoked connection can't block the rest of
+            // this tick's batch.
+            throw new NonRetriableError(humanError)
           }
 
           const humanError = translateSyncError(err)
@@ -340,6 +472,117 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           } catch { /* non-fatal — data was already written to metadata */ }
         }
       })
+      } catch (err) {
+        // The token-revoked branch above throws NonRetriableError after its
+        // side effects (status update, audit log, notification) already
+        // completed — Inngest still records that step as a distinct
+        // non-retriable failure. Swallow it here so one revoked connection
+        // doesn't stop the rest of this tick's connections from syncing.
+        if (err instanceof NonRetriableError) {
+          logger.warn(`[OwnerRez:${conn.user_id}] Skipping — ${err.message}`)
+          continue
+        }
+        throw err
+      }
+
+      // Generate turnovers for any properties that received booking updates.
+      // Called once per property (not per booking) so the generator sees the
+      // full booking list and can apply its two-pass pairing logic correctly.
+      const affectedIds = Array.isArray(syncResult) ? syncResult : []
+      if (affectedIds.length) {
+        const allNewTurnoverIds = await step.run(`generate-turnovers-${conn.user_id}`, async () => {
+          const supabase = createServiceClient()
+          const ids: string[] = []
+          for (const propertyId of affectedIds) {
+            try {
+              const newIds = await generateTurnoversForProperty(propertyId, conn.org_id, supabase)
+              ids.push(...newIds)
+            } catch (err) {
+              logger.error(
+                `[OwnerRez:${conn.user_id}] Turnover generation failed for property ${propertyId}: ${err}`
+              )
+              // Don't let one property's failure block the others
+            }
+          }
+          return ids
+        })
+
+        if (allNewTurnoverIds.length > 0) {
+          const turnoverEvents = await step.run(`fetch-new-turnover-data-${conn.user_id}`, async () => {
+            const supabase = createServiceClient()
+            type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
+            const { data: turnovers } = await supabase
+              .from('turnovers')
+              .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
+              .in('id', allNewTurnoverIds)
+
+            return (turnovers as TurnoverRow[] ?? []).map((t) => ({
+              name: 'turnover/created' as const,
+              data: {
+                turnover_id:       t.id,
+                property_id:       t.property_id,
+                org_id:            conn.org_id,
+                checkout_datetime: t.checkout_datetime,
+                checkin_datetime:  t.checkin_datetime,
+                window_minutes:    t.window_minutes ?? 0,
+              },
+            }))
+          })
+
+          if (turnoverEvents.length > 0) {
+            await step.sendEvent(`fire-turnover-created-events-${conn.user_id}`, turnoverEvents)
+          }
+        }
+      }
+
+      // Auto-create guidebook property configs for newly synced properties
+      if (affectedIds.length) {
+        await step.run(`create-guidebook-property-configs-${conn.user_id}`, async () => {
+          const supabase = createServiceClient()
+
+          const { data: propertiesToCheck } = await supabase
+            .from('properties')
+            .select('id, name')
+            .in('id', affectedIds)
+
+          if (!propertiesToCheck?.length) return
+
+          const { data: existingConfigs } = await supabase
+            .from('guidebook_property_configs')
+            .select('property_id')
+            .in('property_id', affectedIds)
+
+          const alreadyConfigured = new Set(
+            (existingConfigs ?? []).map((c) => c.property_id)
+          )
+
+          const newProperties = propertiesToCheck.filter(
+            (p) => !alreadyConfigured.has(p.id)
+          )
+
+          if (newProperties.length === 0) return
+
+          const slugMap = await generateUniqueSlugsForProperties(newProperties)
+
+          const rows = newProperties.map((p) => ({
+            org_id:       conn.org_id,
+            property_id:  p.id,
+            slug:         slugMap.get(p.id) ?? generateBaseSlug(p.name),
+            is_published: false,
+          }))
+
+          const { error } = await supabase
+            .from('guidebook_property_configs')
+            .upsert(rows, {
+              onConflict:       'org_id,property_id',
+              ignoreDuplicates: true,
+            })
+
+          if (error) {
+            logger.error(`[OwnerRez:${conn.user_id}] guidebook config creation failed: ${error.message}`)
+          }
+        })
+      }
 
       // HIGH-1: step.sleep called at top level — NOT inside step.run
       if (rateLimited) {

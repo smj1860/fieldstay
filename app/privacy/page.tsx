@@ -120,6 +120,15 @@ export default function PrivacyPage() {
               Property addresses and zip codes are collected for operational purposes (geocoding for
               crew dispatch) and are not used for consumer profiling.
             </p>
+
+            <p className="mt-4 font-medium text-gray-800">SMS Communications</p>
+            <p className="text-sm mt-1">
+              FieldStay collects mobile phone numbers solely for the purpose of delivering
+              stay-related SMS communications to guests who have explicitly opted in. Phone numbers
+              are not sold, shared, or transferred to third parties for marketing purposes. SMS
+              consent is not a condition of any purchase or service. Message and data rates may
+              apply. You may opt out at any time by replying STOP to any message.
+            </p>
           </section>
 
           {/* ── 3. Legal Basis for Processing (GDPR) ─────────────────────────────────── */}
@@ -315,7 +324,7 @@ export default function PrivacyPage() {
           </section>
 
           {/* ── 7. Cookies and Local Storage ─────────────────────────────────────────── */}
-          <section>
+          <section id="cookies">
             <h2 className="text-xl font-semibold text-gray-900 mb-3">7. Cookies and Local Storage</h2>
             <p>
               We use only strictly necessary cookies for session management (keeping you logged in)

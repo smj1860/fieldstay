@@ -36,9 +36,9 @@ export async function POST(request: NextRequest) {
 
   if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
 
-  // Idempotency — PowerSync may retry the same upload after a connectivity
-  // blip. Treat a matching report submitted in the last 10 minutes as
-  // already processed instead of creating a duplicate work order.
+  // Idempotency — the Dexie SyncEngine outbox may retry the same upload after a
+  // connectivity blip. Treat a matching report submitted in the last 10 minutes
+  // as already processed instead of creating a duplicate work order.
   const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
   const { data: existing } = await supabase
     .from('work_orders')
@@ -63,6 +63,11 @@ export async function POST(request: NextRequest) {
   })
 
   if (error) {
+    // MEDIUM-8: wo_crew_flag_source_unique — the Dexie outbox can retry this
+    // POST after a connectivity blip that drops the response but not the
+    // write. A duplicate flag on this turnover is a no-op, not a failure —
+    // mirrors the same check in app/crew/turnovers/actions.ts.
+    if (error.code === '23505') return NextResponse.json({ success: true, duplicate: true })
     console.error('[CrewIssueReport]', error)
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
   }

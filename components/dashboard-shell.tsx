@@ -8,7 +8,7 @@ import {
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Sun, Moon,
   Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
-  LifeBuoy, Bell,
+  LifeBuoy, Bell, BookOpen,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -60,6 +60,7 @@ const NAV_ITEMS = [
   { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager'],          group: 'management' as const },
   { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager'],          group: 'management' as const },
   { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager'],          group: 'management' as const },
+  { href: '/guidebook',   label: 'Guidebook',    icon: BookOpen,        roles: ['admin','manager'],          group: 'management' as const },
   { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin'],                    group: 'management' as const },
 ] as const
 
@@ -77,6 +78,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/vendors':      'Vendors',
   '/comms-log':    'Comms Log',
   '/owners':       'Owner Portal',
+  '/guidebook':    'Guidebook',
   '/reviews':      'Reviews',
   '/settings':     'Settings',
   '/help':         'Help & Support',
@@ -219,21 +221,15 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
             'font-medium transition-all relative'
           )}
           style={{
-            background: active
-              ? (theme === 'light' ? 'rgba(10,22,40,0.12)' : 'var(--bg-raised)')
-              : 'transparent',
-            color: theme === 'light'
-              ? (active ? '#0a1628' : 'rgba(10,22,40,0.65)')
-              : (active ? 'var(--text-primary)' : 'var(--text-muted)'),
-            borderLeft: active
-              ? `2px solid ${theme === 'light' ? '#0a1628' : 'var(--accent-gold)'}`
-              : '2px solid transparent',
+            background: active ? 'var(--chrome-bg-raised)' : 'transparent',
+            color:      active ? 'var(--chrome-text)' : 'var(--chrome-text-muted)',
+            borderLeft: active ? '2px solid var(--chrome-gold)' : '2px solid transparent',
           }}
           onMouseOver={(e) => {
-            if (!active) e.currentTarget.style.color = theme === 'light' ? '#0a1628' : 'var(--text-primary)'
+            if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
           }}
           onMouseOut={(e) => {
-            if (!active) e.currentTarget.style.color = theme === 'light' ? 'rgba(10,22,40,0.65)' : 'var(--text-muted)'
+            if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
           }}
         >
           <Icon className="w-4 h-4 flex-shrink-0" />
@@ -261,33 +257,30 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
         mobile ? 'w-[min(256px,85vw)]' : collapsed ? 'w-[68px]' : 'w-60'
       )}
       style={{
-        background:  theme === 'light' ? 'var(--bg-sidebar, #FCD116)' : 'var(--bg-base)',
-        borderRight: '1px solid var(--border)',
+        background:  'var(--chrome-bg)',
+        borderRight: '1px solid var(--chrome-border)',
       }}
     >
       {/* Logo row — close button lives here on mobile */}
       <div
         className="flex items-center gap-3 px-4 py-5 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--border)', minHeight: 72 }}
+        style={{ borderBottom: '1px solid var(--chrome-border)', minHeight: 72 }}
       >
         <div
           className="w-8 h-8 rounded-lg flex-shrink-0 flex items-center
                      justify-center font-black text-sm"
-          style={{
-            background: theme === 'light' ? '#0a1628' : 'var(--accent-gold)',
-            color:      theme === 'light' ? '#FCD116'  : 'var(--text-inverse)',
-          }}
+          style={{ background: 'var(--chrome-gold)', color: 'var(--chrome-bg)' }}
         >
           FS
         </div>
         {(!collapsed || mobile) && (
           <div className="min-w-0 flex-1">
             <span className="font-display font-bold text-base leading-none"
-                  style={{ color: theme === 'light' ? '#0a1628' : 'var(--text-primary)' }}>
+                  style={{ color: 'var(--chrome-text)' }}>
               FieldStay
             </span>
             <p className="text-xs truncate mt-0.5"
-               style={{ color: 'var(--text-muted)' }}>
+               style={{ color: 'var(--chrome-text-muted)' }}>
               {orgName}
             </p>
           </div>
@@ -296,7 +289,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
           <button
             onClick={() => setMobileOpen(false)}
             className="ml-auto p-2 rounded-lg flex-shrink-0"
-            style={{ color: 'var(--text-muted)' }}
+            style={{ color: 'var(--chrome-text-muted)' }}
           >
             <X className="w-5 h-5" />
           </button>
@@ -311,8 +304,8 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
             onClick={() => setMobileOpen(false)}
             className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all mb-2"
             style={{
-              background: 'var(--accent-gold-dim)',
-              color:      'var(--accent-gold)',
+              background: 'var(--chrome-gold-dim)',
+              color:      'var(--chrome-gold)',
               border:     '1px solid rgba(252,209,22,0.2)',
             }}
           >
@@ -325,11 +318,11 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
 
         {mgmtNav.length > 0 && (
           <>
-            <div className="mt-3 mb-1 pt-2" style={{ borderTop: '1px solid var(--border)' }}>
+            <div className="mt-3 mb-1 pt-2" style={{ borderTop: '1px solid var(--chrome-border)' }}>
               {(!collapsed || mobile) && (
                 <span
-                  className="section-header block px-3 pb-1"
-                  style={{ fontSize: '10px', opacity: 0.6 }}
+                  className="block px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide"
+                  style={{ color: 'var(--chrome-text-muted)', opacity: 0.7 }}
                 >
                   Management
                 </span>
@@ -343,22 +336,21 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
       {/* ── Help & Support ─────────────────────────────── */}
       <div
         className="px-2 pt-1 pb-0 flex-shrink-0"
-        style={{ borderTop: '1px solid var(--border)' }}
+        style={{ borderTop: '1px solid var(--chrome-border)' }}
       >
         <Link
           href="/help"
           onClick={() => setMobileOpen(false)}
           title={collapsed && !mobile ? 'Help & Support' : undefined}
           className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
-          style={{ color: 'var(--text-muted)' }}
+          style={{ color: 'var(--chrome-text-muted)' }}
           onMouseOver={(e) => {
-            e.currentTarget.style.background =
-              theme === 'light' ? 'rgba(10,22,40,0.06)' : 'var(--bg-raised)'
-            e.currentTarget.style.color = 'var(--text-primary)'
+            e.currentTarget.style.background = 'var(--chrome-bg-raised)'
+            e.currentTarget.style.color = 'var(--chrome-text)'
           }}
           onMouseOut={(e) => {
             e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--text-muted)'
+            e.currentTarget.style.color = 'var(--chrome-text-muted)'
           }}
         >
           <LifeBuoy className="w-4 h-4 flex-shrink-0" />
@@ -370,7 +362,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
 
       {/* Bottom user row */}
       {(!collapsed || mobile) && (
-        <div className="px-2 pb-3 border-t border-black/10 pt-3 flex-shrink-0">
+        <div className="px-2 pb-3 pt-3 flex-shrink-0" style={{ borderTop: '1px solid var(--chrome-border)' }}>
           <SidebarUserMenu
             userName={userName}
             userEmail={userEmail}
@@ -521,6 +513,36 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 pb-24 md:pb-7">
             {children}
+          </div>
+
+          {/* Legal footer — always visible at the bottom of every PM page */}
+          <div
+            className="flex items-center justify-center gap-4 py-4 border-t"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <a
+              href="/privacy"
+              className="text-xs hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Privacy Policy
+            </a>
+            <span style={{ color: 'var(--border)' }}>·</span>
+            <a
+              href="/terms"
+              className="text-xs hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              Terms of Service
+            </a>
+            <span style={{ color: 'var(--border)' }}>·</span>
+            <a
+              href="/dpa"
+              className="text-xs hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              DPA
+            </a>
           </div>
         </main>
       </div>

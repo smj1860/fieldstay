@@ -5,7 +5,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { slugify } from '@/lib/utils'
 
-export type OnboardingState = { error?: string }
+export type OnboardingState = { error?: string; success?: boolean }
 
 export async function createOrganization(
   _prev: OnboardingState | null,
@@ -22,14 +22,6 @@ export async function createOrganization(
   // Use service client for inserts — user identity already verified above
   const admin = createServiceClient()
 
-  // Pre-flight: prevent duplicate orgs from double-submit
-  const { count: memberCount } = await admin
-    .from('organization_members')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-
-  if ((memberCount ?? 0) > 0) redirect('/ops')
-
   let slug = slugify(name)
   const { count } = await admin
     .from('organizations')
@@ -37,18 +29,19 @@ export async function createOrganization(
     .eq('slug', slug)
   if ((count ?? 0) > 0) slug = `${slug}-${Date.now().toString(36)}`
 
-  const { data: org, error } = await admin
-    .from('organizations')
-    .insert({
-      name,
-      slug,
-      billing_email: user.email,
-      plan: 'starter',
-      plan_status: 'trialing',
-      trial_ends_at: new Date(Date.now() + 14 * 86_400_000).toISOString(),
-      max_properties: 15,
+  // The membership pre-check and the org/membership inserts run inside a
+  // single Postgres function (advisory-locked per user_id) so a double-submit
+  // can't have two concurrent requests both pass the check and each create a
+  // duplicate organization — see create_organization_with_owner migration.
+  const { data, error } = await admin
+    .rpc('create_organization_with_owner', {
+      p_user_id:        user.id,
+      p_name:           name,
+      p_slug:           slug,
+      p_billing_email:  user.email ?? null,
+      p_max_properties: 15,
+      p_trial_ends_at:  new Date(Date.now() + 14 * 86_400_000).toISOString(),
     })
-    .select('id')
     .single()
 
   if (error) {
@@ -56,17 +49,13 @@ export async function createOrganization(
     return { error: 'Failed to create organization. Please try again.' }
   }
 
-  await admin.from('organization_members').insert({
-    org_id:             org.id,
-    user_id:            user.id,
-    role:               'owner',
-    invite_accepted_at: new Date().toISOString(),
-  })
+  const result = data as { org_id: string; created: boolean }
+  if (!result.created) redirect('/ops')
 
   await inngest.send({
     name: 'org/created',
     data: {
-      org_id:     org.id,
+      org_id:     result.org_id,
       user_id:    user.id,
       org_name:   name,
       user_email: user.email ?? '',
@@ -75,6 +64,5 @@ export async function createOrganization(
     },
   })
 
-  redirect('/setup')
-  return {}
+  return { success: true }
 }

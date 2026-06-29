@@ -72,7 +72,7 @@ export default async function InventoryPage() {
         id, property_id, status, created_at, notes,
         crew_members!submitted_by(name),
         inventory_count_draft_items(
-          id, inventory_item_id, previous_quantity, submitted_quantity,
+          id, item_id, previous_quantity, counted_qty, notes,
           inventory_items(name, unit)
         )
       `)

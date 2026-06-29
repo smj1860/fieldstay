@@ -5,7 +5,7 @@ import { inngest } from '@/lib/inngest/client'
 /**
  * POST /api/crew/turnovers/[id]/complete
  *
- * Called by the PowerSync upload connector when a crew member marks a
+ * Called by the Dexie SyncEngine outbox when a crew member marks a
  * turnover complete from the crew PWA. A direct client-side Supabase write
  * can't fire Inngest events, so this route performs the status update and
  * sends `turnover/completed` (cleaning-fee posting, PM notification,

@@ -19,6 +19,7 @@ export default async function OwnersPage() {
       revenue_share_pct,
       notes,
       property_id,
+      share_capital_plan,
       properties ( name ),
       owner_portal_tokens (
         id,
@@ -40,11 +41,17 @@ export default async function OwnersPage() {
     .eq('is_active', true)
     .order('name')
 
-  // Fetch transactions for the P&L panels
+  // Fetch transactions for the P&L panels — bounded to a rolling 13 months
+  // (matching the occupancy report's window) so this doesn't grow unboundedly
+  // with org history.
+  const thirteenMonthsAgo = new Date()
+  thirteenMonthsAgo.setMonth(thirteenMonthsAgo.getMonth() - 13)
+
   const { data: transactions } = await supabase
     .from('owner_transactions')
     .select('id, property_id, transaction_type, category, amount, description, transaction_date, notes, work_order_id, booking_id, visible_to_owner, source')
     .eq('org_id', membership.org_id)
+    .gte('transaction_date', thirteenMonthsAgo.toISOString().split('T')[0]!)
     .order('transaction_date', { ascending: false })
 
   // Derive base URL for portal links

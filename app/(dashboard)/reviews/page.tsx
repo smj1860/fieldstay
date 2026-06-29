@@ -1,6 +1,7 @@
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ReviewsClient } from './reviews-client'
+import { getManualReviewsUsedThisWeek } from './actions'
 
 interface ReviewRow {
   id: string
@@ -32,6 +33,7 @@ interface ReviewResponseRow {
   flags: string[]
   flag_reason: string | null
   generated_at: string | null
+  regeneration_count: number
   created_at: string
   updated_at: string
 }
@@ -39,6 +41,8 @@ interface ReviewResponseRow {
 export default async function ReviewsPage() {
   const { membership } = await requireOrgMember()
   const admin = createServiceClient()
+
+  const manualUsedThisWeek = await getManualReviewsUsedThisWeek(membership.org_id)
 
   // Fetch reviews with responses
   const { data: reviews } = await admin
@@ -75,30 +79,12 @@ export default async function ReviewsPage() {
     return da - db
   })
 
-  if (!reviewsWithDeadline.length) {
-    return (
-      <div className="max-w-lg mx-auto py-20 text-center">
-        <div
-          className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5"
-          style={{ background: 'var(--accent-gold-dim)' }}
-        >
-          <span style={{ fontSize: 24 }}>★</span>
-        </div>
-        <h1 className="font-black text-2xl mb-2 tracking-tight"
-            style={{ color: 'var(--text-primary)' }}>
-          No reviews yet
-        </h1>
-        <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-          Reviews sync automatically from OwnerRez every 6 hours.
-          They&apos;ll appear here once your first review lands.
-        </p>
-      </div>
-    )
-  }
-
+  // Always render ReviewsClient (even with zero reviews) so the manual-paste
+  // entry point stays reachable. ReviewsClient renders its own empty state.
   return (
     <ReviewsClient
       reviews={reviewsWithDeadline as ReviewRow[]}
+      manualUsedThisWeek={manualUsedThisWeek}
     />
   )
 }

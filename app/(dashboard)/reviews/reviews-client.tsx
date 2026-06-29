@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { requestBatchGeneration } from './actions'
+import { requestBatchGeneration, submitManualReview } from './actions'
 
 interface ReviewResponseRow {
   id: string
@@ -15,6 +15,7 @@ interface ReviewResponseRow {
   flags: string[]
   flag_reason: string | null
   generated_at: string | null
+  regeneration_count: number
   created_at: string
   updated_at: string
 }
@@ -40,6 +41,7 @@ interface ReviewRow {
 
 interface Props {
   reviews: ReviewRow[]
+  manualUsedThisWeek: number
 }
 
 function StarRating({ rating }: { rating: number }) {
@@ -97,7 +99,7 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-export function ReviewsClient({ reviews: initialReviews }: Props) {
+export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: Props) {
   const [reviews, setReviews]           = useState<ReviewRow[]>(initialReviews)
   const [selected, setSelected]         = useState<ReviewRow | null>(null)
   const [editedResponse, setEdited]     = useState('')
@@ -106,6 +108,22 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
   const [postConfirm, setPostConfirm]   = useState(false)
   const [batchRequesting, setBatchRequesting] = useState(false)
   const [batchMessage, setBatchMessage]       = useState<string | null>(null)
+
+  // Manual review paste
+  const [showManualModal, setShowManualModal] = useState(false)
+  const [manualForm, setManualForm] = useState({
+    reviewText: '',
+    starRating: 5,
+    guestName:  '',
+    propertyId: null as string | null,
+    platform:   'airbnb',
+  })
+  const [manualSubmitting, setManualSubmitting] = useState(false)
+  const [manualError, setManualError]           = useState<string | null>(null)
+  const [manualUsed, setManualUsed]             = useState(manualUsedThisWeek)
+
+  const MANUAL_LIMIT = 2
+  const manualLeft   = MANUAL_LIMIT - manualUsed
 
   const pendingCount = reviews.filter(r => r.response_status === 'pending').length
 
@@ -205,10 +223,16 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
   const confirmPosted = async () => {
     if (!selected) return
     const supabase = createClient()
-    await supabase
+    const { error } = await supabase
       .from('reviews')
       .update({ response_status: 'posted', updated_at: new Date().toISOString() })
       .eq('id', selected.id)
+
+    if (error) {
+      console.error('[reviews] Failed to mark as posted:', error)
+      alert('Failed to mark as posted. Please try again.')
+      return
+    }
 
     const updatedReview: ReviewRow = { ...selected, response_status: 'posted' }
     updateReviewInList(updatedReview)
@@ -216,6 +240,13 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
   }
 
   const wordCount = editedResponse.trim().split(/\s+/).filter(Boolean).length
+
+  // Regeneration limit state for the selected review
+  const regenCount = selected?.review_responses?.regeneration_count ?? 0
+  const isManual   = selected?.external_source === 'manual'
+  const MAX_REGENS = 2
+  const regenLeft  = MAX_REGENS - regenCount
+  const canRegen   = !isManual && regenLeft > 0
 
   return (
     <div className="relative">
@@ -230,6 +261,26 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
           </h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => setShowManualModal(true)}
+            disabled={manualLeft <= 0}
+            className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+            style={{
+              background: manualLeft > 0 ? 'var(--accent-gold)' : 'var(--bg-raised)',
+              color:      manualLeft > 0 ? 'var(--text-inverse)' : 'var(--text-muted)',
+            }}
+          >
+            + Add Review
+            <span
+              className="text-xs px-1.5 py-0.5 rounded-full ml-1"
+              style={{
+                background: 'rgba(0,0,0,0.15)',
+                color:      manualLeft > 0 ? 'var(--text-inverse)' : 'var(--text-muted)',
+              }}
+            >
+              {manualLeft}/{MANUAL_LIMIT} this week
+            </span>
+          </button>
           {pendingCount > 0 && (
             <button
               onClick={async () => {
@@ -266,12 +317,20 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
 
       {/* Reviews list */}
       {reviews.length === 0 ? (
-        <div
-          className="rounded-2xl p-12 text-center"
-          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
-        >
-          <p style={{ color: 'var(--text-muted)' }}>
-            No reviews synced yet. Reviews will appear here once OwnerRez syncs.
+        <div className="max-w-lg mx-auto py-16 text-center">
+          <div
+            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5"
+            style={{ background: 'var(--accent-gold-dim)' }}
+          >
+            <span style={{ fontSize: 24 }}>★</span>
+          </div>
+          <h2 className="font-black text-xl mb-2 tracking-tight" style={{ color: 'var(--text-primary)' }}>
+            No reviews yet
+          </h2>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            Reviews sync automatically from OwnerRez every 6 hours. They&apos;ll appear
+            here once your first review lands — or use <strong>+ Add Review</strong> above
+            to paste one from another platform.
           </p>
         </div>
       ) : (
@@ -464,14 +523,33 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
                       {savingStatus === 'saving' ? 'Saving…' : savingStatus === 'saved' ? '✓ Saved' : 'Mark as Ready'}
                     </button>
 
-                    <button
-                      onClick={generate}
-                      disabled={generating}
-                      className="px-4 rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
-                      style={{ background: 'var(--bg-raised)', color: 'var(--text-muted)', border: '1px solid var(--border)', cursor: 'pointer' }}
-                    >
-                      {generating ? '…' : 'Regenerate'}
-                    </button>
+                    {canRegen && (
+                      <button
+                        onClick={generate}
+                        disabled={generating}
+                        className="px-4 rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
+                        style={{
+                          background: 'var(--bg-raised)',
+                          color:      'var(--text-muted)',
+                          border:     '1px solid var(--border)',
+                          cursor:     generating ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {generating ? '…' : `Regenerate (${regenLeft} left)`}
+                      </button>
+                    )}
+
+                    {!canRegen && !isManual && (
+                      <p className="text-xs self-center" style={{ color: 'var(--text-muted)' }}>
+                        Max regenerations reached — edit above
+                      </p>
+                    )}
+
+                    {isManual && (
+                      <p className="text-xs self-center" style={{ color: 'var(--text-muted)' }}>
+                        Edit response above
+                      </p>
+                    )}
                   </div>
 
                   {/* Post to OwnerRez */}
@@ -527,6 +605,129 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
             </div>
           </aside>
         </>
+      )}
+
+      {/* Manual review paste modal */}
+      {showManualModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setShowManualModal(false)}
+        >
+          <div
+            className="w-full max-w-lg mx-4 rounded-2xl p-6 space-y-4"
+            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
+                Add Review Manually
+              </h2>
+              <button
+                onClick={() => setShowManualModal(false)}
+                style={{ color: 'var(--text-muted)', fontSize: 20 }}
+              >×</button>
+            </div>
+
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              For reviews from Airbnb, Vrbo, Google, or other platforms that don&apos;t sync
+              automatically. AI response is generated once — edit the draft as needed.
+            </p>
+
+            {manualError && (
+              <p className="text-sm font-medium" style={{ color: 'var(--accent-red)' }}>
+                {manualError}
+              </p>
+            )}
+
+            {/* Platform */}
+            <div>
+              <label className="label">Platform</label>
+              <select
+                value={manualForm.platform}
+                onChange={(e) => setManualForm(f => ({ ...f, platform: e.target.value }))}
+                className="input"
+              >
+                <option value="airbnb">Airbnb</option>
+                <option value="vrbo">Vrbo</option>
+                <option value="google">Google</option>
+                <option value="booking">Booking.com</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            {/* Star rating */}
+            <div>
+              <label className="label">Star Rating</label>
+              <div className="flex gap-2">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setManualForm(f => ({ ...f, starRating: n }))}
+                    className="text-2xl transition-transform active:scale-90"
+                    style={{ color: n <= manualForm.starRating ? '#FCD116' : 'var(--border)' }}
+                  >
+                    ★
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Guest name */}
+            <div>
+              <label className="label">Guest Name (optional)</label>
+              <input
+                type="text"
+                value={manualForm.guestName}
+                onChange={(e) => setManualForm(f => ({ ...f, guestName: e.target.value }))}
+                placeholder="First name or initials"
+                className="input"
+              />
+            </div>
+
+            {/* Review text */}
+            <div>
+              <label className="label">Review Text</label>
+              <textarea
+                value={manualForm.reviewText}
+                onChange={(e) => setManualForm(f => ({ ...f, reviewText: e.target.value }))}
+                rows={5}
+                placeholder="Paste the review text here…"
+                className="input resize-none"
+              />
+            </div>
+
+            <button
+              onClick={async () => {
+                setManualSubmitting(true)
+                setManualError(null)
+                const result = await submitManualReview(manualForm)
+                if ('error' in result) {
+                  setManualError(result.error)
+                  setManualSubmitting(false)
+                  return
+                }
+                // Immediately generate response
+                await fetch('/api/repuguard/generate', {
+                  method:  'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body:    JSON.stringify({ review_id: result.reviewId }),
+                })
+                setManualUsed(u => u + 1)
+                setShowManualModal(false)
+                setManualSubmitting(false)
+                setManualForm({ reviewText: '', starRating: 5, guestName: '', propertyId: null, platform: 'airbnb' })
+                // Reload to show the new review with its generated response
+                window.location.reload()
+              }}
+              disabled={manualSubmitting || !manualForm.reviewText.trim()}
+              className="w-full rounded-xl font-bold text-sm py-3 transition-opacity disabled:opacity-50"
+              style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+            >
+              {manualSubmitting ? 'Generating response…' : 'Submit & Generate Response'}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

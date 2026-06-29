@@ -7,8 +7,9 @@ import { logAuditEvent }       from '@/lib/audit'
 
 export const ownerRezReviewsSync = inngest.createFunction(
   {
-    id:   'ownerrez-reviews-sync',
-    name: 'OwnerRez — Reviews Sync',
+    id:      'ownerrez-reviews-sync',
+    name:    'OwnerRez — Reviews Sync',
+    retries: 2,
   },
   [
     { cron: '0 */6 * * *' },
@@ -123,8 +124,10 @@ export const ownerRezReviewsSync = inngest.createFunction(
           })
           continue
         } else {
+          // Not a rate-limit or revocation — re-throw so Inngest's retry
+          // mechanism fires instead of silently skipping this connection.
           logger.error(`[OwnerRez:${userId}] Reviews fetch failed: ${err instanceof Error ? err.message : String(err)}`)
-          continue
+          throw err
         }
       }
 

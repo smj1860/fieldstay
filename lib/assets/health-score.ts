@@ -6,10 +6,18 @@ export interface AssetRepairSummary {
   last_serviced_at:  string | null
 }
 
+export interface ScoringWeights {
+  age:       number  // 30-70, default 60
+  condition: number  // 30-70, default 40
+}
+
+const DEFAULT_WEIGHTS: ScoringWeights = { age: 60, condition: 40 }
+
 export function calculateHealthScore(
   asset:         Pick<PropertyAsset, 'installation_date' | 'expected_lifespan_years' | 'estimated_replacement_cost'>,
   standards:     Pick<AssetTypeStandard, 'lifespan_min_years' | 'lifespan_max_years' | 'avg_replacement_cost_high'>,
   repairHistory: AssetRepairSummary,
+  weights:       ScoringWeights = DEFAULT_WEIGHTS,
 ): number {
   if (!asset.installation_date) return 50
 
@@ -21,16 +29,18 @@ export function calculateHealthScore(
     || 10  // guard against 0/0 standard ranges to prevent division by zero
 
   const agePct   = Math.min(ageYears / lifespan, 1.0)
-  const ageScore = Math.round((1 - agePct) * 60)
+  const ageScore = Math.round((1 - agePct) * weights.age)
 
   const repairsPerYear    = repairHistory.total_repairs / Math.max(ageYears, 1)
-  const repairFreqPenalty = Math.min(20, Math.round(repairsPerYear * 10))
+  // Penalty caps are proportional to weights.condition (0.5 × 40 = 20, 0.375 × 40 = 15
+  // at default weights — matches the original hardcoded caps exactly).
+  const repairFreqPenalty = Math.min(weights.condition * 0.5, Math.round(repairsPerYear * 10))
 
   const replacementCost   = asset.estimated_replacement_cost
     ?? standards.avg_replacement_cost_high
     ?? 5000
   const repairCostPct     = repairHistory.total_repair_cost / (replacementCost || 5000)
-  const repairCostPenalty = Math.min(15, Math.round(repairCostPct * 100))
+  const repairCostPenalty = Math.min(weights.condition * 0.375, Math.round(repairCostPct * 100))
 
   // last_serviced_at is null for assets with no repair history, which falls
   // through to monthsSinceService = 999 → recencyBonus = 0. That's intentional:
@@ -44,7 +54,7 @@ export function calculateHealthScore(
     : 999
   const recencyBonus = monthsSinceService < 6 ? 5 : monthsSinceService < 12 ? 2 : 0
 
-  const conditionScore = Math.max(0, 40 - repairFreqPenalty - repairCostPenalty + recencyBonus)
+  const conditionScore = Math.max(0, weights.condition - repairFreqPenalty - repairCostPenalty + recencyBonus)
   return Math.max(0, Math.min(100, ageScore + conditionScore))
 }
 

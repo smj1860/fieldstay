@@ -16,8 +16,9 @@ FieldStay is a local-first, multi-tenant SaaS platform that automates turnover o
 | **Inventory** | Par-level tracking with automated Kroger cart generation when stock drops below threshold |
 | **Owner Financials** | Auto-posts cleaning fees, WO expenses, and booking revenue to per-owner P&L ledger |
 | **Asset Health** | Data plate scanning via AI OCR, depreciation tracking, and maintenance history |
-| **RepuGuard** | AI-generated review response drafts, bundled for all OwnerRez-connected accounts |
-| **Crew Mobile** | Offline-first PWA for crew members powered by PowerSync SQLite sync |
+| **RepuGuard** | AI-generated review response drafts with flag detection (legal, safety, billing), regeneration limits, and manual review paste (2/week per org) |
+| **Crew Mobile** | Offline-first PWA for crew members powered by Dexie.js (IndexedDB) local storage with a custom sync outbox |
+| **Guidebook** | Guest-facing portal with WiFi credentials, check-in instructions, and local recommendations. Sponsors pay $15/month per slot for featured placement. Contextual SMS nudges (hot tub timing, fire pit weather, dinner recommendations) are driven by OwnerRez amenity data and live Tomorrow.io weather. Opt-in via door code delivery hook achieves ~100% conversion |
 
 ---
 
@@ -29,7 +30,7 @@ FieldStay is a local-first, multi-tenant SaaS platform that automates turnover o
 | Hosting | Vercel (IAD1 region) |
 | Database | Supabase (PostgreSQL 15, Row Level Security, Realtime) |
 | Auth | Supabase Auth (email + password) |
-| Client Sync | PowerSync (offline-first SQLite, local-first reads) |
+| Client Sync | Dexie.js (offline-first IndexedDB, local-first reads, custom mutation outbox) |
 | Background Jobs | Inngest (durable step functions, crons, event-driven workflows) |
 | Email | Resend + React Email |
 | Payments | Stripe (subscriptions, webhooks, customer portal) |
@@ -38,26 +39,27 @@ FieldStay is a local-first, multi-tenant SaaS platform that automates turnover o
 | Grocery API | Kroger (cart automation) |
 | Geocoding | Mapbox |
 | AI | Anthropic Claude (data plate OCR, RepuGuard draft generation) |
+| SMS | Telnyx (A2P 10DLC) |
+| Weather | Tomorrow.io |
+| Observability | Axiom + Grafana Cloud |
 
 ---
 
 ## Architecture Overview
 
 ```
-Browser (PowerSync SQLite)
-    ↕ sync rules / JWT
-PowerSync Cloud
-    ↕ replication
+Browser (Dexie.js IndexedDB)
+    ↕ mutation outbox / pull sync
+Next.js Server Actions / Route Handlers
+    ↕ queries
 Supabase PostgreSQL (RLS on every table)
-    ↕ Server Actions / Route Handlers
-Next.js on Vercel
     ↕ events
 Inngest (async workflows, crons)
     ↕ integrations
 OwnerRez  ·  Stripe  ·  Resend  ·  Kroger  ·  Mapbox  ·  Anthropic
 ```
 
-**Key architectural constraint:** Client components **never** read from Supabase directly. All client reads go through PowerSync's local SQLite layer. All mutations go through Next.js Server Actions or Route Handlers, which write to Supabase. PowerSync then streams changes back down.
+**Key architectural constraint:** Client components **never** read from Supabase directly. All client reads go through Dexie's local IndexedDB layer (`lib/dexie/`). Mutations are written to a local `mutations` outbox table and drained by `SyncEngine` (`lib/dexie/syncService.ts`), which pushes them to Supabase via Server Actions/Route Handlers; remote changes are pulled back down on the same cadence. This replaces the project's earlier PowerSync-based sync layer — see `CHANGELOG.md` for the migration.
 
 ---
 
@@ -65,7 +67,6 @@ OwnerRez  ·  Stripe  ·  Resend  ·  Kroger  ·  Mapbox  ·  Anthropic
 
 - Node.js ≥ 18.17
 - A Supabase project (free tier works for development)
-- A PowerSync instance
 - An Inngest account (local dev works without one — see below)
 - Stripe account (test mode is fine)
 - Resend account
@@ -98,24 +99,26 @@ Open `.env.local` and fill in the required values. See [`.env.example`](.env.exa
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-NEXT_PUBLIC_POWERSYNC_URL=
 INNGEST_EVENT_KEY=         # set to 'local' for inngest-cli dev
 INNGEST_SIGNING_KEY=       # set to 'local' for inngest-cli dev
 ```
 
 ### 3. Apply database migrations
 
-Run the migrations in order against your Supabase project:
-
 ```bash
-# In the Supabase SQL editor, or using the CLI:
-psql $DATABASE_URL -f fieldstay_migration_v1.sql
-psql $DATABASE_URL -f fieldstay_migration_v2.sql
+# Install Supabase CLI if needed
+npm install -g supabase
+
+# Link to the project
+supabase link --project-ref vpmznjktllhmmbfnxuvk
+
+# Apply all migrations
+supabase db push
 ```
 
-> All migrations are idempotent. Re-running them is safe.
-
-> `fieldstay_migration_v1.sql`/`v2.sql` are superseded — current schema additions live as timestamped files in [`supabase/migrations/`](supabase/migrations/), including `20260618000002_baseline_schema_snapshot.sql`, which backfills CREATE TABLE/RLS/constraints/indexes/policies/grants for tables that predate this migration history. See `supabase/schema_reference.sql` for the full live-schema reference.
+> `fieldstay_migration_v1.sql` and `fieldstay_migration_v2.sql` at the repo root
+> are SUPERSEDED and must not be run. Current schema is maintained as timestamped
+> files in `supabase/migrations/`.
 
 ### 4. Generate TypeScript types
 
@@ -174,6 +177,9 @@ fieldstay/
 │   │   ├── messages/       # Guest messaging
 │   │   ├── comms-log/      # Communication history
 │   │   └── settings/       # Account + billing settings
+│   ├── g/                  # Guest guidebook public routes (/g/[slug], /g/b/[token])
+│   ├── crew/
+│   │   └── work-orders/    # Crew work order detail pages
 │   └── api/
 │       ├── inngest/        # Inngest serve() handler
 │       ├── webhooks/       # Stripe + OwnerRez webhook handlers
@@ -181,10 +187,13 @@ fieldstay/
 ├── lib/
 │   ├── supabase/           # Supabase client factory (server, client, service)
 │   ├── inngest/            # Inngest client, event types, all functions
-│   ├── powersync/          # PowerSync schema + sync rules
+│   ├── dexie/              # Dexie.js schema, local DB, mutation outbox, sync engine
 │   ├── stripe/             # Stripe client + helpers
 │   ├── email/              # React Email components
-│   └── kroger/             # Kroger API client
+│   ├── kroger/             # Kroger API client
+│   ├── guidebook/          # Guidebook helpers, slug generation, PM emails
+│   ├── sms/                # Telnyx SMS client, message builders, NANP validation
+│   └── weather/            # Tomorrow.io weather client
 ├── types/
 │   ├── database.ts         # Hand-maintained DB types (being migrated to generated)
 │   └── supabase.ts         # Generated from schema — do not edit manually
@@ -200,7 +209,7 @@ fieldstay/
 **Never break these.** See [`CLAUDE.md`](CLAUDE.md) for the full rule set.
 
 - Every database table has RLS enabled. No exceptions.
-- Client components read from PowerSync's local SQLite only — never call Supabase directly from the browser.
+- Client components read from Dexie's local IndexedDB only — never call Supabase directly from the browser.
 - All mutations go through Server Actions or Route Handlers.
 - `SUPABASE_SERVICE_ROLE_KEY` is used only in Inngest steps and specific server-side handlers — never in client code.
 - Stripe webhook handlers always verify the signature via `stripe.webhooks.constructEvent()`.
@@ -261,11 +270,30 @@ OAuth2 connection. After connecting, FieldStay syncs properties and bookings via
 ### Stripe
 Subscription billing. Webhook endpoint: `/api/webhooks/stripe`. Always uses `constructEvent()` for signature verification.
 
-### PowerSync
-Offline-first sync. The sync rules determine which rows from Supabase are replicated to each user's local SQLite database. Rules are scoped by `org_id` to enforce tenant isolation at the sync layer.
+### Dexie.js
+Offline-first sync. Client reads come from a local IndexedDB database (`lib/dexie/schema.ts`); writes are queued in a local `mutations` outbox and drained by `SyncEngine` (`lib/dexie/syncService.ts`), which pushes them to Supabase and pulls remote changes back down. Tenant isolation is enforced server-side by RLS on every Supabase query the sync engine makes — the client never queries Supabase directly.
 
 ### Kroger
 Cart automation for inventory restocking. OAuth2 connection per organization. Cart is built automatically when inventory items drop below par level.
+
+### Telnyx (SMS)
+A2P 10DLC messaging for guest SMS delivery. Webhook endpoint: `/api/webhooks/telnyx`.
+All sends are gated on `SMS_ENABLED=true` — do not enable until 10DLC campaign
+verification clears. Handles STOP/START/HELP keywords with TCPA-compliant consent
+tracking. Ed25519 signature verification required on the webhook endpoint
+(`TELNYX_WEBHOOK_PUBLIC_KEY` env var).
+
+### Tomorrow.io (Weather)
+Real-time and forecast weather data used to drive contextual guest SMS messages.
+Rain probability, temperature, and condition codes determine which sponsor slot
+type fires in the morning and evening cron functions.
+
+### Hostaway (PMS)
+OAuth2 connection with API key auth. Property and booking sync adapter built and
+in the codebase (`lib/inngest/functions/hostaway/`). Integration listing pending.
+
+### Hospitable (PMS)
+OAuth2 application submitted. Integration in design phase — not yet built.
 
 ---
 

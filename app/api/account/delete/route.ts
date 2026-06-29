@@ -67,14 +67,29 @@ export async function DELETE(request: NextRequest) {
         try {
           await stripe.subscriptions.cancel(org.stripe_subscription_id as string)
         } catch (err) {
+          // Abort the deletion — a swallowed failure leaves an active Stripe
+          // subscription with no FieldStay account to manage it (billing leak).
           console.error(`[Account:${user.id}] Stripe cancel failed:`, err)
+          return NextResponse.json(
+            {
+              error: 'Unable to cancel your subscription at this time. Please try again in a few minutes, or contact support at support@fieldstay.app if the issue persists.',
+            },
+            { status: 503 }
+          )
         }
       }
       if (org?.repuguard_stripe_subscription_id) {
         try {
           await stripe.subscriptions.cancel(org.repuguard_stripe_subscription_id as string)
         } catch (err) {
+          // Abort the deletion — same billing-leak risk as the main subscription.
           console.error(`[Account:${user.id}] RepuGuard Stripe cancel failed:`, err)
+          return NextResponse.json(
+            {
+              error: 'Unable to cancel your subscription at this time. Please try again in a few minutes, or contact support at support@fieldstay.app if the issue persists.',
+            },
+            { status: 503 }
+          )
         }
       }
     }

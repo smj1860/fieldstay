@@ -151,7 +151,7 @@ export async function cancelBooking(
       .eq('source', 'booking_cancellation')
 
     if ((count ?? 0) === 0) {
-      await supabase.from('owner_transactions').insert({
+      const { error: reversalErr } = await supabase.from('owner_transactions').insert({
         property_id:         txn.property_id,
         org_id:              membership.org_id,
         source:              'booking_cancellation',
@@ -163,6 +163,12 @@ export async function cancelBooking(
         transaction_date:    new Date().toISOString().split('T')[0],
         visible_to_owner:    true,
       })
+      if (reversalErr && reversalErr.code !== '23505') {
+        // 23505 = already reversed (race/retry) — acceptable, continue.
+        // Non-fatal otherwise: the booking is still cancelled; the reversal
+        // is a best-effort financial record. Don't surface this to the PM.
+        console.error('[cancelBooking] reversal insert failed:', reversalErr)
+      }
     }
   }
 

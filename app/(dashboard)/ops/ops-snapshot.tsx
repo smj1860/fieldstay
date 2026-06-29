@@ -3,10 +3,14 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import {
-  Clock, User, Wrench, Package, ChevronDown, ChevronRight,
+  Clock, User, Wrench, Package, ChevronDown, ChevronRight, Car,
+  RefreshCw, AlertCircle, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
+import { distanceMiles } from '@/lib/geocoding'
+
+const AVG_DRIVE_SPEED_MPH = 30
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -27,7 +31,15 @@ interface Turnover {
   turnover_assignments: TurnoverAssignment | TurnoverAssignment[] | null
 }
 
-interface Property    { id: string; name: string; city: string | null; state: string | null }
+interface Property    { id: string; name: string; city: string | null; state: string | null; lat: number | null; lng: number | null }
+
+interface CrewTravelSummary {
+  crewId:    string
+  name:      string
+  miles:     number
+  minutes:   number
+  available: boolean
+}
 interface WorkOrder   { id: string; title: string; property_id: string; priority: string; status: string; scheduled_date: string | null }
 interface LowStockItem { id: string; name: string; property_id: string; current_quantity: number; par_level: number }
 
@@ -53,6 +65,8 @@ function KpiCard({
   label,
   value,
   accentColor = 'var(--accent-gold)',
+  accentDim = 'var(--accent-gold-dim)',
+  icon: Icon,
   alert = false,
   href,
   breakdown,
@@ -60,6 +74,8 @@ function KpiCard({
   label:        string
   value:        number
   accentColor?: string
+  accentDim?:   string
+  icon?:        LucideIcon
   alert?:       boolean
   href?:        string
   breakdown?:   React.ReactNode
@@ -67,14 +83,19 @@ function KpiCard({
   const inner = (
     <div
       className={cn('kpi-card', href && 'cursor-pointer hover:shadow-md hover:border-[var(--accent-gold)] transition-colors')}
-      style={{ '--kpi-accent': accentColor } as React.CSSProperties}
+      style={{ '--kpi-accent': accentColor, '--kpi-accent-dim': accentDim } as React.CSSProperties}
     >
+      {Icon && (
+        <div className="kpi-icon">
+          <Icon className="w-4 h-4" />
+        </div>
+      )}
       <div className="kpi-value" style={alert && value > 0 ? { color: accentColor } : undefined}>
         {value}
       </div>
       <div className="kpi-label mt-1">{label}</div>
       {breakdown && (
-        <div className="mt-1.5 text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>
+        <div className="mt-1.5 text-xs leading-snug" style={{ color: 'var(--kpi-text-muted)' }}>
           {breakdown}
         </div>
       )}
@@ -250,12 +271,14 @@ function DayAccordion({
   isToday,
   turnovers,
   propertyMap,
+  crewTravel,
   defaultOpen,
 }: {
   label:       string
   isToday:     boolean
   turnovers:   Turnover[]
   propertyMap: Record<string, string>
+  crewTravel?: CrewTravelSummary[]
   defaultOpen: boolean
 }) {
   const [open, setOpen] = useState(defaultOpen)
@@ -304,6 +327,32 @@ function DayAccordion({
 
       {open && (
         <div className="px-3 pb-3 pt-1" style={{ background: 'var(--bg-canvas)' }}>
+          {crewTravel && crewTravel.length > 0 && (
+            <div
+              className="rounded-lg mb-3 px-3 py-2 space-y-1"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+            >
+              <p
+                className="text-[10px] font-semibold uppercase tracking-wide mb-1"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                Crew Travel Today
+              </p>
+              {crewTravel.map((c) => (
+                <div key={c.crewId} className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
+                    <Car className="w-3 h-3 flex-shrink-0" style={{ color: 'var(--text-muted)' }} />
+                    {c.name}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    {c.available
+                      ? `${c.miles.toFixed(1)} mi · ${Math.floor(c.minutes / 60)}:${String(c.minutes % 60).padStart(2, '0')}`
+                      : 'Travel time unavailable'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {turnovers.length === 0 ? (
             <p className="text-sm text-center py-4" style={{ color: 'var(--text-muted)' }}>
               No turnovers
@@ -334,6 +383,60 @@ function getDayLabel(day: string, todayDate: string): string {
   })
 }
 
+// ── Urgency sort ─────────────────────────────────────────────────
+
+function urgencyRank(t: Turnover): number {
+  const unassigned = t.status === 'pending_assignment'
+  const urgent     = t.priority === 'urgent' || t.priority === 'high'
+  if (unassigned && urgent) return 0
+  if (unassigned)           return 1
+  if (urgent)               return 2
+  return 3
+}
+
+// ── Crew travel summary ─────────────────────────────────────────
+
+function getCrewTravelSummaries(
+  turnovers:    Turnover[],
+  propertyById: Record<string, Property>
+): CrewTravelSummary[] {
+  const byCrew: Record<string, { name: string; turnovers: Turnover[] }> = {}
+
+  for (const t of turnovers) {
+    const assignments = Array.isArray(t.turnover_assignments)
+      ? t.turnover_assignments
+      : t.turnover_assignments ? [t.turnover_assignments] : []
+
+    for (const a of assignments) {
+      const cm  = a.crew_member
+      const cms = cm ? (Array.isArray(cm) ? cm : [cm]) : []
+      for (const c of cms) {
+        if (!byCrew[c.id]) byCrew[c.id] = { name: c.name, turnovers: [] }
+        byCrew[c.id]!.turnovers.push(t)
+      }
+    }
+  }
+
+  return Object.entries(byCrew).map(([crewId, { name, turnovers: crewTurnovers }]) => {
+    const sorted = [...crewTurnovers].sort((a, b) => a.checkout_datetime.localeCompare(b.checkout_datetime))
+    const stops  = sorted.map((t) => propertyById[t.property_id]).filter(Boolean) as Property[]
+
+    if (stops.length < 2) return { crewId, name, miles: 0, minutes: 0, available: stops.length > 0 }
+
+    let miles = 0
+    for (let i = 0; i < stops.length - 1; i++) {
+      const a = stops[i]!
+      const b = stops[i + 1]!
+      if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) {
+        return { crewId, name, miles: 0, minutes: 0, available: false }
+      }
+      miles += distanceMiles(a.lat, a.lng, b.lat, b.lng)
+    }
+    const minutes = Math.round((miles / AVG_DRIVE_SPEED_MPH) * 60)
+    return { crewId, name, miles, minutes, available: true }
+  })
+}
+
 // ── Main Component ─────────────────────────────────────────────
 
 export function OpsSnapshot({
@@ -357,7 +460,8 @@ export function OpsSnapshot({
 }) {
   const [windowDays, setWindowDays] = useState<7 | 14 | 30>(7)
 
-  const propertyMap = Object.fromEntries(properties.map((p) => [p.id, p.name]))
+  const propertyMap  = Object.fromEntries(properties.map((p) => [p.id, p.name]))
+  const propertyById = Object.fromEntries(properties.map((p) => [p.id, p]))
 
   const days = Array.from({ length: windowDays + 1 }, (_, i) => {
     const d = new Date(todayDate + 'T12:00:00')
@@ -368,7 +472,13 @@ export function OpsSnapshot({
   const byDay = Object.fromEntries(
     days.map((day) => [
       day,
-      turnovers.filter((t) => t.checkout_datetime.startsWith(day)),
+      turnovers
+        .filter((t) => t.checkout_datetime.startsWith(day))
+        .sort((a, b) => {
+          const rankDiff = urgencyRank(a) - urgencyRank(b)
+          if (rankDiff !== 0) return rankDiff
+          return a.checkout_datetime.localeCompare(b.checkout_datetime)
+        }),
     ])
   )
 
@@ -437,7 +547,9 @@ export function OpsSnapshot({
         <KpiCard
           label="Turnovers Today"
           value={kpis.turnoversToday}
-          accentColor="var(--accent-gold)"
+          accentColor="var(--kpi-gold)"
+          accentDim="var(--kpi-gold-dim)"
+          icon={RefreshCw}
           href="/turnovers"
           breakdown={
             kpis.turnoversToday === 0 ? 'No turnovers today' :
@@ -455,7 +567,9 @@ export function OpsSnapshot({
         <KpiCard
           label="Unassigned"
           value={kpis.unassigned}
-          accentColor="var(--accent-amber)"
+          accentColor="var(--kpi-amber)"
+          accentDim="var(--kpi-amber-dim)"
+          icon={AlertCircle}
           alert
           href="/turnovers?status=pending_assignment"
           breakdown={kpis.unassigned > 0 ? 'Tap to assign crew' : undefined}
@@ -463,7 +577,9 @@ export function OpsSnapshot({
         <KpiCard
           label="Open Work Orders"
           value={kpis.openWorkOrders}
-          accentColor="var(--accent-blue)"
+          accentColor="var(--kpi-blue)"
+          accentDim="var(--kpi-blue-dim)"
+          icon={Wrench}
           alert
           href="/maintenance?filter=urgent"
           breakdown={
@@ -475,7 +591,9 @@ export function OpsSnapshot({
         <KpiCard
           label="Below Par"
           value={kpis.belowPar}
-          accentColor="var(--accent-red)"
+          accentColor="var(--kpi-red)"
+          accentDim="var(--kpi-red-dim)"
+          icon={Package}
           alert
           href="/inventory?filter=below_par"
           breakdown={kpis.belowPar > 0 ? 'Tap to view inventory' : undefined}
@@ -538,6 +656,7 @@ export function OpsSnapshot({
               isToday={isToday}
               turnovers={dayTurnovers}
               propertyMap={propertyMap}
+              crewTravel={isToday ? getCrewTravelSummaries(dayTurnovers, propertyById) : undefined}
               defaultOpen={isToday || hasUrgent}
             />
           )

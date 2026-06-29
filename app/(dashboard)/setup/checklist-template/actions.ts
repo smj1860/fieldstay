@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
-import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
+import { inngest } from '@/lib/inngest/client'
 
 export interface ChecklistItemInput {
   section:    string
@@ -37,9 +37,14 @@ export async function saveMasterChecklistItems(
   return { saved: items.length }
 }
 
+// MEDIUM-7: this used to run ~20 sequential Supabase calls per property
+// in-request (delete-then-insert of sections/items + audit log), which for
+// 20+ properties risks hitting the Server Action's execution time limit.
+// Now it just validates and fires an Inngest event — the actual work happens
+// in lib/inngest/functions/apply-master-checklist.ts, fanned out in batches.
 export async function applyMasterChecklistToProperties(
   propertyIds: string[]
-): Promise<{ error?: string; applied: number }> {
+): Promise<{ error?: string; queued: number }> {
   const { supabase, membership, user } = await requireOrgMember()
 
   const { data: masterItems } = await supabase
@@ -48,18 +53,17 @@ export async function applyMasterChecklistToProperties(
     .eq('org_id', membership.org_id)
     .limit(1)
 
-  if (!masterItems?.length) return { error: 'No master checklist items found. Build your checklist first.', applied: 0 }
+  if (!masterItems?.length) return { error: 'No master checklist items found. Build your checklist first.', queued: 0 }
 
-  let applied = 0
-
-  for (const propertyId of propertyIds) {
-    await applyMasterChecklistToProperty(propertyId, membership.org_id, supabase, {
-      force:   true,
-      actorId: user.id,
-    })
-    applied++
-  }
+  await inngest.send({
+    name: 'checklist/master-template.apply.requested',
+    data: {
+      org_id:       membership.org_id,
+      property_ids: propertyIds,
+      triggered_by: user.id,
+    },
+  })
 
   revalidatePath('/inventory')
-  return { applied }
+  return { queued: propertyIds.length }
 }

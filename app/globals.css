@@ -54,16 +54,49 @@
   --bg-overlay:     #253f6e;
   --border-subtle:  rgba(255, 255, 255, 0.04);
   --border-medium:  rgba(255, 255, 255, 0.10);
+
+  /* Branded chrome — intentionally NOT redefined in :root.light, so KPI
+   * cards stay dark-navy in both themes (only the canvas around them
+   * lightens). See the "branded chrome over neutral canvas" pattern. */
+  --kpi-bg:          linear-gradient(145deg, #152b52, #0e1e3e);
+  --kpi-border:      rgba(255, 255, 255, 0.07);
+  --kpi-shadow:      0 4px 10px rgba(10,22,40,0.18), 0 10px 28px rgba(10,22,40,0.14);
+  --kpi-text:        #ffffff;
+  --kpi-text-muted:  #9ab5cc;
+
+  /* Fixed accent set for KPI cards — tuned for the navy chip background,
+   * so they stay legible even when the theme accent vars below recalibrate
+   * for a white card background in :root.light. */
+  --kpi-gold:      #FCD116;
+  --kpi-gold-dim:  rgba(252, 209, 22, 0.16);
+  --kpi-amber:     #f59e0b;
+  --kpi-amber-dim: rgba(245, 158, 11, 0.16);
+  --kpi-blue:      #4da6ff;
+  --kpi-blue-dim:  rgba(77, 166, 255, 0.16);
+  --kpi-red:       #f05454;
+  --kpi-red-dim:   rgba(240, 84, 84, 0.16);
+
+  /* Persistent navy chrome — sidebar, mobile bottom nav, sidebar user row.
+   * Same "branded chrome over neutral canvas" pattern as --kpi-*: not
+   * redefined in :root.light, so these stay constant across themes. */
+  --chrome-bg:         #0a1628;
+  --chrome-bg-raised:  #1a3464;
+  --chrome-border:     rgba(255, 255, 255, 0.08);
+  --chrome-text:       #ffffff;
+  --chrome-text-muted: #9ab5cc;
+  --chrome-gold:       #FCD116;
+  --chrome-gold-dim:   rgba(252, 209, 22, 0.14);
 }
 
 /* ── Light theme override ─────────────────────────────────────── */
 :root.light {
-  /* Blue canvas — white cards float on it */
-  --bg-base:        #c8d9ee;
-  --bg-canvas:      #d4e2f0;
+  /* Neutral gray canvas — white cards float on it, navy chrome (sidebar,
+   * header, KPI cards) stays constant against it */
+  --bg-base:        #e6e9ed;
+  --bg-canvas:      #eef0f3;
   --bg-card:        #ffffff;
-  --bg-raised:      #eaf1f8;
-  --bg-hover:       #dceaf5;
+  --bg-raised:      #f4f6f8;
+  --bg-hover:       #e9edf1;
 
   --border:         rgba(10, 22, 40, 0.10);
   --border-strong:  rgba(10, 22, 40, 0.20);
@@ -95,15 +128,6 @@
   --border-medium:  rgba(10, 22, 40, 0.15);
 }
 
-/* ── Light mode: sidebar stays dark — anchor the "blue frame" ── */
-:root.light aside {
-  background: #0a1628 !important;
-}
-:root.light aside a,
-:root.light aside span,
-:root.light aside p {
-  /* sidebar text uses inline styles — nav overrides handle this */
-}
 
 /* ── Base ─────────────────────────────────────────────────────── */
 @layer base {
@@ -145,12 +169,12 @@
     padding:       24px;
   }
 
-  /* ── KPI / Stat card ── */
+  /* ── KPI / Stat card — branded navy chrome, constant across themes ── */
   .kpi-card {
-    background:    var(--bg-card);
+    background:    var(--kpi-bg);
     border-radius: var(--radius-lg);
-    box-shadow:    var(--shadow-card);
-    border:        1px solid var(--border);
+    box-shadow:    var(--kpi-shadow);
+    border:        1px solid var(--kpi-border);
     padding:       20px;
     position:      relative;
     overflow:      hidden;
@@ -159,16 +183,28 @@
   .kpi-card::before {
     content:  '';
     position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
+    top: 0; left: 0; bottom: 0;
+    width: 4px;
     background: var(--kpi-accent, var(--accent-gold));
+  }
+
+  .kpi-icon {
+    width:  32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 12px;
+    background: var(--kpi-accent-dim, var(--accent-gold-dim));
+    color:      var(--kpi-accent, var(--accent-gold));
   }
 
   .kpi-value {
     font-family:     var(--font-syne), sans-serif;
     font-size:       28px;
     font-weight:     700;
-    color:           var(--text-primary);
+    color:           var(--kpi-text);
     letter-spacing:  -0.03em;
     line-height:     1;
     font-variant-numeric: tabular-nums;
@@ -177,7 +213,7 @@
   .kpi-label {
     font-size:      11px;
     font-weight:    500;
-    color:          var(--text-muted);
+    color:          var(--kpi-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.09em;
   }

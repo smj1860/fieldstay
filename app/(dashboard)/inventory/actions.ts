@@ -490,7 +490,7 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
 
   const { data: draftItems } = await supabase
     .from('inventory_count_draft_items')
-    .select('inventory_item_id, submitted_quantity')
+    .select('item_id, counted_qty')
     .eq('draft_id', draftId)
 
   if (!draftItems) return { error: 'Draft not found' }
@@ -498,7 +498,7 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
   const { data: neverCountedRows } = await supabase
     .from('inventory_items')
     .select('id')
-    .in('id', draftItems.map((item) => item.inventory_item_id))
+    .in('id', draftItems.map((item) => item.item_id))
     .is('first_count_recorded_at', null)
   const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
 
@@ -508,10 +508,10 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
       supabase
         .from('inventory_items')
         .update({
-          current_quantity: item.submitted_quantity,
-          ...(neverCountedIds.has(item.inventory_item_id) ? { first_count_recorded_at: now } : {}),
+          current_quantity: item.counted_qty,
+          ...(neverCountedIds.has(item.item_id) ? { first_count_recorded_at: now } : {}),
         })
-        .eq('id', item.inventory_item_id)
+        .eq('id', item.item_id)
     )
   )
 

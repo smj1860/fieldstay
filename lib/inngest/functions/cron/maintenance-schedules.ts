@@ -364,6 +364,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     const gapSuggestions = await step.run('find-vacancy-gaps', async () => {
       const supabase = createServiceClient()
 
+      // ── 1. All active properties ───────────────────────────────────────────
       const { data: properties } = await supabase
         .from('properties')
         .select('id, org_id, name')
@@ -375,16 +376,54 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
         candidates: Array<{ id: string; name: string; next_due_date: string; estimated_cost: number | null; assigned_vendor_id: string | null }>
       }> = []
 
-      for (const property of properties ?? []) {
-        const { data: bookings } = await supabase
-          .from('bookings')
-          .select('checkin_date, checkout_date')
-          .eq('property_id', property.id)
-          .in('status', ['confirmed', 'tentative'])
-          .gte('checkout_date', todayStr)
-          .order('checkin_date', { ascending: true })
+      if (!properties?.length) return results
 
-        if (!bookings?.length) continue
+      const propertyIds = properties.map((p) => p.id)
+
+      // ── 2. ONE batch bookings query for all properties ─────────────────────
+      //    Replaces the previous per-property query (N round trips → 1).
+      const { data: allBookings } = await supabase
+        .from('bookings')
+        .select('property_id, checkin_date, checkout_date')
+        .in('property_id', propertyIds)
+        .in('status', ['confirmed', 'tentative'])
+        .gte('checkout_date', todayStr)
+        .order('property_id',  { ascending: true })
+        .order('checkin_date', { ascending: true })
+
+      const bookingsByProperty = new Map<string, Array<{ checkin_date: string; checkout_date: string }>>()
+      for (const booking of allBookings ?? []) {
+        const existing = bookingsByProperty.get(booking.property_id) ?? []
+        existing.push({ checkin_date: booking.checkin_date, checkout_date: booking.checkout_date })
+        bookingsByProperty.set(booking.property_id, existing)
+      }
+
+      // ── 3. ONE batch maintenance_schedules query for all properties ────────
+      //    Replaces the per-gap query inside findMaintenanceCandidatesForWindow.
+      //    The window/seasonal filtering it did is reproduced in memory below.
+      const { data: allSchedules } = await supabase
+        .from('maintenance_schedules')
+        .select('id, property_id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
+        .in('property_id', propertyIds)
+        .eq('is_active', true)
+
+      type ScheduleRow = {
+        id: string; property_id: string; name: string; next_due_date: string | null
+        estimated_cost: number | null; assigned_vendor_id: string | null
+        active_from_month: number | null; active_to_month: number | null
+      }
+      const schedulesByProperty = new Map<string, ScheduleRow[]>()
+      for (const schedule of (allSchedules ?? []) as ScheduleRow[]) {
+        const existing = schedulesByProperty.get(schedule.property_id) ?? []
+        existing.push(schedule)
+        schedulesByProperty.set(schedule.property_id, existing)
+      }
+
+      // ── 4. Compute gaps + candidates entirely in memory — zero DB round trips ─
+      for (const property of properties) {
+        const bookings  = bookingsByProperty.get(property.id) ?? []
+        if (!bookings.length) continue
+        const schedules = schedulesByProperty.get(property.id) ?? []
 
         for (let i = 0; i < bookings.length; i++) {
           const checkoutDate = bookings[i]!.checkout_date
@@ -396,18 +435,29 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
           if (gapDays < LIGHT_GAP_DAYS) continue
 
-          const windowEnd = new Date(new Date(checkoutDate).getTime() + Math.min(gapDays, LOOKAHEAD_DAYS) * 86_400_000)
+          // In-memory equivalent of findMaintenanceCandidatesForWindow:
+          // next_due_date <= min(windowEnd, windowStart + LOOKAHEAD_DAYS), and
+          // only schedules whose seasonal window is active this month.
+          const startMs        = new Date(checkoutDate).getTime()
+          const capMs          = startMs + LOOKAHEAD_DAYS * 86_400_000
+          const effectiveEndMs = nextCheckin
+            ? Math.min(new Date(nextCheckin).getTime(), capMs)
+            : capMs
+          const effectiveEnd   = new Date(effectiveEndMs).toISOString().split('T')[0]!
 
-          const { data: candidates } = await supabase
-            .from('maintenance_schedules')
-            .select('id, name, next_due_date, estimated_cost, assigned_vendor_id, active_from_month, active_to_month')
-            .eq('property_id', property.id)
-            .eq('is_active', true)
-            .lte('next_due_date', windowEnd.toISOString().split('T')[0])
-
-          const eligible = (candidates ?? []).filter(c =>
-            isMaintenanceItemActiveThisMonth(c.active_from_month ?? null, c.active_to_month ?? null)
-          )
+          const eligible = schedules
+            .filter((s) =>
+              s.next_due_date != null &&
+              s.next_due_date <= effectiveEnd &&
+              isMaintenanceItemActiveThisMonth(s.active_from_month ?? null, s.active_to_month ?? null)
+            )
+            .map((s) => ({
+              id:                 s.id,
+              name:               s.name,
+              next_due_date:      s.next_due_date!,
+              estimated_cost:     s.estimated_cost,
+              assigned_vendor_id: s.assigned_vendor_id,
+            }))
 
           if (!eligible.length) continue
 

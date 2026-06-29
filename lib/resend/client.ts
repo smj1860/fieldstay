@@ -1,6 +1,8 @@
 import { Resend } from 'resend'
 import { renderTeamInviteEmail }   from '@/emails/team-invite'
 import { renderOwnerPortalEmail } from '@/emails/owner-portal'
+import { renderGuestPreArrivalEmail } from '@/emails/guest-pre-arrival'
+import { renderGuidebookGracePeriodEmail } from '@/emails/guidebook-grace-period'
 
 /**
  * Resend client — single instance for all transactional email.
@@ -52,6 +54,52 @@ export async function sendOwnerPortalEmail({
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
     subject: `Your owner portal for ${propertyName} is ready — FieldStay`,
+    html,
+  })
+}
+
+export async function sendGuestPreArrivalEmail({
+  toEmail,
+  guestName,
+  propertyName,
+  optInUrl,
+  guidebookUrl,
+}: {
+  toEmail:      string
+  guestName:    string
+  propertyName: string
+  optInUrl:     string
+  guidebookUrl: string
+}) {
+  const html = await renderGuestPreArrivalEmail({ guestName, propertyName, optInUrl, guidebookUrl })
+  return resend.emails.send({
+    from:    FROM,
+    to:      toEmail,
+    replyTo: 'help@fieldstay.app',
+    subject: `Get your door code by text — ${propertyName}`,
+    html,
+  })
+}
+
+export async function sendGuidebookGracePeriodEmail({
+  toEmail,
+  orgName,
+  activeSponsors,
+  gracePeriodEndsAt,
+  guidebookUrl,
+}: {
+  toEmail:           string
+  orgName:           string
+  activeSponsors:    number
+  gracePeriodEndsAt: string
+  guidebookUrl:      string
+}) {
+  const html = await renderGuidebookGracePeriodEmail({ orgName, activeSponsors, gracePeriodEndsAt, guidebookUrl })
+  return resend.emails.send({
+    from:    FROM,
+    to:      toEmail,
+    replyTo: 'help@fieldstay.app',
+    subject: `Action needed: your guidebook needs sponsors — FieldStay`,
     html,
   })
 }

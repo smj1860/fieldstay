@@ -13,6 +13,7 @@ import {
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
   bulkUpdateTurnoverStatus,
   acceptSuggestion, dismissSuggestion,
+  archiveTurnover, unarchiveTurnover,
 } from './actions'
 import { TurnoverGantt } from './turnover-gantt'
 import { createClient } from '@/lib/supabase/client'
@@ -65,6 +66,7 @@ interface Turnover {
   suggested_crew_ids: string[] | null
   suggestion_reasoning: string | null
   suggestion_status: 'pending' | 'accepted' | 'dismissed' | null
+  is_archived: boolean
   turnover_assignments: TurnoverAssignment[]
 }
 
@@ -197,12 +199,7 @@ function CrewAssignment({
       {assignedCrew.map(c => (
         <span
           key={c.id}
-          className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"
-          style={{
-            background: 'rgba(59,130,246,0.1)',
-            border:     '1px solid rgba(59,130,246,0.3)',
-            color:      '#1d4ed8',
-          }}
+          className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700"
         >
           {availabilityBadge(c.id)}
           {c.name}
@@ -293,6 +290,7 @@ function TurnoverCard({
   const [updating,        startUpdate]        = useTransition()
   const [accepting,       startAccept]        = useTransition()
   const [dismissing,      startDismiss]       = useTransition()
+  const [archiving,       startArchive]       = useTransition()
   const [flagNotes,       setFlagNotes]       = useState('')
   const [showFlagInput,   setShowFlagInput]   = useState(false)
   const [showQuickFlag,   setShowQuickFlag]   = useState(false)
@@ -667,12 +665,14 @@ function TurnoverCard({
             </div>
           )}
 
-          {turnover.status === 'completed' && turnover.completed_at && (
+          {turnover.status === 'completed' && (
             <div className="flex items-center gap-3 flex-wrap">
-              <p className="text-xs flex items-center gap-1 text-green-600">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Completed {new Date(turnover.completed_at).toLocaleString()}
-              </p>
+              {turnover.completed_at && (
+                <p className="text-xs flex items-center gap-1 text-green-600">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Completed {new Date(turnover.completed_at).toLocaleString()}
+                </p>
+              )}
               {duration && (
                 <span
                   className="text-xs font-semibold px-2 py-0.5 rounded-full"
@@ -680,6 +680,24 @@ function TurnoverCard({
                 >
                   ⏱ {duration}
                 </span>
+              )}
+              {turnover.is_archived ? (
+                <button
+                  onClick={() => startArchive(async () => { await unarchiveTurnover([turnover.id]) })}
+                  disabled={archiving}
+                  className="btn-ghost text-xs py-1.5 ml-auto disabled:opacity-50"
+                  style={{ color: 'var(--accent-gold)' }}
+                >
+                  {archiving ? 'Restoring…' : 'Unarchive'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => startArchive(async () => { await archiveTurnover([turnover.id]) })}
+                  disabled={archiving}
+                  className="btn-ghost text-xs py-1.5 ml-auto text-muted-themed disabled:opacity-50"
+                >
+                  {archiving ? 'Archiving…' : 'Archive'}
+                </button>
               )}
             </div>
           )}
@@ -998,6 +1016,7 @@ export function TurnoverBoard({
     urlStatus === 'pending_assignment' ? 'active' : 'active'
   )
   const [filterCrew,        setFilterCrew]        = useState<string>('all')
+  const [showArchived,      setShowArchived]      = useState(false)
   const [selectedIds,       setSelectedIds]       = useState<Set<string>>(new Set())
   const [bulkAssigning,     startBulkAssign]      = useTransition()
   const [viewMode,          setViewMode]          = useState<'list' | 'gantt'>('list')
@@ -1028,9 +1047,18 @@ export function TurnoverBoard({
 
   // Filter
   const filtered = turnovers.filter((t) => {
+    // Archived turnovers are hidden from the default board and only shown
+    // when the "Show Archived" toggle is active (which shows ONLY archived).
+    if (showArchived ? !t.is_archived : t.is_archived) return false
+
     if (filterProp !== 'all' && t.property_id !== filterProp) return false
-    if (filterStatus === 'active'    && (t.status === 'completed' || t.status === 'cancelled')) return false
-    if (filterStatus === 'completed' &&  t.status !== 'completed') return false
+
+    // In archived view every row is already completed, so the active/completed
+    // status tabs don't apply — skip them to avoid filtering archived rows out.
+    if (!showArchived) {
+      if (filterStatus === 'active'    && (t.status === 'completed' || t.status === 'cancelled')) return false
+      if (filterStatus === 'completed' &&  t.status !== 'completed') return false
+    }
 
     if (filterCrew !== 'all') {
       const crewIds = t.turnover_assignments.map(a => a.crew_member_id)
@@ -1117,7 +1145,7 @@ export function TurnoverBoard({
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => startSync(() => triggerManualSync(orgId))}
+            onClick={() => startSync(() => triggerManualSync())}
             disabled={syncing}
             className="btn-secondary"
             title="Sync calendars now"
@@ -1176,6 +1204,22 @@ export function TurnoverBoard({
             ))}
           </select>
         )}
+
+        <button
+          onClick={() => setShowArchived((s) => !s)}
+          className={cn(
+            'text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors',
+            showArchived ? '' : 'text-muted-themed hover:text-secondary-themed'
+          )}
+          style={
+            showArchived
+              ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)', borderColor: 'var(--accent-gold)' }
+              : { borderColor: 'var(--border)' }
+          }
+          title="Toggle archived turnovers"
+        >
+          {showArchived ? 'Hide Archived' : 'Show Archived'}
+        </button>
 
         {/* List / Gantt toggle */}
         <div
@@ -1302,13 +1346,13 @@ export function TurnoverBoard({
                 onToggle={toggleSelect}
                 onWarning={setAssignmentWarning}
               />
-              {filterStatus !== 'active' && (
+              {(filterStatus !== 'active' || showArchived) && (
                 <BoardSection
-                  label="Recently Completed"
+                  label={showArchived ? 'Archived' : 'Recently Completed'}
                   turnovers={groups.recent}
                   propertyMap={propertyMap}
                   crewMembers={crewMembers}
-                  defaultOpen={false}
+                  defaultOpen={showArchived}
                   variant="muted"
                   selectedIds={selectedIds}
                   onToggle={toggleSelect}

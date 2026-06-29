@@ -182,6 +182,20 @@ export async function createWorkOrder(
     metadata:   { title, property_id, priority, source: 'manual' },
   })
 
+  // Internal crew assignment: no vendor, no portal/dispatch email. The WO
+  // surfaces in the crew PWA via Dexie sync; this event scaffolds push notify.
+  const isCrew = !vendor_id && !!assigned_crew_member_id
+  if (isCrew) {
+    await inngest.send({
+      name: 'work-order/crew.assigned',
+      data: {
+        workOrderId:  wo.id,
+        orgId:        membership.org_id,
+        crewMemberId: assigned_crew_member_id,
+      },
+    })
+  }
+
   revalidatePath('/maintenance')
   return { success: true, workOrderId: wo.id, warning }
 }
@@ -256,13 +270,24 @@ export async function updateWorkOrder(
 
   const priority = PriorityLevelSchema.safeParse(data.priority).data ?? 'medium'
 
+  // Fetch current vendor_id before updating to detect a vendor change
+  const { data: currentWo } = await supabase
+    .from('work_orders')
+    .select('vendor_id')
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  const previousVendorId = currentWo?.vendor_id ?? null
+  const newVendorId      = data.vendor_id || null
+
   const { error } = await supabase
     .from('work_orders')
     .update({
       title:          data.title,
       description:    data.description || null,
       priority,
-      vendor_id:      data.vendor_id || null,
+      vendor_id:      newVendorId,
       scheduled_date: data.scheduled_date || null,
       estimated_cost: data.estimated_cost || null,
       portal_enabled: data.portal_enabled,
@@ -273,6 +298,19 @@ export async function updateWorkOrder(
   if (error) {
     console.error('[updateWorkOrder]', error)
     return { error: 'Operation failed. Please try again.' }
+  }
+
+  // Fire dispatch if a vendor was set or changed
+  if (newVendorId && newVendorId !== previousVendorId) {
+    await inngest.send({
+      name: 'work-order/vendor.assigned',
+      data: {
+        workOrderId,
+        orgId:           membership.org_id,
+        vendorId:        newVendorId,
+        previousVendorId,
+      },
+    })
   }
 
   await logAuditEvent({
@@ -338,6 +376,10 @@ export async function updateWorkOrderStatus(
     .single()
 
   if (!current) return { error: 'Work order not found' }
+
+  // Already completed (e.g. double-click or retried request) — no-op rather
+  // than re-firing work-order/completed and double-advancing its schedule.
+  if (current.status === 'completed') return { success: true }
 
   const update: Record<string, unknown> = { status }
   if (status === 'completed') {
@@ -798,6 +840,20 @@ export async function createWorkOrderFromSchedule(
 
   if (!schedule) return { error: 'Schedule not found' }
 
+  // Idempotency: skip if an open WO already exists for this schedule + date —
+  // mirrors the auto-create check in the maintenance-schedule cron, so a
+  // double-click on "Create Work Order Now" doesn't create a duplicate while
+  // still allowing the next cycle's WO once this one is completed/cancelled.
+  const { data: existingWO } = await supabase
+    .from('work_orders')
+    .select('id')
+    .eq('source_schedule_id', scheduleId)
+    .eq('scheduled_date', schedule.next_due_date)
+    .not('status', 'in', '("completed","cancelled")')
+    .maybeSingle()
+
+  if (existingWO) return { success: true }
+
   const completion_token = crypto.randomUUID()
   const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -888,6 +944,21 @@ export async function bulkAssignVendor(
     targetType: 'work_order',
     metadata:   { workOrderIds, vendorId },
   })
+
+  // Dispatch vendor assignment email for each WO
+  if (workOrderIds.length > 0) {
+    await inngest.send(
+      workOrderIds.map((woId) => ({
+        name: 'work-order/vendor.assigned' as const,
+        data: {
+          workOrderId:      woId,
+          orgId:            membership.org_id,
+          vendorId,
+          previousVendorId: null,  // bulk assign doesn't know previous — always dispatch
+        },
+      }))
+    )
+  }
 
   revalidatePath('/maintenance')
   return {}
@@ -1541,4 +1612,46 @@ export async function recordMaintenanceCompletion(
     console.error('[recordMaintenanceCompletion]', err)
     return { error: 'Operation failed. Please try again.' }
   }
+}
+
+// ── Fetch Completed/Cancelled Work Orders (on demand) ───────────────────────
+// The maintenance page query defaults to active-status work orders only
+// (see app/(dashboard)/maintenance/page.tsx). This fetches the rest, for the
+// "Show completed" toggle in the client board — same select shape as the
+// page's initial query.
+
+export async function fetchArchivedWorkOrders() {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data, error } = await supabase
+    .from('work_orders')
+    .select(`
+      id, property_id, vendor_id, assigned_crew_member_id,
+      wo_number, title, description, category, priority, status, source,
+      scheduled_date, completed_date,
+      estimated_cost, nte_amount, actual_cost,
+      access_notes, completion_notes, invoice_reference,
+      portal_enabled, completion_token,
+      vendor_acknowledged_at, vendor_acknowledged_by,
+      completion_verified_at, completion_verified_by,
+      vendor_dispatch_email,
+      created_at, updated_at,
+      properties ( name, address, city, state, access_instructions ),
+      vendors ( id, name, specialty ),
+      work_order_line_items (
+        id, line_type, description, quantity, unit,
+        unit_cost, line_total, sort_order, created_at
+      ),
+      work_order_invoices ( id, status )
+    `)
+    .eq('org_id', membership.org_id)
+    .in('status', ['completed', 'cancelled'])
+    .order('created_at', { ascending: false })
+
+  if (error) {
+    console.error('[fetchArchivedWorkOrders]', error)
+    return []
+  }
+
+  return data ?? []
 }

@@ -1,23 +1,36 @@
+import Link from 'next/link'
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { Shield, Download } from 'lucide-react'
 import type { AuditEvent } from '@/types/database'
 
-export default async function AuditLogPage() {
+const PAGE_SIZE = 50
+
+export default async function AuditLogPage({
+  searchParams,
+}: {
+  searchParams: { page?: string }
+}) {
   const { membership } = await requireOrgMember()
+
+  const page   = Math.max(1, parseInt(searchParams.page ?? '1', 10) || 1)
+  const offset = (page - 1) * PAGE_SIZE
 
   // Use service client — audit_events RLS restricts to owner role only,
   // but admin/managers should also be able to view for SOC2 purposes.
   const supabase = createServiceClient()
 
+  // Fetch one extra row to detect a next page without a separate count query.
   const { data: events } = await supabase
     .from('audit_events')
     .select('id, action, actor_id, target_type, target_id, metadata, created_at')
     .eq('org_id', membership.org_id)
     .order('created_at', { ascending: false })
-    .limit(200)
+    .range(offset, offset + PAGE_SIZE)
 
-  const rows = (events ?? []) as Pick<AuditEvent, 'id' | 'action' | 'actor_id' | 'target_type' | 'target_id' | 'metadata' | 'created_at'>[]
+  const fetched = (events ?? []) as Pick<AuditEvent, 'id' | 'action' | 'actor_id' | 'target_type' | 'target_id' | 'metadata' | 'created_at'>[]
+  const hasMore = fetched.length > PAGE_SIZE
+  const rows    = hasMore ? fetched.slice(0, PAGE_SIZE) : fetched
 
   return (
     <div className="max-w-4xl">
@@ -32,7 +45,7 @@ export default async function AuditLogPage() {
           <div>
             <h1 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>Audit Log</h1>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Last 200 events — admin actions, access changes, financial mutations
+              Admin actions, access changes, financial mutations
             </p>
           </div>
         </div>
@@ -115,6 +128,25 @@ export default async function AuditLogPage() {
               </tbody>
             </table>
           </div>
+
+          {(page > 1 || hasMore) && (
+            <div
+              className="flex items-center justify-between px-4 py-3"
+              style={{ borderTop: '1px solid var(--border)' }}
+            >
+              {page > 1 ? (
+                <Link href={`/settings/audit?page=${page - 1}`} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
+                  ← Previous
+                </Link>
+              ) : <span />}
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Page {page}</span>
+              {hasMore ? (
+                <Link href={`/settings/audit?page=${page + 1}`} className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
+                  Next →
+                </Link>
+              ) : <span />}
+            </div>
+          )}
         </div>
       )}
     </div>

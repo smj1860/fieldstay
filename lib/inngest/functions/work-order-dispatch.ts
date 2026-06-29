@@ -15,7 +15,7 @@ export const workOrderDispatch = inngest.createFunction(
 
   async ({ event, step }) => {
     const {
-      woNumber, publicUrl, vendorEmail, vendorName,
+      workOrderId, woNumber, publicUrl, vendorEmail, vendorName,
       propertyName, propertyAddress, title, description,
       nteAmount, dispatcherName, dispatcherOrg, dispatcherPhone,
     } = event.data
@@ -35,12 +35,15 @@ export const workOrderDispatch = inngest.createFunction(
         dispatcherOrg,
         dispatcherPhone,
       }))
-      const { error } = await resend.emails.send({
-        from:    FROM,
-        to:      [vendorEmail],
-        subject: `Work Order ${woNumber} — ${propertyName}`,
-        html,
-      })
+      const { error } = await resend.emails.send(
+        {
+          from:    FROM,
+          to:      [vendorEmail],
+          subject: `Work Order ${woNumber} — ${propertyName}`,
+          html,
+        },
+        { idempotencyKey: `work-order-dispatch-${workOrderId}-${vendorEmail}` }
+      )
       if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
     })
 
@@ -48,13 +51,18 @@ export const workOrderDispatch = inngest.createFunction(
     await step.run('log-to-comms', async () => {
       const supabase = createServiceClient()
 
+      // Use PK (workOrderId) — not wo_number — to avoid cross-org ambiguity
+      // if two orgs share the same wo_number string.
       const { data: wo } = await supabase
         .from('work_orders')
         .select('id, org_id, vendor_id, property_id')
-        .eq('wo_number', woNumber)
+        .eq('id', workOrderId)
         .single()
 
       if (!wo) return { skipped: 'work order not found for comms log' }
+
+      const subject  = `Work Order ${woNumber} — ${propertyName}`
+      const dedupKey = `wo-dispatch:${workOrderId}`
 
       const { error } = await supabase.from('communication_logs').insert({
         org_id:          wo.org_id,
@@ -63,12 +71,17 @@ export const workOrderDispatch = inngest.createFunction(
         vendor_id:       wo.vendor_id ?? null,
         work_order_id:   wo.id,
         property_id:     wo.property_id,
-        subject:         `Work Order ${woNumber} — ${propertyName}`,
+        subject,
         body:            `Work order dispatched to ${vendorEmail}. Public URL: ${publicUrl}`,
         source:          'system',
         communicated_at: new Date().toISOString(),
+        dedup_key:       dedupKey,
       })
-      if (error) console.error('[workOrderDispatch] comms log insert', error)
+
+      if (error) {
+        if (error.code === '23505') return { logged: false, alreadyExisted: true }
+        throw error
+      }
 
       return { logged: true }
     })
@@ -143,12 +156,15 @@ export const workOrderSignedOff = inngest.createFunction(
         signedOffAt,
         pmName:       pmEmail.fullName,
       }))
-      const { error } = await resend.emails.send({
-        from:    FROM,
-        to:      [pmEmail.email!],
-        subject: `✓ Work Complete — ${woNumber} · ${propertyName}`,
-        html,
-      })
+      const { error } = await resend.emails.send(
+        {
+          from:    FROM,
+          to:      [pmEmail.email!],
+          subject: `✓ Work Complete — ${woNumber} · ${propertyName}`,
+          html,
+        },
+        { idempotencyKey: `work-order-signed-off-pm-${workOrderId}` }
+      )
       if (error) throw new Error(`Resend sign-off error: ${JSON.stringify(error)}`)
     })
 
@@ -164,6 +180,9 @@ export const workOrderSignedOff = inngest.createFunction(
 
       if (!wo) return { skipped: true }
 
+      const subject  = `Work Order Signed Off — ${woNumber}`
+      const dedupKey = `wo-signoff:${workOrderId}`
+
       const { error } = await supabase.from('communication_logs').insert({
         org_id:          wo.org_id,
         channel:         'note',
@@ -171,14 +190,19 @@ export const workOrderSignedOff = inngest.createFunction(
         vendor_id:       wo.vendor_id ?? null,
         work_order_id:   workOrderId,
         property_id:     wo.property_id,
-        subject:         `Work Order Signed Off — ${woNumber}`,
+        subject,
         body:            signOffNotes
                            ? `Vendor signed off. Notes: ${signOffNotes}`
                            : 'Vendor signed off with no notes.',
         source:          'system',
         communicated_at: signedOffAt,
+        dedup_key:       dedupKey,
       })
-      if (error) console.error('[workOrderSignedOff] comms log insert', error)
+
+      if (error) {
+        if (error.code === '23505') return { logged: false, alreadyExisted: true }
+        throw error
+      }
     })
 
     return { notified: true, pmEmail: pmEmail.email, woNumber }

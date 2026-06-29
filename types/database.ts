@@ -54,6 +54,9 @@ export type AssetType =
   | 'hot_tub' | 'garage_door' | 'smart_lock' | 'deck_structure'
   | 'electrical_panel' | 'plumbing_system' | 'septic_system' | 'well_pump'
   | 'generator' | 'solar_system' | 'other'
+  | 'water_shutoff_valve' | 'solar_inverter' | 'whole_home_water_filter'
+  | 'heated_tile_system' | 'range_hood_vent' | 'coffee_station'
+  | 'toaster_oven' | 'wifi_router' | 'fire_extinguisher' | 'thermostat'
 export type MacrsClass        = '5_year' | '15_year' | '27_5_year' | '39_year' | 'section_179'
 export type ComplianceDocType = 'coi' | 'workers_comp' | 'business_license' | 'contractor_license' | 'bonding' | 'other'
 export type ComplianceStatus  = 'compliant' | 'expiring_soon' | 'grace_period' | 'hard_blocked' | 'no_documents'
@@ -152,21 +155,30 @@ export interface Property {
   square_footage:          number | null
   lat:                     number | null
   lng:                     number | null
+  house_manual:            string | null
+  checkout_instructions:   string | null
+  amenities:               Record<string, boolean> | null
+  smoking_allowed:         boolean | null
+  pets_allowed:            boolean | null
+  max_pets:                number | null
+  events_allowed:          boolean | null
+  min_renter_age:          number | null
   created_at:              string
   updated_at:              string
 }
 
 export interface PropertyOwner {
-  id:                string
-  org_id:            string
-  property_id:       string
-  name:              string
-  email:             string | null
-  phone:             string | null
-  revenue_share_pct: number | null
-  notes:             string | null
-  created_at:        string
-  updated_at:        string
+  id:                 string
+  org_id:             string
+  property_id:        string
+  name:               string
+  email:              string | null
+  phone:              string | null
+  revenue_share_pct:  number | null
+  notes:              string | null
+  share_capital_plan: boolean
+  created_at:         string
+  updated_at:         string
 }
 
 export interface OwnerPortalToken {
@@ -202,6 +214,8 @@ export interface Booking {
   org_id:               string
   ical_feed_id:         string | null
   ical_uid:             string | null
+  external_id:          string | null
+  external_source:      string | null
   guest_name:           string | null
   guest_email:          string | null
   checkin_date:         string
@@ -213,6 +227,9 @@ export interface Booking {
   notes:                string | null
   raw_ical_data:        Record<string, unknown> | null
   has_overlap_conflict: boolean
+  is_block:             boolean
+  guidebook_token:      string | null
+  guidebook_pre_arrival_email_sent_at: string | null
   created_at:           string
   updated_at:           string
 }
@@ -252,10 +269,38 @@ export interface CrewAvailability {
   created_at:     string
 }
 
+export interface CrewFeedback {
+  id:             string
+  org_id:         string
+  crew_member_id: string
+  property_id:    string | null
+  feedback_text:  string
+  created_at:     string
+}
+
 export interface CrewAvailabilityEntry {
   available_date: string
   is_available:   boolean
   notes:          string | null
+}
+
+export interface AssignmentOutcome {
+  id:                 string
+  org_id:             string
+  turnover_id:        string
+  crew_member_id:     string
+  property_id:        string | null
+  suggested_score:    number | null
+  score_breakdown:    Record<string, unknown> | null
+  was_suggestion:     boolean
+  was_accepted:       boolean | null
+  override_reason:    string | null
+  started_at:         string | null
+  completed_at:       string | null
+  duration_minutes:   number | null
+  pm_rating:          number | null
+  property_bedrooms:  number | null
+  created_at:         string
 }
 
 export interface Vendor {
@@ -282,6 +327,11 @@ export interface Vendor {
   lng:                  number | null
   created_at:           string
   updated_at:           string
+  stripe_connect_token:           string
+  stripe_connect_account_id:      string | null
+  stripe_connect_charges_enabled: boolean
+  stripe_connect_onboarded_at:    string | null
+  stripe_connect_invite_sent_at:  string | null
 }
 
 export interface ChecklistTemplate {
@@ -335,6 +385,7 @@ export interface Turnover {
   suggested_crew_ids:    string[] | null
   suggestion_reasoning:  string | null
   suggestion_status:     SuggestionStatus | null
+  is_archived:           boolean
   created_at:            string
   updated_at:            string
   turnover_assignments:  TurnoverAssignment[]
@@ -373,20 +424,42 @@ export interface ChecklistInstance {
 }
 
 export interface ChecklistInstanceItem {
-  id:                   string
-  instance_id:          string
-  section_name:         string
-  task:                 string
-  requires_photo:       boolean
-  notes:                string | null
-  sort_order:           number
-  is_completed:         boolean
-  completed_at:         string | null
-  completed_by_crew_id: string | null
-  photo_storage_path:   string | null
-  crew_notes:           string | null
-  created_at:           string
-  updated_at:           string
+  id:                    string
+  instance_id:           string
+  turnover_id:           string | null
+  section_name:          string
+  task:                  string
+  requires_photo:        boolean
+  notes:                 string | null
+  sort_order:            number
+  is_completed:          boolean
+  completed_at:          string | null
+  completed_by_crew_id:  string | null
+  photo_storage_path:    string | null
+  crew_notes:            string | null
+  photo_reason:          string | null
+  is_section_final_item: boolean
+  is_mandatory:          boolean
+  non_deletable:         boolean
+  asset_discovery_type:  string | null
+  created_at:            string
+  updated_at:            string
+}
+
+export interface ChecklistItemSignal {
+  id:                     string
+  org_id:                 string
+  property_id:            string
+  section_name:           string
+  task:                   string
+  alpha:                  number
+  beta:                   number
+  flag_probability:       number  // generated, read-only
+  dynamic_photo_required: boolean // generated, read-only
+  reason:                 string | null
+  total_completions:      number
+  total_flags:            number
+  computed_at:            string
 }
 
 export interface InventoryCatalogItem {
@@ -470,6 +543,8 @@ export interface PurchaseOrder {
   acknowledged_at:      string | null
   notes:                string | null
   total_estimated_cost: number | null
+  order_email_sent:     boolean
+  is_same_day_flip:     boolean
   created_at:           string
   updated_at:           string
 }
@@ -488,17 +563,38 @@ export interface PurchaseOrderItem {
 }
 
 export interface WorkOrderLineItem {
-  id:            string
-  work_order_id: string
-  org_id:        string
-  line_type:     LineItemType
-  description:   string
-  quantity:      number
-  unit:          string | null
-  unit_cost:     number
-  line_total:    number
-  sort_order:    number
-  created_at:    string
+  id:               string
+  work_order_id:    string
+  org_id:           string
+  line_type:        LineItemType
+  description:      string
+  quantity:         number
+  unit:             string | null
+  unit_cost:        number
+  line_total:       number
+  sort_order:       number
+  created_at:       string
+  vendor_submitted: boolean
+}
+
+export type InvoiceStatus = 'pending_payment' | 'paid' | 'cancelled'
+
+export interface WorkOrderInvoice {
+  id:                         string
+  org_id:                     string
+  work_order_id:              string
+  vendor_id:                  string
+  property_id:                string
+  invoice_number:             string
+  status:                     InvoiceStatus
+  subtotal:                   number
+  total:                      number
+  platform_fee_amount:        number
+  stripe_checkout_session_id: string | null
+  stripe_payment_intent_id:   string | null
+  paid_at:                    string | null
+  submitted_at:               string
+  created_at:                 string
 }
 
 export interface WorkOrder {
@@ -795,6 +891,39 @@ export interface StripeProcessedEvent {
   processed_at:    string
 }
 
+// ── RepuGuard ────────────────────────────────────────────────────────────────
+export interface Review {
+  id:              string
+  org_id:          string
+  property_id:     string | null
+  external_id:     string
+  external_source: string
+  guest_name:      string | null
+  rating:          number
+  review_text:     string
+  review_date:     string | null
+  response_status: string
+  external_url:    string | null
+  created_at:      string
+  updated_at:      string
+}
+
+export interface ReviewResponse {
+  id:                  string
+  review_id:           string
+  org_id:              string
+  generated_response:  string | null
+  edited_response:     string | null
+  word_count:          number | null
+  tone_used:           string | null
+  flags:               string[]
+  flag_reason:         string | null
+  generated_at:        string | null
+  regeneration_count:  number
+  created_at:          string
+  updated_at:          string
+}
+
 export interface QuoteRequest {
   id:                     string
   work_order_id:          string
@@ -826,6 +955,7 @@ export interface CommunicationLog {
   communicated_at:   string
   created_at:        string
   deleted_at:        string | null
+  dedup_key:         string | null
 }
 
 export interface Message {
@@ -840,6 +970,15 @@ export interface Message {
   group_id:      string | null
   group_label:   string | null
   created_at:    string
+}
+
+// ── Inventory template ───────────────────────────────────────────────────────
+export interface InventoryTemplate {
+  id:          string
+  org_id:      string
+  name:        string
+  description: string | null
+  created_at:  string
 }
 
 // ── Inventory template item ──────────────────────────────────────────────────
@@ -949,23 +1088,115 @@ export interface OAuthState {
   expires_at:  string
 }
 
-// ── Audit Log ────────────────────────────────────────────────────────────────
-
-export interface AuditEvent {
-  id:          string
-  org_id:      string | null
-  actor_id:    string | null
-  action:      string
-  target_type: string | null
-  target_id:   string | null
-  metadata:    Record<string, unknown> | null
-  ip_address:  string | null
-  created_at:  string
-}
-
 export interface OwnerRezProcessedWebhook {
   webhook_id:   string
   processed_at: string
+}
+
+// ── Self-Funding Guidebook ────────────────────────────────────────────────────
+
+export interface GuidebookConfiguration {
+  id:                    string
+  org_id:                string
+  is_active:             boolean
+  grace_period_ends_at:  string | null
+  extension_messaging_enabled:   boolean
+  extension_gap_threshold_days:  number
+  extension_discount_pct:        number | null
+  extension_contact_method:      'ownerrez_url' | 'email' | 'sms' | null
+  extension_ownerrez_url:        string | null
+  extension_message_days_before: number
+  created_at:            string
+  updated_at:            string
+}
+
+export type StayExtensionRequestStatus = 'pending' | 'accepted' | 'declined'
+
+export interface StayExtensionRequest {
+  id:                   string
+  org_id:               string
+  booking_id:           string
+  property_id:          string
+  gap_days:             number
+  discount_pct:         number | null
+  next_booking_checkin: string | null
+  status:               StayExtensionRequestStatus
+  sms_sent_at:          string | null
+  pm_notified_at:       string | null
+  created_at:           string
+  updated_at:           string
+}
+
+export type GuidebookSlotType =
+  | 'morning_brew'
+  | 'dinner_pints'
+  | 'rainy_day'
+  | 'outdoor_adventure'
+  | 'general'
+  | 'other'
+
+export type GuidebookSponsorStatus = 'pending' | 'active' | 'payment_failed' | 'cancelled'
+
+export type GuidebookOfferType = 'percentage' | 'fixed_amount' | 'item' | 'custom' | 'none'
+
+export interface GuidebookSponsor {
+  id:                     string
+  org_id:                 string
+  slot_number:            number
+  business_name:          string
+  business_description:   string | null
+  business_phone:         string | null
+  business_website:       string | null
+  custom_offer_text:      string | null
+  offer_type:             GuidebookOfferType
+  offer_value:            number | null
+  offer_item:             string | null
+  featured_item:          string | null
+  address:                string | null
+  lat:                    number | null
+  lng:                    number | null
+  slot_type:              GuidebookSlotType
+  slot_context:           string | null
+  media_kit_token:        string
+  stripe_customer_id:     string | null
+  stripe_subscription_id: string | null
+  checkout_session_id:    string | null
+  status:                 GuidebookSponsorStatus
+  activated_at:           string | null
+  deactivated_at:         string | null
+  created_at:             string
+  updated_at:             string
+}
+
+export interface GuidebookPropertyConfig {
+  id:                     string
+  org_id:                 string
+  property_id:            string
+  slug:                   string
+  check_in_instructions:  string | null
+  check_out_instructions: string | null
+  wifi_network:           string | null
+  wifi_password:          string | null
+  house_rules:            string | null
+  is_published:           boolean
+  created_at:             string
+  updated_at:             string
+}
+
+export interface GuidebookGuestSmsOptin {
+  id:                    string
+  org_id:                string
+  property_id:           string
+  booking_id:            string
+  phone_e164:            string
+  is_active:             boolean
+  door_code_sent_at:     string | null
+  last_morning_sms_date: string | null
+  last_evening_sms_date: string | null
+  opted_in_at:           string
+  opted_out_at:          string | null
+  created_at:            string
+  updated_at:            string
 }
 
 // ── Asset Health ─────────────────────────────────────────────────────────────
@@ -993,9 +1224,13 @@ export interface PropertyAsset {
   salvage_value:              number
   health_score:               number | null
   health_score_updated_at:    string | null
+  replacement_status:         'projected' | 'budgeted' | 'approved' | 'deferred'
   is_active:                  boolean
   replaced_by_asset_id:       string | null
   notes:                      string | null
+  photo_url:                  string | null
+  is_na:                      boolean
+  verified_at:                string | null
   created_at:                 string
   updated_at:                 string
 }
@@ -1010,6 +1245,9 @@ export interface AssetTypeStandard {
   macrs_class_default:       MacrsClass
   vendor_specialty_default:  string | null
   notes:                     string | null
+  age_weight:                number  // default 60, range 30-70
+  condition_weight:          number  // default 40, range 30-70
+  weight_updated_at:         string | null
 }
 
 // ── Asset Depreciation ────────────────────────────────────────────────────────
@@ -1175,6 +1413,12 @@ export interface Database {
       support_kb_chunks:     { Row: SupportKbChunk;     Insert: Partial<SupportKbChunk>;     Update: Partial<SupportKbChunk>;     Relationships: [] }
       support_conversations: { Row: SupportConversation; Insert: Partial<SupportConversation>; Update: Partial<SupportConversation>; Relationships: [] }
       support_messages:      { Row: SupportMessage;      Insert: Partial<SupportMessage>;      Update: Partial<SupportMessage>;      Relationships: [] }
+      // ── Self-Funding Guidebook ───────────────────────────────
+      guidebook_configurations:    { Row: GuidebookConfiguration;   Insert: Partial<GuidebookConfiguration>;   Update: Partial<GuidebookConfiguration>;   Relationships: [] }
+      guidebook_sponsors:          { Row: GuidebookSponsor;         Insert: Partial<GuidebookSponsor>;         Update: Partial<GuidebookSponsor>;         Relationships: [] }
+      guidebook_property_configs:  { Row: GuidebookPropertyConfig;  Insert: Partial<GuidebookPropertyConfig>;  Update: Partial<GuidebookPropertyConfig>;  Relationships: [] }
+      guidebook_guest_sms_optins:  { Row: GuidebookGuestSmsOptin;   Insert: Partial<GuidebookGuestSmsOptin>;   Update: Partial<GuidebookGuestSmsOptin>;   Relationships: [] }
+      stay_extension_requests:     { Row: StayExtensionRequest;     Insert: Partial<StayExtensionRequest>;     Update: Partial<StayExtensionRequest>;     Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }

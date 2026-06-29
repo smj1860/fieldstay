@@ -160,8 +160,9 @@ export const handleBookingDetected = inngest.createFunction(
     })
 
     // Step 3: Fire turnover/created for each new turnover.
-    // iCal sync no longer generates turnovers directly, so this is the only
-    // place that fires these events.
+    // Also fired from lib/inngest/functions/ownerrez/initial-sync.ts and
+    // incremental-sync.ts, which generate turnovers directly from synced
+    // OwnerRez bookings via the same generateTurnoversForProperty call.
     if (newTurnoverIds.length > 0) {
       const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
         const supabase = createServiceClient()

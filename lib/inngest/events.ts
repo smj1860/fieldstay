@@ -387,6 +387,38 @@ export type FieldStayEvents = {
     }
   }
 
+  'work-order/vendor.assigned': {
+    data: {
+      workOrderId: string
+      orgId:       string
+      vendorId:    string
+      // Previous vendor ID — used to detect reassignment vs first assignment.
+      // Null means this is the first vendor assignment on this WO.
+      previousVendorId: string | null
+    }
+  }
+
+  // Internal crew assigned to a work order (no vendor, no portal/dispatch).
+  // The WO surfaces in the crew PWA via Dexie sync; this scaffolds future push.
+  'work-order/crew.assigned': {
+    data: {
+      workOrderId:  string
+      orgId:        string
+      crewMemberId: string
+    }
+  }
+
+  // Crew member marked a crew-assigned work order complete from the PWA.
+  'work-order/crew.completed': {
+    data: {
+      workOrderId:  string
+      orgId:        string
+      crewMemberId: string
+      completedAt:  string
+      notes:        string | null
+    }
+  }
+
   // ----------------------------------------------------------
   // Maintenance analytics
   // ----------------------------------------------------------
@@ -425,6 +457,12 @@ export type FieldStayEvents = {
     data: {
       org_id:   string
       tax_year: number
+    }
+  }
+
+  'asset/capex-projection-requested': {
+    data: {
+      org_id: string
     }
   }
 
@@ -469,6 +507,14 @@ export type FieldStayEvents = {
       source_property_id: string
       target_property_ids: string[]
       triggered_by:       string
+    }
+  }
+
+  'checklist/master-template.apply.requested': {
+    data: {
+      org_id:        string
+      property_ids:  string[]
+      triggered_by:  string
     }
   }
 
@@ -520,6 +566,118 @@ export type FieldStayEvents = {
       user_email: string
       first_name: string
       org_name:   string
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Hostaway Integration
+  // ----------------------------------------------------------
+
+  'integration/hostaway.sync.requested': {
+    data: {
+      user_id:     string
+      org_id:      string
+      provider_id: string
+      full_sync:   boolean
+      since?:      string  // ISO date — for incremental sync
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Work Order Invoices (CLAUDE_58_0)
+  // ----------------------------------------------------------
+
+  'work-order/invoice-submitted': {
+    data: {
+      work_order_id: string
+      invoice_id:    string
+      org_id:        string
+      vendor_id:     string
+      property_id:   string
+      total:         number
+    }
+  }
+
+  'work-order/invoice-paid': {
+    data: {
+      work_order_id: string
+      invoice_id:    string
+      org_id:        string
+      property_id:   string
+      amount_paid:   number
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Self-Funding Guidebook — sponsor lifecycle (CLAUDE_55_0)
+  // ----------------------------------------------------------
+
+  'guidebook/sponsor.checkout.completed': {
+    data: {
+      checkoutSessionId: string
+      sponsorId:         string
+      orgId:             string
+      subscriptionId:    string
+      customerId:        string
+    }
+  }
+
+  'guidebook/sponsor.subscription.cancelled': {
+    data: { subscriptionId: string; orgId: string; sponsorId: string }
+  }
+
+  'guidebook/sponsor.payment.failed': {
+    data: { subscriptionId: string; orgId: string; sponsorId: string }
+  }
+
+  'guidebook/billing.credit.evaluate': {
+    data: {
+      orgId:             string
+      stripeCustomerId:  string
+      currentPeriodEnd:  number  // Unix timestamp — used as idempotency key seed
+    }
+  }
+
+  // Sponsor grace period (CLAUDE_55_0 addendum)
+  'guidebook/grace.period.expired': {
+    data: { orgId: string }
+  }
+
+  // Self-Funding Guidebook — Phase 3 (CLAUDE_55_2)
+  'guidebook/guest.opted.in': {
+    data: {
+      optinId:    string
+      bookingId:  string
+      orgId:      string
+      propertyId: string
+      phoneE164:  string
+    }
+  }
+
+  'guidebook/sponsor.payment.recovered': {
+    data: {
+      subscriptionId: string
+      orgId:          string
+      sponsorId:      string
+    }
+  }
+
+  // Stay-extension ("Gap Night") messaging
+  'guidebook/stay.extension.cron': {
+    data: Record<string, never>
+  }
+  'guidebook/stay.extension.request': {
+    data: {
+      requestId:          string
+      orgId:              string
+      bookingId:          string
+      propertyId:         string
+      gapDays:            number
+      discountPct:        number | null
+      contactMethod:      'ownerrez_url' | 'email' | 'sms'
+      ownerRezUrl:        string | null
+      guestPhoneE164:     string | null
+      nextBookingCheckin: string | null
     }
   }
 

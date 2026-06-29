@@ -10,14 +10,34 @@
  */
 
 import { inngest }              from '@/lib/inngest/client'
+import { NonRetriableError }    from 'inngest'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
-import type { OwnerRezProperty, OwnerRezBooking } from '@/lib/integrations/types'
+import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing, OwnerRezListingAmenityCategory } from '@/lib/integrations/types'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
+import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
+import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
 
 const PROVIDER = 'ownerrez'
+
+// Actual structure is amenity_categories with nested amenities[].title —
+// not a flat array with an amenity_id field.
+function normalizeAmenities(categories: OwnerRezListingAmenityCategory[]): Record<string, boolean> {
+  const result: Record<string, boolean> = {}
+  for (const category of categories ?? []) {
+    for (const amenity of category.amenities ?? []) {
+      if (!amenity.title) continue
+      const key = amenity.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '')
+      result[key] = true // presence in the list = amenity exists at the property
+    }
+  }
+  return result
+}
 
 async function writeSyncCount(
   user_id: string,
@@ -182,7 +202,148 @@ export const ownerRezInitialSync = inngest.createFunction(
         logger.info(`[OwnerRez:${user_id}] Patched null fields on ${existingProps.length} properties`)
       })
 
-      // ── Step 1c: Apply master checklist to newly-synced properties ────────────
+      // ── Step 1c: Fetch property detail and sync rich fields ──────────────────
+      // The /v2/properties list endpoint returns minimal data.
+      // /v2/properties/{id} returns WiFi, instructions, and rules.
+      // Amenities come from the batch /v2/listings endpoint instead (see Addendum
+      // in CLAUDE_55_5.md — avoids a second per-property call for that field).
+      //
+      // SCALABILITY: this used to be a single non-resumable step.run with a for
+      // loop over every property — 50+ properties meant 7+ seconds of sequential
+      // external calls in one step, and a retry discarded ALL progress and
+      // re-burned OwnerRez quota from scratch. It is now fanned out: a list
+      // fetch, a single batch listings fetch, then one memoized step per
+      // property. Inngest skips the callback for steps whose IDs already
+      // completed, so a retry only re-runs incomplete properties.
+
+      type EnrichTarget = {
+        id:                  string
+        external_id:         string | null
+        wifi_name:           string | null
+        wifi_password:       string | null
+        access_instructions: string | null
+        house_manual:        string | null
+        amenities:           Record<string, boolean> | null
+      }
+
+      // Step 1c-i: snapshot the properties to enrich (needed in outer scope so
+      // the per-property steps below can be fanned out from the loop).
+      const enrichTargets = await step.run('fetch-properties-to-enrich', async () => {
+        const supabase = createServiceClient()
+        const { data } = await supabase
+          .from('properties')
+          .select('id, external_id, wifi_name, wifi_password, access_instructions, house_manual, amenities')
+          .eq('external_source', PROVIDER)
+          .eq('org_id', org_id)
+          .eq('is_active', true)
+        return (data ?? []) as EnrichTarget[]
+      })
+
+      // Step 1c-ii: batch fetch amenity listings once (shared across all
+      // properties). Returned as a plain object — a Map is not JSON-serialisable
+      // as step output.
+      const listingByPropertyId = await step.run('fetch-listings-batch', async () => {
+        try {
+          const listings = await client.getListings({ includeAmenities: true })
+
+          if (listings.length > 0) {
+            logger.info('[OwnerRez] listing shape sample', {
+              listingKeys:          Object.keys(listings[0]),
+              amenityCategoryCount: listings[0]?.amenity_categories?.length ?? 0,
+              firstCategoryKeys:    listings[0]?.amenity_categories?.[0] ? Object.keys(listings[0].amenity_categories[0]) : [],
+            })
+          }
+
+          return Object.fromEntries(
+            listings.map((l) => [String(l.property_id), l])
+          ) as Record<string, OwnerRezListing>
+        } catch (err) {
+          logger.warn(`[OwnerRez:${user_id}] getListings failed — continuing without amenities: ${err instanceof Error ? err.message : String(err)}`)
+          return {} as Record<string, OwnerRezListing>
+        }
+      })
+
+      // Step 1c-iii: one memoized step per property for the detail call + patch.
+      for (const dbProp of enrichTargets) {
+        await step.run(`fetch-property-detail-${dbProp.id}`, async () => {
+          const supabase = createServiceClient()
+          const orId     = Number(dbProp.external_id)
+          const detail   = await client.getPropertyDetail(orId).catch(() => null)
+
+          const patch: Record<string, unknown> = {}
+
+          if (detail) {
+            // NOTE: WiFi, check-in instructions, and house manual are NOT on
+            // GET /v2/properties/{id} — they live on the listings endpoint
+            // and are mapped from `listing` below instead.
+
+            // Extract address fields from the addresses array
+            const defaultAddress =
+              (detail.addresses ?? []).find((a) => a.is_default) ??
+              (detail.addresses ?? [])[0]
+
+            if (defaultAddress) {
+              if (defaultAddress.street1)     patch.address = defaultAddress.street1
+              if (defaultAddress.state)       patch.state   = defaultAddress.state
+              if (defaultAddress.city)        patch.city    = defaultAddress.city
+              if (defaultAddress.postal_code) patch.zip     = defaultAddress.postal_code
+            }
+            if (detail.latitude)  patch.lat = detail.latitude
+            if (detail.longitude) patch.lng = detail.longitude
+
+            // Occupancy and rules — always sync from OwnerRez
+            if (detail.max_guests)                     patch.max_guests      = detail.max_guests
+            if (detail.smoking_allowed !== undefined)  patch.smoking_allowed = detail.smoking_allowed
+            if (detail.pets_allowed !== undefined)     patch.pets_allowed    = detail.pets_allowed
+            if (detail.max_pets !== undefined)         patch.max_pets        = detail.max_pets
+            if (detail.events_allowed !== undefined)   patch.events_allowed  = detail.events_allowed
+            if (detail.min_renter_age)                 patch.min_renter_age  = detail.min_renter_age
+          }
+
+          // WiFi, instructions, house manual, and amenities — from the batch
+          // listings call, which is the actual source for these fields
+          const listing = listingByPropertyId[String(orId)]
+          if (listing) {
+            if (!dbProp.wifi_name && listing.wifi_network)
+              patch.wifi_name = listing.wifi_network
+
+            if (!dbProp.wifi_password && listing.wifi_password)
+              patch.wifi_password = listing.wifi_password
+
+            if (!dbProp.access_instructions && listing.check_in_instructions)
+              patch.access_instructions = listing.check_in_instructions
+
+            if (!dbProp.house_manual && listing.house_manual)
+              patch.house_manual = listing.house_manual
+
+            if (listing.amenity_categories?.length) {
+              patch.amenities = normalizeAmenities(listing.amenity_categories)
+            }
+          }
+
+          if (Object.keys(patch).length === 0) return { skipped: true }
+
+          patch.updated_at = new Date().toISOString()
+
+          const { error } = await supabase
+            .from('properties')
+            .update(patch)
+            .eq('id', dbProp.id)
+            .eq('org_id', org_id) // explicit tenant guard
+
+          if (error) throw new Error(`Failed to patch property ${dbProp.id}: ${error.message}`)
+
+          // Distribute the rate-limit delay across steps — each property's
+          // detail call paces itself rather than hammering OwnerRez back-to-back.
+          await new Promise((r) => setTimeout(r, 150))
+
+          return { patched: Object.keys(patch) }
+        })
+      }
+
+      logger.info(`[OwnerRez:${user_id}] Fetched property details for ${enrichTargets.length} properties`)
+
+      // ── Step 1d: Apply master checklist to newly-synced properties ────────────
       // Only applies to properties that do not yet have a default template.
       // Skips any property where the PM has already set one up.
 
@@ -224,6 +385,109 @@ export const ownerRezInitialSync = inngest.createFunction(
         )
       })
 
+      // ── Auto-create guidebook property configs for new properties ─────────────
+      await step.run('create-guidebook-property-configs', async () => {
+        const supabase = createServiceClient()
+
+        // Find properties in this org that have no guidebook config yet
+        const { data: allProperties } = await supabase
+          .from('properties')
+          .select('id, name')
+          .eq('org_id', org_id)
+          .eq('is_active', true)
+
+        if (!allProperties?.length) return
+
+        const { data: existingConfigs } = await supabase
+          .from('guidebook_property_configs')
+          .select('property_id')
+          .eq('org_id', org_id)
+
+        const alreadyConfigured = new Set(
+          (existingConfigs ?? []).map((c) => c.property_id)
+        )
+
+        const newProperties = allProperties.filter(
+          (p) => !alreadyConfigured.has(p.id)
+        )
+
+        if (newProperties.length === 0) return
+
+        // Generate unique slugs for all new properties in one batch
+        const slugMap = await generateUniqueSlugsForProperties(newProperties)
+
+        const rows = newProperties.map((p) => ({
+          org_id:      org_id,
+          property_id: p.id,
+          slug:        slugMap.get(p.id) ?? generateBaseSlug(p.name),
+          is_published: false,  // PM must explicitly publish
+        }))
+
+        const { error } = await supabase
+          .from('guidebook_property_configs')
+          .upsert(rows, {
+            onConflict:       'org_id,property_id',
+            ignoreDuplicates: true,  // never overwrite an existing config
+          })
+
+        if (error) {
+          logger.error(`[OwnerRez:${user_id}] guidebook config creation failed: ${error.message}`)
+          // Non-fatal — don't throw, don't block the sync
+        }
+      })
+
+      // ── Sync property data into guidebook configs ──────────────────────────
+      // guidebook_property_configs stores guest-facing content. If a PM has
+      // already filled in their check-in instructions in OwnerRez, pre-populate
+      // the guidebook config with that data. Never overwrites PM-entered values.
+
+      await step.run('sync-guidebook-configs-from-property', async () => {
+        const supabase = createServiceClient()
+
+        const { data: props } = await supabase
+          .from('properties')
+          .select('id, wifi_name, wifi_password, access_instructions, house_manual, checkout_instructions')
+          .eq('org_id', org_id)
+          .eq('external_source', PROVIDER)
+          .eq('is_active', true)
+
+        if (!props?.length) return
+
+        const { data: configs } = await supabase
+          .from('guidebook_property_configs')
+          .select('id, property_id, wifi_network, wifi_password, check_in_instructions, house_rules, check_out_instructions')
+          .eq('org_id', org_id)
+          .in('property_id', props.map((p) => p.id))
+
+        const configByPropertyId = new Map(
+          (configs ?? []).map((c) => [c.property_id, c])
+        )
+
+        for (const prop of props) {
+          const config = configByPropertyId.get(prop.id)
+          if (!config) continue // no guidebook config yet — auto-slug step handles creation
+
+          const patch: Record<string, unknown> = {}
+
+          if (!config.wifi_network          && prop.wifi_name)             patch.wifi_network           = prop.wifi_name
+          if (!config.wifi_password         && prop.wifi_password)         patch.wifi_password          = prop.wifi_password
+          if (!config.check_in_instructions && prop.access_instructions)   patch.check_in_instructions  = prop.access_instructions
+          if (!config.house_rules           && prop.house_manual)          patch.house_rules            = prop.house_manual
+          if (!config.check_out_instructions && prop.checkout_instructions) patch.check_out_instructions = prop.checkout_instructions
+
+          if (Object.keys(patch).length === 0) continue
+
+          patch.updated_at = new Date().toISOString()
+
+          await supabase
+            .from('guidebook_property_configs')
+            .update(patch)
+            .eq('id', config.id)
+        }
+
+        logger.info(`[OwnerRez:${user_id}] Synced guidebook configs for org ${org_id}`)
+      })
+
       // ── Step 2: Fetch and upsert bookings ───────────────────────────────────
 
       const fetchBookingsResult = await step.run('fetch-bookings', async () => {
@@ -235,7 +499,7 @@ export const ownerRezInitialSync = inngest.createFunction(
               `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
             )
           }
-          return { cursor: new Date().toISOString(), count: 0 }
+          return { cursor: new Date().toISOString(), count: 0, affectedPropertyIds: [] as string[] }
         }
 
         // MEDIUM-3: capture pre-fetch timestamp as cursor value.
@@ -253,6 +517,8 @@ export const ownerRezInitialSync = inngest.createFunction(
           }
           throw err
         }
+
+        let affectedPropertyIds: string[] = []
 
         if (bookings.length) {
           const supabase   = createServiceClient()
@@ -293,6 +559,7 @@ export const ownerRezInitialSync = inngest.createFunction(
             status:          mapBookingStatus(b.status),
             external_id:     String(b.id),
             external_source: PROVIDER,
+            is_block:        b.is_block ?? false,
           }))
 
           const { error } = await supabase
@@ -305,6 +572,10 @@ export const ownerRezInitialSync = inngest.createFunction(
           }
 
           logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
+
+          affectedPropertyIds = Array.from(new Set(
+            bookingRows.map((b) => b.property_id).filter((id): id is string => id != null)
+          ))
         }
 
         try {
@@ -315,7 +586,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           )
         }
 
-        return { cursor: fetchStartedAt, count: bookings.length }  // MEDIUM-3: pre-fetch timestamp
+        return { cursor: fetchStartedAt, count: bookings.length, affectedPropertyIds }  // MEDIUM-3: pre-fetch timestamp
       })
 
       // ── Step 3: Update sync metadata ────────────────────────────────────────
@@ -352,6 +623,56 @@ export const ownerRezInitialSync = inngest.createFunction(
           throw new Error(`[OwnerRez:${user_id}] Failed to persist sync cursor: ${error.message}`)
         }
       })
+
+      // ── Step 4: Generate turnovers for synced properties ─────────────────────
+      // Called once per property (not per booking) so the generator sees the
+      // full booking list and can apply its two-pass pairing logic correctly.
+
+      const newTurnoverIds = await step.run('generate-turnovers', async () => {
+        const propertyIds = fetchBookingsResult.affectedPropertyIds
+        if (!propertyIds.length) return []
+        const supabase = createServiceClient()
+        const ids: string[] = []
+        for (const propertyId of propertyIds) {
+          try {
+            const newIds = await generateTurnoversForProperty(propertyId, org_id, supabase)
+            ids.push(...newIds)
+          } catch (err) {
+            logger.error(
+              `[OwnerRez:${user_id}] Turnover generation failed for property ${propertyId}: ${err}`
+            )
+            // Don't let one property's failure block the others
+          }
+        }
+        return ids
+      })
+
+      if (newTurnoverIds.length > 0) {
+        const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
+          const supabase = createServiceClient()
+          type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
+          const { data: turnovers } = await supabase
+            .from('turnovers')
+            .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
+            .in('id', newTurnoverIds)
+
+          return (turnovers as TurnoverRow[] ?? []).map((t) => ({
+            name: 'turnover/created' as const,
+            data: {
+              turnover_id:       t.id,
+              property_id:       t.property_id,
+              org_id,
+              checkout_datetime: t.checkout_datetime,
+              checkin_datetime:  t.checkin_datetime,
+              window_minutes:    t.window_minutes ?? 0,
+            },
+          }))
+        })
+
+        if (turnoverEvents.length > 0) {
+          await step.sendEvent('fire-turnover-created-events', turnoverEvents)
+        }
+      }
     } catch (err) {
       const humanError = translateSyncError(err)
       logger.error(
@@ -438,7 +759,19 @@ export const ownerRezInitialSync = inngest.createFunction(
         }
       })
 
-      return { user_id, synced: false }
+      // MEDIUM-6: token revocation is permanent — retrying just re-hits the
+      // same revoked token, burning all 3 retries for nothing. Throw
+      // NonRetriableError (after the side effects above already completed)
+      // so Inngest stops immediately and the dashboard distinguishes this
+      // from a transient failure.
+      if (err instanceof TokenRevokedError) {
+        throw new NonRetriableError(humanError)
+      }
+
+      // RE-THROW so Inngest records this as a failure and retries it.
+      // Do NOT return { synced: false } — that silently marks the run
+      // as successful and prevents retries.
+      throw err
     }
 
     // ── Step 4: Auto-activate RepuGuard ────────────────────────────────────────

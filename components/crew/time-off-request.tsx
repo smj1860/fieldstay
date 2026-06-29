@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useMemo }     from 'react'
-import { usePowerSync, usePowerSyncQuery } from '@powersync/react'
-import { XCircle, CheckCircle2 } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
+import { saveCrewAvailability } from '@/lib/dexie/helpers'
+import { ChevronLeft, ChevronRight, XCircle, CheckCircle2 } from 'lucide-react'
 
 interface Props {
   crewMemberId: string
@@ -12,44 +14,50 @@ interface Props {
 type AvailRow = {
   id:             string
   available_date: string
-  is_available:   number   // PowerSync SQLite: 1 = available, 0 = not
+  is_available:   number   // 1 = available, 0 = not
   notes:          string | null
 }
 
 export function TimeOffRequest({ crewMemberId, orgId }: Props) {
-  const db = usePowerSync()
+  const db     = useDexieDb()
+  const userId = useDexieUserId()
 
-  // Build 14-day window starting tomorrow
-  const days = useMemo(() => {
-    return Array.from({ length: 14 }, (_, i) => {
-      const d = new Date()
-      d.setDate(d.getDate() + i + 1)
-      d.setHours(0, 0, 0, 0)
+  const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, 1 = next, -1 = prev
+
+  // Build 7-day window starting tomorrow + (weekOffset * 7) days
+  const { days, windowStart, windowEnd } = useMemo(() => {
+    const start = new Date()
+    start.setDate(start.getDate() + 1 + (weekOffset * 7))
+    start.setHours(0, 0, 0, 0)
+
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start)
+      d.setDate(d.getDate() + i)
       return d
     })
-  }, [])
 
-  const windowStart = days[0].toISOString().slice(0, 10)
-  const windowEnd   = days[13].toISOString().slice(0, 10)
+    return {
+      days,
+      windowStart: days[0]!.toISOString().slice(0, 10),
+      windowEnd:   days[6]!.toISOString().slice(0, 10),
+    }
+  }, [weekOffset])
 
-  // Read existing availability records for this window from local SQLite
-  const existingRows = usePowerSyncQuery<AvailRow>(
-    `SELECT id, available_date, is_available, notes
-     FROM crew_availability
-     WHERE crew_member_id = ?
-       AND available_date >= ?
-       AND available_date <= ?`,
+  // Read existing availability records for this window from the local cache
+  const existingRows = useLiveQuery(
+    () => db.crew_availability
+      .where('crew_member_id').equals(crewMemberId)
+      .filter((r) => r.available_date >= windowStart && r.available_date <= windowEnd)
+      .toArray() as unknown as Promise<AvailRow[]>,
     [crewMemberId, windowStart, windowEnd]
   )
 
-  // Read upcoming time-off records beyond the 14-day window (for the list below)
-  const upcomingTimeOff = usePowerSyncQuery<AvailRow>(
-    `SELECT id, available_date, is_available, notes
-     FROM crew_availability
-     WHERE crew_member_id = ?
-       AND available_date > ?
-       AND is_available = 0
-     ORDER BY available_date ASC`,
+  // Read upcoming time-off records beyond the 7-day window (for the list below)
+  const upcomingTimeOff = useLiveQuery(
+    () => db.crew_availability
+      .where('crew_member_id').equals(crewMemberId)
+      .filter((r) => r.available_date > windowEnd && r.is_available === 0)
+      .sortBy('available_date') as unknown as Promise<AvailRow[]>,
     [crewMemberId, windowEnd]
   )
 
@@ -61,6 +69,11 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   const [savedAt, setSavedAt] = useState<Date | null>(null)
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
+
+  // Clear unsaved draft changes when navigating to a different week
+  useEffect(() => {
+    setDraft({})
+  }, [weekOffset])
 
   const existingMap = useMemo(() => {
     const m = new Map<string, AvailRow>()
@@ -111,24 +124,15 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
     try {
       for (const [dateStr, change] of Object.entries(draft)) {
         const existing = existingMap.get(dateStr)
-        const newIsAvailable = change.timeOff ? 0 : 1
 
-        if (existing) {
-          // UPDATE existing row
-          await db.execute(
-            `UPDATE crew_availability
-             SET is_available = ?, notes = ?
-             WHERE id = ?`,
-            [newIsAvailable, change.note || null, existing.id]
-          )
-        } else {
-          // INSERT new row — UUID generated via SQLite randomblob (gen_random_uuid() is Postgres-only)
-          await db.execute(
-            `INSERT INTO crew_availability (id, org_id, crew_member_id, available_date, is_available, notes, created_at)
-             VALUES (lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))), ?, ?, ?, ?, ?, datetime('now'))`,
-            [orgId, crewMemberId, dateStr, newIsAvailable, change.note || null]
-          )
-        }
+        await saveCrewAvailability(userId, {
+          id:           existing?.id,
+          orgId,
+          crewMemberId,
+          date:         dateStr,
+          isAvailable:  !change.timeOff,
+          notes:        change.note || null,
+        })
       }
 
       setDraft({})
@@ -145,10 +149,14 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
     setCancellingId(row.id)
     setCancelError(null)
     try {
-      await db.execute(
-        `UPDATE crew_availability SET is_available = 1, notes = null WHERE id = ?`,
-        [row.id]
-      )
+      await saveCrewAvailability(userId, {
+        id:           row.id,
+        orgId,
+        crewMemberId,
+        date:         row.available_date,
+        isAvailable:  true,
+        notes:        null,
+      })
     } catch (err) {
       setCancelError('Failed to cancel — please try again')
       console.error('[TimeOffRequest] cancel error:', err)
@@ -162,13 +170,42 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   return (
     <div className="space-y-6 pb-24">
       <div>
-        <h2 className="text-lg font-bold text-white mb-1">Time Off Request</h2>
-        <p className="text-sm text-accent-400">
+        <h2 className="text-lg font-bold text-accent-900 mb-1">Time Off Request</h2>
+        <p className="text-sm text-accent-500 mb-4">
           Tap any day to mark it as time off. Add a note if needed. Tap Save when done.
         </p>
+
+        {/* Week navigation */}
+        <div className="flex items-center justify-between mt-4 mb-2">
+          <button
+            onClick={() => setWeekOffset(w => w - 1)}
+            className="flex items-center gap-1 text-sm font-medium text-accent-600
+                       hover:text-accent-900 px-3 py-2 rounded-lg hover:bg-accent-100
+                       transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            Prev Week
+          </button>
+
+          <span className="text-sm font-semibold text-accent-700">
+            {new Date(windowStart + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            {' – '}
+            {new Date(windowEnd + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          </span>
+
+          <button
+            onClick={() => setWeekOffset(w => w + 1)}
+            className="flex items-center gap-1 text-sm font-medium text-accent-600
+                       hover:text-accent-900 px-3 py-2 rounded-lg hover:bg-accent-100
+                       transition-colors"
+          >
+            Next Week
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      {/* 14-day list */}
+      {/* 7-day list */}
       <div className="space-y-2">
         {days.map((day) => {
           const dateStr   = isoDate(day)

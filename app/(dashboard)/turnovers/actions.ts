@@ -56,10 +56,14 @@ export async function assignCrew(
     .neq('crew_member_id', crewMemberId)
 
   // Batch: upsert this crew member for all turnovers at once
-  await supabase.from('turnover_assignments').upsert(
-    ids.map(id => ({ turnover_id: id, crew_member_id: crewMemberId })),
+  const { error: assignError } = await supabase.from('turnover_assignments').upsert(
+    ids.map(id => ({ turnover_id: id, crew_member_id: crewMemberId, org_id: membership.org_id })),
     { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: true }
   )
+  if (assignError) {
+    console.error('[assignCrew]', assignError)
+    return { error: 'Failed to assign crew. Please try again.' }
+  }
 
   // Batch: advance status for all pending_assignment turnovers at once
   await supabase
@@ -374,9 +378,17 @@ export async function addCrewToTurnover(
   // Batch insert only the missing assignments
   const toInsert = verifiedIds.filter(id => !alreadyAssigned.has(id))
   if (toInsert.length > 0) {
-    await supabase.from('turnover_assignments').insert(
-      toInsert.map(id => ({ turnover_id: id, crew_member_id: crewMemberId }))
+    const { error: insertError } = await supabase.from('turnover_assignments').insert(
+      toInsert.map(id => ({ turnover_id: id, crew_member_id: crewMemberId, org_id: membership.org_id }))
     )
+    if (insertError) {
+      // 23505 = unique_violation — assignment already exists (concurrent request)
+      if (insertError.code === '23505') {
+        return { success: true }
+      }
+      console.error('[addCrewToTurnover]', insertError)
+      return { error: 'Failed to assign crew. Please try again.' }
+    }
   }
 
   // Batch advance pending_assignment turnovers to assigned
@@ -529,10 +541,76 @@ export async function bulkUpdateTurnoverStatus(
   return { success: true }
 }
 
+// ── Archive / unarchive turnovers ────────────────────────────────────────────
+
+export async function archiveTurnover(
+  turnoverIds: string[]
+): Promise<TurnoverActionState> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  if (!turnoverIds.length) return { error: 'No turnovers selected' }
+
+  // Only completed turnovers can be archived — guard at the query level so a
+  // stale client can't archive an active turnover out from under the board.
+  const { error } = await supabase
+    .from('turnovers')
+    .update({ is_archived: true })
+    .in('id', turnoverIds)
+    .eq('org_id', membership.org_id)
+    .eq('status', 'completed')
+
+  if (error) {
+    console.error('[archiveTurnover]', error)
+    return { error: 'Failed to archive turnover.' }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.archived',
+    targetType: 'turnover',
+    metadata:   { turnover_ids: turnoverIds },
+  })
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}
+
+export async function unarchiveTurnover(
+  turnoverIds: string[]
+): Promise<TurnoverActionState> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  if (!turnoverIds.length) return { error: 'No turnovers selected' }
+
+  const { error } = await supabase
+    .from('turnovers')
+    .update({ is_archived: false })
+    .in('id', turnoverIds)
+    .eq('org_id', membership.org_id)
+
+  if (error) {
+    console.error('[unarchiveTurnover]', error)
+    return { error: 'Failed to unarchive.' }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.unarchived',
+    targetType: 'turnover',
+    metadata:   { turnover_ids: turnoverIds },
+  })
+
+  revalidatePath('/turnovers')
+  return { success: true }
+}
+
 // ── Trigger manual iCal sync ─────────────────────────────────────────────────
 
-export async function triggerManualSync(orgId: string): Promise<void> {
-  await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: orgId } })
+export async function triggerManualSync(): Promise<void> {
+  const { membership } = await requireOrgMember()
+  await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: membership.org_id } })
   revalidatePath('/turnovers')
 }
 
@@ -553,10 +631,14 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
   const crewIds = (turnover.suggested_crew_ids as string[] | null) ?? []
   if (!crewIds.length) return { error: 'No suggestion to accept' }
 
-  await supabase.from('turnover_assignments').upsert(
-    crewIds.map(crewId => ({ turnover_id: turnoverId, crew_member_id: crewId })),
+  const { error: assignError } = await supabase.from('turnover_assignments').upsert(
+    crewIds.map(crewId => ({ turnover_id: turnoverId, crew_member_id: crewId, org_id: membership.org_id })),
     { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: true }
   )
+  if (assignError) {
+    console.error('[acceptSuggestion]', assignError)
+    return { error: 'Failed to accept suggestion. Please try again.' }
+  }
 
   await supabase
     .from('turnovers')
@@ -566,12 +648,10 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
   try {
     const { createServiceClient } = await import('@/lib/supabase/server')
     const service = createServiceClient()
-    for (const crewId of crewIds) {
-      await service.from('assignment_outcomes').upsert(
-        { turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: true },
-        { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
-      )
-    }
+    await service.from('assignment_outcomes').upsert(
+      crewIds.map(crewId => ({ turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: true })),
+      { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
+    )
   } catch {
     // Outcome recording must not break the acceptance flow
   }
@@ -617,12 +697,10 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
     try {
       const { createServiceClient } = await import('@/lib/supabase/server')
       const service = createServiceClient()
-      for (const crewId of crewIds) {
-        await service.from('assignment_outcomes').upsert(
-          { turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: false },
-          { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
-        )
-      }
+      await service.from('assignment_outcomes').upsert(
+        crewIds.map(crewId => ({ turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: false })),
+        { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
+      )
     } catch {
       // Outcome recording must not break the dismissal flow
     }

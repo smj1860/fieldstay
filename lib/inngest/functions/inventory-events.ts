@@ -195,40 +195,93 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       )
     })
 
-    // ── Email PM with PO summary ─────────────────────────────────────────────
+    // ── Detect same-day flip ─────────────────────────────────────────────────
+    // A same-day flip = this property has a checkout today AND an incoming
+    // guest today or tomorrow. Those need restocking now, not at end of day.
+    const isSameDayFlip = await step.run('detect-same-day-flip', async () => {
+      const supabase  = createServiceClient()
+      const todayDate = new Date().toISOString().split('T')[0]!
 
-    await step.run('email-po-to-pm', async () => {
-      const supabase = createServiceClient()
-      const [{ data: property }, pmEmail] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', property_id).single(),
-        getPmEmail(supabase, org_id),
-      ])
+      const { data } = await supabase
+        .from('bookings')
+        .select('id, checkout_date, checkin_date')
+        .eq('property_id', property_id)
+        .eq('org_id', org_id)
+        .in('checkout_date', [todayDate])      // checking out today
+        .eq('status', 'confirmed')
+        .eq('is_block', false)
 
-      if (!pmEmail) return
+      const hasCheckoutToday = (data?.length ?? 0) > 0
+      if (!hasCheckoutToday) return false
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      pmEmail,
-        subject: `📦 Restock needed — ${property?.name} (${belowParItems.length} item${belowParItems.length !== 1 ? 's' : ''})`,
-        html: await renderPmAlert({
-          heading:  `Inventory below par at ${property?.name}`,
-          body:     'A crew member just submitted an inventory count. The following items need restocking:',
-          table: {
-            headers: ['Item', 'In Stock', 'Par Level', 'Need to Buy'],
-            rows: belowParItems.map((item) => [
-              item.name,
-              `${item.current_quantity} ${item.unit}`,
-              `${item.par_level} ${item.unit}`,
-              `${item.quantity_to_buy} ${item.unit}`,
-            ]),
-          },
-          note:     'Order however works best for you — Amazon, local store, or your usual supplier.',
-          ctaLabel: 'View Purchase Order →',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/inventory?property=${property_id}&po=${purchaseOrderId}`,
-        }),
-      })
+      // Also verify there's an incoming guest today or tomorrow
+      const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0]!
+      const { data: incoming } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('property_id', property_id)
+        .eq('org_id', org_id)
+        .in('checkin_date', [todayDate, tomorrow])
+        .eq('status', 'confirmed')
+        .eq('is_block', false)
+
+      return (incoming?.length ?? 0) > 0
     })
 
-    return { count_id, purchaseOrderCreated: true, purchaseOrderId, itemCount: belowParItems.length }
+    // ── Mark PO with same-day-flip status ────────────────────────────────────
+    // order_email_sent stays false here: same-day flips flip it to true after
+    // the immediate email below; normal counts leave it for the daily cron.
+    await step.run('mark-po-email-status', async () => {
+      const supabase = createServiceClient()
+      await supabase
+        .from('purchase_orders')
+        .update({ is_same_day_flip: isSameDayFlip })
+        .eq('id', purchaseOrderId)
+    })
+
+    // ── Email PM: immediate for same-day flips only ──────────────────────────
+    if (isSameDayFlip) {
+      await step.run('email-po-to-pm-immediate', async () => {
+        const supabase = createServiceClient()
+        const [{ data: property }, pmEmail] = await Promise.all([
+          supabase.from('properties').select('name').eq('id', property_id).single(),
+          getPmEmail(supabase, org_id),
+        ])
+
+        if (!pmEmail) return
+
+        await resend.emails.send({
+          from:    FROM,
+          to:      pmEmail,
+          subject: `⚡ Immediate Restock — ${property?.name} (same-day flip)`,
+          html: await renderPmAlert({
+            heading:  `Restock needed NOW — ${property?.name}`,
+            body:     'Same-day flip detected. This property has a guest checking in today or tomorrow. Items below par:',
+            table: {
+              headers: ['Item', 'In Stock', 'Par Level', 'Need to Buy'],
+              rows: belowParItems.map((item) => [
+                item.name,
+                `${item.current_quantity} ${item.unit}`,
+                `${item.par_level} ${item.unit}`,
+                `${item.quantity_to_buy} ${item.unit}`,
+              ]),
+            },
+            note:     'Order immediately — the next guest arrives today or tomorrow.',
+            ctaLabel: 'View Purchase Order →',
+            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/inventory?property=${property_id}&po=${purchaseOrderId}`,
+          }),
+        }, { idempotencyKey: `po-email-immediate-${purchaseOrderId}` })
+
+        // Mark as sent so the daily cron skips it
+        await supabase
+          .from('purchase_orders')
+          .update({ order_email_sent: true })
+          .eq('id', purchaseOrderId)
+      })
+    } else {
+      logger.info(`Count ${count_id}: PO queued for end-of-day aggregated email (not a same-day flip)`)
+    }
+
+    return { count_id, purchaseOrderCreated: true, purchaseOrderId, itemCount: belowParItems.length, isSameDayFlip }
   }
 )

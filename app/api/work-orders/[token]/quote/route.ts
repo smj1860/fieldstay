@@ -23,6 +23,10 @@ export async function GET(
 
   if (!qr) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+  if (new Date(qr.quote_token_expires_at) < new Date()) {
+    return NextResponse.json({ error: 'This quote link has expired' }, { status: 410 })
+  }
+
   const wo = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
 
   return NextResponse.json({

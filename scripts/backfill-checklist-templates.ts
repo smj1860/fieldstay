@@ -77,7 +77,7 @@ async function main() {
 
     if (!turnoverRow) { skipped++; continue }
 
-    await snapshotChecklist(admin, t.id, turnoverRow.org_id, template.id)
+    await snapshotChecklist(admin, t.id, turnoverRow.org_id, t.property_id, template.id)
     await admin.from('turnovers').update({ checklist_template_id: template.id }).eq('id', t.id)
 
     console.log(`  → ${t.id}: attached template ${template.id}`)

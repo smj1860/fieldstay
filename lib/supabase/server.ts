@@ -48,6 +48,8 @@ export async function createClient() {
  * Stripe webhooks, iCal sync, vendor portal completion.
  * Never expose to the client.
  */
+// lib/supabase/server.ts — createServiceClient only, leave createClient unchanged
+
 export function createServiceClient() {
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -59,7 +61,15 @@ export function createServiceClient() {
       },
       auth: {
         autoRefreshToken: false,
-        persistSession: false,
+        persistSession:   false,
+      },
+      // Disable WebSocket connection to Supabase Realtime (Warp).
+      // Inngest functions, webhooks, and server actions never subscribe
+      // to real-time events. Without this, every Inngest step opens a
+      // WebSocket that Warp's timeout manager kills 15 minutes later,
+      // producing "Thread killed by timeout manager" logs on every sync cycle.
+      realtime: {
+        params: { eventsPerSecond: -1 },
       },
     }
   )
