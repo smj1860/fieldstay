@@ -1,8 +1,8 @@
 # FieldStay Codebase Audit — Round 2 Coordinating Summary
 
-Status: IN PROGRESS
-Last checkpoint: round 2 kicked off after pulling latest fixes from main (commits aa3da30, 519381b, 65fd3f7, a03165f, a215f89, 466cfe7)
-Next: waiting for domain agents to report in
+Status: COMPLETE
+Last checkpoint: all 4 domain agents finished round 2 re-audit against live code (post-fix main)
+Next: none — see audit/01-04*.md for full findings; round1/ retained for historical comparison
 
 This is a re-audit following fixes applied after round 1 (see audit/round1/ for the original findings — do not treat those as current state, they are historical snapshots only). Each agent appends a section here when it finishes its domain, with a link to its findings file and a 3-5 bullet summary of top issues: regressions, newly-introduced issues, anything missed in round 1, and confirmation of what was actually fixed.
 
@@ -33,3 +33,12 @@ Top issues:
 - Still open / missed by all three fix commits: Inventory dashboard page.tsx's unbounded + duplicate `inventory_items` fetches (round-1 Medium, untouched); bulk work-order action handlers in maintenance-board.tsx still clear selection without checking server-action results (round-1 Medium, untouched even though the same file was edited for a different fix); OwnerRez initial-sync's `patch-property-fields`/`apply-checklist-template` loops remain sequential per-property writes (round-1 Finding 4, only half-fixed — the sibling loop in the same file got the fan-out treatment, these two did not); sequential integration-token revocation on account deletion (round-1 Finding 12, untouched).
 - Newly found (Low): Telnyx webhook's new per-row audit-log loop (route.ts:86-93, 102-109) has no try/catch around `logAuditEvent`, risking a 500/retry on a logging hiccup after the consent-flag write already succeeded.
 - Verified previously-suspected pagination concern is actually fine: both Hostaway and OwnerRez API clients have explicit `MAX_PAGES` caps with abort-and-log behavior — not unbounded as flagged "suspected" in round 1.
+
+## RLS / Security / Multi-Tenant — Round 2 — by RLS/Security/Multi-Tenant auditor
+File: audit/01-rls-security-multitenant.md
+Top issues:
+- STILL OPEN (High, round-1's headline finding): `org_members_admin_manage` on `organization_members` — the single most sensitive table in the schema — still has no WITH CHECK on its FOR UPDATE policy. A large, well-executed consolidation migration (20260617000001) correctly added WITH CHECK to ~27 other flagged tables (bookings, crew_members, vendors, work_orders, turnovers, purchase_orders, property_owners, etc. — all confirmed fixed), but `organization_members` and `org_invites` ("Owners can manage org invites," FOR ALL) were not included and remain genuinely unfixed.
+- IMPORTANT CONTEXT: `supabase/schema_reference.sql` is a stale snapshot dated 2026-06-10 that predates the 06-17 consolidation fix — any audit reading only that file will falsely flag ~27 tables as still broken. Recommend regenerating or deleting it.
+- NEW regressions in brand-new code: two RLS gaps introduced in the June 27 guidebook-monetization migration, written *after* the team had already established the WITH-CHECK convention broadly. `gc_org_members_update` (guidebook_configurations) is the more severe of the two — it gates UPDATE on mere `get_user_org_ids()` org membership instead of `is_org_member(..., ['admin','manager'])`, letting crew/viewer roles modify org-level guidebook/sponsor config, and also has no WITH CHECK. `gs_org_members_update` (guidebook_sponsors) has the correct role gate but is missing WITH CHECK.
+- PARTIALLY FIXED: the Inngest "createServiceClient() inside step.run() only" remediation (commit aa3da30) is real for the 7 files it touched, but independently confirmed (corroborating the Idempotency/Inngest auditor's findings) to miss several cron-triggered functions with the identical outer-scope-client defect — exactly the kind of long-running, retry-prone execution this fix was meant to protect.
+- CONFIRMED FIXED: GDPR account-deletion `.single()` gap (now a proper multi-org loop, plus a new Stripe-cancel-abort safeguard from commit 519381b), inventory_templates/inventory_template_items privilege escalation (now correctly gated on `is_org_member` admin/manager), and Telnyx webhook signature verification (real ed25519 verify-before-parse). Crew API routes, crew PWA Dexie boundary, Stripe/generic webhook handlers, and all newly-added tables (work_order_invoices, guidebook_*, crew_feedback) have RLS enabled with no new anon-grant anomalies.
