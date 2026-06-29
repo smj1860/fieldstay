@@ -58,6 +58,8 @@ export const hostawayInitialSync = inngest.createFunction(
             city:                    listing.city ?? null,
             state:                   listing.state ?? null,
             zip:                     listing.zipcode ?? null,
+            lat:                     listing.lat ?? null,
+            lng:                     listing.lng ?? null,
             bedrooms:                listing.bedrooms ?? 1,
             bathrooms:               listing.bathrooms ?? 1,
             max_guests:              listing.maxGuests ?? 2,

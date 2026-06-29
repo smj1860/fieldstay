@@ -317,12 +317,20 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
       {/* Reviews list */}
       {reviews.length === 0 ? (
-        <div
-          className="rounded-2xl p-12 text-center"
-          style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
-        >
-          <p style={{ color: 'var(--text-muted)' }}>
-            No reviews synced yet. Reviews will appear here once OwnerRez syncs.
+        <div className="max-w-lg mx-auto py-16 text-center">
+          <div
+            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5"
+            style={{ background: 'var(--accent-gold-dim)' }}
+          >
+            <span style={{ fontSize: 24 }}>★</span>
+          </div>
+          <h2 className="font-black text-xl mb-2 tracking-tight" style={{ color: 'var(--text-primary)' }}>
+            No reviews yet
+          </h2>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+            Reviews sync automatically from OwnerRez every 6 hours. They&apos;ll appear
+            here once your first review lands — or use <strong>+ Add Review</strong> above
+            to paste one from another platform.
           </p>
         </div>
       ) : (

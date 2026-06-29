@@ -79,27 +79,8 @@ export default async function ReviewsPage() {
     return da - db
   })
 
-  if (!reviewsWithDeadline.length) {
-    return (
-      <div className="max-w-lg mx-auto py-20 text-center">
-        <div
-          className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5"
-          style={{ background: 'var(--accent-gold-dim)' }}
-        >
-          <span style={{ fontSize: 24 }}>★</span>
-        </div>
-        <h1 className="font-black text-2xl mb-2 tracking-tight"
-            style={{ color: 'var(--text-primary)' }}>
-          No reviews yet
-        </h1>
-        <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-          Reviews sync automatically from OwnerRez every 6 hours.
-          They&apos;ll appear here once your first review lands.
-        </p>
-      </div>
-    )
-  }
-
+  // Always render ReviewsClient (even with zero reviews) so the manual-paste
+  // entry point stays reachable. ReviewsClient renders its own empty state.
   return (
     <ReviewsClient
       reviews={reviewsWithDeadline as ReviewRow[]}
