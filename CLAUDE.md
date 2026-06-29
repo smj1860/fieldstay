@@ -34,6 +34,9 @@ created from a maintenance schedule, the right vendor is selected and notified.
 | Payments | Stripe | Webhook signature verification required |
 | Retailer API | Kroger API | Cart automation for below-par inventory |
 | Geocoding | Mapbox | Properties and vendors — one call on save |
+| SMS | Telnyx | Guest opt-in, door code delivery, morning/evening nudges. `SMS_ENABLED=false` env var gates all sends — do not flip to true until 10DLC is verified |
+| Weather | Tomorrow.io | Contextual SMS — rain/temperature signals for guest recommendations |
+| Observability | Axiom | Native Vercel integration. All Inngest logger calls route here |
 
 **Never introduce:** Vite, Turborepo, tRPC, Prisma, or any ORM.
 **Never add** client-side Supabase reads that bypass the Dexie local-first sync layer
@@ -94,6 +97,21 @@ const event = stripe.webhooks.constructEvent(
 - Never query without an `org_id` filter unless the table is explicitly public.
 - Use `requireOrgMember()` from `lib/auth` as the first line of every Server
   Action and Route Handler that touches org data.
+
+### 5. SMS — Gate on SMS_ENABLED
+
+All SMS sends must be gated on the `SMS_ENABLED` environment variable:
+
+```typescript
+if (process.env.SMS_ENABLED !== 'true') {
+  logger.info('SMS_ENABLED=false — skipping send')
+  return
+}
+```
+
+This flag is `false` until 10DLC campaign verification clears. Never send
+to guests without this gate in place. The flag lives in `lib/sms/telnyx.ts` —
+check that any new SMS-sending code respects it.
 
 ---
 
@@ -227,7 +245,25 @@ org_milestones              — key-value store for org state flags + async job 
 audit_events                — append-only audit log
 push_subscriptions          — PWA push notification endpoints
 oauth_states                — CSRF state tokens for OAuth flows
-powersync_crew_*            — PowerSync-specific crew views (do not modify directly)
+powersync_crew_*            — LEGACY. Tables from the original PowerSync sync layer,
+                              replaced by Dexie.js. Do not use in new code.
+```
+
+### Guidebook & Guest Messaging
+```
+guidebook_configurations    — per-org guidebook settings, sponsor tier config,
+                              grace period state, gap night messaging settings
+guidebook_property_configs  — per-property guest-facing content: WiFi, check-in
+                              instructions, house rules, checkout instructions
+guidebook_sponsors          — local business sponsors with offer details, slot type,
+                              media kit token, Stripe subscription tracking
+guidebook_guest_sms_optins  — guest SMS consent records with TCPA audit fields.
+                              UNIQUE(booking_id). Scoped to phone_e164 globally
+                              for STOP compliance (not per-org)
+stay_extension_requests     — gap night offer tracking. UNIQUE(booking_id).
+                              status: pending | accepted | declined
+crew_feedback               — crew-submitted app feedback. Inserted via service
+                              client through /api/crew/feedback only
 ```
 
 ---
@@ -526,91 +562,6 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 
 ---
 
-## Files Written — Commit These First
-
-These files exist in the project context and need to be committed to the correct
-paths with imports verified against actual path aliases:
-
-| File | Location |
-|---|---|
-| Kroger API types | `lib/kroger/types.ts` |
-| Kroger API client | `lib/kroger/client.ts` |
-| Shopping cart Inngest function | `lib/inngest/functions/build-shopping-cart.ts` |
-| Kroger OAuth initiate | `app/api/kroger/connect/route.ts` |
-| Kroger OAuth callback | `app/api/kroger/callback/route.ts` |
-| triggerShoppingCart() server action | `app/(dashboard)/inventory/actions.ts` (add to existing) |
-| CartReadyBanner component | `app/(dashboard)/inventory/inventory-portfolio.tsx` (add to existing) |
-
-After committing, register `buildShoppingCart` in `app/api/inngest/route.ts`
-alongside existing Inngest functions.
-
-**Environment variables required for Kroger:**
-```
-KROGER_CLIENT_ID=
-KROGER_CLIENT_SECRET=
-MAPBOX_PUBLIC_TOKEN=
-```
-
----
-
-## What to Do First — In This Order
-
-### Step 0: Audit (do before any feature work)
-```bash
-grep -rn "from('memberships')" --include="*.ts" --include="*.tsx" src/ app/ lib/
-```
-Replace every hit with `from('organization_members')`. This is the single most
-common cause of silent auth failures across the entire codebase.
-
-### Step 1: Mobile Layout Fixes
-- Property setup wizard: step nav sidebar + content panel must stack vertically
-  on mobile (< 640px). Currently renders side-by-side and clips content off-screen.
-- Onboarding wizard step 3 (Inventory): the two-column layout clips off the right
-  edge on narrow screens. Stack vertically at < 640px.
-
-### Step 2: Property Card Financial Fields
-Add `cleaning_cost`, `same_day_premium_pct`, and `square_footage` to:
-- Property detail view (display + edit)
-- Property setup wizard step 1 (initial capture)
-
-These fields exist in the DB. This is pure UI work.
-
-### Step 3: Financial Automation Inngest Functions
-Four functions, all following the same pattern:
-
-**turnover/completed → cleaning fee expense**
-- Read `property.cleaning_cost`
-- If `turnover.is_same_day_turnover = true`, apply `property.same_day_premium_pct`
-- INSERT into `owner_transactions` with `source = 'cleaning_fee'`, `source_reference_id = turnover.id`
-- Idempotency: skip if a row already exists with that `source_reference_id`
-
-**work_order/completed → expense**
-- Read `work_order.actual_cost`
-- INSERT `owner_transactions` with `source = 'wo_completion'`, `source_reference_id = work_order.id`
-
-**purchase_order/approved → expense**
-- INSERT `owner_transactions` per property with `source = 'inventory_purchase'`, `source_reference_id = purchase_order.id`
-
-**booking/confirmed → revenue** (OwnerRez and Uplisting paths)
-- INSERT `owner_transactions` with `source = 'booking_revenue'` or `'uplisting_booking'`
-- `source_reference_id = booking.id`
-
----
-
-## Current Roadmap Reference
-
-Full roadmap with sprint order: `FIELDSTAY_MASTER_ROADMAP.md`
-
-Current state summary:
-- **28 DB migrations applied** — schema is ahead of codebase
-- **7 files written** — need commit (listed above)
-- **Step 0–3 above** = immediate unblocked work
-- **Auto-assignment scoring engine** = Sprint 2 (after geocoding)
-- **Owner Portal automation** = Sprint 3
-- **Asset Health module** = Sprint 5
-
----
-
 ## Things That Will Break If You Do Them
 
 | Don't do this | Do this instead |
@@ -651,100 +602,52 @@ Key functions in `public` schema:
 
 ## Database Migrations & Schema Drift
 
-**Current status:** the live project (`vpmznjktllhmmbfnxuvk`) has **64 tracked
-migrations** applied directly (from `20260524165615_fieldstay_v1_extensions_enums`
-through `20260609213733_grant_missing_tables_vendor_address`). The local
-`supabase/migrations/` directory only contains 4 files
-(`20260601000000_repuguard.sql`, `20260602000000_team_access.sql`,
-`20260608000001_rls_hardening.sql`, `20260608000002_repuguard_bundled.sql`).
-This is **known drift** — the local migration history is incomplete relative
-to the live database.
+**Current state:** 147+ migrations applied to project `vpmznjktllhmmbfnxuvk`.
+All migrations live in `supabase/migrations/` as `YYYYMMDDHHMMSS_description.sql`.
 
 `fieldstay_migration_v1.SUPERSEDED.sql` and `fieldstay_migration_v2.SUPERSEDED.sql`
-(repo root) are early hand-written schema dumps that predate the migration
-history above. They are kept for historical reference only — **do not run
-them**, they no longer match the live schema.
+at the repo root are early hand-written schema dumps. Do not run them — they are
+kept for historical reference only and no longer match the live schema.
 
-For the current live schema (all tables, enums, functions, triggers, views,
-indexes, and RLS policies as of 2026-06-10), see:
+### Schema Reference File
 
+`supabase/schema_reference.sql` is AUTO-GENERATED. Do not edit it manually.
+Regenerate before any audit or schema review:
+
+```bash
+bash scripts/generate-schema-reference.sh
 ```
-supabase/schema_reference.sql
-```
 
-This file is a **read-only reference snapshot** generated by introspecting the
-live database via the Supabase MCP server. It is **not a migration** — it is
-intentionally located outside `supabase/migrations/` so `supabase db push`
-will never pick it up. Do not run it against any database.
+If the file does not contain a `Generated:` timestamp in its header, it is stale
+and should not be used as a reference for live DB state. The live Supabase database
+is always authoritative over the snapshot file.
 
-### Workflow going forward
+### Adding new schema
 
-- **New schema changes**: write a new file in `supabase/migrations/` named
-  `YYYYMMDDHHMMSS_description.sql` and apply it via the Supabase CLI
-  (`supabase db push`) or the Supabase MCP `apply_migration` tool against the
-  live project. Always update `types/database.ts` in the same commit (see
-  "types/database.ts — Keep in Sync With Every Migration" above).
-- **Reconciling local history with live**: before running `supabase db pull`
-  or any command that rewrites `supabase/migrations/`, be aware that the
-  local migration history is far behind the live project's
-  `supabase_migrations.schema_migrations` table. Pulling will likely produce
-  a large new migration capturing everything not yet represented locally —
-  review it carefully against `supabase/schema_reference.sql` before
-  committing.
-- **Verifying schema state**: use `supabase/schema_reference.sql` as the
-  source of truth for "what does the live DB actually look like right now,"
-  rather than trying to reconstruct it from the 4 local migration files.
+Write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`
+and apply it via:
+- Supabase CLI: `supabase db push`
+- Supabase MCP: `apply_migration` tool against project `vpmznjktllhmmbfnxuvk`
 
-### types/database.ts drift
+Always update `types/database.ts` in the same commit as the migration.
 
-`types/database.generated.ts` is a **read-only reference** generated directly
-from the live schema via the Supabase MCP `generate_typescript_types` tool
-(standard Supabase `Database` shape — `public.Tables.<table>.Row/Insert/Update`).
-It is **not imported anywhere** — `types/database.ts` (hand-maintained flat
-interfaces) remains the file the app actually imports from, and the Supabase
-client is untyped (`Schema = any`, see `lib/supabase/server.ts`), so this is
-not a build-breaking issue today.
+### Known legacy tables
 
-As of 2026-06-10, the following live tables have **no corresponding interface**
-in `types/database.ts`: `assignment_outcomes`, `audit_events`,
-`inventory_count_drafts`, `inventory_count_draft_items`, `inventory_templates`,
-`inventory_template_items`, `org_invites`, `powersync_crew_instances`,
-`powersync_crew_properties`, `powersync_crew_turnovers`, `review_responses`,
-`reviews`, `stripe_processed_events`, `wo_number_counters`. When building
-features against these tables, add the matching interface to
-`types/database.ts` using `types/database.generated.ts` as the source of
-truth for column names/types/nullability.
-
-### Known anomalies (observed, not yet remediated)
-
-- `owner_transactions` has **two duplicate** `UNIQUE(source_reference_id, source)`
-  constraints (`owner_transactions_source_ref_unique` and
-  `uq_owner_txn_source`). Functionally harmless (Postgres just maintains two
-  identical indexes) but redundant — a future migration could drop one.
-- Several tables grant broad privileges to the `anon` Postgres role
-  (e.g. full CRUD on `bookings`, SELECT on `audit_events`,
-  `owner_transactions`, `work_orders`, `reviews`, `review_responses`,
-  `property_owners`, `owner_portal_tokens`; full CRUD on
-  `integration_connections`, `integration_providers`, `org_invites`,
-  `organization_members`, `oauth_states`, `inventory_*`, `org_master_*`).
-  RLS policies still gate row-level access for these tables, so this is not
-  an active vulnerability, but the grants are broader than necessary and
-  should be tightened in a future migration.
+`powersync_crew_*` tables exist in the DB from an earlier PowerSync-based sync layer
+that was replaced by Dexie.js. They are not used by any active code path. Do not
+write new code that reads from or writes to these tables.
 
 ---
 
-## Context Documents
+## Schema Reference
 
-Read these before working on specific features:
+`supabase/schema_reference.sql` is AUTO-GENERATED and may be stale.
 
-| Document | When to read |
-|---|---|
-| `FIELDSTAY_MASTER_ROADMAP.md` | Before starting any sprint |
-| `CLAUDE_7_0.md` | For Phase 7 context (property setup, checklists, inventory) |
-| `CLAUDE_8_0.md` | For Phase 8 context (work orders, vendor management, comms) |
-| `CLAUDE_WO_COMPLETION.md` | For WO detail page and line items implementation |
-| `CLAUDE_9_0.md` | For Phase 9 features (messaging, maintenance broadcast) |
-| `CLAUDE_7_8_PATCH.md` + `CLAUDE_Patch_7_8v2.md` | For patch context and known issues |
+Before any schema audit, regenerate it:
+  bash scripts/generate-schema-reference.sh
+
+Never trust the file if it lacks a "Generated:" timestamp in the header.
+The live Supabase database is always authoritative over the snapshot file.
 
 ---
 
