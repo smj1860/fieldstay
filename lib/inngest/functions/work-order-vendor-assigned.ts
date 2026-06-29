@@ -8,10 +8,10 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
   { event: 'work-order/vendor.assigned' },
   async ({ event, step, logger }) => {
     const { workOrderId, orgId, vendorId } = event.data
-    const supabase = createServiceClient()
 
     // ── Step 1: Fetch WO + vendor + property + org in parallel ───────────
     const { wo, vendor, property, org } = await step.run('fetch-context', async () => {
+      const supabase = createServiceClient()
       const [woRes, vendorRes] = await Promise.all([
         supabase
           .from('work_orders')
@@ -69,6 +69,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     const token = await step.run('ensure-completion-token', async () => {
       if (wo.completion_token) return wo.completion_token
 
+      const supabase   = createServiceClient()
       const newToken   = randomBytes(32).toString('hex')
       const expiresAt  = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -91,6 +92,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
 
     // ── Step 3: Fetch dispatcher name ────────────────────────────────────
     const dispatcher = await step.run('fetch-dispatcher', async () => {
+      const supabase = createServiceClient()
       const { data: members } = await supabase
         .from('organization_members')
         .select('user_id')

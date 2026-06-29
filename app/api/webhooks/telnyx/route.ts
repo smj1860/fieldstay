@@ -1,12 +1,60 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createVerify } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
 
-// TODO: verify Telnyx webhook signature (ed25519) before processing —
-// deferred for this session per CLAUDE_55_2 scope.
+// ── Signature verification ────────────────────────────────────────────────────
+// Telnyx signs webhooks with ed25519. The signed payload is `timestamp|rawBody`.
+// Public key comes from Telnyx Portal → API Keys → Ed25519 Public Key.
+function verifyTelnyxSignature(
+  rawBody:   string,
+  signature: string | null,
+  timestamp: string | null
+): boolean {
+  const publicKey = process.env.TELNYX_WEBHOOK_PUBLIC_KEY
+  if (!publicKey || !signature || !timestamp) return false
+
+  try {
+    const signedPayload = `${timestamp}|${rawBody}`
+    const verifier      = createVerify('ed25519')
+    verifier.update(signedPayload)
+    return verifier.verify(
+      Buffer.from(publicKey, 'base64'),
+      Buffer.from(signature, 'base64')
+    )
+  } catch {
+    return false
+  }
+}
+
 export async function POST(req: NextRequest) {
-  const body = await req.json()
+  // Read raw body FIRST — signature is computed over the exact bytes
+  const rawBody   = await req.text()
+  const signature = req.headers.get('telnyx-signature-ed25519')
+  const timestamp = req.headers.get('telnyx-timestamp')
+
+  // ── Verify signature before processing any payload ──────────────────────────
+  if (!verifyTelnyxSignature(rawBody, signature, timestamp)) {
+    console.error('[Telnyx webhook] Signature verification failed')
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
+
+  // ── Parse payload (after verification) ──────────────────────────────────────
+  let body: {
+    data?: {
+      event_type?: string
+      payload?: {
+        from?: { phone_number?: string }
+        text?: string
+      }
+    }
+  }
+  try {
+    body = JSON.parse(rawBody)
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
 
   const eventType = body?.data?.event_type as string | undefined
   if (eventType !== 'message.received') {

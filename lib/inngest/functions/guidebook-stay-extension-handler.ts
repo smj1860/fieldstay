@@ -12,10 +12,10 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
       gapDays, discountPct,
       guestPhoneE164,
     } = event.data
-    const supabase = createServiceClient()
 
     // Fetch property and booking context
     const { property, booking } = await step.run('fetch-context', async () => {
+      const supabase = createServiceClient()
       const [propRes, bookRes] = await Promise.all([
         supabase
           .from('properties')
@@ -39,6 +39,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
     // ── SMS to guest (if opted in) ────────────────────────────────────
     if (guestPhoneE164 && portalUrl) {
       await step.run('send-guest-sms', async () => {
+        const supabase = createServiceClient()
         const discountLine = discountPct
           ? ` We're offering ${discountPct}% off to extend your stay.`
           : ''
@@ -63,11 +64,13 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
 
     // ── Notify PM ─────────────────────────────────────────────────────
     const pmEmail = await step.run('fetch-pm-email', async () => {
+      const supabase = createServiceClient()
       return getPmEmail(supabase, orgId)
     })
 
     if (pmEmail) {
       await step.run('notify-pm', async () => {
+        const supabase = createServiceClient()
         const { resend, FROM } = await import('@/lib/resend/client')
         const { renderPmAlert } = await import('@/lib/resend/emails/pm-alert')
 
