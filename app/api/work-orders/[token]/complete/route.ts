@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
+import type { WoStatus } from '@/types/database'
 
 /**
  * POST /api/work-orders/[token]/complete
@@ -178,7 +179,7 @@ export async function POST(
     work_order_id:             claimed.id,
     org_id:                    claimed.org_id,
     updated_via_vendor_portal: true,
-    status_from:               workOrder.status as 'pending' | 'assigned' | 'in_progress',
+    status_from:               workOrder.status as WoStatus,
     status_to:                 'completed',
     notes,
   })

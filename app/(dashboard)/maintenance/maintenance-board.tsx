@@ -427,19 +427,32 @@ function CreateWorkOrderModal({
     const workOrderId = state.workOrderId
     ;(async () => {
       const supabase = createClient()
+      let photoFailures = 0
       for (const file of photoFiles) {
         const ext  = file.name.split('.').pop() ?? 'jpg'
         const path = `wo-${workOrderId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
         const { error: uploadErr } = await supabase.storage
           .from('work-order-photos')
           .upload(path, file, { contentType: file.type })
-        if (!uploadErr) {
-          await supabase.from('work_order_photos').insert({
-            work_order_id: workOrderId,
-            org_id:        orgId,
-            storage_path:  path,
-          })
+        if (uploadErr) {
+          console.error('[CreateWorkOrderModal] Failed to upload photo:', uploadErr)
+          photoFailures++
+          continue
         }
+        const { error: photoError } = await supabase.from('work_order_photos').insert({
+          work_order_id: workOrderId,
+          org_id:        orgId,
+          storage_path:  path,
+        })
+        if (photoError) {
+          console.error('[CreateWorkOrderModal] Failed to attach photos:', photoError)
+          photoFailures++
+        }
+      }
+      // Non-fatal — the WO was created; only photo attachment failed. Surface a
+      // non-blocking warning via the existing toast rather than failing the modal.
+      if (photoFailures > 0) {
+        onWarning?.('Work order created, but some photos could not be attached. You can add them from the work order detail page.')
       }
       onClose()
     })()

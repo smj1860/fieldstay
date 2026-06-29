@@ -205,10 +205,16 @@ export function ReviewsClient({ reviews: initialReviews }: Props) {
   const confirmPosted = async () => {
     if (!selected) return
     const supabase = createClient()
-    await supabase
+    const { error } = await supabase
       .from('reviews')
       .update({ response_status: 'posted', updated_at: new Date().toISOString() })
       .eq('id', selected.id)
+
+    if (error) {
+      console.error('[reviews] Failed to mark as posted:', error)
+      alert('Failed to mark as posted. Please try again.')
+      return
+    }
 
     const updatedReview: ReviewRow = { ...selected, response_status: 'posted' }
     updateReviewInList(updatedReview)

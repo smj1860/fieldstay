@@ -36,6 +36,7 @@ export default function CrewMessagesPage() {
     if (!userId || unreadFromPM.length === 0) return
     const otherUserId = unreadFromPM[0]!.sender_id
     markConversationRead(otherUserId)
+      .catch((err) => console.error('[messages] markConversationRead failed:', err))
   }, [userId, unreadFromPM])
 
   function handleSend() {

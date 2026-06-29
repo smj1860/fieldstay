@@ -200,7 +200,7 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
             : m
         )
       )
-    })
+    }).catch((err) => console.error('[messages] markConversationRead failed:', err))
   }, [selectedThread, currentUserId])
 
   function handleSend() {
