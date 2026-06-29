@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { DashboardToastProvider } from '@/components/dashboard-toast-provider'
 import { CrispWidget } from '@/components/crisp-widget'
+import { SupportChatWidget } from '@/components/support/support-chat-widget'
 import { ReviewPrompt } from '@/components/review-prompt'
 import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 import { getNotifications } from '@/lib/notifications'
@@ -186,6 +187,9 @@ export default async function DashboardLayout({
         userName={displayName}
         orgName={org?.name}
       />
+
+      {/* AI support chat widget — PM dashboard only */}
+      <SupportChatWidget />
     </DashboardToastProvider>
   )
 }

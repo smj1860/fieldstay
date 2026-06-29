@@ -70,6 +70,10 @@ export type CommSource          = 'manual' | 'system'
 export type IntegrationAuthType = 'oauth2' | 'api_key'
 export type IntegrationStatus   = 'active' | 'revoked' | 'error'
 
+// Support bot
+export type SupportCategory    = 'faq' | 'technical' | 'account_specific'
+export type SupportMessageRole = 'user' | 'assistant'
+
 // ─────────────────────────────────────────────────────────────
 // Row interfaces — one per Supabase table
 // ─────────────────────────────────────────────────────────────
@@ -1301,6 +1305,37 @@ export interface VendorComplianceStatus {
   compliance_status:    ComplianceStatus
 }
 
+// ── Support Bot ───────────────────────────────────────────────────────────────
+
+export interface SupportKbChunk {
+  id:         string
+  title:      string
+  content:    string
+  embedding:  unknown | null
+  source:     string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SupportConversation {
+  id:              string
+  org_id:          string
+  user_id:         string
+  status:          string
+  created_at:      string
+  last_message_at: string
+}
+
+export interface SupportMessage {
+  id:              string
+  conversation_id: string
+  role:            SupportMessageRole
+  content:         string
+  category:        SupportCategory | null
+  model_used:      string | null
+  created_at:      string
+}
+
 // ─────────────────────────────────────────────────────────────
 // Supabase Database interface — used by createClient()
 //
@@ -1374,6 +1409,10 @@ export interface Database {
       oauth_states:                   { Row: OAuthState;                  Insert: Partial<OAuthState>;                  Update: Partial<OAuthState>;                  Relationships: [] }
       ownerrez_processed_webhooks:    { Row: OwnerRezProcessedWebhook;    Insert: Partial<OwnerRezProcessedWebhook>;    Update: Partial<OwnerRezProcessedWebhook>;    Relationships: [] }
 
+      // ── Support bot ────────────────────────────────────────
+      support_kb_chunks:     { Row: SupportKbChunk;     Insert: Partial<SupportKbChunk>;     Update: Partial<SupportKbChunk>;     Relationships: [] }
+      support_conversations: { Row: SupportConversation; Insert: Partial<SupportConversation>; Update: Partial<SupportConversation>; Relationships: [] }
+      support_messages:      { Row: SupportMessage;      Insert: Partial<SupportMessage>;      Update: Partial<SupportMessage>;      Relationships: [] }
       // ── Self-Funding Guidebook ───────────────────────────────
       guidebook_configurations:    { Row: GuidebookConfiguration;   Insert: Partial<GuidebookConfiguration>;   Update: Partial<GuidebookConfiguration>;   Relationships: [] }
       guidebook_sponsors:          { Row: GuidebookSponsor;         Insert: Partial<GuidebookSponsor>;         Update: Partial<GuidebookSponsor>;         Relationships: [] }
