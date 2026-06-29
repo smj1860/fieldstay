@@ -200,39 +200,57 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             // but a known vacancy window is the best signal for scheduling maintenance.
             // Don't wait for the next cron cycle — notify the PM right away.
             const pmEmail = await getPmEmail(supabase, conn.org_id)
-            if (pmEmail) {
-              for (const row of bookingRows) {
-                if (!row.is_block || !row.property_id) continue
 
-                const candidates = await findMaintenanceCandidatesForWindow(
-                  supabase,
-                  row.property_id,
-                  row.checkin_date,
-                  row.checkout_date
-                )
+            type BookingRow = typeof bookingRows[number]
+            const ownerBlocks = bookingRows.filter(
+              (r): r is BookingRow & { property_id: string } =>
+                Boolean(r.is_block) && r.property_id != null
+            )
 
-                if (!candidates.length) continue
+            if (pmEmail && ownerBlocks.length) {
+              // Batch-fetch property names for every owner-block property in one
+              // query instead of a per-booking SELECT inside the loop.
+              const uniquePropertyIds = [...new Set(ownerBlocks.map((b) => b.property_id))]
 
-                const { data: property } = await supabase
-                  .from('properties')
-                  .select('name')
-                  .eq('id', row.property_id)
-                  .single()
+              const { data: blockProperties } = await supabase
+                .from('properties')
+                .select('id, name')
+                .in('id', uniquePropertyIds)
 
-                const items = candidates
-                  .map((c) => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
-                  .join(', ')
+              const propertyNameById = Object.fromEntries(
+                (blockProperties ?? []).map((p) => [p.id, p.name as string | null])
+              ) as Record<string, string | null>
 
-                await resend.emails.send(
-                  {
-                    from:    FROM,
-                    to:      pmEmail,
-                    subject: `Maintenance opportunity — ${property?.name ?? 'Property'} blocked for owner use`,
-                    html: `
+              // Parallel sends — owner-block notifications are independent of each
+              // other. One email failure must not abort the rest.
+              await Promise.all(
+                ownerBlocks.map(async (row) => {
+                  try {
+                    const candidates = await findMaintenanceCandidatesForWindow(
+                      supabase,
+                      row.property_id,
+                      row.checkin_date,
+                      row.checkout_date
+                    )
+
+                    if (!candidates.length) return
+
+                    const propertyName = propertyNameById[row.property_id] ?? 'Property'
+
+                    const items = candidates
+                      .map((c) => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
+                      .join(', ')
+
+                    await resend.emails.send(
+                      {
+                        from:    FROM,
+                        to:      pmEmail,
+                        subject: `Maintenance opportunity — ${propertyName} blocked for owner use`,
+                        html: `
                       <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
                         <h2>Owner block scheduled</h2>
                         <p>
-                          ${property?.name ?? 'This property'} is blocked
+                          ${propertyName} is blocked
                           ${new Date(row.checkin_date).toLocaleDateString()} –
                           ${new Date(row.checkout_date).toLocaleDateString()}.
                           Want to schedule maintenance during this window? Candidates:
@@ -241,10 +259,17 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                         <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">Review Maintenance →</a></p>
                       </div>
                     `,
-                  },
-                  { idempotencyKey: `ownerrez-maint-opportunity-${row.external_id}` }
-                )
-              }
+                      },
+                      { idempotencyKey: `ownerrez-maint-opportunity-${row.external_id}` }
+                    )
+                  } catch (err) {
+                    logger.error(
+                      `[OwnerRez] Failed to send owner-block email for booking ${row.external_id}: ${err instanceof Error ? err.message : String(err)}`
+                    )
+                    // Non-fatal — log and continue; don't fail the whole step for one email
+                  }
+                })
+              )
             }
           }
 
