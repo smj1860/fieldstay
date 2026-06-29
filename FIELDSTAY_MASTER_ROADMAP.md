@@ -1,5 +1,9 @@
 # FieldStay — Master Build Roadmap
-*Updated June 6, 2026 — Single source of truth for all planned work*
+*Updated June 29, 2026 — Single source of truth for all planned work*
+
+> **Note:** Significant features were built between June 6 and June 29 that are
+> not reflected in the original track structure. See **TRACK 0 — BUILT SINCE
+> CUTOFF** below for the complete list of features now live in production.
 
 ---
 
@@ -12,6 +16,87 @@
 
 ---
 
+## TRACK 0 — BUILT SINCE JUNE 6 CUTOFF (All Live in Production)
+
+These features were designed and built after the June 6 roadmap cutoff.
+They are not represented in Tracks 1–9 below.
+
+### Self-Funding Guidebook ✅
+- Guest-facing portal: tokenized URL `/g/b/[token]` with WiFi, check-in
+  instructions, door code, and local sponsor recommendations
+- Property QR codes at `/g/[slug]` with auto-generated slugs from OwnerRez sync
+- Sponsor model: $15/month per slot, plan credits at 5 and 6 active sponsors,
+  free tier unlocks at 4+ sponsors, grace period on cancellation
+- Pre-arrival email with door code CTA (de-duped, sent once per booking)
+- Guest SMS opt-in hook ("Want your door code texted?") — near-100% conversion
+- Check-in SMS: door code + WiFi + portal link (atomic claim, race-condition safe)
+- Morning and evening contextual nudges driven by OwnerRez amenity flags and
+  Tomorrow.io live weather (hot tub timing, fire pit weather, dinner recommendations)
+- Stay extension / gap night messaging: PM-configurable discount and contact method,
+  SMS offer to opted-in guests, card in guest portal near checkout
+- Media kit page with PM-shareable sponsor pitch
+- Sponsor checkout via Stripe, lifecycle managed by Inngest
+- TCPA compliance: NANP phone validation, booking window checks, STOP/START/HELP
+  handling, consent audit log
+- `SMS_ENABLED=false` env var gates all sends — flip after 10DLC verification
+
+### RepuGuard ✅ (was deferred in Track 6 — now live)
+- AI-generated review response drafts using Claude Sonnet
+- Bundled into all FieldStay tiers — not a paid add-on
+- Automatic batch generation for new reviews synced from OwnerRez
+- 2 regenerations per synced review, 0 for manual pastes
+- Manual review paste: 2 per org per week, covers Airbnb / Vrbo / Google / Booking
+- Flag detection: legal, safety, billing issues surface before PM edits
+- Deadline tracking with urgency sort (PM has 14 days from review date)
+- "Post to OwnerRez" confirmation flow
+
+### OwnerRez Integration ✅ (full production)
+- OAuth 2.0 connection with token refresh and revocation
+- Property sync: name, address, bedrooms, bathrooms, lat/lng, max_guests,
+  amenity flags (from listings endpoint), WiFi credentials, check-in instructions,
+  house manual, checkout instructions, occupancy rules
+- Booking sync: all fields including guest name/email, status, channel, is_block
+- Review sync: cursor-based, only pulls reviews after connection date
+- Webhook registration: booking.created / modified / cancelled, guest events,
+  entity_update, authorization_revoked
+- Per-property fan-out for detail API calls (memoized Inngest steps)
+- Guidebook property configs auto-created from sync with slug generation
+
+### Hostaway Integration ✅ (adapter built, marketplace listing pending)
+- Property and booking sync adapter at `lib/inngest/functions/hostaway/`
+- O(n²) array scan replaced with Map-based O(1) lookup
+
+### Crew PWA — Dexie.js ✅ (PowerSync replaced)
+- Full offline-first capability via Dexie.js IndexedDB + custom mutation outbox
+- Crew work orders: assigned WOs appear in Today/Upcoming columns
+- Work order detail page with Mark Complete → PM notification email
+- Per-item notes on inventory count (mirrors checklist notes)
+- Info/FAQ panel covering app features, par levels, photo rationale
+- Feedback form → `crew_feedback` table
+- Branded header with FieldStay/gold wordmark and gold welcome bar
+- Support link surfaces `help@fieldstay.app`
+
+### Turnovers Board ✅
+- Archive completed turnovers (manual, `is_archived` column)
+- Default view: upcoming 14 days (no blank page on first load)
+- Crew name pills use lighter blue-100/blue-700 styling
+
+### Work Orders ✅
+- Assign Crew mode on WO form (suppresses vendor/invoice path)
+- Crew WOs sync to crew app via Dexie
+- Vendor assignment email fires on ALL assignment paths including post-creation
+  assignment and bulk assign (previously only fired at creation time)
+
+### 10DLC / SMS ✅ (campaign submitted, pending carrier verification)
+- Telnyx A2P registration submitted: Low Volume Mixed, Account Notification +
+  Marketing use cases
+- Ed25519 webhook signature verification live
+- STOP/STOPALL/UNSUBSCRIBE/CANCEL/END/QUIT/HELP/INFO/SUPPORT all handled
+- Campaign description, opt-in workflow, sample messages submitted
+- Flip `SMS_ENABLED=true` after campaign verification clears
+
+---
+
 ## TRACK 1 — BUG FIXES & STABILITY
 
 | # | Item | Status | Notes |
@@ -21,9 +106,9 @@
 | 1.3 | `communication_logs` duplicate/conflicting policies | ✅ | Consolidated to 2 clean policies |
 | 1.4 | `properties` missing WITH CHECK on manage policy | ✅ | Rewritten |
 | 1.5 | `assigned_crew_id` vs `assigned_crew_member_id` dual columns | ✅ | Old column deprecated |
-| 1.6 | Property setup wizard — mobile layout breaks at narrow width | 🔧 | Step nav + content panel must stack vertically |
-| 1.7 | `memberships` table reference in server actions | ⚠️ 🔧 | Table is `organization_members` — audit all `.from('memberships')` calls before testing |
-| 1.8 | Onboarding wizard step 3 inventory panel off-screen on mobile | 🔧 | Two-column layout clips off right edge |
+| 1.6 | Property setup wizard — mobile layout breaks at narrow width | ✅ | Step nav + content panel must stack vertically |
+| 1.7 | `memberships` table reference in server actions | ✅ | Table is `organization_members` — zero `.from('memberships')` occurrences confirmed app-wide |
+| 1.8 | Onboarding wizard step 3 inventory panel off-screen on mobile | ✅ | Two-column layout clips off right edge |
 
 ---
 
@@ -42,19 +127,19 @@
 
 | # | Trigger | Action | Status |
 |---|---|---|---|
-| 2.1 | Turnover marked complete | Auto-create cleaning fee expense (`source = 'cleaning_fee'`). Applies `same_day_premium_pct` if `is_same_day_turnover = true`. Reads `property.cleaning_cost`. | 🔧 |
-| 2.2 | Work order marked complete with `actual_cost` set | Auto-create expense (`source = 'wo_completion'`). Idempotent via `source_reference_id`. | 🔧 |
-| 2.3 | Purchase order approved | Auto-create expense per property (`source = 'inventory_purchase'`) | 🔧 |
-| 2.4 | OwnerRez booking confirmed | Auto-create revenue (`source = 'booking_revenue'`) | 🔧 |
+| 2.1 | Turnover marked complete | Auto-create cleaning fee expense (`source = 'cleaning_fee'`). Applies `same_day_premium_pct` if `is_same_day_turnover = true`. Reads `property.cleaning_cost`. | ✅ |
+| 2.2 | Work order marked complete with `actual_cost` set | Auto-create expense (`source = 'wo_completion'`). Idempotent via `source_reference_id`. | ✅ |
+| 2.3 | Purchase order approved | Auto-create expense per property (`source = 'inventory_purchase'`) | ✅ |
+| 2.4 | OwnerRez booking confirmed | Auto-create revenue (`source = 'booking_revenue'`) | ✅ |
 | 2.5 | Uplisting booking confirmed | Auto-create revenue (`source = 'uplisting_booking'`) | 🔧 |
-| 2.6 | All functions | Idempotency via `source_reference_id` — never duplicate for same source record | 🔧 |
+| 2.6 | All functions | Idempotency via `source_reference_id` — never duplicate for same source record | ✅ |
 
 ### 2C — UI
 
 | # | Item | Status |
 |---|---|---|
-| 2.7 | Property card: `cleaning_cost` + `same_day_premium_pct` fields | 🔧 |
-| 2.8 | Property setup wizard step 1: financial fields | 🔧 |
+| 2.7 | Property card: `cleaning_cost` + `same_day_premium_pct` fields | ✅ |
+| 2.8 | Property setup wizard step 1: financial fields | ✅ |
 | 2.9 | Owner portal: `visible_to_owner` toggle on expense entries | 🔧 |
 | 2.10 | Non-OwnerRez/Uplisting path: monthly revenue input field per property | 🔧 |
 
@@ -83,8 +168,8 @@
 
 | # | Item | Status |
 |---|---|---|
-| 3.1 | Property geocoding — zip → lat/lng on property save (Mapbox) | 🔧 |
-| 3.2 | Vendor geocoding — zip → lat/lng on vendor save (same Mapbox pattern) | 🔧 |
+| 3.1 | Property geocoding — zip → lat/lng on property save (Mapbox) | ✅ |
+| 3.2 | Vendor geocoding — zip → lat/lng on vendor save (same Mapbox pattern) | ✅ |
 | 3.3 | Inngest: auto-assignment scoring engine | 🔧 |
 | 3.4 | Suggest mode: populate `turnovers.suggested_crew_ids` + `suggestion_reasoning` | 🔧 |
 | 3.5 | Autopilot mode: assign directly + Resend notification to PM | 🔧 |
@@ -94,7 +179,7 @@
 | 3.9 | Checklist completion timestamps → populate `assignment_outcomes` duration | 🔧 |
 | 3.10 | Org settings: auto-assign mode toggle (Suggest / Autopilot / Off) | 🔧 |
 | 3.11 | Crew app: monthly availability calendar (tap to toggle) | 📋 Phase 9 |
-| 3.12 | Add `crew_availability` to PowerSync publication | 📋 Phase 9 |
+| 3.12 | Add `crew_availability` to Dexie sync pull in DexieProvider | 📋 Phase 9 |
 
 ---
 
@@ -157,11 +242,11 @@
 | # | Item | Status | Notes |
 |---|---|---|---|
 | 6.1 | `messages` table + RLS | 📋 | Fix `memberships` → `organization_members` in policy before applying |
-| 6.2 | PowerSync: add `messages` table to publication | 📋 | Verify not `puballtables` first |
-| 6.3 | `lib/powersync/schema.ts` — messages table | 📋 | |
+| 6.2 | Dexie: add `messages` table to DexieProvider pull sync + Dexie schema | 📋 | Match existing Dexie table pattern in `lib/dexie/schema.ts` |
+| 6.3 | `lib/dexie/schema.ts` — add messages table interface + version bump | 📋 | |
 | 6.4 | Inngest: `message/sent` → push notify + Comms Log entry | 📋 | |
 | 6.5 | PM dashboard: Messages page (split-pane) | 📋 | |
-| 6.6 | Crew app: Messages page (PowerSync reads) | 📋 | |
+| 6.6 | Crew app: Messages page (Dexie `useLiveQuery` reads) | 📋 | |
 | 6.7 | Nav: Messages in PM dashboard + crew app | 📋 | |
 | 6.8 | PWA: `app/manifest.ts`, service worker, icons | 📋 | Icons: `app/icon.png`, `app/apple-icon.png`, `public/icon-192.png`, `public/icon-512.png` |
 | 6.9 | `push_subscriptions` table | 📋 | |
@@ -179,7 +264,9 @@
 | 6.16 | Org settings: retention period selector | 📋 |
 
 ### Task 3 — Google Reviews
-**⏸️ Deferred to end of year.** RepuGuard is OwnerRez-only through 12/31 and OwnerRez API provides review access. No Google API integration needed until 2027.
+**⏸️ Deferred to end of year.** RepuGuard is live and covers OwnerRez-synced reviews
+plus manual review paste (2/week per org) for Airbnb, Vrbo, Google, and Booking reviews.
+No Google API integration needed until 2027.
 
 ### Task 4 — Maintenance Schedule Template Broadcasting
 
@@ -197,8 +284,8 @@
 | # | Item | Status |
 |---|---|---|
 | 6.22 | Crew app: monthly availability calendar | 📋 |
-| 6.23 | `crew_availability` to PowerSync publication | 📋 |
-| 6.24 | `lib/powersync/schema.ts` updated | 📋 |
+| 6.23 | `crew_availability` to Dexie DexieProvider pull sync | 📋 |
+| 6.24 | `lib/dexie/schema.ts` — add crew_availability table + version bump | 📋 |
 | 6.25 | Turnover Board: availability indicator on assignment | 📋 |
 
 ---
@@ -289,44 +376,57 @@
 |---|---|---|
 | P1 | Bookings module | Direct/social/phone bookings only (not iCal). Architecture clear — build when ready |
 | P2 | Uplisting API — booking confirmed event vs rate-only? | Affects whether revenue auto-population works or needs nightly-rate × nights calculation |
-| P3 | Smart lock integration | Seam confirmed as provider if built. $10+/property/month add-on. Build only on PM demand |
+| P3 | Smart lock integration | Seam deferred entirely. Google Nest (credentials in hand: Cloud project, Device Access Console, OAuth Client ID) and Ecobee planned via shared ThermostatProvider abstraction. Build after go-live. |
 | P4 | Google Reviews | Deferred to end of year. OwnerRez API covers review access through 12/31 |
-| P5 | PWA icons | Need FieldStay-branded `icon-192.png` and `icon-512.png` for manifest |
+| P5 | PWA icons | Need FieldStay-branded `icon-192.png` and `icon-512.png` for manifest. PWA install prompt and notification permission flow documented in crew app FAQ. |
 | P6 | Minut noise monitoring | API is public. High relevance for STR guest management. Evaluate after smart lock decision |
 | P7 | Phyn/Moen water sensor integration | API available. Premium property add-on. Future partnership territory |
 | P8 | Pricing review | No feature gating confirmed. May warrant slight price increase to reflect full platform value |
+| P9 | Hospitable integration | OAuth 2.0 architecture designed, application submitted, awaiting approval. Build after OwnerRez marketplace launch. |
+| P10 | MealMe integration | Potential replacement/supplement to Kroger for multi-retailer inventory ordering. Instrument PO volume/GMV data first before evaluating pricing. |
+| P11 | TradeSuite build phase | July 28, 2026 calendar reminder set. Standalone Next.js deployment, shared Supabase infra TBD. |
+| P12 | Minut / NoiseAware | Noise monitoring evaluation. Minut via direct enterprise conversation preferred. |
+| P13 | Smart thermostat | Google Nest credentials in hand. Ecobee also planned. Build simultaneously behind shared ThermostatProvider abstraction. |
 
 ---
 
 ## RECOMMENDED BUILD ORDER
 
-### Immediate — Unblocks Testing
-1. **1.7** — `memberships` → `organization_members` audit (do before any testing)
-2. **1.6, 1.8** — Mobile layout fixes (property wizard)
+### Live in Production (Track 0)
+- Self-Funding Guidebook ✅
+- RepuGuard ✅
+- OwnerRez Integration (full) ✅
+- Hostaway adapter ✅
+- Crew PWA (Dexie) ✅
+- 10DLC submitted, pending carrier verification ✅
 
-### Sprint 1 — Core Automation (Highest PM Value)
-3. **2.7, 2.8** — Property card financial fields UI
-4. **2.1–2.6** — All four financial automation Inngest functions
-5. **3.1, 3.2** — Property and vendor geocoding
+### Active — Paul Testing
+- OwnerRez marketplace listing review
+- SMS: flip `SMS_ENABLED=true` after 10DLC campaign clears
 
-### Sprint 2 — Kroger + Auto-Assignment
-6. **4.8–4.17** — Kroger brand fields UI, register Inngest function
-7. **3.3–3.10** — Auto-assignment scoring engine + Turnover Board suggest UI
+### Next — Unblocked
+1. **Track 2 remaining** — Owner portal `visible_to_owner` toggle (2.9), non-integration revenue input (2.10)
+2. **Track 3.3–3.10** — Auto-assignment scoring engine + Turnover Board suggest UI
+3. **Track 4.8–4.17** — Kroger brand fields UI, store selector, build cart button
+4. **Track 5** — Full owner portal P&L view
 
-### Sprint 3 — Owner Portal Complete
-8. **5.1–5.9** — Full owner portal automation + P&L view
+### After Marketplace Launch
+5. **Hospitable integration** — OAuth 2.0, per-user webhook registration, HMAC middleware
+6. **Smart thermostat** — Nest + Ecobee via ThermostatProvider abstraction
+7. **Track 7** — Reactive maintenance automation (WO aging, repeat issue detection)
+8. **Track 8** — Asset Health module (Pillars 1–3)
 
-### Sprint 4 — Reactive Maintenance
-9. **7.1–7.4** — WO aging escalation, repeat issue detection, auto-WO from schedule
+### July 28, 2026
+9. **TradeSuite build phase** — standalone deployment, Vite → Next.js migration,
+   work order → invoice flow
 
-### Sprint 5 — Asset Health (MVP)
-10. **8.1–8.15** — Pillars 1 and 2 (Asset Ledger + Compliance Vault)
-11. **8.16–8.20** — Pillar 3 (CapEx + Depreciation)
-
-### Sprint 6 — Phase 9
-12. Tasks 1, 2, 4, 5 from CLAUDE_9_0.md in priority order
+### Phase 9 (Later)
+10. **Track 6** — In-app messaging, comms log retention, maintenance template broadcasting,
+    crew availability calendar (all PowerSync references updated to Dexie)
 
 ---
 
-*Total tracked items: 98 | ✅ Done: 28 | 🔧 Code needed: 55 | 📋 Not started: 15*
+*Roadmap last updated: June 29, 2026. Track 0 documents all features built since
+the June 6 cutoff. Status counts below reflect Tracks 1–9 only and are
+approximate — refer to Track 0 for current production feature state.*
 *Sessions: This conversation. Hand off implementation sprints to Claude Code.*
