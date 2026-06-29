@@ -10,11 +10,11 @@ export const guidebookDailyMonitor = inngest.createFunction(
   },
   { cron: '0 13 * * *' }, // 8 AM CT (UTC-5)
   async ({ step, logger }) => {
-    const supabase = createServiceClient()
     const now48hrs = new Date(Date.now() + 48 * 60 * 60 * 1000)
 
     // Fetch all active guidebook orgs in one query
     const activeOrgs = await step.run('fetch-active-guidebook-orgs', async () => {
+      const supabase = createServiceClient()
       const { data, error } = await supabase
         .from('guidebook_configurations')
         .select(`

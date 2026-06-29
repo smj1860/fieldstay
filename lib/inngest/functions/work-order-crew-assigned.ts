@@ -6,7 +6,6 @@ export const handleWorkOrderCrewAssigned = inngest.createFunction(
   { event: 'work-order/crew.assigned' },
   async ({ event, step }) => {
     const { workOrderId, crewMemberId } = event.data
-    const supabase = createServiceClient()
 
     // Future: send push notification to crew member's device.
     // For now, the WO surfaces in the crew app via the Dexie sync.
@@ -14,6 +13,7 @@ export const handleWorkOrderCrewAssigned = inngest.createFunction(
     // This handler is scaffolded for the push notification integration.
 
     await step.run('log-assignment', async () => {
+      const supabase = createServiceClient()
       const { data: wo } = await supabase
         .from('work_orders')
         .select('wo_number, title')

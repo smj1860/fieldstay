@@ -40,11 +40,13 @@ export const repuguardBatchGenerate = inngest.createFunction(
     }
 
     // ── Steps 2+: Generate response per review ────────────────────────────────
-    let generated = 0
-    let skipped   = 0
+    // Accumulate outcomes from step return values rather than mutating outer
+    // counters inside step.run — memoized steps don't re-run their callbacks on
+    // replay, so in-callback counter mutations would undercount.
+    const results: Array<{ generated: boolean }> = []
 
     for (const review of reviews) {
-      await step.run(`generate-${review.id}`, async () => {
+      const result = await step.run(`generate-${review.id}`, async () => {
         const supabase = createServiceClient()
 
         type PropertyRef = { name?: string } | { name?: string }[] | null
@@ -82,8 +84,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
 
           // Permanent failure (malformed review, missing fields, etc.)
           logger.error(`RepuGuard batch: permanent failure for review ${review.id}: ${msg}`)
-          skipped++
-          return
+          return { generated: false }
         }
 
         const hasFlags     = Array.isArray(parsed.flags) && parsed.flags.length > 0
@@ -106,15 +107,26 @@ export const repuguardBatchGenerate = inngest.createFunction(
           .update({ response_status: responseStatus, updated_at: new Date().toISOString() })
           .eq('id', review.id)
 
-        generated++
+        return { generated: true }
       })
+
+      // result is null only if the step was skipped/failed terminally — count as skipped
+      results.push(result ?? { generated: false })
 
       if (reviews.indexOf(review) < reviews.length - 1) {
         await step.sleep(`pace-${review.id}`, '500ms')
       }
     }
 
+    const generated = results.filter((r) => r.generated).length
+    const skipped   = results.filter((r) => !r.generated).length
+
     // ── Notify PM ─────────────────────────────────────────────────────────────
+    // Scope the idempotency key to org+date+batch marker (first review id) so a
+    // second same-day batch run — triggered after BATCH_LIMIT capped the first —
+    // still notifies the PM instead of being silently de-duped.
+    const batchRunId = reviews[0]?.id ?? 'empty'
+
     await step.run('notify-pm', async () => {
       const supabase = createServiceClient()
       const pmEmail  = await getPmEmail(supabase, org_id)
@@ -129,7 +141,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
 
       await resend.emails.send(
         { from: FROM, to: pmEmail, subject: `RepuGuard: ${generated} review draft${generated !== 1 ? 's' : ''} ready`, html },
-        { idempotencyKey: `repuguard-batch-${org_id}-${requested_by}-${new Date().toISOString().split('T')[0]}` }
+        { idempotencyKey: `repuguard-batch-${org_id}-${new Date().toISOString().split('T')[0]}-${batchRunId}` }
       )
     })
 

@@ -207,51 +207,68 @@ export const ownerRezInitialSync = inngest.createFunction(
       // /v2/properties/{id} returns WiFi, instructions, and rules.
       // Amenities come from the batch /v2/listings endpoint instead (see Addendum
       // in CLAUDE_55_5.md — avoids a second per-property call for that field).
-      // We fetch property detail sequentially with a delay to avoid rate limiting.
+      //
+      // SCALABILITY: this used to be a single non-resumable step.run with a for
+      // loop over every property — 50+ properties meant 7+ seconds of sequential
+      // external calls in one step, and a retry discarded ALL progress and
+      // re-burned OwnerRez quota from scratch. It is now fanned out: a list
+      // fetch, a single batch listings fetch, then one memoized step per
+      // property. Inngest skips the callback for steps whose IDs already
+      // completed, so a retry only re-runs incomplete properties.
 
-      await step.run('fetch-property-details', async () => {
-        const supabase    = createServiceClient()
-        const { data: dbProperties } = await supabase
-  .from('properties')
-  .select('id, external_id, wifi_name, wifi_password, access_instructions, house_manual, amenities')
-  .eq('external_source', PROVIDER)
-  .eq('org_id', org_id)
-  .eq('is_active', true)
+      type EnrichTarget = {
+        id:                  string
+        external_id:         string | null
+        wifi_name:           string | null
+        wifi_password:       string | null
+        access_instructions: string | null
+        house_manual:        string | null
+        amenities:           Record<string, boolean> | null
+      }
 
-if (!dbProperties?.length) return
+      // Step 1c-i: snapshot the properties to enrich (needed in outer scope so
+      // the per-property steps below can be fanned out from the loop).
+      const enrichTargets = await step.run('fetch-properties-to-enrich', async () => {
+        const supabase = createServiceClient()
+        const { data } = await supabase
+          .from('properties')
+          .select('id, external_id, wifi_name, wifi_password, access_instructions, house_manual, amenities')
+          .eq('external_source', PROVIDER)
+          .eq('org_id', org_id)
+          .eq('is_active', true)
+        return (data ?? []) as EnrichTarget[]
+      })
 
-        // Batch fetch amenities for all properties in one call (Addendum)
-        let listingByPropertyId = new Map<number, OwnerRezListing>()
+      // Step 1c-ii: batch fetch amenity listings once (shared across all
+      // properties). Returned as a plain object — a Map is not JSON-serialisable
+      // as step output.
+      const listingByPropertyId = await step.run('fetch-listings-batch', async () => {
         try {
           const listings = await client.getListings({ includeAmenities: true })
-          listingByPropertyId = new Map(listings.map((l) => [l.property_id, l]))
 
           if (listings.length > 0) {
             logger.info('[OwnerRez] listing shape sample', {
-              listingKeys:        Object.keys(listings[0]),
+              listingKeys:          Object.keys(listings[0]),
               amenityCategoryCount: listings[0]?.amenity_categories?.length ?? 0,
-              firstCategoryKeys:  listings[0]?.amenity_categories?.[0] ? Object.keys(listings[0].amenity_categories[0]) : [],
+              firstCategoryKeys:    listings[0]?.amenity_categories?.[0] ? Object.keys(listings[0].amenity_categories[0]) : [],
             })
           }
+
+          return Object.fromEntries(
+            listings.map((l) => [String(l.property_id), l])
+          ) as Record<string, OwnerRezListing>
         } catch (err) {
           logger.warn(`[OwnerRez:${user_id}] getListings failed — continuing without amenities: ${err instanceof Error ? err.message : String(err)}`)
+          return {} as Record<string, OwnerRezListing>
         }
+      })
 
-        let loggedDetailSample = false
-
-        for (const dbProp of dbProperties) {
-          const orId    = Number(dbProp.external_id)
-          const detail  = await client.getPropertyDetail(orId)
-
-          // One-time diagnostic — verify actual OwnerRez field names.
-          // Logs key presence only, never values (may contain WiFi passwords).
-          if (!loggedDetailSample) {
-            loggedDetailSample = true
-            logger.info('[OwnerRez] property detail shape sample', {
-              keys:        detail ? Object.keys(detail) : [],
-              hasAddress:  !!detail?.addresses?.length,
-            })
-          }
+      // Step 1c-iii: one memoized step per property for the detail call + patch.
+      for (const dbProp of enrichTargets) {
+        await step.run(`fetch-property-detail-${dbProp.id}`, async () => {
+          const supabase = createServiceClient()
+          const orId     = Number(dbProp.external_id)
+          const detail   = await client.getPropertyDetail(orId).catch(() => null)
 
           const patch: Record<string, unknown> = {}
 
@@ -285,7 +302,7 @@ if (!dbProperties?.length) return
 
           // WiFi, instructions, house manual, and amenities — from the batch
           // listings call, which is the actual source for these fields
-          const listing = listingByPropertyId.get(orId)
+          const listing = listingByPropertyId[String(orId)]
           if (listing) {
             if (!dbProp.wifi_name && listing.wifi_network)
               patch.wifi_name = listing.wifi_network
@@ -304,22 +321,27 @@ if (!dbProperties?.length) return
             }
           }
 
-          if (Object.keys(patch).length === 0) continue
+          if (Object.keys(patch).length === 0) return { skipped: true }
 
           patch.updated_at = new Date().toISOString()
 
-          await supabase
+          const { error } = await supabase
             .from('properties')
             .update(patch)
             .eq('id', dbProp.id)
             .eq('org_id', org_id) // explicit tenant guard
 
-          // Sequential delay — avoid hitting OwnerRez rate limits
-          await new Promise((r) => setTimeout(r, 150))
-        }
+          if (error) throw new Error(`Failed to patch property ${dbProp.id}: ${error.message}`)
 
-        logger.info(`[OwnerRez:${user_id}] Fetched property details for ${dbProperties.length} properties`)
-      })
+          // Distribute the rate-limit delay across steps — each property's
+          // detail call paces itself rather than hammering OwnerRez back-to-back.
+          await new Promise((r) => setTimeout(r, 150))
+
+          return { patched: Object.keys(patch) }
+        })
+      }
+
+      logger.info(`[OwnerRez:${user_id}] Fetched property details for ${enrichTargets.length} properties`)
 
       // ── Step 1d: Apply master checklist to newly-synced properties ────────────
       // Only applies to properties that do not yet have a default template.

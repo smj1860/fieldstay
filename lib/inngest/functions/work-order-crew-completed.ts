@@ -9,9 +9,9 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
   { event: 'work-order/crew.completed' },
   async ({ event, step }) => {
     const { workOrderId, orgId, crewMemberId, notes } = event.data
-    const supabase = createServiceClient()
 
     const context = await step.run('fetch-context', async () => {
+      const supabase = createServiceClient()
       const [woRes, crewRes] = await Promise.all([
         supabase
           .from('work_orders')
@@ -35,6 +35,7 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
     })
 
     const pmEmail = await step.run('fetch-pm-email', async () => {
+      const supabase = createServiceClient()
       return getPmEmail(supabase, orgId)
     })
 

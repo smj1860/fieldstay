@@ -395,11 +395,18 @@ function PropertyGuidebookForm({
 
   useEffect(() => {
     const load = async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('guidebook_property_configs')
         .select('*')
         .eq('property_id', property.id)
         .maybeSingle()
+
+      if (error) {
+        console.error('[guidebook] Failed to load config:', error)
+        // Do NOT fall through to the blank default on error — that would risk
+        // overwriting an existing config on the next save.
+        return
+      }
 
       if (data) {
         setConfig({

@@ -11,6 +11,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
   const [wo, setWo]               = useState<CrewWorkOrderRow | null>(null)
   const [property, setProperty]   = useState<PropertyRow | null>(null)
   const [completing, setCompleting] = useState(false)
+  const [completeError, setCompleteError] = useState<string | null>(null)
   const [notes, setNotes]         = useState('')
   const [done, setDone]           = useState(false)
   const db     = useDexieDb()
@@ -31,6 +32,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
   async function handleComplete() {
     if (!id) return
     setCompleting(true)
+    setCompleteError(null)
     try {
       const res = await fetch(`/api/crew/work-orders/${id}/complete`, {
         method:  'POST',
@@ -43,6 +45,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
       await db.crew_work_orders.update(id, { status: 'completed' })
     } catch {
       setCompleting(false)
+      setCompleteError('Something went wrong. Please check your connection and try again.')
     }
   }
 
@@ -123,6 +126,11 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
             >
               {completing ? 'Marking Complete...' : 'Mark Work Complete'}
             </button>
+            {completeError && (
+              <p className="text-sm text-center mt-2 text-red-600">
+                {completeError}
+              </p>
+            )}
           </div>
         )}
 

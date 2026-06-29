@@ -73,6 +73,37 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Review not found' }, { status: 404 })
   }
 
+  const isManual = (review.external_source as string) === 'manual'
+
+  // Fetch the existing response (if any) to enforce regeneration limits
+  const { data: existingResponse } = await admin
+    .from('review_responses')
+    .select('id, regeneration_count, generated_response')
+    .eq('review_id', reviewId)
+    .maybeSingle()
+
+  const isRegeneration = !!existingResponse?.generated_response
+
+  // Manually-pasted reviews are edit-only — never regenerate them
+  if (isRegeneration && isManual) {
+    return NextResponse.json(
+      { error: 'Manually added reviews cannot be regenerated. Edit the response directly.' },
+      { status: 403 }
+    )
+  }
+
+  // Synced reviews: cap regeneration at MAX_REGENERATIONS after the first draft
+  const MAX_REGENERATIONS = 2
+  if (isRegeneration && !isManual) {
+    const regenCount = existingResponse?.regeneration_count ?? 0
+    if (regenCount >= MAX_REGENERATIONS) {
+      return NextResponse.json(
+        { error: 'Maximum regenerations reached. Edit the response directly.' },
+        { status: 429 }
+      )
+    }
+  }
+
   const propertyData  = review.properties as { name?: string } | null
   const propertyName  = propertyData?.name ?? 'the property'
   const guestName     = (review.guest_name as string | null) ?? 'Guest'
@@ -110,6 +141,10 @@ export async function POST(request: NextRequest) {
       flags:              parsed.flags ?? [],
       flag_reason:        parsed.flag_reason ?? null,
       generated_at:       new Date().toISOString(),
+      // Increment on regeneration; leave at 0 on the first generation
+      regeneration_count: isRegeneration
+        ? ((existingResponse?.regeneration_count ?? 0) + 1)
+        : 0,
     }, { onConflict: 'review_id' })
     .select()
     .single()

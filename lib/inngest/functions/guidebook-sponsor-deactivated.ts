@@ -14,9 +14,9 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
   async ({ event, step }) => {
     const { sponsorId, orgId } = event.data
     const isCancelled = event.name === 'guidebook/sponsor.subscription.cancelled'
-    const supabase    = createServiceClient()
 
     await step.run('deactivate-sponsor-row', async () => {
+      const supabase = createServiceClient()
       const { error } = await supabase
         .from('guidebook_sponsors')
         .update({
@@ -41,6 +41,7 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
     const gracePeriodEndsAt = await step.run('evaluate-guidebook-lock', async () => {
       if (activeSponsorCount >= 4) return null
 
+      const supabase = createServiceClient()
       const { data: existingConfig } = await supabase
         .from('guidebook_configurations')
         .select('is_active, grace_period_ends_at')
