@@ -1,6 +1,7 @@
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ReviewsClient } from './reviews-client'
+import { getManualReviewsUsedThisWeek } from './actions'
 
 interface ReviewRow {
   id: string
@@ -32,6 +33,7 @@ interface ReviewResponseRow {
   flags: string[]
   flag_reason: string | null
   generated_at: string | null
+  regeneration_count: number
   created_at: string
   updated_at: string
 }
@@ -39,6 +41,8 @@ interface ReviewResponseRow {
 export default async function ReviewsPage() {
   const { membership } = await requireOrgMember()
   const admin = createServiceClient()
+
+  const manualUsedThisWeek = await getManualReviewsUsedThisWeek(membership.org_id)
 
   // Fetch reviews with responses
   const { data: reviews } = await admin
@@ -99,6 +103,7 @@ export default async function ReviewsPage() {
   return (
     <ReviewsClient
       reviews={reviewsWithDeadline as ReviewRow[]}
+      manualUsedThisWeek={manualUsedThisWeek}
     />
   )
 }

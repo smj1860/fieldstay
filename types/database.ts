@@ -915,6 +915,7 @@ export interface ReviewResponse {
   flags:               string[]
   flag_reason:         string | null
   generated_at:        string | null
+  regeneration_count:  number
   created_at:          string
   updated_at:          string
 }
