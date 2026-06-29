@@ -207,14 +207,14 @@ export function CrewShell({
         )}
 
         <main className="flex-1 px-4 py-6">{children}</main>
-        <CrewBottomNav userId={userId} />
+        <CrewBottomNav userId={userId} onHelpClick={() => setShowInfo(true)} />
       </div>
     </DexieProvider>
     </CrewContext.Provider>
   )
 }
 
-function CrewBottomNav({ userId }: { userId: string }) {
+function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: () => void }) {
   const pathname = usePathname()
   const db = useDexieDb()
 
@@ -258,14 +258,14 @@ function CrewBottomNav({ userId }: { userId: string }) {
         )
       })}
 
-      {/* Support — opens the crew's mail client */}
-      <a
-        href="mailto:help@fieldstay.app"
+      {/* Support — opens FAQ panel */}
+      <button
+        onClick={onHelpClick}
         className="flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-accent-400 hover:text-accent-600 transition-colors"
       >
         <HelpCircle className="w-5 h-5" />
         Help
-      </a>
+      </button>
     </nav>
   )
 }
