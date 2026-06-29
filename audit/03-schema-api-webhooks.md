@@ -1,47 +1,67 @@
-# Schema Naming / API / Webhooks Audit
+# Schema Naming / API / Webhooks Audit — Round 2
 
-Status: COMPLETE
-Last checkpoint: reviewed all app/api/**/route.ts handlers, all webhook handlers, OAuth connect/callback flow, token-based public vendor/work-order routes, GDPR/account-delete routes, asset export routes, and cross-checked types/database.ts against the three most recent migrations (property_sync_expansion, crew_feedback, vendor_stripe_connect) plus enum usage for txn_category/txn_type/source/wo_status across lib/inngest/functions and app/(dashboard) actions.
-Next: none — audit complete
+Status: IN PROGRESS
+Last checkpoint: Verified Telnyx webhook ed25519 fix, OwnerRez/[provider] webhook + adapter validateWebhook implementations, wo_status cast fix, memberships/assigned_crew_id/work_order_notes/supabase.raw greps (all clean), recent migrations (20260625-20260628) cross-checked against types/database.ts (all in sync).
+Next: final write-up.
 
 ## Findings
 
-### Finding 1: Telnyx webhook has no signature verification
-- File: app/api/webhooks/telnyx/route.ts:6-9
-- Severity: High
-- Issue: The handler has an explicit TODO admitting it does not verify the Telnyx ed25519 webhook signature before processing the request body. Anyone who knows (or guesses) the webhook URL can POST arbitrary STOP/START/UNSUBSCRIBE payloads with any `phone_number`, flipping SMS consent (`guidebook_guest_sms_optins.is_active`) for any phone number in the system without proving the request came from Telnyx.
-- Confirmed: Code comment is explicit: `// TODO: verify Telnyx webhook signature (ed25519) before processing — deferred for this session per CLAUDE_55_2 scope.`
-- Fix: Implement ed25519 signature verification using Telnyx's `telnyx-signature-ed25519` and `telnyx-timestamp` headers before parsing/acting on the body, consistent with the Stripe webhook pattern (`constructEvent` + fail-closed 400 on bad signature) used elsewhere in this codebase.
+### Finding 1: Stray migration file breaks naming convention — `new asset_type_standards_rls`
+- File: supabase/migrations/new asset_type_standards_rls
+- Severity: Medium
+- Issue: This file has no timestamp prefix (`YYYYMMDDHHMMSS_description.sql`) and no `.sql` extension at all — it's literally named `new asset_type_standards_rls` (with a space). CLAUDE.md's migration workflow section is explicit: "write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`". A file like this may be silently skipped by `supabase db push` (which matches on `.sql` extension) or applied out of order relative to its actual intent, since there's no timestamp to anchor it after `20260628013427_property_sync_expansion.sql`. Its content (enabling RLS + locking down INSERT/UPDATE/DELETE on `asset_type_standards`, allowing authenticated SELECT) looks correct and harmless in isolation, but the question is whether it was ever actually applied to the live DB, since `supabase db push` filename matching may reject it.
+- Confirmed/Suspected: Confirmed file exists with this exact malformed name; suspected (not verified against live DB) that this causes drift — could not query live Supabase project state in this pass to confirm whether RLS is actually enabled on `asset_type_standards` live.
+- Status: NEW
+- Fix: Rename to `20260629000000_asset_type_standards_rls.sql` (or appropriate timestamp) and re-apply via `supabase db push` / `apply_migration` to guarantee it's tracked, then verify live RLS state on `asset_type_standards` via `get_advisors` or `list_tables`.
 
-### Finding 2: `[provider]` webhook handler (OwnerRez) has no signature/HMAC verification of its own — delegates entirely to `providerAdapter.validateWebhook()`
+### Finding 2: `TELNYX_WEBHOOK_PUBLIC_KEY` undocumented in `.env.example`
+- File: .env.example (missing entry); referenced in app/api/webhooks/telnyx/route.ts:15
+- Severity: Low
+- Issue: The new Telnyx signature verification depends on `process.env.TELNYX_WEBHOOK_PUBLIC_KEY`, but `.env.example` only documents `KROGER_CLIENT_ID`/`KROGER_CLIENT_SECRET` (per CLAUDE.md's required-env list) and has no Telnyx section at all. If unset in any environment, `verifyTelnyxSignature()` returns `false` unconditionally (safe failure — no legitimate webhooks get silently accepted), but the webhook will appear broken with no documentation pointing at the missing var.
+- Confirmed/Suspected: Confirmed via grep — zero Telnyx entries in `.env.example`.
+- Status: NEW
+- Fix: Add `TELNYX_WEBHOOK_PUBLIC_KEY=` (and ideally `TELNYX_API_KEY` if used elsewhere in `lib/sms/telnyx.ts` for outbound sends) to `.env.example` with a comment pointing to Telnyx Portal → API Keys → Ed25519 Public Key, matching the comment already in the route file.
+
+### Finding 3 (informational — re-flagging round-1 watch item, now resolved): Provider adapter `validateWebhook()` stubs fail closed correctly
+- File: lib/integrations/providers/hostaway.ts:67-73, lib/integrations/providers/kroger.ts:80-82, lib/integrations/providers/ownerrez.ts:141-163
+- Severity: Low (no actual issue — documenting verification)
+- Issue: Round 1 flagged this as a "watch item" — risk that a future provider adapter might stub `validateWebhook()` to always return `true`. Checked all three current adapters: Hostaway and Kroger both explicitly `return false` (fail closed, webhooks not yet supported), and OwnerRez does real HTTP Basic Auth verification with `timingSafeEqual()` constant-time comparison against `OWNERREZ_WEBHOOK_USER`/`OWNERREZ_WEBHOOK_PASSWORD`, throwing (caught by the route, mapped to 401) if those env vars are unset. No stub returns `true`.
+- Confirmed/Suspected: Confirmed — read all three provider files in full.
+- Status: STILL OPEN as a structural risk (nothing enforces this contract at compile time — a future adapter could still stub `true`), but no current instance of the bug exists.
+- Fix: Same as round 1 — no code change needed today; consider a lint rule or code-review checklist item for new adapters.
+
+## Round 1 Verification
+
+### Round 1 Finding 1: Telnyx webhook has no signature verification
+- File: app/api/webhooks/telnyx/route.ts:6-9 (now lines 1-41 in current file)
+- Status: **FIXED**
+- Evidence: Current code (read in full) implements `verifyTelnyxSignature()` using `createVerify('ed25519')` over `${timestamp}|${rawBody}` (matches Telnyx's documented signed-payload format), reads headers `telnyx-signature-ed25519` and `telnyx-timestamp` (correct header names per Telnyx docs), reads the raw body via `req.text()` BEFORE any parsing (critical — signature must be computed over exact bytes, and this is done correctly), fails closed returning 401 if verification fails or `TELNYX_WEBHOOK_PUBLIC_KEY`/signature/timestamp are missing, and only parses JSON after the signature check passes. This is functionally equivalent in rigor to the Stripe `constructEvent()` pattern referenced as the standard in CLAUDE.md. No regressions found — STOP/START handling logic downstream is unchanged and still correctly scoped by `phone_e164` + `is_active` guard conditions to prevent duplicate audit log writes.
+- Minor gap (see Finding 2 above): the required `TELNYX_WEBHOOK_PUBLIC_KEY` env var isn't documented in `.env.example`.
+
+### Round 1 Finding 2: `[provider]` webhook handler delegates validation to adapters — watch item
 - File: app/api/webhooks/[provider]/route.ts:48-63
-- Severity: Low
-- Issue: This is not a bug in the route itself — it correctly fails closed (401) if `validateWebhook()` throws or returns false, and the comment block documents OwnerRez's HTTP Basic Auth scheme. However, the actual validation logic lives in the provider adapter (`lib/integrations/*`), which was outside this read; if any future provider adapter is added to the registry without implementing `validateWebhook()` correctly (e.g. always returning `true`), this route would silently accept unauthenticated webhooks. Flagging as a watch item, not a confirmed defect.
-- Confirmed/Suspected: Suspected — the route's own logic is sound; risk is contingent on adapter implementations not reviewed in this pass.
-- Fix: When auditing `lib/integrations/registry.ts` and individual provider adapters, verify every adapter's `validateWebhook()` does real cryptographic/credential verification (not a stub returning true).
+- Status: **STILL OPEN as documented watch item, but verified no current defect** (see Finding 3 above). The route's own fail-closed logic (try/catch wrapping `validateWebhook()`, 401 on throw or `false`) is unchanged and correct. All three current adapters fail closed correctly.
 
-### Finding 3: `wo_status` narrowing cast in vendor-portal completion route silently excludes `quote_requested`
-- File: app/api/work-orders/[token]/complete/route.ts:181
-- Severity: Low
-- Issue: `status_from: workOrder.status as 'pending' | 'assigned' | 'in_progress'` casts to a 3-value subset of the 6-value `wo_status` enum (missing `quote_requested`, `completed`, `cancelled`). This is currently safe at runtime because the preceding atomic update on line 93-102 only claims rows `.in('status', ['pending', 'assigned', 'in_progress'])`, so `workOrder.status` can never actually be `quote_requested` by the time this cast executes. Purely a type-safety smell, not a runtime bug today — but if the claimable-status list on line 102 is ever widened (e.g. to allow completing directly from `quote_requested`), this cast would silently mask a real type mismatch instead of failing the build.
-- Confirmed: Confirmed as written; not exploitable today because of the line-102 guard.
-- Fix: Use the shared `WoStatus` type (`types/database.ts`) for this cast instead of a hand-rolled literal union, so future widening of the claim filter is caught by the type checker.
+### Round 1 Finding 3: `wo_status` narrowing cast in vendor-portal completion route
+- File: app/api/work-orders/[token]/complete/route.ts:181 (now line 182)
+- Status: **FIXED**
+- Evidence: Current code imports `WoStatus` from `@/types/database` (line 4) and casts `status_from: workOrder.status as WoStatus` (line 182) — the full 6-value enum type, not the previous hand-rolled 3-value union (`'pending' | 'assigned' | 'in_progress'`). This means if the claimable-status filter on line 103 (`.in('status', ['pending', 'assigned', 'in_progress'])`) is ever widened, the type checker will no longer silently mask a mismatch, exactly per round 1's recommended fix.
 
-## Clean / Verified (no issues found)
+## Areas Re-Verified Clean (no new issues)
 
-The following areas were specifically audited per the assignment brief and found correct:
+- **`.from('memberships')`**: Zero occurrences (grepped `--include="*.ts" --include="*.tsx"` across entire repo).
+- **`assigned_crew_id` in app code**: Zero occurrences in `app/` or `lib/` (still only present in deprecated DB column / schema_reference.sql / generated types, as in round 1).
+- **`work_order_notes`**: Zero occurrences anywhere.
+- **`supabase.raw()` / `.modify()`**: Zero occurrences in `app/` or `lib/`.
+- **Recent migrations vs types/database.ts**: Spot-checked all migrations from `20260625000001_communication_logs_dedup_key.sql` through `20260628013427_property_sync_expansion.sql` (6 migrations, the most recent batch since round 1's last check). Every new column/table is present and correctly typed in `types/database.ts`:
+  - `communication_logs.dedup_key` → present (line 954)
+  - `property_owners.share_capital_plan`, `property_assets.replacement_status` → present (lines 175, 1223)
+  - `guidebook_configurations`, `guidebook_sponsors`, `guidebook_property_configs`, `guidebook_guest_sms_optins` tables + `bookings.guidebook_token` → all present (lines 227-228, 1094-1200+, Database type entries 1378-1381)
+  - `guidebook_sponsors.offer_type/offer_value/offer_item` → present (lines 1146-1149)
+  - `crew_feedback` table → present (line 268)
+  - `bookings.guidebook_pre_arrival_email_sent_at` → present (line 228)
+  - `properties.house_manual/checkout_instructions/amenities/smoking_allowed/pets_allowed/max_pets/events_allowed/min_renter_age` → all present (lines 154-161)
+- **Stripe webhooks**: Not re-read line-by-line this pass given no flagged regression risk and no related commit in this round's changelist; round 1's verification stands.
+- **OAuth CSRF / token-based portal routes**: No changes detected relevant to this domain since round 1; spot check of `app/api/work-orders/[token]/complete/route.ts` (read in full above) confirms the vendor-org cross-check (lines 49-59) and atomic claim-on-status (.in() filter, lines 94-103) are both still intact.
 
-- **`.from('memberships')` bug**: Zero occurrences in app/lib source. Already fully remediated (confirmed by grep and corroborated by prior audit docs `audits/00-SUMMARY.md`, `audits/01-security-multitenant-isolation.md`).
-- **`assigned_crew_id` vs `assigned_crew_member_id`**: The deprecated column does NOT actually exist in `types/database.ts`'s `WorkOrder` interface as checked here — grep only found it in `types/database.generated.ts` (the read-only reference snapshot, not imported anywhere) and in `supabase/schema_reference.sql`/migrations (where it legitimately still exists as a deprecated-but-present DB column per the schema comment "work_orders has BOTH assigned_crew_id (deprecated, FK retained...) and assigned_crew_member_id"). No application code reads/writes `assigned_crew_id`. (Note: sibling audit `audits/04-business-logic-tech-debt.md` from a prior session flagged this differently — worth reconciling, but in the current `types/database.ts` and `app/` as of this pass, `assigned_crew_id` is not referenced in app code.)
-- **`inventory_count_draft_items` vs `inventory_count_items` column naming**: Both tables are used correctly and consistently in their respective code paths — `app/api/crew/inventory-count/route.ts` uses `item_id`/`counted_qty` for drafts and `inventory_item_id`/`quantity_counted` for the legacy direct-commit path; `app/(dashboard)/inventory/actions.ts` likewise uses `inventory_item_id`/`quantity_counted` for `inventory_count_items`. No cross-contamination found.
-- **`work_order_notes` non-existent table**: Zero occurrences anywhere in source; all status-log writes correctly use `work_order_updates`.
-- **`supabase.raw()` / `.modify()`**: Zero occurrences anywhere in `app/` or `lib/`.
-- **Stripe webhook signature verification**: Both `app/api/webhooks/stripe/route.ts` and `app/api/webhooks/stripe-connect/route.ts` correctly call `stripe.webhooks.constructEvent()` with the appropriate secret (`STRIPE_WEBHOOK_SECRET` vs `STRIPE_CONNECT_WEBHOOK_SECRET`) and fail closed with 400 on verification failure, before touching the DB. Both dedupe via `stripe_processed_events` (keyed `connect:${event.id}` for the Connect webhook to avoid ID collision with the platform webhook).
-- **OAuth CSRF state verification**: `app/api/integrations/[provider]/connect/route.ts` and `.../callback/route.ts` implement a solid double-layered CSRF defense — a DB-backed one-time `oauth_states` row (validated, expiry-checked, and deleted immediately on use) plus a belt-and-suspenders httpOnly cookie. Open-redirect guard on `return_to` (`safePath.startsWith('/')`) is present.
-- **Token-based public vendor/work-order portal routes** (`vendor-connect/[token]/onboard`, `work-orders/[token]/complete`, `work-orders/[token]/quote`): All validate the token against the DB, check expiry, check `portal_enabled`/`status` state, and use atomic conditional updates (`.eq('status', 'pending')` style claims) to prevent double-submission races. The WO completion route additionally cross-checks that the assigned vendor's `org_id` matches the work order's `org_id` before creating an invoice — good defense against a stale/cross-tenant vendor_id.
-- **`txn_category`/`txn_type`/`owner_transactions.source` enum usage**: All usages across `lib/inngest/functions/{inventory,work-order,turnover,booking}-events.ts`, `app/(dashboard)/bookings/actions.ts`, `app/(dashboard)/maintenance/actions.ts`, and `app/api/webhooks/stripe/route.ts` use exact canonical enum values (`restock`, `maintenance`, `cleaning_fee`, `booking_revenue`, `wo_completion`, `inventory_purchase`). The `uplisting_booking` source value (initially appeared unused in a narrow grep) is in fact correctly wired in `lib/inngest/functions/booking-events.ts:16` (`source === 'uplisting' ? 'uplisting_booking' : 'booking_revenue'`).
-- **Recent migration → types/database.ts sync**: Spot-checked the 3 most recent schema-changing migrations (`20260628013427_property_sync_expansion.sql` adding 8 columns to `properties`; `20260628000000_crew_feedback.sql` creating `crew_feedback`; `20260626142311_vendor_stripe_connect.sql` adding 5 `stripe_connect_*` columns to `vendors` plus `work_order_line_items.vendor_submitted`). All new columns/tables are present in `types/database.ts` with correct nullability.
-- **GDPR export, account deletion, asset CapEx/CPA export routes**: All correctly call `requireOrgMember()` or equivalent session check first, scope every query by `org_id`/`user.id`, and never leak the service role key or raw DB errors to the client.
-- **Crew PWA API routes** (`crew/inventory-count`, `crew/issue-reports`, `crew/feedback`, `crew/turnovers/[id]/complete`, `crew/work-orders/[id]/complete`, `crew/push-subscribe`): All follow the documented inline auth pattern (`supabase.auth.getUser()` → `crew_members` lookup by `user_id` → 403 if not found), and all subsequent queries are scoped by `org_id` derived server-side, never trusting client-supplied org/property IDs without a server-side ownership check.
-
-
+Status: COMPLETE

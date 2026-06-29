@@ -1,83 +1,81 @@
-# Idempotency / Deduplication / Inngest Audit
+# Idempotency / Deduplication / Inngest Audit — Round 2
 
-Status: COMPLETE
-Last checkpoint: audited all lib/inngest/functions/*.ts (including cron/, ownerrez/, hostaway/ subdirectories) for idempotency, createServiceClient placement, step.sleep nesting, for-of return-vs-continue, and event registration. Verified exactly one serve() call in app/api/inngest/route.ts and all used events are registered in events.ts.
-Next: none — audit complete
+Status: IN PROGRESS
+Last checkpoint: Verified single serve() call, all 10 round-1-flagged createServiceClient files now fixed, the guest-SMS atomic claim fix, and the repuguard counter/idempotency-key fix. Found 9 ADDITIONAL files with the same outer-scope createServiceClient() bug that round 1 missed entirely.
+Next: finalize write-up, append SUMMARY.md
 
 ## Findings
 
-### Finding 1: turnover-events.ts and booking-events.ts use correct upsert pattern
-- File: lib/inngest/functions/turnover-events.ts:239-258, lib/inngest/functions/booking-events.ts:48-65, lib/inngest/functions/booking-events.ts:115-130
-- Severity: N/A (informational — good pattern, not a bug)
-- Issue: None — these correctly use `.upsert(..., { onConflict: 'source_reference_id,source', ignoreDuplicates: true })`, which is a proper atomic dedup against the owner_transactions unique constraint, better than a check-then-insert TOCTOU pattern.
-- Confirmed: yes
-- Fix: N/A — use this as the reference pattern when reviewing other files.
+### Finding 1: MISSED IN ROUND 1 — 9 more files call createServiceClient() outside step.run()
+- File: lib/inngest/functions/inventory-order-email-cron.ts:22, lib/inngest/functions/ownerrez/initial-sync.ts:47, lib/inngest/functions/guidebook-sms-evening-cron.ts:21, lib/inngest/functions/cron/checklist-signals.ts:16, lib/inngest/functions/cron/work-order-ops.ts:23, lib/inngest/functions/guidebook-pre-arrival-email-cron.ts:14, lib/inngest/functions/guidebook-stay-extension-cron.ts:12, lib/inngest/functions/build-shopping-cart.ts:115 (plus correctly-scoped instances at 43/53/340 in the same file), lib/inngest/functions/guidebook-sms-morning-cron.ts:21
+- Severity: High
+- Issue: All 9 files declare `const supabase = createServiceClient()` (or similarly named) at the top of the handler body, before the first `step.run()` call, then close over that single instance inside every subsequent `step.run()` callback — the exact anti-pattern round 1 flagged as Finding 7/9 and that the "Fix Inngest client scoping" commit (aa3da30) targeted. That commit fixed the 10 files it named but did not do a codebase-wide sweep, leaving this pattern in at least 9 other files untouched. Notably this includes `build-shopping-cart.ts` (live Kroger cart API calls) and three guidebook SMS cron files (paid Telnyx SMS sends) and `cron/work-order-ops.ts` (auto-WO creation + PM email alerts) — all side-effect-heavy functions where stale/shared client state across step boundaries is the exact risk CLAUDE.md's rule is meant to prevent.
+- Confirmed/Suspected: Confirmed via direct code read of all 9 files — `createServiceClient()` appears before the first `step.run(` token, verified by both regex byte-offset comparison and manual reading of file headers.
+- Status: MISSED (round 1 audited file-by-file but apparently did not check beyond the 10 files it found in its first sweep, or these files were added/never re-checked; commit history shows none of the 9 files were touched by `aa3da30`)
+- Fix: Move `const supabase = createServiceClient()` inside each individual `step.run()` callback in all 9 files, matching the corrected pattern in the round-1-fixed files (guidebook-sponsor-activated.ts, work-order-crew-assigned.ts, etc.). Recommend a follow-up grep-assisted manual sweep across the ENTIRE `lib/inngest/functions/` tree (including subdirectories) rather than spot-checking — this round found these 9 by mechanically comparing byte offsets of `createServiceClient()` calls against the first `step.run(` call in every file, which round 1's manual approach apparently missed.
 
-### Finding 2 (RETRACTED — false alarm): renderPmAlert prop names
-- File: lib/resend/emails/pm-alert.tsx:12-20
-- Severity: N/A
-- Issue: Verified actual `PmAlertProps` interface — `heading`, `body`, `details`, `table`, `note`, `ctaLabel`, `ctaUrl` are ALL valid optional/required props on the real component. CLAUDE.md's claim that the signature is "NOT heading, body, table, note, pmName" does not match this file's current code. Calls in turnover-events.ts are correct as written. Not flagging further — out of my domain (idempotency) anyway; mentioning only to retract my earlier suspicion.
-- Confirmed/Suspected: Confirmed not a bug (read the source file directly).
-- Fix: None needed.
-
-### Finding 3: work-order-events.ts — owner_transactions upsert correctly guards against estimated_cost
-- File: lib/inngest/functions/work-order-events.ts:184-214
-- Severity: N/A (informational)
-- Issue: None — `handleWorkOrderCompleted` correctly only posts when `actual_cost` is set (not `estimated_cost`), uses the upsert+ignoreDuplicates dedup pattern, and a code comment in `handleWorkOrderCompletedViaPortal` (lines 258-260) explicitly explains why that function does NOT also post an expense (to avoid racing the same source_reference_id/source pair). This is a well-reasoned, intentional separation of concerns.
-- Confirmed: yes
+### Finding 2: VERIFIED FIXED — guidebook-guest-opted-in.ts SMS race now uses atomic claim
+- File: lib/inngest/functions/guidebook-guest-opted-in.ts:44-56
+- Severity: N/A (informational — confirms fix)
+- Issue: None remaining. The `send-door-code-sms` step now performs an atomic `UPDATE guidebook_guest_sms_optins SET door_code_sent_at = now() ... WHERE id = optinId AND door_code_sent_at IS NULL RETURNING id` before sending the SMS. If the UPDATE affects 0 rows (`claimed` is null), the function returns `{ skipped: 'already_sent' }` without sending. On SMS send failure, the claim is explicitly rolled back (`door_code_sent_at: null`) before throwing, allowing a legitimate retry. This is a correct, race-free claim pattern.
+- Confirmed/Suspected: Confirmed by direct code read.
+- Status: FIXED
 - Fix: N/A
 
-### Finding 4: repuguard-batch-generate.ts — counters mutated in outer function scope across step.run boundaries (replay-safety concern)
-- File: lib/inngest/functions/repuguard-batch-generate.ts:43-44, 85, 109, 112-114
-- Severity: Medium
-- Issue: `generated` and `skipped` are declared in the outer function scope (let generated = 0; let skipped = 0) and mutated *inside* `step.run()` callbacks (`generated++` at line 109, `skipped++` at line 85). Because Inngest replays the entire function body on every step completion/retry, but memoizes the *return value* of already-completed `step.run()` calls (skipping re-execution of the callback body), the increments inside the callback bodies will NOT re-run on replay for already-completed reviews — only for the step(s) actually executing in that invocation. This means `generated`/`skipped` are reconstructed via re-running the whole loop each time the function resumes, but only newly-executing steps mutate the counters; memoized (skipped) steps do not re-increment. Net effect across a full successful run this nets out correctly, but it's a fragile pattern: any future refactor that moves logic between step.run callback and outer scope, or any partial-failure/retry interleaving, risks undercounting `generated`/`skipped` in the final `notify-pm` email body, since that step runs after the loop and reads the closure variables which may not reflect counts from steps memoized in a prior invocation attempt in all Inngest execution model edge cases.
-- Confirmed/Suspected: Suspected — the exact replay semantics depend on Inngest's execution model details (step memoization is per run, and a single run's outer function does fully re-execute on each step-boundary resumption, so this is likely fine in practice for a single run). Flagging because mutating shared counters across a step.run boundary inside a loop is a known anti-pattern Inngest's own docs warn about ("non-deterministic side effects must live inside step.run, but variables derived from them and used outside steps can drift") — and because the same pattern recurs in repuguard's `pace-${review.id}` step.sleep calls outside step.run, which is correct, but the counters are a smaller variant of the same general hazard.
-- Fix: Compute `generated`/`skipped` counts via a final `step.run('tally-results', ...)` that re-queries `review_responses`/`reviews` by `org_id` and a batch marker (e.g. reviews updated in this run, or count of rows with response_status in ('draft','ready') created since batch start), rather than relying on in-memory counters mutated inside per-item step.run callbacks. This removes any replay ambiguity.
+### Finding 3: VERIFIED FIXED — repuguard-batch-generate.ts counter and idempotency-key issues resolved
+- File: lib/inngest/functions/repuguard-batch-generate.ts:46, 113-114, 121-122, 128, 144
+- Severity: N/A (informational — confirms fix)
+- Issue: None remaining. `generated`/`skipped` counts are now derived from `results: Array<{ generated: boolean }>` populated by each step.run's return value (pushed at line 114, outside the step.run callback), then tallied via `.filter()` at lines 121-122 — eliminating the prior in-callback outer-counter-mutation hazard. The notify-pm email's idempotency key now includes `batchRunId` (`reviews[0]?.id`) in addition to org_id and date (line 144: `repuguard-batch-${org_id}-${date}-${batchRunId}`), so a second same-day batch run with a different first-review-id will notify independently instead of being silently deduped by Resend.
+- Confirmed/Suspected: Confirmed by direct code read.
+- Status: FIXED
+- Fix: N/A
 
-### Finding 5: repuguard-batch-generate.ts notify-pm email idempotency keyed by day, not by batch
-- File: lib/inngest/functions/repuguard-batch-generate.ts:130-133
-- Severity: Low
-- Issue: The notify-pm email's `idempotencyKey` is `repuguard-batch-${org_id}-${requested_by}-${new Date().toISOString().split('T')[0]}` — keyed by org, requester, and *today's date*. If the same org/user triggers two separate repuguard batch-generate runs on the same calendar day (e.g. manually re-triggered after the first batch only processed 25 of 60 pending reviews, since BATCH_LIMIT=25), the second run's PM notification email will be silently deduplicated by Resend's idempotency key and the PM will never be told about the second batch's results.
-- Confirmed/Suspected: Confirmed by reading the code — this is a real consequence of date-only keying combined with BATCH_LIMIT pagination, though it is a notification-suppression bug rather than a data-correctness bug.
-- Fix: Include a per-run identifier (e.g. the Inngest run ID, or the batch's `reviews[0].id`/count) in the idempotency key, e.g. `repuguard-batch-${org_id}-${requested_by}-${event.id}` (Inngest event ID) so multiple same-day batches each notify independently.
-
-### Finding 6: build-shopping-cart.ts, kroger-connected.ts, auto-assign-turnover.ts — clean idempotency patterns (informational)
-- File: lib/inngest/functions/build-shopping-cart.ts:339-361, lib/inngest/functions/kroger-connected.ts:25-105, lib/inngest/functions/auto-assign-turnover.ts:214-280
+### Finding 4: Informational — step.sleep/step.run nesting and for-of return-vs-continue clean across codebase
+- File: lib/inngest/functions/*.ts and subdirectories (ownerrez/, hostaway/, cron/)
 - Severity: N/A
-- Issue: None. These are the strongest examples in the codebase:
-  - build-shopping-cart.ts guards the actual Kroger cart-add API call with a `runId`-scoped `org_milestones` row checked before calling `addItemsToKrogerCart`, preventing a retried step from double-adding items to the customer's real Kroger cart (a double-charge-adjacent risk since this is a live external retailer cart).
-  - auto-assign-turnover.ts handles the `23505` unique-violation on `turnover_assignments` insert explicitly, treating "already assigned" as a successful idempotent outcome rather than retrying into a duplicate-row error loop, and the `assignment_outcomes` upsert keys on `(turnover_id, crew_member_id)`.
-  - kroger-connected.ts is a clean one-shot setup function with no real duplication risk (all writes are idempotent upserts/updates keyed on org_id).
+- Issue: None found. Surveyed all files containing `step.sleep` (email-subscriber-checkin.ts, repuguard-batch-generate.ts, turnover-events.ts, work-order-events.ts, ownerrez/incremental-sync.ts, ownerrez/ownerrez-reviews-sync.ts, cron/vendor-connect-onboarding.ts) — in every case `step.sleep`/`step.sleepUntil` is called at the top level of the function body or a for-of loop body, never nested inside a `step.run()` callback. Spot-checked `ownerrez-reviews-sync.ts:51` specifically since it sits inside a try/catch following a `step.run()` call — confirmed the `step.sleep` is in the catch block at the top level, not inside the failed step.run's callback. No `for...of` loop inside a `step.run()` callback was found using bare `return` to skip an iteration (the loops that do exist inside step.run bodies, e.g. hostaway/initial-sync.ts:96, only build in-memory maps/arrays and don't use return/continue at all).
 - Confirmed: yes
-- Fix: N/A — reference patterns.
+- Status: STILL OPEN — N/A, this is a clean-bill finding, no remediation needed.
+- Fix: N/A
 
-### Finding 7: CRITICAL — createServiceClient() called in outer function scope (not inside step.run) across the entire guidebook-*.ts family
-- File: lib/inngest/functions/guidebook-sponsor-activated.ts:11, guidebook-sponsor-deactivated.ts:17, guidebook-daily-monitor.ts:13, guidebook-grace-expired-handler.ts:14, guidebook-sponsor-payment-recovered.ts:11, guidebook-guest-opted-in.ts:10, guidebook-stay-extension-handler.ts:15
-- Severity: High
-- Issue: CLAUDE.md states explicitly: "createServiceClient() inside step.run() only — never in outer function scope." All seven files listed call `const supabase = createServiceClient()` (or `const admin = ...` in some) once at the top of the handler, OUTSIDE any `step.run()`, and then close over that single client instance inside every subsequent `step.run()` callback. This is the exact anti-pattern the project's own constraints document calls out. It matters because Inngest replays the outer function body on every step boundary; while creating a lightweight client instance itself is unlikely to use stale state immediately, this pattern is flagged as forbidden in CLAUDE.md specifically because of past incidents in this codebase (the constraint wouldn't otherwise be called out so prominently), and a client created in module/closure scope can silently carry forward stale auth/connection state across what should be independent, isolated step executions — also makes each step's side effects harder to reason about in isolation when debugging retries.
-- Confirmed/Suspected: Confirmed via direct code read — `createServiceClient()` is unambiguously outside `step.run()` in all 7 files.
-- Fix: Move `const supabase = createServiceClient()` inside each individual `step.run()` callback that uses it (matching the correct pattern used in turnover-events.ts, work-order-events.ts, inventory-events.ts, booking-events.ts, build-shopping-cart.ts, auto-assign-turnover.ts, ownerrez/*, hostaway/initial-sync.ts — all of which correctly instantiate the client per-step).
-
-### Finding 8: guidebook-guest-opted-in.ts — check-then-act race on door-code SMS dedup
-- File: lib/inngest/functions/guidebook-guest-opted-in.ts:38-62
-- Severity: Medium
-- Issue: The `send-door-code-sms` step reads `door_code_sent_at` from `guidebook_guest_sms_optins` (line 38-42), returns early if already set (line 44), then — if not set — sends the SMS (line 49-52) and only afterward updates `door_code_sent_at` (line 54-61) to mark it sent. If this step is retried after the SMS send succeeds but before (or during) the DB update (e.g. the function crashes, times out, or Inngest retries due to an unrelated transient error after `sendSMS` resolves but before the `update` call completes), the retry will re-read `door_code_sent_at` as still null, and send the SMS a second time to the same guest's phone number. There is no unique constraint or atomic claim (e.g. `UPDATE ... WHERE door_code_sent_at IS NULL RETURNING ...` done before sending, or an `ON CONFLICT DO NOTHING` insert into a separate dedup table) — this is a textbook check-then-act gap on a paid, user-visible external side effect (an SMS to a guest).
-- Confirmed/Suspected: Confirmed by reading the code — the check and the write are two separate non-atomic operations bridging an external API call that has no idempotency key of its own (sendSMS call has no idempotency key passed, unlike most resend.emails.send calls elsewhere in the codebase that pass `idempotencyKey`).
-- Fix: Convert the "claim" into a single atomic UPDATE before sending: `UPDATE guidebook_guest_sms_optins SET door_code_sent_at = now() WHERE id = optinId AND door_code_sent_at IS NULL RETURNING id` — only send the SMS if that update affected a row (i.e., this invocation won the race). This is the same pattern as `source_reference_id` dedup but applied to a non-owner_transactions table, which is exactly the kind of external-API-side-effect dedup CLAUDE.md's idempotency rule is meant to generalize to.
-
-### Finding 9: More createServiceClient() outer-scope violations — work-order-vendor-assigned.ts, work-order-crew-assigned.ts, work-order-crew-completed.ts
-- File: lib/inngest/functions/work-order-vendor-assigned.ts:11, lib/inngest/functions/work-order-crew-assigned.ts:9, lib/inngest/functions/work-order-crew-completed.ts:12
-- Severity: High
-- Issue: Same violation as Finding 7 — `const supabase = createServiceClient()` is declared at the top of the handler, before the first `step.run()` call, in all three of these work-order-* files. Combined with Finding 7's guidebook-*.ts files, this brings the total count of outer-scope `createServiceClient()` violations to 10 files: guidebook-sponsor-activated.ts, guidebook-sponsor-deactivated.ts, guidebook-daily-monitor.ts, guidebook-grace-expired-handler.ts, guidebook-sponsor-payment-recovered.ts, guidebook-guest-opted-in.ts, guidebook-stay-extension-handler.ts, work-order-vendor-assigned.ts, work-order-crew-assigned.ts, work-order-crew-completed.ts. By contrast, every other function file audited (turnover-events.ts, booking-events.ts, work-order-events.ts [NOT to be confused with the 3 files here], inventory-events.ts, build-shopping-cart.ts, kroger-connected.ts, auto-assign-turnover.ts, ownerrez/*, hostaway/initial-sync.ts, flagged-turnover-wo.ts, repuguard-batch-generate.ts) correctly instantiates `createServiceClient()` fresh inside each `step.run()` callback. This is a consistent, repeated pattern violation, not a one-off.
-- Confirmed/Suspected: Confirmed via direct code read of all three files' opening lines.
-- Fix: Same as Finding 7 — move the `createServiceClient()` call inside each `step.run()` callback in these three files. Given the volume (10 files now), recommend a project-wide grep-based sweep: `grep -rn "createServiceClient()" lib/inngest/functions/*.ts | grep -v "step.run\|step\.run"` won't reliably catch this via grep alone since it's about *line position relative to step.run*, but a quick manual check is: does `const supabase = createServiceClient()` (or `const admin = ...`) appear before the first `step.run(` in the function body? All 10 files above answer yes.
-
-### Finding 10: ical-sync.ts, ownerrez/initial-sync.ts, cron/*.ts — createServiceClient correctly scoped (informational, contrast to Findings 7/9)
-- File: lib/inngest/functions/ical-sync.ts, lib/inngest/functions/ownerrez/initial-sync.ts, lib/inngest/functions/cron/*.ts
+### Finding 5: Informational — single serve() call and event registration intact
+- File: app/api/inngest/route.ts, lib/inngest/events.ts
 - Severity: N/A
-- Issue: None — spot-checked these and `createServiceClient()` is correctly called inside each `step.run()` callback, not hoisted to outer scope. This confirms Findings 7/9 are isolated to the specific files listed there rather than a codebase-wide problem, but the 10 affected files span two different feature areas (guidebook lifecycle + work-order crew/vendor assignment notifications), suggesting at least two different authors/sessions introduced the same mistake independently.
+- Issue: None. Exactly one `export const { GET, POST, PUT } = serve({...})` call exists in route.ts, with all ~70 functions registered in its array, including the 12 guidebook functions and all 3 previously-flagged work-order-* files. Cross-referenced every `event: '...'` trigger string in `lib/inngest/functions/**/*.ts` against `lib/inngest/events.ts` — all are registered except the built-in Inngest system event `inngest/function.failed` (expected, not user-defined, used by on-failure.ts as a dead-letter handler). Cross-referenced every `inngest.send({ name: '...' })` call site against events.ts — all registered, including `integration/connection.revoked` which only appears in a commented-out line (app/api/webhooks/[provider]/route.ts:125) and is not actually sent anywhere live.
 - Confirmed: yes
+- Status: STILL OPEN — N/A, clean.
+- Fix: N/A
+
+### Finding 6: Informational — owner_transactions upserts remain consistently correct
+- File: lib/inngest/functions/turnover-events.ts:239-258, work-order-events.ts:184-214, inventory-events.ts:1-35, booking-events.ts:48-65/115-130
+- Severity: N/A
+- Issue: None. Every `owner_transactions` write across all 4 financial-automation functions uses `.upsert(..., { onConflict: 'source_reference_id,source', ignoreDuplicates: true })`. This matches CLAUDE.md's idempotency rule exactly and is consistent with round 1's Finding 1 reference pattern — no regressions found in this area.
+- Confirmed: yes
+- Status: STILL OPEN — N/A, clean.
+- Fix: N/A
+
+### Finding 7: Informational — purchase_order creation idempotency intact, Hostaway/OwnerRez O(n²)/N+1 fixes verified
+- File: lib/inngest/functions/inventory-events.ts:140-183, lib/inngest/functions/hostaway/initial-sync.ts:86-99
+- Severity: N/A
+- Issue: None. `create-purchase-order` step checks `source_count_id` for an existing PO before inserting (lines 143-149), correctly skipping duplicate PO + purchase_order_items creation on retry. Separately verified the "Hostaway O(n²) lookup" fix mentioned in the commit history: hostaway/initial-sync.ts:93 now builds a `Map` (`listingById`) for O(1) lookups instead of a `.find()` inside a loop — the for-of loop at line 96 only populates an in-memory id map (no return/continue concern, not a DB write). Properties upsert at line 77 correctly uses `onConflict: 'external_id,external_source'`.
+- Confirmed: yes
+- Status: STILL OPEN — N/A, clean / fix verified.
 - Fix: N/A
 
 Status: COMPLETE
 
+## Round 1 Verification
+
+| Round 1 Finding | File(s) | Status Now | Evidence |
+|---|---|---|---|
+| Finding 1 (informational — upsert pattern) | turnover-events.ts, booking-events.ts | Still correct | Confirmed in Finding 6 above — pattern unchanged and still consistently applied. |
+| Finding 3 (informational — WO completion guard) | work-order-events.ts:184-214, 258-260 | Still correct | Re-read the file; the `actual_cost`-only posting and the comment explaining why `handleWorkOrderCompletedViaPortal` does not double-post are both still present and correct. |
+| Finding 4 (Medium — repuguard outer-scope counters) | repuguard-batch-generate.ts | **FIXED** | Counters now derived from `results` array of step.run return values (lines 46, 113-114, 121-122), not mutated inside callbacks. See Finding 3 above. |
+| Finding 5 (Low — repuguard notify-pm idempotency key keyed only by date) | repuguard-batch-generate.ts:130-133 (orig) | **FIXED** | Idempotency key now includes `batchRunId` (`reviews[0].id`), line 144. See Finding 3 above. |
+| Finding 6 (informational — clean patterns) | build-shopping-cart.ts, kroger-connected.ts, auto-assign-turnover.ts | Still correct, BUT build-shopping-cart.ts itself has the createServiceClient outer-scope bug (see Finding 1 above) — round 1 praised this file's idempotency pattern (org_milestones runId guard) without noticing the separate client-scoping violation at line 115. | Partially missed — the specific idempotency guard praised is still correct and present, but round 1 did not flag this file under Finding 7/9 despite the bug being present. |
+| Finding 7 (High — createServiceClient outer scope, 7 guidebook files) | guidebook-sponsor-activated.ts, guidebook-sponsor-deactivated.ts, guidebook-daily-monitor.ts, guidebook-grace-expired-handler.ts, guidebook-sponsor-payment-recovered.ts, guidebook-guest-opted-in.ts, guidebook-stay-extension-handler.ts | **FIXED** — all 7 now call createServiceClient() inside each step.run() callback. | Verified via grep on all 7 files; createServiceClient lines all appear after/inside step.run( lines. |
+| Finding 8 (Medium — guest-SMS check-then-act race) | guidebook-guest-opted-in.ts:38-62 (orig) | **FIXED** | See Finding 2 above — atomic UPDATE...WHERE...IS NULL claim now in place with rollback on send failure. |
+| Finding 9 (High — createServiceClient outer scope, 3 work-order files) | work-order-vendor-assigned.ts, work-order-crew-assigned.ts, work-order-crew-completed.ts | **FIXED** — all 3 now call createServiceClient() inside step.run() callbacks. | Verified via grep; consistent with Finding 7 fix. |
+| Finding 10 (informational — ical-sync/ownerrez/cron correctly scoped) | ical-sync.ts, ownerrez/initial-sync.ts, cron/*.ts | **PARTIALLY WRONG / MISLEADING** — round 1 claimed these were "correctly scoped" as a contrast case, but this round found `ownerrez/initial-sync.ts:47`, `cron/checklist-signals.ts:16`, and `cron/work-order-ops.ts:23` (all three explicitly named in round 1's "spot-checked, confirmed clean" list) actually DO have createServiceClient() outside step.run(). Round 1's spot-check of these specific files was incorrect. | See Finding 1 above — same files round 1 said were clean. |
+
+**Net summary:** Round 1's 3 substantive bugs (repuguard counters, repuguard idempotency key, guest-SMS race) are confirmed fixed. The 10-file createServiceClient sweep was correctly fixed for the 10 files it identified, but round 1's own "contrast/clean" spot-check (Finding 10) was wrong for at least 3 of the files it named as clean (ownerrez/initial-sync.ts, cron/checklist-signals.ts, cron/work-order-ops.ts), and 6 additional files with the same bug were never identified at all in round 1 (inventory-order-email-cron.ts, guidebook-sms-evening-cron.ts, guidebook-pre-arrival-email-cron.ts, guidebook-stay-extension-cron.ts, build-shopping-cart.ts, guidebook-sms-morning-cron.ts). This round's Finding 1 supersedes round 1's Finding 10.

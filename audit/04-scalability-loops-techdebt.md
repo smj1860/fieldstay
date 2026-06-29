@@ -1,112 +1,84 @@
-# Scalability / Loops / Silent Failures / Tech Debt Audit
+# Scalability / Loops / Silent Failures / Tech Debt Audit — Round 2
 
-Status: COMPLETE
-Last checkpoint: Reviewed all lib/inngest/functions/cron/*.ts, ownerrez/hostaway sync functions, geocoding-backfill.ts, account deletion route, Telnyx webhook, inventory/capital-planning dashboard pages, turnover-board/turnover-gantt, GDPR export route, crew API routes, and ~20+ dashboard/crew client components (owners-manager, inventory-manager, assets-board, bookings-client, crew-manage-client, integrations-client, settings-tabs, messages clients, reviews-client, maintenance-board, guidebook-client, crew work-order completion page) via a combination of direct reads and a delegated sub-agent pass.
-Next: None — audit complete. Remaining untouched files (small modals/buttons/banners: ical-form.tsx, crew-setup.tsx, trigger-projections-button.tsx, trigger-ledger-button.tsx, reset-password-form.tsx, dashboard-shell.tsx, session-refresh-guard.tsx, cookie-notice.tsx, time-off-request.tsx, install-banner.tsx, RepuGuardSandbox.tsx, onboarding modals, crisp-widget.tsx, dashboard-toast-provider.tsx) are judged low-yield based on the consistent pattern of clean results in structurally similar small UI components reviewed so far, and are not expected to contain scalability/N+1/silent-failure issues of note. A non-finding worth noting for future review: crew-shell.tsx polls the Dexie outbox sync on a fixed 30-second interval with no exponential backoff — low impact (bounded local polling, not a DB/API hot loop) so not written up as a standalone finding.
+Status: IN PROGRESS
+Last checkpoint: verified all 3 fix commits against live code (ownerrez initial/incremental sync, account delete route, maintenance-schedules.ts, hostaway initial-sync.ts, inventory page.tsx, repuguard-batch-generate.ts, reviews-client.tsx)
+Next: sweep for new N+1/silent-failure patterns introduced by recent commits, finalize Round 1 Verification table
 
 ## Findings
 
-### Finding 1: Unbounded per-property + per-gap N+1 query loop in vacancy-gap maintenance suggestions
-- File: lib/inngest/functions/cron/maintenance-schedules.ts:365-423 (step `find-vacancy-gaps`), and lib/maintenance/vacancy-suggestions.ts:25-48
-- Severity: High
-- Issue: Fetches ALL active properties org-wide with no `.limit()` (`properties` table, `.eq('is_active', true)`), then for EACH property issues a separate `bookings` query (line 380-386), and then for EACH booking-gap within that property's bookings calls `findMaintenanceCandidatesForWindow(supabase, ...)` (line 400-405) which itself issues a `maintenance_schedules` query per call. This is N+1 two levels deep: O(properties) booking queries + O(properties * gaps) maintenance_schedules queries, all sequential `await`s inside nested `for` loops. At 50 properties with active bookings this could be hundreds of sequential round trips inside one `step.run`, with no batching and no `.limit()` anywhere in the chain. Also a step-timeout risk: Inngest steps have a max execution duration, and this single step covers every org's properties in one unmemoized unit — a slow run loses all progress on retry (the whole step re-runs from scratch).
-- Confirmed: Yes — read directly. `for (const property of properties ?? [])` → `await supabase.from('bookings')...` → nested `for (let i = 0; i < bookings.length; i++)` → `await findMaintenanceCandidatesForWindow(...)` → another `await supabase.from('maintenance_schedules')...` inside that helper.
-- Fix: Batch the `bookings` query for all property IDs at once (`.in('property_id', propertyIds)`) and group in memory — the same pattern already used a few lines later in this same file for `find-pm-emails-gaps` (batched `getPmEmailsByOrgIds`). Similarly batch `maintenance_schedules` lookups by fetching all active schedules for the relevant properties up front and filtering in-memory per gap window, rather than querying per gap.
-
-### Finding 2: Sequential per-property OwnerRez API detail fetch inside one unmemoized step
-- File: lib/inngest/functions/ownerrez/initial-sync.ts:242-319 (`fetch-property-details` step)
-- Severity: Critical
-- Issue: `for (const dbProp of dbProperties)` calls `client.getPropertyDetail(orId)` sequentially per property plus a hardcoded 150ms sleep per iteration, all inside a single `step.run`. For a host with 200+ properties this is 30s+ of sequential external API calls inside one non-resumable step. If the step times out or the function retries, ALL prior successful detail fetches are discarded and re-run from scratch (no incremental checkpointing within the step), wasting OwnerRez API quota and increasing the chance of hitting OwnerRez rate limits on every retry.
-- Confirmed: Yes, per sub-agent review of the full file.
-- Fix: Split into one step per property (or per small batch) so Inngest memoizes progress, or use a concurrency-limited `Promise.all` to parallelize the safe (non-rate-limited) portion of the work.
-
-### Finding 3: N+1 query pattern in OwnerRez incremental sync for owner-block property names
-- File: lib/inngest/functions/ownerrez/incremental-sync.ts:204-248
-- Severity: High
-- Issue: Per-booking-row loop calls `findMaintenanceCandidatesForWindow` plus a separate `properties` SELECT per row (lines 216-220) inside a single `step.run`, with no `.in()` batching. `resend.emails.send` is also called sequentially per row in the same loop with no `Promise.all`, risking step-timeout for hosts with many simultaneous owner blocks.
-- Confirmed: Yes, per sub-agent review.
-- Fix: Pre-fetch all property names in one `.in()` query before the loop; batch email sends or fire via `step.sendEvent` fan-out instead of inline sequential sends.
-
-### Finding 4: N+1 .update() per property instead of batched upsert
-- File: lib/inngest/functions/ownerrez/initial-sync.ts:173-195 (patch-property-fields loop), and :354-359 (applyMasterChecklistToProperty loop)
+### Finding A: Multi-org account deletion can log "account.deleted" for an org whose Stripe cancel later fails, and partially delete state across orgs
+- File: app/api/account/delete/route.ts:41-102
 - Severity: Medium
-- Issue: Both loops perform one Supabase write per property sequentially instead of a single batched upsert with `.in()`/array payload. Unbounded for large portfolios (no `.limit()`); for orgs with 50+ properties this multiplies round trips linearly. Failures are at least collected here (not silently swallowed), which is good, but the query pattern itself is inefficient at scale.
-- Confirmed: Yes, per sub-agent review.
-- Fix: Batch `.update()` calls into a single `.upsert()` with an array of rows where the side effects allow it; where per-property side effects (e.g. checklist application) are unavoidable, consider fanning out via Inngest step concurrency rather than one mega-step.
+- Issue: The round-1 fix (commit 519381b) correctly aborts with a 503 when `stripe.subscriptions.cancel()` fails for an owned org — but the abort happens *inside* the `for (const membership of memberships ?? [])` loop. If a user owns multiple orgs (org A succeeds, org B's Stripe cancel fails), org A's `logAuditEvent({ action: 'account.deleted' })` at line 97-101 already ran for org A before the loop reaches org B and returns the 503. The route returns an error telling the user "please try again," but org A has already been audit-logged as deleted (and if `deleteUser` doesn't run, org A's org_id data is NOT actually deleted via cascade — only the audit log was written prematurely, which is itself a minor data-integrity issue: an audit trail claiming a deletion occurred when the auth user deletion that triggers the FK cascade never happened). Re-running the whole DELETE request after a fix is also not idempotent for org A: it will attempt org A's Stripe cancel again (now a no-op since already cancelled, fine) but will log a second `account.deleted` audit event for org A.
+- Confirmed: Yes, read directly — `logAuditEvent` call sits at line 97-101, after the Stripe-cancel block, inside the same per-membership loop that can return early on a later iteration.
+- Fix: Move the audit-log calls to fire only after ALL memberships have successfully passed the Stripe-cancellation gate (collect successes first, write audit events in a second pass), or write a "deletion_initiated" event distinct from "account.deleted" until the auth user delete actually succeeds at the end of the function.
 
-### Finding 5: Hostaway/OwnerRez API clients' pagination behavior unverified — possible unbounded external API fetch
-- File: lib/integrations/providers/hostaway.ts, lib/integrations/providers/ownerrez-api.ts (functions `getListings`/`getBookings`/`getProperties` called from lib/inngest/functions/hostaway/initial-sync.ts and ownerrez/initial-sync.ts)
-- Severity: Medium (Suspected — needs verification)
-- Issue: The Inngest sync functions call these client methods and hold the full result set in memory with no evidence of a page-count or result-count cap. If the underlying client methods auto-paginate without an upper bound, a host with a very large number of listings/bookings could cause large in-memory arrays and many sequential upstream API calls within one Inngest step.
-- Confirmed/Suspected: Suspected — the API client implementations were not read in this pass.
-- Fix: Verify pagination logic in lib/integrations/providers/hostaway.ts and ownerrez-api.ts; ensure a sane upper bound or cursor-based incremental processing.
-
-### Finding 7: Unbounded inventory queries on main Inventory dashboard page
+### Finding B: Round-1 Medium finding — unbounded/duplicate inventory queries on Inventory dashboard — NOT fixed
 - File: app/(dashboard)/inventory/page.tsx:28-33, 57-63, 69-81
 - Severity: Medium
-- Issue: Three of the eight parallel queries on the Inventory page have no `.limit()`: `items` (all `inventory_items` for the org, line 28-33), `allInventoryItems` (a near-duplicate full `inventory_items` fetch with a join to `properties`, line 57-63 — note this duplicates the `items` query above almost entirely, just with different columns/ordering, doubling the read cost), and `pendingDrafts` (all `inventory_count_drafts` with status `pending_review`, including nested `inventory_count_draft_items` joins, line 69-81). Other queries on the same page (`purchaseOrders`, `recentCounts`) were correctly capped with `.limit(20)`/`.limit(50)`. For an org at the 50-property ceiling with ~20-50 inventory items per property, `inventory_items` alone could return 1000-2500 rows fetched twice per page load, and `pendingDrafts` has no bound on accumulated unreviewed counts over time.
-- Confirmed: Yes, read directly.
-- Fix: Add `.limit()` to `items`/`allInventoryItems` (or better, eliminate the duplicate query — derive one view from the other in memory) and to `pendingDrafts`; consider pagination for inventory items the same way comms-log/page.tsx already does (it uses `PAGE_SIZE = 100` with `.range()` — a good pattern to copy here).
+- Issue: None of the three fix commits touched this file. `items` (full `inventory_items`, no `.limit()`), `allInventoryItems` (a near-duplicate full `inventory_items` fetch with a `properties` join, no `.limit()`), and `pendingDrafts` (all `inventory_count_drafts` with nested `inventory_count_draft_items`, no `.limit()`) are all still present exactly as flagged in round 1. The duplicate-query waste (`items` and `allInventoryItems` are two near-identical full-table fetches in the same `Promise.all`) is also unchanged.
+- Confirmed: Yes, read directly, lines unchanged from round-1 line numbers.
+- Status: STILL OPEN (not addressed by any of the three fix commits despite being in scope for "scalability" work this round).
+- Fix: As round 1 — add `.limit()`/pagination, and eliminate the duplicate `inventory_items` fetch by deriving one view from the other in memory.
 
-### Finding 9: Geocoding backfill — unbounded fetch + per-row sequential updates in one unmemoized step
-- File: lib/inngest/functions/geocoding-backfill.ts:28-68, 70-110
-- Severity: Low
-- Issue: Both `geocode-properties` and `geocode-vendors` steps fetch ALL rows org-wide with no `.limit()` (`is('lat', null)`), then after geocoding unique zips, loop over every property/vendor row and issue one sequential `.update()` per row (lines 54-65, 96-107) instead of a batched `upsert`. This is intentionally a cross-tenant admin/ops-only function per the code comment, so the blast radius is limited to whoever triggers it, but at scale (thousands of properties never geocoded) this is still a single non-resumable step doing potentially thousands of sequential DB writes — a retry after partial failure re-runs the entire step's writes again (each `.update()` is idempotent so this is safe, just wasteful).
-- Confirmed: Yes, read directly. Note the code already references "LOW-4" fixing the zip-dedup N+1 for the geocoding API calls themselves — the remaining per-row `.update()` write pattern was not addressed by that same fix.
-- Fix: Batch the per-row updates using `.upsert()` with an array of `{id, lat, lng}` rows (one round trip) instead of one `.update()` per row; this is a one-time low-traffic ops function so severity is Low, but worth cleaning up given the adjacent fix already addressed half the problem.
-
-### Finding 10: Minor O(n²) array scan in Hostaway initial sync
-- File: lib/inngest/functions/hostaway/initial-sync.ts:91-94
-- Severity: Low
-- Issue: A `.find()` call inside a loop over `fsProps` to map back to `listings` produces O(n²) behavior for the property list. Not a DB query issue, but worth flagging as it degrades for large listing counts (100+).
-- Confirmed: Yes, per sub-agent review.
-- Fix: Pre-build a `Map<id, listing>` before the loop and do O(1) lookups.
-
-### Finding 11: Account deletion proceeds even when Stripe subscription cancellation fails
-- File: app/api/account/delete/route.ts:64-78
+### Finding C: Bulk work-order action handlers still clear selection without checking server-action result
+- File: app/(dashboard)/maintenance/maintenance-board.tsx:2453-2455, 2470-2472
 - Severity: Medium
-- Issue: When an owner deletes their account, `stripe.subscriptions.cancel(...)` is wrapped in try/catch for both the main and RepuGuard subscriptions. On failure the error is only `console.error`'d — there is no rethrow, no abort, and no surfacing to the user. The function proceeds to delete the org owner's auth user (which cascades to org data via DB foreign keys per the code comment) regardless of whether the Stripe subscription was actually cancelled. This can leave an active, billable Stripe subscription with no corresponding FieldStay account/org to manage or cancel it from the product UI — a silent billing leak that has to be caught manually in the Stripe dashboard.
+- Issue: `bulkAssignVendor`/`bulkUpdateWorkOrderStatus` results are still not inspected before `clearSelection()` runs — unchanged from round 1 (Finding 14). The tech-debt sweep commit (a03165f) touched this same file (added photo-upload-failure warning surfacing at lines 418/455) but did not address the bulk-action result-checking gap a few hundred lines later.
 - Confirmed: Yes, read directly.
-- Fix: If Stripe cancellation fails, either abort the deletion and return an error asking the user to retry (consistent with the explicit 409 returned a few lines above for unresolved org members), or queue a reliable async retry (e.g. an Inngest function) for the Stripe cancellation before allowing the auth user delete to proceed, so a transient Stripe API failure can't permanently orphan a paid subscription.
+- Status: STILL OPEN.
+- Fix: As round 1 — check `{ error }`/`{ success }` before clearing selection; surface failures via the same `onWarning` pattern the sweep commit just added for photo uploads in this very file.
 
-### Finding 12: Sequential per-connection integration token revocation on account deletion
-- File: app/api/account/delete/route.ts:88-97
+### Finding D: OwnerRez initial-sync `patch-property-fields` and `apply-checklist-template` loops remain sequential per-property writes
+- File: lib/inngest/functions/ownerrez/initial-sync.ts:173-195 (patch loop), :376-381 (checklist-apply loop)
+- Severity: Low (downgraded from round-1 Medium since the higher-impact detail-fetch step (Finding 2) was fixed)
+- Issue: The fan-out fix in this same file (519381b) only addressed the `fetch-property-detail` step (Finding 2). The `patch-property-fields` step still does one `.update()` per property sequentially inside a single step, and `apply-checklist-template` still calls `applyMasterChecklistToProperty` once per property sequentially inside a single step. Both remain unbounded (no `.limit()` on the underlying property fetch) and un-fanned-out, so a retry of either step re-runs from scratch for all properties, same risk class as Finding 2 before its fix (just smaller in per-iteration cost — one `.update()`/checklist-application call vs. a full external API call + 150ms sleep).
+- Confirmed: Yes, read directly — code is unchanged from round 1 in these two loops.
+- Status: STILL OPEN (round-1 Finding 4, partially addressed — only the detail-fetch sibling loop in the same file was fixed).
+- Fix: Same as round 1 — batch `patch-property-fields` into one `.upsert()`/multi-row update where the patch payload differs per row (Supabase doesn't support per-row differing payloads in a single `.update()`, so this needs either a `upsert` with full row payloads or per-row steps like the detail-fetch fix); fan out `apply-checklist-template` into one step per property using the same `step.run('apply-checklist-${property.id}', ...)` pattern just established for property-detail fetches in this file.
+
+### Finding E: Geocoding-backfill per-row sequential .update() — unchanged
+- File: lib/inngest/functions/geocoding-backfill.ts:54-65, 96-107
 - Severity: Low
-- Issue: `for (const conn of connections ?? [])` calls `revokeIntegrationToken(user.id, conn.provider_id)` sequentially with individual try/catch per iteration. Each failure is logged but does not abort the loop or the overall deletion — acceptable for not blocking deletion, but for a user with many connected integrations this adds sequential latency, and a failed revoke is never retried or surfaced anywhere after the fact.
+- Issue: Round-1 Finding 9 (per-row sequential `.update()` instead of batched upsert) is untouched by any of the three fix commits. Still low severity / ops-only blast radius.
+- Confirmed: Yes, read directly, code unchanged.
+- Status: STILL OPEN.
+- Fix: As round 1.
+
+### Finding F (RESOLVED, listed for completeness): Telnyx webhook signature verification now implemented correctly
+- File: app/api/webhooks/telnyx/route.ts:7-41
+- Severity: N/A (fixed)
+- Issue: Round-1 Finding 13 flagged a deferred/missing ed25519 signature check. Live code now reads the raw body first, computes `verifyTelnyxSignature()` against `timestamp|rawBody` using `crypto.createVerify('ed25519')` and the `telnyx-signature-ed25519`/`telnyx-timestamp` headers, and returns 401 before any payload parsing or DB writes if verification fails or the public key/headers are missing.
 - Confirmed: Yes, read directly.
-- Fix: Use `Promise.allSettled` to revoke all tokens concurrently instead of sequential awaits; consider logging failed revocations to `audit_events` (not just console) so they're discoverable later instead of only living in server logs.
+- Status: FIXED.
 
-### Finding 13: Telnyx webhook signature verification explicitly deferred — unauthenticated SMS opt-out/opt-in spoofing
-- File: app/api/webhooks/telnyx/route.ts:1-9
-- Severity: High
-- Issue: The file's own comment states `// TODO: verify Telnyx webhook signature (ed25519) before processing — deferred for this session per CLAUDE_55_2 scope.` The route accepts any POST body, extracts a `from` phone number and message text, and toggles `guidebook_guest_sms_optins.is_active` for that phone number org-wide based on STOP/START keywords — with zero signature verification. Anyone who can guess or discover the webhook URL can spoof a payload claiming to be from any phone number and flip that guest's SMS consent flag (opt them out of compliance-relevant SMS, or fraudulently opt back in a number that asked to stop). This is the same class of issue CLAUDE.md flags as mandatory for Stripe ("Always verify signature. No exceptions.") but for Telnyx it is openly unimplemented.
-- Confirmed: Yes, read directly — the deferral is explicitly admitted in a code comment.
-- Fix: Implement Telnyx's documented ed25519 webhook signature verification (using the `telnyx-signature-ed25519` and `telnyx-timestamp` headers against the raw body) before trusting any field in the payload, mirroring the `stripe.webhooks.constructEvent()` pattern used elsewhere in this codebase. This is consent/compliance-sensitive data (SMS opt-in status under TCPA-adjacent rules), so the unauthenticated write path should be treated as a priority fix, not deferred further.
-
-### Finding 14: Bulk work-order action handlers clear selection without checking for errors
-- File: app/(dashboard)/maintenance/maintenance-board.tsx (bulk-action `onChange` handlers calling `bulkAssignVendor`/`bulkUpdateWorkOrderStatus`)
-- Severity: Medium
-- Issue: The bulk vendor-assign and bulk status-update `onChange` handlers call their respective server actions inside `startBulkAction` but never inspect the returned result for an error before calling `clearSelection()` — selection is cleared and the bulk-action bar disappears regardless of whether the action actually succeeded. At 50-property scale this is exactly the kind of multi-WO bulk operation a PM relies on; a partial failure (e.g. one WO already completed, a vendor deactivated mid-flight) is invisible — the PM has no indication anything went wrong and assumes the bulk update applied to all selected items.
-- Confirmed: Yes, per sub-agent review.
-- Fix: Check the server action's returned `{ error }`/`{ success }` shape before clearing selection; on error, keep the selection active and surface the error via the existing `assignmentWarning`-style toast pattern used in turnover-board.tsx.
-
-### Finding 15: Review-response confirm action has no error handling — UI shows success on a failed write
-- File: app/(dashboard)/reviews/reviews-client.tsx (`confirmPosted()`)
-- Severity: Medium
-- Issue: `confirmPosted()` performs a direct Supabase `.update()` with no error check at all. Regardless of whether the write succeeds, the code proceeds to call `updateReviewInList()` and show "Posted" in the UI. A real write failure (RLS rejection, network blip, stale row) leaves the database in a state that disagrees with what the PM sees on screen — the PM believes a guest review response was recorded as posted when it was not, with no way to discover the discrepancy except by manually re-checking the review later.
-- Confirmed: Yes, per sub-agent review.
-- Fix: Check `{ error }` from the `.update()` call; only call `updateReviewInList()` / show "Posted" on success, and surface a visible error (matching the existing `alert()` pattern already used elsewhere in the same file for `markReady()`) on failure.
-
-### Finding 16: Minor silent-failure pattern repeated across messaging read-receipt effects
-- File: app/(dashboard)/messages/messages-client.tsx (auto-mark-read effect) and app/crew/messages/page.tsx:38
+### Finding G: New silent-failure pattern — Telnyx webhook opt-out/opt-in audit log loop has no error handling
+- File: app/api/webhooks/telnyx/route.ts:86-93, 102-109
 - Severity: Low
-- Issue: Both files call `markConversationRead(otherUserId)` inside a `useEffect` as a bare `.then(...)` (dashboard) or unguarded call (crew PWA) with no `.catch()`. A failure produces an unhandled promise rejection and the read-receipt silently never updates, with no retry and no user-visible indication — duplicated across both the PM dashboard and crew PWA codepaths.
-- Confirmed: Yes, per sub-agent review.
-- Fix: Add `.catch(err => console.error('[markConversationRead]', err))` at minimum; consider a lightweight retry-on-next-mount since read receipts are not security/financial sensitive but the duplication across two call sites suggests extracting a shared hook (e.g. `useMarkConversationRead`) would also reduce tech debt.
+- Issue: The `for (const row of updated ?? [])` loops calling `logAuditEvent(...)` per affected org have no try/catch — if `logAuditEvent` throws (e.g. transient DB error), the entire webhook handler throws after the `is_active` update already succeeded, causing Telnyx to see a 500 and retry the webhook, which could lead to duplicate STOP/START processing (each retry re-runs the `.update()` — idempotent for the opt-in flag itself, but `logAuditEvent` calls would duplicate audit entries on a partial retry, or the response update step could double-fire if Telnyx's retry semantics resend the identical body). Minor since `.update()...is_active = false/true` is naturally idempotent, but worth a try/catch around the audit log call so a logging hiccup can't turn a successful consent-flag write into a perceived failure.
+- Confirmed: Yes, read directly — this loop pattern is newly introduced in the aa3da30 Telnyx security fix commit (the route was previously not signature-verified, so this loop logic appears new/changed in this commit).
+- Fix: Wrap `logAuditEvent` calls in try/catch with console.error fallback, consistent with the non-fatal logging pattern used elsewhere (e.g. ownerrez sync's writeSyncCount).
 
-### Finding 17 (rollup, Low severity, not individually itemized): Minor scattered silent-failure / error-suppression patterns
-- Photo upload error swallowed silently in maintenance-board.tsx's `CreateWorkOrderModal` (failed `work_order_photos` insert is skipped with no `console.error` and no PM-visible warning — modal closes as if successful).
-- guidebook-client.tsx `PropertyGuidebookForm`'s load effect has no error handling on its `.select('*')` — a failed load silently falls through to "create new config" branch, risking an overwrite of an existing but failed-to-load guidebook config.
-- app/crew/work-orders/[id]/page.tsx's `handleComplete` catch block resets `setCompleting(false)` but shows no error message to the crew member — they only know to retry by trial and error.
-- These are all narrow-blast-radius UI-only issues (single record, no cross-tenant or financial impact) bundled here rather than given individual Critical/High writeups; each fix is the same shape — check the result/error and surface a visible message instead of failing silently.
+## Round 1 Verification
 
+| # | Round-1 Finding | Status | Evidence |
+|---|---|---|---|
+| 1 | Maintenance-schedules vacancy-gap two-level N+1 | **Fixed** | lib/inngest/functions/cron/maintenance-schedules.ts:364-421 — now 3 batched `.in()` queries (properties, bookings, schedules) + in-memory gap/candidate computation, zero DB calls inside any loop. |
+| 2 | OwnerRez initial-sync sequential per-property detail fetch in one non-resumable step | **Fixed** | lib/inngest/functions/ownerrez/initial-sync.ts:219-342 — fanned out into one memoized `step.run('fetch-property-detail-${dbProp.id}', ...)` per property; a batch `getListings()` call replaces the old per-property amenities lookup; 150ms delay now lives inside each per-property step instead of accumulating in one step. |
+| 3 | OwnerRez incremental-sync N+1 property-name lookup + sequential email sends | **Fixed** | lib/inngest/functions/ownerrez/incremental-sync.ts:211-273 — property names batched via one `.in()` query before the loop; emails sent via `Promise.all(...)` with per-email try/catch so one failure doesn't abort the rest. |
+| 4 | N+1 `.update()` per property instead of batched upsert (initial-sync.ts patch-property-fields + apply-checklist-template loops) | **Partially Fixed** | The sibling `fetch-property-detail` loop in the same file was fanned out (Finding 2 above), but `patch-property-fields` (initial-sync.ts:173-195) and `apply-checklist-template` (initial-sync.ts:376-381) remain sequential per-property loops inside single un-fanned steps — see Finding D. |
+| 5 | Hostaway/OwnerRez API client pagination unverified | **Fixed (verified, was already bounded)** | lib/integrations/providers/hostaway.ts:140-217 and lib/integrations/providers/ownerrez-api.ts:197-213 both have explicit `MAX_PAGES` caps with `console.error` + abort if exceeded — confirmed bounded, not unbounded as suspected in round 1. |
+| 7 | Unbounded/duplicate inventory queries on Inventory dashboard page | **Still Open** | app/(dashboard)/inventory/page.tsx:28-33, 57-63, 69-81 unchanged — no `.limit()` added, duplicate `items`/`allInventoryItems` fetch still present. None of the three fix commits touched this file. See Finding B. |
+| 9 | Geocoding-backfill per-row sequential `.update()` | **Still Open** | lib/inngest/functions/geocoding-backfill.ts unchanged. Low severity, ops-only. See Finding E. |
+| 10 | Hostaway O(n²) `.find()` in property loop | **Fixed** | lib/inngest/functions/hostaway/initial-sync.ts:93-99 — replaced with `Map<string, listing>` built once, O(1) lookups in the loop. |
+| 11 | Account deletion proceeds despite Stripe cancellation failure | **Fixed, with a new edge-case regression** | app/api/account/delete/route.ts:66-94 now aborts with 503 on Stripe cancel failure instead of swallowing it. However the abort happens inside the per-membership loop, so a multi-org owner can have org A's audit log already written before org B's Stripe failure aborts the request — see Finding A. |
+| 12 | Sequential per-connection integration token revocation on account deletion | **Still Open** | app/api/account/delete/route.ts:110-116 — still a sequential `for` loop with individual try/catch, not `Promise.allSettled`. Not in scope for the three fix commits (none touched this block). |
+| 13 | Telnyx webhook signature verification deferred | **Fixed** | app/api/webhooks/telnyx/route.ts:7-41 — proper ed25519 verification via `crypto.createVerify`, checked before any payload parsing. See Finding F. New minor issue introduced in the same fix: Finding G (unguarded audit-log loop). |
+| 14 | Bulk work-order action handlers clear selection without checking errors | **Still Open** | app/(dashboard)/maintenance/maintenance-board.tsx:2453-2455, 2470-2472 — unchanged. The tech-debt sweep commit touched this file for a different issue (photo-upload warnings) but did not address this. See Finding C. |
+| 15 | Review-response confirm action (`confirmPosted`) has no error handling | **Fixed** | app/(dashboard)/reviews/reviews-client.tsx — now checks `{ error }` from the `.update()` call, alerts and bails on failure before updating UI state. |
+| 16 | Messaging read-receipt `.then()` calls with no `.catch()` | **Fixed** | app/(dashboard)/messages/messages-client.tsx and app/crew/messages/page.tsx — both now have `.catch()` added per the tech-debt sweep commit. |
+| 17 | Rollup: photo-upload error swallowed, guidebook load silent fallthrough, crew WO completion no error surfaced | **Fixed** | maintenance-board.tsx now tracks photo upload/insert failures and surfaces via `onWarning` (lines 418, 455); guidebook-client.tsx logs and returns on failed config load instead of falling through to blank defaults; app/crew/work-orders/[id]/page.tsx now has a `completeError` state surfaced under the button. All three sub-items from the round-1 rollup finding were addressed by the a03165f sweep commit. |
+
+Status: COMPLETE
+Last checkpoint: Verified all three fix commits (519381b, 65fd3f7, a03165f) against live code; cross-checked Telnyx fix from aa3da30; re-swept inventory page.tsx, hostaway/ownerrez pagination, maintenance-board.tsx bulk actions, and account/delete/route.ts for regressions.
+Next: None — audit complete.
