@@ -1,24 +1,53 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { createClient }                from '@/lib/supabase/client'
 
 interface Message {
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'human'
   content: string
 }
 
 export function SupportChatWidget() {
-  const [open, setOpen]                   = useState(false)
-  const [messages, setMessages]           = useState<Message[]>([])
-  const [input, setInput]                 = useState('')
-  const [loading, setLoading]             = useState(false)
-  const [error, setError]                 = useState<string | null>(null)
+  const [open, setOpen]                     = useState(false)
+  const [messages, setMessages]             = useState<Message[]>([])
+  const [input, setInput]                   = useState('')
+  const [loading, setLoading]               = useState(false)
+  const [error, setError]                   = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, open])
+
+  // Subscribe to new human replies for this conversation
+  useEffect(() => {
+    if (!conversationId) return
+
+    const supabase = createClient()
+    const channel  = supabase
+      .channel(`support-widget-${conversationId}`)
+      .on('postgres_changes',
+        {
+          event:  'INSERT',
+          schema: 'public',
+          table:  'support_messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload: { new: Record<string, unknown> }) => {
+          const row = payload.new as { role: string; content: string }
+          // Only add human messages via realtime — user/assistant are already
+          // added locally during the send() flow to avoid duplicates
+          if (row.role === 'human') {
+            setMessages(prev => [...prev, { role: 'human', content: row.content }])
+          }
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [conversationId])
 
   async function send() {
     const text = input.trim()
@@ -43,7 +72,7 @@ export function SupportChatWidget() {
 
       const data = await res.json() as {
         conversationId: string
-        reply: string
+        reply:          string
       }
 
       if (!conversationId) setConversationId(data.conversationId)
@@ -62,20 +91,46 @@ export function SupportChatWidget() {
     }
   }
 
+  function bubbleStyle(role: Message['role']) {
+    if (role === 'user') {
+      return {
+        alignSelf:    'flex-end'  as const,
+        background:   'var(--accent-gold)',
+        color:        'var(--text-inverse)',
+        borderRadius: '12px 12px 2px 12px',
+      }
+    }
+    if (role === 'human') {
+      return {
+        alignSelf:    'flex-start' as const,
+        background:   'var(--bg-raised)',
+        color:        'var(--text-primary)',
+        borderRadius: '12px 12px 12px 2px',
+        border:       '1px solid var(--accent-gold)',
+      }
+    }
+    return {
+      alignSelf:    'flex-start' as const,
+      background:   'var(--bg-elevated)',
+      color:        'var(--text-primary)',
+      borderRadius: '12px 12px 12px 2px',
+    }
+  }
+
   return (
     <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999 }}>
       {open ? (
         <div
           style={{
-            width:        '360px',
-            maxHeight:    '520px',
-            display:      'flex',
-            flexDirection:'column',
-            background:   'var(--bg-card)',
-            border:       '1px solid var(--border-strong)',
-            borderRadius: 'var(--radius-lg)',
-            boxShadow:    'var(--shadow-lg)',
-            overflow:     'hidden',
+            width:         '360px',
+            maxHeight:     '520px',
+            display:       'flex',
+            flexDirection: 'column',
+            background:    'var(--bg-card)',
+            border:        '1px solid var(--border-strong)',
+            borderRadius:  'var(--radius-lg)',
+            boxShadow:     'var(--shadow-lg)',
+            overflow:      'hidden',
           }}
         >
           {/* Header */}
@@ -118,12 +173,12 @@ export function SupportChatWidget() {
           {/* Messages */}
           <div
             style={{
-              flex:      1,
-              overflowY: 'auto',
-              padding:   '12px 16px',
-              display:   'flex',
+              flex:          1,
+              overflowY:     'auto',
+              padding:       '12px 16px',
+              display:       'flex',
               flexDirection: 'column',
-              gap:       '10px',
+              gap:           '10px',
             }}
           >
             {messages.length === 0 && (
@@ -132,22 +187,24 @@ export function SupportChatWidget() {
               </p>
             )}
             {messages.map((m, i) => (
-              <div
-                key={i}
-                style={{
-                  alignSelf:    m.role === 'user' ? 'flex-end' : 'flex-start',
-                  maxWidth:     '85%',
-                  padding:      '8px 12px',
-                  borderRadius: m.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                  background:   m.role === 'user' ? 'var(--accent-gold)' : 'var(--bg-elevated)',
-                  color:        m.role === 'user' ? 'var(--text-inverse)' : 'var(--text-primary)',
-                  fontSize:     '13px',
-                  lineHeight:   '1.5',
-                  whiteSpace:   'pre-wrap',
-                  wordBreak:    'break-word',
-                }}
-              >
-                {m.content}
+              <div key={i} style={{ alignSelf: bubbleStyle(m.role).alignSelf, maxWidth: '85%' }}>
+                {m.role === 'human' && (
+                  <p style={{ fontSize: '10px', fontWeight: 700, color: 'var(--accent-gold)', marginBottom: '2px', marginLeft: '2px' }}>
+                    FieldStay Team
+                  </p>
+                )}
+                <div
+                  style={{
+                    ...bubbleStyle(m.role),
+                    padding:    '8px 12px',
+                    fontSize:   '13px',
+                    lineHeight: '1.5',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak:  'break-word',
+                  }}
+                >
+                  {m.content}
+                </div>
               </div>
             ))}
             {loading && (
@@ -183,13 +240,13 @@ export function SupportChatWidget() {
           {/* Input */}
           <div
             style={{
-              padding:      '10px 12px',
-              borderTop:    '1px solid var(--border)',
-              background:   'var(--bg-raised)',
-              display:      'flex',
-              gap:          '8px',
-              alignItems:   'flex-end',
-              flexShrink:   0,
+              padding:    '10px 12px',
+              borderTop:  '1px solid var(--border)',
+              background: 'var(--bg-raised)',
+              display:    'flex',
+              gap:        '8px',
+              alignItems: 'flex-end',
+              flexShrink: 0,
             }}
           >
             <textarea
@@ -200,19 +257,19 @@ export function SupportChatWidget() {
               rows={1}
               disabled={loading}
               style={{
-                flex:       1,
-                resize:     'none',
-                background: 'var(--bg-base)',
-                border:     '1px solid var(--border-strong)',
+                flex:         1,
+                resize:       'none',
+                background:   'var(--bg-base)',
+                border:       '1px solid var(--border-strong)',
                 borderRadius: 'var(--radius)',
-                color:      'var(--text-primary)',
-                fontSize:   '13px',
-                padding:    '8px 10px',
-                outline:    'none',
-                fontFamily: 'inherit',
-                lineHeight: '1.4',
-                maxHeight:  '80px',
-                overflowY:  'auto',
+                color:        'var(--text-primary)',
+                fontSize:     '13px',
+                padding:      '8px 10px',
+                outline:      'none',
+                fontFamily:   'inherit',
+                lineHeight:   '1.4',
+                maxHeight:    '80px',
+                overflowY:    'auto',
               }}
             />
             <button
@@ -229,18 +286,18 @@ export function SupportChatWidget() {
         <button
           onClick={() => setOpen(true)}
           style={{
-            width:        '52px',
-            height:       '52px',
-            borderRadius: '50%',
-            background:   'var(--accent-gold)',
-            border:       'none',
-            cursor:       'pointer',
-            display:      'flex',
-            alignItems:   'center',
+            width:          '52px',
+            height:         '52px',
+            borderRadius:   '50%',
+            background:     'var(--accent-gold)',
+            border:         'none',
+            cursor:         'pointer',
+            display:        'flex',
+            alignItems:     'center',
             justifyContent: 'center',
-            boxShadow:    'var(--shadow-lg)',
-            color:        'var(--text-inverse)',
-            fontSize:     '22px',
+            boxShadow:      'var(--shadow-lg)',
+            color:          'var(--text-inverse)',
+            fontSize:       '22px',
           }}
           aria-label="Open support chat"
         >

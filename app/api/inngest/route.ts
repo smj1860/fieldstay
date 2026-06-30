@@ -116,6 +116,9 @@ import { guidebookSmsEveningCron }          from '@/lib/inngest/functions/guideb
 import { guidebookStayExtensionCron }       from '@/lib/inngest/functions/guidebook-stay-extension-cron'
 import { guidebookStayExtensionHandler }    from '@/lib/inngest/functions/guidebook-stay-extension-handler'
 
+// Support bot — human escalation
+import { handleSupportEscalation } from '@/lib/inngest/functions/support-conversation-escalated'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -230,5 +233,8 @@ export const { GET, POST, PUT } = serve({
     guidebookSmsEveningCron,
     guidebookStayExtensionCron,
     guidebookStayExtensionHandler,
+
+    // Support bot — human escalation
+    handleSupportEscalation,
   ],
 })
