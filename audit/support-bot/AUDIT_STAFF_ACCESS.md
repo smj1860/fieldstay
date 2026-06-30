@@ -1,6 +1,6 @@
-Status: IN PROGRESS
-Last checkpoint: Read the only support migration (20260620233632_support_bot_scaffold.sql), page.tsx, reply/route.ts, resolve/route.ts. CRITICAL gap found: schema migration does not match application code.
-Next: Search all migrations for is_platform_staff/platform_staff references (none found yet — see finding #1), check support-inbox-client.tsx realtime config, check classify.ts/respond.ts for escalation logic, write summary.
+Status: COMPLETE
+Last checkpoint: Read all in-scope files: support_bot migration, page.tsx, reply/route.ts, resolve/route.ts, support-inbox-client.tsx, respond.ts, account-tools.ts. Searched ALL migrations for is_platform_staff/platform_staff (zero hits) and for ALTER PUBLICATION/REPLICA IDENTITY (only property_assets is added to supabase_realtime — support tables are not).
+Next: None — audit complete. See findings 1-6 below and summary appended to AUDIT_SUMMARY.md.
 
 ---
 
