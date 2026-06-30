@@ -3,9 +3,26 @@ import { requireOrgMember } from '@/lib/auth'
 import { classifyIntent } from '@/lib/support/classify'
 import { generateResponse } from '@/lib/support/respond'
 import { inngest } from '@/lib/inngest/client'
+import { supportChatLimiter, supportChatDailyLimiter } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   const { supabase, user, membership } = await requireOrgMember()
+
+  const { success: minuteOk } = await supportChatLimiter.limit(user.id)
+  if (!minuteOk) {
+    return NextResponse.json(
+      { error: 'Too many messages. Please wait a moment before sending another.' },
+      { status: 429 }
+    )
+  }
+
+  const { success: dailyOk } = await supportChatDailyLimiter.limit(user.id)
+  if (!dailyOk) {
+    return NextResponse.json(
+      { error: 'Daily message limit reached. Please try again tomorrow or email support@fieldstay.app.' },
+      { status: 429 }
+    )
+  }
 
   const body = await req.json().catch(() => null)
   const message        = body?.message        as string | undefined
@@ -43,12 +60,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { data: historyRows } = await supabase
+  const { data: recentRows } = await supabase
     .from('support_messages')
     .select('role, content')
     .eq('conversation_id', convoId)
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(10)
+
+  const historyRows = (recentRows ?? []).reverse()
 
   const history = (historyRows ?? []).map((r) => ({
     role:    r.role    as 'user' | 'assistant',
@@ -67,7 +86,7 @@ export async function POST(req: NextRequest) {
     console.error('[support/chat] failed to persist user message', userInsertErr)
   }
 
-  const { content, modelUsed, needsEscalation } = await generateResponse({ category, message, history, orgId: membership.org_id })
+  const { content, modelUsed, needsEscalation, escalationReason } = await generateResponse({ category, message, history, orgId: membership.org_id })
 
   const { error: assistantInsertErr } = await supabase.from('support_messages').insert({
     conversation_id: convoId,
@@ -87,11 +106,13 @@ export async function POST(req: NextRequest) {
     .eq('id', convoId)
 
   if (needsEscalation) {
+    const reason = escalationReason || content.slice(0, 280)
+
     await supabase
       .from('support_conversations')
       .update({
         needs_human:       true,
-        escalation_reason: content.slice(0, 280),
+        escalation_reason: reason,
         escalated_at:      now,
       })
       .eq('id', convoId)
@@ -102,7 +123,7 @@ export async function POST(req: NextRequest) {
       data: {
         conversationId: convoId,
         orgId:          membership.org_id,
-        reason:         content.slice(0, 280),
+        reason:         reason,
       },
     })
   }
