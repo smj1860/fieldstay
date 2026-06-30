@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     console.error('[support/chat] failed to persist user message', userInsertErr)
   }
 
-  const { content, modelUsed } = await generateResponse({ category, message, history })
+  const { content, modelUsed, needsEscalation } = await generateResponse({ category, message, history })
 
   const { error: assistantInsertErr } = await supabase.from('support_messages').insert({
     conversation_id: convoId,
@@ -84,9 +84,10 @@ export async function POST(req: NextRequest) {
     .eq('id', convoId)
 
   return NextResponse.json({
-    conversationId: convoId,
+    conversationId:  convoId,
     category,
-    reply:          content,
+    reply:           content,
     modelUsed,
+    needsEscalation,
   })
 }
