@@ -8,7 +8,7 @@ import {
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Sun, Moon,
   Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
-  LifeBuoy, Bell, BookOpen,
+  LifeBuoy, Bell, BookOpen, Inbox,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -81,7 +81,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/guidebook':    'Guidebook',
   '/reviews':      'Reviews',
   '/settings':     'Settings',
-  '/help':         'Help & Support',
+  '/help':             'Help & Support',
+  '/support-inbox':    'Support Inbox',
 }
 
 interface Props {
@@ -94,10 +95,11 @@ interface Props {
   onboardingPct?:             number
   notifications?:             NotificationItem[]
   unreadMessages?:            number
+  isStaff?:                   boolean
   children:                   React.ReactNode
 }
 
-export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, children }: Props) {
+export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, isStaff = false, children }: Props) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -332,6 +334,36 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
           </>
         )}
       </nav>
+
+      {/* ── Staff-only: Support Inbox ──────────────────── */}
+      {isStaff && (
+        <div className="px-2 pt-1 pb-0 flex-shrink-0" style={{ borderTop: '1px solid var(--chrome-border)' }}>
+          <Link
+            href="/support-inbox"
+            onClick={() => setMobileOpen(false)}
+            title={collapsed && !mobile ? 'Support Inbox' : undefined}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+            style={{
+              color:      pathname.startsWith('/support-inbox') ? 'var(--chrome-text)' : 'var(--chrome-text-muted)',
+              background: pathname.startsWith('/support-inbox') ? 'var(--chrome-bg-raised)' : 'transparent',
+              borderLeft: pathname.startsWith('/support-inbox') ? '2px solid var(--chrome-gold)' : '2px solid transparent',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.background = 'var(--chrome-bg-raised)'
+              e.currentTarget.style.color = 'var(--chrome-text)'
+            }}
+            onMouseOut={(e) => {
+              if (!pathname.startsWith('/support-inbox')) {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--chrome-text-muted)'
+              }
+            }}
+          >
+            <Inbox className="w-4 h-4 flex-shrink-0" />
+            {(!collapsed || mobile) && <span className="truncate">Support Inbox</span>}
+          </Link>
+        </div>
+      )}
 
       {/* ── Help & Support ─────────────────────────────── */}
       <div

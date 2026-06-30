@@ -124,6 +124,14 @@ export default async function DashboardLayout({
       .eq('milestone', pendingMilestone.milestone)
   }
 
+  const { data: staffRow } = await supabase
+    .from('platform_staff')
+    .select('user_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  const isStaff = !!staffRow
+
   const notifications = await getNotifications(membership.org_id)
 
   const { count: unreadMessages } = await supabase
@@ -150,6 +158,7 @@ export default async function DashboardLayout({
         onboardingPct={onboardingPct}
         notifications={notifications}
         unreadMessages={unreadMessages ?? 0}
+        isStaff={isStaff}
       >
         {isPastDue && (
           <div

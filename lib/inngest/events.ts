@@ -662,6 +662,18 @@ export type FieldStayEvents = {
     }
   }
 
+  // ----------------------------------------------------------
+  // Support Bot — human escalation
+  // ----------------------------------------------------------
+
+  'support/conversation.escalated': {
+    data: {
+      conversationId: string
+      orgId:          string
+      reason:         string  // bot's own escalation sentence, for context in the email
+    }
+  }
+
   // Stay-extension ("Gap Night") messaging
   'guidebook/stay.extension.cron': {
     data: Record<string, never>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireOrgMember } from '@/lib/auth'
 import { classifyIntent } from '@/lib/support/classify'
 import { generateResponse } from '@/lib/support/respond'
+import { inngest } from '@/lib/inngest/client'
 
 export async function POST(req: NextRequest) {
   const { supabase, user, membership } = await requireOrgMember()
@@ -78,10 +79,33 @@ export async function POST(req: NextRequest) {
     console.error('[support/chat] failed to persist assistant message', assistantInsertErr)
   }
 
+  const now = new Date().toISOString()
+
   await supabase
     .from('support_conversations')
-    .update({ last_message_at: new Date().toISOString() })
+    .update({ last_message_at: now })
     .eq('id', convoId)
+
+  if (needsEscalation) {
+    await supabase
+      .from('support_conversations')
+      .update({
+        needs_human:       true,
+        escalation_reason: content.slice(0, 280),
+        escalated_at:      now,
+      })
+      .eq('id', convoId)
+      .eq('org_id', membership.org_id)
+
+    await inngest.send({
+      name: 'support/conversation.escalated',
+      data: {
+        conversationId: convoId,
+        orgId:          membership.org_id,
+        reason:         content.slice(0, 280),
+      },
+    })
+  }
 
   return NextResponse.json({
     conversationId:  convoId,
