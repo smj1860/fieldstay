@@ -127,6 +127,96 @@ should be able to act on any org's conversation), assuming the RLS policy questi
 above resolves to "staff genuinely have broader RLS access," which is exactly what could not be
 confirmed from source.
 
+## Item 6: app/(dashboard)/support-inbox/support-inbox-client.tsx — CLIENT-SIDE Supabase reads, RLS-dependent
+
+**FINDING — High (confirmed code pattern; severity depends on the same unresolved RLS question
+from Item 4).**
+
+File: `app/(dashboard)/support-inbox/support-inbox-client.tsx`
+
+This is a `'use client'` component that uses the browser Supabase client
+(`createClient` from `@/lib/supabase/client`, line 4 — anon key, RLS-enforced, no server-side
+gate at all on these specific calls) to:
+- Line 70-75: directly query `support_messages` filtered only by `conversation_id` (no org_id
+  or platform_staff check in the query itself — relies 100% on RLS).
+- Line 43-61: subscribe to realtime `postgres_changes` on ALL of `support_conversations`
+  (`{ event: '*', schema: 'public', table: 'support_conversations' }`, no filter at all) —
+  this means the browser-side realtime subscription receives every row-level change across
+  every organization's support conversations, filtered only by whatever RLS policy applies to
+  realtime (which mirrors the table's RLS policies in Supabase).
+- Line 77-85: subscribes to realtime INSERTs on `support_messages` filtered by
+  `conversation_id`, again relying purely on RLS.
+
+This means: **the only thing standing between any authenticated FieldStay user (not just
+platform_staff) and the ability to read other orgs' support conversations via this component
+is the RLS policy on `support_conversations`/`support_messages`.** There is no
+`platform_staff` check inside this client component at all — that check only happens once,
+server-side, in `page.tsx` (lines 11-17) to decide whether to redirect to `/ops` before
+rendering `SupportInboxClient`. Once the client component has mounted (e.g., if a non-staff
+user somehow loaded this route, or via direct API/realtime access bypassing the page
+component), there is no additional authorization check — it is RLS or nothing.
+
+Given Item 4's finding that the migration-defined RLS policy on these tables ONLY allows
+`user_id = auth.uid()` access (i.e., does NOT appear to grant platform_staff a bypass), one of
+two things must be true:
+1. If no staff-bypass RLS policy exists in the live DB: this component's queries return only
+   the staff member's OWN conversations (if they happen to also be a PM in some org) or empty
+   results — not a tenant-isolation breach, but a broken feature (consistent with Item 4
+   explanation #2).
+2. If an out-of-band staff-bypass RLS policy DOES exist in the live DB (Item 4 explanation #1):
+   its exact scope is unverifiable from source. If that policy is broader than intended (e.g.
+   grants `authenticated` role access instead of specifically gating on `platform_staff`
+   membership, or has a typo'd/overly permissive `USING` clause), then this client component
+   provides a direct, unauthenticated-at-the-query-level path for ANY authenticated user
+   (any PM, not just staff) to read all organizations' support conversations and messages
+   simply by being served this React component or by directly calling the Supabase JS client
+   with the right table/filter — page.tsx's redirect only prevents seeing the *page*, not a
+   determined user from importing the same query pattern via browser devtools/their own script
+   using their own valid session, since Supabase RLS, not React, is the only real boundary here.
+
+This is the single most security-relevant structural fact in this audit: **the support-inbox
+feature's tenant isolation rests entirely on an RLS policy whose live-DB definition could not
+be confirmed from the migrations in this repository.**
+
+Severity: High (escalating toward Critical if the out-of-band policy theory is correct and
+overly broad). Status: SUSPECTED / UNVERIFIED — requires live DB policy inspection
+(`bash scripts/generate-schema-reference.sh` then review `supabase/schema_reference.sql`,
+or direct `pg_policies` query) to resolve definitively.
+
+Recommended fix: Same as Item 4 — formalize the platform_staff RLS policy in a committed
+migration with the narrowest possible `USING`/`WITH CHECK` clauses
+(`EXISTS (SELECT 1 FROM platform_staff WHERE user_id = auth.uid())`), and verify live policy
+state against it. Until verified, treat this as the highest-priority open item from this audit.
+
+## Item 7: components/support/support-chat-widget.tsx — CLEAN
+
+CONFIRMED CLEAN. This is the PM-facing chat widget (`'use client'`). It:
+- Sends messages via `fetch('/api/support/chat', ...)` (line 62) — server route handles
+  auth/org scoping per Items 1-3 above, not client-trusted.
+- Subscribes to realtime `support_messages` INSERTs filtered by a single `conversation_id`
+  (lines 28-47) that was itself returned by the server route (`data.conversationId`, set only
+  after the server created/validated it against `membership.org_id` — see chat/route.ts lines
+  18-44). The widget never sets or trusts a conversationId from anywhere other than server
+  responses or its own local state.
+- Does not read or send any org_id from the client at all — org scoping is 100% server-derived
+  for this component's API calls. The realtime subscription is scoped to a single
+  conversation_id the user already legitimately owns (per the RLS policy in Item 4, which DOES
+  correctly restrict support_conversations/support_messages SELECT to
+  `user_id = auth.uid()` for the base "org members" policy) — so even under RLS-only
+  enforcement, this widget cannot leak cross-org data: a PM can only ever learn the
+  conversationId for conversations the chat/route.ts handler creates/validates as their own.
+
+Severity: N/A (clean). No violation found.
+
+## Item 8: lib/support/classify.ts, retrieve.ts, embed.ts, anthropic-client.ts, types.ts
+
+Briefly reviewed for any org_id/tenant-data handling — none of these files touch org-scoped
+tables. `classify.ts` and `retrieve.ts` only interact with the model and the
+platform-wide (intentionally non-tenant-scoped, per migration line 17 comment)
+`support_kb_chunks` table. `embed.ts` likewise only touches `support_kb_chunks`.
+No tenant isolation concerns in these files — confirmed CLEAN, no org_id handling expected
+or found.
+
 ---
 
 ## Item 1: lib/support/account-tools.ts — org_id scoping audit
@@ -194,3 +284,26 @@ a Supabase query. Reasoning:
    model/message layer to the query layer at all.
 
 This is a sound structural mitigation, not merely a prompt-engineering one. No violation found.
+
+---
+
+## LIVE DB RESOLUTION (added post-hoc, this session, via Supabase MCP)
+
+The "CRITICAL / UNVERIFIED" finding above (Items 4/6) has been resolved using direct
+`pg_policies`/`pg_proc`/`pg_publication_tables` queries against live project
+`vpmznjktllhmmbfnxuvk`. Full query results in `LIVE_DB_VERIFICATION.md`.
+
+**Result: CLEAN.** `is_platform_staff()` is correctly defined (`SECURITY DEFINER`,
+body exactly checks `platform_staff.user_id = auth.uid()`), used in exactly the 4
+intended policies (no scope creep), and `platform_staff` has a confirmed deny-all
+write policy live. The realtime concern (Item 6) is also resolved: neither
+`support_conversations` nor `support_messages` is in the `supabase_realtime`
+publication, so the unfiltered client subscriptions are currently inert (a functional
+bug, not a leak).
+
+**Downgraded conclusion:** explanation #1 from Item 4 was correct (an out-of-band
+policy exists and is correctly scoped) — explanation #2 (broken feature) and the
+leak scenario in Item 6 are both ruled out. The remaining issue is process/auditability
+only: this authorization layer should be backfilled into a committed migration so
+future audits don't have to re-derive this from a live DB session. See
+AUDIT_SUMMARY.md finding #3 for the consolidated writeup.
