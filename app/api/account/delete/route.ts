@@ -38,6 +38,8 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Delete failed' }, { status: 500 })
   }
 
+  const auditOrgIds: string[] = []
+
   for (const membership of memberships ?? []) {
     const orgId = membership.org_id as string
 
@@ -94,11 +96,20 @@ export async function DELETE(request: NextRequest) {
       }
     }
 
+    auditOrgIds.push(orgId)
+  }
+
+  // Only reached if all orgs' Stripe cancels succeeded — write audit events
+  // after the full loop so a mid-loop 503 never leaves a premature
+  // "account.deleted" record for an org whose subscription is still active.
+  for (const orgId of auditOrgIds) {
     await logAuditEvent({
       orgId:   orgId,
       actorId: user.id,
       action:  'account.deleted',
-    })
+    }).catch(err =>
+      console.error(`[Account:${user.id}] audit log failed for ${orgId}:`, err)
+    )
   }
 
   // Revoke integration tokens — user-level, done once after per-org cleanup

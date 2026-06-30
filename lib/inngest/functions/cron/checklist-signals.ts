@@ -13,13 +13,12 @@ export const computeChecklistSignals = inngest.createFunction(
   },
   { cron: '0 4 * * *' }, // 11pm CT, before the 8am asset health run
   async ({ step, logger }) => {
-    const supabase = createServiceClient()
-
     // Fetch all completed checklist items with their property and org context.
     // No rolling window — Bayesian models work better with full history (old
     // data is naturally down-weighted by the prior's relative strength vs
     // total observation count). Use completed_at ordering for streak detection.
     const items = await step.run('fetch-all-completions', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('checklist_instance_items')
         .select(`
@@ -113,6 +112,7 @@ export const computeChecklistSignals = inngest.createFunction(
     // Wrapped in a single step so it's memoized — a mid-loop failure won't
     // force re-running the expensive read + grouping pass above.
     await step.run('persist-signals', async () => {
+      const supabase = createServiceClient()
       const CHUNK = 200
       for (let i = 0; i < upserts.length; i += CHUNK) {
         await supabase

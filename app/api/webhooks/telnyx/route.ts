@@ -89,7 +89,9 @@ export async function POST(req: NextRequest) {
         action:     'sms.consent.revoked',
         targetType: 'guidebook_guest_sms_optin',
         metadata:   { reason: text },
-      })
+      }).catch(err =>
+        console.error('[Telnyx] audit log failed:', err)
+      )
     }
   } else if (text === 'START' || text === 'YES' || text === 'UNSTOP') {
     const { data: updated } = await supabase
@@ -105,7 +107,9 @@ export async function POST(req: NextRequest) {
         action:     'sms.consent.restored',
         targetType: 'guidebook_guest_sms_optin',
         metadata:   { reason: text },
-      })
+      }).catch(err =>
+        console.error('[Telnyx] audit log failed:', err)
+      )
     }
   }
 

@@ -20,12 +20,12 @@ export const dailyWorkOrderOps = inngest.createFunction(
   },
   { cron: '0 13 * * *' },  // same time as maintenance-schedules — they are independent
   async ({ step, logger }) => {
-    const supabase = createServiceClient()
     const today    = new Date()
     const todayStr = today.toISOString().split('T')[0]
 
     // ── 7.1: WO Aging Escalation ─────────────────────────────────────────────
     const agingWOs = await step.run('find-aging-work-orders', async () => {
+      const supabase = createServiceClient()
       const sevenDaysAgo = new Date(today)
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
 
@@ -43,6 +43,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     // ── 7.4 lookup: schedules eligible for auto-WO (fetched early to batch PM emails) ──
     const autoWOSchedules = await step.run('find-auto-wo-schedules', async () => {
+      const supabase = createServiceClient()
       const { data } = await supabase
         .from('maintenance_schedules')
         .select(`
@@ -62,6 +63,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     // ── Pre-collect org IDs with repeat issues so their PM emails are batched below ──
     const repeatIssueOrgIds = await step.run('find-repeat-issue-org-ids', async () => {
+      const supabase = createServiceClient()
       const ninetyDaysAgo = new Date(today)
       ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
 
@@ -76,6 +78,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     // ── Batch-resolve PM emails for every org touched by aging WOs, auto-WO schedules, or repeat issues ──
     const pmEmailEntries = await step.run('find-pm-emails', async () => {
+      const supabase = createServiceClient()
       const orgIds = Array.from(new Set([
         ...agingWOs.map((wo) => wo.org_id),
         ...autoWOSchedules.map((s) => s.org_id),
@@ -88,6 +91,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     for (const wo of agingWOs) {
       const escalationEventData = await step.run(`escalate-aging-wo-${wo.id}`, async () => {
+        const supabase = createServiceClient()
         const daysOpen = Math.round((today.getTime() - new Date(wo.created_at).getTime()) / 86_400_000)
 
         await supabase
@@ -144,6 +148,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     // ── 7.2: Repeat Issue Detection ──────────────────────────────────────────
     const repeatGroupsToAlert = await step.run('detect-repeat-issues', async () => {
+      const supabase = createServiceClient()
       const ninetyDaysAgo = new Date(today)
       ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
 
@@ -227,6 +232,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
     // ── 7.4: Auto-create WOs for due maintenance schedules ───────────────────
     for (const schedule of autoWOSchedules) {
       const autoCreateEventData = await step.run(`auto-create-wo-${schedule.id}`, async () => {
+        const supabase = createServiceClient()
         const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
 
         // Idempotency: skip if an open WO already exists for this schedule + date
@@ -329,6 +335,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
     // Removes ownerrez_processed_webhooks entries older than 72 hours.
     // Moved off the webhook hot path — runs once daily here instead.
     await step.run('cleanup-ownerrez-webhook-inbox', async () => {
+      const supabase = createServiceClient()
       await supabase
         .from('ownerrez_processed_webhooks')
         .delete()

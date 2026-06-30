@@ -18,9 +18,9 @@ export const guidebookSmsEveningCron = inngest.createFunction(
     if (hourOfDay < 17 || hourOfDay >= 21) return { skipped: 'outside evening window' }
 
     const todayDate = new Intl.DateTimeFormat('en-CA', { timeZone: FALLBACK_TIMEZONE }).format(new Date())
-    const supabase  = createServiceClient()
 
     const optins = await step.run('fetch-active-optins', async () => {
+      const supabase = createServiceClient()
       const { data, error } = await supabase
         .from('guidebook_guest_sms_optins')
         .select(`
@@ -47,6 +47,7 @@ export const guidebookSmsEveningCron = inngest.createFunction(
 
     const [propertiesData, sponsorsData] = await Promise.all([
       step.run('batch-fetch-properties', async () => {
+        const supabase = createServiceClient()
         const { data } = await supabase
           .from('properties')
           .select('id, name, lat, lng')
@@ -54,6 +55,7 @@ export const guidebookSmsEveningCron = inngest.createFunction(
         return data ?? []
       }),
       step.run('batch-fetch-sponsors', async () => {
+        const supabase = createServiceClient()
         const { data } = await supabase
           .from('guidebook_sponsors')
           .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
@@ -75,6 +77,7 @@ export const guidebookSmsEveningCron = inngest.createFunction(
 
     for (const optin of optins) {
       const result = await step.run(`send-evening-sms-${optin.id}`, async () => {
+        const supabase = createServiceClient()
         const property = propertyMap[optin.property_id]
         if (!property?.lat || !property?.lng) return false
 
