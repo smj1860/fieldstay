@@ -1,6 +1,8 @@
 'use client'
 
+import { useActionState } from 'react'
 import Link from 'next/link'
+import { acceptTeamInvite } from './actions'
 
 interface Props {
   token:   string
@@ -9,8 +11,14 @@ interface Props {
 }
 
 export function AcceptForm({ token, email, orgName }: Props) {
-  const signupUrl = `/signup?invite_token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`
-  const loginUrl  = `/login?invite_token=${encodeURIComponent(token)}`
+  const [state, formAction, pending] = useActionState(
+    async (_prev: { error?: string } | null, formData: FormData) => {
+      return acceptTeamInvite(formData)
+    },
+    null
+  )
+
+  const loginUrl = `/login?invite_token=${encodeURIComponent(token)}`
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4"
@@ -42,22 +50,87 @@ export function AcceptForm({ token, email, orgName }: Props) {
             </p>
           </div>
 
-          <div className="space-y-3">
-            <a href={signupUrl}
-               className="block w-full text-center rounded-xl font-bold text-sm py-3.5 transition-opacity hover:opacity-90"
-               style={{ background: '#FCD116', color: '#102246' }}>
-              Create your FieldStay account
-            </a>
+          <form action={formAction} className="space-y-4">
+            <input type="hidden" name="token" value={token} />
 
-            <a href={loginUrl}
-               className="block w-full text-center rounded-xl font-bold text-sm py-3.5 transition-colors"
-               style={{ background: 'transparent', color: '#102246', border: '1.5px solid #E5E7EB' }}>
-              Log in to an existing account
-            </a>
-          </div>
+            {state?.error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                {state.error}
+              </div>
+            )}
+
+            <div>
+              <label className="label">Email</label>
+              <input
+                type="email"
+                value={email}
+                disabled
+                className="input bg-accent-50 text-accent-500 cursor-not-allowed"
+              />
+            </div>
+
+            <div>
+              <label className="label">
+                Full Name <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="fullName"
+                required
+                maxLength={200}
+                className="input"
+                placeholder="Jane Smith"
+                autoComplete="name"
+              />
+            </div>
+
+            <div>
+              <label className="label">
+                Password <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                name="password"
+                required
+                minLength={8}
+                maxLength={72}
+                className="input"
+                placeholder="At least 8 characters"
+                autoComplete="new-password"
+              />
+            </div>
+
+            <div>
+              <label className="label">
+                Confirm Password <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="password"
+                name="confirm"
+                required
+                className="input"
+                placeholder="Repeat password"
+                autoComplete="new-password"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={pending}
+              className="block w-full text-center rounded-xl font-bold text-sm py-3.5 transition-opacity hover:opacity-90 disabled:opacity-60"
+              style={{ background: '#FCD116', color: '#102246' }}
+            >
+              {pending ? 'Creating account…' : 'Create Account & Join →'}
+            </button>
+          </form>
 
           <p className="text-xs text-center mt-5" style={{ color: '#9CA3AF' }}>
-            You&apos;ll be added to <strong>{orgName}</strong> automatically after signing in.
+            Already have an account?{' '}
+            <Link href={loginUrl}
+                  className="font-semibold hover:underline"
+                  style={{ color: '#102246' }}>
+              Log in
+            </Link>
           </p>
         </div>
 

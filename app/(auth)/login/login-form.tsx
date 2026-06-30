@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import { acceptInviteForCurrentUser } from './actions'
 import Link from 'next/link'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -17,6 +18,7 @@ export function LoginForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const next         = searchParams.get('next') ?? '/ops'
+  const inviteToken  = searchParams.get('invite_token')
 
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
@@ -37,6 +39,13 @@ export function LoginForm() {
     if (error) {
       setError(error.message)
       setLoading(false)
+      return
+    }
+
+    if (inviteToken) {
+      await acceptInviteForCurrentUser(inviteToken)
+      router.push('/ops')
+      router.refresh()
       return
     }
 
