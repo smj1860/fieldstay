@@ -3,6 +3,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { anthropic } from './anthropic-client'
 import { retrieveContext } from './retrieve'
 import type { SupportCategory, SupportMessage, SupportResponse } from './types'
+import { ACCOUNT_TOOLS, callAccountTool } from './account-tools'
 
 const MODEL_BY_CATEGORY: Record<SupportCategory, string> = {
   faq:              'claude-haiku-4-5-20251001',
@@ -14,10 +15,21 @@ export async function generateResponse(params: {
   category: SupportCategory
   message:  string
   history:  SupportMessage[]
+  orgId:    string
 }): Promise<SupportResponse> {
-  const model       = MODEL_BY_CATEGORY[params.category]
-  const context     = await retrieveContext(params.message)
+  const model        = MODEL_BY_CATEGORY[params.category]
+  const context      = await retrieveContext(params.message)
   const systemPrompt = buildSystemPrompt(params.category, context)
+
+  if (params.category === 'account_specific') {
+    return generateAccountSpecificResponse({
+      model,
+      systemPrompt,
+      message: params.message,
+      history: params.history,
+      orgId:   params.orgId,
+    })
+  }
 
   const res = await anthropic.messages.create({
     model,
@@ -38,6 +50,67 @@ export async function generateResponse(params: {
   return {
     content,
     modelUsed:       model,
+    needsEscalation: detectEscalation(content),
+  }
+}
+
+async function generateAccountSpecificResponse(params: {
+  model:        string
+  systemPrompt: string
+  message:      string
+  history:      SupportMessage[]
+  orgId:        string
+}): Promise<SupportResponse> {
+  const messages: Anthropic.Messages.MessageParam[] = [
+    ...params.history.map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user' as const, content: params.message },
+  ]
+
+  let res = await anthropic.messages.create({
+    model:      params.model,
+    max_tokens: 800,
+    system:     params.systemPrompt,
+    tools:      ACCOUNT_TOOLS,
+    messages,
+  })
+
+  // Tool-use loop — handle up to 3 rounds of tool calls before forcing a final answer
+  let rounds = 0
+  while (res.stop_reason === 'tool_use' && rounds < 3) {
+    const toolUseBlocks = res.content.filter(
+      (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use'
+    )
+
+    const toolResults = await Promise.all(
+      toolUseBlocks.map(async (block) => ({
+        type:        'tool_result' as const,
+        tool_use_id: block.id,
+        content:     JSON.stringify(await callAccountTool(block.name, params.orgId)),
+      }))
+    )
+
+    messages.push({ role: 'assistant', content: res.content })
+    messages.push({ role: 'user', content: toolResults })
+
+    res = await anthropic.messages.create({
+      model:      params.model,
+      max_tokens: 800,
+      system:     params.systemPrompt,
+      tools:      ACCOUNT_TOOLS,
+      messages,
+    })
+
+    rounds++
+  }
+
+  const textBlock = res.content.find(
+    (b): b is Anthropic.Messages.TextBlock => b.type === 'text'
+  )
+  const content = textBlock?.text ?? "I wasn't able to generate a response — please try rephrasing."
+
+  return {
+    content,
+    modelUsed:       params.model,
     needsEscalation: detectEscalation(content),
   }
 }
@@ -88,7 +161,9 @@ ${context.map((c, i) => `[${i + 1}] ${c}`).join('\n\n')}`
   }
 
   if (category === 'account_specific') {
-    return `${base}\n\nThis references their specific account or data. You do not currently have access to live account data. Say so plainly and offer to flag this for a human who can look up their account — do not guess or fabricate account details.`
+    return `${base}
+
+This question is about the person's specific account or data. You have tools available to look up their plan status, recent turnovers, integration connection status, and recent purchase orders. Use a tool when it would answer the question directly. If the question needs information no tool provides, say so plainly and offer to flag this for a human.`
   }
 
   return base
