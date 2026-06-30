@@ -46,3 +46,18 @@ export const signOffRatelimit = new Ratelimit({
   analytics: false,
   prefix:    'rl:signoff',
 })
+
+// Support chat — 20 messages per minute per user, plus a 100/day cap
+export const supportChatLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: true,
+  prefix:    'ratelimit:support-chat',
+})
+
+export const supportChatDailyLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(100, '1 d'),
+  analytics: true,
+  prefix:    'ratelimit:support-chat-daily',
+})
