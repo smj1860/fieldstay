@@ -11,7 +11,7 @@
     "types:supabase": "supabase gen types typescript --local > types/supabase.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.100.1",
+    "@anthropic-ai/sdk": "^0.109.0",
     "@hookform/resolvers": "^3.9.1",
     "@opentelemetry/api": "^1.9.1",
     "@react-email/components": "^1.0.12",
