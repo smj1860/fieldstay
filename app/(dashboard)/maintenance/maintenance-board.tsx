@@ -430,7 +430,7 @@ function CreateWorkOrderModal({
       let photoFailures = 0
       for (const file of photoFiles) {
         const ext  = file.name.split('.').pop() ?? 'jpg'
-        const path = `wo-${workOrderId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const path = `wo-${workOrderId}/${crypto.randomUUID()}.${ext}`
         const { error: uploadErr } = await supabase.storage
           .from('work-order-photos')
           .upload(path, file, { contentType: file.type })

@@ -154,7 +154,7 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
   const propertyIds = [...new Set(owners.map((o) => o.property_id))]
   if (propertyIds.length < 2) return { error: 'Combined links require at least two properties' }
 
-  // Anchor the token on the first owner row (sorted for determinism)
+  // Sort UUIDs lexicographically for a deterministic anchor — string sort is correct here
   const anchorOwnerId = [...owners].map((o) => o.id).sort()[0]!
 
   const token     = crypto.randomUUID()

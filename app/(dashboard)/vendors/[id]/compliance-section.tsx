@@ -52,7 +52,7 @@ function AddDocumentForm({
 
     const supabase = createClient()
     const ext  = file.name.split('.').pop() ?? 'pdf'
-    const path = `${orgId}/${vendorId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    const path = `${orgId}/${vendorId}/${crypto.randomUUID()}.${ext}`
 
     const { error } = await supabase.storage
       .from('compliance-documents')
