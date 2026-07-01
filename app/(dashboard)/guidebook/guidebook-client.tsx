@@ -56,6 +56,14 @@ export function GuidebookClient({
   const activeSponsorCount = sponsors.filter((s) => s.status === 'active').length
   const isGuidebookActive  = config?.is_active ?? false
 
+  const trialEndsAt    = config?.trial_ends_at ?? null
+  const inTrial        = trialEndsAt ? new Date() < new Date(trialEndsAt) : false
+  const trialDaysLeft  = inTrial
+    ? Math.ceil((new Date(trialEndsAt!).getTime() - Date.now()) / 86400000)
+    : 0
+  const hasAccess      = inTrial || activeSponsorCount >= 3
+  const sponsorsNeeded = Math.max(0, 3 - activeSponsorCount)
+
   const checkCelebration = useCallback(
     (newCount: number, prevCount: number) => {
       const storageKey = 'guidebook_celebration_shown'
@@ -125,9 +133,93 @@ export function GuidebookClient({
           Guidebook
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '15px', margin: 0 }}>
-          Your guest-facing recommendation engine. Fill 4 sponsor slots to unlock it — free forever.
+          Your guest-facing recommendation engine. Fill 3 sponsor slots to unlock it — free forever.
         </p>
       </div>
+
+      {/* ── Trial countdown banner ──────────────────────────────────────────── */}
+      {inTrial && (
+        <div
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            padding:      '12px 16px',
+            marginBottom: '16px',
+            display:      'flex',
+            alignItems:   'center',
+            justifyContent: 'space-between',
+            background:   trialDaysLeft <= 7 ? 'rgba(245,158,11,0.12)' : 'rgba(47,217,140,0.10)',
+            border:       `1px solid ${trialDaysLeft <= 7 ? 'var(--accent-amber)' : 'var(--accent-green)'}`,
+          }}
+        >
+          <div>
+            <p style={{ fontWeight: '600', fontSize: '13px', color: 'var(--text-primary)', margin: '0 0 2px' }}>
+              {trialDaysLeft > 0
+                ? `${trialDaysLeft} day${trialDaysLeft !== 1 ? 's' : ''} left in your free trial`
+                : 'Your trial ends today'}
+            </p>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0 }}>
+              Add 3 sponsors to unlock the Guidebook permanently and earn plan credits.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '5px', marginLeft: '16px', flexShrink: 0 }}>
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                style={{
+                  width: '12px', height: '12px', borderRadius: '50%',
+                  backgroundColor: i < activeSponsorCount ? 'var(--accent-gold)' : 'var(--border-strong)',
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Post-trial locked state banner ─────────────────────────────────── */}
+      {!inTrial && !hasAccess && (
+        <div
+          style={{
+            borderRadius: 'var(--radius-lg)',
+            padding:      '20px',
+            marginBottom: '16px',
+            textAlign:    'center',
+            background:   'var(--bg-card)',
+            border:       '1px solid var(--border)',
+          }}
+        >
+          <p style={{ fontWeight: '700', fontSize: '15px', color: 'var(--text-primary)', margin: '0 0 4px' }}>
+            Add {sponsorsNeeded} more sponsor{sponsorsNeeded !== 1 ? 's' : ''} to unlock the Guidebook
+          </p>
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 16px' }}>
+            Your 30-day trial has ended. 3 active sponsors unlock the Guidebook
+            permanently — keep adding to earn plan credits.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '16px' }}>
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                style={{
+                  width: '16px', height: '16px', borderRadius: '50%',
+                  backgroundColor: i < activeSponsorCount ? 'var(--accent-gold)' : 'var(--border-strong)',
+                }}
+              />
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              document.querySelector<HTMLElement>('[data-sponsor-slots]')?.scrollIntoView({ behavior: 'smooth' })
+            }}
+            style={{
+              fontSize: '13px', fontWeight: '600',
+              padding: '8px 16px', borderRadius: 'var(--radius)',
+              backgroundColor: 'var(--accent-gold)', color: 'var(--text-inverse)',
+              border: 'none', cursor: 'pointer',
+            }}
+          >
+            Add a Sponsor →
+          </button>
+        </div>
+      )}
 
       <div
         style={{
@@ -155,7 +247,7 @@ export function GuidebookClient({
             <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '14px' }}>
               {isGuidebookActive
                 ? `Guidebook is live · ${activeSponsorCount} active sponsor${activeSponsorCount !== 1 ? 's' : ''}`
-                : `${activeSponsorCount} of 4 sponsors · Guidebook locked`}
+                : `${activeSponsorCount} of 3 sponsors · Guidebook locked`}
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '2px' }}>
               {isGuidebookActive
@@ -163,10 +255,10 @@ export function GuidebookClient({
                   ? '$25/month credit applied to your plan'
                   : activeSponsorCount >= 5
                   ? '$10/month credit applied to your plan'
-                  : 'Add 2 more sponsors to earn a plan credit'
+                  : 'Add sponsors to earn a plan credit (5 = $10/mo, 6 = $25/mo)'
                 : config?.grace_period_ends_at
                 ? `Grace period — fill the slot before ${new Date(config.grace_period_ends_at).toLocaleDateString()} to avoid losing your guidebook`
-                : `Add ${4 - activeSponsorCount} more sponsor${4 - activeSponsorCount !== 1 ? 's' : ''} to unlock`}
+                : `Add ${sponsorsNeeded} more sponsor${sponsorsNeeded !== 1 ? 's' : ''} to unlock`}
             </div>
           </div>
         </div>
@@ -194,7 +286,7 @@ export function GuidebookClient({
           marginBottom:    '32px',
         }}
       >
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div data-sponsor-slots style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2 style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>
             Sponsor Slots
           </h2>

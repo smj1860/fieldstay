@@ -16,7 +16,7 @@ export const guidebookGraceExpiredHandler = inngest.createFunction(
       return getActiveSponsorCount(orgId)
     })
 
-    const locked = activeSponsorCount < 4
+    const locked = activeSponsorCount < 3
 
     if (!locked) {
       // The PM filled the slot during the grace period — clear it and do nothing

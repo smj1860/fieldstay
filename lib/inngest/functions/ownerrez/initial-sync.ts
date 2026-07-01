@@ -385,6 +385,28 @@ export const ownerRezInitialSync = inngest.createFunction(
         )
       })
 
+      // ── Create org-level guidebook config with 30-day trial ───────────────────
+      // ignoreDuplicates: true ensures we never overwrite an existing config
+      // (e.g. if the org reconnects OwnerRez after already having a config).
+      await step.run('create-guidebook-org-config', async () => {
+        const supabase    = createServiceClient()
+        const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+        await supabase
+          .from('guidebook_configurations')
+          .upsert(
+            {
+              org_id:        org_id,
+              is_active:     true,
+              trial_ends_at: trialEndsAt,
+            },
+            {
+              onConflict:       'org_id',
+              ignoreDuplicates: true,
+            }
+          )
+      })
+
       // ── Auto-create guidebook property configs for new properties ─────────────
       await step.run('create-guidebook-property-configs', async () => {
         const supabase = createServiceClient()
