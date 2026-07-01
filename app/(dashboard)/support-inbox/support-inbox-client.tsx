@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient }                from '@/lib/supabase/client'
 
 interface ConversationRow {
@@ -39,29 +39,35 @@ export function SupportInboxClient({
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Real-time: new/updated conversations
+  // Extracted from useEffect → .on() → setState(prev) → .map + .sort chain (S2004).
+  const applyConversationChange = useCallback(
+    (payload: { new: Record<string, unknown> }) => {
+      const updated = payload.new as unknown as ConversationRow
+      setConversations((prev) => {
+        const exists = prev.some((c) => c.id === updated.id)
+        const next   = exists
+          ? prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+          : [updated, ...prev]
+        return next.sort((a, b) => {
+          if (a.needs_human !== b.needs_human) return a.needs_human ? -1 : 1
+          return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
+        })
+      })
+    },
+    []
+  )
+
   useEffect(() => {
     const channel = supabase
       .channel('support-inbox-conversations')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'support_conversations' },
-        (payload: { new: Record<string, unknown> }) => {
-          setConversations(prev => {
-            const updated = payload.new as unknown as ConversationRow
-            const exists  = prev.some(c => c.id === updated.id)
-            const next    = exists
-              ? prev.map(c => c.id === updated.id ? { ...c, ...updated } : c)
-              : [updated, ...prev]
-            return next.sort((a, b) => {
-              if (a.needs_human !== b.needs_human) return a.needs_human ? -1 : 1
-              return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
-            })
-          })
-        }
+        applyConversationChange
       )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [supabase])
+  }, [supabase, applyConversationChange])
 
   // Load + subscribe to messages for the selected conversation
   useEffect(() => {

@@ -80,43 +80,67 @@ export function GuidebookClient({
     []
   )
 
+  // Extracted from useEffect → .on() → setState(prev) → .map/.filter chain (S2004).
+  // Pure reducer — no side effects, no closures over component state.
+  const applySponsorsPayload = useCallback(
+    (
+      prev:    GuidebookSponsor[],
+      payload: RealtimePostgresChangesPayload<GuidebookSponsor>,
+    ): GuidebookSponsor[] => {
+      if (payload.eventType === 'INSERT') {
+        return [...prev, payload.new as GuidebookSponsor]
+      }
+      if (payload.eventType === 'UPDATE') {
+        const updated = payload.new as GuidebookSponsor
+        return prev.map((s) => (s.id === updated.id ? updated : s))
+      }
+      if (payload.eventType === 'DELETE') {
+        const removed = payload.old as GuidebookSponsor
+        return prev.filter((s) => s.id !== removed.id)
+      }
+      return prev
+    },
+    []
+  )
+
+  const handleSponsorChange = useCallback(
+    (payload: RealtimePostgresChangesPayload<GuidebookSponsor>) => {
+      setSponsors((prev) => {
+        const next       = applySponsorsPayload(prev, payload)
+        const newActive  = next.filter((s) => s.status === 'active').length
+        const prevActive = prevCountRef.current
+        prevCountRef.current = newActive
+        checkCelebration(newActive, prevActive)
+        return next
+      })
+    },
+    [applySponsorsPayload, checkCelebration]
+  )
+
+  const handleConfigChange = useCallback(
+    (payload: RealtimePostgresChangesPayload<GuidebookConfiguration>) => {
+      setConfig(payload.new as GuidebookConfiguration)
+    },
+    []
+  )
+
   useEffect(() => {
     const channel = supabase
       .channel(`guidebook-sponsors-${orgId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'guidebook_sponsors', filter: `org_id=eq.${orgId}` },
-        (payload: RealtimePostgresChangesPayload<GuidebookSponsor>) => {
-          setSponsors((prev) => {
-            let next: GuidebookSponsor[]
-            if (payload.eventType === 'INSERT') {
-              next = [...prev, payload.new as GuidebookSponsor]
-            } else if (payload.eventType === 'UPDATE') {
-              next = prev.map((s) =>
-                s.id === (payload.new as GuidebookSponsor).id ? (payload.new as GuidebookSponsor) : s
-              )
-            } else if (payload.eventType === 'DELETE') {
-              next = prev.filter((s) => s.id !== (payload.old as GuidebookSponsor).id)
-            } else {
-              next = prev
-            }
-            const newActive  = next.filter((s) => s.status === 'active').length
-            const prevActive = prevCountRef.current
-            prevCountRef.current = newActive
-            checkCelebration(newActive, prevActive)
-            return next
-          })
-        }
+        handleSponsorChange
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'guidebook_configurations', filter: `org_id=eq.${orgId}` },
-        (payload: RealtimePostgresChangesPayload<GuidebookConfiguration>) => { setConfig(payload.new as GuidebookConfiguration) }
+        handleConfigChange
       )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [orgId, supabase, checkCelebration])
+  }, [orgId, supabase, handleSponsorChange, handleConfigChange])
 
   const sponsorsBySlot = sponsors.reduce<Record<number, GuidebookSponsor>>((acc, s) => {
     acc[s.slot_number] = s

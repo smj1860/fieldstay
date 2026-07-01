@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef, useTransition } from 'react'
+import { useState, useEffect, useMemo, useRef, useTransition, useCallback } from 'react'
 import { Send, MessageSquare, Search, ChevronLeft, Users } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
@@ -62,6 +62,24 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
 
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // Extracted from useEffect → .on() → setState(prev) → .map/.some chain (S2004).
+  // useCallback gives stable references so the channel never re-subscribes spuriously.
+  const handleMessageInsert = useCallback(
+    (payload: RealtimePostgresChangesPayload<Message>) => {
+      const incoming = payload.new as Message
+      setMessages((prev) => (prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]))
+    },
+    []
+  )
+
+  const handleMessageUpdate = useCallback(
+    (payload: RealtimePostgresChangesPayload<Message>) => {
+      const updated = payload.new as Message
+      setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+    },
+    []
+  )
+
   // Live updates
   useEffect(() => {
     const supabase = createClient()
@@ -70,23 +88,17 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `org_id=eq.${orgId}` },
-        (payload: RealtimePostgresChangesPayload<Message>) => {
-          const incoming = payload.new as Message
-          setMessages((prev) => (prev.some((m) => m.id === incoming.id) ? prev : [...prev, incoming]))
-        }
+        handleMessageInsert
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages', filter: `org_id=eq.${orgId}` },
-        (payload: RealtimePostgresChangesPayload<Message>) => {
-          const updated = payload.new as Message
-          setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
-        }
+        handleMessageUpdate
       )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [orgId])
+  }, [orgId, handleMessageInsert, handleMessageUpdate])
 
   const { directThreads, groupThreads } = useMemo(() => {
     const byUserId  = new Map(crew.map((c) => [c.user_id, c]))

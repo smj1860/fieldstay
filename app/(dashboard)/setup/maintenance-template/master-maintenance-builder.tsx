@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useCallback } from 'react'
 import { Plus, X, Check } from 'lucide-react'
 import { saveMasterMaintenanceSchedules, type MaintenanceScheduleInput } from './actions'
 
@@ -82,6 +82,20 @@ export function MasterMaintenanceBuilder({
     (s) => !schedules.some((e) => e.title === s.title)
   )
 
+  // Extracted from JSX onChange → setState(prev) → forEach chain (S2004).
+  const toggleAllSuggestions = useCallback(() => {
+    const allSelected = selectableSuggestions.every((s) => selectedSuggestions.has(s.title))
+    setSelectedSuggestions((prev) => {
+      const next = new Set(prev)
+      if (allSelected) {
+        selectableSuggestions.forEach((s) => next.delete(s.title))
+      } else {
+        selectableSuggestions.forEach((s) => next.add(s.title))
+      }
+      return next
+    })
+  }, [selectableSuggestions, selectedSuggestions])
+
   return (
     <div className="space-y-4">
       {/* Suggested Schedules — checkbox list */}
@@ -93,18 +107,7 @@ export function MasterMaintenanceBuilder({
             <input
               type="checkbox"
               checked={selectableSuggestions.length > 0 && selectableSuggestions.every((s) => selectedSuggestions.has(s.title))}
-              onChange={() => {
-                const allSelected = selectableSuggestions.every((s) => selectedSuggestions.has(s.title))
-                setSelectedSuggestions((prev) => {
-                  const next = new Set(prev)
-                  if (allSelected) {
-                    selectableSuggestions.forEach((s) => next.delete(s.title))
-                  } else {
-                    selectableSuggestions.forEach((s) => next.add(s.title))
-                  }
-                  return next
-                })
-              }}
+              onChange={toggleAllSuggestions}
               className="w-4 h-4 rounded"
             />
             <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
