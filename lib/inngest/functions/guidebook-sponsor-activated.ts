@@ -30,12 +30,24 @@ export const guidebookSponsorActivated = inngest.createFunction(
       return getActiveSponsorCount(orgId)
     })
 
-    // Unlock guidebook when sponsor wall threshold is reached. Also clears
-    // any in-progress grace period — a replaced sponsor cancels the countdown.
-    await step.run('evaluate-guidebook-lock', async () => {
-      if (activeSponsorCount < 4) return
-
+    // Unlock guidebook when sponsor threshold is reached, or if the org is
+    // still within their 30-day free trial. Also clears any in-progress grace
+    // period — a replaced sponsor cancels the countdown.
+    const wasUnlocked = await step.run('evaluate-guidebook-lock', async () => {
       const supabase = createServiceClient()
+
+      const { data: config } = await supabase
+        .from('guidebook_configurations')
+        .select('trial_ends_at')
+        .eq('org_id', orgId)
+        .maybeSingle()
+
+      const inTrial = config?.trial_ends_at
+        ? new Date() < new Date(config.trial_ends_at)
+        : false
+
+      if (!inTrial && activeSponsorCount < 3) return false
+
       await supabase
         .from('guidebook_configurations')
         .upsert(
@@ -47,6 +59,8 @@ export const guidebookSponsorActivated = inngest.createFunction(
           },
           { onConflict: 'org_id' }
         )
+
+      return true
     })
 
     await step.run('log-audit-event', async () => {
@@ -55,10 +69,10 @@ export const guidebookSponsorActivated = inngest.createFunction(
         action:     'guidebook.sponsor.activated',
         targetType: 'guidebook_sponsor',
         targetId:   sponsorId,
-        metadata:   { activeSponsorCount, guidebookUnlocked: activeSponsorCount >= 4 },
+        metadata:   { activeSponsorCount, guidebookUnlocked: wasUnlocked },
       })
     })
 
-    return { activeSponsorCount, sponsorId, orgId }
+    return { activeSponsorCount, sponsorId, orgId, wasUnlocked }
   }
 )

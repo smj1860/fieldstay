@@ -1100,6 +1100,7 @@ export interface GuidebookConfiguration {
   org_id:                string
   is_active:             boolean
   grace_period_ends_at:  string | null
+  trial_ends_at:         string | null
   extension_messaging_enabled:   boolean
   extension_gap_threshold_days:  number
   extension_discount_pct:        number | null

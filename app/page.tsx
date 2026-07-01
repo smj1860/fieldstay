@@ -51,15 +51,15 @@ export default function LandingPage() {
         {/* Headline */}
         <h1 className="mx-auto mb-5 font-black leading-[1.08] tracking-tight"
             style={{ fontSize: 'clamp(36px, 5vw, 54px)', color: '#fff', maxWidth: 720, letterSpacing: '-1.5px' }}>
-          Stop Running Your Properties on{' '}
-          <span style={{ color: '#FCD116' }}>Texts & Spreadsheets.</span>
+          Built for the work that happens{' '}
+          <span style={{ color: '#FCD116' }}>between checkouts.</span>
         </h1>
 
         {/* Subhead */}
-        <p className="mx-auto mb-9" style={{ fontSize: 18, color: 'rgba(255,255,255,0.62)', maxWidth: 560, lineHeight: 1.65 }}>
-          FieldStay coordinates your turnovers, inventory, maintenance, and owner
-          reporting in one platform — with a true offline app your cleaning crew
-          can use anywhere at the property.
+        <p className="mx-auto mb-9" style={{ fontSize: 18, color: 'rgba(255,255,255,0.62)', maxWidth: 580, lineHeight: 1.65 }}>
+          FieldStay handles crew scheduling, turnovers, maintenance, inventory,
+          vendor work orders, and guest communications — so the gap between
+          checkout and check-in runs itself.
         </p>
 
         {/* CTA */}
@@ -154,88 +154,126 @@ export default function LandingPage() {
           <div className="text-center mb-14">
             <h2 className="font-black mb-3 tracking-tight"
                 style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
-              Everything between check-out and check-in.
+              Built for every part of the operation.
             </h2>
             <p className="text-base mx-auto" style={{ color: '#6B7280', maxWidth: 480 }}>
               FieldStay handles operations so you can focus on growing your portfolio.
             </p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {[
-              {
-                tag: 'Turnovers',
-                title: 'Automated from your calendar',
-                body: 'Connect your Airbnb or VRBO iCal. FieldStay reads your bookings, generates turnovers in the gaps, and assigns them to crew — with mandatory photo proof on any task that needs it.',
-                details: [
-                  'Auto-generated from booking gaps',
-                  'Crew notified immediately on assignment',
-                  'Photo capture blocks completion when required',
-                  'True offline access — no Wi-Fi required on-site',
-                ],
-              },
-              {
-                tag: 'Inventory',
-                title: 'Par levels that reorder themselves',
-                body: 'Set par levels for every item at every property. When crew submits their count and something\'s below par, a purchase order emails you automatically. You just place the order.',
-                details: [
-                  'Pre-seeded catalog of common STR supplies',
-                  'Per-property par level configuration',
-                  'Crew submits counts offline via mobile app',
-                  'Auto-generated PO when stock is low',
-                ],
-              },
-              {
-                tag: 'Maintenance',
-                title: 'Work orders vendors actually complete',
-                body: 'Create work orders and assign vendors. Vendors get a tokenized link — no account needed — to mark work complete, attach photos, and add notes. You\'re notified instantly.',
-                details: [
-                  'Vendor portal requires zero login to use',
-                  'Routine and seasonal schedule tracking',
-                  'Auto-create work orders from due schedules',
-                  'Maintenance costs flow into owner P&L',
-                ],
-              },
-              {
-                tag: 'Owner P&L',
-                title: 'P&L your owners can actually see',
-                body: 'Revenue auto-calculates from synced bookings. Maintenance costs flow in from completed work orders. Owners click a link and see their numbers — no password, no account needed.',
-                details: [
-                  'Revenue auto-pulled from booking data',
-                  'Expenses auto-created from work order costs',
-                  'Monthly P&L with category breakdown',
-                  'Tokenized portal — owners click link, done',
-                ],
-              },
-            ].map((f) => (
-              <div key={f.tag}
-                   className="rounded-2xl p-7 relative overflow-hidden transition-all"
-                   style={{ border: '1px solid #E5E7EB' }}>
-                <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
-                     style={{ background: '#102246' }} />
-                <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
-                      style={{ background: '#EEF2FF', color: '#102246' }}>
-                  {f.tag}
-                </span>
-                <h3 className="font-black mb-3 tracking-tight"
-                    style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
-                  {f.title}
-                </h3>
-                <p className="text-sm leading-relaxed mb-5" style={{ color: '#6B7280' }}>
-                  {f.body}
-                </p>
-                <div className="flex flex-col gap-2">
-                  {f.details.map((d) => (
-                    <div key={d} className="flex items-center gap-2.5 text-sm" style={{ color: '#374151' }}>
-                      <span className="flex-shrink-0 flex items-center justify-center rounded-full text-xs font-black"
-                            style={{ width: 18, height: 18, background: '#102246', color: '#FCD116', lineHeight: '18px' }}>
-                        ✓
-                      </span>
-                      {d}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+
+          {/* ── Feature grid: F1 + F2 ── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+
+            {/* Feature 1 — Offline Crew App */}
+            <div className="rounded-2xl p-7 relative overflow-hidden"
+                 style={{ border: '1px solid #E5E7EB' }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
+                   style={{ background: '#102246' }} />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
+                    style={{ background: '#EEF2FF', color: '#102246' }}>
+                Crew Mobile App
+              </span>
+              <h3 className="font-black mb-3 tracking-tight"
+                  style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
+                Your crew has to work fast even without a signal. Their app should too.
+              </h3>
+              <p className="text-sm leading-relaxed" style={{ color: '#6B7280' }}>
+                The FieldStay crew app works completely offline. Checklists, inventory counts,
+                and photos all function with zero cell service — everything syncs automatically
+                when signal is restored. No spinning wheels. No excuses for an incomplete turnover.
+              </p>
+            </div>
+
+            {/* Feature 2 — Smart Crew Scheduling */}
+            <div className="rounded-2xl p-7 relative overflow-hidden"
+                 style={{ border: '1px solid #E5E7EB' }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
+                   style={{ background: '#102246' }} />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
+                    style={{ background: '#EEF2FF', color: '#102246' }}>
+                Intelligent Scheduling
+              </span>
+              <h3 className="font-black mb-3 tracking-tight"
+                  style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
+                Suggested crew assignment that gets smarter every turnover.
+              </h3>
+              <p className="text-sm leading-relaxed" style={{ color: '#6B7280' }}>
+                FieldStay suggests the right crew member for each turnover based on familiarity
+                with the property, geographic proximity, workload, and completion history. The
+                more turnovers you run through it, the better it gets. Operations shouldn&apos;t
+                feel like groundhog day every week.
+              </p>
+            </div>
+
+            {/* Feature 3 — Flat Pricing */}
+            <div className="rounded-2xl p-7 relative overflow-hidden"
+                 style={{ border: '1px solid #E5E7EB' }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
+                   style={{ background: '#102246' }} />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
+                    style={{ background: '#EEF2FF', color: '#102246' }}>
+                Pricing
+              </span>
+              <h3 className="font-black mb-3 tracking-tight"
+                  style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
+                Gates are for fences. Not features.
+              </h3>
+              <p className="text-sm leading-relaxed" style={{ color: '#6B7280' }}>
+                Every FieldStay plan includes the full platform — no feature gating, no
+                per-property fees that punish growth. Starter covers 1–15 properties at $199/month.
+                Growth covers 16–50 at $379/month. Portfolio covers 51–100 at $599/month. Scale
+                your portfolio without watching your software bill scale with it.
+              </p>
+            </div>
+
+            {/* Feature 5 — RepuGuard */}
+            <div className="rounded-2xl p-7 relative overflow-hidden"
+                 style={{ border: '1px solid #E5E7EB' }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
+                   style={{ background: '#102246' }} />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
+                    style={{ background: '#EEF2FF', color: '#102246' }}>
+                RepuGuard
+              </span>
+              <h3 className="font-black mb-3 tracking-tight"
+                  style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
+                A professional review response that sounds as authentic as you. One click to post.
+              </h3>
+              <p className="text-sm leading-relaxed" style={{ color: '#6B7280' }}>
+                RepuGuard generates a tailored draft response for every guest review synced from
+                OwnerRez — ready before you&apos;ve had your morning coffee. Review it, edit it if you
+                want, and post directly back to OwnerRez in one click. Bundled into every plan.
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* ── Feature 4 — Guest Guidebook (highlighted band) ───────────────── */}
+      <section className="px-8 py-16" style={{ background: '#102246' }}>
+        <div className="mx-auto" style={{ maxWidth: 960 }}>
+          <div className="rounded-2xl p-8 md:p-10"
+               style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)' }}>
+            <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-5"
+                  style={{ background: 'rgba(252,209,22,0.15)', color: '#FCD116', border: '1px solid rgba(252,209,22,0.3)' }}>
+              Guest Guidebook
+            </span>
+            <h3 className="font-black mb-4 tracking-tight"
+                style={{ fontSize: 'clamp(22px, 3vw, 28px)', color: '#fff', letterSpacing: '-0.5px', maxWidth: 680 }}>
+              Not just another guidebook. A guest experience tool with a personal touch — and we&apos;ll pay you to use it.*
+            </h3>
+            <p className="text-base leading-relaxed mb-3" style={{ color: 'rgba(255,255,255,0.6)', maxWidth: 700 }}>
+              Every FieldStay property gets a personalized guest guidebook: door codes, WiFi
+              credentials, check-in instructions, and contextual recommendations driven by
+              your property&apos;s amenities and live weather. Guests opt in to receive their door
+              code by text — the moment they submit their number, your opt-in rate is nearly
+              complete. Local business sponsors pay $15/month for featured placement. At 5
+              active sponsors, you earn a $10/month plan credit. At 6, it&apos;s $25/month.
+            </p>
+            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
+              *Plan credits applied monthly based on active sponsor count. Subject to plan tier.
+            </p>
           </div>
         </div>
       </section>

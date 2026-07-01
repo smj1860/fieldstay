@@ -20,6 +20,7 @@ export const guidebookDailyMonitor = inngest.createFunction(
         .select(`
           org_id,
           grace_period_ends_at,
+          trial_ends_at,
           organizations (
             stripe_customer_id,
             stripe_subscription_id
@@ -96,6 +97,37 @@ export const guidebookDailyMonitor = inngest.createFunction(
     }
 
     logger.info(`Dispatched ${events.length} guidebook event(s)`)
+
+    // Trial expiry check — lock any guidebook whose trial ended overnight
+    // and still has fewer than 3 active sponsors.
+    let trialLockedCount = 0
+    for (const row of activeOrgs) {
+      if (!row.trial_ends_at) continue
+      if (new Date(row.trial_ends_at) > new Date()) continue // still in trial
+
+      await step.run(`check-trial-expired-${row.org_id}`, async () => {
+        const supabase = createServiceClient()
+        const activeSponsorCount = await getActiveSponsorCount(row.org_id)
+        if (activeSponsorCount >= 3) return { skipped: true }
+
+        await supabase
+          .from('guidebook_configurations')
+          .update({
+            is_active:  false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('org_id', row.org_id)
+
+        return { locked: true, activeSponsorCount }
+      })
+
+      trialLockedCount++
+    }
+
+    if (trialLockedCount > 0) {
+      logger.info(`Checked ${trialLockedCount} trial-expired guidebook org(s)`)
+    }
+
     return { evaluated: activeOrgs.length, dispatched: events.length }
   }
 )
