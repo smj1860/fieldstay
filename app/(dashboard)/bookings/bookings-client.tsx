@@ -565,8 +565,8 @@ export function BookingsClient({
   return (
     <div>
       {/* Header */}
-      <div className="page-header flex items-start justify-between gap-4">
-        <div>
+      <div className="page-header flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             <h1 className="page-title">Bookings</h1>
             {connections.length > 0 && (
@@ -601,7 +601,7 @@ export function BookingsClient({
             every 30 minutes.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -613,7 +613,7 @@ export function BookingsClient({
           </button>
           <button onClick={() => setShowAdd(true)} className="btn-primary">
             <Plus className="w-4 h-4" />
-            Log Booking
+            Add Booking
           </button>
         </div>
       </div>

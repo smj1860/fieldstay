@@ -95,8 +95,8 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
                 <input id="vendor-name" name="name" type="text" required className="input" placeholder="ABC Plumbing" /></div>
               <div><label htmlFor="vendor-contact-name" className="label">Contact Name</label>
                 <input id="vendor-contact-name" name="contact_name" type="text" className="input" placeholder="John Smith" /></div>
-              <div><label htmlFor="vendor-email" className="label">Email</label>
-                <input id="vendor-email" name="email" type="email" className="input" placeholder="info@abcplumbing.com" /></div>
+              <div><label htmlFor="vendor-email" className="label">Email <span className="text-red-400 ml-0.5">*</span></label>
+                <input id="vendor-email" name="email" type="email" required className="input" placeholder="info@abcplumbing.com" /></div>
               <div><label htmlFor="vendor-phone" className="label">Phone</label>
                 <input id="vendor-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" /></div>
               <div><label htmlFor="vendor-specialty" className="label">Specialty</label>

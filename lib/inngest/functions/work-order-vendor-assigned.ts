@@ -1,6 +1,11 @@
 import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { NonRetriableError }    from 'inngest'
+import { render }               from '@react-email/render'
+import WorkOrderDispatchEmail   from '@/emails/WorkOrderDispatch'
+import { resend, FROM }         from '@/lib/resend/client'
+import { getPmEmail }           from '@/lib/inngest/helpers'
+import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
 import { randomBytes }          from 'crypto'
 
 export const handleWorkOrderVendorAssigned = inngest.createFunction(
@@ -33,9 +38,6 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
 
       if (!woRes.data)     throw new NonRetriableError('Work order not found')
       if (!vendorRes.data) throw new NonRetriableError('Vendor not found')
-      if (!vendorRes.data.email) {
-        throw new NonRetriableError('Vendor has no email address — cannot dispatch')
-      }
 
       const [propRes, orgRes] = await Promise.all([
         supabase
@@ -58,20 +60,52 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
       }
     })
 
-    if (!vendor.portal_enabled) {
-      logger.warn(`Vendor ${vendorId} has portal disabled — skipping dispatch`)
-      return { skipped: true, reason: 'vendor_portal_disabled' }
+    // Gate on WO's portal_enabled — this is the PM's explicit intent for this
+    // work order. vendor.portal_enabled is a profile preference but the PM's
+    // per-WO decision is authoritative.
+    if (!wo.portal_enabled) {
+      logger.warn(`WO ${workOrderId}: portal_enabled=false — skipping vendor dispatch`)
+      return { skipped: true, reason: 'wo_portal_disabled' }
     }
 
-    // ── Step 2: Ensure completion_token exists ────────────────────────────
-    // On first assignment the WO has no token. On reassignment it may already
-    // have one — reuse it so the existing vendor link keeps working if shared.
+    if (!vendor.email) {
+      // Can't dispatch without an email. Notify PM instead of silently failing.
+      logger.warn(`WO ${workOrderId}: vendor ${vendorId} has no email — cannot dispatch`)
+
+      await step.run('notify-pm-no-vendor-email', async () => {
+        const supabase = createServiceClient()
+        const pmEmail  = await getPmEmail(supabase, orgId)
+        if (!pmEmail) return { skipped: true }
+
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
+        await resend.emails.send({
+          from:    FROM,
+          to:      pmEmail,
+          subject: 'Action required — vendor has no email address',
+          html: await renderPmAlert({
+            heading:  'Vendor assigned but not notified',
+            body:     `${vendor.name ?? 'The assigned vendor'} was added to work order ${wo.wo_number ?? workOrderId} but has no email address on file. They were not notified.`,
+            details:  [
+              { label: 'Property', value: property?.name ?? null },
+              { label: 'Action',   value: 'Add an email address to the vendor record.' },
+            ],
+            ctaLabel: 'Go to Vendors →',
+            ctaUrl:   `${appUrl}/vendors`,
+          }),
+        })
+        return { notified: true }
+      })
+
+      return { skipped: true, reason: 'no_vendor_email' }
+    }
+
+    // ── Step 2: Ensure completion_token exists ─────────────────────────────
     const token = await step.run('ensure-completion-token', async () => {
       if (wo.completion_token) return wo.completion_token
 
-      const supabase   = createServiceClient()
-      const newToken   = randomBytes(32).toString('hex')
-      const expiresAt  = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
+      const supabase  = createServiceClient()
+      const newToken  = randomBytes(32).toString('hex')
+      const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
 
       const { error } = await supabase
         .from('work_orders')
@@ -81,16 +115,15 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           portal_enabled:              true,
           status:                      'assigned',
           vendor_id:                   vendorId,
-          updated_at:                  new Date().toISOString(),
         })
         .eq('id', workOrderId)
         .eq('org_id', orgId)
 
-      if (error) throw new Error(`Failed to set completion token: ${error.message}`)
+      if (error) throw new Error(`Failed to set completion_token: ${error.message}`)
       return newToken
     })
 
-    // ── Step 3: Fetch dispatcher name ────────────────────────────────────
+    // ── Step 3: Fetch dispatcher ───────────────────────────────────────────
     const dispatcher = await step.run('fetch-dispatcher', async () => {
       const supabase = createServiceClient()
       const { data: members } = await supabase
@@ -117,28 +150,65 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
       }
     })
 
-    // ── Step 4: Fire dispatch event → sends the vendor email ─────────────
-    const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
-    const publicUrl = `${appUrl}/work-orders/${token}`
+    // ── Step 4: Send vendor email directly (no secondary event hop) ────────
+    const appUrl      = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
+    const publicUrl   = `${appUrl}/work-orders/${token}`
+    const propertyName    = property?.name    ?? 'Property'
+    const propertyAddress = property?.address ?? ''
 
-    await step.sendEvent('send-dispatch', {
-      name: 'work-order/dispatched',
-      data: {
-        workOrderId,
+    await step.run('send-vendor-email', async () => {
+      const html = await render(WorkOrderDispatchEmail({
         woNumber:        wo.wo_number ?? '',
-        token,
         publicUrl,
-        vendorEmail:     vendor.email,
-        vendorName:      vendor.name ?? '',
-        propertyName:    property?.name    ?? 'Property',
-        propertyAddress: property?.address ?? '',
+        vendorName:      vendor.name   ?? '',
+        propertyName,
+        propertyAddress,
         title:           wo.title,
         description:     wo.description ?? '',
         nteAmount:       (wo.nte_amount as number | null) ?? 0,
         dispatcherName:  dispatcher.name,
         dispatcherOrg:   org?.name ?? 'FieldStay Property Management',
         dispatcherPhone: dispatcher.phone,
-      },
+      }))
+
+      const { error } = await resend.emails.send(
+        {
+          from:    FROM,
+          to:      [vendor.email!],
+          subject: `Work Order ${wo.wo_number ?? ''} — ${propertyName}`,
+          html,
+        },
+        { idempotencyKey: `wo-dispatch-vendor-assigned-${workOrderId}-${vendorId}` }
+      )
+
+      if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
+    })
+
+    // ── Step 5: Notify PM that vendor was dispatched ───────────────────────
+    await step.run('notify-pm-dispatched', async () => {
+      const supabase = createServiceClient()
+      const pmEmail  = await getPmEmail(supabase, orgId)
+      if (!pmEmail) return { skipped: true }
+
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      pmEmail,
+          subject: `Work order dispatched — ${wo.wo_number ?? ''} · ${propertyName}`,
+          html: await renderPmAlert({
+            heading:  'Work order sent to vendor',
+            body:     `${vendor.name ?? 'The assigned vendor'} has been notified of work order ${wo.wo_number ?? workOrderId} and can access the job details via their portal link.`,
+            details:  [
+              { label: 'Property', value: propertyName ?? null },
+              { label: 'Vendor',   value: vendor.name ?? null },
+            ],
+            ctaLabel: 'View work order →',
+            ctaUrl:   `${appUrl}/maintenance/${workOrderId}`,
+          }),
+        },
+        { idempotencyKey: `wo-pm-notified-vendor-assigned-${workOrderId}-${vendorId}` }
+      )
+      return { notified: true }
     })
 
     logger.info(`Dispatched WO ${wo.wo_number} to ${vendor.email} via vendor-assigned handler`)
