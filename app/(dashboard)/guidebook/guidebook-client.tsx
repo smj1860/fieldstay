@@ -80,67 +80,43 @@ export function GuidebookClient({
     []
   )
 
-  // Extracted from useEffect → .on() → setState(prev) → .map/.filter chain (S2004).
-  // Pure reducer — no side effects, no closures over component state.
-  const applySponsorsPayload = useCallback(
-    (
-      prev:    GuidebookSponsor[],
-      payload: RealtimePostgresChangesPayload<GuidebookSponsor>,
-    ): GuidebookSponsor[] => {
-      if (payload.eventType === 'INSERT') {
-        return [...prev, payload.new as GuidebookSponsor]
-      }
-      if (payload.eventType === 'UPDATE') {
-        const updated = payload.new as GuidebookSponsor
-        return prev.map((s) => (s.id === updated.id ? updated : s))
-      }
-      if (payload.eventType === 'DELETE') {
-        const removed = payload.old as GuidebookSponsor
-        return prev.filter((s) => s.id !== removed.id)
-      }
-      return prev
-    },
-    []
-  )
-
-  const handleSponsorChange = useCallback(
-    (payload: RealtimePostgresChangesPayload<GuidebookSponsor>) => {
-      setSponsors((prev) => {
-        const next       = applySponsorsPayload(prev, payload)
-        const newActive  = next.filter((s) => s.status === 'active').length
-        const prevActive = prevCountRef.current
-        prevCountRef.current = newActive
-        checkCelebration(newActive, prevActive)
-        return next
-      })
-    },
-    [applySponsorsPayload, checkCelebration]
-  )
-
-  const handleConfigChange = useCallback(
-    (payload: RealtimePostgresChangesPayload<GuidebookConfiguration>) => {
-      setConfig(payload.new as GuidebookConfiguration)
-    },
-    []
-  )
-
   useEffect(() => {
     const channel = supabase
       .channel(`guidebook-sponsors-${orgId}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'guidebook_sponsors', filter: `org_id=eq.${orgId}` },
-        handleSponsorChange
+        (payload: RealtimePostgresChangesPayload<GuidebookSponsor>) => {
+          setSponsors((prev) => {
+            let next: GuidebookSponsor[]
+            if (payload.eventType === 'INSERT') {
+              next = [...prev, payload.new as GuidebookSponsor]
+            } else if (payload.eventType === 'UPDATE') {
+              next = prev.map((s) =>
+                s.id === (payload.new as GuidebookSponsor).id ? (payload.new as GuidebookSponsor) : s
+              )
+            } else if (payload.eventType === 'DELETE') {
+              next = prev.filter((s) => s.id !== (payload.old as GuidebookSponsor).id)
+            } else {
+              next = prev
+            }
+            const newActive  = next.filter((s) => s.status === 'active').length
+            const prevActive = prevCountRef.current
+            prevCountRef.current = newActive
+            checkCelebration(newActive, prevActive)
+            return next
+          })
+        }
       )
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'guidebook_configurations', filter: `org_id=eq.${orgId}` },
-        handleConfigChange
+        (payload: RealtimePostgresChangesPayload<GuidebookConfiguration>) => { setConfig(payload.new as GuidebookConfiguration) }
       )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
-  }, [orgId, supabase, handleSponsorChange, handleConfigChange])
+  }, [orgId, supabase, checkCelebration])
 
   const sponsorsBySlot = sponsors.reduce<Record<number, GuidebookSponsor>>((acc, s) => {
     acc[s.slot_number] = s
@@ -148,16 +124,6 @@ export function GuidebookClient({
   }, {})
 
   const editingSponsor = editingSlot !== null ? (sponsorsBySlot[editingSlot] ?? null) : null
-
-  const statusSubtitle = isGuidebookActive
-    ? activeSponsorCount >= 6
-      ? '$25/month credit applied to your plan'
-      : activeSponsorCount >= 5
-      ? '$10/month credit applied to your plan'
-      : 'Add sponsors to earn a plan credit (5 = $10/mo, 6 = $25/mo)'
-    : config?.grace_period_ends_at
-    ? `Grace period — fill the slot before ${new Date(config.grace_period_ends_at).toLocaleDateString()} to avoid losing your guidebook`
-    : `Add ${sponsorsNeeded} more sponsor${sponsorsNeeded !== 1 ? 's' : ''} to unlock`
 
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '32px 24px' }}>
@@ -284,7 +250,15 @@ export function GuidebookClient({
                 : `${activeSponsorCount} of 3 sponsors · Guidebook locked`}
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '2px' }}>
-              {statusSubtitle}
+              {isGuidebookActive
+                ? activeSponsorCount >= 6
+                  ? '$25/month credit applied to your plan'
+                  : activeSponsorCount >= 5
+                  ? '$10/month credit applied to your plan'
+                  : 'Add sponsors to earn a plan credit (5 = $10/mo, 6 = $25/mo)'
+                : config?.grace_period_ends_at
+                ? `Grace period — fill the slot before ${new Date(config.grace_period_ends_at).toLocaleDateString()} to avoid losing your guidebook`
+                : `Add ${sponsorsNeeded} more sponsor${sponsorsNeeded !== 1 ? 's' : ''} to unlock`}
             </div>
           </div>
         </div>
@@ -453,11 +427,11 @@ function PropertyGuidebookRow({
   property,
   appUrl,
   isGuidebookActive,
-}: Readonly<{
+}: {
   property: Property
   appUrl: string
   isGuidebookActive: boolean
-}>) {
+}) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -492,11 +466,11 @@ function PropertyGuidebookForm({
   property,
   appUrl,
   isGuidebookActive,
-}: Readonly<{
+}: {
   property: Property
   appUrl:   string
   isGuidebookActive: boolean
-}>) {
+}) {
   const supabase = createClient()
   const [config, setConfig] = useState<{
     slug: string
@@ -594,12 +568,13 @@ function PropertyGuidebookForm({
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
 
         <div style={{ gridColumn: '1 / -1' }}>
-          <label style={labelStyle}>Guest URL Slug</label>
+          <label htmlFor={`guest-url-slug-${property.id}`} style={labelStyle}>Guest URL Slug</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '13px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
               {appUrl}/g/
             </span>
             <input
+              id={`guest-url-slug-${property.id}`}
               style={{ ...inputStyle, flex: 1 }}
               value={config.slug}
               onChange={(e) => setConfig((c) => c && ({ ...c, slug: e.target.value }))}
@@ -617,17 +592,18 @@ function PropertyGuidebookForm({
         </div>
 
         <div>
-          <label style={labelStyle}>WiFi Network</label>
-          <input style={inputStyle} value={config.wifiNetwork} onChange={(e) => setConfig((c) => c && ({ ...c, wifiNetwork: e.target.value }))} placeholder="CabinWifi_5G" />
+          <label htmlFor={`wifi-network-${property.id}`} style={labelStyle}>WiFi Network</label>
+          <input id={`wifi-network-${property.id}`} style={inputStyle} value={config.wifiNetwork} onChange={(e) => setConfig((c) => c && ({ ...c, wifiNetwork: e.target.value }))} placeholder="CabinWifi_5G" />
         </div>
         <div>
-          <label style={labelStyle}>WiFi Password</label>
-          <input style={inputStyle} value={config.wifiPassword} onChange={(e) => setConfig((c) => c && ({ ...c, wifiPassword: e.target.value }))} placeholder="bearhollowguest2024" />
+          <label htmlFor={`wifi-password-${property.id}`} style={labelStyle}>WiFi Password</label>
+          <input id={`wifi-password-${property.id}`} style={inputStyle} value={config.wifiPassword} onChange={(e) => setConfig((c) => c && ({ ...c, wifiPassword: e.target.value }))} placeholder="bearhollowguest2024" />
         </div>
 
         <div>
-          <label style={labelStyle}>Check-In Instructions</label>
+          <label htmlFor={`check-in-instructions-${property.id}`} style={labelStyle}>Check-In Instructions</label>
           <textarea
+            id={`check-in-instructions-${property.id}`}
             style={{ ...inputStyle, minHeight: '80px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.checkInInstructions}
             onChange={(e) => setConfig((c) => c && ({ ...c, checkInInstructions: e.target.value }))}
@@ -635,8 +611,9 @@ function PropertyGuidebookForm({
           />
         </div>
         <div>
-          <label style={labelStyle}>Check-Out Instructions</label>
+          <label htmlFor={`check-out-instructions-${property.id}`} style={labelStyle}>Check-Out Instructions</label>
           <textarea
+            id={`check-out-instructions-${property.id}`}
             style={{ ...inputStyle, minHeight: '80px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.checkOutInstructions}
             onChange={(e) => setConfig((c) => c && ({ ...c, checkOutInstructions: e.target.value }))}
@@ -645,8 +622,9 @@ function PropertyGuidebookForm({
         </div>
 
         <div style={{ gridColumn: '1 / -1' }}>
-          <label style={labelStyle}>House Rules (optional)</label>
+          <label htmlFor={`house-rules-${property.id}`} style={labelStyle}>House Rules (optional)</label>
           <textarea
+            id={`house-rules-${property.id}`}
             style={{ ...inputStyle, minHeight: '60px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.houseRules}
             onChange={(e) => setConfig((c) => c && ({ ...c, houseRules: e.target.value }))}
@@ -687,7 +665,7 @@ function PropertyGuidebookForm({
   )
 }
 
-function GapNightMessagingSection({ config }: Readonly<{ config: GuidebookConfiguration | null }>) {
+function GapNightMessagingSection({ config }: { config: GuidebookConfiguration | null }) {
   const [enabled, setEnabled]           = useState(config?.extension_messaging_enabled ?? false)
   const [gapThreshold, setGapThreshold] = useState(String(config?.extension_gap_threshold_days ?? 7))
   const [discount, setDiscount]         = useState(
@@ -764,9 +742,10 @@ function GapNightMessagingSection({ config }: Readonly<{ config: GuidebookConfig
 
         {/* Gap threshold */}
         <div>
-          <label style={labelStyle}>Only offer when the gap is at least</label>
+          <label htmlFor="gap-threshold-days" style={labelStyle}>Only offer when the gap is at least</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
+              id="gap-threshold-days"
               type="number" min={1} value={gapThreshold}
               onChange={(e) => setGapThreshold(e.target.value)}
               style={inputStyle}
@@ -777,9 +756,10 @@ function GapNightMessagingSection({ config }: Readonly<{ config: GuidebookConfig
 
         {/* Discount offer */}
         <div>
-          <label style={labelStyle}>Include a discount offer (optional)</label>
+          <label htmlFor="extension-discount-pct" style={labelStyle}>Include a discount offer (optional)</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
+              id="extension-discount-pct"
               type="number" min={0} max={100} value={discount}
               onChange={(e) => setDiscount(e.target.value)}
               placeholder="—"
@@ -791,7 +771,7 @@ function GapNightMessagingSection({ config }: Readonly<{ config: GuidebookConfig
 
         {/* Contact method */}
         <div>
-          <label style={labelStyle}>When a guest is interested</label>
+          <span style={labelStyle}>When a guest is interested</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {([
               { value: 'ownerrez_url', label: 'Link guests to your OwnerRez booking page' },
@@ -823,9 +803,10 @@ function GapNightMessagingSection({ config }: Readonly<{ config: GuidebookConfig
 
         {/* Message timing */}
         <div>
-          <label style={labelStyle}>Send the offer</label>
+          <label htmlFor="extension-days-before" style={labelStyle}>Send the offer</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
+              id="extension-days-before"
               type="number" min={1} value={daysBefore}
               onChange={(e) => setDaysBefore(e.target.value)}
               style={inputStyle}
@@ -860,7 +841,7 @@ function GapNightMessagingSection({ config }: Readonly<{ config: GuidebookConfig
   )
 }
 
-function GuidebookQrCode({ url, propertyName }: Readonly<{ url: string; propertyName: string }>) {
+function GuidebookQrCode({ url, propertyName }: { url: string; propertyName: string }) {
   const qrId = `guidebook-qr-${propertyName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
   function handleDownload() {

@@ -126,7 +126,7 @@ function getStockStatus(item: InventoryItem): StockStatus {
   return 'healthy'
 }
 
-function StockBadge({ item }: Readonly<{ item: InventoryItem }>) {
+function StockBadge({ item }: { item: InventoryItem }) {
   const status = getStockStatus(item)
   if (status === 'uncounted') return <span className="badge badge-slate">Needs Count</span>
   if (status === 'critical')  return <span className="badge badge-red">At/Below Par</span>
@@ -154,7 +154,7 @@ const CATEGORY_ORDER: InventoryCategory[] = [
 
 // ── Inline par-level editor ───────────────────────────────────────────────────
 
-function ParLevelEditor({ item }: Readonly<{ item: InventoryItem }>) {
+function ParLevelEditor({ item }: { item: InventoryItem }) {
   const [editing, setEditing] = useState(false)
   const [value, setValue]     = useState(String(item.par_level))
   const [saving, setSaving]   = useState(false)
@@ -234,13 +234,13 @@ function AddItemsModal({
   catalogItems,
   onClose,
   onSuccess,
-}: Readonly<{
+}: {
   propertyId: string
   propertyItems: InventoryItem[]
   catalogItems: CatalogItem[]
   onClose: () => void
   onSuccess: () => void
-}>) {
+}) {
   const [state, action, pending] = useActionState(addInventoryItems, null)
   const [tab, setTab]             = useState<'catalog' | 'custom'>('catalog')
   const [categoryFilter, setCategoryFilter] = useState<InventoryCategory | 'all'>('all')
@@ -402,8 +402,9 @@ function AddItemsModal({
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs text-muted-themed block mb-1">Unit</label>
+                          <label htmlFor={`unit-${catalogItem.id}`} className="text-xs text-muted-themed block mb-1">Unit</label>
                           <input
+                            id={`unit-${catalogItem.id}`}
                             type="text"
                             value={unit}
                             onChange={(e) => updateSelected(catalogItem.id, 'unit', e.target.value)}
@@ -412,8 +413,9 @@ function AddItemsModal({
                           />
                         </div>
                         <div>
-                          <label className="text-xs text-muted-themed block mb-1">Par Level</label>
+                          <label htmlFor={`par-level-${catalogItem.id}`} className="text-xs text-muted-themed block mb-1">Par Level</label>
                           <input
+                            id={`par-level-${catalogItem.id}`}
                             type="number"
                             min={0}
                             step={0.5}
@@ -431,8 +433,9 @@ function AddItemsModal({
           ) : (
             <>
               <div>
-                <label className="label">Item Name <span className="text-red-500">*</span></label>
+                <label htmlFor="custom-item-name" className="label">Item Name <span className="text-red-500">*</span></label>
                 <input
+                  id="custom-item-name"
                   type="text"
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
@@ -442,8 +445,9 @@ function AddItemsModal({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Category</label>
+                  <label htmlFor="custom-category" className="label">Category</label>
                   <select
+                    id="custom-category"
                     value={customCategory}
                     onChange={(e) => setCustomCategory(e.target.value as InventoryCategory)}
                     className="input"
@@ -454,8 +458,9 @@ function AddItemsModal({
                   </select>
                 </div>
                 <div>
-                  <label className="label">Unit <span className="text-red-500">*</span></label>
+                  <label htmlFor="custom-unit" className="label">Unit <span className="text-red-500">*</span></label>
                   <input
+                    id="custom-unit"
                     type="text"
                     value={customUnit}
                     onChange={(e) => setCustomUnit(e.target.value)}
@@ -465,8 +470,9 @@ function AddItemsModal({
                 </div>
               </div>
               <div>
-                <label className="label">Par Level</label>
+                <label htmlFor="custom-par-level" className="label">Par Level</label>
                 <input
+                  id="custom-par-level"
                   type="number"
                   min={0}
                   step={0.5}
@@ -476,8 +482,9 @@ function AddItemsModal({
                 />
               </div>
               <div>
-                <label className="label">Notes</label>
+                <label htmlFor="custom-notes" className="label">Notes</label>
                 <textarea
+                  id="custom-notes"
                   value={customNotes}
                   onChange={(e) => setCustomNotes(e.target.value)}
                   rows={2}
@@ -549,12 +556,12 @@ function RunCountModal({
   items,
   onClose,
   onSuccess,
-}: Readonly<{
+}: {
   propertyId: string
   items: InventoryItem[]
   onClose: () => void
   onSuccess: () => void
-}>) {
+}) {
   const [state, action, pending] = useActionState(submitInventoryCount, null)
 
   if (state?.success) { onSuccess(); onClose(); return null }
@@ -621,8 +628,9 @@ function RunCountModal({
                         </span>
                       </div>
                       <div className="flex flex-col items-end gap-0.5">
-                        <label className="text-xs text-muted-themed">New Count</label>
+                        <label htmlFor={`count-${item.id}`} className="text-xs text-muted-themed">New Count</label>
                         <input
+                          id={`count-${item.id}`}
                           name={`item_${item.id}`}
                           type="number"
                           min={0}
@@ -638,8 +646,9 @@ function RunCountModal({
             ))}
 
             <div>
-              <label className="label">Notes (optional)</label>
+              <label htmlFor="count-notes" className="label">Notes (optional)</label>
               <textarea
+                id="count-notes"
                 name="notes"
                 rows={2}
                 className="input resize-none"
@@ -662,7 +671,7 @@ function RunCountModal({
 
 // ── Category rows (used in the detail modal) ──────────────────────────────────
 
-function CategoryRows({ category, items }: Readonly<{ category: InventoryCategory; items: InventoryItem[] }>) {
+function CategoryRows({ category, items }: { category: InventoryCategory; items: InventoryItem[] }) {
   return (
     <>
       <div className="px-5 py-1.5 bg-canvas-themed">
@@ -734,7 +743,7 @@ function PropertyInventoryDetail({
   purchaseOrders,
   onClose,
   onRefresh,
-}: Readonly<{
+}: {
   property: Property
   items: InventoryItem[]
   catalogItems: CatalogItem[]
@@ -742,7 +751,7 @@ function PropertyInventoryDetail({
   purchaseOrders: PurchaseOrder[]
   onClose: () => void
   onRefresh: () => void
-}>) {
+}) {
   const [showAddItems, setShowAddItems] = useState(false)
   const [showRunCount, setShowRunCount] = useState(false)
   const [showCounts,   setShowCounts]   = useState(true)
@@ -893,7 +902,7 @@ function PropertyInventoryDetail({
                             {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
                           </span>
                           <span className="text-sm text-secondary-themed">{formatDate(po.generated_at)}</span>
-                          {po.total_estimated_cost !== null && (
+                          {po.total_estimated_cost != null && (
                             <span className="text-sm font-medium text-primary-themed ml-auto mr-2">
                               ${po.total_estimated_cost.toFixed(2)}
                             </span>
@@ -919,7 +928,7 @@ function PropertyInventoryDetail({
                                   <span className="text-right tabular-nums">{pi.current_quantity}</span>
                                   <span className="text-right tabular-nums font-medium">{pi.quantity_to_buy}</span>
                                   <span className="text-right tabular-nums">
-                                    {pi.estimated_unit_cost !== null
+                                    {pi.estimated_unit_cost != null
                                       ? `$${(pi.estimated_unit_cost * pi.quantity_to_buy).toFixed(2)}`
                                       : '—'}
                                   </span>
@@ -969,11 +978,11 @@ function PropertyInventoryCard({
   property,
   items,
   onSelect,
-}: Readonly<{
+}: {
   property: Property
   items: InventoryItem[]
   onSelect: () => void
-}>) {
+}) {
   const criticalCount  = items.filter((i) => getStockStatus(i) === 'critical').length
   const lowCount       = items.filter((i) => getStockStatus(i) === 'low').length
   const uncountedCount = items.filter((i) => getStockStatus(i) === 'uncounted').length
@@ -1034,11 +1043,11 @@ function PendingCountReview({
   drafts,
   properties,
   onRefresh,
-}: Readonly<{
+}: {
   drafts: PendingDraft[]
   properties: Property[]
   onRefresh: () => void
-}>) {
+}) {
   const [isPending, startTransition] = useTransition()
   const [expanded, setExpanded]      = useState<string | null>(drafts[0]?.id ?? null)
 

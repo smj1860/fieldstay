@@ -92,8 +92,9 @@ export default function CrewInventoryPage() {
       {items && items.length > 0 && (
         <div className="space-y-3 pb-8">
           <div>
-            <label className="label">Notes (optional)</label>
+            <label htmlFor="inventory-count-notes" className="label">Notes (optional)</label>
             <textarea
+              id="inventory-count-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}

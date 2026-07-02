@@ -50,7 +50,7 @@ const PRIORITY_STYLES: Record<string, { bg: string; text: string }> = {
 
 // ── Shared layout wrapper ─────────────────────────────────────────────────────
 
-function PortalShell({ children }: Readonly<{ children: React.ReactNode }>) {
+function PortalShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-accent-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-[0_4px_24px_0_rgba(0,0,0,.10)] w-full max-w-md p-8">
@@ -64,7 +64,7 @@ function PortalShell({ children }: Readonly<{ children: React.ReactNode }>) {
   )
 }
 
-function WOInfo({ workOrder, property }: Readonly<{ workOrder: WorkOrderInfo; property: PropertyInfo | null }>) {
+function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: PropertyInfo | null }) {
   const categoryLabel  = workOrder.category ? (CATEGORY_LABELS[workOrder.category] ?? workOrder.category) : null
   const priorityStyle  = workOrder.priority ? (PRIORITY_STYLES[workOrder.priority] ?? PRIORITY_STYLES.low) : null
   const priorityLabel  = workOrder.priority
@@ -137,7 +137,7 @@ function WOInfo({ workOrder, property }: Readonly<{ workOrder: WorkOrderInfo; pr
         )}
 
         {/* NTE amount */}
-        {workOrder.nte_amount !== null && (
+        {workOrder.nte_amount != null && (
           <div className="flex items-center gap-2">
             <DollarSign className="w-3.5 h-3.5 text-accent-400 flex-shrink-0" />
             <span className="text-xs text-accent-500">Not to Exceed: </span>
@@ -168,14 +168,14 @@ export function VendorPortal({
   expired,
   vendorConnectToken,
   vendorChargesEnabled,
-}: Readonly<{
+}: {
   token:                string
   workOrder:            WorkOrderInfo
   property:             PropertyInfo | null
   expired:              boolean
   vendorConnectToken:   string
   vendorChargesEnabled: boolean
-}>) {
+}) {
   const [notes,       setNotes]       = useState('')
   const [submitting,  setSubmitting]  = useState(false)
   const [success,     setSuccess]     = useState(false)
@@ -529,17 +529,18 @@ export function VendorPortal({
           </span>
         </div>
 
-        {workOrder.nte_amount !== null && subtotal > workOrder.nte_amount && (
+        {workOrder.nte_amount != null && subtotal > workOrder.nte_amount && (
           <p style={{ fontSize: 12, color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '8px 10px', marginBottom: 12 }}>
             ⚠️ Total exceeds the Not-to-Exceed amount of ${workOrder.nte_amount.toFixed(2)}. Contact the PM before submitting.
           </p>
         )}
 
         {/* Completion notes */}
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+        <label htmlFor="completion-notes" style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
           Completion Notes <span style={{ fontWeight: 400, color: '#9ca3af' }}>(optional)</span>
         </label>
         <textarea
+          id="completion-notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
@@ -607,13 +608,13 @@ export function VendorQuotePortal({
   workOrder,
   property,
   expired,
-}: Readonly<{
+}: {
   token:              string
   quoteRequestStatus: string
   workOrder:          WorkOrderInfo
   property:           PropertyInfo | null
   expired:            boolean
-}>) {
+}) {
   const [amount, setAmount]     = useState('')
   const [notes, setNotes]       = useState('')
   const [submitting, setSubmitting] = useState(false)

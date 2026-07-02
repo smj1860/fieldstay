@@ -199,7 +199,7 @@ export function VendorsClient({ vendors, showComplianceNudge }: Props) {
 
 // ── Vendor card modal ─────────────────────────────────────────────────────────
 
-function VendorCardModal({ vendor, onClose }: Readonly<{ vendor: Vendor; onClose: () => void }>) {
+function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => void }) {
   const [editing, setEditing] = useState(false)
   const boundUpdate = updateVendor.bind(null, vendor.id)
   const [state, formAction, pending] = useActionState(boundUpdate, null)
@@ -237,17 +237,17 @@ function VendorCardModal({ vendor, onClose }: Readonly<{ vendor: Vendor; onClose
         {editing ? (
           <form action={formAction} className="space-y-3">
             <div>
-              <label className="label">Vendor Name</label>
-              <input name="name" type="text" required defaultValue={vendor.name} className="input" />
+              <label htmlFor="edit-vendor-name" className="label">Vendor Name</label>
+              <input id="edit-vendor-name" name="name" type="text" required defaultValue={vendor.name} className="input" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Contact Name</label>
-                <input name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} className="input" />
+                <label htmlFor="edit-contact-name" className="label">Contact Name</label>
+                <input id="edit-contact-name" name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} className="input" />
               </div>
               <div>
-                <label className="label">Specialty</label>
-                <select name="specialty" defaultValue={vendor.specialty} className="input">
+                <label htmlFor="edit-specialty" className="label">Specialty</label>
+                <select id="edit-specialty" name="specialty" defaultValue={vendor.specialty} className="input">
                   {VENDOR_SPECIALTIES.map((s) => (
                     <option key={s} value={s}>{VENDOR_SPECIALTY_LABELS[s]}</option>
                   ))}
@@ -256,35 +256,35 @@ function VendorCardModal({ vendor, onClose }: Readonly<{ vendor: Vendor; onClose
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Email</label>
-                <input name="email" type="email" defaultValue={vendor.email ?? ''} className="input" />
+                <label htmlFor="edit-email" className="label">Email</label>
+                <input id="edit-email" name="email" type="email" defaultValue={vendor.email ?? ''} className="input" />
               </div>
               <div>
-                <label className="label">Phone</label>
-                <input name="phone" type="tel" defaultValue={vendor.phone ?? ''} className="input" />
+                <label htmlFor="edit-phone" className="label">Phone</label>
+                <input id="edit-phone" name="phone" type="tel" defaultValue={vendor.phone ?? ''} className="input" />
               </div>
             </div>
             <div>
-              <label className="label">Street Address</label>
-              <input name="address" type="text" defaultValue={vendor.address ?? ''} className="input" placeholder="123 Main St" />
+              <label htmlFor="edit-address" className="label">Street Address</label>
+              <input id="edit-address" name="address" type="text" defaultValue={vendor.address ?? ''} className="input" placeholder="123 Main St" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">City</label>
-                <input name="city" type="text" defaultValue={vendor.city ?? ''} className="input" placeholder="Atlanta" />
+                <label htmlFor="edit-city" className="label">City</label>
+                <input id="edit-city" name="city" type="text" defaultValue={vendor.city ?? ''} className="input" placeholder="Atlanta" />
               </div>
               <div>
-                <label className="label">State</label>
-                <input name="state" type="text" defaultValue={vendor.state ?? ''} className="input" placeholder="GA" maxLength={2} />
+                <label htmlFor="edit-state" className="label">State</label>
+                <input id="edit-state" name="state" type="text" defaultValue={vendor.state ?? ''} className="input" placeholder="GA" maxLength={2} />
               </div>
             </div>
             <div>
-              <label className="label">Service ZIP</label>
-              <input name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} className="input" placeholder="e.g. 30301" maxLength={10} />
+              <label htmlFor="edit-service-zip" className="label">Service ZIP</label>
+              <input id="edit-service-zip" name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} className="input" placeholder="e.g. 30301" maxLength={10} />
             </div>
             <div>
-              <label className="label">Notes</label>
-              <textarea name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
+              <label htmlFor="edit-notes" className="label">Notes</label>
+              <textarea id="edit-notes" name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
             </div>
             <div className="flex gap-2 pt-1">
               <button type="submit" disabled={pending} className="btn-primary text-sm flex-1">
@@ -362,7 +362,7 @@ function VendorCardModal({ vendor, onClose }: Readonly<{ vendor: Vendor; onClose
 
 // ── Add single vendor ─────────────────────────────────────────────────────────
 
-function AddVendorForm({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
+function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
   const [state, formAction, pending] = useActionState(addVendor, null)
 
   if (state?.success) {
@@ -460,7 +460,7 @@ function AddVendorForm({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
 
 // ── Bulk upload ───────────────────────────────────────────────────────────────
 
-function BulkVendorUpload({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
+function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode]         = useState<'csv' | 'paste'>('csv')
   const [preview, setPreview]   = useState<ParsedVendor[] | null>(null)
   const [pasteText, setPaste]   = useState('')
@@ -610,7 +610,7 @@ function BulkVendorUpload({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
 
 const STAR_PATH = 'M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.563.563 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z'
 
-function StarRating({ rating, count }: Readonly<{ rating: number | null; count: number }>) {
+function StarRating({ rating, count }: { rating: number | null; count: number }) {
   if (!rating || count === 0) {
     return (
       <span className="text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>

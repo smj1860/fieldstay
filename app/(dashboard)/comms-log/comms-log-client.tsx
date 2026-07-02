@@ -69,10 +69,10 @@ const CHANNEL_ICON: Record<CommChannel, React.ReactNode> = {
 
 // ── Log entry row ─────────────────────────────────────────────────────────────
 
-function LogRow({ entry }: Readonly<{ entry: LogEntry }>) {
+function LogRow({ entry }: { entry: LogEntry }) {
   const [expanded, setExpanded]     = useState(false)
   const [deleting, startDelete]     = useTransition()
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmDelete, setConfirm] = useState(false)
 
   const recipient     = entry.recipient_type === 'vendor' ? entry.vendors : entry.crew_members
   const recipientName = recipient?.name ?? '—'
@@ -185,7 +185,7 @@ function LogRow({ entry }: Readonly<{ entry: LogEntry }>) {
               {entry.source === 'manual' && (
                 !confirmDelete ? (
                   <button
-                    onClick={() => setConfirmDelete(true)}
+                    onClick={() => setConfirm(true)}
                     className="flex items-center gap-1 hover:opacity-80 transition-opacity"
                     style={{ color: 'var(--accent-red)' }}
                   >
@@ -205,7 +205,7 @@ function LogRow({ entry }: Readonly<{ entry: LogEntry }>) {
                       {deleting ? 'Deleting…' : 'Yes'}
                     </button>
                     <button
-                      onClick={() => setConfirmDelete(false)}
+                      onClick={() => setConfirm(false)}
                       className="hover:opacity-80"
                       style={{ color: 'var(--text-muted)' }}
                     >
@@ -230,13 +230,13 @@ function AddEntryModal({
   properties,
   workOrders,
   onClose,
-}: Readonly<{
+}: {
   vendors:    PersonOption[]
   crew:       PersonOption[]
   properties: PropertyOption[]
   workOrders: WorkOrderOption[]
   onClose:    () => void
-}>) {
+}) {
   const [state, action, pending]         = useActionState(createCommunicationLog, null)
   const [recipientType, setRecipientType] = useState<CommRecipientType>('vendor')
 
@@ -279,7 +279,7 @@ function AddEntryModal({
 
           {/* Vendor / Crew toggle */}
           <div>
-            <label className="label">Recipient</label>
+            <p className="label">Recipient</p>
             <div className="flex gap-2 mb-2">
               {(['vendor', 'crew'] as const).map((t) => (
                 <button
@@ -302,14 +302,14 @@ function AddEntryModal({
             </div>
 
             {recipientType === 'vendor' ? (
-              <select name="vendor_id" required className="input">
+              <select name="vendor_id" required className="input" aria-label="Vendor">
                 <option value="">Select vendor…</option>
                 {vendors.map((v) => (
                   <option key={v.id} value={v.id}>{v.name}</option>
                 ))}
               </select>
             ) : (
-              <select name="crew_member_id" required className="input">
+              <select name="crew_member_id" required className="input" aria-label="Crew member">
                 <option value="">Select crew member…</option>
                 {crew.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -320,8 +320,8 @@ function AddEntryModal({
 
           {/* Channel */}
           <div>
-            <label className="label">Channel</label>
-            <select name="channel" className="input" defaultValue="email">
+            <label htmlFor="comms-channel" className="label">Channel</label>
+            <select id="comms-channel" name="channel" className="input" defaultValue="email">
               {(Object.keys(CHANNEL_LABELS) as CommChannel[]).map((ch) => (
                 <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
               ))}
@@ -330,8 +330,9 @@ function AddEntryModal({
 
           {/* Date */}
           <div>
-            <label className="label">Date &amp; Time</label>
+            <label htmlFor="comms-communicated-at" className="label">Date &amp; Time</label>
             <input
+              id="comms-communicated-at"
               name="communicated_at"
               type="datetime-local"
               className="input"
@@ -346,8 +347,9 @@ function AddEntryModal({
 
           {/* Subject */}
           <div>
-            <label className="label">Subject</label>
+            <label htmlFor="comms-subject" className="label">Subject</label>
             <input
+              id="comms-subject"
               name="subject"
               type="text"
               className="input"
@@ -357,8 +359,9 @@ function AddEntryModal({
 
           {/* Body */}
           <div>
-            <label className="label">Message / Notes</label>
+            <label htmlFor="comms-body" className="label">Message / Notes</label>
             <textarea
+              id="comms-body"
               name="body"
               rows={4}
               className="input resize-none"
@@ -369,8 +372,8 @@ function AddEntryModal({
           {/* Context links */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Property (optional)</label>
-              <select name="property_id" className="input">
+              <label htmlFor="comms-property-id" className="label">Property (optional)</label>
+              <select id="comms-property-id" name="property_id" className="input">
                 <option value="">—</option>
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -378,8 +381,8 @@ function AddEntryModal({
               </select>
             </div>
             <div>
-              <label className="label">Work Order (optional)</label>
-              <select name="work_order_id" className="input">
+              <label htmlFor="comms-work-order-id" className="label">Work Order (optional)</label>
+              <select id="comms-work-order-id" name="work_order_id" className="input">
                 <option value="">—</option>
                 {workOrders.map((w) => (
                   <option key={w.id} value={w.id}>{w.title}</option>
@@ -410,7 +413,7 @@ export function CommsLogClient({
   workOrders,
   page,
   hasMore,
-}: Readonly<{
+}: {
   logs:       LogEntry[]
   vendors:    PersonOption[]
   crew:       PersonOption[]
@@ -418,7 +421,7 @@ export function CommsLogClient({
   workOrders: WorkOrderOption[]
   page:       number
   hasMore:    boolean
-}>) {
+}) {
   const [showAdd, setShowAdd]               = useState(false)
   const [search, setSearch]                 = useState('')
   const [filterType, setFilterType]         = useState<'all' | CommRecipientType>('all')

@@ -48,7 +48,7 @@ const CATEGORY_ORDER: InventoryCategory[] = [
   'guest_experience', 'technology', 'other',
 ]
 
-function TemplateBrandInput({ itemId, defaultBrand }: Readonly<{ itemId: string; defaultBrand: string | null }>) {
+function TemplateBrandInput({ itemId, defaultBrand }: { itemId: string; defaultBrand: string | null }) {
   const [value, setValue]       = useState(defaultBrand ?? '')
   const [, startTransition]     = useTransition()
 
@@ -96,12 +96,12 @@ export function TemplateManager({
   properties,
   orgId,
   catalogItems = [],
-}: Readonly<{
+}: {
   template:     Template | null
   properties:   Property[]
   orgId:        string
   catalogItems: CatalogItem[]
-}>) {
+}) {
   const [currentTemplate, setCurrentTemplate] = useState<Template | null>(template)
   const [creating, setCreating]               = useState(false)
   const [applyModal, setApplyModal]           = useState(false)
@@ -557,8 +557,9 @@ export function TemplateManager({
                           {isSelected && !alreadyInTemplate && (
                             <div className="flex items-center gap-2 px-4 pb-2.5 flex-wrap" onClick={e => e.stopPropagation()}>
                               <div className="flex items-center gap-1.5">
-                                <label className="text-xs text-muted-themed whitespace-nowrap">Par:</label>
+                                <label htmlFor={`catalog-par-${c.id}`} className="text-xs text-muted-themed whitespace-nowrap">Par:</label>
                                 <input
+                                  id={`catalog-par-${c.id}`}
                                   type="number"
                                   min={1}
                                   value={catalogParLevels[c.id] ?? '1'}
@@ -572,8 +573,9 @@ export function TemplateManager({
                                 />
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <label className="text-xs text-muted-themed whitespace-nowrap">Unit:</label>
+                                <label htmlFor={`catalog-unit-${c.id}`} className="text-xs text-muted-themed whitespace-nowrap">Unit:</label>
                                 <input
+                                  id={`catalog-unit-${c.id}`}
                                   type="text"
                                   value={catalogUnits[c.id] ?? c.default_unit}
                                   onChange={e => setCatalogUnits(prev => ({ ...prev, [c.id]: e.target.value }))}
@@ -582,8 +584,9 @@ export function TemplateManager({
                                 />
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <label className="text-xs text-muted-themed whitespace-nowrap">Brand:</label>
+                                <label htmlFor={`catalog-brand-${c.id}`} className="text-xs text-muted-themed whitespace-nowrap">Brand:</label>
                                 <input
+                                  id={`catalog-brand-${c.id}`}
                                   type="text"
                                   value={catalogBrands[c.id] ?? ''}
                                   onChange={e => setCatalogBrands(prev => ({ ...prev, [c.id]: e.target.value }))}
@@ -620,8 +623,9 @@ export function TemplateManager({
           <div className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="label">Name *</label>
+                <label htmlFor="custom-name" className="label">Name *</label>
                 <input
+                  id="custom-name"
                   type="text"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
@@ -630,8 +634,9 @@ export function TemplateManager({
                 />
               </div>
               <div>
-                <label className="label">Unit *</label>
+                <label htmlFor="custom-unit" className="label">Unit *</label>
                 <input
+                  id="custom-unit"
                   type="text"
                   value={newUnit}
                   onChange={e => setNewUnit(e.target.value)}
@@ -640,16 +645,17 @@ export function TemplateManager({
                 />
               </div>
               <div>
-                <label className="label">Category</label>
-                <select value={newCategory} onChange={e => setNewCategory(e.target.value as InventoryCategory)} className="input">
+                <label htmlFor="custom-category" className="label">Category</label>
+                <select id="custom-category" value={newCategory} onChange={e => setNewCategory(e.target.value as InventoryCategory)} className="input">
                   {CATEGORY_ORDER.map(c => (
                     <option key={c} value={c}>{INVENTORY_CATEGORY_LABELS[c]}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="label">Par Level</label>
+                <label htmlFor="custom-par-level" className="label">Par Level</label>
                 <input
+                  id="custom-par-level"
                   type="number" min={0} step={0.5}
                   value={newPar}
                   onChange={e => setNewPar(e.target.value)}
@@ -657,8 +663,9 @@ export function TemplateManager({
                 />
               </div>
               <div>
-                <label className="label">Brand <span className="text-muted-themed font-normal">(optional)</span></label>
+                <label htmlFor="custom-brand" className="label">Brand <span className="text-muted-themed font-normal">(optional)</span></label>
                 <input
+                  id="custom-brand"
                   type="text"
                   value={newBrand}
                   onChange={e => setNewBrand(e.target.value)}

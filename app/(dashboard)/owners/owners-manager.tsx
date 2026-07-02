@@ -152,7 +152,7 @@ function todayIso() {
 
 // ── Copy button ──────────────────────────────────────────────────────────────
 
-function CopyButton({ text }: Readonly<{ text: string }>) {
+function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -178,7 +178,7 @@ function CopyButton({ text }: Readonly<{ text: string }>) {
 
 // ── Revoke Access Button ─────────────────────────────────────────────────────
 
-function RevokeAccessButton({ ownerId }: Readonly<{ ownerId: string }>) {
+function RevokeAccessButton({ ownerId }: { ownerId: string }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -207,7 +207,7 @@ function RevokeAccessButton({ ownerId }: Readonly<{ ownerId: string }>) {
 
 // ── Generate Link Button ─────────────────────────────────────────────────────
 
-function GenerateLinkButton({ ownerId }: Readonly<{ ownerId: string }>) {
+function GenerateLinkButton({ ownerId }: { ownerId: string }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -239,10 +239,10 @@ function GenerateLinkButton({ ownerId }: Readonly<{ ownerId: string }>) {
 function AddTransactionForm({
   propertyId,
   onClose,
-}: Readonly<{
+}: {
   propertyId: string
   onClose: () => void
-}>) {
+}) {
   const [state, formAction, pending] = useActionState(addOwnerTransaction, null)
   const [txnType, setTxnType] = useState<'revenue' | 'expense'>('revenue')
 
@@ -302,8 +302,9 @@ function AddTransactionForm({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="label text-xs">Date</label>
+            <label htmlFor="txn-date" className="label text-xs">Date</label>
             <input
+              id="txn-date"
               name="transaction_date"
               type="date"
               required
@@ -312,8 +313,8 @@ function AddTransactionForm({
             />
           </div>
           <div>
-            <label className="label text-xs">Category</label>
-            <select name="category" required className="input text-sm">
+            <label htmlFor="txn-category" className="label text-xs">Category</label>
+            <select id="txn-category" name="category" required className="input text-sm">
               {categories.map((c) => (
                 <option key={c.value} value={c.value}>{c.label}</option>
               ))}
@@ -322,18 +323,18 @@ function AddTransactionForm({
         </div>
 
         <div>
-          <label className="label text-xs">Description <span className="text-red-500">*</span></label>
-          <input name="description" type="text" required className="input text-sm" placeholder="e.g. 4-night stay, HVAC repair" />
+          <label htmlFor="txn-description" className="label text-xs">Description <span className="text-red-500">*</span></label>
+          <input id="txn-description" name="description" type="text" required className="input text-sm" placeholder="e.g. 4-night stay, HVAC repair" />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="label text-xs">Amount ($) <span className="text-red-500">*</span></label>
-            <input name="amount" type="number" required min="0.01" step="0.01" className="input text-sm" placeholder="0.00" />
+            <label htmlFor="txn-amount" className="label text-xs">Amount ($) <span className="text-red-500">*</span></label>
+            <input id="txn-amount" name="amount" type="number" required min="0.01" step="0.01" className="input text-sm" placeholder="0.00" />
           </div>
           <div>
-            <label className="label text-xs">Notes</label>
-            <input name="notes" type="text" className="input text-sm" placeholder="Optional" />
+            <label htmlFor="txn-notes" className="label text-xs">Notes</label>
+            <input id="txn-notes" name="notes" type="text" className="input text-sm" placeholder="Optional" />
           </div>
         </div>
 
@@ -352,7 +353,7 @@ function AddTransactionForm({
 
 // ── Visibility Toggle ────────────────────────────────────────────────────────
 
-function VisibilityToggle({ txn }: Readonly<{ txn: Transaction }>) {
+function VisibilityToggle({ txn }: { txn: Transaction }) {
   const [pending, startTransition] = useTransition()
 
   const toggle = () => {
@@ -381,10 +382,10 @@ function VisibilityToggle({ txn }: Readonly<{ txn: Transaction }>) {
 function TransactionPanel({
   propertyId,
   transactions,
-}: Readonly<{
+}: {
   propertyId: string
   transactions: Transaction[]
-}>) {
+}) {
   const [expanded, setExpanded]       = useState(false)
   const [showForm, setShowForm]       = useState(false)
   const [deletingId, setDeletingId]   = useState<string | null>(null)
@@ -526,10 +527,10 @@ function TransactionPanel({
 function AddOwnerModal({
   properties,
   onClose,
-}: Readonly<{
+}: {
   properties: Property[]
   onClose: () => void
-}>) {
+}) {
   const [state, formAction, pending] = useActionState(addPropertyOwner, null)
 
   useEffect(() => {
@@ -608,7 +609,7 @@ function AddOwnerModal({
 
 // ── Combined Portfolio Link Button ───────────────────────────────────────────
 
-function GenerateCombinedLinkButton({ ownerIds }: Readonly<{ ownerIds: string[] }>) {
+function GenerateCombinedLinkButton({ ownerIds }: { ownerIds: string[] }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -641,11 +642,11 @@ function MultiPropertyOwnerCard({
   group,
   baseUrl,
   properties,
-}: Readonly<{
+}: {
   group:      OwnerGroup
   baseUrl:    string
   properties: Property[]
-}>) {
+}) {
   const combinedToken = getCombinedToken(group.anchor)
   const expired       = combinedToken ? isTokenExpired(combinedToken) : false
   const portalUrl     = combinedToken && !expired ? `${baseUrl}/owner/${combinedToken.token}` : null
@@ -695,11 +696,11 @@ function OwnerCard({
   owner,
   baseUrl,
   transactions,
-}: Readonly<{
+}: {
   owner: Owner
   baseUrl: string
   transactions: Transaction[]
-}>) {
+}) {
   const token     = getToken(owner)
   const expired   = token ? isTokenExpired(token) : false
   const portalUrl = token && !expired ? `${baseUrl}/owner/${token.token}` : null
@@ -754,7 +755,7 @@ function OwnerCard({
           <div className="font-semibold text-primary-themed">{owner.name}</div>
           <div className="text-sm text-muted-themed mt-0.5">{getPropertyName(owner)}</div>
           {owner.email && <div className="text-xs text-muted-themed mt-0.5">{owner.email}</div>}
-          {owner.revenue_share_pct !== null && (
+          {owner.revenue_share_pct != null && (
             <div className="text-xs text-muted-themed">{owner.revenue_share_pct}% revenue share</div>
           )}
         </div>
@@ -784,7 +785,7 @@ function OwnerCard({
 
       {/* Monthly revenue quick entry */}
       <div className="mt-3 pt-3 border-t border-themed">
-        <label className="label text-xs">
+        <label htmlFor="monthly-revenue-amount" className="label text-xs">
           Monthly Revenue ($)
           <span className="text-muted-themed font-normal ml-1">— enter before sharing portal link</span>
         </label>
@@ -796,6 +797,7 @@ function OwnerCard({
             className="input text-sm py-1.5 w-36 flex-shrink-0"
           />
           <input
+            id="monthly-revenue-amount"
             type="number"
             min={0}
             step={0.01}
@@ -834,10 +836,10 @@ function OwnerCard({
 function CapitalPlanToggle({
   ownerId,
   initialShared,
-}: Readonly<{
+}: {
   ownerId:       string
   initialShared: boolean
-}>) {
+}) {
   const [shared, setShared]    = useState(initialShared)
   const [pending, startToggle] = useTransition()
   const [error, setError]      = useState<string | null>(null)
@@ -897,12 +899,12 @@ export function OwnersManager({
   properties,
   transactions,
   baseUrl,
-}: Readonly<{
+}: {
   owners: Owner[]
   properties: Property[]
   transactions: Transaction[]
   baseUrl: string
-}>) {
+}) {
   const [showAdd, setShowAdd] = useState(false)
   const multiPropertyGroups = groupMultiPropertyOwners(owners)
 

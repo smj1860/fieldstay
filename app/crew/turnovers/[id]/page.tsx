@@ -798,8 +798,9 @@ function IssueReportModal({
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
-                <label className="label text-accent-900">What's the issue? *</label>
+                <label htmlFor="issue-title" className="label text-accent-900">What's the issue? *</label>
                 <input
+                  id="issue-title"
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -809,8 +810,9 @@ function IssueReportModal({
                 />
               </div>
               <div>
-                <label className="label text-accent-900">Details (optional)</label>
+                <label htmlFor="issue-details" className="label text-accent-900">Details (optional)</label>
                 <textarea
+                  id="issue-details"
                   value={details}
                   onChange={(e) => setDetails(e.target.value)}
                   rows={2}
@@ -819,7 +821,7 @@ function IssueReportModal({
                 />
               </div>
               <div>
-                <label className="label text-accent-900">Urgency</label>
+                <span className="label text-accent-900">Urgency</span>
                 <div className="flex gap-2">
                   {(['medium', 'high', 'urgent'] as const).map((p) => (
                     <button

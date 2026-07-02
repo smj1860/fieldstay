@@ -66,7 +66,7 @@ function normalizeAssetType(raw: string): AssetType | null {
 
 // ── Health score pill ─────────────────────────────────────────────────────────
 
-function HealthPill({ score }: Readonly<{ score: number | null }>) {
+function HealthPill({ score }: { score: number | null }) {
   if (score === null) return <span className="badge badge-slate">Unknown</span>
   const color = healthColor(score)
   return (
@@ -112,12 +112,12 @@ function AssetForm({
   standards,
   asset,
   onClose,
-}: Readonly<{
+}: {
   propertyId: string
   standards:  AssetTypeStandard[]
   asset?:     PropertyAsset
   onClose:    () => void
-}>) {
+}) {
   const isEdit = Boolean(asset)
 
   const boundCreate = createAsset.bind(null, propertyId)
@@ -251,8 +251,9 @@ function AssetForm({
             {/* Asset Type — only on create */}
             {!isEdit && (
               <div className="sm:col-span-2">
-                <label className="label">Asset Type <span className="text-red-500">*</span></label>
+                <label htmlFor="asset-type" className="label">Asset Type <span className="text-red-500">*</span></label>
                 <select
+                  id="asset-type"
                   name="asset_type"
                   required
                   className="input"
@@ -269,8 +270,9 @@ function AssetForm({
 
             {/* Name */}
             <div className="sm:col-span-2">
-              <label className="label">Name <span className="text-red-500">*</span></label>
+              <label htmlFor="asset-name" className="label">Name <span className="text-red-500">*</span></label>
               <input
+                id="asset-name"
                 name="name"
                 type="text"
                 required
@@ -282,8 +284,9 @@ function AssetForm({
 
             {/* Make / Model — prefilled from scan */}
             <div>
-              <label className="label">Make</label>
+              <label htmlFor="asset-make" className="label">Make</label>
               <input
+                id="asset-make"
                 key={scanResult?.make}
                 name="make"
                 type="text"
@@ -293,8 +296,9 @@ function AssetForm({
               />
             </div>
             <div>
-              <label className="label">Model</label>
+              <label htmlFor="asset-model" className="label">Model</label>
               <input
+                id="asset-model"
                 key={scanResult?.model}
                 name="model"
                 type="text"
@@ -306,8 +310,9 @@ function AssetForm({
 
             {/* Serial Number */}
             <div>
-              <label className="label">Serial Number</label>
+              <label htmlFor="asset-serial-number" className="label">Serial Number</label>
               <input
+                id="asset-serial-number"
                 key={scanResult?.serial_number}
                 name="serial_number"
                 type="text"
@@ -318,8 +323,9 @@ function AssetForm({
 
             {/* Installation Date */}
             <div>
-              <label className="label">Installation Date</label>
+              <label htmlFor="asset-installation-date" className="label">Installation Date</label>
               <input
+                id="asset-installation-date"
                 key={scanResult?.manufacture_year}
                 name="installation_date"
                 type="date"
@@ -341,8 +347,9 @@ function AssetForm({
 
             {/* Purchase Price / Replacement Cost */}
             <div>
-              <label className="label">Purchase Price ($)</label>
+              <label htmlFor="asset-purchase-price" className="label">Purchase Price ($)</label>
               <input
+                id="asset-purchase-price"
                 name="purchase_price"
                 type="number"
                 min="0"
@@ -353,8 +360,9 @@ function AssetForm({
               />
             </div>
             <div>
-              <label className="label">Est. Replacement Cost ($)</label>
+              <label htmlFor="asset-estimated-replacement-cost" className="label">Est. Replacement Cost ($)</label>
               <input
+                id="asset-estimated-replacement-cost"
                 name="estimated_replacement_cost"
                 type="number"
                 min="0"
@@ -367,18 +375,18 @@ function AssetForm({
 
             {/* Warranty */}
             <div>
-              <label className="label">Warranty Expiry Date</label>
-              <input name="warranty_expiry_date" type="date" defaultValue={asset?.warranty_expiry_date ?? ''} className="input" />
+              <label htmlFor="asset-warranty-expiry-date" className="label">Warranty Expiry Date</label>
+              <input id="asset-warranty-expiry-date" name="warranty_expiry_date" type="date" defaultValue={asset?.warranty_expiry_date ?? ''} className="input" />
             </div>
             <div>
-              <label className="label">Warranty Provider</label>
-              <input name="warranty_provider" type="text" defaultValue={asset?.warranty_provider ?? ''} className="input" placeholder="e.g. Carrier" />
+              <label htmlFor="asset-warranty-provider" className="label">Warranty Provider</label>
+              <input id="asset-warranty-provider" name="warranty_provider" type="text" defaultValue={asset?.warranty_provider ?? ''} className="input" placeholder="e.g. Carrier" />
             </div>
 
             {/* Notes */}
             <div className="sm:col-span-2">
-              <label className="label">Notes</label>
-              <textarea name="notes" rows={2} defaultValue={asset?.notes ?? ''} className="input resize-none" />
+              <label htmlFor="asset-notes" className="label">Notes</label>
+              <textarea id="asset-notes" name="notes" rows={2} defaultValue={asset?.notes ?? ''} className="input resize-none" />
             </div>
           </div>
 
@@ -406,11 +414,11 @@ function CsvImportModal({
   propertyId,
   standards,
   onClose,
-}: Readonly<{
+}: {
   propertyId: string
   standards:  AssetTypeStandard[]
   onClose:    () => void
-}>) {
+}) {
   const [rows,      setRows]      = useState<ParsedRow[]>([])
   const [importing, setImporting] = useState(false)
   const [done,      setDone]      = useState(false)
@@ -600,12 +608,12 @@ function AssetRow({
   standards,
   propertyId,
   onEdit,
-}: Readonly<{
+}: {
   asset:      PropertyAsset
   standards:  AssetTypeStandard[]
   propertyId: string
   onEdit:     (a: PropertyAsset) => void
-}>) {
+}) {
   const [removing, startRemove] = useTransition()
 
   const std      = standards.find((s) => s.asset_type === asset.asset_type)
@@ -627,7 +635,7 @@ function AssetRow({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-primary-themed">{asset.name}</span>
           <span className="badge badge-slate text-xs">{typeName}</span>
-          {ageYears !== null && (
+          {ageYears != null && (
             <span className="text-xs text-muted-themed">{ageYears}y old</span>
           )}
           {showSection179 && (
@@ -672,11 +680,11 @@ export function AssetSection({
   assets,
   standards,
   propertyId,
-}: Readonly<{
+}: {
   assets:     PropertyAsset[]
   standards:  AssetTypeStandard[]
   propertyId: string
-}>) {
+}) {
   const [showAdd,    setShowAdd]    = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [editing,    setEditing]    = useState<PropertyAsset | null>(null)
@@ -687,7 +695,7 @@ export function AssetSection({
   const agingCount    = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 40 && s < 60 }).length
   const poorCount     = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 20 && s < 40 }).length
   const criticalCount = assets.filter((a) => (a.health_score ?? 100) < 20).length
-  const urgentAssets  = assets.filter((a) => a.health_score !== null && a.health_score < 40)
+  const urgentAssets  = assets.filter((a) => a.health_score != null && a.health_score < 40)
 
   return (
     <>

@@ -91,12 +91,12 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
           <form action={formAction} className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="label">Name *</label>
-                <input name="name" type="text" required className="input" placeholder="Alex Johnson" />
+                <label htmlFor="crew-name" className="label">Name *</label>
+                <input id="crew-name" name="name" type="text" required className="input" placeholder="Alex Johnson" />
               </div>
               <div>
-                <label className="label">Role</label>
-                <select name="role" className="input" defaultValue="general">
+                <label htmlFor="crew-role" className="label">Role</label>
+                <select id="crew-role" name="role" className="input" defaultValue="general">
                   <option value="cleaning">Cleaning</option>
                   <option value="maintenance">Maintenance</option>
                   <option value="landscaping">Landscaping</option>
@@ -104,12 +104,12 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
                 </select>
               </div>
               <div>
-                <label className="label">Email *</label>
-                <input name="email" type="email" required className="input" placeholder="alex@example.com" />
+                <label htmlFor="crew-email" className="label">Email *</label>
+                <input id="crew-email" name="email" type="email" required className="input" placeholder="alex@example.com" />
               </div>
               <div>
-                <label className="label">Phone</label>
-                <input name="phone" type="tel" className="input" placeholder="+1 555-0100" />
+                <label htmlFor="crew-phone" className="label">Phone</label>
+                <input id="crew-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
               </div>
             </div>
             <div className="flex gap-2">
@@ -142,7 +142,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
 
 function InviteChip({
   memberId, inviteSentAt, hasApp,
-}: Readonly<{ memberId: string; inviteSentAt: string | null; hasApp: boolean }>) {
+}: { memberId: string; inviteSentAt: string | null; hasApp: boolean }) {
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
 

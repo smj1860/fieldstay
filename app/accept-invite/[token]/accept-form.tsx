@@ -60,8 +60,9 @@ export function AcceptForm({ token, email, orgName }: Props) {
             )}
 
             <div>
-              <label className="label">Email</label>
+              <label htmlFor="invite-email" className="label">Email</label>
               <input
+                id="invite-email"
                 type="email"
                 value={email}
                 disabled
@@ -70,10 +71,11 @@ export function AcceptForm({ token, email, orgName }: Props) {
             </div>
 
             <div>
-              <label className="label">
+              <label htmlFor="full-name" className="label">
                 Full Name <span className="text-red-500">*</span>
               </label>
               <input
+                id="full-name"
                 type="text"
                 name="fullName"
                 required
@@ -85,10 +87,11 @@ export function AcceptForm({ token, email, orgName }: Props) {
             </div>
 
             <div>
-              <label className="label">
+              <label htmlFor="password" className="label">
                 Password <span className="text-red-500">*</span>
               </label>
               <input
+                id="password"
                 type="password"
                 name="password"
                 required
@@ -101,10 +104,11 @@ export function AcceptForm({ token, email, orgName }: Props) {
             </div>
 
             <div>
-              <label className="label">
+              <label htmlFor="confirm-password" className="label">
                 Confirm Password <span className="text-red-500">*</span>
               </label>
               <input
+                id="confirm-password"
                 type="password"
                 name="confirm"
                 required

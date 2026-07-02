@@ -23,10 +23,10 @@ const SOURCE_INSTRUCTIONS: Record<string, string> = {
 export function IcalManager({
   propertyId,
   feeds,
-}: Readonly<{
+}: {
   propertyId: string
   feeds: IcalFeed[]
-}>) {
+}) {
   const addAction = addIcalFeed.bind(null, propertyId)
   const [state, formAction, pending] = useActionState(addAction, null)
   const [showForm, setShowForm] = useState(feeds.length === 0)
@@ -104,8 +104,9 @@ export function IcalManager({
           }} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="label">Platform</label>
+                <label htmlFor="ical-source" className="label">Platform</label>
                 <select
+                  id="ical-source"
                   name="source"
                   value={selectedSource}
                   onChange={(e) => setSelectedSource(e.target.value)}
@@ -117,8 +118,9 @@ export function IcalManager({
                 </select>
               </div>
               <div>
-                <label className="label">Label</label>
+                <label htmlFor="ical-name" className="label">Label</label>
                 <input
+                  id="ical-name"
                   name="name"
                   type="text"
                   defaultValue={SOURCES.find((s) => s.value === selectedSource)?.label}
@@ -136,8 +138,9 @@ export function IcalManager({
             )}
 
             <div>
-              <label className="label">Calendar URL (.ics)</label>
+              <label htmlFor="ical-url" className="label">Calendar URL (.ics)</label>
               <input
+                id="ical-url"
                 name="url"
                 type="url"
                 className="input font-mono text-xs"

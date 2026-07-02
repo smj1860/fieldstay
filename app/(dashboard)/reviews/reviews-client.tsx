@@ -44,7 +44,7 @@ interface Props {
   manualUsedThisWeek: number
 }
 
-function StarRating({ rating }: Readonly<{ rating: number }>) {
+function StarRating({ rating }: { rating: number }) {
   return (
     <span className="text-base" aria-label={`${rating} out of 5 stars`}>
       {Array.from({ length: 5 }, (_, i) => (
@@ -59,10 +59,10 @@ function StarRating({ rating }: Readonly<{ rating: number }>) {
 function DeadlineBadge({
   daysRemaining,
   status,
-}: Readonly<{
+}: {
   daysRemaining: number | null
   status:        string
-}>) {
+}) {
   if (status === 'posted' || daysRemaining === null) return null
 
   const [bg, color, text]: [string, string, string] =
@@ -81,7 +81,7 @@ function DeadlineBadge({
   )
 }
 
-function StatusBadge({ status }: Readonly<{ status: string }>) {
+function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; bg: string; color: string }> = {
     pending: { label: 'No Response',  bg: 'rgba(107,114,128,0.15)', color: 'var(--text-muted)' },
     draft:   { label: 'Draft',        bg: 'rgba(251,191,36,0.15)',  color: '#D97706' },
@@ -642,8 +642,9 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
             {/* Platform */}
             <div>
-              <label className="label">Platform</label>
+              <label htmlFor="manual-platform" className="label">Platform</label>
               <select
+                id="manual-platform"
                 value={manualForm.platform}
                 onChange={(e) => setManualForm(f => ({ ...f, platform: e.target.value }))}
                 className="input"
@@ -658,7 +659,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
             {/* Star rating */}
             <div>
-              <label className="label">Star Rating</label>
+              <span className="label">Star Rating</span>
               <div className="flex gap-2">
                 {[1, 2, 3, 4, 5].map((n) => (
                   <button
@@ -675,8 +676,9 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
             {/* Guest name */}
             <div>
-              <label className="label">Guest Name (optional)</label>
+              <label htmlFor="manual-guest-name" className="label">Guest Name (optional)</label>
               <input
+                id="manual-guest-name"
                 type="text"
                 value={manualForm.guestName}
                 onChange={(e) => setManualForm(f => ({ ...f, guestName: e.target.value }))}
@@ -687,8 +689,9 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
             {/* Review text */}
             <div>
-              <label className="label">Review Text</label>
+              <label htmlFor="manual-review-text" className="label">Review Text</label>
               <textarea
+                id="manual-review-text"
                 value={manualForm.reviewText}
                 onChange={(e) => setManualForm(f => ({ ...f, reviewText: e.target.value }))}
                 rows={5}

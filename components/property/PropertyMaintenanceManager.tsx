@@ -28,12 +28,12 @@ function DueBadge({
   nextDueDate,
   activeFromMonth,
   activeToMonth,
-}: Readonly<{
+}: {
   nextDueDate:     string | null
   activeFromMonth: number | null
   activeToMonth:   number | null
-}>) {
-  if (activeFromMonth !== null && activeToMonth !== null) {
+}) {
+  if (activeFromMonth != null && activeToMonth != null) {
     const month = new Date().getMonth() + 1
     const inWindow = activeFromMonth <= activeToMonth
       ? month >= activeFromMonth && month <= activeToMonth
@@ -95,15 +95,15 @@ function EditModal({
   item,
   onClose,
   onSaved,
-}: Readonly<{
+}: {
   item:    MaintenanceSchedule
   onClose: () => void
   onSaved: () => void
-}>) {
+}) {
   const [name,            setName]            = useState(item.name)
   const [frequency,       setFrequency]       = useState<ScheduleFrequency>(item.frequency ?? 'annual')
   const [nextDueDate,     setNextDueDate]     = useState(item.next_due_date ?? '')
-  const [seasonal,        setSeasonal]        = useState(item.active_from_month !== null)
+  const [seasonal,        setSeasonal]        = useState(item.active_from_month != null)
   const [activeFrom,      setActiveFrom]      = useState<number>(item.active_from_month ?? 1)
   const [activeTo,        setActiveTo]        = useState<number>(item.active_to_month ?? 12)
   const [notes,           setNotes]           = useState(item.instructions ?? '')
@@ -151,22 +151,22 @@ function EditModal({
 
         <div className="space-y-4">
           <div>
-            <label className="label">Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
+            <label htmlFor="edit-name" className="label">Name</label>
+            <input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} className="input" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Recurrence</label>
-              <select value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
+              <label htmlFor="edit-recurrence" className="label">Recurrence</label>
+              <select id="edit-recurrence" value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
                 {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="label">Next Due Date</label>
-              <input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
+              <label htmlFor="edit-next-due-date" className="label">Next Due Date</label>
+              <input id="edit-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
             </div>
           </div>
 
@@ -181,14 +181,14 @@ function EditModal({
           {seasonal && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Active From</label>
-                <select value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
+                <label htmlFor="edit-active-from" className="label">Active From</label>
+                <select id="edit-active-from" value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
                   {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="label">Active To</label>
-                <select value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
+                <label htmlFor="edit-active-to" className="label">Active To</label>
+                <select id="edit-active-to" value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
                   {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
@@ -196,8 +196,8 @@ function EditModal({
           )}
 
           <div>
-            <label className="label">Notes / Instructions</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
+            <label htmlFor="edit-notes" className="label">Notes / Instructions</label>
+            <textarea id="edit-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
           </div>
         </div>
 
@@ -218,11 +218,11 @@ function DuplicateModal({
   item,
   onClose,
   onSaved,
-}: Readonly<{
+}: {
   item:    MaintenanceSchedule
   onClose: () => void
   onSaved: () => void
-}>) {
+}) {
   const [date,   setDate]   = useState(new Date().toISOString().split('T')[0])
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState<string | null>(null)
@@ -259,8 +259,8 @@ function DuplicateModal({
         )}
 
         <div className="mb-4">
-          <label className="label">Next Due Date for Duplicate</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
+          <label htmlFor="duplicate-next-due-date" className="label">Next Due Date for Duplicate</label>
+          <input id="duplicate-next-due-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
         </div>
 
         <div className="flex gap-2">
@@ -281,12 +281,12 @@ function CatalogModal({
   catalog,
   onClose,
   onSaved,
-}: Readonly<{
+}: {
   propertyId: string
   catalog:    MaintenanceCatalogItem[]
   onClose:    () => void
   onSaved:    () => void
-}>) {
+}) {
   const [selectedItem, setSelectedItem] = useState<MaintenanceCatalogItem | null>(null)
   const [recurrence,   setRecurrence]   = useState<ScheduleFrequency>('annual')
   const [nextDueDate,  setNextDueDate]  = useState(new Date().toISOString().split('T')[0])
@@ -378,16 +378,16 @@ function CatalogModal({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Recurrence</label>
-                <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as ScheduleFrequency)} className="input">
+                <label htmlFor="catalog-recurrence" className="label">Recurrence</label>
+                <select id="catalog-recurrence" value={recurrence} onChange={(e) => setRecurrence(e.target.value as ScheduleFrequency)} className="input">
                   {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
                     <option key={v} value={v}>{l}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="label">Next Due Date</label>
-                <input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
+                <label htmlFor="catalog-next-due-date" className="label">Next Due Date</label>
+                <input id="catalog-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
               </div>
             </div>
 
@@ -410,11 +410,11 @@ function CustomItemModal({
   propertyId,
   onClose,
   onSaved,
-}: Readonly<{
+}: {
   propertyId: string
   onClose:    () => void
   onSaved:    () => void
-}>) {
+}) {
   const [name,       setName]       = useState('')
   const [frequency,  setFrequency]  = useState<ScheduleFrequency>('annual')
   const [dueDate,    setDueDate]    = useState(new Date().toISOString().split('T')[0])
@@ -466,23 +466,23 @@ function CustomItemModal({
 
         <div className="space-y-4">
           <div>
-            <label className="label">Name <span className="text-red-500">*</span></label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input"
+            <label htmlFor="custom-name" className="label">Name <span className="text-red-500">*</span></label>
+            <input id="custom-name" value={name} onChange={(e) => setName(e.target.value)} className="input"
                    placeholder="e.g. Boat dock winterization" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Recurrence</label>
-              <select value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
+              <label htmlFor="custom-recurrence" className="label">Recurrence</label>
+              <select id="custom-recurrence" value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
                 {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="label">Next Due Date</label>
-              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
+              <label htmlFor="custom-next-due-date" className="label">Next Due Date</label>
+              <input id="custom-next-due-date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
             </div>
           </div>
 
@@ -495,14 +495,14 @@ function CustomItemModal({
           {seasonal && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Active From</label>
-                <select value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
+                <label htmlFor="custom-active-from" className="label">Active From</label>
+                <select id="custom-active-from" value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
                   {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="label">Active To</label>
-                <select value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
+                <label htmlFor="custom-active-to" className="label">Active To</label>
+                <select id="custom-active-to" value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
                   {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
@@ -510,8 +510,8 @@ function CustomItemModal({
           )}
 
           <div>
-            <label className="label">Notes</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
+            <label htmlFor="custom-notes" className="label">Notes</label>
+            <textarea id="custom-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
           </div>
         </div>
 
@@ -539,11 +539,11 @@ export function PropertyMaintenanceManager({
   propertyId,
   initialSchedules,
   catalog,
-}: Readonly<{
+}: {
   propertyId:       string
   initialSchedules: MaintenanceSchedule[]
   catalog:          MaintenanceCatalogItem[]
-}>) {
+}) {
   const router      = useRouter()
   const [schedules, setSchedules] = useState(initialSchedules)
   const [modal,     setModal]     = useState<Modal>(null)
@@ -606,7 +606,7 @@ export function PropertyMaintenanceManager({
                   <span className="badge badge-slate text-xs">
                     {RECURRENCE_LABELS[s.frequency ?? 'annual']}
                   </span>
-                  {s.active_from_month !== null && s.active_to_month !== null && (
+                  {s.active_from_month != null && s.active_to_month != null && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full"
                           style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}>
                       {MONTH_NAMES[s.active_from_month]}–{MONTH_NAMES[s.active_to_month]}

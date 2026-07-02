@@ -315,8 +315,9 @@ export function MasterChecklistBuilder({
       {tab === 'custom' && (
         <div className="card p-4 space-y-3">
           <div>
-            <label className="label">Section</label>
+            <label htmlFor="custom-section" className="label">Section</label>
             <select
+              id="custom-section"
               value={customSection}
               onChange={(e) => setCustomSection(e.target.value)}
               className="input"
@@ -326,8 +327,9 @@ export function MasterChecklistBuilder({
             </select>
           </div>
           <div>
-            <label className="label">Tasks (one per line)</label>
+            <label htmlFor="custom-tasks" className="label">Tasks (one per line)</label>
             <textarea
+              id="custom-tasks"
               value={customText}
               onChange={(e) => setCustomText(e.target.value)}
               rows={5}

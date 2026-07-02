@@ -152,14 +152,14 @@ function CrewAssignment({
   onWarning,
   open,
   onOpenChange,
-}: Readonly<{
+}: {
   turnover:     Turnover
   crewMembers:  CrewMember[]
   assignedCrew: AssignedCrewMember[]
   onWarning?:   (msg: string) => void
   open:         boolean
   onOpenChange: (open: boolean) => void
-}>) {
+}) {
   const [adding,   startAdd]    = useTransition()
   const [removing, startRemove] = useTransition()
 
@@ -277,14 +277,14 @@ function TurnoverCard({
   isSelected,
   onToggle,
   onWarning,
-}: Readonly<{
+}: {
   turnover: Turnover
   property: Property | undefined
   crewMembers: CrewMember[]
   isSelected: boolean
   onToggle: () => void
   onWarning?: (msg: string) => void
-}>) {
+}) {
   const [expanded,        setExpanded]        = useState(false)
   const [assignOpen,      setAssignOpen]      = useState(false)
   const [updating,        startUpdate]        = useTransition()
@@ -606,8 +606,9 @@ function TurnoverCard({
           {/* Flag notes input */}
           {showFlagInput && (
             <div className="space-y-2">
-              <label className="text-xs font-medium text-secondary-themed">What needs attention?</label>
+              <label htmlFor="flag-notes" className="text-xs font-medium text-secondary-themed">What needs attention?</label>
               <textarea
+                id="flag-notes"
                 value={flagNotes}
                 onChange={(e) => setFlagNotes(e.target.value)}
                 rows={2}
@@ -720,7 +721,7 @@ function BoardSection({
   selectedIds,
   onToggle,
   onWarning,
-}: Readonly<{
+}: {
   label: string
   turnovers: Turnover[]
   propertyMap: Record<string, Property>
@@ -731,7 +732,7 @@ function BoardSection({
   selectedIds: Set<string>
   onToggle: (id: string) => void
   onWarning?: (msg: string) => void
-}>) {
+}) {
   const [open, setOpen] = useState(defaultOpen)
   const prevLengthRef = useRef(turnovers.length)
 
@@ -793,10 +794,10 @@ function BoardSection({
 function AddTurnoverModal({
   properties,
   onClose,
-}: Readonly<{
+}: {
   properties: Property[]
   onClose: () => void
-}>) {
+}) {
   const [state, action, pending] = useActionState(createManualTurnover, null)
 
   return (
@@ -817,8 +818,8 @@ function AddTurnoverModal({
 
         <form action={async (fd) => { await action(fd); if (!state?.error) onClose() }} className="space-y-4">
           <div>
-            <label className="label">Property</label>
-            <select name="property_id" required className="input">
+            <label htmlFor="property-id" className="label">Property</label>
+            <select id="property-id" name="property_id" required className="input">
               <option value="">Select property…</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -827,27 +828,27 @@ function AddTurnoverModal({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Checkout Date</label>
-              <input name="checkout_date" type="date" required className="input" />
+              <label htmlFor="checkout-date" className="label">Checkout Date</label>
+              <input id="checkout-date" name="checkout_date" type="date" required className="input" />
             </div>
             <div>
-              <label className="label">Checkout Time</label>
-              <input name="checkout_time" type="time" defaultValue="11:00" className="input" />
+              <label htmlFor="checkout-time" className="label">Checkout Time</label>
+              <input id="checkout-time" name="checkout_time" type="time" defaultValue="11:00" className="input" />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Next Check-in Date</label>
-              <input name="checkin_date" type="date" required className="input" />
+              <label htmlFor="checkin-date" className="label">Next Check-in Date</label>
+              <input id="checkin-date" name="checkin_date" type="date" required className="input" />
             </div>
             <div>
-              <label className="label">Check-in Time</label>
-              <input name="checkin_time" type="time" defaultValue="15:00" className="input" />
+              <label htmlFor="checkin-time" className="label">Check-in Time</label>
+              <input id="checkin-time" name="checkin_time" type="time" defaultValue="15:00" className="input" />
             </div>
           </div>
           <div>
-            <label className="label">Notes (optional)</label>
-            <textarea name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
+            <label htmlFor="turnover-notes" className="label">Notes (optional)</label>
+            <textarea id="turnover-notes" name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
           </div>
           <div className="flex gap-3 pt-2">
             <button type="submit" disabled={pending} className="btn-primary flex-1">
@@ -870,14 +871,14 @@ function SplitAssignModal({
   crewMembers,
   onClose,
   onApplied,
-}: Readonly<{
+}: {
   turnoverIds: string[]
   turnovers:   Turnover[]
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
   onClose:     () => void
   onApplied:   (warning?: string) => void
-}>) {
+}) {
   const selected = turnovers.filter(t => turnoverIds.includes(t.id))
 
   const [picks, setPicks] = useState<Record<string, string>>(() => {
@@ -995,7 +996,7 @@ export function TurnoverBoard({
   crewAvailability = [],
   orgId,
   showAutoAssignNudge = false,
-}: Readonly<{
+}: {
   turnovers: Turnover[]
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
@@ -1004,7 +1005,7 @@ export function TurnoverBoard({
   crewAvailability?: CrewAvailabilityRow[]
   orgId: string
   showAutoAssignNudge?: boolean
-}>) {
+}) {
   const searchParams = useSearchParams()
   const urlStatus    = searchParams.get('status')
 

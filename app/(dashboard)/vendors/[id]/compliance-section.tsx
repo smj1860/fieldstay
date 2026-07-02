@@ -26,11 +26,11 @@ function AddDocumentForm({
   vendorId,
   orgId,
   onClose,
-}: Readonly<{
+}: {
   vendorId: string
   orgId:    string
   onClose:  () => void
-}>) {
+}) {
   const [uploading, setUploading] = useState(false)
   const [uploadedUrl, setUploadedUrl] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -52,7 +52,7 @@ function AddDocumentForm({
 
     const supabase = createClient()
     const ext  = file.name.split('.').pop() ?? 'pdf'
-    const path = `${orgId}/${vendorId}/${crypto.randomUUID()}.${ext}`
+    const path = `${orgId}/${vendorId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
     const { error } = await supabase.storage
       .from('compliance-documents')
@@ -97,8 +97,8 @@ function AddDocumentForm({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
-              <label className="label">Document Type <span className="text-red-500">*</span></label>
-              <select name="document_type" required className="input">
+              <label htmlFor="document-type" className="label">Document Type <span className="text-red-500">*</span></label>
+              <select id="document-type" name="document_type" required className="input">
                 <option value="">Select type…</option>
                 {DOC_TYPES.map((t) => (
                   <option key={t} value={t}>{DOC_TYPE_LABELS[t]}</option>
@@ -107,40 +107,41 @@ function AddDocumentForm({
             </div>
 
             <div className="sm:col-span-2">
-              <label className="label">Document Name <span className="text-red-500">*</span></label>
-              <input name="document_name" type="text" required className="input"
+              <label htmlFor="document-name" className="label">Document Name <span className="text-red-500">*</span></label>
+              <input id="document-name" name="document_name" type="text" required className="input"
                      placeholder='e.g. "General Liability COI 2025"' />
             </div>
 
             <div>
-              <label className="label">Policy / License Number</label>
-              <input name="policy_number" type="text" className="input" />
+              <label htmlFor="policy-number" className="label">Policy / License Number</label>
+              <input id="policy-number" name="policy_number" type="text" className="input" />
             </div>
 
             <div>
-              <label className="label">Issuing Company</label>
-              <input name="issuer_name" type="text" className="input" placeholder="e.g. State Farm" />
+              <label htmlFor="issuer-name" className="label">Issuing Company</label>
+              <input id="issuer-name" name="issuer_name" type="text" className="input" placeholder="e.g. State Farm" />
             </div>
 
             <div>
-              <label className="label">Effective Date</label>
-              <input name="effective_date" type="date" className="input" />
+              <label htmlFor="effective-date" className="label">Effective Date</label>
+              <input id="effective-date" name="effective_date" type="date" className="input" />
             </div>
 
             <div>
-              <label className="label">Expiry Date</label>
-              <input name="expiry_date" type="date" className="input" />
+              <label htmlFor="expiry-date" className="label">Expiry Date</label>
+              <input id="expiry-date" name="expiry_date" type="date" className="input" />
             </div>
 
             <div className="sm:col-span-2">
-              <label className="label">Coverage Amount ($)</label>
-              <input name="coverage_amount" type="number" min="0" step="1000" className="input" placeholder="0" />
+              <label htmlFor="coverage-amount" className="label">Coverage Amount ($)</label>
+              <input id="coverage-amount" name="coverage_amount" type="number" min="0" step="1000" className="input" placeholder="0" />
             </div>
 
             {/* File upload */}
             <div className="sm:col-span-2">
-              <label className="label">Upload Document (PDF, image)</label>
+              <label htmlFor="document-file" className="label">Upload Document (PDF, image)</label>
               <input
+                id="document-file"
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png,.webp"
                 className="input py-2 text-sm"
@@ -201,11 +202,11 @@ export function ComplianceSection({
   vendorId,
   orgId,
   documents,
-}: Readonly<{
+}: {
   vendorId:  string
   orgId:     string
   documents: VendorComplianceDocument[]
-}>) {
+}) {
   const [showAdd, setShowAdd]     = useState(false)
   const [removing, startRemove]   = useTransition()
   const [verifying, startVerify]  = useTransition()
@@ -283,7 +284,7 @@ export function ComplianceSection({
                       {doc.policy_number  && <span>#{doc.policy_number}</span>}
                       {doc.effective_date && <span>Eff: {doc.effective_date}</span>}
                       {doc.expiry_date    && <span>Exp: {doc.expiry_date}</span>}
-                      {doc.coverage_amount !== null && (
+                      {doc.coverage_amount != null && (
                         <span>${doc.coverage_amount.toLocaleString()}</span>
                       )}
                     </div>

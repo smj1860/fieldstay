@@ -12,10 +12,10 @@ interface CrewMember {
 export function CrewSetup({
   propertyId,
   crew,
-}: Readonly<{
+}: {
   propertyId: string
   crew: CrewMember[]
-}>) {
+}) {
   const [state, formAction, pending] = useActionState(addCrewMember, null)
   const [showForm, setShowForm] = useState(crew.length === 0)
   const [completing, setCompleting] = useState(false)
@@ -67,22 +67,22 @@ export function CrewSetup({
 
           <form action={formAction} className="space-y-4">
             <div>
-              <label className="label">Name <span className="text-red-500">*</span></label>
-              <input name="name" type="text" required className="input" placeholder="Full name" />
+              <label htmlFor="crew-name" className="label">Name <span className="text-red-500">*</span></label>
+              <input id="crew-name" name="name" type="text" required className="input" placeholder="Full name" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="label">Email</label>
-                <input name="email" type="email" className="input" placeholder="crew@example.com" />
+                <label htmlFor="crew-email" className="label">Email</label>
+                <input id="crew-email" name="email" type="email" className="input" placeholder="crew@example.com" />
               </div>
               <div>
-                <label className="label">Phone</label>
-                <input name="phone" type="tel" className="input" placeholder="(555) 000-0000" />
+                <label htmlFor="crew-phone" className="label">Phone</label>
+                <input id="crew-phone" name="phone" type="tel" className="input" placeholder="(555) 000-0000" />
               </div>
             </div>
             <div>
-              <label className="label">Preferred Contact</label>
-              <select name="preferred_contact" className="input">
+              <label htmlFor="crew-preferred-contact" className="label">Preferred Contact</label>
+              <select id="crew-preferred-contact" name="preferred_contact" className="input">
                 <option value="email">Email</option>
                 <option value="sms">SMS</option>
                 <option value="both">Both</option>

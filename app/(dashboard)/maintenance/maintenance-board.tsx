@@ -273,12 +273,12 @@ function WorkOrderCard({
   onClick,
   isSelected,
   onToggle,
-}: Readonly<{
+}: {
   wo: WorkOrderRow
   onClick: () => void
   isSelected: boolean
   onToggle: () => void
-}>) {
+}) {
   const property = getJoined(wo.properties)
   const vendor   = getJoined(wo.vendors)
 
@@ -340,11 +340,11 @@ function WorkOrderCard({
                 {formatDate(wo.scheduled_date)}
               </span>
             )}
-            {(wo.nte_amount !== null || wo.estimated_cost !== null) && (
+            {(wo.nte_amount != null || wo.estimated_cost != null) && (
               <span className="flex items-center gap-1">
                 <DollarSign className="w-3 h-3" />
                 {(wo.nte_amount ?? wo.estimated_cost ?? 0).toFixed(0)}
-                {wo.nte_amount !== null && (
+                {wo.nte_amount != null && (
                   <span className="text-xs opacity-60">NTE</span>
                 )}
               </span>
@@ -369,7 +369,7 @@ function CreateWorkOrderModal({
   orgId = '',
   onClose,
   onWarning,
-}: Readonly<{
+}: {
   properties:       PropertyOptionWithCoords[]
   vendors:          VendorOptionWithCoords[]
   crewMembers?:     CrewMemberOption[]
@@ -378,7 +378,7 @@ function CreateWorkOrderModal({
   orgId?:           string
   onClose:          () => void
   onWarning?:       (msg: string) => void
-}>) {
+}) {
   const [state, action, pending]          = useActionState(createWorkOrder, null)
   const [assignMode,         setAssignMode]         = useState<'vendor' | 'crew' | 'quotes'>('vendor')
   const [selectedVendor,     setSelectedVendor]     = useState('')
@@ -430,7 +430,7 @@ function CreateWorkOrderModal({
       let photoFailures = 0
       for (const file of photoFiles) {
         const ext  = file.name.split('.').pop() ?? 'jpg'
-        const path = `wo-${workOrderId}/${crypto.randomUUID()}.${ext}`
+        const path = `wo-${workOrderId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
         const { error: uploadErr } = await supabase.storage
           .from('work-order-photos')
           .upload(path, file, { contentType: file.type })
@@ -594,7 +594,7 @@ function CreateWorkOrderModal({
 
               {/* Assignment mode */}
               <div>
-                <label className="label">Assign To</label>
+                <span className="label">Assign To</span>
             <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3">
               {vendors.length > 0 && (
                 <button
@@ -663,7 +663,7 @@ function CreateWorkOrderModal({
                       const blocked = status === 'hard_blocked'
                       const label  = [
                         v.name,
-                        dist !== null ? `${dist.toFixed(1)} mi` : null,
+                        dist != null ? `${dist.toFixed(1)} mi` : null,
                         blocked ? '⛔ Blocked' : status === 'expiring_soon' ? '⚠️ Expiring' : null,
                       ].filter(Boolean).join(' · ')
                       return (
@@ -744,8 +744,9 @@ function CreateWorkOrderModal({
 
           {/* Photo attachments */}
           <div>
-            <label className="label">Photos (optional)</label>
+            <label htmlFor="wo-photos" className="label">Photos (optional)</label>
             <input
+              id="wo-photos"
               ref={photoInputRef}
               type="file"
               accept="image/*"
@@ -804,24 +805,24 @@ function ScheduleFormFields({
   properties,
   vendors,
   defaults,
-}: Readonly<{
+}: {
   properties: PropertyOption[]
   vendors: VendorOption[]
   defaults?: Partial<ScheduleRow>
-}>) {
+}) {
   const [schedType, setSchedType] = useState<ScheduleType>(defaults?.schedule_type ?? 'routine')
 
   return (
     <>
       <div>
-        <label className="label">Name <span className="text-red-500">*</span></label>
-        <input name="name" type="text" required className="input" defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
+        <label htmlFor="schedule-name" className="label">Name <span className="text-red-500">*</span></label>
+        <input id="schedule-name" name="name" type="text" required className="input" defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
       </div>
 
       {!defaults && (
         <div>
-          <label className="label">Property <span className="text-red-500">*</span></label>
-          <select name="property_id" required className="input">
+          <label htmlFor="schedule-property" className="label">Property <span className="text-red-500">*</span></label>
+          <select id="schedule-property" name="property_id" required className="input">
             <option value="">Select property…</option>
             {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -829,8 +830,9 @@ function ScheduleFormFields({
       )}
 
       <div>
-        <label className="label">Type</label>
+        <label htmlFor="schedule-type" className="label">Type</label>
         <select
+          id="schedule-type"
           name="schedule_type"
           className="input"
           value={schedType}
@@ -844,8 +846,8 @@ function ScheduleFormFields({
 
       {schedType === 'routine' && (
         <div>
-          <label className="label">Frequency</label>
-          <select name="frequency" className="input" defaultValue={defaults?.frequency ?? 'quarterly'}>
+          <label htmlFor="schedule-frequency" className="label">Frequency</label>
+          <select id="schedule-frequency" name="frequency" className="input" defaultValue={defaults?.frequency ?? 'quarterly'}>
             {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
         </div>
@@ -853,8 +855,8 @@ function ScheduleFormFields({
 
       {schedType === 'seasonal' && (
         <div>
-          <label className="label">Month Due</label>
-          <select name="month_due" className="input" defaultValue={defaults?.month_due ?? ''}>
+          <label htmlFor="schedule-month-due" className="label">Month Due</label>
+          <select id="schedule-month-due" name="month_due" className="input" defaultValue={defaults?.month_due ?? ''}>
             <option value="">Select month…</option>
             {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
           </select>
@@ -863,31 +865,31 @@ function ScheduleFormFields({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="label">Next Due Date</label>
-          <input name="next_due_date" type="date" className="input" defaultValue={defaults?.next_due_date ?? ''} />
+          <label htmlFor="schedule-next-due-date" className="label">Next Due Date</label>
+          <input id="schedule-next-due-date" name="next_due_date" type="date" className="input" defaultValue={defaults?.next_due_date ?? ''} />
         </div>
         <div>
-          <label className="label">Est. Cost ($)</label>
-          <input name="estimated_cost" type="number" min="0" step="0.01" className="input" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
+          <label htmlFor="schedule-estimated-cost" className="label">Est. Cost ($)</label>
+          <input id="schedule-estimated-cost" name="estimated_cost" type="number" min="0" step="0.01" className="input" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
         </div>
       </div>
 
       <div>
-        <label className="label">Assigned Vendor</label>
-        <select name="assigned_vendor_id" className="input" defaultValue={defaults?.assigned_vendor_id ?? ''}>
+        <label htmlFor="schedule-assigned-vendor" className="label">Assigned Vendor</label>
+        <select id="schedule-assigned-vendor" name="assigned_vendor_id" className="input" defaultValue={defaults?.assigned_vendor_id ?? ''}>
           <option value="">None</option>
           {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
       </div>
 
       <div>
-        <label className="label">Description</label>
-        <textarea name="description" rows={2} className="input resize-none" defaultValue={defaults?.description ?? ''} placeholder="Brief description…" />
+        <label htmlFor="schedule-description" className="label">Description</label>
+        <textarea id="schedule-description" name="description" rows={2} className="input resize-none" defaultValue={defaults?.description ?? ''} placeholder="Brief description…" />
       </div>
 
       <div>
-        <label className="label">Instructions</label>
-        <textarea name="instructions" rows={2} className="input resize-none" defaultValue={defaults?.instructions ?? ''} placeholder="Step-by-step instructions for vendor or crew…" />
+        <label htmlFor="schedule-instructions" className="label">Instructions</label>
+        <textarea id="schedule-instructions" name="instructions" rows={2} className="input resize-none" defaultValue={defaults?.instructions ?? ''} placeholder="Step-by-step instructions for vendor or crew…" />
       </div>
 
       <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
@@ -904,11 +906,11 @@ function AddScheduleModal({
   properties,
   vendors,
   onClose,
-}: Readonly<{
+}: {
   properties: PropertyOption[]
   vendors: VendorOption[]
   onClose: () => void
-}>) {
+}) {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState<string | null>(null)
 
@@ -963,11 +965,11 @@ function EditScheduleModal({
   schedule,
   vendors,
   onClose,
-}: Readonly<{
+}: {
   schedule: ScheduleRow
   vendors: VendorOption[]
   onClose: () => void
-}>) {
+}) {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState<string | null>(null)
 
@@ -1021,11 +1023,11 @@ function SchedulesSection({
   schedules,
   properties,
   vendors,
-}: Readonly<{
+}: {
   schedules: ScheduleRow[]
   properties: PropertyOption[]
   vendors: VendorOption[]
-}>) {
+}) {
   const [open, setOpen]             = useState(false)
   const [showAdd, setShowAdd]       = useState(false)
   const [editingId, setEditingId]   = useState<string | null>(null)
@@ -1199,13 +1201,13 @@ function TemplateBroadcastModal({
   template,
   properties,
   onClose,
-}: Readonly<{
+}: {
   template: TemplateRow
   properties: PropertyOption[]
   onClose: () => void
-}>) {
+}) {
   const [step, setStep]                       = useState<1 | 2 | 3>(1)
-  const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>([])
+  const [selectedPropertyIds, setSelectedIds] = useState<string[]>([])
   const [broadcasting, setBroadcasting]       = useState(false)
   const [error, setError]                     = useState<string | null>(null)
   const [result, setResult]                   = useState<BroadcastResult | null>(null)
@@ -1215,11 +1217,11 @@ function TemplateBroadcastModal({
   const totalItems   = items.length * selectedPropertyIds.length
 
   const toggleProperty = (id: string) => {
-    setSelectedPropertyIds((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id])
+    setSelectedIds((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id])
   }
 
   const toggleAll = () => {
-    setSelectedPropertyIds(allSelected ? [] : properties.map((p) => p.id))
+    setSelectedIds(allSelected ? [] : properties.map((p) => p.id))
   }
 
   const handleBroadcast = async () => {
@@ -1394,11 +1396,11 @@ function CreateTemplateModal({
   onClose,
   catalogItems,
   properties,
-}: Readonly<{
+}: {
   onClose: () => void
   catalogItems: TemplateItemRow[]
   properties: PropertyOption[]
-}>) {
+}) {
   const [name, setName]           = useState('')
   const [description, setDesc]    = useState('')
   const [items, setItems]         = useState<NewTemplateItem[]>([{ ...EMPTY_TEMPLATE_ITEM }])
@@ -1431,7 +1433,7 @@ function CreateTemplateModal({
     description:           ci.description ?? '',
     schedule_frequency:    ci.schedule_frequency,
     vendor_specialty_hint: (ci.vendor_specialty_hint ?? '') as VendorSpecialty | '',
-    estimated_cost:        ci.estimated_cost !== null ? String(ci.estimated_cost) : '',
+    estimated_cost:        ci.estimated_cost != null ? String(ci.estimated_cost) : '',
     catalogId:             ci.id,
   })
 
@@ -1647,12 +1649,12 @@ function CreateTemplateModal({
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="label">Template Name <span className="text-red-500">*</span></label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. STR Annual Maintenance" required />
+            <label htmlFor="template-name" className="label">Template Name <span className="text-red-500">*</span></label>
+            <input id="template-name" value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. STR Annual Maintenance" required />
           </div>
           <div>
-            <label className="label">Description</label>
-            <input value={description} onChange={(e) => setDesc(e.target.value)} className="input" placeholder="Optional description…" />
+            <label htmlFor="template-description" className="label">Description</label>
+            <input id="template-description" value={description} onChange={(e) => setDesc(e.target.value)} className="input" placeholder="Optional description…" />
           </div>
 
           {catalogItems.length > 0 && (
@@ -1710,7 +1712,7 @@ function CreateTemplateModal({
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">Items <span className="text-red-500">*</span></label>
+              <span className="label mb-0">Items <span className="text-red-500">*</span></span>
               <button type="button" onClick={addItem} className="btn-secondary text-xs py-1 px-2 flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Add Item
               </button>
@@ -1721,21 +1723,21 @@ function CreateTemplateModal({
                   <div className="flex items-start gap-2">
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <label className="label text-xs">Item Name <span className="text-red-500">*</span></label>
-                        <input value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
+                        <label htmlFor={`template-item-name-${i}`} className="label text-xs">Item Name <span className="text-red-500">*</span></label>
+                        <input id={`template-item-name-${i}`} value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
                                className="input text-sm" placeholder="e.g. HVAC Filter Replacement" />
                       </div>
                       <div>
-                        <label className="label text-xs">Frequency</label>
-                        <select value={item.schedule_frequency}
+                        <label htmlFor={`template-item-frequency-${i}`} className="label text-xs">Frequency</label>
+                        <select id={`template-item-frequency-${i}`} value={item.schedule_frequency}
                                 onChange={(e) => updateItem(i, 'schedule_frequency', e.target.value)}
                                 className="input text-sm">
                           {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="label text-xs">Vendor Specialty</label>
-                        <select value={item.vendor_specialty_hint}
+                        <label htmlFor={`template-item-specialty-${i}`} className="label text-xs">Vendor Specialty</label>
+                        <select id={`template-item-specialty-${i}`} value={item.vendor_specialty_hint}
                                 onChange={(e) => updateItem(i, 'vendor_specialty_hint', e.target.value)}
                                 className="input text-sm">
                           <option value="">None</option>
@@ -1743,8 +1745,8 @@ function CreateTemplateModal({
                         </select>
                       </div>
                       <div>
-                        <label className="label text-xs">Est. Cost ($)</label>
-                        <input type="number" min="0" step="0.01" value={item.estimated_cost}
+                        <label htmlFor={`template-item-cost-${i}`} className="label text-xs">Est. Cost ($)</label>
+                        <input id={`template-item-cost-${i}`} type="number" min="0" step="0.01" value={item.estimated_cost}
                                onChange={(e) => updateItem(i, 'estimated_cost', e.target.value)}
                                className="input text-sm" placeholder="0.00" />
                       </div>
@@ -1778,10 +1780,10 @@ function CreateTemplateModal({
 function TemplatesSection({
   templates,
   properties,
-}: Readonly<{
+}: {
   templates: TemplateRow[]
   properties: PropertyOption[]
-}>) {
+}) {
   const [open, setOpen]                             = useState(false)
   const [broadcastTemplateId, setBroadcastTemplateId] = useState<string | null>(null)
   const [showCreateTemplate, setShowCreateTemplate] = useState(false)
@@ -1910,10 +1912,10 @@ function TemplatesSection({
 function EditTemplateModal({
   template,
   onClose,
-}: Readonly<{
+}: {
   template: TemplateRow
   onClose:  () => void
-}>) {
+}) {
   const [name,        setName]        = useState(template.name)
   const [description, setDescription] = useState(template.description ?? '')
   const [saving,      startSave]      = useTransition()
@@ -1959,8 +1961,9 @@ function EditTemplateModal({
         ) : (
           <div className="space-y-4">
             <div>
-              <label className="label">Template Name <span className="text-red-400">*</span></label>
+              <label htmlFor="edit-template-name" className="label">Template Name <span className="text-red-400">*</span></label>
               <input
+                id="edit-template-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={100}
@@ -1969,8 +1972,9 @@ function EditTemplateModal({
               />
             </div>
             <div>
-              <label className="label">Description</label>
+              <label htmlFor="edit-template-description" className="label">Description</label>
               <textarea
+                id="edit-template-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 maxLength={500}
@@ -2014,7 +2018,7 @@ export function MaintenanceBoard({
   vendorCompliance = [],
   orgId = '',
   role,
-}: Readonly<{
+}: {
   workOrders:       WorkOrderRow[]
   properties:       PropertyOptionWithCoords[]
   vendors:          VendorOptionWithCoords[]
@@ -2025,7 +2029,7 @@ export function MaintenanceBoard({
   vendorCompliance?: VendorComplianceRow[]
   orgId?:           string
   role:             string
-}>) {
+}) {
   const searchParams  = useSearchParams()
   const urlFilter     = searchParams.get('filter')
 
