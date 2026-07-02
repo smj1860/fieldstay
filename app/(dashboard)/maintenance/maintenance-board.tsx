@@ -285,6 +285,9 @@ function WorkOrderCard({
   return (
     <div
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
       className={cn(
         'bg-card-themed rounded-xl border border-themed p-4 cursor-pointer',
         'hover:shadow-[0_2px_8px_0_rgba(0,0,0,.08)] hover:border-themed transition-all',
@@ -594,7 +597,7 @@ function CreateWorkOrderModal({
 
               {/* Assignment mode */}
               <div>
-                <span className="label">Assign To</span>
+                <label className="label">Assign To</label>
             <div className="flex gap-1 rounded-lg border border-themed p-1 mb-3">
               {vendors.length > 0 && (
                 <button
@@ -744,9 +747,8 @@ function CreateWorkOrderModal({
 
           {/* Photo attachments */}
           <div>
-            <label htmlFor="wo-photos" className="label">Photos (optional)</label>
+            <label className="label">Photos (optional)</label>
             <input
-              id="wo-photos"
               ref={photoInputRef}
               type="file"
               accept="image/*"
@@ -815,14 +817,14 @@ function ScheduleFormFields({
   return (
     <>
       <div>
-        <label htmlFor="schedule-name" className="label">Name <span className="text-red-500">*</span></label>
-        <input id="schedule-name" name="name" type="text" required className="input" defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
+        <label className="label">Name <span className="text-red-500">*</span></label>
+        <input name="name" type="text" required className="input" defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
       </div>
 
       {!defaults && (
         <div>
-          <label htmlFor="schedule-property" className="label">Property <span className="text-red-500">*</span></label>
-          <select id="schedule-property" name="property_id" required className="input">
+          <label className="label">Property <span className="text-red-500">*</span></label>
+          <select name="property_id" required className="input">
             <option value="">Select property…</option>
             {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -830,9 +832,8 @@ function ScheduleFormFields({
       )}
 
       <div>
-        <label htmlFor="schedule-type" className="label">Type</label>
+        <label className="label">Type</label>
         <select
-          id="schedule-type"
           name="schedule_type"
           className="input"
           value={schedType}
@@ -846,8 +847,8 @@ function ScheduleFormFields({
 
       {schedType === 'routine' && (
         <div>
-          <label htmlFor="schedule-frequency" className="label">Frequency</label>
-          <select id="schedule-frequency" name="frequency" className="input" defaultValue={defaults?.frequency ?? 'quarterly'}>
+          <label className="label">Frequency</label>
+          <select name="frequency" className="input" defaultValue={defaults?.frequency ?? 'quarterly'}>
             {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
         </div>
@@ -855,8 +856,8 @@ function ScheduleFormFields({
 
       {schedType === 'seasonal' && (
         <div>
-          <label htmlFor="schedule-month-due" className="label">Month Due</label>
-          <select id="schedule-month-due" name="month_due" className="input" defaultValue={defaults?.month_due ?? ''}>
+          <label className="label">Month Due</label>
+          <select name="month_due" className="input" defaultValue={defaults?.month_due ?? ''}>
             <option value="">Select month…</option>
             {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
           </select>
@@ -865,31 +866,31 @@ function ScheduleFormFields({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label htmlFor="schedule-next-due-date" className="label">Next Due Date</label>
-          <input id="schedule-next-due-date" name="next_due_date" type="date" className="input" defaultValue={defaults?.next_due_date ?? ''} />
+          <label className="label">Next Due Date</label>
+          <input name="next_due_date" type="date" className="input" defaultValue={defaults?.next_due_date ?? ''} />
         </div>
         <div>
-          <label htmlFor="schedule-estimated-cost" className="label">Est. Cost ($)</label>
-          <input id="schedule-estimated-cost" name="estimated_cost" type="number" min="0" step="0.01" className="input" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
+          <label className="label">Est. Cost ($)</label>
+          <input name="estimated_cost" type="number" min="0" step="0.01" className="input" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
         </div>
       </div>
 
       <div>
-        <label htmlFor="schedule-assigned-vendor" className="label">Assigned Vendor</label>
-        <select id="schedule-assigned-vendor" name="assigned_vendor_id" className="input" defaultValue={defaults?.assigned_vendor_id ?? ''}>
+        <label className="label">Assigned Vendor</label>
+        <select name="assigned_vendor_id" className="input" defaultValue={defaults?.assigned_vendor_id ?? ''}>
           <option value="">None</option>
           {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
         </select>
       </div>
 
       <div>
-        <label htmlFor="schedule-description" className="label">Description</label>
-        <textarea id="schedule-description" name="description" rows={2} className="input resize-none" defaultValue={defaults?.description ?? ''} placeholder="Brief description…" />
+        <label className="label">Description</label>
+        <textarea name="description" rows={2} className="input resize-none" defaultValue={defaults?.description ?? ''} placeholder="Brief description…" />
       </div>
 
       <div>
-        <label htmlFor="schedule-instructions" className="label">Instructions</label>
-        <textarea id="schedule-instructions" name="instructions" rows={2} className="input resize-none" defaultValue={defaults?.instructions ?? ''} placeholder="Step-by-step instructions for vendor or crew…" />
+        <label className="label">Instructions</label>
+        <textarea name="instructions" rows={2} className="input resize-none" defaultValue={defaults?.instructions ?? ''} placeholder="Step-by-step instructions for vendor or crew…" />
       </div>
 
       <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
@@ -1649,12 +1650,12 @@ function CreateTemplateModal({
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="template-name" className="label">Template Name <span className="text-red-500">*</span></label>
-            <input id="template-name" value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. STR Annual Maintenance" required />
+            <label className="label">Template Name <span className="text-red-500">*</span></label>
+            <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. STR Annual Maintenance" required />
           </div>
           <div>
-            <label htmlFor="template-description" className="label">Description</label>
-            <input id="template-description" value={description} onChange={(e) => setDesc(e.target.value)} className="input" placeholder="Optional description…" />
+            <label className="label">Description</label>
+            <input value={description} onChange={(e) => setDesc(e.target.value)} className="input" placeholder="Optional description…" />
           </div>
 
           {catalogItems.length > 0 && (
@@ -1712,7 +1713,7 @@ function CreateTemplateModal({
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="label mb-0">Items <span className="text-red-500">*</span></span>
+              <label className="label mb-0">Items <span className="text-red-500">*</span></label>
               <button type="button" onClick={addItem} className="btn-secondary text-xs py-1 px-2 flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Add Item
               </button>
@@ -1723,21 +1724,21 @@ function CreateTemplateModal({
                   <div className="flex items-start gap-2">
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <label htmlFor={`template-item-name-${i}`} className="label text-xs">Item Name <span className="text-red-500">*</span></label>
-                        <input id={`template-item-name-${i}`} value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
+                        <label className="label text-xs">Item Name <span className="text-red-500">*</span></label>
+                        <input value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
                                className="input text-sm" placeholder="e.g. HVAC Filter Replacement" />
                       </div>
                       <div>
-                        <label htmlFor={`template-item-frequency-${i}`} className="label text-xs">Frequency</label>
-                        <select id={`template-item-frequency-${i}`} value={item.schedule_frequency}
+                        <label className="label text-xs">Frequency</label>
+                        <select value={item.schedule_frequency}
                                 onChange={(e) => updateItem(i, 'schedule_frequency', e.target.value)}
                                 className="input text-sm">
                           {FREQUENCIES.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label htmlFor={`template-item-specialty-${i}`} className="label text-xs">Vendor Specialty</label>
-                        <select id={`template-item-specialty-${i}`} value={item.vendor_specialty_hint}
+                        <label className="label text-xs">Vendor Specialty</label>
+                        <select value={item.vendor_specialty_hint}
                                 onChange={(e) => updateItem(i, 'vendor_specialty_hint', e.target.value)}
                                 className="input text-sm">
                           <option value="">None</option>
@@ -1745,8 +1746,8 @@ function CreateTemplateModal({
                         </select>
                       </div>
                       <div>
-                        <label htmlFor={`template-item-cost-${i}`} className="label text-xs">Est. Cost ($)</label>
-                        <input id={`template-item-cost-${i}`} type="number" min="0" step="0.01" value={item.estimated_cost}
+                        <label className="label text-xs">Est. Cost ($)</label>
+                        <input type="number" min="0" step="0.01" value={item.estimated_cost}
                                onChange={(e) => updateItem(i, 'estimated_cost', e.target.value)}
                                className="input text-sm" placeholder="0.00" />
                       </div>
@@ -1961,9 +1962,8 @@ function EditTemplateModal({
         ) : (
           <div className="space-y-4">
             <div>
-              <label htmlFor="edit-template-name" className="label">Template Name <span className="text-red-400">*</span></label>
+              <label className="label">Template Name <span className="text-red-400">*</span></label>
               <input
-                id="edit-template-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={100}
@@ -1972,9 +1972,8 @@ function EditTemplateModal({
               />
             </div>
             <div>
-              <label htmlFor="edit-template-description" className="label">Description</label>
+              <label className="label">Description</label>
               <textarea
-                id="edit-template-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 maxLength={500}
@@ -2493,7 +2492,11 @@ export function MaintenanceBoard({
           <div
             className="fixed inset-0 z-40"
             style={{ background: 'rgba(0,0,0,0.5)' }}
+            role="button"
+            tabIndex={0}
+            aria-label="Close work order detail"
             onClick={() => setSelectedWO(null)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedWO(null) } }}
           />
 
           {/* Panel */}

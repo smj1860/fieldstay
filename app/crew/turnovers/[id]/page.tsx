@@ -452,8 +452,9 @@ export default function CrewTurnoverPage() {
                             : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-accent-300')} />}
                         </button>
 
-                        <div
-                          className="flex-1 min-w-0 cursor-pointer"
+                        <button
+                          type="button"
+                          className="flex-1 min-w-0 cursor-pointer text-left"
                           onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
                         >
                           <p className={cn('text-sm leading-snug',
@@ -479,7 +480,7 @@ export default function CrewTurnoverPage() {
                           {item.requires_photo && item.photo_reason && (
                             <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
                           )}
-                        </div>
+                        </button>
 
                         {/* Note toggle button */}
                         <button
@@ -798,9 +799,8 @@ function IssueReportModal({
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <div>
-                <label htmlFor="issue-title" className="label text-accent-900">What's the issue? *</label>
+                <label className="label text-accent-900">What's the issue? *</label>
                 <input
-                  id="issue-title"
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -810,9 +810,8 @@ function IssueReportModal({
                 />
               </div>
               <div>
-                <label htmlFor="issue-details" className="label text-accent-900">Details (optional)</label>
+                <label className="label text-accent-900">Details (optional)</label>
                 <textarea
-                  id="issue-details"
                   value={details}
                   onChange={(e) => setDetails(e.target.value)}
                   rows={2}
@@ -821,7 +820,7 @@ function IssueReportModal({
                 />
               </div>
               <div>
-                <span className="label text-accent-900">Urgency</span>
+                <label className="label text-accent-900">Urgency</label>
                 <div className="flex gap-2">
                   {(['medium', 'high', 'urgent'] as const).map((p) => (
                     <button

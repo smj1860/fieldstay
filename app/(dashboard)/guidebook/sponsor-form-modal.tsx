@@ -91,7 +91,10 @@ export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSave
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 100, padding: '16px',
       }}
+      role="button"
+      tabIndex={0}
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         style={{
@@ -269,7 +272,7 @@ const inputStyle: React.CSSProperties = {
   fontSize:     '13px',
 }
 
-function Field({ label, children }: Readonly<{ label: string; children: React.ReactNode }>) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
       <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{label}</span>

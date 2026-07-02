@@ -208,7 +208,11 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-         onClick={onClose}>
+         onClick={onClose}
+         role="button"
+         tabIndex={0}
+         aria-label="Close modal"
+         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}>
       <div
         className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm"
         style={{ background: 'var(--bg-card)' }}
@@ -237,17 +241,17 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
         {editing ? (
           <form action={formAction} className="space-y-3">
             <div>
-              <label htmlFor="edit-vendor-name" className="label">Vendor Name</label>
-              <input id="edit-vendor-name" name="name" type="text" required defaultValue={vendor.name} className="input" />
+              <label className="label">Vendor Name</label>
+              <input name="name" type="text" required defaultValue={vendor.name} className="input" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="edit-contact-name" className="label">Contact Name</label>
-                <input id="edit-contact-name" name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} className="input" />
+                <label className="label">Contact Name</label>
+                <input name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} className="input" />
               </div>
               <div>
-                <label htmlFor="edit-specialty" className="label">Specialty</label>
-                <select id="edit-specialty" name="specialty" defaultValue={vendor.specialty} className="input">
+                <label className="label">Specialty</label>
+                <select name="specialty" defaultValue={vendor.specialty} className="input">
                   {VENDOR_SPECIALTIES.map((s) => (
                     <option key={s} value={s}>{VENDOR_SPECIALTY_LABELS[s]}</option>
                   ))}
@@ -256,35 +260,35 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="edit-email" className="label">Email</label>
-                <input id="edit-email" name="email" type="email" defaultValue={vendor.email ?? ''} className="input" />
+                <label className="label">Email</label>
+                <input name="email" type="email" defaultValue={vendor.email ?? ''} className="input" />
               </div>
               <div>
-                <label htmlFor="edit-phone" className="label">Phone</label>
-                <input id="edit-phone" name="phone" type="tel" defaultValue={vendor.phone ?? ''} className="input" />
+                <label className="label">Phone</label>
+                <input name="phone" type="tel" defaultValue={vendor.phone ?? ''} className="input" />
               </div>
             </div>
             <div>
-              <label htmlFor="edit-address" className="label">Street Address</label>
-              <input id="edit-address" name="address" type="text" defaultValue={vendor.address ?? ''} className="input" placeholder="123 Main St" />
+              <label className="label">Street Address</label>
+              <input name="address" type="text" defaultValue={vendor.address ?? ''} className="input" placeholder="123 Main St" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="edit-city" className="label">City</label>
-                <input id="edit-city" name="city" type="text" defaultValue={vendor.city ?? ''} className="input" placeholder="Atlanta" />
+                <label className="label">City</label>
+                <input name="city" type="text" defaultValue={vendor.city ?? ''} className="input" placeholder="Atlanta" />
               </div>
               <div>
-                <label htmlFor="edit-state" className="label">State</label>
-                <input id="edit-state" name="state" type="text" defaultValue={vendor.state ?? ''} className="input" placeholder="GA" maxLength={2} />
+                <label className="label">State</label>
+                <input name="state" type="text" defaultValue={vendor.state ?? ''} className="input" placeholder="GA" maxLength={2} />
               </div>
             </div>
             <div>
-              <label htmlFor="edit-service-zip" className="label">Service ZIP</label>
-              <input id="edit-service-zip" name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} className="input" placeholder="e.g. 30301" maxLength={10} />
+              <label className="label">Service ZIP</label>
+              <input name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} className="input" placeholder="e.g. 30301" maxLength={10} />
             </div>
             <div>
-              <label htmlFor="edit-notes" className="label">Notes</label>
-              <textarea id="edit-notes" name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
+              <label className="label">Notes</label>
+              <textarea name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
             </div>
             <div className="flex gap-2 pt-1">
               <button type="submit" disabled={pending} className="btn-primary text-sm flex-1">
@@ -681,7 +685,11 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
   }
 
   return (
-    <tr className="hover:bg-raised-themed transition-colors cursor-pointer" onClick={() => onSelect?.(vendor)}>
+    <tr className="hover:bg-raised-themed transition-colors cursor-pointer"
+        onClick={() => onSelect?.(vendor)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect?.(vendor) } }}>
       <td className="py-2.5 pr-4">
         <div className="font-medium text-primary-themed">{vendor.name}</div>
         {vendor.contact_name && <div className="text-xs text-muted-themed">{vendor.contact_name}</div>}

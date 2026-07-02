@@ -403,7 +403,11 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
           <div
             className="fixed inset-0 z-40"
             style={{ background: 'rgba(0,0,0,0.4)' }}
+            role="button"
+            tabIndex={0}
+            aria-label="Close review panel"
             onClick={closePanel}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closePanel() } }}
           />
 
           {/* Drawer */}
@@ -612,7 +616,11 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
         <div
           className="fixed inset-0 z-50 flex items-center justify-center"
           style={{ background: 'rgba(0,0,0,0.5)' }}
+          role="button"
+          tabIndex={0}
+          aria-label="Close modal"
           onClick={() => setShowManualModal(false)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowManualModal(false) } }}
         >
           <div
             className="w-full max-w-lg mx-4 rounded-2xl p-6 space-y-4"
@@ -642,9 +650,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
             {/* Platform */}
             <div>
-              <label htmlFor="manual-platform" className="label">Platform</label>
+              <label className="label">Platform</label>
               <select
-                id="manual-platform"
                 value={manualForm.platform}
                 onChange={(e) => setManualForm(f => ({ ...f, platform: e.target.value }))}
                 className="input"
@@ -659,7 +666,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
             {/* Star rating */}
             <div>
-              <span className="label">Star Rating</span>
+              <label className="label">Star Rating</label>
               <div className="flex gap-2">
                 {[1, 2, 3, 4, 5].map((n) => (
                   <button
@@ -676,9 +683,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
             {/* Guest name */}
             <div>
-              <label htmlFor="manual-guest-name" className="label">Guest Name (optional)</label>
+              <label className="label">Guest Name (optional)</label>
               <input
-                id="manual-guest-name"
                 type="text"
                 value={manualForm.guestName}
                 onChange={(e) => setManualForm(f => ({ ...f, guestName: e.target.value }))}
@@ -689,9 +695,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
             {/* Review text */}
             <div>
-              <label htmlFor="manual-review-text" className="label">Review Text</label>
+              <label className="label">Review Text</label>
               <textarea
-                id="manual-review-text"
                 value={manualForm.reviewText}
                 onChange={(e) => setManualForm(f => ({ ...f, reviewText: e.target.value }))}
                 rows={5}

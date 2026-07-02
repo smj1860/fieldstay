@@ -530,6 +530,8 @@ export function TemplateManager({
                         >
                           <div
                             className={cn('flex items-center gap-3 px-4 py-2.5', alreadyInTemplate ? 'cursor-not-allowed' : 'cursor-pointer')}
+                            role="button"
+                            tabIndex={alreadyInTemplate ? -1 : 0}
                             onClick={() => {
                               if (alreadyInTemplate) return
                               setCatalogSelected(prev => {
@@ -537,6 +539,17 @@ export function TemplateManager({
                                 next.has(c.id) ? next.delete(c.id) : next.add(c.id)
                                 return next
                               })
+                            }}
+                            onKeyDown={(e) => {
+                              if (alreadyInTemplate) return
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setCatalogSelected(prev => {
+                                  const next = new Set(prev)
+                                  next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                                  return next
+                                })
+                              }
                             }}
                           >
                             <input
@@ -557,9 +570,8 @@ export function TemplateManager({
                           {isSelected && !alreadyInTemplate && (
                             <div className="flex items-center gap-2 px-4 pb-2.5 flex-wrap" onClick={e => e.stopPropagation()}>
                               <div className="flex items-center gap-1.5">
-                                <label htmlFor={`catalog-par-${c.id}`} className="text-xs text-muted-themed whitespace-nowrap">Par:</label>
+                                <label className="text-xs text-muted-themed whitespace-nowrap">Par:</label>
                                 <input
-                                  id={`catalog-par-${c.id}`}
                                   type="number"
                                   min={1}
                                   value={catalogParLevels[c.id] ?? '1'}
@@ -573,9 +585,8 @@ export function TemplateManager({
                                 />
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <label htmlFor={`catalog-unit-${c.id}`} className="text-xs text-muted-themed whitespace-nowrap">Unit:</label>
+                                <label className="text-xs text-muted-themed whitespace-nowrap">Unit:</label>
                                 <input
-                                  id={`catalog-unit-${c.id}`}
                                   type="text"
                                   value={catalogUnits[c.id] ?? c.default_unit}
                                   onChange={e => setCatalogUnits(prev => ({ ...prev, [c.id]: e.target.value }))}
@@ -584,9 +595,8 @@ export function TemplateManager({
                                 />
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <label htmlFor={`catalog-brand-${c.id}`} className="text-xs text-muted-themed whitespace-nowrap">Brand:</label>
+                                <label className="text-xs text-muted-themed whitespace-nowrap">Brand:</label>
                                 <input
-                                  id={`catalog-brand-${c.id}`}
                                   type="text"
                                   value={catalogBrands[c.id] ?? ''}
                                   onChange={e => setCatalogBrands(prev => ({ ...prev, [c.id]: e.target.value }))}
@@ -623,9 +633,8 @@ export function TemplateManager({
           <div className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label htmlFor="custom-name" className="label">Name *</label>
+                <label className="label">Name *</label>
                 <input
-                  id="custom-name"
                   type="text"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
@@ -634,9 +643,8 @@ export function TemplateManager({
                 />
               </div>
               <div>
-                <label htmlFor="custom-unit" className="label">Unit *</label>
+                <label className="label">Unit *</label>
                 <input
-                  id="custom-unit"
                   type="text"
                   value={newUnit}
                   onChange={e => setNewUnit(e.target.value)}
@@ -645,17 +653,16 @@ export function TemplateManager({
                 />
               </div>
               <div>
-                <label htmlFor="custom-category" className="label">Category</label>
-                <select id="custom-category" value={newCategory} onChange={e => setNewCategory(e.target.value as InventoryCategory)} className="input">
+                <label className="label">Category</label>
+                <select value={newCategory} onChange={e => setNewCategory(e.target.value as InventoryCategory)} className="input">
                   {CATEGORY_ORDER.map(c => (
                     <option key={c} value={c}>{INVENTORY_CATEGORY_LABELS[c]}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label htmlFor="custom-par-level" className="label">Par Level</label>
+                <label className="label">Par Level</label>
                 <input
-                  id="custom-par-level"
                   type="number" min={0} step={0.5}
                   value={newPar}
                   onChange={e => setNewPar(e.target.value)}
@@ -663,9 +670,8 @@ export function TemplateManager({
                 />
               </div>
               <div>
-                <label htmlFor="custom-brand" className="label">Brand <span className="text-muted-themed font-normal">(optional)</span></label>
+                <label className="label">Brand <span className="text-muted-themed font-normal">(optional)</span></label>
                 <input
-                  id="custom-brand"
                   type="text"
                   value={newBrand}
                   onChange={e => setNewBrand(e.target.value)}

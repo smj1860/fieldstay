@@ -315,9 +315,8 @@ export function MasterChecklistBuilder({
       {tab === 'custom' && (
         <div className="card p-4 space-y-3">
           <div>
-            <label htmlFor="custom-section" className="label">Section</label>
+            <label className="label">Section</label>
             <select
-              id="custom-section"
               value={customSection}
               onChange={(e) => setCustomSection(e.target.value)}
               className="input"
@@ -327,9 +326,8 @@ export function MasterChecklistBuilder({
             </select>
           </div>
           <div>
-            <label htmlFor="custom-tasks" className="label">Tasks (one per line)</label>
+            <label className="label">Tasks (one per line)</label>
             <textarea
-              id="custom-tasks"
               value={customText}
               onChange={(e) => setCustomText(e.target.value)}
               rows={5}
@@ -482,7 +480,11 @@ export function MasterChecklistBuilder({
       {showConfirm && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center"
+          role="button"
+          tabIndex={0}
+          aria-label="Close dialog"
           onClick={() => setShowConfirm(false)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowConfirm(false) } }}
         >
           <div className="absolute inset-0 bg-black/50" />
           <div

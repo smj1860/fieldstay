@@ -150,9 +150,11 @@ function BookingCard({
       style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
     >
       {/* Main row */}
-      <div
-        className="flex items-start gap-3 px-4 py-3 cursor-pointer"
+      <button
+        type="button"
+        className="flex items-start gap-3 px-4 py-3 w-full text-left"
         onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
       >
         {/* Date column */}
         <div className="flex-shrink-0 w-14 text-center">
@@ -262,7 +264,7 @@ function BookingCard({
             </div>
           </div>
         </div>
-      </div>
+      </button>
 
       {/* Expanded detail */}
       {expanded && (
@@ -406,8 +408,8 @@ function AddBookingModal({
 
         <form action={action} className="space-y-4">
           <div>
-            <label htmlFor="booking-property-id" className="label">Property <span className="text-red-500">*</span></label>
-            <select id="booking-property-id" name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
+            <label className="label">Property <span className="text-red-500">*</span></label>
+            <select name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
               <option value="">Select property…</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -417,9 +419,8 @@ function AddBookingModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label htmlFor="booking-checkin-date" className="label">Check-in <span className="text-red-500">*</span></label>
+              <label className="label">Check-in <span className="text-red-500">*</span></label>
               <input
-                id="booking-checkin-date"
                 name="checkin_date"
                 type="date"
                 required
@@ -430,19 +431,19 @@ function AddBookingModal({
               />
             </div>
             <div>
-              <label htmlFor="booking-checkout-date" className="label">Check-out <span className="text-red-500">*</span></label>
-              <input id="booking-checkout-date" name="checkout_date" type="date" required min={checkinVal || todayStr} className="input" />
+              <label className="label">Check-out <span className="text-red-500">*</span></label>
+              <input name="checkout_date" type="date" required min={checkinVal || todayStr} className="input" />
             </div>
           </div>
 
           <div>
-            <label htmlFor="booking-guest-name" className="label">Guest Name</label>
-            <input id="booking-guest-name" name="guest_name" type="text" className="input" placeholder="Optional" />
+            <label className="label">Guest Name</label>
+            <input name="guest_name" type="text" className="input" placeholder="Optional" />
           </div>
 
           <div>
-            <label htmlFor="booking-source" className="label">Source</label>
-            <select id="booking-source" name="source" className="input" defaultValue="direct">
+            <label className="label">Source</label>
+            <select name="source" className="input" defaultValue="direct">
               <option value="direct">Direct Booking</option>
               <option value="airbnb">Airbnb</option>
               <option value="vrbo">VRBO</option>
@@ -453,9 +454,8 @@ function AddBookingModal({
           </div>
 
           <div>
-            <label htmlFor="booking-notes" className="label">Notes</label>
+            <label className="label">Notes</label>
             <textarea
-              id="booking-notes"
               name="notes"
               rows={2}
               className="input resize-none"

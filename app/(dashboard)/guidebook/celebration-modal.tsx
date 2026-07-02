@@ -30,7 +30,10 @@ export function CelebrationModal({ tier, onClose }: CelebrationModalProps) {
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 200, padding: '16px',
       }}
+      role="button"
+      tabIndex={0}
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         style={{

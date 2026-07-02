@@ -83,8 +83,9 @@ function LogRow({ entry }: { entry: LogEntry }) {
       style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
     >
       {/* Main row */}
-      <div
-        className="flex items-start gap-3 px-4 py-3 cursor-pointer"
+      <button
+        type="button"
+        className="flex items-start gap-3 px-4 py-3 cursor-pointer w-full text-left"
         onClick={() => setExpanded((v) => !v)}
       >
         {/* Recipient type icon */}
@@ -147,7 +148,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
             ? <ChevronUp   className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
             : <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />}
         </div>
-      </div>
+      </button>
 
       {/* Expanded body */}
       {expanded && (
@@ -279,7 +280,7 @@ function AddEntryModal({
 
           {/* Vendor / Crew toggle */}
           <div>
-            <p className="label">Recipient</p>
+            <label className="label">Recipient</label>
             <div className="flex gap-2 mb-2">
               {(['vendor', 'crew'] as const).map((t) => (
                 <button
@@ -302,14 +303,14 @@ function AddEntryModal({
             </div>
 
             {recipientType === 'vendor' ? (
-              <select name="vendor_id" required className="input" aria-label="Vendor">
+              <select name="vendor_id" required className="input">
                 <option value="">Select vendor…</option>
                 {vendors.map((v) => (
                   <option key={v.id} value={v.id}>{v.name}</option>
                 ))}
               </select>
             ) : (
-              <select name="crew_member_id" required className="input" aria-label="Crew member">
+              <select name="crew_member_id" required className="input">
                 <option value="">Select crew member…</option>
                 {crew.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
@@ -320,8 +321,8 @@ function AddEntryModal({
 
           {/* Channel */}
           <div>
-            <label htmlFor="comms-channel" className="label">Channel</label>
-            <select id="comms-channel" name="channel" className="input" defaultValue="email">
+            <label className="label">Channel</label>
+            <select name="channel" className="input" defaultValue="email">
               {(Object.keys(CHANNEL_LABELS) as CommChannel[]).map((ch) => (
                 <option key={ch} value={ch}>{CHANNEL_LABELS[ch]}</option>
               ))}
@@ -330,9 +331,8 @@ function AddEntryModal({
 
           {/* Date */}
           <div>
-            <label htmlFor="comms-communicated-at" className="label">Date &amp; Time</label>
+            <label className="label">Date &amp; Time</label>
             <input
-              id="comms-communicated-at"
               name="communicated_at"
               type="datetime-local"
               className="input"
@@ -347,9 +347,8 @@ function AddEntryModal({
 
           {/* Subject */}
           <div>
-            <label htmlFor="comms-subject" className="label">Subject</label>
+            <label className="label">Subject</label>
             <input
-              id="comms-subject"
               name="subject"
               type="text"
               className="input"
@@ -359,9 +358,8 @@ function AddEntryModal({
 
           {/* Body */}
           <div>
-            <label htmlFor="comms-body" className="label">Message / Notes</label>
+            <label className="label">Message / Notes</label>
             <textarea
-              id="comms-body"
               name="body"
               rows={4}
               className="input resize-none"
@@ -372,8 +370,8 @@ function AddEntryModal({
           {/* Context links */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label htmlFor="comms-property-id" className="label">Property (optional)</label>
-              <select id="comms-property-id" name="property_id" className="input">
+              <label className="label">Property (optional)</label>
+              <select name="property_id" className="input">
                 <option value="">—</option>
                 {properties.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
@@ -381,8 +379,8 @@ function AddEntryModal({
               </select>
             </div>
             <div>
-              <label htmlFor="comms-work-order-id" className="label">Work Order (optional)</label>
-              <select id="comms-work-order-id" name="work_order_id" className="input">
+              <label className="label">Work Order (optional)</label>
+              <select name="work_order_id" className="input">
                 <option value="">—</option>
                 {workOrders.map((w) => (
                   <option key={w.id} value={w.id}>{w.title}</option>

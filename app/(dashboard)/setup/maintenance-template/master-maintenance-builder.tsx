@@ -122,6 +122,8 @@ export function MasterMaintenanceBuilder({
                   key={s.title}
                   className={`flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0 transition-colors${alreadyAdded ? ' opacity-40' : ' cursor-pointer'}`}
                   style={isSelected && !alreadyAdded ? { background: 'var(--accent-gold-dim)' } : {}}
+                  role={alreadyAdded ? undefined : 'button'}
+                  tabIndex={alreadyAdded ? undefined : 0}
                   onClick={() => {
                     if (alreadyAdded) return
                     setSelectedSuggestions((prev) => {
@@ -129,6 +131,16 @@ export function MasterMaintenanceBuilder({
                       next.has(s.title) ? next.delete(s.title) : next.add(s.title)
                       return next
                     })
+                  }}
+                  onKeyDown={alreadyAdded ? undefined : (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setSelectedSuggestions((prev) => {
+                        const next = new Set(prev)
+                        next.has(s.title) ? next.delete(s.title) : next.add(s.title)
+                        return next
+                      })
+                    }
                   }}
                 >
                   <input
@@ -177,9 +189,8 @@ export function MasterMaintenanceBuilder({
             <div className="flex-1 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor={`schedule-${i}-title`} className="label">Title *</label>
+                  <label className="label">Title *</label>
                   <input
-                    id={`schedule-${i}-title`}
                     type="text"
                     value={s.title}
                     onChange={(e) => update(i, { title: e.target.value })}
@@ -188,9 +199,8 @@ export function MasterMaintenanceBuilder({
                   />
                 </div>
                 <div>
-                  <label htmlFor={`schedule-${i}-frequency`} className="label">Frequency</label>
+                  <label className="label">Frequency</label>
                   <select
-                    id={`schedule-${i}-frequency`}
                     value={s.frequency}
                     onChange={(e) => update(i, { frequency: e.target.value })}
                     className="input"
@@ -201,9 +211,8 @@ export function MasterMaintenanceBuilder({
                   </select>
                 </div>
                 <div>
-                  <label htmlFor={`schedule-${i}-specialty`} className="label">Specialty</label>
+                  <label className="label">Specialty</label>
                   <select
-                    id={`schedule-${i}-specialty`}
                     value={s.specialty ?? ''}
                     onChange={(e) => update(i, { specialty: e.target.value || null })}
                     className="input"
@@ -215,9 +224,8 @@ export function MasterMaintenanceBuilder({
                   </select>
                 </div>
                 <div>
-                  <label htmlFor={`schedule-${i}-estimated-cost`} className="label">Est. Cost (optional)</label>
+                  <label className="label">Est. Cost (optional)</label>
                   <input
-                    id={`schedule-${i}-estimated-cost`}
                     type="number"
                     min={0}
                     step={0.01}
@@ -229,9 +237,8 @@ export function MasterMaintenanceBuilder({
                 </div>
               </div>
               <div>
-                <label htmlFor={`schedule-${i}-description`} className="label">Description (optional)</label>
+                <label className="label">Description (optional)</label>
                 <textarea
-                  id={`schedule-${i}-description`}
                   value={s.description ?? ''}
                   onChange={(e) => update(i, { description: e.target.value || null })}
                   rows={2}

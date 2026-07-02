@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useActionState, useRef, useEffect, useCallback } from 'react'
+import { useState, useTransition, useActionState, useRef, useEffect } from 'react'
 import { Pencil, X, Check, Loader2, Upload, Users2, FileText, CalendarDays, Send } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
@@ -128,21 +128,6 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
     return () => clearTimeout(t)
   }, [inviteResult])
 
-  const handleInviteAll = useCallback(() => {
-    startInviteAll(async () => {
-      const result = await inviteAllUninvitedCrew()
-      if (result.error) {
-        setInviteResult(result.error)
-      } else {
-        setInviteResult(
-          result.sent > 0
-            ? `${result.sent} invite${result.sent !== 1 ? 's' : ''} sent`
-            : 'No new invites to send'
-        )
-      }
-    })
-  }, [])
-
   return (
     <div className="space-y-6">
       <div className="card">
@@ -163,7 +148,20 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
             {uninvitedCount > 0 && (
               <button
                 disabled={inviting}
-                onClick={handleInviteAll}
+                onClick={() =>
+                  startInviteAll(async () => {
+                    const result = await inviteAllUninvitedCrew()
+                    if (result.error) {
+                      setInviteResult(result.error)
+                    } else {
+                      setInviteResult(
+                        result.sent > 0
+                          ? `${result.sent} invite${result.sent !== 1 ? 's' : ''} sent`
+                          : 'No new invites to send'
+                      )
+                    }
+                  })
+                }
                 className="btn-secondary text-sm"
               >
                 <Send className="w-4 h-4" />
@@ -263,14 +261,20 @@ function CrewCardModal({
   member,
   availability,
   onClose,
-}: Readonly<{
+}: {
   member:       CrewMember
   availability: CrewAvailabilityEntry[]
   onClose:      () => void
-}>) {
+}) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-         onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      role="button"
+      tabIndex={0}
+      onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
+      aria-label="Close modal"
+    >
       <div
         className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm"
         style={{ background: 'var(--bg-card)' }}
@@ -433,7 +437,7 @@ function CrewCardModal({
   )
 }
 
-function InviteButton({ memberId, inviteSentAt }: Readonly<{ memberId: string; inviteSentAt: string | null }>) {
+function InviteButton({ memberId, inviteSentAt }: { memberId: string; inviteSentAt: string | null }) {
   const [sent, setSent]   = useState(false)
   const [err, setErr]     = useState<string | null>(null)
   const [clicked, setClicked] = useState(false)
@@ -474,7 +478,7 @@ function InviteButton({ memberId, inviteSentAt }: Readonly<{ memberId: string; i
 
 // ── Add single crew member ────────────────────────────────────────────────────
 
-function AddCrewForm({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
+function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
   const [state, formAction, pending] = useActionState(addCrewMember, null)
 
   if (state?.success) {
@@ -552,7 +556,7 @@ function AddCrewForm({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
 
 // ── Bulk upload ───────────────────────────────────────────────────────────────
 
-function BulkCrewUpload({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
+function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode]         = useState<'csv' | 'paste'>('csv')
   const [preview, setPreview]   = useState<ParsedRow[] | null>(null)
   const [pasteText, setPaste]   = useState('')
@@ -754,7 +758,7 @@ function BulkCrewUpload({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
 
 // ── Crew row ──────────────────────────────────────────────────────────────────
 
-function CrewRow({ member, onSelect }: Readonly<{ member: CrewMember; onSelect: (m: CrewMember) => void }>) {
+function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewMember) => void }) {
   const [editing, setEditing]         = useState(false)
   const [name, setName]               = useState(member.name)
   const [roleVal, setRoleVal]         = useState<CrewRole>(member.role ?? 'general')
@@ -845,7 +849,13 @@ function CrewRow({ member, onSelect }: Readonly<{ member: CrewMember; onSelect: 
   }
 
   return (
-    <tr className="hover:bg-raised-themed transition-colors cursor-pointer" onClick={() => onSelect(member)}>
+    <tr
+      className="hover:bg-raised-themed transition-colors cursor-pointer"
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(member)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(member) } }}
+    >
       <td className="py-2.5 pr-4 font-medium text-primary-themed">{member.name}</td>
       <td className="py-2.5 pr-4">
         <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>

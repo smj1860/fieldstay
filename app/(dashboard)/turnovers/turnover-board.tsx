@@ -235,7 +235,7 @@ function CrewAssignment({
 
           {open && available.length > 0 && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} />
+              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} role="button" tabIndex={0} aria-label="Close" onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenChange(false) } }} />
               <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg py-1 min-w-[160px]">
                 {available.map(c => (
                   <button
@@ -256,7 +256,7 @@ function CrewAssignment({
 
           {open && available.length === 0 && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} />
+              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} role="button" tabIndex={0} aria-label="Close" onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenChange(false) } }} />
               <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg p-3 min-w-[140px]">
                 <p className="text-xs text-muted-themed">All crew assigned</p>
               </div>
@@ -382,6 +382,10 @@ function TurnoverCard({
       <div
         className="flex items-start gap-3 p-4 cursor-pointer"
         onClick={() => setExpanded((e) => !e)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded((prev) => !prev) } }}
       >
         {/* Bulk-select checkbox */}
         <input
@@ -522,6 +526,10 @@ function TurnoverCard({
           className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
           style={{ background: 'rgba(0,0,0,0.5)' }}
           onClick={() => setShowQuickFlag(false)}
+          role="button"
+          tabIndex={0}
+          aria-label="Close"
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowQuickFlag(false) } }}
         >
           <div
             className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 pb-8 sm:pb-5"
@@ -606,9 +614,8 @@ function TurnoverCard({
           {/* Flag notes input */}
           {showFlagInput && (
             <div className="space-y-2">
-              <label htmlFor="flag-notes" className="text-xs font-medium text-secondary-themed">What needs attention?</label>
+              <label className="text-xs font-medium text-secondary-themed">What needs attention?</label>
               <textarea
-                id="flag-notes"
                 value={flagNotes}
                 onChange={(e) => setFlagNotes(e.target.value)}
                 rows={2}
@@ -818,8 +825,8 @@ function AddTurnoverModal({
 
         <form action={async (fd) => { await action(fd); if (!state?.error) onClose() }} className="space-y-4">
           <div>
-            <label htmlFor="property-id" className="label">Property</label>
-            <select id="property-id" name="property_id" required className="input">
+            <label className="label">Property</label>
+            <select name="property_id" required className="input">
               <option value="">Select property…</option>
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
@@ -828,27 +835,27 @@ function AddTurnoverModal({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label htmlFor="checkout-date" className="label">Checkout Date</label>
-              <input id="checkout-date" name="checkout_date" type="date" required className="input" />
+              <label className="label">Checkout Date</label>
+              <input name="checkout_date" type="date" required className="input" />
             </div>
             <div>
-              <label htmlFor="checkout-time" className="label">Checkout Time</label>
-              <input id="checkout-time" name="checkout_time" type="time" defaultValue="11:00" className="input" />
+              <label className="label">Checkout Time</label>
+              <input name="checkout_time" type="time" defaultValue="11:00" className="input" />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label htmlFor="checkin-date" className="label">Next Check-in Date</label>
-              <input id="checkin-date" name="checkin_date" type="date" required className="input" />
+              <label className="label">Next Check-in Date</label>
+              <input name="checkin_date" type="date" required className="input" />
             </div>
             <div>
-              <label htmlFor="checkin-time" className="label">Check-in Time</label>
-              <input id="checkin-time" name="checkin_time" type="time" defaultValue="15:00" className="input" />
+              <label className="label">Check-in Time</label>
+              <input name="checkin_time" type="time" defaultValue="15:00" className="input" />
             </div>
           </div>
           <div>
-            <label htmlFor="turnover-notes" className="label">Notes (optional)</label>
-            <textarea id="turnover-notes" name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
+            <label className="label">Notes (optional)</label>
+            <textarea name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
           </div>
           <div className="flex gap-3 pt-2">
             <button type="submit" disabled={pending} className="btn-primary flex-1">

@@ -436,8 +436,9 @@ function PropertyGuidebookRow({
 
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', cursor: 'pointer', justifyContent: 'space-between' }}
+      <button
+        type="button"
+        style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', cursor: 'pointer', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', textAlign: 'left' }}
         onClick={() => setExpanded((e) => !e)}
       >
         <div>
@@ -453,7 +454,7 @@ function PropertyGuidebookRow({
         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           {expanded ? '▲ Close' : '▼ Configure'}
         </span>
-      </div>
+      </button>
 
       {expanded && (
         <PropertyGuidebookForm property={property} appUrl={appUrl} isGuidebookActive={isGuidebookActive} />
@@ -568,13 +569,12 @@ function PropertyGuidebookForm({
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
 
         <div style={{ gridColumn: '1 / -1' }}>
-          <label htmlFor={`guest-url-slug-${property.id}`} style={labelStyle}>Guest URL Slug</label>
+          <label style={labelStyle}>Guest URL Slug</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '13px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
               {appUrl}/g/
             </span>
             <input
-              id={`guest-url-slug-${property.id}`}
               style={{ ...inputStyle, flex: 1 }}
               value={config.slug}
               onChange={(e) => setConfig((c) => c && ({ ...c, slug: e.target.value }))}
@@ -592,18 +592,17 @@ function PropertyGuidebookForm({
         </div>
 
         <div>
-          <label htmlFor={`wifi-network-${property.id}`} style={labelStyle}>WiFi Network</label>
-          <input id={`wifi-network-${property.id}`} style={inputStyle} value={config.wifiNetwork} onChange={(e) => setConfig((c) => c && ({ ...c, wifiNetwork: e.target.value }))} placeholder="CabinWifi_5G" />
+          <label style={labelStyle}>WiFi Network</label>
+          <input style={inputStyle} value={config.wifiNetwork} onChange={(e) => setConfig((c) => c && ({ ...c, wifiNetwork: e.target.value }))} placeholder="CabinWifi_5G" />
         </div>
         <div>
-          <label htmlFor={`wifi-password-${property.id}`} style={labelStyle}>WiFi Password</label>
-          <input id={`wifi-password-${property.id}`} style={inputStyle} value={config.wifiPassword} onChange={(e) => setConfig((c) => c && ({ ...c, wifiPassword: e.target.value }))} placeholder="bearhollowguest2024" />
+          <label style={labelStyle}>WiFi Password</label>
+          <input style={inputStyle} value={config.wifiPassword} onChange={(e) => setConfig((c) => c && ({ ...c, wifiPassword: e.target.value }))} placeholder="bearhollowguest2024" />
         </div>
 
         <div>
-          <label htmlFor={`check-in-instructions-${property.id}`} style={labelStyle}>Check-In Instructions</label>
+          <label style={labelStyle}>Check-In Instructions</label>
           <textarea
-            id={`check-in-instructions-${property.id}`}
             style={{ ...inputStyle, minHeight: '80px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.checkInInstructions}
             onChange={(e) => setConfig((c) => c && ({ ...c, checkInInstructions: e.target.value }))}
@@ -611,9 +610,8 @@ function PropertyGuidebookForm({
           />
         </div>
         <div>
-          <label htmlFor={`check-out-instructions-${property.id}`} style={labelStyle}>Check-Out Instructions</label>
+          <label style={labelStyle}>Check-Out Instructions</label>
           <textarea
-            id={`check-out-instructions-${property.id}`}
             style={{ ...inputStyle, minHeight: '80px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.checkOutInstructions}
             onChange={(e) => setConfig((c) => c && ({ ...c, checkOutInstructions: e.target.value }))}
@@ -622,9 +620,8 @@ function PropertyGuidebookForm({
         </div>
 
         <div style={{ gridColumn: '1 / -1' }}>
-          <label htmlFor={`house-rules-${property.id}`} style={labelStyle}>House Rules (optional)</label>
+          <label style={labelStyle}>House Rules (optional)</label>
           <textarea
-            id={`house-rules-${property.id}`}
             style={{ ...inputStyle, minHeight: '60px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.houseRules}
             onChange={(e) => setConfig((c) => c && ({ ...c, houseRules: e.target.value }))}
@@ -742,10 +739,9 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
 
         {/* Gap threshold */}
         <div>
-          <label htmlFor="gap-threshold-days" style={labelStyle}>Only offer when the gap is at least</label>
+          <label style={labelStyle}>Only offer when the gap is at least</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
-              id="gap-threshold-days"
               type="number" min={1} value={gapThreshold}
               onChange={(e) => setGapThreshold(e.target.value)}
               style={inputStyle}
@@ -756,10 +752,9 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
 
         {/* Discount offer */}
         <div>
-          <label htmlFor="extension-discount-pct" style={labelStyle}>Include a discount offer (optional)</label>
+          <label style={labelStyle}>Include a discount offer (optional)</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
-              id="extension-discount-pct"
               type="number" min={0} max={100} value={discount}
               onChange={(e) => setDiscount(e.target.value)}
               placeholder="—"
@@ -771,7 +766,7 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
 
         {/* Contact method */}
         <div>
-          <span style={labelStyle}>When a guest is interested</span>
+          <label style={labelStyle}>When a guest is interested</label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {([
               { value: 'ownerrez_url', label: 'Link guests to your OwnerRez booking page' },
@@ -803,10 +798,9 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
 
         {/* Message timing */}
         <div>
-          <label htmlFor="extension-days-before" style={labelStyle}>Send the offer</label>
+          <label style={labelStyle}>Send the offer</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
-              id="extension-days-before"
               type="number" min={1} value={daysBefore}
               onChange={(e) => setDaysBefore(e.target.value)}
               style={inputStyle}

@@ -42,11 +42,11 @@ export function CrewShell({
   crewName,
   userId,
   children,
-}: Readonly<{
+}: {
   crewName: string
   userId:   string
   children: React.ReactNode
-}>) {
+}) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -202,7 +202,7 @@ export function CrewShell({
   )
 }
 
-function CrewBottomNav({ userId, onHelpClick }: Readonly<{ userId: string; onHelpClick: () => void }>) {
+function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: () => void }) {
   const pathname = usePathname()
   const db = useDexieDb()
 
@@ -293,7 +293,11 @@ function SyncStatus() {
       {showInfo && (
         <div
           className="fixed inset-0 z-50 flex items-end"
+          role="button"
+          tabIndex={0}
+          aria-label="Close offline info"
           onClick={() => setShowInfo(false)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowInfo(false) } }}
         >
           <div className="absolute inset-0 bg-black/40" />
           <div
@@ -342,7 +346,7 @@ function SyncStatus() {
 
 // ── Info / FAQ bottom sheet ────────────────────────────────────────────────────
 
-function CrewFaqPanel({ onClose }: Readonly<{ onClose: () => void }>) {
+function CrewFaqPanel({ onClose }: { onClose: () => void }) {
   return (
     <div
       style={{
@@ -350,7 +354,11 @@ function CrewFaqPanel({ onClose }: Readonly<{ onClose: () => void }>) {
         background: 'rgba(0,0,0,0.4)',
         display: 'flex', alignItems: 'flex-end',
       }}
+      role="button"
+      tabIndex={0}
+      aria-label="Close FAQ panel"
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         style={{
@@ -390,7 +398,7 @@ function CrewFaqPanel({ onClose }: Readonly<{ onClose: () => void }>) {
   )
 }
 
-function FaqItem({ question, answer }: Readonly<{ question: string; answer: string }>) {
+function FaqItem({ question, answer }: { question: string; answer: string }) {
   const [open, setOpen] = useState(false)
   return (
     <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 12, marginBottom: 12 }}>

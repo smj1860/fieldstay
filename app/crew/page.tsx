@@ -41,7 +41,7 @@ function calcTravelSummary(turnovers: TurnoverRow[], propertyMap: Record<string,
   for (let i = 0; i < stops.length - 1; i++) {
     const a = stops[i]!
     const b = stops[i + 1]!
-    if (a.lat === null || a.lng === null || b.lat === null || b.lng === null) {
+    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) {
       return { miles: 0, minutes: 0, available: false }
     }
     miles += distanceMiles(a.lat, a.lng, b.lat, b.lng)
@@ -50,7 +50,7 @@ function calcTravelSummary(turnovers: TurnoverRow[], propertyMap: Record<string,
   return { miles, minutes, available: true }
 }
 
-function TurnoverCard({ t, property }: Readonly<{ t: TurnoverRow; property?: PropertyRow }>) {
+function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow }) {
   const checkout = new Date(t.checkout_datetime)
   const isUrgent = t.priority === 'urgent' || t.priority === 'high'
 
@@ -105,7 +105,7 @@ function TurnoverCard({ t, property }: Readonly<{ t: TurnoverRow; property?: Pro
   )
 }
 
-function WorkOrderCard({ wo, property }: Readonly<{ wo: CrewWorkOrderRow; property?: PropertyRow }>) {
+function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: PropertyRow }) {
   const fullAddress = [property?.address, property?.city, property?.state]
     .filter(Boolean).join(', ')
 
@@ -154,7 +154,7 @@ function WorkOrderCard({ wo, property }: Readonly<{ wo: CrewWorkOrderRow; proper
   )
 }
 
-function EmptyColumn({ label }: Readonly<{ label: string }>) {
+function EmptyColumn({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
       <p className="text-xs text-accent-400">No {label.toLowerCase()}</p>
@@ -252,10 +252,10 @@ export default function CrewDashboardPage() {
   // Work orders split by scheduled_date: today (or overdue) vs upcoming.
   // WOs with no scheduled date land at the bottom of the Upcoming column.
   const todayWorkOrders = (allWorkOrders as CrewWorkOrderRow[]).filter(
-    (wo) => wo.scheduled_date !== null && wo.scheduled_date <= today
+    (wo) => wo.scheduled_date != null && wo.scheduled_date <= today
   )
   const upcomingWorkOrders = (allWorkOrders as CrewWorkOrderRow[]).filter(
-    (wo) => wo.scheduled_date === null || wo.scheduled_date > today
+    (wo) => wo.scheduled_date == null || wo.scheduled_date > today
   )
 
   const travelSummary = calcTravelSummary(todayTurnovers, propertyMap as Record<string, PropertyRow>)
@@ -381,7 +381,7 @@ export default function CrewDashboardPage() {
   )
 }
 
-function FeedbackModal({ onClose }: Readonly<{ onClose: () => void }>) {
+function FeedbackModal({ onClose }: { onClose: () => void }) {
   const [text, setText]           = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
@@ -412,12 +412,16 @@ function FeedbackModal({ onClose }: Readonly<{ onClose: () => void }>) {
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label="Close feedback modal"
       style={{
         position: 'fixed', inset: 0, zIndex: 50,
         background: 'rgba(0,0,0,0.4)',
         display: 'flex', alignItems: 'flex-end',
       }}
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         style={{

@@ -710,7 +710,11 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden"
           style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+          role="button"
+          tabIndex={0}
+          aria-label="Close dialog"
           onClick={e => { if (e.target === e.currentTarget) setShowDispatch(false) }}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDispatch(false) } }}
         >
           <div
             className="w-full max-w-sm rounded-2xl p-6 space-y-4"
@@ -740,11 +744,10 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
                 {/* Vendor selector */}
                 {vendors.filter(v => v.email).length > 0 && (
                   <div className="space-y-1.5">
-                    <label htmlFor="dispatch-vendor-select" className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                    <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
                       Select Vendor
                     </label>
                     <select
-                      id="dispatch-vendor-select"
                       className="input text-sm w-full"
                       value={dispatchEmail}
                       onChange={(e) => {
@@ -763,13 +766,12 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
 
                 {/* Free-text email fallback */}
                 <div className="space-y-1.5">
-                  <label htmlFor="dispatch-vendor-email" className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                  <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
                     {vendors.filter(v => v.email).length > 0
                       ? 'Or enter an email directly for a one-off contractor:'
                       : 'Vendor Email *'}
                   </label>
                   <input
-                    id="dispatch-vendor-email"
                     type="email"
                     value={dispatchEmail}
                     onChange={e => {
@@ -785,11 +787,10 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
 
                 {/* Vendor name */}
                 <div className="space-y-1.5">
-                  <label htmlFor="dispatch-vendor-name" className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
+                  <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
                     Vendor Name
                   </label>
                   <input
-                    id="dispatch-vendor-name"
                     type="text"
                     value={dispatchName}
                     onChange={e => setDispatchName(e.target.value)}
