@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useActionState, useRef, useEffect } from 'react'
+import { useState, useTransition, useActionState, useRef, useEffect, useCallback } from 'react'
 import { Pencil, X, Check, Loader2, Upload, Users2, FileText, CalendarDays, Send } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
@@ -128,6 +128,21 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
     return () => clearTimeout(t)
   }, [inviteResult])
 
+  const handleInviteAll = useCallback(() => {
+    startInviteAll(async () => {
+      const result = await inviteAllUninvitedCrew()
+      if (result.error) {
+        setInviteResult(result.error)
+      } else {
+        setInviteResult(
+          result.sent > 0
+            ? `${result.sent} invite${result.sent !== 1 ? 's' : ''} sent`
+            : 'No new invites to send'
+        )
+      }
+    })
+  }, [])
+
   return (
     <div className="space-y-6">
       <div className="card">
@@ -148,20 +163,7 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
             {uninvitedCount > 0 && (
               <button
                 disabled={inviting}
-                onClick={() =>
-                  startInviteAll(async () => {
-                    const result = await inviteAllUninvitedCrew()
-                    if (result.error) {
-                      setInviteResult(result.error)
-                    } else {
-                      setInviteResult(
-                        result.sent > 0
-                          ? `${result.sent} invite${result.sent !== 1 ? 's' : ''} sent`
-                          : 'No new invites to send'
-                      )
-                    }
-                  })
-                }
+                onClick={handleInviteAll}
                 className="btn-secondary text-sm"
               >
                 <Send className="w-4 h-4" />

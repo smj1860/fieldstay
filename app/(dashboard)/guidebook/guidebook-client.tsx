@@ -149,6 +149,16 @@ export function GuidebookClient({
 
   const editingSponsor = editingSlot !== null ? (sponsorsBySlot[editingSlot] ?? null) : null
 
+  const statusSubtitle = isGuidebookActive
+    ? activeSponsorCount >= 6
+      ? '$25/month credit applied to your plan'
+      : activeSponsorCount >= 5
+      ? '$10/month credit applied to your plan'
+      : 'Add sponsors to earn a plan credit (5 = $10/mo, 6 = $25/mo)'
+    : config?.grace_period_ends_at
+    ? `Grace period — fill the slot before ${new Date(config.grace_period_ends_at).toLocaleDateString()} to avoid losing your guidebook`
+    : `Add ${sponsorsNeeded} more sponsor${sponsorsNeeded !== 1 ? 's' : ''} to unlock`
+
   return (
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '32px 24px' }}>
 
@@ -274,15 +284,7 @@ export function GuidebookClient({
                 : `${activeSponsorCount} of 3 sponsors · Guidebook locked`}
             </div>
             <div style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '2px' }}>
-              {isGuidebookActive
-                ? activeSponsorCount >= 6
-                  ? '$25/month credit applied to your plan'
-                  : activeSponsorCount >= 5
-                  ? '$10/month credit applied to your plan'
-                  : 'Add sponsors to earn a plan credit (5 = $10/mo, 6 = $25/mo)'
-                : config?.grace_period_ends_at
-                ? `Grace period — fill the slot before ${new Date(config.grace_period_ends_at).toLocaleDateString()} to avoid losing your guidebook`
-                : `Add ${sponsorsNeeded} more sponsor${sponsorsNeeded !== 1 ? 's' : ''} to unlock`}
+              {statusSubtitle}
             </div>
           </div>
         </div>
