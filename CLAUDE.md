@@ -715,3 +715,68 @@ if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 40
 - Nested joins always return arrays, not single objects
 - RLS policies need both `USING` and `WITH CHECK` on UPDATE — `USING` alone is not enough
 - `supabase.raw()` and `.modify()` are not used in this codebase
+
+---
+
+## Code Quality Standards
+
+These rules are enforced by SonarQube and must be followed in all new code
+and refactors. Violations will appear as SonarQube findings on the next scan.
+
+### Complexity & Structure
+- **Cognitive complexity ≤ 15** per function — extract named helper functions,
+  custom hooks, or named predicates to reduce branching
+- **Nesting depth ≤ 4** — use guard clauses and early returns to flatten nested
+  `if` blocks rather than indenting further
+- **No nested template literals** — extract inner expressions to named variables
+  first, or use `cn()` for className construction if already imported in the file
+- **No invariant conditionals** — a ternary where both branches return the same
+  value is always a bug; review intent before fixing
+
+### Type Safety
+- All component props must be wrapped in `Readonly<Props>` or
+  `Readonly<{ ... }>` — no mutable prop types
+- `useState` setters must exactly follow the `set[ValueName]` convention:
+  `const [confirmDelete, setConfirmDelete]` not `setConfirm`
+- Use `!== null && value !== undefined` or nullish coalescing `??` — never
+  loose `!= null` checks
+- Optional chaining `?.` over manual `&&` null guards wherever applicable
+- Never use `as any` or `// @ts-ignore` — fix the type, not the error
+
+### React Rules
+- **Rules of Hooks:** Hooks must always be called in the exact same order on
+  every render. Never call `useState`, `useEffect`, `useCallback`, `useMemo`,
+  `useTransition`, or any hook:
+  - Inside an `if` / `else` block
+  - After an early `return` statement
+  - Inside a loop
+  - Move all hooks to the top of the component before any conditional logic.
+    If a guard is needed before the hooks run, extract the inner content to a
+    child component.
+- Non-native elements (`div`, `span`, `li`, etc.) with `onClick` must have:
+  - `role="button"` (or appropriate ARIA role)
+  - `tabIndex={0}`
+  - `onKeyDown` handler firing on `Enter` and `Space`
+  - Prefer converting to an actual `<button type="button">` wherever possible —
+    native elements get keyboard handling for free
+- `onMouseOver` must always be paired with `onFocus` on the same element
+- `onMouseOut` must always be paired with `onBlur` on the same element
+- Every `<label>` must have `htmlFor` matching the `id` of its associated
+  control — no orphaned labels
+
+### Security & Best Practices
+- **Never use `Math.random()`** for IDs, storage paths, or tokens —
+  use `crypto.randomUUID()` (native in Node.js 14.17+ and all modern browsers,
+  no import needed)
+- **Never use `window` directly** — use `globalThis` for SSR safety in Next.js.
+  `window` throws a ReferenceError during server-side rendering
+- Remove all unused imports before committing — run `npx tsc --noEmit` to
+  surface them if ESLint is not configured to catch them
+- No chained ternary expressions — break them into `if/else` blocks or a
+  named classification function
+
+### Accessibility Checklist (apply to all new UI)
+- Non-native click targets → `role`, `tabIndex`, `onKeyDown` or convert to `<button>`
+- Mouse hover events → paired focus events
+- Form labels → `htmlFor` on every `<label>`
+- Inputs without a visible label → `aria-label` attribute required
