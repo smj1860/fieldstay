@@ -47,9 +47,9 @@ export async function dispatchWorkOrderToVendor(input: {
     const { error: updateErr } = await supabase
       .from('work_orders')
       .update({
-        public_token:            token,
-        public_token_expires_at: expiresAt.toISOString(),
-        vendor_dispatch_email:   input.vendorEmail,
+        completion_token:            token,
+        completion_token_expires_at: expiresAt.toISOString(),
+        vendor_dispatch_email:       input.vendorEmail,
       })
       .eq('id', input.workOrderId)
 
@@ -78,7 +78,7 @@ export async function dispatchWorkOrderToVendor(input: {
         workOrderId:      wo.id,
         woNumber:         wo.wo_number ?? '',
         token,
-        publicUrl:        `${APP_URL}/wo/${token}`,
+        publicUrl:        `${APP_URL}/work-orders/${token}`,
         vendorEmail:      input.vendorEmail,
         vendorName:       input.vendorName,
         propertyName:     (property as { name: string } | null)?.name  ?? 'Property',
@@ -93,7 +93,7 @@ export async function dispatchWorkOrderToVendor(input: {
     })
 
     revalidatePath('/maintenance')
-    return { success: true, token, publicUrl: `${APP_URL}/wo/${token}` }
+    return { success: true, token, publicUrl: `${APP_URL}/work-orders/${token}` }
 
   } catch (err) {
     console.error('[dispatchWorkOrderToVendor]', err)

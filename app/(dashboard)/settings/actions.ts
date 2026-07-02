@@ -348,6 +348,7 @@ export async function addVendor(
   const service_zip    = (formData.get('service_zip') as string)?.trim() || null
 
   if (!name) return { error: 'Vendor name is required' }
+  if (!email) return { error: 'Email address is required. Vendors need an email to receive work order dispatch notifications.' }
 
   const { data: vendor, error } = await supabase.from('vendors').insert({
     org_id: membership.org_id,

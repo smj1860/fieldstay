@@ -2,6 +2,8 @@ import { inngest } from '@/lib/inngest/client'
 import { NonRetriableError } from 'inngest'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
+import { render } from '@react-email/render'
+import WorkOrderDispatchEmail from '@/emails/WorkOrderDispatch'
 import { renderWorkOrderEmail } from '@/emails/work-order'
 import { getPmEmail } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
@@ -21,31 +23,18 @@ export const handleWorkOrderCreated = inngest.createFunction(
     const { work_order_id, property_id, org_id, portal_enabled } = event.data
 
     if (portal_enabled) {
-      // step.sendEvent must not be called from inside a step.run callback —
-      // step.run's return value is memoized as plain data, so the event send
-      // is hoisted out into its own step below the DB work.
-      // MEDIUM-6: "work order not found" and "vendor has no email" are
-      // permanent failures — retrying will never make them succeed. They're
-      // thrown as NonRetriableError (instead of silently returning null) so
-      // they show up distinctly in Inngest's dashboard. The try/catch below
-      // swallows that so the independent overdue-check logic further down
-      // still runs even when dispatch can't proceed.
-      let dispatchEventData: {
-        workOrderId: string; woNumber: string; token: string; publicUrl: string
-        vendorEmail: string; vendorName: string; propertyName: string; propertyAddress: string
-        title: string; description: string; nteAmount: number
-        dispatcherName: string; dispatcherOrg: string; dispatcherPhone: string | null
-      } | null = null
-      try {
-      dispatchEventData = await step.run('build-dispatch', async () => {
+      // ── Step 1: Build context and send vendor email ────────────────────────
+      // All dispatch work is in a single step so failures surface here, not in
+      // a secondary `workOrderDispatch` function run.
+      const dispatchResult = await step.run('dispatch-to-vendor', async () => {
         const supabase = createServiceClient()
 
         const { data: wo } = await supabase
           .from('work_orders')
           .select(`
             id, title, description, wo_number, nte_amount,
-            access_notes, lockbox_code, parking_notes,
-            vendor_id, created_by,
+            completion_token, created_by,
+            vendor_id,
             vendors ( name, email ),
             properties ( name, address ),
             organizations ( name )
@@ -60,24 +49,41 @@ export const handleWorkOrderCreated = inngest.createFunction(
         const org      = Array.isArray(wo.organizations) ? wo.organizations[0] : wo.organizations
 
         if (!vendor?.email) {
-          throw new NonRetriableError(`Work order ${work_order_id}: portal_enabled but vendor has no email`)
+          // Non-retriable: retrying will never produce an email address.
+          // Return a structured failure so the PM notification step can handle it.
+          return {
+            dispatched:  false,
+            reason:      'no_vendor_email' as const,
+            vendorName:  vendor?.name ?? null,
+          }
         }
 
-        const token     = randomBytes(32).toString('hex')
-        const expiresAt = new Date()
-        expiresAt.setDate(expiresAt.getDate() + 30)
+        // Reuse existing completion_token if WO was created with portal enabled.
+        // Only generate a new one if the WO somehow arrived here without one.
+        let token = wo.completion_token
+        if (!token) {
+          token = randomBytes(32).toString('hex')
+          const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+          const { error: tokenErr } = await supabase
+            .from('work_orders')
+            .update({
+              completion_token:            token,
+              completion_token_expires_at: expiresAt,
+              vendor_dispatch_email:       vendor.email,
+            })
+            .eq('id', work_order_id)
 
-        await supabase
-          .from('work_orders')
-          .update({
-            public_token:            token,
-            public_token_expires_at: expiresAt.toISOString(),
-            vendor_dispatch_email:   vendor.email,
-          })
-          .eq('id', work_order_id)
+          if (tokenErr) throw new Error(`Failed to write completion_token: ${tokenErr.message}`)
+        } else {
+          // Record dispatch email even if token was already set
+          await supabase
+            .from('work_orders')
+            .update({ vendor_dispatch_email: vendor.email })
+            .eq('id', work_order_id)
+        }
 
-        // Fetch dispatcher info from the user who created the WO
-        let dispatcherName = 'Your Property Manager'
+        // Build dispatcher info from the WO creator
+        let dispatcherName  = 'Your Property Manager'
         let dispatcherPhone: string | null = null
         if (wo.created_by) {
           const { data: profile } = await supabase
@@ -89,41 +95,113 @@ export const handleWorkOrderCreated = inngest.createFunction(
           if (profile?.phone)     dispatcherPhone = profile.phone
         }
 
-        return {
-          workOrderId:     wo.id,
+        const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
+        const publicUrl = `${appUrl}/work-orders/${token}`
+
+        const propertyName    = (property as { name: string } | null)?.name    ?? 'Property'
+        const propertyAddress = (property as { address: string | null } | null)?.address ?? ''
+        const orgName         = (org as { name: string } | null)?.name ?? 'FieldStay Property Management'
+
+        // Send vendor email directly — no secondary event hop
+        const html = await render(WorkOrderDispatchEmail({
           woNumber:        wo.wo_number ?? '',
-          token,
-          publicUrl:       `${process.env.NEXT_PUBLIC_APP_URL}/wo/${token}`,
-          vendorEmail:     vendor.email,
+          publicUrl,
           vendorName:      vendor.name ?? '',
-          propertyName:    (property as { name: string } | null)?.name    ?? 'Property',
-          propertyAddress: (property as { address: string | null } | null)?.address ?? '',
+          propertyName,
+          propertyAddress,
           title:           wo.title,
           description:     wo.description ?? '',
           nteAmount:       (wo.nte_amount as number | null) ?? 0,
           dispatcherName,
-          dispatcherOrg:   (org as { name: string } | null)?.name ?? 'FieldStay Property Management',
+          dispatcherOrg:   orgName,
           dispatcherPhone,
+        }))
+
+        const { error: emailErr } = await resend.emails.send(
+          {
+            from:    FROM,
+            to:      [vendor.email],
+            subject: `Work Order ${wo.wo_number ?? ''} — ${propertyName}`,
+            html,
+          },
+          { idempotencyKey: `wo-dispatch-created-${work_order_id}-${vendor.email}` }
+        )
+
+        if (emailErr) throw new Error(`Resend error: ${JSON.stringify(emailErr)}`)
+
+        logger.info(`Dispatched WO ${work_order_id} to vendor ${vendor.email}`)
+
+        return {
+          dispatched:      true,
+          vendorEmail:     vendor.email,
+          vendorName:      vendor.name ?? '',
+          propertyName,
+          publicUrl,
+          woNumber:        wo.wo_number ?? '',
+          dispatcherName,
+          orgName,
         }
       })
-      } catch (err) {
-        if (err instanceof NonRetriableError) {
-          logger.warn(`Work order ${work_order_id}: skipping dispatch — ${err.message}`)
-        } else {
-          throw err
+
+      // ── Step 2: Notify PM of dispatch outcome ──────────────────────────────
+      await step.run('notify-pm', async () => {
+        const supabase = createServiceClient()
+        const pmEmail  = await getPmEmail(supabase, org_id)
+
+        if (!pmEmail) {
+          logger.warn(`No PM email found for org ${org_id} — skipping PM notification`)
+          return { skipped: true }
         }
-      }
 
-      if (dispatchEventData) {
-        await step.sendEvent('send-dispatch-event', {
-          name: 'work-order/dispatched' as const,
-          data: dispatchEventData,
-        })
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
 
-        logger.info(`Dispatched WO ${work_order_id} to vendor ${dispatchEventData.vendorEmail} via TradeSuite portal`)
-      }
+        if (!dispatchResult.dispatched && dispatchResult.reason === 'no_vendor_email') {
+          // Vendor has no email — alert PM so they can manually notify the vendor
+          await resend.emails.send({
+            from:    FROM,
+            to:      pmEmail,
+            subject: 'Action required — vendor has no email address',
+            html: await renderPmAlert({
+              heading:  'Work order created — vendor not notified',
+              body:     `A work order was created with the vendor portal enabled, but the assigned vendor${dispatchResult.vendorName ? ` (${dispatchResult.vendorName})` : ''} has no email address on file. The vendor was not notified automatically.`,
+              details:  [
+                { label: 'Action required', value: 'Add an email address to the vendor record so future work orders dispatch automatically.' },
+              ],
+              ctaLabel: 'Go to Vendors →',
+              ctaUrl:   `${appUrl}/vendors`,
+            }),
+          })
+          return { notified: true, reason: 'no_vendor_email_warning' }
+        }
+
+        if (dispatchResult.dispatched) {
+          // Confirm to PM that vendor was notified
+          await resend.emails.send(
+            {
+              from:    FROM,
+              to:      pmEmail,
+              subject: `Work order dispatched — ${dispatchResult.woNumber} · ${dispatchResult.propertyName}`,
+              html: await renderPmAlert({
+                heading:  'Work order sent to vendor',
+                body:     `${dispatchResult.vendorName} has been notified of work order ${dispatchResult.woNumber} and can access the job details and sign off via the link in their email.`,
+                details:  [
+                  { label: 'Property', value: dispatchResult.propertyName ?? null },
+                  { label: 'Vendor',   value: dispatchResult.vendorName   ?? null },
+                ],
+                ctaLabel: 'View work order →',
+                ctaUrl:   `${appUrl}/maintenance/${work_order_id}`,
+              }),
+            },
+            { idempotencyKey: `wo-pm-notified-created-${work_order_id}` }
+          )
+          return { notified: true }
+        }
+
+        return { skipped: true }
+      })
     }
 
+    // ── Overdue check (unchanged from original) ────────────────────────────
     if (event.data.vendor_id) {
       const scheduledDate = await step.run('fetch-scheduled-date', async () => {
         const supabase = createServiceClient()
