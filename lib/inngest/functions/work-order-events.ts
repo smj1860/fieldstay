@@ -52,7 +52,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
           // Non-retriable: retrying will never produce an email address.
           // Return a structured failure so the PM notification step can handle it.
           return {
-            dispatched:  false,
+            dispatched:  false as const,
             reason:      'no_vendor_email' as const,
             vendorName:  vendor?.name ?? null,
           }
@@ -132,7 +132,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
         logger.info(`Dispatched WO ${work_order_id} to vendor ${vendor.email}`)
 
         return {
-          dispatched:      true,
+          dispatched:      true as const,
           vendorEmail:     vendor.email,
           vendorName:      vendor.name ?? '',
           propertyName,
