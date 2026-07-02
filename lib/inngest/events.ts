@@ -570,6 +570,28 @@ export type FieldStayEvents = {
   }
 
   // ----------------------------------------------------------
+  // Hospitable Integration
+  // ----------------------------------------------------------
+
+  'integration/hospitable.connected': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
+  'integration/hospitable.sync.requested': {
+    data: {
+      provider_id:  string
+      event_type:   string
+      entity_type:  string
+      entity_id:    string
+      triggered_at: string
+    }
+  }
+
+  // ----------------------------------------------------------
   // Hostaway Integration
   // ----------------------------------------------------------
 

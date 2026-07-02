@@ -260,6 +260,17 @@ export async function GET(
         data: { org_id: membership.org_id, user_id: appUserId },
       })
     }
+
+    if (providerId === 'hospitable') {
+      await inngest.send({
+        name: 'integration/hospitable.connected',
+        data: {
+          user_id:          appUserId,
+          org_id:           membership?.org_id ?? '',
+          external_user_id: tokenData.externalUserId,
+        },
+      })
+    }
   } catch (err) {
     console.error(`[OAuth:${providerId}] Vault storage failed:`, err)
     return errorRedirect('storage_failed')
