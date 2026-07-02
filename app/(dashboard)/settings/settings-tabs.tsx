@@ -82,7 +82,13 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }
             onMouseOver={(e) => {
               if (activeTab !== tab) e.currentTarget.style.color = 'var(--text-secondary)'
             }}
+            onFocus={(e) => {
+              if (activeTab !== tab) e.currentTarget.style.color = 'var(--text-secondary)'
+            }}
             onMouseOut={(e) => {
+              if (activeTab !== tab) e.currentTarget.style.color = 'var(--text-muted)'
+            }}
+            onBlur={(e) => {
               if (activeTab !== tab) e.currentTarget.style.color = 'var(--text-muted)'
             }}
           >
@@ -525,7 +531,9 @@ function NotificationsTab({ org }: { org: Organization }) {
               className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors"
               style={{ background: 'transparent' }}
               onMouseOver={(e) => (e.currentTarget.style.background = 'var(--bg-raised)')}
+              onFocus={(e)     => (e.currentTarget.style.background = 'var(--bg-raised)')}
               onMouseOut={(e)  => (e.currentTarget.style.background = 'transparent')}
+              onBlur={(e)      => (e.currentTarget.style.background = 'transparent')}
             >
               <input
                 type="checkbox"
@@ -555,7 +563,9 @@ function NotificationsTab({ org }: { org: Organization }) {
                 className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors"
                 style={{ background: 'transparent' }}
                 onMouseOver={(e) => (e.currentTarget.style.background = 'var(--bg-raised)')}
+                onFocus={(e)     => (e.currentTarget.style.background = 'var(--bg-raised)')}
                 onMouseOut={(e)  => (e.currentTarget.style.background = 'transparent')}
+                onBlur={(e)      => (e.currentTarget.style.background = 'transparent')}
               >
                 <input
                   type="checkbox"

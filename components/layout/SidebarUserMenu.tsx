@@ -101,7 +101,9 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors"
                 style={{ color: 'var(--text-primary)' }}
                 onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-card)' }}
+                onFocus={(e)     => { e.currentTarget.style.background = 'var(--bg-card)' }}
                 onMouseOut={(e)  => { e.currentTarget.style.background = 'transparent' }}
+                onBlur={(e)      => { e.currentTarget.style.background = 'transparent' }}
               >
                 <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24"
                      stroke="currentColor" strokeWidth={1.75}>
@@ -121,7 +123,9 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
                 className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors disabled:opacity-50"
                 style={{ color: '#ef4444' }}
                 onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-card)' }}
+                onFocus={(e)     => { e.currentTarget.style.background = 'var(--bg-card)' }}
                 onMouseOut={(e)  => { e.currentTarget.style.background = 'transparent' }}
+                onBlur={(e)      => { e.currentTarget.style.background = 'transparent' }}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24"
                      stroke="currentColor" strokeWidth={1.75}>

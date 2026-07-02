@@ -651,7 +651,9 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
                     type="button"
                     onClick={() => handleRating(star)}
                     onMouseEnter={() => setHoverRating(star)}
+                    onFocus={() => setHoverRating(star)}
                     onMouseLeave={() => setHoverRating(0)}
+                    onBlur={() => setHoverRating(0)}
                     disabled={ratingPending}
                     className="p-0.5 transition-transform hover:scale-110"
                   >
