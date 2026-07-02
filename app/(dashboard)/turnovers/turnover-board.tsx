@@ -1021,7 +1021,7 @@ export function TurnoverBoard({
   const [syncing,           startSync]            = useTransition()
   const [filterProp,        setFilterProp]        = useState<string>('all')
   const [filterStatus,      setFilterStatus]      = useState<string>(
-    urlStatus === 'pending_assignment' ? 'active' : 'active'
+    urlStatus === 'pending_assignment' ? 'pending_assignment' : 'active'
   )
   const [filterCrew,        setFilterCrew]        = useState<string>('all')
   const [showArchived,      setShowArchived]      = useState(false)

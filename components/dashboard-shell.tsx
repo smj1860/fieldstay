@@ -230,7 +230,13 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
           onMouseOver={(e) => {
             if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
           }}
+          onFocus={(e) => {
+            if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
+          }}
           onMouseOut={(e) => {
+            if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
+          }}
+          onBlur={(e) => {
             if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
           }}
         >
@@ -352,7 +358,17 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
               e.currentTarget.style.background = 'var(--chrome-bg-raised)'
               e.currentTarget.style.color = 'var(--chrome-text)'
             }}
+            onFocus={(e) => {
+              e.currentTarget.style.background = 'var(--chrome-bg-raised)'
+              e.currentTarget.style.color = 'var(--chrome-text)'
+            }}
             onMouseOut={(e) => {
+              if (!pathname.startsWith('/support-inbox')) {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--chrome-text-muted)'
+              }
+            }}
+            onBlur={(e) => {
               if (!pathname.startsWith('/support-inbox')) {
                 e.currentTarget.style.background = 'transparent'
                 e.currentTarget.style.color = 'var(--chrome-text-muted)'
@@ -380,7 +396,15 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
             e.currentTarget.style.background = 'var(--chrome-bg-raised)'
             e.currentTarget.style.color = 'var(--chrome-text)'
           }}
+          onFocus={(e) => {
+            e.currentTarget.style.background = 'var(--chrome-bg-raised)'
+            e.currentTarget.style.color = 'var(--chrome-text)'
+          }}
           onMouseOut={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--chrome-text-muted)'
+          }}
+          onBlur={(e) => {
             e.currentTarget.style.background = 'transparent'
             e.currentTarget.style.color = 'var(--chrome-text-muted)'
           }}
@@ -462,7 +486,15 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
                 e.currentTarget.style.background = 'var(--border)'
                 e.currentTarget.style.color = 'var(--text-primary)'
               }}
+              onFocus={(e) => {
+                e.currentTarget.style.background = 'var(--border)'
+                e.currentTarget.style.color = 'var(--text-primary)'
+              }}
               onMouseOut={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--text-muted)'
+              }}
+              onBlur={(e) => {
                 e.currentTarget.style.background = 'transparent'
                 e.currentTarget.style.color = 'var(--text-muted)'
               }}
@@ -507,7 +539,15 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
                 e.currentTarget.style.background = 'var(--border)'
                 e.currentTarget.style.color = 'var(--text-primary)'
               }}
+              onFocus={(e) => {
+                e.currentTarget.style.background = 'var(--border)'
+                e.currentTarget.style.color = 'var(--text-primary)'
+              }}
               onMouseOut={(e) => {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--text-muted)'
+              }}
+              onBlur={(e) => {
                 e.currentTarget.style.background = 'transparent'
                 e.currentTarget.style.color = 'var(--text-muted)'
               }}
@@ -526,7 +566,9 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
                 className="w-8 h-8 rounded-lg flex items-center justify-center transition-all relative"
                 style={{ color: 'var(--accent-amber, #f59e0b)' }}
                 onMouseOver={(e) => { e.currentTarget.style.background = 'var(--border)' }}
+                onFocus={(e)     => { e.currentTarget.style.background = 'var(--border)' }}
                 onMouseOut={(e)  => { e.currentTarget.style.background = 'transparent' }}
+                onBlur={(e)      => { e.currentTarget.style.background = 'transparent' }}
               >
                 <Bell className="w-4 h-4" />
                 <span

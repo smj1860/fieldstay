@@ -154,7 +154,32 @@ function CredentialModal({
 }) {
   const config = API_KEY_PROVIDER_FIELDS[providerId]
   if (!config) return null
+  return (
+    <CredentialModalContent
+      providerId={providerId}
+      displayName={displayName}
+      config={config}
+      onClose={onClose}
+      onSuccess={onSuccess}
+    />
+  )
+}
 
+type ProviderConfig = { description: string; fields: Array<{ key: string; label: string; placeholder: string; sensitive?: boolean }> }
+
+function CredentialModalContent({
+  providerId,
+  displayName,
+  config,
+  onClose,
+  onSuccess,
+}: {
+  providerId:  string
+  displayName: string
+  config:      ProviderConfig
+  onClose:     () => void
+  onSuccess:   (externalUserId: string) => void
+}) {
   const [values, setValues] = useState<Record<string, string>>(
     Object.fromEntries(config.fields.map((f) => [f.key, '']))
   )

@@ -210,7 +210,9 @@ function TurnoverCard({
           borderLeft:  `3px solid ${statusColor}`,
         }}
         onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)' }}
+        onFocus={(e)     => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)' }}
         onMouseOut={(e)  => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)'   }}
+        onBlur={(e)      => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)'   }}
       >
         <p className="font-semibold text-sm mb-1.5 truncate"
            style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-syne)' }}>
@@ -682,7 +684,9 @@ export function OpsSnapshot({
                       className={cn('flex items-center gap-3 px-4 py-3 transition-colors', i > 0 && 'border-t')}
                       style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
                       onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)' }}
+                      onFocus={(e)     => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)' }}
                       onMouseOut={(e)  => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)'   }}
+                      onBlur={(e)      => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)'   }}
                     >
                       <Wrench className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent-blue)' }} />
                       <div className="flex-1 min-w-0">

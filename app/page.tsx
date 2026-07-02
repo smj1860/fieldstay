@@ -20,7 +20,9 @@ export default function LandingPage() {
                 className="text-sm px-4 py-2 rounded-md transition-colors"
                 style={{ color: 'rgba(255,255,255,0.65)' }}
                 onMouseOver={e => (e.currentTarget.style.color = '#fff')}
-                onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}>
+                onFocus={e     => (e.currentTarget.style.color = '#fff')}
+                onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}
+                onBlur={e     => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}>
             Log In
           </Link>
           <Link href="/signup"
