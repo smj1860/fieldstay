@@ -436,8 +436,9 @@ function PropertyGuidebookRow({
 
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
-      <div
-        style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', cursor: 'pointer', justifyContent: 'space-between' }}
+      <button
+        type="button"
+        style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', cursor: 'pointer', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', textAlign: 'left' }}
         onClick={() => setExpanded((e) => !e)}
       >
         <div>
@@ -453,7 +454,7 @@ function PropertyGuidebookRow({
         <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
           {expanded ? '▲ Close' : '▼ Configure'}
         </span>
-      </div>
+      </button>
 
       {expanded && (
         <PropertyGuidebookForm property={property} appUrl={appUrl} isGuidebookActive={isGuidebookActive} />

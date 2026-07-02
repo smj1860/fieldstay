@@ -207,12 +207,14 @@ function CredentialModal({
           {config.fields.map((field) => (
             <div key={field.key}>
               <label
+                htmlFor={field.key}
                 className="block text-sm font-medium mb-1.5"
                 style={{ color: 'var(--text-secondary)' }}
               >
                 {field.label}
               </label>
               <input
+                id={field.key}
                 type={field.sensitive ? 'password' : 'text'}
                 value={values[field.key] ?? ''}
                 onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}

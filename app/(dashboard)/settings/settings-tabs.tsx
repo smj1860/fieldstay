@@ -611,10 +611,11 @@ function NotificationsTab({ org }: { org: Organization }) {
 
         <form action={slackAction} className="space-y-3">
           <div>
-            <label className="block text-xs font-medium text-muted-themed mb-1.5">
+            <label htmlFor="slack-webhook-url" className="block text-xs font-medium text-muted-themed mb-1.5">
               Slack Incoming Webhook URL
             </label>
             <input
+              id="slack-webhook-url"
               type="url"
               name="slack_webhook_url"
               defaultValue={org.slack_webhook_url ?? ''}

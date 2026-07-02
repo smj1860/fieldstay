@@ -116,7 +116,7 @@ export function MediaKitClient({ sponsor }: MediaKitClientProps) {
   )
 }
 
-function Banner({ color, text }: { color: string; text: string }) {
+function Banner({ color, text }: Readonly<{ color: string; text: string }>) {
   return (
     <div
       style={{

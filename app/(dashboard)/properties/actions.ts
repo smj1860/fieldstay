@@ -318,7 +318,7 @@ export async function createAsset(
         warranty_provider,
         notes,
         health_score,
-        health_score_updated_at:   health_score != null ? new Date().toISOString() : null,
+        health_score_updated_at:   health_score !== null ? new Date().toISOString() : null,
         macrs_class:               standards?.macrs_class_default ?? '5_year',
         depreciation_method:       'macrs',
         salvage_value:             0,

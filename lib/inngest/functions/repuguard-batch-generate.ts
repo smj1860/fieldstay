@@ -134,7 +134,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
 
       const html = await renderPmAlert({
         heading:  'RepuGuard batch complete',
-        body:     `${generated} review draft${generated !== 1 ? 's' : ''} are ready for your review.${skipped > 0 ? ` ${skipped} could not be generated and will need to be drafted manually.` : ''}`,
+        body:     `${generated} review draft${generated !== 1 ? 's' : ''} are ready for your review.${skipped > 0 ? ' ' + skipped + ' could not be generated and will need to be drafted manually.' : ''}`,
         ctaLabel: 'Review Drafts →',
         ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/reviews`,
       })

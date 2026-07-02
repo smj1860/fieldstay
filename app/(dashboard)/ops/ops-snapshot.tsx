@@ -70,7 +70,7 @@ function KpiCard({
   alert = false,
   href,
   breakdown,
-}: {
+}: Readonly<{
   label:        string
   value:        number
   accentColor?: string
@@ -79,7 +79,7 @@ function KpiCard({
   alert?:       boolean
   href?:        string
   breakdown?:   React.ReactNode
-}) {
+}>) {
   const inner = (
     <div
       className={cn('kpi-card', href && 'cursor-pointer hover:shadow-md hover:border-[var(--accent-gold)] transition-colors')}
@@ -111,11 +111,11 @@ function MobileExceptionBanner({
   urgentWorkOrders,
   overdueCount,
   belowPar,
-}: {
+}: Readonly<{
   urgentWorkOrders: number
   overdueCount:     number
   belowPar:         number
-}) {
+}>) {
   const hasExceptions = urgentWorkOrders > 0 || overdueCount > 0 || belowPar > 0
   if (!hasExceptions) return null
 
@@ -181,10 +181,10 @@ const STATUS_COLORS: Record<string, string> = {
 function TurnoverCard({
   turnover,
   propertyName,
-}: {
+}: Readonly<{
   turnover:     Turnover
   propertyName: string
-}) {
+}>) {
   const assignments = Array.isArray(turnover.turnover_assignments)
     ? turnover.turnover_assignments
     : turnover.turnover_assignments
@@ -273,14 +273,14 @@ function DayAccordion({
   propertyMap,
   crewTravel,
   defaultOpen,
-}: {
+}: Readonly<{
   label:       string
   isToday:     boolean
   turnovers:   Turnover[]
   propertyMap: Record<string, string>
   crewTravel?: CrewTravelSummary[]
   defaultOpen: boolean
-}) {
+}>) {
   const [open, setOpen] = useState(defaultOpen)
   const hasAlert = turnovers.some(
     t => t.status === 'pending_assignment' || t.priority === 'urgent'
@@ -427,7 +427,7 @@ function getCrewTravelSummaries(
     for (let i = 0; i < stops.length - 1; i++) {
       const a = stops[i]!
       const b = stops[i + 1]!
-      if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) {
+      if (a.lat === null || a.lng === null || b.lat === null || b.lng === null) {
         return { crewId, name, miles: 0, minutes: 0, available: false }
       }
       miles += distanceMiles(a.lat, a.lng, b.lat, b.lng)
@@ -448,7 +448,7 @@ export function OpsSnapshot({
   todayDate,
   metrics,
   showOwnerRezNudge = false,
-}: {
+}: Readonly<{
   turnovers:      Turnover[]
   properties:     Property[]
   openWorkOrders: WorkOrder[]
@@ -457,7 +457,7 @@ export function OpsSnapshot({
   todayDate:      string
   metrics?:       Metrics
   showOwnerRezNudge?: boolean
-}) {
+}>) {
   const [windowDays, setWindowDays] = useState<7 | 14 | 30>(7)
 
   const propertyMap  = Object.fromEntries(properties.map((p) => [p.id, p.name]))

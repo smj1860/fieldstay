@@ -91,22 +91,22 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
           )}
           <form action={formAction} className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div><label className="label">Vendor Name *</label>
-                <input name="name" type="text" required className="input" placeholder="ABC Plumbing" /></div>
-              <div><label className="label">Contact Name</label>
-                <input name="contact_name" type="text" className="input" placeholder="John Smith" /></div>
-              <div><label className="label">Email</label>
-                <input name="email" type="email" className="input" placeholder="info@abcplumbing.com" /></div>
-              <div><label className="label">Phone</label>
-                <input name="phone" type="tel" className="input" placeholder="+1 555-0100" /></div>
-              <div><label className="label">Specialty</label>
-                <select name="specialty" className="input" defaultValue="general">
+              <div><label htmlFor="vendor-name" className="label">Vendor Name *</label>
+                <input id="vendor-name" name="name" type="text" required className="input" placeholder="ABC Plumbing" /></div>
+              <div><label htmlFor="vendor-contact-name" className="label">Contact Name</label>
+                <input id="vendor-contact-name" name="contact_name" type="text" className="input" placeholder="John Smith" /></div>
+              <div><label htmlFor="vendor-email" className="label">Email</label>
+                <input id="vendor-email" name="email" type="email" className="input" placeholder="info@abcplumbing.com" /></div>
+              <div><label htmlFor="vendor-phone" className="label">Phone</label>
+                <input id="vendor-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" /></div>
+              <div><label htmlFor="vendor-specialty" className="label">Specialty</label>
+                <select id="vendor-specialty" name="specialty" className="input" defaultValue="general">
                   {VENDOR_SPECIALTIES.map((s) => (
                     <option key={s.value} value={s.value}>{s.label}</option>
                   ))}
                 </select></div>
-              <div><label className="label">Service ZIP</label>
-                <input name="service_zip" type="text" className="input" placeholder="30301" maxLength={10} /></div>
+              <div><label htmlFor="vendor-service-zip" className="label">Service ZIP</label>
+                <input id="vendor-service-zip" name="service_zip" type="text" className="input" placeholder="30301" maxLength={10} /></div>
             </div>
             <div className="flex gap-2">
               <button type="submit" disabled={pending} className="btn-primary text-sm">

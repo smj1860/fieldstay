@@ -83,7 +83,7 @@ const PanelPlate = () => (
   </svg>
 )
 
-function Lbl({ children }: { children: React.ReactNode }) {
+function Lbl({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <div style={{ color:'#7A7A7A', fontSize:10, fontWeight:700,
                   letterSpacing:'0.14em', textTransform:'uppercase', marginBottom:10 }}>
@@ -92,7 +92,7 @@ function Lbl({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Icon({ d, color = '#6B7280', size = 16 }: { d: string; color?: string; size?: number }) {
+function Icon({ d, color = '#6B7280', size = 16 }: Readonly<{ d: string; color?: string; size?: number }>) {
   return (
     <svg width={size} height={size} fill="none" viewBox="0 0 24 24"
          stroke={color} strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"

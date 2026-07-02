@@ -536,10 +536,11 @@ export function VendorPortal({
         )}
 
         {/* Completion notes */}
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+        <label htmlFor="completion-notes" style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
           Completion Notes <span style={{ fontWeight: 400, color: '#9ca3af' }}>(optional)</span>
         </label>
         <textarea
+          id="completion-notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}

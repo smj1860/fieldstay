@@ -5,10 +5,10 @@ import { useState } from 'react'
 export function PayInvoiceButton({
   invoiceId,
   total,
-}: {
+}: Readonly<{
   invoiceId: string
   total:     number
-}) {
+}>) {
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState<string | null>(null)
 

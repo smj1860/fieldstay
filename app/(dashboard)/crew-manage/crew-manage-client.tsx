@@ -267,8 +267,14 @@ function CrewCardModal({
   onClose:      () => void
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-         onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      role="button"
+      tabIndex={0}
+      onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
+      aria-label="Close modal"
+    >
       <div
         className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm"
         style={{ background: 'var(--bg-card)' }}
@@ -843,7 +849,13 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
   }
 
   return (
-    <tr className="hover:bg-raised-themed transition-colors cursor-pointer" onClick={() => onSelect(member)}>
+    <tr
+      className="hover:bg-raised-themed transition-colors cursor-pointer"
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelect(member)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(member) } }}
+    >
       <td className="py-2.5 pr-4 font-medium text-primary-themed">{member.name}</td>
       <td className="py-2.5 pr-4">
         <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>

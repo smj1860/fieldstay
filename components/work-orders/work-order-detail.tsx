@@ -710,7 +710,11 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden"
           style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+          role="button"
+          tabIndex={0}
+          aria-label="Close dialog"
           onClick={e => { if (e.target === e.currentTarget) setShowDispatch(false) }}
+          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDispatch(false) } }}
         >
           <div
             className="w-full max-w-sm rounded-2xl p-6 space-y-4"

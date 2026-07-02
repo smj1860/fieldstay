@@ -208,7 +208,11 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-         onClick={onClose}>
+         onClick={onClose}
+         role="button"
+         tabIndex={0}
+         aria-label="Close modal"
+         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}>
       <div
         className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm"
         style={{ background: 'var(--bg-card)' }}
@@ -681,7 +685,11 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
   }
 
   return (
-    <tr className="hover:bg-raised-themed transition-colors cursor-pointer" onClick={() => onSelect?.(vendor)}>
+    <tr className="hover:bg-raised-themed transition-colors cursor-pointer"
+        onClick={() => onSelect?.(vendor)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect?.(vendor) } }}>
       <td className="py-2.5 pr-4">
         <div className="font-medium text-primary-themed">{vendor.name}</div>
         {vendor.contact_name && <div className="text-xs text-muted-themed">{vendor.contact_name}</div>}

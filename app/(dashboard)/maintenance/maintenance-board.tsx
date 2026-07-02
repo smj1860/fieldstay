@@ -285,6 +285,9 @@ function WorkOrderCard({
   return (
     <div
       onClick={onClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
       className={cn(
         'bg-card-themed rounded-xl border border-themed p-4 cursor-pointer',
         'hover:shadow-[0_2px_8px_0_rgba(0,0,0,.08)] hover:border-themed transition-all',
@@ -2489,7 +2492,11 @@ export function MaintenanceBoard({
           <div
             className="fixed inset-0 z-40"
             style={{ background: 'rgba(0,0,0,0.5)' }}
+            role="button"
+            tabIndex={0}
+            aria-label="Close work order detail"
             onClick={() => setSelectedWO(null)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedWO(null) } }}
           />
 
           {/* Panel */}

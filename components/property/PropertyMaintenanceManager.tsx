@@ -151,22 +151,22 @@ function EditModal({
 
         <div className="space-y-4">
           <div>
-            <label className="label">Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
+            <label htmlFor="edit-name" className="label">Name</label>
+            <input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} className="input" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Recurrence</label>
-              <select value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
+              <label htmlFor="edit-recurrence" className="label">Recurrence</label>
+              <select id="edit-recurrence" value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
                 {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="label">Next Due Date</label>
-              <input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
+              <label htmlFor="edit-next-due-date" className="label">Next Due Date</label>
+              <input id="edit-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
             </div>
           </div>
 
@@ -181,14 +181,14 @@ function EditModal({
           {seasonal && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Active From</label>
-                <select value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
+                <label htmlFor="edit-active-from" className="label">Active From</label>
+                <select id="edit-active-from" value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
                   {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="label">Active To</label>
-                <select value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
+                <label htmlFor="edit-active-to" className="label">Active To</label>
+                <select id="edit-active-to" value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
                   {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
@@ -196,8 +196,8 @@ function EditModal({
           )}
 
           <div>
-            <label className="label">Notes / Instructions</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
+            <label htmlFor="edit-notes" className="label">Notes / Instructions</label>
+            <textarea id="edit-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
           </div>
         </div>
 
@@ -259,8 +259,8 @@ function DuplicateModal({
         )}
 
         <div className="mb-4">
-          <label className="label">Next Due Date for Duplicate</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
+          <label htmlFor="duplicate-next-due-date" className="label">Next Due Date for Duplicate</label>
+          <input id="duplicate-next-due-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
         </div>
 
         <div className="flex gap-2">
@@ -378,16 +378,16 @@ function CatalogModal({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Recurrence</label>
-                <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as ScheduleFrequency)} className="input">
+                <label htmlFor="catalog-recurrence" className="label">Recurrence</label>
+                <select id="catalog-recurrence" value={recurrence} onChange={(e) => setRecurrence(e.target.value as ScheduleFrequency)} className="input">
                   {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
                     <option key={v} value={v}>{l}</option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="label">Next Due Date</label>
-                <input type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
+                <label htmlFor="catalog-next-due-date" className="label">Next Due Date</label>
+                <input id="catalog-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
               </div>
             </div>
 
@@ -466,23 +466,23 @@ function CustomItemModal({
 
         <div className="space-y-4">
           <div>
-            <label className="label">Name <span className="text-red-500">*</span></label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input"
+            <label htmlFor="custom-name" className="label">Name <span className="text-red-500">*</span></label>
+            <input id="custom-name" value={name} onChange={(e) => setName(e.target.value)} className="input"
                    placeholder="e.g. Boat dock winterization" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Recurrence</label>
-              <select value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
+              <label htmlFor="custom-recurrence" className="label">Recurrence</label>
+              <select id="custom-recurrence" value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
                 {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="label">Next Due Date</label>
-              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
+              <label htmlFor="custom-next-due-date" className="label">Next Due Date</label>
+              <input id="custom-next-due-date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
             </div>
           </div>
 
@@ -495,14 +495,14 @@ function CustomItemModal({
           {seasonal && (
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Active From</label>
-                <select value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
+                <label htmlFor="custom-active-from" className="label">Active From</label>
+                <select id="custom-active-from" value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
                   {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="label">Active To</label>
-                <select value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
+                <label htmlFor="custom-active-to" className="label">Active To</label>
+                <select id="custom-active-to" value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
                   {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
               </div>
@@ -510,8 +510,8 @@ function CustomItemModal({
           )}
 
           <div>
-            <label className="label">Notes</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
+            <label htmlFor="custom-notes" className="label">Notes</label>
+            <textarea id="custom-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
           </div>
         </div>
 

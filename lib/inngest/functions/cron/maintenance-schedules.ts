@@ -447,7 +447,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
           const eligible = schedules
             .filter((s) =>
-              s.next_due_date != null &&
+              s.next_due_date !== null &&
               s.next_due_date <= effectiveEnd &&
               isMaintenanceItemActiveThisMonth(s.active_from_month ?? null, s.active_to_month ?? null)
             )
@@ -493,7 +493,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
           const tierLabel = gap.tier === 'strong' ? 'Vacancy opportunity' : 'Possible vacancy window'
           const items = gap.candidates
-            .map(c => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
+            .map(c => `${c.name}${c.estimated_cost ? ' (~$' + c.estimated_cost + ')' : ''}`)
             .join(', ')
 
           await resend.emails.send(

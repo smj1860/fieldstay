@@ -33,8 +33,9 @@ export function AcceptInviteForm({
       )}
 
       <div>
-        <label className="label">Email</label>
+        <label htmlFor="email" className="label">Email</label>
         <input
+          id="email"
           type="email"
           value={email}
           disabled
@@ -43,10 +44,11 @@ export function AcceptInviteForm({
       </div>
 
       <div>
-        <label className="label">
+        <label htmlFor="password" className="label">
           Password <span className="text-red-500">*</span>
         </label>
         <input
+          id="password"
           type="password"
           name="password"
           required
@@ -59,10 +61,11 @@ export function AcceptInviteForm({
       </div>
 
       <div>
-        <label className="label">
+        <label htmlFor="confirm-password" className="label">
           Confirm Password <span className="text-red-500">*</span>
         </label>
         <input
+          id="confirm-password"
           type="password"
           name="confirm"
           required

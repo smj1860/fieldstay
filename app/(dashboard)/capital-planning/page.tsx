@@ -316,7 +316,7 @@ export default async function CapitalPlanningPage({
                         </div>
                         <div className="text-xs text-muted-themed text-right flex-shrink-0">
                           <p>{item.age_years}y · {item.pct_of_lifespan}% lifespan</p>
-                          {item.health_score != null && (
+                          {item.health_score !== null && (
                             <p className="mt-0.5">Score: {item.health_score}/100</p>
                           )}
                         </div>

@@ -26,7 +26,7 @@ interface AggregatedItem {
   properties: Array<{ name: string; needed: number }>
 }
 
-function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
+function StatCard({ label, value, color }: Readonly<{ label: string; value: number; color: string }>) {
   return (
     <div className="card p-4 text-center">
       <div className="text-2xl font-bold" style={{ color }}>{value}</div>
@@ -35,7 +35,7 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   )
 }
 
-export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
+export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioItem[] }>) {
   const [purchaseList, setPurchaseList]   = useState<AggregatedItem[] | null>(null)
   const [showList, setShowList]           = useState(false)
   const [copied, setCopied]               = useState(false)
@@ -63,7 +63,8 @@ export function PortfolioInventoryView({ items }: { items: PortfolioItem[] }) {
     if (!purchaseList) return ''
     const rows = ['Item,Unit,Total Needed,Properties']
     for (const item of purchaseList) {
-      rows.push(`"${item.name}","${item.unit}",${item.totalNeeded},"${item.properties.map(p => `${p.name}(${p.needed})`).join('; ')}"`)
+      const propList = item.properties.map(p => p.name + '(' + p.needed + ')').join('; ')
+      rows.push(`"${item.name}","${item.unit}",${item.totalNeeded},"${propList}"`)
     }
     return rows.join('\n')
   }

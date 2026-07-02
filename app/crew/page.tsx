@@ -412,12 +412,16 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label="Close feedback modal"
       style={{
         position: 'fixed', inset: 0, zIndex: 50,
         background: 'rgba(0,0,0,0.4)',
         display: 'flex', alignItems: 'flex-end',
       }}
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         style={{

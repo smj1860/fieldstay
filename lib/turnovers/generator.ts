@@ -45,12 +45,12 @@ export async function generateTurnoversForProperty(
     .eq('property_id', propertyId)
   const existingPairs = new Set(
     (existingTurnovers ?? [])
-      .filter(t => t.prev_booking_id != null)
+      .filter(t => t.prev_booking_id !== null)
       .map(t => `${t.prev_booking_id}:${t.booking_id}`)
   )
   const existingStandalones = new Set(
     (existingTurnovers ?? [])
-      .filter(t => t.prev_booking_id == null && t.booking_id != null)
+      .filter(t => t.prev_booking_id === null && t.booking_id !== null)
       .map(t => t.booking_id as string)
   )
   const newTurnoverIds: string[] = []
@@ -61,7 +61,7 @@ export async function generateTurnoversForProperty(
   for (const booking of bookings) {
     if (existingStandalones.has(booking.id)) continue
     const alreadyPaired = (existingTurnovers ?? []).some(
-      t => t.booking_id === booking.id && t.prev_booking_id != null
+      t => t.booking_id === booking.id && t.prev_booking_id !== null
     )
     if (alreadyPaired) continue
     const checkoutTimeStr = (booking.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)

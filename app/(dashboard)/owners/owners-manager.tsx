@@ -302,8 +302,9 @@ function AddTransactionForm({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="label text-xs">Date</label>
+            <label htmlFor="txn-date" className="label text-xs">Date</label>
             <input
+              id="txn-date"
               name="transaction_date"
               type="date"
               required
@@ -312,8 +313,8 @@ function AddTransactionForm({
             />
           </div>
           <div>
-            <label className="label text-xs">Category</label>
-            <select name="category" required className="input text-sm">
+            <label htmlFor="txn-category" className="label text-xs">Category</label>
+            <select id="txn-category" name="category" required className="input text-sm">
               {categories.map((c) => (
                 <option key={c.value} value={c.value}>{c.label}</option>
               ))}
@@ -322,18 +323,18 @@ function AddTransactionForm({
         </div>
 
         <div>
-          <label className="label text-xs">Description <span className="text-red-500">*</span></label>
-          <input name="description" type="text" required className="input text-sm" placeholder="e.g. 4-night stay, HVAC repair" />
+          <label htmlFor="txn-description" className="label text-xs">Description <span className="text-red-500">*</span></label>
+          <input id="txn-description" name="description" type="text" required className="input text-sm" placeholder="e.g. 4-night stay, HVAC repair" />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="label text-xs">Amount ($) <span className="text-red-500">*</span></label>
-            <input name="amount" type="number" required min="0.01" step="0.01" className="input text-sm" placeholder="0.00" />
+            <label htmlFor="txn-amount" className="label text-xs">Amount ($) <span className="text-red-500">*</span></label>
+            <input id="txn-amount" name="amount" type="number" required min="0.01" step="0.01" className="input text-sm" placeholder="0.00" />
           </div>
           <div>
-            <label className="label text-xs">Notes</label>
-            <input name="notes" type="text" className="input text-sm" placeholder="Optional" />
+            <label htmlFor="txn-notes" className="label text-xs">Notes</label>
+            <input id="txn-notes" name="notes" type="text" className="input text-sm" placeholder="Optional" />
           </div>
         </div>
 
@@ -784,7 +785,7 @@ function OwnerCard({
 
       {/* Monthly revenue quick entry */}
       <div className="mt-3 pt-3 border-t border-themed">
-        <label className="label text-xs">
+        <label htmlFor="monthly-revenue-amount" className="label text-xs">
           Monthly Revenue ($)
           <span className="text-muted-themed font-normal ml-1">— enter before sharing portal link</span>
         </label>
@@ -796,6 +797,7 @@ function OwnerCard({
             className="input text-sm py-1.5 w-36 flex-shrink-0"
           />
           <input
+            id="monthly-revenue-amount"
             type="number"
             min={0}
             step={0.01}

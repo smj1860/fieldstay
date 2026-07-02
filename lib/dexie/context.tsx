@@ -169,7 +169,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
             ...item,
             is_completed:          Number(item.is_completed ?? 0),
             requires_photo:        Number(item.requires_photo ?? 0),
-            is_section_final_item: item.is_section_final_item != null ? Number(item.is_section_final_item) : 0,
+            is_section_final_item: item.is_section_final_item !== null ? Number(item.is_section_final_item) : 0,
             completed_by_crew_id:  item.completed_by_crew_id ?? '',
             // Only retain crew_notes if this crew member authored them —
             // nullify notes from other crew members on multi-crew turnovers

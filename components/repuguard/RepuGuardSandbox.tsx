@@ -98,7 +98,7 @@ const SCENARIOS: Scenario[] = [
   },
 ];
 
-function StarRow({ rating, color }: { rating: number; color: string }) {
+function StarRow({ rating, color }: Readonly<{ rating: number; color: string }>) {
   return (
     <div style={{ display: "flex", gap: 3 }}>
       {[1, 2, 3, 4, 5].map((i) => (

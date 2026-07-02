@@ -24,7 +24,7 @@ export async function GET(req: Request) {
   ]
 
   if (payload) {
-    const sortedYears = Object.keys(payload.projections).map(Number).sort()
+    const sortedYears = Object.keys(payload.projections).map(Number).sort((a, b) => a - b)
     for (const projYear of sortedYears) {
       for (const item of payload.projections[projYear].items as CapExProjectionItem[]) {
         rows.push([

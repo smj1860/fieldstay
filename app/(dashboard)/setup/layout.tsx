@@ -5,9 +5,9 @@ import { cn } from '@/lib/utils'
 
 export default async function OnboardingLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode
-}) {
+}>) {
   const { supabase, membership } = await requireOrgMember()
 
   const { data: org } = await supabase

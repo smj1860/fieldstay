@@ -23,11 +23,11 @@ export function DashboardToastProvider({
   orgId,
   userId,
   children,
-}: {
+}: Readonly<{
   orgId:    string
   userId:   string
   children: React.ReactNode
-}) {
+}>) {
   const [toasts, setToasts] = useState<ToastItem[]>([])
 
   const push = useCallback((t: Omit<ToastItem, 'id'>) => {

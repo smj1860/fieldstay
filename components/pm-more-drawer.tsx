@@ -45,9 +45,11 @@ export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: P
   return (
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40 md:hidden"
-        style={{ background: 'rgba(0,0,0,0.5)' }}
+      <button
+        type="button"
+        aria-label="Close drawer"
+        className="fixed inset-0 z-40 md:hidden w-full cursor-default"
+        style={{ background: 'rgba(0,0,0,0.5)', border: 'none', padding: 0 }}
         onClick={onClose}
       />
 

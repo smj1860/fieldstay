@@ -421,7 +421,11 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
           <div
             className="absolute inset-0"
             style={{ background: 'rgba(0,0,0,0.6)' }}
+            role="button"
+            tabIndex={0}
+            aria-label="Close navigation"
             onClick={() => setMobileOpen(false)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMobileOpen(false) } }}
           />
           <div className="relative z-10 h-full flex-shrink-0">
             <Sidebar mobile />

@@ -91,7 +91,10 @@ export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSave
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 100, padding: '16px',
       }}
+      role="button"
+      tabIndex={0}
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         style={{

@@ -402,8 +402,9 @@ function AddItemsModal({
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs text-muted-themed block mb-1">Unit</label>
+                          <label htmlFor={`unit-${catalogItem.id}`} className="text-xs text-muted-themed block mb-1">Unit</label>
                           <input
+                            id={`unit-${catalogItem.id}`}
                             type="text"
                             value={unit}
                             onChange={(e) => updateSelected(catalogItem.id, 'unit', e.target.value)}
@@ -412,8 +413,9 @@ function AddItemsModal({
                           />
                         </div>
                         <div>
-                          <label className="text-xs text-muted-themed block mb-1">Par Level</label>
+                          <label htmlFor={`par-level-${catalogItem.id}`} className="text-xs text-muted-themed block mb-1">Par Level</label>
                           <input
+                            id={`par-level-${catalogItem.id}`}
                             type="number"
                             min={0}
                             step={0.5}
@@ -431,8 +433,9 @@ function AddItemsModal({
           ) : (
             <>
               <div>
-                <label className="label">Item Name <span className="text-red-500">*</span></label>
+                <label htmlFor="custom-item-name" className="label">Item Name <span className="text-red-500">*</span></label>
                 <input
+                  id="custom-item-name"
                   type="text"
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
@@ -442,8 +445,9 @@ function AddItemsModal({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Category</label>
+                  <label htmlFor="custom-category" className="label">Category</label>
                   <select
+                    id="custom-category"
                     value={customCategory}
                     onChange={(e) => setCustomCategory(e.target.value as InventoryCategory)}
                     className="input"
@@ -454,8 +458,9 @@ function AddItemsModal({
                   </select>
                 </div>
                 <div>
-                  <label className="label">Unit <span className="text-red-500">*</span></label>
+                  <label htmlFor="custom-unit" className="label">Unit <span className="text-red-500">*</span></label>
                   <input
+                    id="custom-unit"
                     type="text"
                     value={customUnit}
                     onChange={(e) => setCustomUnit(e.target.value)}
@@ -465,8 +470,9 @@ function AddItemsModal({
                 </div>
               </div>
               <div>
-                <label className="label">Par Level</label>
+                <label htmlFor="custom-par-level" className="label">Par Level</label>
                 <input
+                  id="custom-par-level"
                   type="number"
                   min={0}
                   step={0.5}
@@ -476,8 +482,9 @@ function AddItemsModal({
                 />
               </div>
               <div>
-                <label className="label">Notes</label>
+                <label htmlFor="custom-notes" className="label">Notes</label>
                 <textarea
+                  id="custom-notes"
                   value={customNotes}
                   onChange={(e) => setCustomNotes(e.target.value)}
                   rows={2}
@@ -621,8 +628,9 @@ function RunCountModal({
                         </span>
                       </div>
                       <div className="flex flex-col items-end gap-0.5">
-                        <label className="text-xs text-muted-themed">New Count</label>
+                        <label htmlFor={`count-${item.id}`} className="text-xs text-muted-themed">New Count</label>
                         <input
+                          id={`count-${item.id}`}
                           name={`item_${item.id}`}
                           type="number"
                           min={0}
@@ -638,8 +646,9 @@ function RunCountModal({
             ))}
 
             <div>
-              <label className="label">Notes (optional)</label>
+              <label htmlFor="count-notes" className="label">Notes (optional)</label>
               <textarea
+                id="count-notes"
                 name="notes"
                 rows={2}
                 className="input resize-none"

@@ -368,24 +368,24 @@ export function InventorySetup({
           <p className="text-sm font-semibold text-primary-themed">Custom Item</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Item Name</label>
-              <input value={customItem.name} onChange={(e) => setCustomItem((p) => ({ ...p, name: e.target.value }))} className="input" placeholder="e.g. Propane Tank" />
+              <label htmlFor="custom-item-name" className="label">Item Name</label>
+              <input id="custom-item-name" value={customItem.name} onChange={(e) => setCustomItem((p) => ({ ...p, name: e.target.value }))} className="input" placeholder="e.g. Propane Tank" />
             </div>
             <div>
-              <label className="label">Category</label>
-              <select value={customItem.category} onChange={(e) => setCustomItem((p) => ({ ...p, category: e.target.value }))} className="input" style={{ color: '#1a1d20' }}>
+              <label htmlFor="custom-item-category" className="label">Category</label>
+              <select id="custom-item-category" value={customItem.category} onChange={(e) => setCustomItem((p) => ({ ...p, category: e.target.value }))} className="input" style={{ color: '#1a1d20' }}>
                 {Object.entries(INVENTORY_CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </div>
             <div>
-              <label className="label">Unit</label>
-              <select value={customItem.unit} onChange={(e) => setCustomItem((p) => ({ ...p, unit: e.target.value }))} className="input" style={{ color: '#1a1d20' }}>
+              <label htmlFor="custom-item-unit" className="label">Unit</label>
+              <select id="custom-item-unit" value={customItem.unit} onChange={(e) => setCustomItem((p) => ({ ...p, unit: e.target.value }))} className="input" style={{ color: '#1a1d20' }}>
                 {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
             </div>
             <div>
-              <label className="label">Par Level</label>
-              <input
+              <label htmlFor="custom-item-par-level" className="label">Par Level</label>
+              <input id="custom-item-par-level"
                 type="number" min="0" step="0.5" value={customItem.par_level}
                 onChange={(e) => {
                   const n = e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0)

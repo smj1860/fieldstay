@@ -17,7 +17,7 @@ interface FeedRow {
 
 const STATUS_RANK: Record<string, number> = { error: 0, pending: 1, success: 2 }
 
-export function ChannelHealthTable({ feeds }: { feeds: FeedRow[] }) {
+export function ChannelHealthTable({ feeds }: Readonly<{ feeds: FeedRow[] }>) {
   if (feeds.length === 0) return null
 
   const sorted = [...feeds].sort(

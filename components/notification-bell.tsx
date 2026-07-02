@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Bell } from 'lucide-react'
 import type { NotificationItem } from '@/lib/notifications'
 
-export function NotificationBell({ items }: { items: NotificationItem[] }) {
+export function NotificationBell({ items }: Readonly<{ items: NotificationItem[] }>) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 

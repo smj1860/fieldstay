@@ -403,7 +403,11 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
           <div
             className="fixed inset-0 z-40"
             style={{ background: 'rgba(0,0,0,0.4)' }}
+            role="button"
+            tabIndex={0}
+            aria-label="Close review panel"
             onClick={closePanel}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closePanel() } }}
           />
 
           {/* Drawer */}
@@ -612,7 +616,11 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
         <div
           className="fixed inset-0 z-50 flex items-center justify-center"
           style={{ background: 'rgba(0,0,0,0.5)' }}
+          role="button"
+          tabIndex={0}
+          aria-label="Close modal"
           onClick={() => setShowManualModal(false)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowManualModal(false) } }}
         >
           <div
             className="w-full max-w-lg mx-4 rounded-2xl p-6 space-y-4"

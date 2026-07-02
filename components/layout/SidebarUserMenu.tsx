@@ -72,7 +72,14 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
       {/* Popover — appears above the button */}
       {open && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            className="fixed inset-0 z-40"
+            role="button"
+            tabIndex={0}
+            aria-label="Close menu"
+            onClick={() => setOpen(false)}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(false) } }}
+          />
 
           <div
             className="absolute bottom-full left-0 right-0 mb-2 z-50 rounded-xl overflow-hidden"

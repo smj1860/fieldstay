@@ -150,7 +150,7 @@ function pickNearestSponsor(
   lat: number,
   lng: number
 ): GuidebookSponsor | null {
-  const withCoords = sponsors.filter((s) => s.lat != null && s.lng != null)
+  const withCoords = sponsors.filter((s) => s.lat !== null && s.lng !== null)
   if (withCoords.length === 0) return sponsors[0] ?? null
 
   let nearest: GuidebookSponsor | null = null

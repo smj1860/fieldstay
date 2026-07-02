@@ -452,8 +452,9 @@ export default function CrewTurnoverPage() {
                             : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-accent-300')} />}
                         </button>
 
-                        <div
-                          className="flex-1 min-w-0 cursor-pointer"
+                        <button
+                          type="button"
+                          className="flex-1 min-w-0 cursor-pointer text-left"
                           onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
                         >
                           <p className={cn('text-sm leading-snug',
@@ -479,7 +480,7 @@ export default function CrewTurnoverPage() {
                           {item.requires_photo && item.photo_reason && (
                             <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
                           )}
-                        </div>
+                        </button>
 
                         {/* Note toggle button */}
                         <button

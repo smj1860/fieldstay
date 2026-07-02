@@ -137,7 +137,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
 
         const propertyExternalIds = reviews
           .map(r => r.property_id)
-          .filter((id): id is number => id != null)
+          .filter((id): id is number => id !== null)
           .map(String)
 
         let propertyMap: Map<string, string> = new Map()

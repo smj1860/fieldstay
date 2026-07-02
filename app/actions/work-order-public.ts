@@ -281,7 +281,7 @@ export async function submitWorkOrderSignOff(
   if (photos && photos.length > 0) {
     for (const photo of photos) {
       const ext  = photo.type === 'image/png' ? 'png' : photo.type === 'image/webp' ? 'webp' : 'jpg'
-      const path = `work-orders/${wo.id}/signoff/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const path = `work-orders/${wo.id}/signoff/${crypto.randomUUID()}.${ext}`
       const { error: uploadErr } = await supabase.storage
         .from('work-order-photos')
         .upload(path, photo, { contentType: photo.type, upsert: false })

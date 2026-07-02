@@ -204,7 +204,7 @@ export function GuestGuidebookView({
   )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: Readonly<{ title: string; children: React.ReactNode }>) {
   return (
     <div style={{ marginBottom: '24px' }}>
       <h2 style={{ fontSize: '12px', fontWeight: 700, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 8px' }}>

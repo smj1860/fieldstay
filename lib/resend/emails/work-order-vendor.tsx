@@ -158,7 +158,7 @@ export function WorkOrderVendorEmail({
             {formatDate(scheduled_date)}
           </Text>
         </Column>
-        {nte_amount != null && (
+        {nte_amount !== null && (
           <Column style={{ width: '50%', paddingLeft: 8 }}>
             <Text style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>
               Not to Exceed

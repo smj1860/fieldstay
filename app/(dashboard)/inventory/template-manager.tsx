@@ -530,6 +530,8 @@ export function TemplateManager({
                         >
                           <div
                             className={cn('flex items-center gap-3 px-4 py-2.5', alreadyInTemplate ? 'cursor-not-allowed' : 'cursor-pointer')}
+                            role="button"
+                            tabIndex={alreadyInTemplate ? -1 : 0}
                             onClick={() => {
                               if (alreadyInTemplate) return
                               setCatalogSelected(prev => {
@@ -537,6 +539,17 @@ export function TemplateManager({
                                 next.has(c.id) ? next.delete(c.id) : next.add(c.id)
                                 return next
                               })
+                            }}
+                            onKeyDown={(e) => {
+                              if (alreadyInTemplate) return
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setCatalogSelected(prev => {
+                                  const next = new Set(prev)
+                                  next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                                  return next
+                                })
+                              }
                             }}
                           >
                             <input

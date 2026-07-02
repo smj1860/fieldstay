@@ -38,6 +38,10 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.6)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      role="button"
+      tabIndex={0}
+      aria-label="Close modal"
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         className="rounded-2xl border p-6 w-full max-w-md space-y-4"

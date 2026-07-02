@@ -102,7 +102,7 @@ export async function POST(
     updated_via_vendor_portal: true,
     status_from:               null,
     status_to:                 null,
-    notes: `Vendor submitted quote: $${quoted_amount.toFixed(2)}${quote_notes ? ` — ${quote_notes}` : ''}`,
+    notes: `Vendor submitted quote: $${quoted_amount.toFixed(2)}${quote_notes ? ' — ' + quote_notes : ''}`,
   })
 
   await inngest.send({

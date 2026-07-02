@@ -303,7 +303,11 @@ function DayAvailabilityModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
+      role="button"
+      tabIndex={0}
+      aria-label="Close dialog"
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto"

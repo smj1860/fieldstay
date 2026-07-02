@@ -5,7 +5,7 @@ import { Loader2 } from 'lucide-react'
 import { triggerDepreciationLedger } from './actions'
 import { createClient } from '@/lib/supabase/client'
 
-export function TriggerLedgerButton({ taxYear, orgId }: { taxYear: number; orgId: string }) {
+export function TriggerLedgerButton({ taxYear, orgId }: Readonly<{ taxYear: number; orgId: string }>) {
   const [loading, setLoading]   = useState(false)
   const [polling, setPolling]   = useState(false)
   const [result,  setResult]    = useState<{ entries: number; total: number } | 'empty' | 'timeout' | null>(null)

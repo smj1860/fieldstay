@@ -11,7 +11,7 @@ const PROPERTY_TYPES = [
   { value: 'townhouse', label: 'Townhouse' }, { value: 'other', label: 'Other' },
 ]
 
-export function DetailsForm({ property }: { property: Property }) {
+export function DetailsForm({ property }: Readonly<{ property: Property }>) {
   const action = saveDetails.bind(null, property.id)
   const [state, formAction, pending] = useActionState(action, null)
 

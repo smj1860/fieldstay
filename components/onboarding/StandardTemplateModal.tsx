@@ -119,7 +119,7 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Props
               >
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium text-primary-themed">{item.name}</span>
-                  {item.active_from_month != null && item.active_to_month != null && (
+                  {item.active_from_month !== null && item.active_to_month !== null && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full"
                           style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}>
                       {MONTH_NAMES[item.active_from_month]}–{MONTH_NAMES[item.active_to_month]}

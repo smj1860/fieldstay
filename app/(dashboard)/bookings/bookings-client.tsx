@@ -150,9 +150,11 @@ function BookingCard({
       style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
     >
       {/* Main row */}
-      <div
-        className="flex items-start gap-3 px-4 py-3 cursor-pointer"
+      <button
+        type="button"
+        className="flex items-start gap-3 px-4 py-3 w-full text-left"
         onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
       >
         {/* Date column */}
         <div className="flex-shrink-0 w-14 text-center">
@@ -262,7 +264,7 @@ function BookingCard({
             </div>
           </div>
         </div>
-      </div>
+      </button>
 
       {/* Expanded detail */}
       {expanded && (

@@ -122,6 +122,8 @@ export function MasterMaintenanceBuilder({
                   key={s.title}
                   className={`flex items-center gap-3 px-4 py-2.5 border-b border-themed last:border-0 transition-colors${alreadyAdded ? ' opacity-40' : ' cursor-pointer'}`}
                   style={isSelected && !alreadyAdded ? { background: 'var(--accent-gold-dim)' } : {}}
+                  role={alreadyAdded ? undefined : 'button'}
+                  tabIndex={alreadyAdded ? undefined : 0}
                   onClick={() => {
                     if (alreadyAdded) return
                     setSelectedSuggestions((prev) => {
@@ -129,6 +131,16 @@ export function MasterMaintenanceBuilder({
                       next.has(s.title) ? next.delete(s.title) : next.add(s.title)
                       return next
                     })
+                  }}
+                  onKeyDown={alreadyAdded ? undefined : (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      setSelectedSuggestions((prev) => {
+                        const next = new Set(prev)
+                        next.has(s.title) ? next.delete(s.title) : next.add(s.title)
+                        return next
+                      })
+                    }
                   }}
                 >
                   <input

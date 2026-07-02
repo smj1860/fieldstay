@@ -83,8 +83,9 @@ function LogRow({ entry }: { entry: LogEntry }) {
       style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
     >
       {/* Main row */}
-      <div
-        className="flex items-start gap-3 px-4 py-3 cursor-pointer"
+      <button
+        type="button"
+        className="flex items-start gap-3 px-4 py-3 cursor-pointer w-full text-left"
         onClick={() => setExpanded((v) => !v)}
       >
         {/* Recipient type icon */}
@@ -147,7 +148,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
             ? <ChevronUp   className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
             : <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />}
         </div>
-      </div>
+      </button>
 
       {/* Expanded body */}
       {expanded && (

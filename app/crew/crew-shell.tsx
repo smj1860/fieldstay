@@ -293,7 +293,11 @@ function SyncStatus() {
       {showInfo && (
         <div
           className="fixed inset-0 z-50 flex items-end"
+          role="button"
+          tabIndex={0}
+          aria-label="Close offline info"
           onClick={() => setShowInfo(false)}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowInfo(false) } }}
         >
           <div className="absolute inset-0 bg-black/40" />
           <div
@@ -350,7 +354,11 @@ function CrewFaqPanel({ onClose }: { onClose: () => void }) {
         background: 'rgba(0,0,0,0.4)',
         display: 'flex', alignItems: 'flex-end',
       }}
+      role="button"
+      tabIndex={0}
+      aria-label="Close FAQ panel"
       onClick={onClose}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
     >
       <div
         style={{

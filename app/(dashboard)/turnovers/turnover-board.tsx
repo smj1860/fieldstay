@@ -235,7 +235,7 @@ function CrewAssignment({
 
           {open && available.length > 0 && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} />
+              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} role="button" tabIndex={0} aria-label="Close" onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenChange(false) } }} />
               <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg py-1 min-w-[160px]">
                 {available.map(c => (
                   <button
@@ -256,7 +256,7 @@ function CrewAssignment({
 
           {open && available.length === 0 && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} />
+              <div className="fixed inset-0 z-10" onClick={() => onOpenChange(false)} role="button" tabIndex={0} aria-label="Close" onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenChange(false) } }} />
               <div className="absolute left-0 top-full mt-1 z-20 bg-card-themed border border-themed rounded-xl shadow-card-lg p-3 min-w-[140px]">
                 <p className="text-xs text-muted-themed">All crew assigned</p>
               </div>
@@ -382,6 +382,10 @@ function TurnoverCard({
       <div
         className="flex items-start gap-3 p-4 cursor-pointer"
         onClick={() => setExpanded((e) => !e)}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded((prev) => !prev) } }}
       >
         {/* Bulk-select checkbox */}
         <input
@@ -522,6 +526,10 @@ function TurnoverCard({
           className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
           style={{ background: 'rgba(0,0,0,0.5)' }}
           onClick={() => setShowQuickFlag(false)}
+          role="button"
+          tabIndex={0}
+          aria-label="Close"
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowQuickFlag(false) } }}
         >
           <div
             className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 pb-8 sm:pb-5"
