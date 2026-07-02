@@ -142,7 +142,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
 
 function InviteChip({
   memberId, inviteSentAt, hasApp,
-}: { memberId: string; inviteSentAt: string | null; hasApp: boolean }) {
+}: Readonly<{ memberId: string; inviteSentAt: string | null; hasApp: boolean }>) {
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
 

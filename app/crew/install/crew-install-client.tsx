@@ -128,7 +128,7 @@ export function CrewInstallClient() {
 
   const [platform, setPlatform]     = useState<Platform>('unknown')
   const [alreadyPWA, setAlreadyPWA] = useState(false)
-  const [deferredPrompt, setPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
 
   // Detect platform and PWA state on mount (client-only)
   useEffect(() => {
@@ -145,7 +145,7 @@ export function CrewInstallClient() {
   useEffect(() => {
     const handler = (e: Event) => {
       e.preventDefault()
-      setPrompt(e as BeforeInstallPromptEvent)
+      setDeferredPrompt(e as BeforeInstallPromptEvent)
     }
     window.addEventListener('beforeinstallprompt', handler)
     return () => window.removeEventListener('beforeinstallprompt', handler)

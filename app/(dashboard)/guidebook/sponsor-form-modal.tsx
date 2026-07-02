@@ -269,7 +269,7 @@ const inputStyle: React.CSSProperties = {
   fontSize:     '13px',
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: Readonly<{ label: string; children: React.ReactNode }>) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
       <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{label}</span>

@@ -206,7 +206,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
     pathname === path || pathname.startsWith(path + '/')
   )?.[1] ?? ''
 
-  const Sidebar = ({ mobile = false }: { mobile?: boolean }) => {
+  const Sidebar = ({ mobile = false }: Readonly<{ mobile?: boolean }>) => {
     const renderNavLink = (item: typeof filteredNav[number]) => {
       const Icon   = item.icon
       const active = pathname === item.href ||

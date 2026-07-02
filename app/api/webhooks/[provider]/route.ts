@@ -148,7 +148,7 @@ export async function POST(
   //    payload.id (not the synthesized crypto.randomUUID() fallback in
   //    correlationId above) is required — without a real id from the
   //    provider there's nothing stable to dedup against.
-  const webhookId = payload.id != null ? String(payload.id) : null
+  const webhookId = payload.id !== null ? String(payload.id) : null
 
   if (webhookId) {
     const admin = createServiceClient()

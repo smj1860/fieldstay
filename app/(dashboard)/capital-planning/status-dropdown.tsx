@@ -21,10 +21,10 @@ const STATUS_STYLES: Record<ReplacementStatus, string> = {
 export function StatusDropdown({
   assetId,
   currentStatus,
-}: {
+}: Readonly<{
   assetId:       string
   currentStatus: ReplacementStatus
-}) {
+}>) {
   const [status, setStatus]    = useState<ReplacementStatus>(currentStatus)
   const [pending, startUpdate] = useTransition()
 

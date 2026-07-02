@@ -106,7 +106,7 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }
 
 // ── Organization tab ─────────────────────────────────────────────────────────
 
-function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; connections: Record<string, ConnectionInfo>; krogerNeedsStore?: boolean }) {
+function OrgTab({ org, connections, krogerNeedsStore }: Readonly<{ org: Organization; connections: Record<string, ConnectionInfo>; krogerNeedsStore?: boolean }>) {
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
   const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
@@ -261,7 +261,7 @@ const COMMS_RETENTION_OPTIONS = [
   { value: 730, label: '24 months (730 days)' },
 ]
 
-function CommsRetentionSelector({ days }: { days: number }) {
+function CommsRetentionSelector({ days }: Readonly<{ days: number }>) {
   const [current,   setCurrent]   = useState(days)
   const [saving,    startSave]    = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -317,7 +317,7 @@ const AUTO_ASSIGN_OPTIONS = [
   },
 ]
 
-function AutoAssignToggle({ mode }: { mode: string }) {
+function AutoAssignToggle({ mode }: Readonly<{ mode: string }>) {
   const [current,  setCurrent]  = useState(mode)
   const [saving,   startSave]   = useTransition()
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -485,7 +485,7 @@ const EMAIL_PREFS = [
   { key: 'email_weekly_report', label: 'Weekly report',       desc: 'Full ops report every Monday morning'       },
 ] as const
 
-function NotificationsTab({ org }: { org: Organization }) {
+function NotificationsTab({ org }: Readonly<{ org: Organization }>) {
   const [state, formAction, pending] = useActionState(updateNotificationPrefs, null)
   const [slackState, slackAction, slackPending] = useActionState(updateSlackWebhook, null)
 
@@ -764,7 +764,7 @@ const DISPLAY_PLANS = [
   },
 ]
 
-function BillingTab({ org }: { org: Organization }) {
+function BillingTab({ org }: Readonly<{ org: Organization }>) {
   const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
   const isTrialing  = org.plan_status === 'trialing'

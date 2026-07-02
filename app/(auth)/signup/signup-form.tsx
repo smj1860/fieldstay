@@ -36,7 +36,7 @@ export function SignupForm() {
 
     // Build the emailRedirectTo URL — include invite_token so the callback
     // can process the invite acceptance after email confirmation.
-    const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? window.location.origin
+    const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? globalThis.location?.origin
     const nextParam = inviteToken
       ? `/auth/callback?invite_token=${encodeURIComponent(inviteToken)}`
       : '/auth/callback'

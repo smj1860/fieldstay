@@ -126,7 +126,7 @@ function getStockStatus(item: InventoryItem): StockStatus {
   return 'healthy'
 }
 
-function StockBadge({ item }: { item: InventoryItem }) {
+function StockBadge({ item }: Readonly<{ item: InventoryItem }>) {
   const status = getStockStatus(item)
   if (status === 'uncounted') return <span className="badge badge-slate">Needs Count</span>
   if (status === 'critical')  return <span className="badge badge-red">At/Below Par</span>
@@ -154,7 +154,7 @@ const CATEGORY_ORDER: InventoryCategory[] = [
 
 // ── Inline par-level editor ───────────────────────────────────────────────────
 
-function ParLevelEditor({ item }: { item: InventoryItem }) {
+function ParLevelEditor({ item }: Readonly<{ item: InventoryItem }>) {
   const [editing, setEditing] = useState(false)
   const [value, setValue]     = useState(String(item.par_level))
   const [saving, setSaving]   = useState(false)
@@ -234,13 +234,13 @@ function AddItemsModal({
   catalogItems,
   onClose,
   onSuccess,
-}: {
+}: Readonly<{
   propertyId: string
   propertyItems: InventoryItem[]
   catalogItems: CatalogItem[]
   onClose: () => void
   onSuccess: () => void
-}) {
+}>) {
   const [state, action, pending] = useActionState(addInventoryItems, null)
   const [tab, setTab]             = useState<'catalog' | 'custom'>('catalog')
   const [categoryFilter, setCategoryFilter] = useState<InventoryCategory | 'all'>('all')
@@ -549,12 +549,12 @@ function RunCountModal({
   items,
   onClose,
   onSuccess,
-}: {
+}: Readonly<{
   propertyId: string
   items: InventoryItem[]
   onClose: () => void
   onSuccess: () => void
-}) {
+}>) {
   const [state, action, pending] = useActionState(submitInventoryCount, null)
 
   if (state?.success) { onSuccess(); onClose(); return null }
@@ -662,7 +662,7 @@ function RunCountModal({
 
 // ── Category rows (used in the detail modal) ──────────────────────────────────
 
-function CategoryRows({ category, items }: { category: InventoryCategory; items: InventoryItem[] }) {
+function CategoryRows({ category, items }: Readonly<{ category: InventoryCategory; items: InventoryItem[] }>) {
   return (
     <>
       <div className="px-5 py-1.5 bg-canvas-themed">
@@ -734,7 +734,7 @@ function PropertyInventoryDetail({
   purchaseOrders,
   onClose,
   onRefresh,
-}: {
+}: Readonly<{
   property: Property
   items: InventoryItem[]
   catalogItems: CatalogItem[]
@@ -742,7 +742,7 @@ function PropertyInventoryDetail({
   purchaseOrders: PurchaseOrder[]
   onClose: () => void
   onRefresh: () => void
-}) {
+}>) {
   const [showAddItems, setShowAddItems] = useState(false)
   const [showRunCount, setShowRunCount] = useState(false)
   const [showCounts,   setShowCounts]   = useState(true)
@@ -893,7 +893,7 @@ function PropertyInventoryDetail({
                             {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
                           </span>
                           <span className="text-sm text-secondary-themed">{formatDate(po.generated_at)}</span>
-                          {po.total_estimated_cost != null && (
+                          {po.total_estimated_cost !== null && (
                             <span className="text-sm font-medium text-primary-themed ml-auto mr-2">
                               ${po.total_estimated_cost.toFixed(2)}
                             </span>
@@ -919,7 +919,7 @@ function PropertyInventoryDetail({
                                   <span className="text-right tabular-nums">{pi.current_quantity}</span>
                                   <span className="text-right tabular-nums font-medium">{pi.quantity_to_buy}</span>
                                   <span className="text-right tabular-nums">
-                                    {pi.estimated_unit_cost != null
+                                    {pi.estimated_unit_cost !== null
                                       ? `$${(pi.estimated_unit_cost * pi.quantity_to_buy).toFixed(2)}`
                                       : '—'}
                                   </span>
@@ -969,11 +969,11 @@ function PropertyInventoryCard({
   property,
   items,
   onSelect,
-}: {
+}: Readonly<{
   property: Property
   items: InventoryItem[]
   onSelect: () => void
-}) {
+}>) {
   const criticalCount  = items.filter((i) => getStockStatus(i) === 'critical').length
   const lowCount       = items.filter((i) => getStockStatus(i) === 'low').length
   const uncountedCount = items.filter((i) => getStockStatus(i) === 'uncounted').length
@@ -1034,11 +1034,11 @@ function PendingCountReview({
   drafts,
   properties,
   onRefresh,
-}: {
+}: Readonly<{
   drafts: PendingDraft[]
   properties: Property[]
   onRefresh: () => void
-}) {
+}>) {
   const [isPending, startTransition] = useTransition()
   const [expanded, setExpanded]      = useState<string | null>(drafts[0]?.id ?? null)
 

@@ -8,10 +8,10 @@ import { createClient }                 from '@/lib/supabase/client'
 export function TriggerProjectionsButton({
   orgId,
   currentYear,
-}: {
+}: Readonly<{
   orgId:       string
   currentYear: number
-}) {
+}>) {
   const [loading, setLoading]     = useState(false)
   const [polling, setPolling]     = useState(false)
   const [done,    setDone]        = useState(false)

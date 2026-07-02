@@ -42,11 +42,11 @@ export function CrewShell({
   crewName,
   userId,
   children,
-}: {
+}: Readonly<{
   crewName: string
   userId:   string
   children: React.ReactNode
-}) {
+}>) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
 
@@ -202,7 +202,7 @@ export function CrewShell({
   )
 }
 
-function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: () => void }) {
+function CrewBottomNav({ userId, onHelpClick }: Readonly<{ userId: string; onHelpClick: () => void }>) {
   const pathname = usePathname()
   const db = useDexieDb()
 
@@ -342,7 +342,7 @@ function SyncStatus() {
 
 // ── Info / FAQ bottom sheet ────────────────────────────────────────────────────
 
-function CrewFaqPanel({ onClose }: { onClose: () => void }) {
+function CrewFaqPanel({ onClose }: Readonly<{ onClose: () => void }>) {
   return (
     <div
       style={{
@@ -390,7 +390,7 @@ function CrewFaqPanel({ onClose }: { onClose: () => void }) {
   )
 }
 
-function FaqItem({ question, answer }: { question: string; answer: string }) {
+function FaqItem({ question, answer }: Readonly<{ question: string; answer: string }>) {
   const [open, setOpen] = useState(false)
   return (
     <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 12, marginBottom: 12 }}>

@@ -263,11 +263,11 @@ function CrewCardModal({
   member,
   availability,
   onClose,
-}: {
+}: Readonly<{
   member:       CrewMember
   availability: CrewAvailabilityEntry[]
   onClose:      () => void
-}) {
+}>) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
          onClick={onClose}>
@@ -433,7 +433,7 @@ function CrewCardModal({
   )
 }
 
-function InviteButton({ memberId, inviteSentAt }: { memberId: string; inviteSentAt: string | null }) {
+function InviteButton({ memberId, inviteSentAt }: Readonly<{ memberId: string; inviteSentAt: string | null }>) {
   const [sent, setSent]   = useState(false)
   const [err, setErr]     = useState<string | null>(null)
   const [clicked, setClicked] = useState(false)
@@ -474,7 +474,7 @@ function InviteButton({ memberId, inviteSentAt }: { memberId: string; inviteSent
 
 // ── Add single crew member ────────────────────────────────────────────────────
 
-function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
+function AddCrewForm({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
   const [state, formAction, pending] = useActionState(addCrewMember, null)
 
   if (state?.success) {
@@ -552,7 +552,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
 
 // ── Bulk upload ───────────────────────────────────────────────────────────────
 
-function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
+function BulkCrewUpload({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
   const [mode, setMode]         = useState<'csv' | 'paste'>('csv')
   const [preview, setPreview]   = useState<ParsedRow[] | null>(null)
   const [pasteText, setPaste]   = useState('')
@@ -754,7 +754,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
 
 // ── Crew row ──────────────────────────────────────────────────────────────────
 
-function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewMember) => void }) {
+function CrewRow({ member, onSelect }: Readonly<{ member: CrewMember; onSelect: (m: CrewMember) => void }>) {
   const [editing, setEditing]         = useState(false)
   const [name, setName]               = useState(member.name)
   const [roleVal, setRoleVal]         = useState<CrewRole>(member.role ?? 'general')

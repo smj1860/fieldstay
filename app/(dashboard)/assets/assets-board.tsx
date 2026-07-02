@@ -32,7 +32,7 @@ export interface StandardOption {
 }
 
 function isDiscovered(asset: Pick<AssetRow, 'make' | 'model' | 'is_na'> & { photo_url?: string | null }): boolean {
-  return asset.is_na === true || asset.make != null || asset.model != null || (asset as { photo_url?: string | null }).photo_url != null
+  return asset.is_na === true || asset.make !== null || asset.model !== null || (asset as { photo_url?: string | null }).photo_url !== null
 }
 
 function missingTypesForProperty(propertyId: string, assets: AssetRow[]): AssetType[] {
@@ -50,12 +50,12 @@ export function AssetsBoard({
   assets,
   properties,
   standards,
-}: {
+}: Readonly<{
   orgId:      string
   assets:     AssetRow[]
   properties: PropertyOption[]
   standards:  StandardOption[]
-}) {
+}>) {
   const router = useRouter()
   const [filterProperty, setFilterProperty] = useState('all')
 
@@ -88,9 +88,9 @@ export function AssetsBoard({
   // N/A assets are excluded from totals, averages, and attention counts —
   // they were explicitly marked as not present at the property.
   const realAssets = filteredAssets.filter((a) => !a.is_na)
-  const scored      = realAssets.filter((a) => a.health_score != null)
-  const unscored     = realAssets.filter((a) => a.health_score == null)
-  const urgentAssets = realAssets.filter((a) => a.health_score != null && a.health_score < 40)
+  const scored      = realAssets.filter((a) => a.health_score !== null)
+  const unscored     = realAssets.filter((a) => a.health_score === null)
+  const urgentAssets = realAssets.filter((a) => a.health_score !== null && a.health_score < 40)
 
   const avgScore = scored.length
     ? Math.round(scored.reduce((s, a) => s + a.health_score!, 0) / scored.length)
@@ -143,7 +143,7 @@ export function AssetsBoard({
       {/* Portfolio summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <SummaryCard label="Total Assets"  value={realAssets.length} />
-        <SummaryCard label="Avg Score"     value={avgScore != null ? `${avgScore}/100` : '—'} />
+        <SummaryCard label="Avg Score"     value={avgScore !== null ? `${avgScore}/100` : '—'} />
         <SummaryCard label="Needing Attention" value={urgentAssets.length}
           accent={urgentAssets.length > 0 ? 'var(--accent-red)' : undefined} />
         <SummaryCard label="Pending Discovery" value={pendingDiscoveryCount}
@@ -199,10 +199,10 @@ export function AssetsBoard({
                     ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
                     : null
                   const score  = asset.health_score
-                  const color  = score != null ? healthColor(score) : '#6b7280'
-                  const bg     = score != null ? healthBgStyle(score) : 'rgba(107,114,128,0.1)'
-                  const dot    = score != null ? healthDot(score) : '⚪'
-                  const label  = score != null ? healthLabel(score) : 'Unknown'
+                  const color  = score !== null ? healthColor(score) : '#6b7280'
+                  const bg     = score !== null ? healthBgStyle(score) : 'rgba(107,114,128,0.1)'
+                  const dot    = score !== null ? healthDot(score) : '⚪'
+                  const label  = score !== null ? healthLabel(score) : 'Unknown'
 
                   return (
                     <tr key={asset.id} className="hover:bg-raised-themed transition-colors">
@@ -224,10 +224,10 @@ export function AssetsBoard({
                         {[asset.make, asset.model].filter(Boolean).join(' · ') || '—'}
                       </td>
                       <td className="px-4 py-3 text-muted-themed hidden sm:table-cell">
-                        {ageYears != null ? `${ageYears}y` : '—'}
+                        {ageYears !== null ? `${ageYears}y` : '—'}
                       </td>
                       <td className="px-4 py-3">
-                        {score != null ? (
+                        {score !== null ? (
                           <span
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
                             style={{ color, background: bg, border: `1px solid ${color}44` }}
@@ -269,11 +269,11 @@ function SummaryCard({
   label,
   value,
   accent,
-}: {
+}: Readonly<{
   label:   string
   value:   string | number
   accent?: string
-}) {
+}>) {
   return (
     <div className="card flex flex-col gap-1">
       <p className="text-xs text-muted-themed">{label}</p>

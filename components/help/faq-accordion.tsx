@@ -138,12 +138,12 @@ function AccordionGroup({
   openId,
   toggle,
   uid,
-}: {
+}: Readonly<{
   items:  FaqItem[]
   openId: string | null
   toggle: (id: string) => void
   uid:    string
-}) {
+}>) {
   return (
     <div
       className="rounded-xl overflow-hidden"

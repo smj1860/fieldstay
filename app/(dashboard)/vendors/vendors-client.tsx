@@ -199,7 +199,7 @@ export function VendorsClient({ vendors, showComplianceNudge }: Props) {
 
 // ── Vendor card modal ─────────────────────────────────────────────────────────
 
-function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => void }) {
+function VendorCardModal({ vendor, onClose }: Readonly<{ vendor: Vendor; onClose: () => void }>) {
   const [editing, setEditing] = useState(false)
   const boundUpdate = updateVendor.bind(null, vendor.id)
   const [state, formAction, pending] = useActionState(boundUpdate, null)
@@ -362,7 +362,7 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
 
 // ── Add single vendor ─────────────────────────────────────────────────────────
 
-function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
+function AddVendorForm({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
   const [state, formAction, pending] = useActionState(addVendor, null)
 
   if (state?.success) {
@@ -460,7 +460,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
 
 // ── Bulk upload ───────────────────────────────────────────────────────────────
 
-function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
+function BulkVendorUpload({ onSuccess }: Readonly<{ onSuccess: () => void }>) {
   const [mode, setMode]         = useState<'csv' | 'paste'>('csv')
   const [preview, setPreview]   = useState<ParsedVendor[] | null>(null)
   const [pasteText, setPaste]   = useState('')
@@ -610,7 +610,7 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
 
 const STAR_PATH = 'M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.563.563 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z'
 
-function StarRating({ rating, count }: { rating: number | null; count: number }) {
+function StarRating({ rating, count }: Readonly<{ rating: number | null; count: number }>) {
   if (!rating || count === 0) {
     return (
       <span className="text-xs flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>

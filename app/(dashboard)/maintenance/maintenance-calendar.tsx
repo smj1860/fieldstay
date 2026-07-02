@@ -24,10 +24,10 @@ interface CalendarSchedule {
 export function MaintenanceCalendar({
   workOrders,
   schedules,
-}: {
+}: Readonly<{
   workOrders: CalendarWO[]
   schedules:  CalendarSchedule[]
-}) {
+}>) {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 

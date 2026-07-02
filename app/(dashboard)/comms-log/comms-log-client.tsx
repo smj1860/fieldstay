@@ -69,10 +69,10 @@ const CHANNEL_ICON: Record<CommChannel, React.ReactNode> = {
 
 // ── Log entry row ─────────────────────────────────────────────────────────────
 
-function LogRow({ entry }: { entry: LogEntry }) {
+function LogRow({ entry }: Readonly<{ entry: LogEntry }>) {
   const [expanded, setExpanded]     = useState(false)
   const [deleting, startDelete]     = useTransition()
-  const [confirmDelete, setConfirm] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const recipient     = entry.recipient_type === 'vendor' ? entry.vendors : entry.crew_members
   const recipientName = recipient?.name ?? '—'
@@ -185,7 +185,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
               {entry.source === 'manual' && (
                 !confirmDelete ? (
                   <button
-                    onClick={() => setConfirm(true)}
+                    onClick={() => setConfirmDelete(true)}
                     className="flex items-center gap-1 hover:opacity-80 transition-opacity"
                     style={{ color: 'var(--accent-red)' }}
                   >
@@ -205,7 +205,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
                       {deleting ? 'Deleting…' : 'Yes'}
                     </button>
                     <button
-                      onClick={() => setConfirm(false)}
+                      onClick={() => setConfirmDelete(false)}
                       className="hover:opacity-80"
                       style={{ color: 'var(--text-muted)' }}
                     >
@@ -230,13 +230,13 @@ function AddEntryModal({
   properties,
   workOrders,
   onClose,
-}: {
+}: Readonly<{
   vendors:    PersonOption[]
   crew:       PersonOption[]
   properties: PropertyOption[]
   workOrders: WorkOrderOption[]
   onClose:    () => void
-}) {
+}>) {
   const [state, action, pending]         = useActionState(createCommunicationLog, null)
   const [recipientType, setRecipientType] = useState<CommRecipientType>('vendor')
 
@@ -410,7 +410,7 @@ export function CommsLogClient({
   workOrders,
   page,
   hasMore,
-}: {
+}: Readonly<{
   logs:       LogEntry[]
   vendors:    PersonOption[]
   crew:       PersonOption[]
@@ -418,7 +418,7 @@ export function CommsLogClient({
   workOrders: WorkOrderOption[]
   page:       number
   hasMore:    boolean
-}) {
+}>) {
   const [showAdd, setShowAdd]               = useState(false)
   const [search, setSearch]                 = useState('')
   const [filterType, setFilterType]         = useState<'all' | CommRecipientType>('all')

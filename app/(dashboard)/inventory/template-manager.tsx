@@ -48,7 +48,7 @@ const CATEGORY_ORDER: InventoryCategory[] = [
   'guest_experience', 'technology', 'other',
 ]
 
-function TemplateBrandInput({ itemId, defaultBrand }: { itemId: string; defaultBrand: string | null }) {
+function TemplateBrandInput({ itemId, defaultBrand }: Readonly<{ itemId: string; defaultBrand: string | null }>) {
   const [value, setValue]       = useState(defaultBrand ?? '')
   const [, startTransition]     = useTransition()
 
@@ -96,12 +96,12 @@ export function TemplateManager({
   properties,
   orgId,
   catalogItems = [],
-}: {
+}: Readonly<{
   template:     Template | null
   properties:   Property[]
   orgId:        string
   catalogItems: CatalogItem[]
-}) {
+}>) {
   const [currentTemplate, setCurrentTemplate] = useState<Template | null>(template)
   const [creating, setCreating]               = useState(false)
   const [applyModal, setApplyModal]           = useState(false)

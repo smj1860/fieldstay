@@ -273,12 +273,12 @@ function WorkOrderCard({
   onClick,
   isSelected,
   onToggle,
-}: {
+}: Readonly<{
   wo: WorkOrderRow
   onClick: () => void
   isSelected: boolean
   onToggle: () => void
-}) {
+}>) {
   const property = getJoined(wo.properties)
   const vendor   = getJoined(wo.vendors)
 
@@ -340,11 +340,11 @@ function WorkOrderCard({
                 {formatDate(wo.scheduled_date)}
               </span>
             )}
-            {(wo.nte_amount != null || wo.estimated_cost != null) && (
+            {(wo.nte_amount !== null || wo.estimated_cost !== null) && (
               <span className="flex items-center gap-1">
                 <DollarSign className="w-3 h-3" />
                 {(wo.nte_amount ?? wo.estimated_cost ?? 0).toFixed(0)}
-                {wo.nte_amount != null && (
+                {wo.nte_amount !== null && (
                   <span className="text-xs opacity-60">NTE</span>
                 )}
               </span>
@@ -369,7 +369,7 @@ function CreateWorkOrderModal({
   orgId = '',
   onClose,
   onWarning,
-}: {
+}: Readonly<{
   properties:       PropertyOptionWithCoords[]
   vendors:          VendorOptionWithCoords[]
   crewMembers?:     CrewMemberOption[]
@@ -378,7 +378,7 @@ function CreateWorkOrderModal({
   orgId?:           string
   onClose:          () => void
   onWarning?:       (msg: string) => void
-}) {
+}>) {
   const [state, action, pending]          = useActionState(createWorkOrder, null)
   const [assignMode,         setAssignMode]         = useState<'vendor' | 'crew' | 'quotes'>('vendor')
   const [selectedVendor,     setSelectedVendor]     = useState('')
@@ -663,7 +663,7 @@ function CreateWorkOrderModal({
                       const blocked = status === 'hard_blocked'
                       const label  = [
                         v.name,
-                        dist != null ? `${dist.toFixed(1)} mi` : null,
+                        dist !== null ? `${dist.toFixed(1)} mi` : null,
                         blocked ? '⛔ Blocked' : status === 'expiring_soon' ? '⚠️ Expiring' : null,
                       ].filter(Boolean).join(' · ')
                       return (
@@ -804,11 +804,11 @@ function ScheduleFormFields({
   properties,
   vendors,
   defaults,
-}: {
+}: Readonly<{
   properties: PropertyOption[]
   vendors: VendorOption[]
   defaults?: Partial<ScheduleRow>
-}) {
+}>) {
   const [schedType, setSchedType] = useState<ScheduleType>(defaults?.schedule_type ?? 'routine')
 
   return (
@@ -904,11 +904,11 @@ function AddScheduleModal({
   properties,
   vendors,
   onClose,
-}: {
+}: Readonly<{
   properties: PropertyOption[]
   vendors: VendorOption[]
   onClose: () => void
-}) {
+}>) {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState<string | null>(null)
 
@@ -963,11 +963,11 @@ function EditScheduleModal({
   schedule,
   vendors,
   onClose,
-}: {
+}: Readonly<{
   schedule: ScheduleRow
   vendors: VendorOption[]
   onClose: () => void
-}) {
+}>) {
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState<string | null>(null)
 
@@ -1021,11 +1021,11 @@ function SchedulesSection({
   schedules,
   properties,
   vendors,
-}: {
+}: Readonly<{
   schedules: ScheduleRow[]
   properties: PropertyOption[]
   vendors: VendorOption[]
-}) {
+}>) {
   const [open, setOpen]             = useState(false)
   const [showAdd, setShowAdd]       = useState(false)
   const [editingId, setEditingId]   = useState<string | null>(null)
@@ -1199,13 +1199,13 @@ function TemplateBroadcastModal({
   template,
   properties,
   onClose,
-}: {
+}: Readonly<{
   template: TemplateRow
   properties: PropertyOption[]
   onClose: () => void
-}) {
+}>) {
   const [step, setStep]                       = useState<1 | 2 | 3>(1)
-  const [selectedPropertyIds, setSelectedIds] = useState<string[]>([])
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>([])
   const [broadcasting, setBroadcasting]       = useState(false)
   const [error, setError]                     = useState<string | null>(null)
   const [result, setResult]                   = useState<BroadcastResult | null>(null)
@@ -1215,11 +1215,11 @@ function TemplateBroadcastModal({
   const totalItems   = items.length * selectedPropertyIds.length
 
   const toggleProperty = (id: string) => {
-    setSelectedIds((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id])
+    setSelectedPropertyIds((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id])
   }
 
   const toggleAll = () => {
-    setSelectedIds(allSelected ? [] : properties.map((p) => p.id))
+    setSelectedPropertyIds(allSelected ? [] : properties.map((p) => p.id))
   }
 
   const handleBroadcast = async () => {
@@ -1394,11 +1394,11 @@ function CreateTemplateModal({
   onClose,
   catalogItems,
   properties,
-}: {
+}: Readonly<{
   onClose: () => void
   catalogItems: TemplateItemRow[]
   properties: PropertyOption[]
-}) {
+}>) {
   const [name, setName]           = useState('')
   const [description, setDesc]    = useState('')
   const [items, setItems]         = useState<NewTemplateItem[]>([{ ...EMPTY_TEMPLATE_ITEM }])
@@ -1431,7 +1431,7 @@ function CreateTemplateModal({
     description:           ci.description ?? '',
     schedule_frequency:    ci.schedule_frequency,
     vendor_specialty_hint: (ci.vendor_specialty_hint ?? '') as VendorSpecialty | '',
-    estimated_cost:        ci.estimated_cost != null ? String(ci.estimated_cost) : '',
+    estimated_cost:        ci.estimated_cost !== null ? String(ci.estimated_cost) : '',
     catalogId:             ci.id,
   })
 
@@ -1778,10 +1778,10 @@ function CreateTemplateModal({
 function TemplatesSection({
   templates,
   properties,
-}: {
+}: Readonly<{
   templates: TemplateRow[]
   properties: PropertyOption[]
-}) {
+}>) {
   const [open, setOpen]                             = useState(false)
   const [broadcastTemplateId, setBroadcastTemplateId] = useState<string | null>(null)
   const [showCreateTemplate, setShowCreateTemplate] = useState(false)
@@ -1910,10 +1910,10 @@ function TemplatesSection({
 function EditTemplateModal({
   template,
   onClose,
-}: {
+}: Readonly<{
   template: TemplateRow
   onClose:  () => void
-}) {
+}>) {
   const [name,        setName]        = useState(template.name)
   const [description, setDescription] = useState(template.description ?? '')
   const [saving,      startSave]      = useTransition()
@@ -2014,7 +2014,7 @@ export function MaintenanceBoard({
   vendorCompliance = [],
   orgId = '',
   role,
-}: {
+}: Readonly<{
   workOrders:       WorkOrderRow[]
   properties:       PropertyOptionWithCoords[]
   vendors:          VendorOptionWithCoords[]
@@ -2025,7 +2025,7 @@ export function MaintenanceBoard({
   vendorCompliance?: VendorComplianceRow[]
   orgId?:           string
   role:             string
-}) {
+}>) {
   const searchParams  = useSearchParams()
   const urlFilter     = searchParams.get('filter')
 

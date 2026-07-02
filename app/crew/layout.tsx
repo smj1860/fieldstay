@@ -18,9 +18,9 @@ export const metadata: Metadata = {
 
 export default async function CrewLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode
-}) {
+}>) {
   // Step 1: Read session via cookie-aware client
   const supabaseAuth = await createClient()
   const { data: { user }, error: authError } = await supabaseAuth.auth.getUser()

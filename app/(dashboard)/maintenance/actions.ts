@@ -511,7 +511,7 @@ export async function logActualCost(
     updated_via_vendor_portal: false,
     status_from:               null,
     status_to:                 null,
-    notes:                     `Actual cost logged: $${data.actual_cost.toFixed(2)}${data.invoice_reference ? ` (Invoice: ${data.invoice_reference})` : ''}`,
+    notes:                     `Actual cost logged: $${data.actual_cost.toFixed(2)}${data.invoice_reference ? ' (Invoice: ' + data.invoice_reference + ')' : ''}`,
   })
 
   // Upsert expense transaction with actual cost (updates amount if already posted)

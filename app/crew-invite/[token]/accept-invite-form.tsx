@@ -8,12 +8,12 @@ export function AcceptInviteForm({
   crewId,
   email,
   name,
-}: {
+}: Readonly<{
   token:  string
   crewId: string
   email:  string
   name:   string
-}) {
+}>) {
   const [state, formAction, pending] = useActionState(
     async (_prev: { error?: string } | null, formData: FormData) => {
       return activateCrewAccount(formData)

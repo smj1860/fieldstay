@@ -138,7 +138,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               ...new Set(
                 bookings
                   .map((b) => b.property_id)
-                  .filter((id): id is number => id != null)
+                  .filter((id): id is number => id !== null)
                   .map(String)
               ),
             ]
@@ -168,7 +168,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
             const bookingRows = bookings.map((b) => ({
               org_id:          conn.org_id,
-              property_id:     b.property_id != null
+              property_id:     b.property_id !== null
                                  ? (externalToFsId[String(b.property_id)] ?? null)
                                  : null,
               guest_name:      b.guest?.name  ?? null,
@@ -192,7 +192,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             }
 
             affectedPropertyIds = Array.from(new Set(
-              bookingRows.map((b) => b.property_id).filter((id): id is string => id != null)
+              bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
             ))
 
             // Send immediate maintenance-suggestion emails for owner blocks.
@@ -204,7 +204,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             type BookingRow = typeof bookingRows[number]
             const ownerBlocks = bookingRows.filter(
               (r): r is BookingRow & { property_id: string } =>
-                Boolean(r.is_block) && r.property_id != null
+                Boolean(r.is_block) && r.property_id !== null
             )
 
             if (pmEmail && ownerBlocks.length) {
@@ -238,7 +238,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                     const propertyName = propertyNameById[row.property_id] ?? 'Property'
 
                     const items = candidates
-                      .map((c) => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
+                      .map((c) => `${c.name}${c.estimated_cost ? ' (~$' + c.estimated_cost + ')' : ''}`)
                       .join(', ')
 
                     await resend.emails.send(

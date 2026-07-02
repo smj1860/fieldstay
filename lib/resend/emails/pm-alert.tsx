@@ -22,7 +22,7 @@ export interface PmAlertProps {
 export function PmAlert({
   heading, body, details, table, note, ctaLabel, ctaUrl,
 }: PmAlertProps) {
-  const rows = details?.filter((d) => d.value != null && d.value !== '') ?? []
+  const rows = details?.filter((d) => d.value !== null && d.value !== '') ?? []
 
   return (
     <EmailLayout

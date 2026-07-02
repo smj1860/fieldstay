@@ -52,11 +52,11 @@ export function TeamClient({ currentUserId, currentUserRole, members, invites }:
 
 function MembersSection({
   members, currentUserId, isOwner,
-}: {
+}: Readonly<{
   members: Member[]
   currentUserId: string
   isOwner: boolean
-}) {
+}>) {
   const [removing, startRemove] = useTransition()
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -175,7 +175,7 @@ function InviteSection() {
 
 // ── Pending invites ───────────────────────────────────────────────────────────
 
-function PendingInvitesSection({ invites }: { invites: Invite[] }) {
+function PendingInvitesSection({ invites }: Readonly<{ invites: Invite[] }>) {
   const [revoking, startRevoke]   = useTransition()
   const [revokingId, setRevokingId] = useState<string | null>(null)
   const [error, setError]         = useState<string | null>(null)

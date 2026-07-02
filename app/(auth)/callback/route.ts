@@ -2,7 +2,6 @@ import { NextResponse }        from 'next/server'
 import type { NextRequest }    from 'next/server'
 import { createClient }        from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
-import { inngest }             from '@/lib/inngest/client'
 import { acceptOrgInvite }     from '@/lib/auth/invites'
 
 function classifyAuthError(error: { message?: string }): string {

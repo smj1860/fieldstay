@@ -176,13 +176,13 @@ export const ownerRezInitialSync = inngest.createFunction(
 
           const patch: Record<string, unknown> = {}
 
-          if (orData.bedrooms  != null && !existing.bedrooms)
+          if (orData.bedrooms  !== null && !existing.bedrooms)
             patch.bedrooms = orData.bedrooms
 
-          if (orData.bathrooms != null && existing.bathrooms == null)
+          if (orData.bathrooms !== null && existing.bathrooms === null)
             patch.bathrooms = orData.bathrooms
 
-          if (orData.sqft != null && !existing.square_footage)
+          if (orData.sqft !== null && !existing.square_footage)
             patch.square_footage = orData.sqft
 
           if (Object.keys(patch).length > 0) {
@@ -570,7 +570,7 @@ export const ownerRezInitialSync = inngest.createFunction(
 
           const bookingRows = bookings.map((b) => ({
             org_id,
-            property_id:     b.property_id != null
+            property_id:     b.property_id !== null
                                ? (externalToFsId[String(b.property_id)] ?? null)
                                : null,
             guest_name:      b.guest?.name  ?? null,
@@ -596,7 +596,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           logger.info(`[OwnerRez:${user_id}] Upserted ${bookingRows.length} bookings`)
 
           affectedPropertyIds = Array.from(new Set(
-            bookingRows.map((b) => b.property_id).filter((id): id is string => id != null)
+            bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
           ))
         }
 

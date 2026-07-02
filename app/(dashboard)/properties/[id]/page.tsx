@@ -167,20 +167,20 @@ export default async function PropertyDetailPage({ params }: Props) {
         <div className="grid grid-cols-2 gap-y-3 text-sm">
           <DetailRow label="Type" value={property.property_type} className="capitalize" />
           <DetailRow label="Bedrooms" value={`${property.bedrooms}`} />
-          {property.bathrooms != null && (
+          {property.bathrooms !== null && (
             <DetailRow label="Bathrooms" value={`${property.bathrooms}`} />
           )}
-          {property.square_footage != null && (
+          {property.square_footage !== null && (
             <DetailRow label="Sq Footage" value={`${property.square_footage.toLocaleString()} sqft`} />
           )}
           <DetailRow label="Check-in"  value={property.checkin_time} />
           <DetailRow label="Check-out" value={property.checkout_time} />
           {property.wifi_name  && <DetailRow label="Wi-Fi" value={`${property.wifi_name} / ${property.wifi_password}`} />}
           {property.door_code  && <DetailRow label="Door Code" value={property.door_code} />}
-          {property.cleaning_cost != null && (
+          {property.cleaning_cost !== null && (
             <DetailRow label="Cleaning Fee" value={`$${property.cleaning_cost.toFixed(2)}`} />
           )}
-          {property.same_day_premium_pct != null && (
+          {property.same_day_premium_pct !== null && (
             <DetailRow label="Same-Day Premium" value={`+${property.same_day_premium_pct}%`} />
           )}
         </div>
@@ -277,7 +277,7 @@ export default async function PropertyDetailPage({ params }: Props) {
                       {vendor && <span className="text-xs text-muted-themed hidden sm:block">· {vendor.name}</span>}
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0 ml-2 text-xs text-muted-themed">
-                      {cost != null && <span>${cost.toFixed(0)}</span>}
+                      {cost !== null && <span>${cost.toFixed(0)}</span>}
                       {wo.completed_date && <span>{formatDate(wo.completed_date, 'MMM d')}</span>}
                     </div>
                   </Link>
@@ -303,7 +303,7 @@ export default async function PropertyDetailPage({ params }: Props) {
                       <span className="text-sm text-secondary-themed">{s.name}</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs">
-                      {s.estimated_cost != null && (
+                      {s.estimated_cost !== null && (
                         <span className="text-muted-themed">${s.estimated_cost}</span>
                       )}
                       {s.next_due_date && (
@@ -353,9 +353,9 @@ export default async function PropertyDetailPage({ params }: Props) {
   )
 }
 
-function StatCard({ label, value, icon, href }: {
+function StatCard({ label, value, icon, href }: Readonly<{
   label: string; value: number; icon: React.ReactNode; href: string
-}) {
+}>) {
   return (
     <Link href={href} className="card hover:shadow-card-md transition-shadow flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -367,7 +367,7 @@ function StatCard({ label, value, icon, href }: {
   )
 }
 
-function DetailRow({ label, value, className }: { label: string; value: string | number; className?: string }) {
+function DetailRow({ label, value, className }: Readonly<{ label: string; value: string | number; className?: string }>) {
   return (
     <>
       <span className="text-muted-themed">{label}</span>

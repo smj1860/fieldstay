@@ -66,7 +66,7 @@ function normalizeAssetType(raw: string): AssetType | null {
 
 // ── Health score pill ─────────────────────────────────────────────────────────
 
-function HealthPill({ score }: { score: number | null }) {
+function HealthPill({ score }: Readonly<{ score: number | null }>) {
   if (score === null) return <span className="badge badge-slate">Unknown</span>
   const color = healthColor(score)
   return (
@@ -112,12 +112,12 @@ function AssetForm({
   standards,
   asset,
   onClose,
-}: {
+}: Readonly<{
   propertyId: string
   standards:  AssetTypeStandard[]
   asset?:     PropertyAsset
   onClose:    () => void
-}) {
+}>) {
   const isEdit = Boolean(asset)
 
   const boundCreate = createAsset.bind(null, propertyId)
@@ -406,11 +406,11 @@ function CsvImportModal({
   propertyId,
   standards,
   onClose,
-}: {
+}: Readonly<{
   propertyId: string
   standards:  AssetTypeStandard[]
   onClose:    () => void
-}) {
+}>) {
   const [rows,      setRows]      = useState<ParsedRow[]>([])
   const [importing, setImporting] = useState(false)
   const [done,      setDone]      = useState(false)
@@ -600,12 +600,12 @@ function AssetRow({
   standards,
   propertyId,
   onEdit,
-}: {
+}: Readonly<{
   asset:      PropertyAsset
   standards:  AssetTypeStandard[]
   propertyId: string
   onEdit:     (a: PropertyAsset) => void
-}) {
+}>) {
   const [removing, startRemove] = useTransition()
 
   const std      = standards.find((s) => s.asset_type === asset.asset_type)
@@ -627,7 +627,7 @@ function AssetRow({
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-primary-themed">{asset.name}</span>
           <span className="badge badge-slate text-xs">{typeName}</span>
-          {ageYears != null && (
+          {ageYears !== null && (
             <span className="text-xs text-muted-themed">{ageYears}y old</span>
           )}
           {showSection179 && (
@@ -672,11 +672,11 @@ export function AssetSection({
   assets,
   standards,
   propertyId,
-}: {
+}: Readonly<{
   assets:     PropertyAsset[]
   standards:  AssetTypeStandard[]
   propertyId: string
-}) {
+}>) {
   const [showAdd,    setShowAdd]    = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [editing,    setEditing]    = useState<PropertyAsset | null>(null)
@@ -687,7 +687,7 @@ export function AssetSection({
   const agingCount    = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 40 && s < 60 }).length
   const poorCount     = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 20 && s < 40 }).length
   const criticalCount = assets.filter((a) => (a.health_score ?? 100) < 20).length
-  const urgentAssets  = assets.filter((a) => a.health_score != null && a.health_score < 40)
+  const urgentAssets  = assets.filter((a) => a.health_score !== null && a.health_score < 40)
 
   return (
     <>

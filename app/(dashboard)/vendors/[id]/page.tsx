@@ -134,11 +134,11 @@ export default async function VendorDetailPage({ params }: Props) {
               <span className="text-muted-themed">Service Area</span>
               <span className="text-secondary-themed font-medium">
                 {vendor.service_zip}
-                {vendor.service_radius_miles != null && ` (+${vendor.service_radius_miles} mi)`}
+                {vendor.service_radius_miles !== null && ` (+${vendor.service_radius_miles} mi)`}
               </span>
             </>
           )}
-          {vendor.avg_rating != null && vendor.rating_count > 0 && (
+          {vendor.avg_rating !== null && vendor.rating_count > 0 && (
             <>
               <span className="text-muted-themed">Rating</span>
               <span className="text-secondary-themed font-medium">
@@ -186,7 +186,7 @@ export default async function VendorDetailPage({ params }: Props) {
               >
                 <span className="text-sm text-secondary-themed truncate">{wo.title}</span>
                 <div className="flex items-center gap-3 flex-shrink-0 ml-2 text-xs text-muted-themed">
-                  {wo.actual_cost != null && <span>${wo.actual_cost.toFixed(0)}</span>}
+                  {wo.actual_cost !== null && <span>${wo.actual_cost.toFixed(0)}</span>}
                   {wo.completed_date && <span>{formatDate(wo.completed_date)}</span>}
                 </div>
               </Link>

@@ -12,10 +12,10 @@ interface CrewMember {
 export function CrewSetup({
   propertyId,
   crew,
-}: {
+}: Readonly<{
   propertyId: string
   crew: CrewMember[]
-}) {
+}>) {
   const [state, formAction, pending] = useActionState(addCrewMember, null)
   const [showForm, setShowForm] = useState(crew.length === 0)
   const [completing, setCompleting] = useState(false)

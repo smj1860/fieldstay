@@ -27,7 +27,7 @@ export async function getMissingAssetDiscoveryTypes(
 
   const verifiedTypes = new Set(
     (existing ?? [])
-      .filter(row => row.make != null || row.model != null || row.photo_url != null || row.is_na === true)
+      .filter(row => row.make !== null || row.model !== null || row.photo_url !== null || row.is_na === true)
       .map(row => row.asset_type as AssetType)
   )
 

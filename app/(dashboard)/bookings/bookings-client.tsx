@@ -104,10 +104,10 @@ const TURNOVER_STATUS_COLORS: Record<string, string> = {
 function BookingCard({
   booking,
   onCancel,
-}: {
+}: Readonly<{
   booking:  BookingRow
   onCancel: (id: string) => void
-}) {
+}>) {
   const [expanded, setExpanded]     = useState(false)
   const [confirm,  setConfirm]      = useState(false)
   const [cancelling, startCancel]   = useTransition()
@@ -243,8 +243,8 @@ function BookingCard({
       {expanded && (
         <div className="border-t px-4 pb-4 pt-3 space-y-3" style={{ borderColor: 'var(--border)' }}>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-            <Detail label="Check-in"  value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ` at ${booking.checkin_time}` : ''}`} />
-            <Detail label="Check-out" value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ` at ${booking.checkout_time}` : ''}`} />
+            <Detail label="Check-in"  value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ' at ' + booking.checkin_time : ''}`} />
+            <Detail label="Check-out" value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ' at ' + booking.checkout_time : ''}`} />
             <Detail label="Nights"    value={`${nights} night${nights !== 1 ? 's' : ''}`} />
             {property && (
               <Detail
@@ -322,7 +322,7 @@ function BookingCard({
   )
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
+function Detail({ label, value }: Readonly<{ label: string; value: string }>) {
   return (
     <div>
       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{label}</p>
@@ -339,13 +339,13 @@ function AddBookingModal({
   onSuccess,
   initialPropertyId,
   initialCheckinDate,
-}: {
+}: Readonly<{
   properties:          PropertyOption[]
   onClose:             () => void
   onSuccess:           () => void
   initialPropertyId?:  string
   initialCheckinDate?: string
-}) {
+}>) {
   const [state, action, pending] = useActionState(createBooking, null)
   const [checkinVal, setCheckinVal] = useState(initialCheckinDate ?? '')
   const todayStr = new Date().toISOString().split('T')[0]!
@@ -459,12 +459,12 @@ export function BookingsClient({
   properties,
   connections,
   vacancyGaps,
-}: {
+}: Readonly<{
   bookings:    BookingRow[]
   properties:  PropertyOption[]
   connections: ConnectionRow[]
   vacancyGaps: VacancyGap[]
-}) {
+}>) {
   const {
     filtered, localBookings, justAdded, syncing,
     showAdd,        setShowAdd,
@@ -495,7 +495,7 @@ export function BookingsClient({
                       key={c.provider_id}
                       title={
                         isHealthy
-                          ? `${c.provider_id} connected${c.last_used_at ? ` — last synced ${new Date(c.last_used_at).toLocaleString()}` : ''}`
+                          ? `${c.provider_id} connected${c.last_used_at ? ' — last synced ' + new Date(c.last_used_at).toLocaleString() : ''}`
                           : `${c.provider_id}: ${(c.metadata?.last_sync_error as string) ?? 'connection needs attention'}`
                       }
                       className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full"

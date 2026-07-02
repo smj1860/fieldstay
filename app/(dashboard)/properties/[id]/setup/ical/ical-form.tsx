@@ -23,10 +23,10 @@ const SOURCE_INSTRUCTIONS: Record<string, string> = {
 export function IcalManager({
   propertyId,
   feeds,
-}: {
+}: Readonly<{
   propertyId: string
   feeds: IcalFeed[]
-}) {
+}>) {
   const addAction = addIcalFeed.bind(null, propertyId)
   const [state, formAction, pending] = useActionState(addAction, null)
   const [showForm, setShowForm] = useState(feeds.length === 0)

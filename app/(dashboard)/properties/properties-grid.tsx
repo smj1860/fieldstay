@@ -28,10 +28,10 @@ interface PropertyOpsCounts {
 export function PropertiesGrid({
   properties,
   opsCountsByProperty,
-}: {
+}: Readonly<{
   properties: PropertyRow[]
   opsCountsByProperty: Record<string, PropertyOpsCounts>
-}) {
+}>) {
   const [query, setQuery] = useState('')
 
   const filtered = useMemo(() => {

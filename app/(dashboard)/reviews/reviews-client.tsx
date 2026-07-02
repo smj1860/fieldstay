@@ -44,7 +44,7 @@ interface Props {
   manualUsedThisWeek: number
 }
 
-function StarRating({ rating }: { rating: number }) {
+function StarRating({ rating }: Readonly<{ rating: number }>) {
   return (
     <span className="text-base" aria-label={`${rating} out of 5 stars`}>
       {Array.from({ length: 5 }, (_, i) => (
@@ -59,10 +59,10 @@ function StarRating({ rating }: { rating: number }) {
 function DeadlineBadge({
   daysRemaining,
   status,
-}: {
+}: Readonly<{
   daysRemaining: number | null
   status:        string
-}) {
+}>) {
   if (status === 'posted' || daysRemaining === null) return null
 
   const [bg, color, text]: [string, string, string] =
@@ -81,7 +81,7 @@ function DeadlineBadge({
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status }: Readonly<{ status: string }>) {
   const map: Record<string, { label: string; bg: string; color: string }> = {
     pending: { label: 'No Response',  bg: 'rgba(107,114,128,0.15)', color: 'var(--text-muted)' },
     draft:   { label: 'Draft',        bg: 'rgba(251,191,36,0.15)',  color: '#D97706' },

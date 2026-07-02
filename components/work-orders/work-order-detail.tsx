@@ -164,7 +164,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
   const hasAccess      = !!(wo.properties.access_instructions || wo.access_notes)
   const lineItemsTotal = lineItems.reduce((s, i) => s + i.line_total, 0)
 
-  const nteSet      = wo.nte_amount != null && wo.nte_amount > 0
+  const nteSet      = wo.nte_amount !== null && wo.nte_amount > 0
   const nteExceeded = nteSet && lineItemsTotal > wo.nte_amount!
   const nteOverage  = nteExceeded ? lineItemsTotal - wo.nte_amount! : 0
 
@@ -426,7 +426,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
         </div>
 
         {/* ── NTE Banner ────────────────────────────────────────── */}
-        {wo.nte_amount != null && (
+        {wo.nte_amount !== null && (
           <div
             className="flex items-start gap-3 px-4 py-3 rounded-lg"
             style={{
@@ -452,7 +452,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
              style={{ color: wo.description ? 'var(--text-primary)' : 'var(--text-muted)' }}>
             {wo.description ?? 'No description provided.'}
           </p>
-          {(wo.estimated_cost != null && wo.nte_amount == null) && (
+          {(wo.estimated_cost !== null && wo.nte_amount === null) && (
             <p className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
               Estimated cost: <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
                 {fmt(wo.estimated_cost)}
@@ -496,7 +496,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
           mobileCollapse
           defaultOpen={false}
           action={
-            wo.actual_cost != null && lineItems.length > 0 ? (
+            wo.actual_cost !== null && lineItems.length > 0 ? (
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
                 Total: <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>
                   {fmt(wo.actual_cost)}
@@ -892,14 +892,14 @@ function Section({
   mobileCollapse = false,
   defaultOpen = true,
   children,
-}: {
+}: Readonly<{
   icon:            React.ReactNode
   title:           string
   action?:         React.ReactNode
   mobileCollapse?: boolean
   defaultOpen?:    boolean
   children:        React.ReactNode
-}) {
+}>) {
   const [open, setOpen] = useState(defaultOpen)
 
   const header = (
@@ -956,14 +956,14 @@ function SignOffRow({
   isPending,
   onAction,
   actionLabel,
-}: {
+}: Readonly<{
   label:       string
   timestamp:   string | null
   canAction:   boolean
   isPending:   boolean
   onAction:    () => void
   actionLabel: string
-}) {
+}>) {
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="flex items-center gap-2.5">

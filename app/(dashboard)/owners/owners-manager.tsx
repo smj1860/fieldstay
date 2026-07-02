@@ -152,7 +152,7 @@ function todayIso() {
 
 // ── Copy button ──────────────────────────────────────────────────────────────
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text }: Readonly<{ text: string }>) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -178,7 +178,7 @@ function CopyButton({ text }: { text: string }) {
 
 // ── Revoke Access Button ─────────────────────────────────────────────────────
 
-function RevokeAccessButton({ ownerId }: { ownerId: string }) {
+function RevokeAccessButton({ ownerId }: Readonly<{ ownerId: string }>) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -207,7 +207,7 @@ function RevokeAccessButton({ ownerId }: { ownerId: string }) {
 
 // ── Generate Link Button ─────────────────────────────────────────────────────
 
-function GenerateLinkButton({ ownerId }: { ownerId: string }) {
+function GenerateLinkButton({ ownerId }: Readonly<{ ownerId: string }>) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -239,10 +239,10 @@ function GenerateLinkButton({ ownerId }: { ownerId: string }) {
 function AddTransactionForm({
   propertyId,
   onClose,
-}: {
+}: Readonly<{
   propertyId: string
   onClose: () => void
-}) {
+}>) {
   const [state, formAction, pending] = useActionState(addOwnerTransaction, null)
   const [txnType, setTxnType] = useState<'revenue' | 'expense'>('revenue')
 
@@ -352,7 +352,7 @@ function AddTransactionForm({
 
 // ── Visibility Toggle ────────────────────────────────────────────────────────
 
-function VisibilityToggle({ txn }: { txn: Transaction }) {
+function VisibilityToggle({ txn }: Readonly<{ txn: Transaction }>) {
   const [pending, startTransition] = useTransition()
 
   const toggle = () => {
@@ -381,10 +381,10 @@ function VisibilityToggle({ txn }: { txn: Transaction }) {
 function TransactionPanel({
   propertyId,
   transactions,
-}: {
+}: Readonly<{
   propertyId: string
   transactions: Transaction[]
-}) {
+}>) {
   const [expanded, setExpanded]       = useState(false)
   const [showForm, setShowForm]       = useState(false)
   const [deletingId, setDeletingId]   = useState<string | null>(null)
@@ -526,10 +526,10 @@ function TransactionPanel({
 function AddOwnerModal({
   properties,
   onClose,
-}: {
+}: Readonly<{
   properties: Property[]
   onClose: () => void
-}) {
+}>) {
   const [state, formAction, pending] = useActionState(addPropertyOwner, null)
 
   useEffect(() => {
@@ -608,7 +608,7 @@ function AddOwnerModal({
 
 // ── Combined Portfolio Link Button ───────────────────────────────────────────
 
-function GenerateCombinedLinkButton({ ownerIds }: { ownerIds: string[] }) {
+function GenerateCombinedLinkButton({ ownerIds }: Readonly<{ ownerIds: string[] }>) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
 
@@ -641,11 +641,11 @@ function MultiPropertyOwnerCard({
   group,
   baseUrl,
   properties,
-}: {
+}: Readonly<{
   group:      OwnerGroup
   baseUrl:    string
   properties: Property[]
-}) {
+}>) {
   const combinedToken = getCombinedToken(group.anchor)
   const expired       = combinedToken ? isTokenExpired(combinedToken) : false
   const portalUrl     = combinedToken && !expired ? `${baseUrl}/owner/${combinedToken.token}` : null
@@ -695,11 +695,11 @@ function OwnerCard({
   owner,
   baseUrl,
   transactions,
-}: {
+}: Readonly<{
   owner: Owner
   baseUrl: string
   transactions: Transaction[]
-}) {
+}>) {
   const token     = getToken(owner)
   const expired   = token ? isTokenExpired(token) : false
   const portalUrl = token && !expired ? `${baseUrl}/owner/${token.token}` : null
@@ -754,7 +754,7 @@ function OwnerCard({
           <div className="font-semibold text-primary-themed">{owner.name}</div>
           <div className="text-sm text-muted-themed mt-0.5">{getPropertyName(owner)}</div>
           {owner.email && <div className="text-xs text-muted-themed mt-0.5">{owner.email}</div>}
-          {owner.revenue_share_pct != null && (
+          {owner.revenue_share_pct !== null && (
             <div className="text-xs text-muted-themed">{owner.revenue_share_pct}% revenue share</div>
           )}
         </div>
@@ -834,10 +834,10 @@ function OwnerCard({
 function CapitalPlanToggle({
   ownerId,
   initialShared,
-}: {
+}: Readonly<{
   ownerId:       string
   initialShared: boolean
-}) {
+}>) {
   const [shared, setShared]    = useState(initialShared)
   const [pending, startToggle] = useTransition()
   const [error, setError]      = useState<string | null>(null)
@@ -897,12 +897,12 @@ export function OwnersManager({
   properties,
   transactions,
   baseUrl,
-}: {
+}: Readonly<{
   owners: Owner[]
   properties: Property[]
   transactions: Transaction[]
   baseUrl: string
-}) {
+}>) {
   const [showAdd, setShowAdd] = useState(false)
   const multiPropertyGroups = groupMultiPropertyOwners(owners)
 

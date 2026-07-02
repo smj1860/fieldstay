@@ -8,7 +8,7 @@ export async function acceptInviteForCurrentUser(
 ): Promise<{ accepted: boolean }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user || !user.email) return { accepted: false }
+  if (!user?.email) return { accepted: false }
 
   const { accepted } = await acceptOrgInvite(user.id, user.email, inviteToken)
   return { accepted }

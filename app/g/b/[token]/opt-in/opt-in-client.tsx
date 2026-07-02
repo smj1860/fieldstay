@@ -10,7 +10,7 @@ const TEXT     = '#F4F4F5'
 const MUTED    = '#9A9AA2'
 const GOLD     = '#D4A537'
 
-export function OptInClient({ token, propertyName }: { token: string; propertyName: string }) {
+export function OptInClient({ token, propertyName }: Readonly<{ token: string; propertyName: string }>) {
   const [phone, setPhone] = useState('')
   const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)

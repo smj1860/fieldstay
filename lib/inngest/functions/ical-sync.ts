@@ -65,7 +65,7 @@ export const syncAllIcalFeeds = inngest.createFunction(
       return data ?? []
     })
 
-    logger.info(`Syncing ${feeds.length} iCal feeds${orgId ? ` for org ${orgId}` : ' (all orgs)'}`)
+    logger.info(`Syncing ${feeds.length} iCal feeds${orgId ? ' for org ' + orgId : ' (all orgs)'}`)
 
     if (feeds.length === 0) return { synced: 0 }
 

@@ -115,11 +115,11 @@ function BookingDetailPanel({
   booking,
   onClose,
   onViewInList,
-}: {
+}: Readonly<{
   booking:      BookingRow
   onClose:      () => void
   onViewInList: (guestName: string) => void
-}) {
+}>) {
   const nights = Math.round(
     (new Date(booking.checkout_date).getTime() - new Date(booking.checkin_date).getTime()) / 86_400_000
   )
@@ -161,11 +161,11 @@ function BookingDetailPanel({
           <DetailRow label="Property"  value={booking.properties?.name ?? '—'} />
           <DetailRow
             label="Check-in"
-            value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ` at ${booking.checkin_time}` : ''}`}
+            value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ' at ' + booking.checkin_time : ''}`}
           />
           <DetailRow
             label="Check-out"
-            value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ` at ${booking.checkout_time}` : ''}`}
+            value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ' at ' + booking.checkout_time : ''}`}
           />
           <DetailRow label="Nights" value={`${nights} night${nights !== 1 ? 's' : ''}`} />
         </div>
@@ -192,7 +192,7 @@ function BookingDetailPanel({
   )
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({ label, value }: Readonly<{ label: string; value: string }>) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span style={{ color: 'var(--text-muted)' }}>{label}</span>
@@ -209,13 +209,13 @@ export function BookingsCalendar({
   vacancyGaps,
   onViewInList,
   onCanvasClick,
-}: {
+}: Readonly<{
   bookings:      BookingRow[]
   properties:    PropertyOption[]
   vacancyGaps:   VacancyGap[]
   onViewInList:  (guestName: string) => void
   onCanvasClick: (propertyId: string, checkinDate: string) => void
-}) {
+}>) {
   const { push } = useToast()
   const router = useRouter()
 

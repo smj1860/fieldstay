@@ -141,8 +141,8 @@ export const autoAssignTurnover = inngest.createFunction(
           // (e.g. 1.000 = 100%), NOT 0–100 despite the old code's /100 implying a
           // percentage scale. PostgREST also returns numeric columns as strings, so
           // coerce explicitly rather than relying on implicit arithmetic coercion.
-          const reliability = c.reliability_score != null ? Number(c.reliability_score) : 0.7
-          const capacity    = c.capacity_score    != null ? Number(c.capacity_score)    : 0.7
+          const reliability = c.reliability_score !== null ? Number(c.reliability_score) : 0.7
+          const capacity    = c.capacity_score    !== null ? Number(c.capacity_score)    : 0.7
           const workload    = 1 - (workloadMap[c.id] ?? 0) / maxWorkload
           const familiarity = familiarSet.has(c.id) ? 1.0 : 0.0
 

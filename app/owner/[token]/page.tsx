@@ -93,7 +93,7 @@ interface TxnRowData {
   notes:            string | null
 }
 
-function TransactionRow({ txn }: { txn: TxnRowData }) {
+function TransactionRow({ txn }: Readonly<{ txn: TxnRowData }>) {
   const isRevenue = (txn.transaction_type as TxnType) === 'revenue'
   const badge     = SOURCE_BADGES[txn.source ?? ''] ?? null
   const desc      = txn.description || SOURCE_FALLBACK_LABELS[txn.source ?? ''] || txn.category
@@ -428,7 +428,7 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
               {!isMulti && (
                 <p className="text-sm font-medium text-gray-700">{ownerRaw.name}</p>
               )}
-              {ownerRaw.revenue_share_pct != null && (
+              {ownerRaw.revenue_share_pct !== null && (
                 <p className="text-xs text-gray-400 mt-0.5">{ownerRaw.revenue_share_pct}% revenue share</p>
               )}
             </div>
@@ -612,7 +612,7 @@ export default async function OwnerPortalPage({ params, searchParams }: Props) {
                                   ? `–$${item.cost_high.toLocaleString()}`
                                   : ''}
                               </span>
-                              {item.health_score != null && (
+                              {item.health_score !== null && (
                                 <span className={`ml-2 text-xs font-medium ${
                                   item.health_score >= 80 ? 'text-green-600'
                                   : item.health_score >= 60 ? 'text-amber-600'

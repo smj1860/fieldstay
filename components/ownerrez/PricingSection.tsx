@@ -83,7 +83,7 @@ const PLANS = [
 ];
 
 // Shared RepuGuard feature row — rendered identically across all plan cards
-function RepuGuardFeatureRow({ highlight }: { highlight: boolean }) {
+function RepuGuardFeatureRow({ highlight }: Readonly<{ highlight: boolean }>) {
   return (
     <li className="flex items-center gap-2 text-sm">
       {/* Swap the standard yellow checkmark for a green one to visually

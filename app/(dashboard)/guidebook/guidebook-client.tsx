@@ -453,11 +453,11 @@ function PropertyGuidebookRow({
   property,
   appUrl,
   isGuidebookActive,
-}: {
+}: Readonly<{
   property: Property
   appUrl: string
   isGuidebookActive: boolean
-}) {
+}>) {
   const [expanded, setExpanded] = useState(false)
 
   return (
@@ -492,11 +492,11 @@ function PropertyGuidebookForm({
   property,
   appUrl,
   isGuidebookActive,
-}: {
+}: Readonly<{
   property: Property
   appUrl:   string
   isGuidebookActive: boolean
-}) {
+}>) {
   const supabase = createClient()
   const [config, setConfig] = useState<{
     slug: string
@@ -687,7 +687,7 @@ function PropertyGuidebookForm({
   )
 }
 
-function GapNightMessagingSection({ config }: { config: GuidebookConfiguration | null }) {
+function GapNightMessagingSection({ config }: Readonly<{ config: GuidebookConfiguration | null }>) {
   const [enabled, setEnabled]           = useState(config?.extension_messaging_enabled ?? false)
   const [gapThreshold, setGapThreshold] = useState(String(config?.extension_gap_threshold_days ?? 7))
   const [discount, setDiscount]         = useState(
@@ -860,7 +860,7 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
   )
 }
 
-function GuidebookQrCode({ url, propertyName }: { url: string; propertyName: string }) {
+function GuidebookQrCode({ url, propertyName }: Readonly<{ url: string; propertyName: string }>) {
   const qrId = `guidebook-qr-${propertyName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
   function handleDownload() {

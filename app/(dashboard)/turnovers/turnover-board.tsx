@@ -152,14 +152,14 @@ function CrewAssignment({
   onWarning,
   open,
   onOpenChange,
-}: {
+}: Readonly<{
   turnover:     Turnover
   crewMembers:  CrewMember[]
   assignedCrew: AssignedCrewMember[]
   onWarning?:   (msg: string) => void
   open:         boolean
   onOpenChange: (open: boolean) => void
-}) {
+}>) {
   const [adding,   startAdd]    = useTransition()
   const [removing, startRemove] = useTransition()
 
@@ -277,14 +277,14 @@ function TurnoverCard({
   isSelected,
   onToggle,
   onWarning,
-}: {
+}: Readonly<{
   turnover: Turnover
   property: Property | undefined
   crewMembers: CrewMember[]
   isSelected: boolean
   onToggle: () => void
   onWarning?: (msg: string) => void
-}) {
+}>) {
   const [expanded,        setExpanded]        = useState(false)
   const [assignOpen,      setAssignOpen]      = useState(false)
   const [updating,        startUpdate]        = useTransition()
@@ -720,7 +720,7 @@ function BoardSection({
   selectedIds,
   onToggle,
   onWarning,
-}: {
+}: Readonly<{
   label: string
   turnovers: Turnover[]
   propertyMap: Record<string, Property>
@@ -731,7 +731,7 @@ function BoardSection({
   selectedIds: Set<string>
   onToggle: (id: string) => void
   onWarning?: (msg: string) => void
-}) {
+}>) {
   const [open, setOpen] = useState(defaultOpen)
   const prevLengthRef = useRef(turnovers.length)
 
@@ -793,10 +793,10 @@ function BoardSection({
 function AddTurnoverModal({
   properties,
   onClose,
-}: {
+}: Readonly<{
   properties: Property[]
   onClose: () => void
-}) {
+}>) {
   const [state, action, pending] = useActionState(createManualTurnover, null)
 
   return (
@@ -870,14 +870,14 @@ function SplitAssignModal({
   crewMembers,
   onClose,
   onApplied,
-}: {
+}: Readonly<{
   turnoverIds: string[]
   turnovers:   Turnover[]
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
   onClose:     () => void
   onApplied:   (warning?: string) => void
-}) {
+}>) {
   const selected = turnovers.filter(t => turnoverIds.includes(t.id))
 
   const [picks, setPicks] = useState<Record<string, string>>(() => {
@@ -995,7 +995,7 @@ export function TurnoverBoard({
   crewAvailability = [],
   orgId,
   showAutoAssignNudge = false,
-}: {
+}: Readonly<{
   turnovers: Turnover[]
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
@@ -1004,7 +1004,7 @@ export function TurnoverBoard({
   crewAvailability?: CrewAvailabilityRow[]
   orgId: string
   showAutoAssignNudge?: boolean
-}) {
+}>) {
   const searchParams = useSearchParams()
   const urlStatus    = searchParams.get('status')
 

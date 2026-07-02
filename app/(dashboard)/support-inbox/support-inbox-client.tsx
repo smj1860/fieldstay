@@ -25,9 +25,9 @@ interface MessageRow {
 
 export function SupportInboxClient({
   initialConversations,
-}: {
+}: Readonly<{
   initialConversations: ConversationRow[]
-}) {
+}>) {
   const [conversations, setConversations] = useState(initialConversations)
   const [selectedId, setSelectedId]       = useState<string | null>(
     initialConversations.find(c => c.needs_human)?.id ?? initialConversations[0]?.id ?? null

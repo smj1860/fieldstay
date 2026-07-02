@@ -26,11 +26,11 @@ function AddDocumentForm({
   vendorId,
   orgId,
   onClose,
-}: {
+}: Readonly<{
   vendorId: string
   orgId:    string
   onClose:  () => void
-}) {
+}>) {
   const [uploading, setUploading] = useState(false)
   const [uploadedUrl, setUploadedUrl] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
@@ -201,11 +201,11 @@ export function ComplianceSection({
   vendorId,
   orgId,
   documents,
-}: {
+}: Readonly<{
   vendorId:  string
   orgId:     string
   documents: VendorComplianceDocument[]
-}) {
+}>) {
   const [showAdd, setShowAdd]     = useState(false)
   const [removing, startRemove]   = useTransition()
   const [verifying, startVerify]  = useTransition()
@@ -283,7 +283,7 @@ export function ComplianceSection({
                       {doc.policy_number  && <span>#{doc.policy_number}</span>}
                       {doc.effective_date && <span>Eff: {doc.effective_date}</span>}
                       {doc.expiry_date    && <span>Exp: {doc.expiry_date}</span>}
-                      {doc.coverage_amount != null && (
+                      {doc.coverage_amount !== null && (
                         <span>${doc.coverage_amount.toLocaleString()}</span>
                       )}
                     </div>

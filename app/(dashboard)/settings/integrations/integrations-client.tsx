@@ -80,10 +80,10 @@ interface Connection {
 export function IntegrationsClient({
   providers,
   connectionsByProvider,
-}: {
+}: Readonly<{
   providers:             Provider[]
   connectionsByProvider: Record<string, Connection>
-}) {
+}>) {
   const searchParams = useSearchParams()
   const router       = useRouter()
   const [connectingProvider, setConnectingProvider] = useState<string | null>(
@@ -146,12 +146,12 @@ function CredentialModal({
   displayName,
   onClose,
   onSuccess,
-}: {
+}: Readonly<{
   providerId:  string
   displayName: string
   onClose:     () => void
   onSuccess:   (externalUserId: string) => void
-}) {
+}>) {
   const config = API_KEY_PROVIDER_FIELDS[providerId]
   if (!config) return null
 
@@ -281,11 +281,11 @@ function IntegrationCard({
   provider,
   connection,
   onConnectClick,
-}: {
+}: Readonly<{
   provider:       Provider
   connection:     Connection | null
   onConnectClick: () => void
-}) {
+}>) {
   const [disconnecting, startDisconnect] = useTransition()
   const [confirming, setConfirming]      = useState(false)
   const [error, setError]                = useState<string | null>(null)

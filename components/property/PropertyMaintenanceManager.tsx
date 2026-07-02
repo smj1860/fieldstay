@@ -28,12 +28,12 @@ function DueBadge({
   nextDueDate,
   activeFromMonth,
   activeToMonth,
-}: {
+}: Readonly<{
   nextDueDate:     string | null
   activeFromMonth: number | null
   activeToMonth:   number | null
-}) {
-  if (activeFromMonth != null && activeToMonth != null) {
+}>) {
+  if (activeFromMonth !== null && activeToMonth !== null) {
     const month = new Date().getMonth() + 1
     const inWindow = activeFromMonth <= activeToMonth
       ? month >= activeFromMonth && month <= activeToMonth
@@ -95,15 +95,15 @@ function EditModal({
   item,
   onClose,
   onSaved,
-}: {
+}: Readonly<{
   item:    MaintenanceSchedule
   onClose: () => void
   onSaved: () => void
-}) {
+}>) {
   const [name,            setName]            = useState(item.name)
   const [frequency,       setFrequency]       = useState<ScheduleFrequency>(item.frequency ?? 'annual')
   const [nextDueDate,     setNextDueDate]     = useState(item.next_due_date ?? '')
-  const [seasonal,        setSeasonal]        = useState(item.active_from_month != null)
+  const [seasonal,        setSeasonal]        = useState(item.active_from_month !== null)
   const [activeFrom,      setActiveFrom]      = useState<number>(item.active_from_month ?? 1)
   const [activeTo,        setActiveTo]        = useState<number>(item.active_to_month ?? 12)
   const [notes,           setNotes]           = useState(item.instructions ?? '')
@@ -218,11 +218,11 @@ function DuplicateModal({
   item,
   onClose,
   onSaved,
-}: {
+}: Readonly<{
   item:    MaintenanceSchedule
   onClose: () => void
   onSaved: () => void
-}) {
+}>) {
   const [date,   setDate]   = useState(new Date().toISOString().split('T')[0])
   const [saving, setSaving] = useState(false)
   const [error,  setError]  = useState<string | null>(null)
@@ -281,12 +281,12 @@ function CatalogModal({
   catalog,
   onClose,
   onSaved,
-}: {
+}: Readonly<{
   propertyId: string
   catalog:    MaintenanceCatalogItem[]
   onClose:    () => void
   onSaved:    () => void
-}) {
+}>) {
   const [selectedItem, setSelectedItem] = useState<MaintenanceCatalogItem | null>(null)
   const [recurrence,   setRecurrence]   = useState<ScheduleFrequency>('annual')
   const [nextDueDate,  setNextDueDate]  = useState(new Date().toISOString().split('T')[0])
@@ -410,11 +410,11 @@ function CustomItemModal({
   propertyId,
   onClose,
   onSaved,
-}: {
+}: Readonly<{
   propertyId: string
   onClose:    () => void
   onSaved:    () => void
-}) {
+}>) {
   const [name,       setName]       = useState('')
   const [frequency,  setFrequency]  = useState<ScheduleFrequency>('annual')
   const [dueDate,    setDueDate]    = useState(new Date().toISOString().split('T')[0])
@@ -539,11 +539,11 @@ export function PropertyMaintenanceManager({
   propertyId,
   initialSchedules,
   catalog,
-}: {
+}: Readonly<{
   propertyId:       string
   initialSchedules: MaintenanceSchedule[]
   catalog:          MaintenanceCatalogItem[]
-}) {
+}>) {
   const router      = useRouter()
   const [schedules, setSchedules] = useState(initialSchedules)
   const [modal,     setModal]     = useState<Modal>(null)
@@ -606,7 +606,7 @@ export function PropertyMaintenanceManager({
                   <span className="badge badge-slate text-xs">
                     {RECURRENCE_LABELS[s.frequency ?? 'annual']}
                   </span>
-                  {s.active_from_month != null && s.active_to_month != null && (
+                  {s.active_from_month !== null && s.active_to_month !== null && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full"
                           style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}>
                       {MONTH_NAMES[s.active_from_month]}–{MONTH_NAMES[s.active_to_month]}
