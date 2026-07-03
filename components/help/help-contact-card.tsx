@@ -1,18 +1,8 @@
 'use client'
 
-import { Mail, MessageCircle } from 'lucide-react'
+import { Mail } from 'lucide-react'
 
 export function HelpContactCard() {
-  const hasCrisp =
-    typeof process !== 'undefined' &&
-    !!process.env.NEXT_PUBLIC_CRISP_WEBSITE_ID
-
-  const openChat = () => {
-    if (typeof window !== 'undefined' && window.$crisp) {
-      window.$crisp.push(['do', 'chat:open'])
-    }
-  }
-
   return (
     <div
       className="mt-10 rounded-xl p-5 flex flex-col sm:flex-row sm:items-center
@@ -35,21 +25,6 @@ export function HelpContactCard() {
       </div>
 
       <div className="flex items-center gap-2 flex-shrink-0">
-        {hasCrisp && (
-          <button
-            onClick={openChat}
-            className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm
-                       font-medium transition-all"
-            style={{
-              background: 'var(--bg-raised)',
-              color:      'var(--text-primary)',
-              border:     '1px solid var(--border)',
-            }}
-          >
-            <MessageCircle className="w-4 h-4" />
-            Chat
-          </button>
-        )}
         <a
           href="mailto:support@fieldstay.app"
           className="flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm

@@ -276,12 +276,6 @@ export default function PrivacyPage() {
                   transmitted to identify the nearest store.
                 </dd>
               </div>
-              <div>
-                <dt className="font-semibold text-gray-800">Crisp, Inc. (France)</dt>
-                <dd className="text-sm mt-0.5">
-                  Live chat support. Session cookies used to maintain chat state.
-                </dd>
-              </div>
             </dl>
             <p className="mt-4 text-sm">
               We may also disclose personal data: (a) to comply with a court order, subpoena, or
@@ -330,15 +324,6 @@ export default function PrivacyPage() {
               We use only strictly necessary cookies for session management (keeping you logged in)
               and a <code className="bg-gray-100 px-1 rounded text-sm">localStorage</code> entry to
               remember your theme preference. No advertising, tracking, or analytics cookies are set.
-            </p>
-            <p className="mt-3">
-              We also use Crisp (crisp.chat) to provide live chat support. Crisp may
-              set cookies to maintain chat session state.{' '}
-              <a href="https://crisp.chat/en/privacy/" className="underline"
-                 target="_blank" rel="noopener noreferrer">
-                See Crisp&apos;s privacy policy
-              </a>
-              .
             </p>
             <p className="mt-3 text-sm">
               Because we use only technically necessary cookies, consent is not required under the

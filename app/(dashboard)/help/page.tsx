@@ -44,7 +44,7 @@ export default function HelpPage() {
       {/* Searchable accordion */}
       <FaqAccordion categories={FAQ_CATEGORIES} />
 
-      {/* Contact card — client component handles Crisp trigger */}
+      {/* Contact card */}
       <HelpContactCard />
 
     </div>
