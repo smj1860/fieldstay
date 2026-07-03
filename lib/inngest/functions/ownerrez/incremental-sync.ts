@@ -479,7 +479,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         // non-retriable failure. Swallow it here so one revoked connection
         // doesn't stop the rest of this tick's connections from syncing.
         if (err instanceof NonRetriableError) {
-          logger.warn(`[OwnerRez:${conn.user_id}] Skipping — ${err.message}`)
+          logger.warn(`[OwnerRez:${conn.user_id}] Skipping — ${err instanceof Error ? err.message : String(err)}`)
           continue
         }
         throw err
