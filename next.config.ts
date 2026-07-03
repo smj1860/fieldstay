@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self' https: localhost:* =>*; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com http://localhost:* ws://localhost:*;"
+            value: "default-src 'self' https: localhost:* =>*; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://auth.hospitable.com https://public.api.hospitable.com http://localhost:* ws://localhost:*;"
           }
         ]
       }
