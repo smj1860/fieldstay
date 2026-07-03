@@ -82,7 +82,7 @@ export const hospInitialSync = inngest.createFunction(
             checkin_time:            prop['check-in']  ?? '15:00',
             checkout_time:           prop['check-out'] ?? '11:00',
             setup_steps_completed:   {} as Record<string, boolean>,
-            is_active:               prop.listed,
+            is_active:               true,
           }
         })
 
@@ -121,7 +121,9 @@ export const hospInitialSync = inngest.createFunction(
 
       // ── 4. Fetch reservations and upsert bookings ─────────────────────────
       const reservationCount = await step.run('fetch-and-upsert-reservations', async () => {
-        const reservations = await hospFetchReservations(token)
+        const hospPropertyIds = Object.keys(propertyIdMap)
+        if (!hospPropertyIds.length) return 0
+        const reservations = await hospFetchReservations(token, undefined, hospPropertyIds)
         logger.info(`[Hospitable:${user_id}] Fetched ${reservations.length} reservations`)
 
         const supabase = createServiceClient()
