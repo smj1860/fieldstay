@@ -402,7 +402,8 @@ export async function hospFetchProperties(token: string): Promise<HospitableProp
 
 export async function hospFetchReservations(
   token: string,
-  since?: string   // YYYY-MM-DD
+  since?: string,
+  propertyIds?: string[]
 ): Promise<HospitableReservation[]> {
   const reservations: HospitableReservation[] = []
   const PER_PAGE  = 100
@@ -429,6 +430,10 @@ export async function hospFetchReservations(
       include:    'guest,properties',
       date_query: 'checkin',
     })
+
+    if (propertyIds?.length) {
+      params.set('properties', propertyIds.join(','))
+    }
 
     const res = await fetch(`${HOSPITABLE_API_BASE}/reservations?${params}`, {
       headers: hospitableProvider.getApiHeaders(token),
