@@ -8,7 +8,11 @@
     "start": "next start",
     "lint": "next lint",
     "inngest:dev": "npx inngest-cli@latest dev",
-    "types:supabase": "supabase gen types typescript --local > types/supabase.ts"
+    "types:supabase": "supabase gen types typescript --local > types/supabase.ts",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:headed": "playwright test --headed",
+    "e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
@@ -45,11 +49,13 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.0.0",
     "@types/web-push": "^3.6.4",
     "autoprefixer": "^10.4.20",
+    "dotenv": "^17.4.2",
     "eslint": "^9.16.0",
     "eslint-config-next": "16.2.7",
     "postcss": "^8.5.10",

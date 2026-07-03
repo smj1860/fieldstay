@@ -31,3 +31,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .claude/worktrees/
+
+# Playwright
+e2e/.auth/pm.json
+e2e/.auth/context.json
+e2e/.env.e2e
+playwright-report/
+test-results/
+blob-report/
