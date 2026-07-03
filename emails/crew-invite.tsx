@@ -22,7 +22,7 @@ export function CrewInviteEmail({ crewName, orgName, inviteUrl }: Props) {
       </Text>
       <Text style={body}>
         FieldStay is how your team manages property turnovers. You&apos;ll be
-        able to view your assigned turnovers, complete cleaning checklists,
+        able to view your assigned turnovers, complete turnover checklists,
         and capture photos — all from your phone. No app store required.
       </Text>
       <Text style={body}>

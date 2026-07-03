@@ -179,7 +179,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
       {totalCount > 0 && (
         <div className="card">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-primary-themed">Cleaning Checklist</h3>
+            <h3 className="font-semibold text-primary-themed">Turnover Checklist</h3>
             <div className="flex items-center gap-3">
               <span className="text-sm text-accent-500">{completedCount}/{totalCount}</span>
               <div className="w-24 h-1.5 bg-accent-100 rounded-full overflow-hidden">

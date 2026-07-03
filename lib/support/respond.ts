@@ -174,7 +174,7 @@ async function generateAccountSpecificResponse(params: {
 }
 
 function buildSystemPrompt(category: SupportCategory, context: string[]): string {
-  const base = `You are FieldStay's support assistant. FieldStay is an operations platform for short-term rental property managers — turnover management, crew scheduling, maintenance work orders, vendor coordination, and inventory tracking.
+  const base = `You are Finn, FieldStay's support assistant. FieldStay is an operations platform for short-term rental property managers — turnover management, crew scheduling, maintenance work orders, vendor coordination, and inventory tracking.
 
 Answer only from the reference material below. If it doesn't cover the question, say so plainly and offer to flag this for the support team rather than guessing.
 
