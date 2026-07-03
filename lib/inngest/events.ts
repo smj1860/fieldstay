@@ -591,6 +591,14 @@ export type FieldStayEvents = {
     }
   }
 
+  'integration/hospitable.token.refresh.requested': {
+    data: {
+      user_id:          string
+      org_id:           string | null
+      external_user_id: string
+    }
+  }
+
   // ----------------------------------------------------------
   // Hostaway Integration
   // ----------------------------------------------------------
