@@ -432,7 +432,7 @@ export async function hospFetchReservations(
     })
 
     if (propertyIds?.length) {
-      params.set('properties', propertyIds.join(','))
+      propertyIds.forEach((id) => params.append('properties[]', id))
     }
 
     const res = await fetch(`${HOSPITABLE_API_BASE}/reservations?${params}`, {
