@@ -33,7 +33,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
           .from('work_orders')
           .select(`
             id, title, description, wo_number, nte_amount,
-            completion_token, created_by,
+            completion_token,
             vendor_id,
             vendors ( name, email ),
             properties ( name, address )
@@ -85,14 +85,23 @@ export const handleWorkOrderCreated = inngest.createFunction(
             .eq('id', work_order_id)
         }
 
-        // Build dispatcher info from the WO creator
+        // Dispatcher info — use org owner/admin since work_orders has no created_by column
         let dispatcherName  = 'Your Property Manager'
         let dispatcherPhone: string | null = null
-        if (wo.created_by) {
+
+        const { data: dispatchMembers } = await supabase
+          .from('organization_members')
+          .select('user_id')
+          .eq('org_id', org_id)
+          .in('role', ['owner', 'admin'])
+          .not('invite_accepted_at', 'is', null)
+          .limit(1)
+
+        if (dispatchMembers?.[0]?.user_id) {
           const { data: profile } = await supabase
             .from('profiles')
             .select('full_name, phone')
-            .eq('id', wo.created_by)
+            .eq('id', dispatchMembers[0].user_id)
             .single()
           if (profile?.full_name) dispatcherName = profile.full_name
           if (profile?.phone)     dispatcherPhone = profile.phone
@@ -104,17 +113,14 @@ export const handleWorkOrderCreated = inngest.createFunction(
         const propertyName    = (property as { name: string } | null)?.name    ?? 'Property'
         const propertyAddress = (property as { address: string | null } | null)?.address ?? ''
 
-        // Query org name separately — no FK constraint from work_orders → organizations
-        // exists in the DB, so the join was silently killing the entire query
+        // Fetch org name for the dispatcher email footer
         let orgName = 'FieldStay Property Management'
-        if (wo.created_by) {
-          const { data: orgRow } = await supabase
-            .from('organizations')
-            .select('name')
-            .eq('id', org_id)
-            .single()
-          if (orgRow?.name) orgName = orgRow.name
-        }
+        const { data: orgRow } = await supabase
+          .from('organizations')
+          .select('name')
+          .eq('id', org_id)
+          .single()
+        if (orgRow?.name) orgName = orgRow.name
 
         // Send vendor email directly — no secondary event hop
         const html = await render(WorkOrderDispatchEmail({
