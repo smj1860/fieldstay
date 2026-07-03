@@ -70,7 +70,7 @@ export function WelcomeEmail({
           <Column>
             <Text style={stepTitle}>Set up your first property</Text>
             <Text style={stepDesc}>
-              Add inventory with par levels, your cleaning checklist, assets, and maintenance schedules.{' '}
+              Add inventory with par levels, your turnover checklist, assets, and maintenance schedules.{' '}
               <Link href={propertiesUrl} style={link}>View properties →</Link>
             </Text>
           </Column>

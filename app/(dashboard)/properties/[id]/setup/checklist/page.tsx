@@ -2,7 +2,7 @@ import { requireProperty, requireOrgMember } from '@/lib/auth'
 import { ChecklistBuilder } from './checklist-builder'
 import type { Metadata } from 'next'
 
-export const metadata: Metadata = { title: 'Cleaning Checklist' }
+export const metadata: Metadata = { title: 'Turnover Checklist' }
 interface Props { params: Promise<{ id: string }> }
 
 export default async function ChecklistPage({ params }: Props) {
@@ -46,7 +46,7 @@ export default async function ChecklistPage({ params }: Props) {
 
   return (
     <div className="card">
-      <h2 className="text-lg font-semibold text-primary-themed mb-1">Cleaning Checklist</h2>
+      <h2 className="text-lg font-semibold text-primary-themed mb-1">Turnover Checklist</h2>
       <p className="text-sm text-accent-500 mb-6">
         Build the checklist your crew follows for every turnover. Organize by room or area.
         Flag items that require a photo for accountability.

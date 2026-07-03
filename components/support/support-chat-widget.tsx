@@ -147,7 +147,7 @@ export function SupportChatWidget() {
           >
             <div>
               <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)' }}>
-                FieldStay Support
+                Finn · FieldStay Support
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '1px' }}>
                 Ask anything about your account
@@ -183,7 +183,7 @@ export function SupportChatWidget() {
           >
             {messages.length === 0 && (
               <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-                Hi! Ask me about pricing, integrations, turnovers, or anything else about FieldStay.
+                Hi, I'm Finn — FieldStay's support assistant. Ask me about pricing, integrations, turnovers, or anything else.
               </p>
             )}
             {messages.map((m, i) => (

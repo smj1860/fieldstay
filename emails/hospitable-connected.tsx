@@ -39,7 +39,7 @@ export function HospitableConnectedEmail({ firstName, orgName, dashboardUrl }: P
 
       <Text style={body}>
         While the sync runs, it&apos;s a good time to add your crew members and
-        set up cleaning checklists so turnovers are ready to assign the moment
+        set up turnover checklists so turnovers are ready to assign the moment
         they appear.
       </Text>
 

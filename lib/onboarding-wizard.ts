@@ -38,7 +38,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   },
   {
     key:         'checklist_template',
-    label:       'Cleaning Checklist',
+    label:       'Turnover Checklist',
     href:        'checklist-template',
     description: 'Build your master turnover checklist',
   },

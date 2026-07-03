@@ -19,7 +19,7 @@ export const WIZARD_STEPS = [
   },
   {
     key:         'checklist',
-    label:       'Cleaning Checklist',
+    label:       'Turnover Checklist',
     description: 'Tasks for your cleaning crew',
     href:        'checklist',
   },

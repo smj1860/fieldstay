@@ -300,7 +300,7 @@ export default function LandingPage() {
               {
                 n: '02',
                 title: 'Configure the details',
-                desc: 'Set inventory par levels, build your cleaning checklist, add maintenance schedules, invite your crew. Takes about 15 minutes per property.',
+                desc: 'Set inventory par levels, build your turnover checklist, add maintenance schedules, invite your crew. Takes about 15 minutes per property.',
               },
               {
                 n: '03',

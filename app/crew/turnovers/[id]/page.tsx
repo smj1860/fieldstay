@@ -335,7 +335,7 @@ export default function CrewTurnoverPage() {
           >
             <div className="flex items-center gap-3">
               <CheckSquare className="w-5 h-5" style={{ color: 'var(--accent-green)' }} />
-              Cleaning Checklist
+              Turnover Checklist
             </div>
             <div className="flex items-center gap-2">
               {totalCount > 0 && (
@@ -394,7 +394,7 @@ export default function CrewTurnoverPage() {
         {/* Section header */}
         <div className="flex items-center justify-between mb-3 px-1">
           <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Cleaning Checklist
+            Turnover Checklist
           </h2>
           <span className="text-sm" style={{ color: 'var(--text-muted)' }}>
             {completedCount} of {totalCount}
