@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import Link                                    from 'next/link'
 import { useSearchParams, useRouter }          from 'next/navigation'
 import { Loader2, PlugZap, Unplug, X }         from 'lucide-react'
 import { disconnectIntegration, getSyncProgress, connectWithApiKey } from './actions'
@@ -426,13 +425,13 @@ function IntegrationCard({
                 {isError ? 'Reconnect' : 'Connect'}
               </button>
             ) : (
-              <Link
+              <a
                 href={`/api/integrations/${provider.id}/connect`}
                 className="btn-secondary text-sm flex items-center gap-1.5"
               >
                 <PlugZap className="w-3.5 h-3.5" />
                 {isError ? 'Reconnect' : 'Connect'}
-              </Link>
+              </a>
             )
           ) : confirming ? (
             <div className="flex items-center gap-2">
