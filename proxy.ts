@@ -149,6 +149,19 @@ export async function proxy(request: NextRequest) {
   }
 
   supabaseResponse.headers.set('x-pathname', pathname)
+// Append Hospitable domains to CSP — next.config.ts headers are overridden
+// by supabaseResponse when middleware returns a custom response object.
+ const csp = supabaseResponse.headers.get('Content-Security-Policy') ?? ''
+ if (csp && !csp.includes('auth.hospitable.com')) {
+   supabaseResponse.headers.set(
+     'Content-Security-Policy',
+     csp.replace(
+       'connect-src ',
+       'connect-src https://auth.hospitable.com https://public.api.hospitable.com '
+     )
+   )
+ }
+
   return supabaseResponse
 }
 
