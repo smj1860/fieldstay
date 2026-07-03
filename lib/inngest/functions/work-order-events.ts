@@ -29,24 +29,27 @@ export const handleWorkOrderCreated = inngest.createFunction(
       const dispatchResult = await step.run('dispatch-to-vendor', async () => {
         const supabase = createServiceClient()
 
-        const { data: wo } = await supabase
+        const { data: wo, error: woErr } = await supabase
           .from('work_orders')
           .select(`
             id, title, description, wo_number, nte_amount,
             completion_token, created_by,
             vendor_id,
             vendors ( name, email ),
-            properties ( name, address ),
-            organizations ( name )
+            properties ( name, address )
           `)
           .eq('id', work_order_id)
           .single()
 
-        if (!wo) throw new NonRetriableError(`Work order ${work_order_id} not found`)
+        if (woErr || !wo) {
+          throw new NonRetriableError(
+            `Work order ${work_order_id} query failed: ${woErr?.message ?? 'not found'} ` +
+            `(code: ${woErr?.code ?? 'unknown'})`
+          )
+        }
 
-        const vendor   = Array.isArray(wo.vendors)       ? wo.vendors[0]       : wo.vendors
-        const property = Array.isArray(wo.properties)    ? wo.properties[0]    : wo.properties
-        const org      = Array.isArray(wo.organizations) ? wo.organizations[0] : wo.organizations
+        const vendor   = Array.isArray(wo.vendors)    ? wo.vendors[0]    : wo.vendors
+        const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
         if (!vendor?.email) {
           // Non-retriable: retrying will never produce an email address.
@@ -100,7 +103,18 @@ export const handleWorkOrderCreated = inngest.createFunction(
 
         const propertyName    = (property as { name: string } | null)?.name    ?? 'Property'
         const propertyAddress = (property as { address: string | null } | null)?.address ?? ''
-        const orgName         = (org as { name: string } | null)?.name ?? 'FieldStay Property Management'
+
+        // Query org name separately — no FK constraint from work_orders → organizations
+        // exists in the DB, so the join was silently killing the entire query
+        let orgName = 'FieldStay Property Management'
+        if (wo.created_by) {
+          const { data: orgRow } = await supabase
+            .from('organizations')
+            .select('name')
+            .eq('id', org_id)
+            .single()
+          if (orgRow?.name) orgName = orgRow.name
+        }
 
         // Send vendor email directly — no secondary event hop
         const html = await render(WorkOrderDispatchEmail({
