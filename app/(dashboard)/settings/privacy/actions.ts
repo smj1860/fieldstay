@@ -1,4 +1,5 @@
 'use server'
+import crypto                  from 'crypto'
 import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
@@ -56,7 +57,11 @@ export async function anonymizeGuestData(
     action:     'gdpr.data_erasure.completed',
     targetType: 'guest',
     metadata:   {
-      email_hash:          Buffer.from(normalizedEmail).toString('base64'),
+      // SHA-256: irreversible, suitable for audit trail without exposing PII
+      email_hash:          crypto
+        .createHash('sha256')
+        .update(normalizedEmail)
+        .digest('hex'),
       bookings_anonymized: ids.length,
       request_type:        'erasure_article_17',
     },

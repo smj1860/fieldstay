@@ -167,6 +167,18 @@ export async function POST(
     }
   }
 
+  // Periodic TTL cleanup — fire-and-forget, never delays webhook response.
+  // Keeps ownerrez_processed_webhooks from growing unbounded.
+  if (providerId === 'ownerrez' && Math.random() < 0.05) {
+    // Run on ~5% of requests to amortise cleanup cost without a cron job
+    void (async () => {
+      const { error } = await createServiceClient().rpc('cleanup_ownerrez_webhook_dedup')
+      if (error) {
+        console.warn(`[Webhook:${providerId}] TTL cleanup failed (non-fatal): ${error.message}`)
+      }
+    })()
+  }
+
   // ── 5. Delegate provider-specific events ──────────────────
   //    Future events: booking.created, booking.modified, guest.updated, etc.
   //    These are fired via individual webhook subscriptions (POST /v2/webhooksubscriptions)
