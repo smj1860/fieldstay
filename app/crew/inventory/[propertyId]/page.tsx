@@ -16,6 +16,7 @@ export default function CrewInventoryPage() {
   const [itemNotes, setItemNotes] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [notes, setNotes]         = useState('')
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   type InvRow = { id: string; name: string; category: InventoryCategory; unit: string; par_level: number; current_quantity: number }
   const items = useLiveQuery(
@@ -32,13 +33,26 @@ export default function CrewInventoryPage() {
 
   const handleSubmit = async () => {
     setSubmitting(true)
-    // Submit as draft for manager review instead of immediately committing
-    await fetch('/api/crew/inventory-count', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ propertyId, counts, notes, itemNotes, submitAsDraft: true }),
-    })
-    router.push('/crew')
+    setSubmitError(null)
+    try {
+      // Submit as draft for manager review instead of immediately committing
+      const res = await fetch('/api/crew/inventory-count', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ propertyId, counts, notes, itemNotes, submitAsDraft: true }),
+      })
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error((body as { error?: string }).error ?? `Server error ${res.status}`)
+      }
+
+      router.push('/crew')
+    } catch (err) {
+      console.error('[Crew] inventory submit failed:', err)
+      setSubmitting(false)
+      setSubmitError('Could not submit inventory count. Please check your connection and try again.')
+    }
   }
 
   return (
@@ -106,6 +120,18 @@ export default function CrewInventoryPage() {
             Each count saves automatically as you enter it.
             Tap below when you&apos;re done.
           </p>
+          {submitError && (
+            <div
+              className="mb-3 px-4 py-3 rounded-xl text-sm"
+              style={{
+                backgroundColor: 'var(--accent-red-dim)',
+                color:           'var(--accent-red)',
+                border:          '1px solid rgba(240,84,84,0.2)',
+              }}
+            >
+              {submitError}
+            </div>
+          )}
           <button
             onClick={handleSubmit}
             disabled={submitting}

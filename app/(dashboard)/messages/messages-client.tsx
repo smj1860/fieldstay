@@ -20,6 +20,8 @@ interface Props {
   orgId:           string
   crew:            CrewOption[]
   initialMessages: Message[]
+  hasMore:         boolean
+  oldestTimestamp: string | null
 }
 
 interface DirectThread {
@@ -44,7 +46,7 @@ interface GroupThread {
 
 type AnyThread = DirectThread | GroupThread
 
-export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: Props) {
+export function MessagesClient({ currentUserId, orgId, crew, initialMessages, hasMore, oldestTimestamp }: Props) {
   const [messages, setMessages]         = useState<Message[]>(initialMessages)
   const [selectedKey, setSelectedKey]   = useState<string | null>(null)
   const [search, setSearch]             = useState('')
@@ -393,6 +395,17 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages }: 
               </button>
             )
           })}
+
+          {!groupMode && hasMore && oldestTimestamp && (
+            <div className="flex justify-center py-4">
+              <a
+                href={`/messages?before=${encodeURIComponent(oldestTimestamp)}`}
+                className="btn-secondary text-sm"
+              >
+                Load older messages
+              </a>
+            </div>
+          )}
         </div>
 
         {/* Group compose panel */}

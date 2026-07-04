@@ -101,7 +101,7 @@ export async function POST(
     })
     .eq('id', workOrder.id)
     .in('status', ['pending', 'assigned', 'in_progress'])
-    .select('id, org_id, vendor_id, property_id, wo_number')
+    .select('id, org_id, vendor_id, property_id, wo_number, source_turnover_id')
     .single()
 
   if (!claimed) {
@@ -128,14 +128,17 @@ export async function POST(
   // Create invoice record if line items were submitted
   let invoiceId: string | null = null
   if (safeLineItems.length > 0 && claimed.vendor_id) {
-    // Generate invoice number: INV-YYYY-NNNNN (per-org sequence via count)
-    const { count } = await supabase
-      .from('work_order_invoices')
-      .select('id', { count: 'exact', head: true })
-      .eq('org_id', claimed.org_id)
+    // Generate invoice number: INV-YYYY-NNNNN via an atomic Postgres sequence.
+    // COUNT-then-INSERT is a TOCTOU race under concurrent submissions.
+    const { data: seqResult, error: seqErr } = await supabase
+      .rpc('next_work_order_invoice_seq')
 
-    const seq           = String((count ?? 0) + 1).padStart(5, '0')
-    const invoiceNumber = `INV-${new Date().getFullYear()}-${seq}`
+    if (seqErr || seqResult == null) {
+      console.error('[complete] invoice sequence error:', seqErr)
+      return NextResponse.json({ error: 'Invoice numbering failed. Please try again.' }, { status: 500 })
+    }
+
+    const invoiceNumber = `INV-${new Date().getFullYear()}-${String(seqResult).padStart(5, '0')}`
 
     const platformFeePct = parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0') / 100
     const platformFee    = Math.round(subtotal * platformFeePct * 100) / 100
@@ -208,6 +211,28 @@ export async function POST(
         photo_paths:      [],
       },
     })
+  }
+
+  // Fire turnover completion automation if this WO is linked to a turnover
+  if (claimed.source_turnover_id) {
+    const { data: turnover } = await supabase
+      .from('turnovers')
+      .select('id, property_id, org_id, status')
+      .eq('id', claimed.source_turnover_id)
+      .single()
+
+    if (turnover && !['completed', 'cancelled'].includes(turnover.status)) {
+      await inngest.send({
+        name: 'turnover/completed',
+        data: {
+          turnover_id:          turnover.id,
+          property_id:          turnover.property_id,
+          org_id:               turnover.org_id,
+          completed_by_crew_id: '',
+          completed_at:         new Date().toISOString(),
+        },
+      })
+    }
   }
 
   return NextResponse.json({ success: true })

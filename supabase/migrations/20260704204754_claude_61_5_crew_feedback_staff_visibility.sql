@@ -1,0 +1,17 @@
+-- CLAUDE_61_5: Surface crew_feedback to platform staff
+--
+-- CLAUDE_61_5's premise ("crew_feedback does not exist") was incorrect — the
+-- table, RLS, API route, and crew-facing modal already existed as of
+-- 20260628000000_crew_feedback.sql. The real gap: crew feedback was only
+-- visible to the crew member's own org (PMs), never to platform staff, so
+-- nobody at FieldStay could see feedback trends across all orgs.
+--
+-- Follows the same pattern already established for support_conversations in
+-- 20260630100200_support_staff_backfill.sql: a dedicated staff SELECT policy
+-- gated on is_platform_staff(), read via the normal authenticated client
+-- (not a service-role page fetch).
+
+DROP POLICY IF EXISTS "crew_feedback_staff_select" ON public.crew_feedback;
+
+CREATE POLICY "crew_feedback_staff_select" ON public.crew_feedback
+  FOR SELECT USING (is_platform_staff());

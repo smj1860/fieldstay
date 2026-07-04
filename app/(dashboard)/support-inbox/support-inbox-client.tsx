@@ -23,12 +23,23 @@ interface MessageRow {
   created_at: string
 }
 
+interface FeedbackRow {
+  id:            string
+  feedback_text: string
+  created_at:    string
+  crew_members:  { name: string } | { name: string }[] | null
+  organizations: { name: string } | { name: string }[] | null
+}
+
 export function SupportInboxClient({
   initialConversations,
+  initialFeedback,
 }: Readonly<{
   initialConversations: ConversationRow[]
+  initialFeedback:      FeedbackRow[]
 }>) {
   const [conversations, setConversations] = useState(initialConversations)
+  const [feedback] = useState(initialFeedback)
   const [selectedId, setSelectedId]       = useState<string | null>(
     initialConversations.find(c => c.needs_human)?.id ?? initialConversations[0]?.id ?? null
   )
@@ -150,7 +161,11 @@ export function SupportInboxClient({
     }
   }
 
+  const feedbackCrewName = (crew: FeedbackRow['crew_members']) =>
+    Array.isArray(crew) ? crew[0]?.name : crew?.name
+
   return (
+    <>
     <div style={{ display: 'flex', height: 'calc(100vh - 64px)' }}>
       {/* Conversation list */}
       <div style={{ width: '300px', borderRight: '1px solid var(--border)', overflowY: 'auto', flexShrink: 0 }}>
@@ -301,5 +316,42 @@ export function SupportInboxClient({
         )}
       </div>
     </div>
+
+    {/* Crew Feedback — app feedback submitted by crew members, all orgs */}
+    <div style={{ padding: '20px 24px', borderTop: '1px solid var(--border)' }}>
+      <h2 style={{ fontWeight: 700, fontSize: '14px', margin: '0 0 12px' }}>Crew Feedback</h2>
+
+      {feedback.length === 0 && (
+        <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No feedback yet.</p>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '640px' }}>
+        {feedback.map((f) => (
+          <div
+            key={f.id}
+            style={{
+              padding:      '10px 12px',
+              borderRadius: '10px',
+              border:       '1px solid var(--border)',
+              background:   'var(--bg-elevated)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', marginBottom: '4px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600 }}>
+                {feedbackCrewName(f.crew_members) ?? 'Unknown crew'}
+                <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {orgName(f.organizations)}</span>
+              </span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', flexShrink: 0 }}>
+                {new Date(f.created_at).toLocaleDateString()}
+              </span>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', margin: 0 }}>
+              {f.feedback_text}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+    </>
   )
 }

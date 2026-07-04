@@ -94,9 +94,16 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
         let batchInvited = 0
 
         for (const vendor of batch) {
-          // Re-check inside the step — another run may have already processed
-          // this vendor if the previous step was retried.
-          if (vendor.stripe_connect_invite_sent_at || vendor.stripe_connect_account_id) {
+          // Fresh DB read — the outer vendors array is stale on step retry.
+          // This is the only reliable guard against double-inviting on retry.
+          const { data: fresh } = await supabase
+            .from('vendors')
+            .select('id, stripe_connect_account_id, stripe_connect_invite_sent_at')
+            .eq('id', vendor.id)
+            .eq('org_id', vendor.org_id)
+            .single()
+
+          if (fresh?.stripe_connect_invite_sent_at || fresh?.stripe_connect_account_id) {
             continue
           }
 

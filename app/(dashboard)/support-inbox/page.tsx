@@ -16,16 +16,33 @@ export default async function SupportInboxPage() {
 
   if (!staff) redirect('/ops')
 
-  const { data: conversations } = await supabase
-    .from('support_conversations')
-    .select(`
-      id, org_id, status, needs_human, escalation_reason, escalated_at,
-      resolved_at, last_message_at, created_at,
-      organizations ( name )
-    `)
-    .order('needs_human', { ascending: false })
-    .order('last_message_at', { ascending: false })
-    .limit(100)
+  const [{ data: conversations }, { data: feedback }] = await Promise.all([
+    supabase
+      .from('support_conversations')
+      .select(`
+        id, org_id, status, needs_human, escalation_reason, escalated_at,
+        resolved_at, last_message_at, created_at,
+        organizations ( name )
+      `)
+      .order('needs_human', { ascending: false })
+      .order('last_message_at', { ascending: false })
+      .limit(100),
 
-  return <SupportInboxClient initialConversations={conversations ?? []} />
+    supabase
+      .from('crew_feedback')
+      .select(`
+        id, feedback_text, created_at,
+        crew_members ( name ),
+        organizations ( name )
+      `)
+      .order('created_at', { ascending: false })
+      .limit(50),
+  ])
+
+  return (
+    <SupportInboxClient
+      initialConversations={conversations ?? []}
+      initialFeedback={feedback ?? []}
+    />
+  )
 }
