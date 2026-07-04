@@ -231,7 +231,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .select('id, org_id, sender_id, recipient_id, content, read_at, turnover_id, group_id, group_label, created_at')
         .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`)
         .gte('created_at', ninetyDaysAgo)
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })  // newest first — limit drops oldest not newest
         .limit(500)
       if (messages?.length) await db.messages.bulkPut(messages as MessageRow[])
     }
