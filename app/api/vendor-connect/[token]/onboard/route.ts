@@ -42,10 +42,32 @@ export async function GET(
   }
 
   try {
+    // ── Atomic claim: set sentinel before calling Stripe ──────────────────────
+    // Prevents two concurrent tab opens from creating two Connect accounts.
+    // Only the request that wins the UPDATE proceeds to create the account.
+    // 'pending' is not a real Stripe account ID — it acts as a mutex.
+    if (!vendor.stripe_connect_account_id) {
+      const { data: claimed } = await supabase
+        .from('vendors')
+        .update({ stripe_connect_account_id: 'pending' })
+        .eq('stripe_connect_token', token)
+        .is('stripe_connect_account_id', null)   // only updates if still null
+        .select('id')
+        .single()
+
+      if (!claimed) {
+        // Another request already claimed it — redirect to status page
+        // The other request will finish creating the real account
+        return NextResponse.redirect(
+          `${process.env.NEXT_PUBLIC_APP_URL}/vendor-connect/${token}/status`
+        )
+      }
+    }
+
     let accountId = vendor.stripe_connect_account_id
 
     // Create account if it doesn't exist yet (e.g. vendor received WO before cron ran)
-    if (!accountId) {
+    if (!accountId || accountId === 'pending') {
       const account = await stripe.accounts.create({
         type:  'express',
         ...(vendor.email ? { email: vendor.email } : {}),
@@ -83,6 +105,15 @@ export async function GET(
 
     return NextResponse.redirect(accountLink.url)
   } catch (err) {
+    // If Stripe create failed after we set the sentinel, clear it so the
+    // vendor can try again rather than being permanently stuck on 'pending'.
+    if (vendor.stripe_connect_account_id === null) {
+      void supabase
+        .from('vendors')
+        .update({ stripe_connect_account_id: null })
+        .eq('stripe_connect_token', token)
+        .eq('stripe_connect_account_id', 'pending')
+    }
     console.error('[vendor-connect/onboard] Stripe error:', err)
     return NextResponse.json(
       { error: 'Could not generate onboarding link. Please try again.' },
