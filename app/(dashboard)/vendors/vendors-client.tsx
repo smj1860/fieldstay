@@ -403,8 +403,11 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
             <input id="vendor-email" name="email" type="email" required className="input" placeholder="info@abcplumbing.com" />
           </div>
           <div>
-            <label htmlFor="vendor-phone" className="label">Phone <span className="text-red-400">*</span></label>
-            <input id="vendor-phone" name="phone" type="tel" required className="input" placeholder="+1 555-0100" />
+            <label htmlFor="vendor-phone" className="label">Mobile phone number</label>
+            <input id="vendor-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
+            <p className="text-xs text-muted-themed mt-1">
+              Work orders will be dispatched to this number by SMS in addition to email.
+            </p>
           </div>
         </div>
 
@@ -710,6 +713,19 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
           {vendor.email && <div className="truncate max-w-[180px]">{vendor.email}</div>}
           {vendor.phone && <div>{vendor.phone}</div>}
           {!vendor.email && !vendor.phone && <span className="text-muted-themed">—</span>}
+        </div>
+        {/* SMS / Email channel indicator */}
+        <div className="flex items-center gap-2 mt-1.5">
+          {vendor.phone && (
+            <span className="badge badge-green" style={{ fontSize: 10, padding: '2px 7px' }}>
+              SMS Active
+            </span>
+          )}
+          {!vendor.phone && vendor.email && (
+            <span className="badge badge-slate" style={{ fontSize: 10, padding: '2px 7px' }}>
+              Email only
+            </span>
+          )}
         </div>
       </td>
       <td className="py-2.5 pr-4" onClick={e => e.stopPropagation()}>

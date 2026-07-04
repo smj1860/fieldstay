@@ -51,7 +51,7 @@ interface WorkOrderRow {
   created_at: string
   updated_at: string
   properties: { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null } | { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null }[] | null
-  vendors: { id: string; name: string; specialty: string } | { id: string; name: string; specialty: string }[] | null
+  vendors: { id: string; name: string; specialty: string; phone: string | null } | { id: string; name: string; specialty: string; phone: string | null }[] | null
   work_order_line_items?: Array<{
     id: string; work_order_id?: string; line_type: string; description: string
     quantity: number; unit: string | null; unit_cost: number; line_total: number
@@ -189,6 +189,7 @@ function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
       id:        vend.id,
       name:      vend.name,
       specialty: vend.specialty as WorkOrderDetailData['vendors'] extends { specialty: infer S } | null ? S : never,
+      phone:     vend.phone ?? null,
     } : null,
     vendor_dispatch_email: wo.vendor_dispatch_email,
     work_order_line_items: (wo.work_order_line_items ?? []) as WorkOrderDetailData['work_order_line_items'],

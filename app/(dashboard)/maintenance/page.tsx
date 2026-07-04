@@ -31,7 +31,7 @@ export default async function MaintenancePage() {
         vendor_dispatch_email,
         created_at, updated_at,
         properties ( name, address, city, state, access_instructions ),
-        vendors ( id, name, specialty ),
+        vendors ( id, name, specialty, phone ),
         work_order_line_items (
           id, line_type, description, quantity, unit,
           unit_cost, line_total, sort_order, created_at
