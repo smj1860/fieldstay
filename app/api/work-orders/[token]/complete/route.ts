@@ -101,7 +101,7 @@ export async function POST(
     })
     .eq('id', workOrder.id)
     .in('status', ['pending', 'assigned', 'in_progress'])
-    .select('id, org_id, vendor_id, property_id, wo_number')
+    .select('id, org_id, vendor_id, property_id, wo_number, source_turnover_id')
     .single()
 
   if (!claimed) {
@@ -208,6 +208,28 @@ export async function POST(
         photo_paths:      [],
       },
     })
+  }
+
+  // Fire turnover completion automation if this WO is linked to a turnover
+  if (claimed.source_turnover_id) {
+    const { data: turnover } = await supabase
+      .from('turnovers')
+      .select('id, property_id, org_id, status')
+      .eq('id', claimed.source_turnover_id)
+      .single()
+
+    if (turnover && !['completed', 'cancelled'].includes(turnover.status)) {
+      await inngest.send({
+        name: 'turnover/completed',
+        data: {
+          turnover_id:          turnover.id,
+          property_id:          turnover.property_id,
+          org_id:               turnover.org_id,
+          completed_by_crew_id: '',
+          completed_at:         new Date().toISOString(),
+        },
+      })
+    }
   }
 
   return NextResponse.json({ success: true })

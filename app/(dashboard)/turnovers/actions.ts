@@ -515,10 +515,11 @@ export async function bulkUpdateTurnoverStatus(
 ): Promise<TurnoverActionState> {
   const { supabase, membership } = await requireOrgMember()
 
-  // Only update turnovers that belong to this org and aren't already terminal
+  // Only update turnovers that belong to this org and aren't already terminal.
+  // Fetch property_id/org_id alongside id for the completion events below.
   const { data: eligible } = await supabase
     .from('turnovers')
-    .select('id')
+    .select('id, property_id, org_id')
     .in('id', turnoverIds)
     .eq('org_id', membership.org_id)
     .in('status', ['pending_assignment', 'assigned', 'in_progress', 'flagged'])
@@ -536,6 +537,24 @@ export async function bulkUpdateTurnoverStatus(
     console.error('[bulkUpdateTurnoverStatus]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  // Fire the same automation event single-completion uses.
+  // One event per turnover so each has its own Inngest retry path.
+  const now = new Date().toISOString()
+  await Promise.all(
+    eligible.map(t =>
+      inngest.send({
+        name: 'turnover/completed',
+        data: {
+          turnover_id:          t.id,
+          property_id:          t.property_id,
+          org_id:               t.org_id,
+          completed_by_crew_id: '',  // PM-initiated bulk completion
+          completed_at:         now,
+        },
+      })
+    )
+  )
 
   revalidatePath('/turnovers')
   return { success: true }

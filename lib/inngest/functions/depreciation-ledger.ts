@@ -33,16 +33,28 @@ export const generateDepreciationLedger = inngest.createFunction(
     const taxYear: number = (event as { data?: { org_id?: string; tax_year?: number } })?.data?.tax_year
       ?? new Date().getFullYear() - 1
 
+    // Determine if this is a manual trigger (has org_id) or the annual cron (all orgs).
+    const triggerOrgId: string | null =
+      (event as { data?: { org_id?: string } })?.data?.org_id ?? null
+
     // ── Step 1: Load active assets ──────────────────────────────────────────
 
     const assets = await step.run('load-assets', async () => {
       const supabase = createServiceClient()
-      const { data } = await supabase
+      const query = supabase
         .from('property_assets')
         .select('id, org_id, property_id, name, asset_type, placed_in_service_date, purchase_price, salvage_value, macrs_class')
         .eq('is_active', true)
         .not('placed_in_service_date', 'is', null)
         .not('purchase_price', 'is', null)
+
+      // Cron has no event data — runs for all orgs.
+      // Manual trigger from the PM dashboard provides org_id — scope to that org.
+      if (triggerOrgId) {
+        query.eq('org_id', triggerOrgId)
+      }
+
+      const { data } = await query
       return data ?? []
     })
 
