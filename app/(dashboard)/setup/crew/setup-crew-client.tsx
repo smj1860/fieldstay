@@ -59,6 +59,22 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
         </div>
       )}
 
+      {crew.length === 0 && (
+        <div
+          className="flex items-start gap-3 px-4 py-3 rounded-xl"
+          style={{
+            backgroundColor: 'var(--accent-amber-dim)',
+            border:          '1px solid var(--accent-amber)',
+          }}
+        >
+          <span className="text-base flex-shrink-0">⚠️</span>
+          <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            You haven't added any crew members yet. Add at least one crew member
+            before continuing so FieldStay can assign turnovers automatically.
+          </p>
+        </div>
+      )}
+
       {crew.length > 0 && (
         <div className="border border-themed rounded-xl overflow-hidden">
           {crew.map((m) => (

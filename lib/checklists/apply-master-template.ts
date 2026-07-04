@@ -99,13 +99,18 @@ export async function applyMasterChecklistToProperty(
   for (const sectionName of sectionNames) {
     const sectionItems = catalogRows.filter((r) => r.section === sectionName)
 
-    const { data: sectionRow } = await supabase
+    const { data: sectionRow, error: sectionErr } = await supabase
       .from('checklist_template_sections')
       .insert({ template_id: templateId, name: sectionName, sort_order: sectionNames.indexOf(sectionName) })
       .select('id')
       .single()
 
-    if (!sectionRow) continue
+    if (sectionErr || !sectionRow) {
+      throw new Error(
+        `Failed to insert checklist section "${sectionName}" for property ${propertyId}: ` +
+        (sectionErr?.message ?? 'no row returned')
+      )
+    }
 
     await supabase.from('checklist_template_items').insert(
       sectionItems.map((item) => ({
@@ -127,6 +132,10 @@ export async function applyMasterChecklistToProperty(
       targetType: 'property',
       targetId:   propertyId,
       metadata:   { template_id: templateId, task_count: catalogRows.length },
-    }).catch(() => {})
+    }).catch((err: unknown) => {
+      // Non-fatal: log failure but don't throw — the checklist was applied
+      // successfully and the audit miss should not roll back the operation.
+      console.error('[applyMasterChecklistToProperty] audit log failed:', err)
+    })
   }
 }

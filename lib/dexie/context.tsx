@@ -5,6 +5,7 @@ import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import {
   getDexieDb,
+  cleanupStaleDexieDbs,
   type FieldStayDexie,
   type TurnoverRow,
   type PropertyRow,
@@ -13,6 +14,7 @@ import {
   type InventoryItemRow,
   type MessageRow,
   type CrewWorkOrderRow,
+  type CrewAvailabilityRow,
 } from './schema'
 import { getSyncEngine } from './syncService'
 
@@ -67,6 +69,9 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
   // crew-shell.tsx's 'online' listener for processPendingPhotoUploads.
   useEffect(() => {
     if (!userId) return
+
+    // Clean up databases from previous users on this device (non-blocking)
+    void cleanupStaleDexieDbs(userId)
 
     const supabase = createClient()
     let cancelled = false
@@ -236,6 +241,36 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (messages?.length) await db.messages.bulkPut(messages as MessageRow[])
     }
 
+    async function syncCrewAvailability(crewMemberId: string): Promise<void> {
+      const db = getDexieDb(userId!)
+
+      // Only fetch this crew member's own availability — not other crew members'.
+      // Tenant isolation: org_id is implicitly enforced via crew_member_id FK.
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().split('T')[0]!
+      const oneYearAhead  = new Date(Date.now() + 365 * 86_400_000).toISOString().split('T')[0]!
+
+      const { data: availability, error } = await supabase
+        .from('crew_availability')
+        .select('id, org_id, crew_member_id, available_date, is_available, notes, created_at')
+        .eq('crew_member_id', crewMemberId)  // own rows only — critical isolation guard
+        .gte('available_date', thirtyDaysAgo)
+        .lte('available_date', oneYearAhead)
+        .order('available_date', { ascending: true })
+      if (error) {
+        console.error('[DexieProvider] crew_availability fetch failed:', error)
+        return
+      }
+
+      if (availability?.length) {
+        const normalized = availability.map((row: Record<string, unknown>) => ({
+          ...row,
+          is_available: row.is_available ? 1 : 0,
+          notes:        row.notes ?? '',
+        }))
+        await db.crew_availability.bulkPut(normalized as CrewAvailabilityRow[])
+      }
+    }
+
     let channel: ReturnType<typeof supabase.channel> | null = null
 
     async function run() {
@@ -252,6 +287,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         syncAssignedTurnovers(crewMember.id, true),
         syncWorkOrders(crewMember.id),
         syncMessages(),
+        syncCrewAvailability(crewMember.id),
       ])
       if (cancelled) return
 

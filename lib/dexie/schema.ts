@@ -276,3 +276,43 @@ export async function closeDexieDb(): Promise<void> {
     }
   }
 }
+
+/**
+ * Deletes IndexedDB databases belonging to users OTHER than the current one.
+ * Called on Dexie context mount when a userId is known.
+ *
+ * Safety: only deletes databases matching the 'fieldstay-' prefix pattern.
+ * Never deletes the active user's database.
+ * Non-fatal: failures are logged and ignored.
+ */
+export async function cleanupStaleDexieDbs(currentUserId: string): Promise<void> {
+  try {
+    if (typeof indexedDB === 'undefined' || !indexedDB.databases) return
+
+    const dbs = await indexedDB.databases()
+    const stale = dbs.filter((info) => {
+      if (!info.name) return false
+      if (!info.name.startsWith('fieldstay-')) return false
+      // Keep the active user's database
+      return !info.name.includes(currentUserId)
+    })
+
+    await Promise.allSettled(
+      stale.map((info) =>
+        new Promise<void>((resolve, reject) => {
+          const req = indexedDB.deleteDatabase(info.name!)
+          req.onsuccess = () => resolve()
+          req.onerror   = () => reject(req.error)
+          req.onblocked = () => {
+            // Another tab has it open — skip rather than block
+            console.warn(`[Dexie cleanup] ${info.name} is blocked — skipping`)
+            resolve()
+          }
+        })
+      )
+    )
+  } catch (err) {
+    // Non-fatal: cleanup failure should never affect the active session
+    console.warn('[Dexie cleanup] stale DB cleanup failed (non-fatal):', err)
+  }
+}

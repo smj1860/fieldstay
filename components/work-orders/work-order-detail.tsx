@@ -210,19 +210,25 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
     if (!dispatchEmail.trim()) return
     setDispatching(true)
     setDispatchError(null)
-    const result = await dispatchWorkOrderToVendor({
-      workOrderId: wo.id,
-      vendorEmail: dispatchEmail.trim(),
-      vendorName:  dispatchName.trim() || 'Contractor',
-      vendorPhone: wo.vendors?.phone ?? null,
-    })
-    setDispatching(false)
-    if (result.error) {
-      setDispatchError(result.error)
-      return
-    }
-    if (result.publicUrl) {
-      setDispatchedUrl(result.publicUrl)
+    try {
+      const result = await dispatchWorkOrderToVendor({
+        workOrderId: wo.id,
+        vendorEmail: dispatchEmail.trim(),
+        vendorName:  dispatchName.trim() || 'Contractor',
+        vendorPhone: wo.vendors?.phone ?? null,
+      })
+      if (result.error) {
+        setDispatchError(result.error)
+        return
+      }
+      if (result.publicUrl) {
+        setDispatchedUrl(result.publicUrl)
+      }
+    } catch (err) {
+      console.error('[handleDispatch] failed:', err)
+      setDispatchError('Could not dispatch vendor. Please check your connection and try again.')
+    } finally {
+      setDispatching(false)
     }
   }
 

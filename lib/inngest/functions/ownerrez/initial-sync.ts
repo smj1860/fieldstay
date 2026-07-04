@@ -15,12 +15,34 @@ import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing, OwnerRezListingAmenityCategory } from '@/lib/integrations/types'
+import type { AssetType }       from '@/types/database'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
 import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
 
 const PROVIDER = 'ownerrez'
+
+/**
+ * Maps normalized OwnerRez amenity keys (lowercased, underscored) to the
+ * optional AssetTypes that their presence confirms.
+ *
+ * Normalization applied by normalizeAmenities():
+ *   "Hot Tub" → "hot_tub", "Swimming Pool" → "swimming_pool", etc.
+ *
+ * Only types in this map are eligible for is_na seeding.
+ * Mandatory types (hvac, refrigerator, water_heater, etc.) are never touched.
+ */
+const OPTIONAL_ASSET_AMENITY_MAP: Partial<Record<AssetType, string[]>> = {
+  pool_pump:               ['swimming_pool', 'private_pool', 'shared_pool', 'indoor_pool', 'outdoor_pool', 'pool', 'lap_pool'],
+  hot_tub:                 ['hot_tub', 'jacuzzi', 'spa', 'jetted_tub', 'whirlpool'],
+  well_pump:               ['well_water', 'well_pump', 'private_well'],
+  solar_inverter:          ['solar_panels', 'solar_power', 'solar_energy', 'solar'],
+  whole_home_water_filter: ['water_filtration', 'water_filter', 'whole_home_water_filter'],
+  heated_tile_system:      ['heated_floors', 'heated_tile', 'radiant_heat', 'in_floor_heat', 'heated_bathroom_floor'],
+  coffee_station:          ['coffee_station', 'espresso_machine', 'nespresso', 'coffee_bar', 'keurig'],
+  toaster_oven:            ['toaster_oven', 'countertop_oven', 'convection_oven'],
+}
 
 // Actual structure is amenity_categories with nested amenities[].title —
 // not a flat array with an amenity_id field.
@@ -383,6 +405,86 @@ export const ownerRezInitialSync = inngest.createFunction(
         logger.info(
           `[OwnerRez:${user_id}] Applied master checklist to ${toApply.length} of ${properties.length} properties`
         )
+      })
+
+      // ── Step 1e: Seed asset discovery from stored amenity data ─────────────
+      // properties.amenities is a Record<string, boolean> written during the
+      // fetch-property-detail-* steps above. We read it here (no extra API call)
+      // and mark optional asset types that are NOT present at this property as
+      // is_na = true — dropping them from the crew's discovery queue immediately.
+      //
+      // Non-destructive: existing property_assets rows (crew-captured, PM-entered)
+      // are fetched first and excluded from the insert.
+      // Non-fatal: a failure here only means the discovery queue is slightly
+      // larger than optimal — it does not block any other sync step.
+
+      await step.run('seed-asset-discovery-from-amenities', async () => {
+        const supabase       = createServiceClient()
+        const optionalTypes  = Object.keys(OPTIONAL_ASSET_AMENITY_MAP) as AssetType[]
+
+        const { data: propertiesWithAmenities } = await supabase
+          .from('properties')
+          .select('id, amenities')
+          .eq('org_id', org_id)
+          .eq('is_active', true)
+          .not('amenities', 'is', null)
+
+        if (!propertiesWithAmenities?.length) {
+          return { seeded: 0, reason: 'no_amenity_data' }
+        }
+
+        let seeded = 0
+
+        for (const property of propertiesWithAmenities) {
+          const amenities = (property.amenities ?? {}) as Record<string, boolean>
+
+          // Determine which optional types are absent from this property's amenities
+          const absentTypes = optionalTypes.filter((assetType) => {
+            const triggers = OPTIONAL_ASSET_AMENITY_MAP[assetType] ?? []
+            return !triggers.some((trigger) => amenities[trigger] === true)
+          })
+
+          if (!absentTypes.length) continue
+
+          // Skip types that already have an active property_assets row —
+          // never overwrite crew-captured or PM-entered records.
+          const { data: existingAssets } = await supabase
+            .from('property_assets')
+            .select('asset_type')
+            .eq('property_id', property.id as string)
+            .eq('is_active', true)
+            .in('asset_type', absentTypes)
+
+          const existingTypes = new Set((existingAssets ?? []).map((a) => a.asset_type as AssetType))
+          const stubs = absentTypes
+            .filter((assetType) => !existingTypes.has(assetType))
+            .map((assetType) => ({
+              org_id:      org_id,
+              property_id: property.id as string,
+              asset_type:  assetType,
+              name:        assetType.replace(/_/g, ' '),
+              is_active:   true,
+              is_na:       true,
+            }))
+
+          if (!stubs.length) continue
+
+          const { error } = await supabase.from('property_assets').insert(stubs)
+
+          if (error) {
+            logger.warn(
+              `[OwnerRez:${user_id}] asset discovery seed failed for property ` +
+              `${property.id as string}: ${error.message}`
+            )
+          } else {
+            seeded++
+          }
+        }
+
+        logger.info(
+          `[OwnerRez:${user_id}] Asset discovery seeded for ${seeded}/${propertiesWithAmenities.length} properties`
+        )
+        return { seeded, total: propertiesWithAmenities.length }
       })
 
       // ── Create org-level guidebook config with 30-day trial ───────────────────

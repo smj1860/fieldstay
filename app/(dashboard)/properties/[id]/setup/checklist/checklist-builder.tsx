@@ -9,7 +9,7 @@ interface Section { tempId: string; id?: string; name: string; items: Item[] }
 
 function makeId() {
   if (typeof window === 'undefined') return 'ssr'
-  return Math.random().toString(36).slice(2)
+  return crypto.randomUUID()
 }
 
 const DEFAULT_SECTIONS: Section[] = [
