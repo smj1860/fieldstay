@@ -237,10 +237,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
 
           const { data: vendor, error: vendorErr } = await supabase
             .from('vendors')
-            .select(
-              'id, name, email, org_id, stripe_connect_token, ' +
-              'stripe_connect_account_id, stripe_connect_invite_sent_at'
-            )
+            .select('id, name, email, org_id, stripe_connect_token, stripe_connect_account_id, stripe_connect_invite_sent_at')
             .eq('id', event.data.vendor_id!)
             .eq('org_id', org_id)
             .single()
