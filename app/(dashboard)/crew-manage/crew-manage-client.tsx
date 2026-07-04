@@ -530,8 +530,11 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
             <input id="crew-email" name="email" type="email" required className="input" placeholder="alex@example.com" />
           </div>
           <div>
-            <label htmlFor="crew-phone" className="label">Phone <span className="text-red-400">*</span></label>
-            <input id="crew-phone" name="phone" type="tel" required className="input" placeholder="+1 555-0100" />
+            <label htmlFor="crew-phone" className="label">Mobile phone number</label>
+            <input id="crew-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
+            <p className="text-xs text-muted-themed mt-1">
+              Turnover assignment notifications will be sent to this number via SMS.
+            </p>
           </div>
         </div>
 

@@ -33,7 +33,7 @@ export default async function WorkOrderPage({ params }: Props) {
         vendor_dispatch_email,
         created_at, updated_at,
         properties ( name, address, city, state, access_instructions ),
-        vendors ( id, name, specialty )
+        vendors ( id, name, specialty, phone )
       `)
       .eq('id', id)
       .eq('org_id', membership.org_id)
@@ -108,6 +108,7 @@ export default async function WorkOrderPage({ params }: Props) {
       id:        vendor.id,
       name:      vendor.name,
       specialty: vendor.specialty as WorkOrderDetailData['vendors'] extends { specialty: infer S } | null ? S : never,
+      phone:     vendor.phone ?? null,
     } : null,
     vendor_dispatch_email: wo.vendor_dispatch_email ?? null,
     work_order_line_items: (lineItems ?? []) as WorkOrderDetailData['work_order_line_items'],

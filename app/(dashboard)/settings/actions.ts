@@ -570,13 +570,13 @@ export async function inviteCrewMember(
 
   const { data: crew } = await supabase
     .from('crew_members')
-    .select('id, name, email, invite_token, user_id, invite_sent_at')
+    .select('id, name, email, phone, invite_token, user_id, invite_sent_at')
     .eq('id', crewMemberId)
     .eq('org_id', membership.org_id)
     .single()
 
   if (!crew)        return { error: 'Crew member not found' }
-  if (!crew.email)  return { error: 'No email address on file for this crew member' }
+  if (!crew.email && !crew.phone) return { error: 'No contact information on file for this crew member' }
   if (crew.user_id) return { error: 'This crew member already has an active account' }
 
   // Atomically claim the send via a conditional update keyed on the same 10s
@@ -604,28 +604,51 @@ export async function inviteCrewMember(
 
   const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
 
-  const { resend, FROM } = await import('@/lib/resend/client')
-  const html = await renderCrewInviteEmail({
-    crewName:  crew.name,
-    orgName:   org?.name ?? 'Your property manager',
-    inviteUrl,
-  })
-  const { error: emailError } = await resend.emails.send({
-    from:     FROM,
-    to:       crew.email,
-    replyTo:  'help@fieldstay.app',
-    subject:  `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
-    html,
-  })
+  if (crew.email) {
+    const { resend, FROM } = await import('@/lib/resend/client')
+    const html = await renderCrewInviteEmail({
+      crewName:  crew.name,
+      orgName:   org?.name ?? 'Your property manager',
+      inviteUrl,
+    })
+    const { error: emailError } = await resend.emails.send({
+      from:     FROM,
+      to:       crew.email,
+      replyTo:  'help@fieldstay.app',
+      subject:  `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
+      html,
+    })
 
-  if (emailError) {
-    console.error('[inviteCrewMember] email send failed')
-    // Release the claim so a retry isn't blocked by the window above
-    await supabase
-      .from('crew_members')
-      .update({ invite_sent_at: crew.invite_sent_at })
-      .eq('id', crewMemberId)
-    return { error: 'Failed to send invite email. Please try again.' }
+    if (emailError) {
+      console.error('[inviteCrewMember] email send failed')
+      // Release the claim so a retry isn't blocked by the window above
+      await supabase
+        .from('crew_members')
+        .update({ invite_sent_at: crew.invite_sent_at })
+        .eq('id', crewMemberId)
+      return { error: 'Failed to send invite email. Please try again.' }
+    }
+  }
+
+  // SMS — crew with a phone number receive an invite via SMS in addition to
+  // (or instead of) email. Non-fatal on failure.
+  if (crew.phone) {
+    const { normalizePhoneToE164, sendSMS, buildCrewInviteSMS } =
+      await import('@/lib/sms/telnyx')
+
+    const e164 = normalizePhoneToE164(crew.phone)
+    if (e164) {
+      const smsBody = buildCrewInviteSMS({
+        crewName:  crew.name,
+        orgName:   org?.name ?? 'Your property manager',
+        inviteUrl,
+      })
+      try {
+        await sendSMS(e164, smsBody)
+      } catch (smsErr) {
+        console.error('[inviteCrewMember] SMS failed (non-fatal):', smsErr)
+      }
+    }
   }
 
   revalidatePath('/crew-manage')

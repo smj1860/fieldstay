@@ -131,3 +131,70 @@ export function buildEveningNudgeSMS(
 export function buildRainAlertSMS(propertyName: string): string {
   return `Heads up — rain expected near ${propertyName} today. Check your guidebook for rainy-day recommendations. Reply STOP to opt out.`
 }
+
+export function buildVendorWorkOrderSMS(params: {
+  vendorName:   string
+  woNumber:     string
+  propertyName: string
+  pmName:       string
+  orgName:      string
+  nteAmount:    number
+  portalUrl:    string
+}): string {
+  const nte = params.nteAmount > 0
+    ? `\nNTE: $${params.nteAmount.toLocaleString()}`
+    : ''
+
+  return [
+    `New work order from ${params.pmName} at ${params.orgName}:`,
+    `${params.woNumber} — ${params.propertyName}${nte}`,
+    ``,
+    `Review & sign off:`,
+    params.portalUrl,
+    ``,
+    `Reply STOP to opt out.`,
+  ].join('\n')
+}
+
+export function buildCrewInviteSMS(params: {
+  crewName:  string
+  orgName:   string
+  inviteUrl: string
+}): string {
+  return [
+    `${params.orgName} invited you to their crew on FieldStay.`,
+    ``,
+    `Set up your account & install the crew app:`,
+    params.inviteUrl,
+    ``,
+    `Reply STOP to opt out.`,
+  ].join('\n')
+}
+
+export function buildCrewTurnoverAssignedSMS(params: {
+  orgName:   string
+  turnovers: Array<{
+    propertyName:     string
+    checkoutDatetime: string
+    windowMinutes:    number
+  }>
+}): string {
+  const lines = params.turnovers.map((t) => {
+    const date    = new Date(t.checkoutDatetime)
+    const dateStr = date.toLocaleDateString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric',
+    })
+    const windowHours = Math.round(t.windowMinutes / 60)
+    const windowStr   = windowHours > 0 ? ` · ${windowHours}hr window` : ''
+    return `• ${t.propertyName} — ${dateStr}${windowStr}`
+  })
+
+  return [
+    `${params.orgName}: Turnover${params.turnovers.length > 1 ? 's' : ''} assigned 📋`,
+    ...lines,
+    ``,
+    `Open your crew app for details & checklist.`,
+    ``,
+    `Reply STOP to opt out.`,
+  ].join('\n')
+}

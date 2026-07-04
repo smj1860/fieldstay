@@ -37,7 +37,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
             id, title, description, wo_number, nte_amount,
             completion_token,
             vendor_id,
-            vendors ( name, email ),
+            vendors ( name, email, phone ),
             properties ( name, address )
           `)
           .eq('id', work_order_id)
@@ -152,6 +152,31 @@ export const handleWorkOrderCreated = inngest.createFunction(
         if (emailErr) throw new Error(`Resend error: ${JSON.stringify(emailErr)}`)
 
         logger.info(`Dispatched WO ${work_order_id} to vendor ${vendor.email}`)
+
+        // SMS — send alongside email when vendor has a mobile number. Non-fatal.
+        if (vendor.phone) {
+          const { normalizePhoneToE164, sendSMS, buildVendorWorkOrderSMS } =
+            await import('@/lib/sms/telnyx')
+
+          const vendorPhone = (vendor as { name: string; email: string; phone: string | null }).phone!
+          const e164 = normalizePhoneToE164(vendorPhone)
+          if (e164) {
+            const smsBody = buildVendorWorkOrderSMS({
+              vendorName:   vendor.name   ?? '',
+              woNumber:     wo.wo_number  ?? '',
+              propertyName,
+              pmName:       dispatcherName,
+              orgName,
+              nteAmount:    (wo.nte_amount as number | null) ?? 0,
+              portalUrl:    publicUrl,
+            })
+            try {
+              await sendSMS(e164, smsBody)
+            } catch (smsErr) {
+              console.error('[WO dispatch-to-vendor] SMS failed (non-fatal):', smsErr)
+            }
+          }
+        }
 
         return {
           dispatched:      true as const,

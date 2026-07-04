@@ -18,6 +18,7 @@ export async function dispatchWorkOrderToVendor(input: {
   workOrderId:  string
   vendorEmail:  string
   vendorName:   string
+  vendorPhone?: string | null
 }): Promise<{ success?: boolean; token?: string; publicUrl?: string; error?: string }> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
@@ -91,6 +92,31 @@ export async function dispatchWorkOrderToVendor(input: {
         dispatcherPhone:  profile?.phone ?? null,
       },
     })
+
+    // SMS — send alongside the dispatched email when vendor has a mobile number
+    if (input.vendorPhone) {
+      const { normalizePhoneToE164, sendSMS, buildVendorWorkOrderSMS } =
+        await import('@/lib/sms/telnyx')
+
+      const e164 = normalizePhoneToE164(input.vendorPhone)
+      if (e164) {
+        const smsBody = buildVendorWorkOrderSMS({
+          vendorName:   input.vendorName,
+          woNumber:     wo.wo_number ?? '',
+          propertyName: (property as { name: string } | null)?.name ?? 'Property',
+          pmName:       profile?.full_name ?? 'Your Property Manager',
+          orgName:      org?.name ?? 'FieldStay Property Management',
+          nteAmount:    (wo.nte_amount as number | null) ?? 0,
+          portalUrl:    `${APP_URL}/work-orders/${token}`,
+        })
+
+        try {
+          await sendSMS(e164, smsBody)
+        } catch (smsErr) {
+          console.error('[dispatchWorkOrderToVendor] SMS failed (non-fatal):', smsErr)
+        }
+      }
+    }
 
     revalidatePath('/maintenance')
     return { success: true, token, publicUrl: `${APP_URL}/work-orders/${token}` }

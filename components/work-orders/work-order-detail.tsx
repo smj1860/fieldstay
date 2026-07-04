@@ -63,6 +63,7 @@ export interface WorkOrderDetailData {
     name:      string
     specialty: VendorSpecialty
     email?:    string | null
+    phone?:    string | null
   } | null
   // Public dispatch tracking
   vendor_dispatch_email?: string | null
@@ -213,6 +214,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
       workOrderId: wo.id,
       vendorEmail: dispatchEmail.trim(),
       vendorName:  dispatchName.trim() || 'Contractor',
+      vendorPhone: wo.vendors?.phone ?? null,
     })
     setDispatching(false)
     if (result.error) {

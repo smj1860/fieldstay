@@ -30,7 +30,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           .single(),
         supabase
           .from('vendors')
-          .select('id, name, email, portal_enabled')
+          .select('id, name, email, phone, portal_enabled')
           .eq('id', vendorId)
           .eq('org_id', orgId)
           .single(),
@@ -183,6 +183,35 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
 
       if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
     })
+
+    // SMS — alongside email when vendor has a mobile number
+    if (vendor.phone) {
+      await step.run('send-vendor-sms', async () => {
+        const { normalizePhoneToE164, sendSMS, buildVendorWorkOrderSMS } =
+          await import('@/lib/sms/telnyx')
+
+        const e164 = normalizePhoneToE164(vendor.phone!)
+        if (!e164) return { skipped: true, reason: 'invalid-phone' }
+
+        const smsBody = buildVendorWorkOrderSMS({
+          vendorName:   vendor.name   ?? '',
+          woNumber:     wo.wo_number  ?? '',
+          propertyName,
+          pmName:       dispatcher.name,
+          orgName:      org?.name     ?? 'FieldStay Property Management',
+          nteAmount:    (wo.nte_amount as number | null) ?? 0,
+          portalUrl:    publicUrl,
+        })
+
+        try {
+          await sendSMS(e164, smsBody)
+        } catch (smsErr) {
+          console.error('[WO vendor-assigned] SMS failed (non-fatal):', smsErr)
+          return { sent: false, reason: 'send-failed' }
+        }
+        return { sent: true }
+      })
+    }
 
     // ── Step 5: Notify PM that vendor was dispatched ───────────────────────
     await step.run('notify-pm-dispatched', async () => {
