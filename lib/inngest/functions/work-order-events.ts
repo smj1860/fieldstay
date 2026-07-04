@@ -7,6 +7,8 @@ import WorkOrderDispatchEmail from '@/emails/WorkOrderDispatch'
 import { renderWorkOrderEmail } from '@/emails/work-order'
 import { getPmEmail } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
+import { stripe } from '@/lib/stripe/client'
+import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { randomBytes } from 'crypto'
 
@@ -219,6 +221,167 @@ export const handleWorkOrderCreated = inngest.createFunction(
 
         return { skipped: true }
       })
+
+      // ── Step 3: Immediate Stripe Connect invite if vendor isn't set up yet ───
+      //
+      // The nightly cron covers vendors created in the last 2 days, but misses
+      // same-day dispatches and vendors added more than 2 days ago. This step
+      // bridges that gap by triggering the invite immediately when a work order
+      // is dispatched.
+      //
+      // Idempotency: stripe_connect_invite_sent_at is the dedup guard.
+      // If the cron or a prior dispatch already sent the invite, this is a no-op.
+      if (dispatchResult.dispatched && event.data.vendor_id) {
+        await step.run('trigger-vendor-stripe-onboarding', async () => {
+          const supabase = createServiceClient()
+
+          const { data: vendor, error: vendorErr } = await supabase
+            .from('vendors')
+            .select('id, name, email, org_id, stripe_connect_token, stripe_connect_account_id, stripe_connect_invite_sent_at')
+            .eq('id', event.data.vendor_id!)
+            .eq('org_id', org_id)
+            .single()
+
+          if (vendorErr || !vendor) {
+            logger.warn(
+              `[WO created] Could not fetch vendor ${event.data.vendor_id} for Stripe onboarding check`
+            )
+            return { skipped: true, reason: 'vendor_not_found' }
+          }
+
+          // Dedup guard — cron or prior dispatch already handled this vendor
+          if (vendor.stripe_connect_invite_sent_at || vendor.stripe_connect_account_id) {
+            return { skipped: true, reason: 'already_invited_or_onboarded' }
+          }
+
+          // Vendor must have an email to receive the invite
+          if (!vendor.email) {
+            return { skipped: true, reason: 'vendor_has_no_email' }
+          }
+
+          // Vendor must have a stripe_connect_token to build the onboard URL
+          if (!vendor.stripe_connect_token) {
+            logger.warn(
+              `[WO created] Vendor ${vendor.id} has no stripe_connect_token — cannot build onboard URL`
+            )
+            return { skipped: true, reason: 'vendor_missing_connect_token' }
+          }
+
+          // Get PM name and org name for contextual email copy
+          let pmName:  string | null = null
+          let orgName: string        = 'Your property manager'
+
+          const [membersResult, orgResult] = await Promise.all([
+            supabase
+              .from('organization_members')
+              .select('user_id')
+              .eq('org_id', org_id)
+              .in('role', ['owner', 'admin'])
+              .not('invite_accepted_at', 'is', null)
+              .limit(1),
+            supabase
+              .from('organizations')
+              .select('name')
+              .eq('id', org_id)
+              .single(),
+          ])
+
+          if (orgResult.data?.name) orgName = orgResult.data.name
+
+          if (membersResult.data?.[0]?.user_id) {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', membersResult.data[0].user_id)
+              .single()
+            if (profile?.full_name) pmName = profile.full_name
+          }
+
+          // Create a Stripe Express account if the vendor doesn't have one yet.
+          // Idempotency key prevents duplicate accounts on step retry.
+          let accountId = vendor.stripe_connect_account_id
+          if (!accountId) {
+            const account = await stripe.accounts.create(
+              {
+                type:  'express',
+                email: vendor.email,
+                metadata: {
+                  vendor_id: vendor.id,
+                  org_id:    vendor.org_id,
+                },
+                capabilities: {
+                  card_payments: { requested: true },
+                  transfers:     { requested: true },
+                },
+              },
+              { idempotencyKey: `vendor-connect-create-${vendor.id}` }
+            )
+            accountId = account.id
+          }
+
+          const appUrl        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
+          const onboardingUrl = `${appUrl}/api/vendor-connect/${vendor.stripe_connect_token}/onboard`
+          const woNumber      = dispatchResult.dispatched ? (dispatchResult.woNumber ?? null) : null
+
+          // Send the invite email
+          const { error: emailErr } = await resend.emails.send(
+            {
+              from:    FROM,
+              to:      vendor.email,
+              replyTo: 'support@fieldstay.app',
+              subject: `${orgName} uses FieldStay — set up your payment account`,
+              html:    await renderVendorConnectInviteEmail({
+                vendorName:    vendor.name,
+                orgName,
+                pmName,
+                woNumber,
+                onboardingUrl,
+              }),
+            },
+            { idempotencyKey: `vendor-connect-invite-wo-${event.data.vendor_id}` }
+          )
+
+          if (emailErr) {
+            // Log and return — don't throw. A Resend error here must not retry
+            // the entire step and risk creating duplicate Stripe accounts.
+            logger.error(
+              `[WO created] Stripe Connect invite email failed for vendor ${vendor.id}: ` +
+              JSON.stringify(emailErr)
+            )
+            return { skipped: true, reason: 'email_send_failed' }
+          }
+
+          // Persist the Stripe account ID and sent timestamp.
+          // Two fields in one update — atomic. If this update fails and the step
+          // retries, the idempotency key on stripe.accounts.create prevents a
+          // duplicate account, and the email idempotency key prevents a duplicate send.
+          const { error: updateErr } = await supabase
+            .from('vendors')
+            .update({
+              stripe_connect_account_id:    accountId,
+              stripe_connect_invite_sent_at: new Date().toISOString(),
+            })
+            .eq('id',     vendor.id)
+            .eq('org_id', vendor.org_id)   // explicit tenant scope even with service role
+
+          if (updateErr) {
+            logger.error(
+              `[WO created] Failed to update vendor ${vendor.id} with Stripe account ID: ` +
+              updateErr.message
+            )
+            // Do not throw — email was sent successfully. The cron will see
+            // stripe_connect_invite_sent_at is still null and may re-send, but
+            // the Resend idempotency key will dedup that send.
+          }
+
+          logger.info(
+            `[WO created] Stripe Connect invite sent to vendor ${vendor.id} — ` +
+            `account: ${accountId}`
+          )
+
+          return { sent: true, vendorId: vendor.id, accountId }
+        })
+      }
     }
 
     // ── Overdue check (unchanged from original) ────────────────────────────

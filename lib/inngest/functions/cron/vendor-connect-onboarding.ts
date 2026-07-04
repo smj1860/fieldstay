@@ -131,6 +131,8 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
               html:    await renderVendorConnectInviteEmail({
                 vendorName:    vendor.name,
                 orgName,
+                pmName:        null,
+                woNumber:      null,
                 onboardingUrl,
               }),
             })
