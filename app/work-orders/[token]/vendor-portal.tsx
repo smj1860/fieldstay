@@ -88,7 +88,7 @@ function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: P
         </div>
         {workOrder.wo_number && (
           <span className="text-xs font-bold text-accent-400 tracking-widest flex-shrink-0 uppercase">
-            WO-{workOrder.wo_number}
+            {workOrder.wo_number}
           </span>
         )}
       </div>
@@ -300,7 +300,7 @@ export function VendorPortal({
           </div>
           {workOrder.wo_number && (
             <span style={{ color: '#C0C0C0', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em' }}>
-              WO-{workOrder.wo_number}
+              {workOrder.wo_number}
             </span>
           )}
         </div>
