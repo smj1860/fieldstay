@@ -26,6 +26,7 @@ export default function CrewTurnoverPage() {
   const [uploadingItemId,   setUploadingItemId]   = useState<string | null>(null)
   const [uploadError,       setUploadError]       = useState<string | null>(null)
   const [completing,        setCompleting]        = useState(false)
+  const [actionError,       setActionError]       = useState<string | null>(null)
   const [showFlagModal,     setShowFlagModal]     = useState(false)
   const [counts,            setCounts]            = useState<Record<string, number>>({})
   const [sectionPhotoPrompt, setSectionPhotoPrompt] = useState<string | null>(null)
@@ -207,7 +208,13 @@ export default function CrewTurnoverPage() {
     counts[item.id] !== undefined ? counts[item.id] : item.current_quantity
 
   const markInProgress = async () => {
-    await startTurnover(userId, id)
+    setActionError(null)
+    try {
+      await startTurnover(userId, id)
+    } catch (err) {
+      console.error('[Crew] startTurnover failed:', err)
+      setActionError('Could not start this turnover. Please check your connection and try again.')
+    }
   }
 
   const markComplete = async () => {
@@ -218,8 +225,15 @@ export default function CrewTurnoverPage() {
       if (!ok) return
     }
     setCompleting(true)
-    await completeTurnover(userId, id)
-    router.push('/crew')
+    setActionError(null)
+    try {
+      await completeTurnover(userId, id)
+      router.push('/crew')
+    } catch (err) {
+      console.error('[Crew] completeTurnover failed:', err)
+      setCompleting(false)
+      setActionError('Could not mark complete. Please check your connection and try again.')
+    }
   }
 
   if (!turnover) {
@@ -307,6 +321,19 @@ export default function CrewTurnoverPage() {
       {/* ── HUB VIEW ── */}
       {view === 'hub' && (
         <div className="space-y-3 mt-4">
+          {actionError && (
+            <div
+              className="px-4 py-3 rounded-xl text-sm font-medium"
+              style={{
+                backgroundColor: 'var(--accent-red-dim)',
+                color:           'var(--accent-red)',
+                border:          '1px solid rgba(240,84,84,0.2)',
+              }}
+            >
+              {actionError}
+            </div>
+          )}
+
           {/* Progress summary — show checklist completion at a glance */}
           {totalCount > 0 && (
             <div className="rounded-xl px-4 py-3 flex items-center justify-between"

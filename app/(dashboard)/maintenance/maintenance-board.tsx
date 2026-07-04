@@ -1036,6 +1036,7 @@ function SchedulesSection({
   const [deleting, startDelete]     = useTransition()
   const [creatingId, setCreatingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const handleCreateWO = (scheduleId: string) => {
     setCreatingId(scheduleId)
@@ -1048,9 +1049,13 @@ function SchedulesSection({
   const handleDelete = (scheduleId: string) => {
     if (!confirm('Remove this schedule? This cannot be undone.')) return
     setDeletingId(scheduleId)
+    setDeleteError(null)
     startDelete(async () => {
-      await deleteMaintenanceSchedule(scheduleId)
+      const result = await deleteMaintenanceSchedule(scheduleId)
       setDeletingId(null)
+      if (result?.error) {
+        setDeleteError('Could not delete this schedule. Please try again.')
+      }
     })
   }
 
@@ -1079,6 +1084,25 @@ function SchedulesSection({
           </button>
         </div>
         <p className="text-xs text-muted-themed mb-3">Recurring tasks that generate work orders automatically</p>
+
+        {deleteError && (
+          <div
+            className="mb-3 px-4 py-3 rounded-xl text-sm"
+            style={{
+              backgroundColor: 'var(--accent-red-dim)',
+              color:           'var(--accent-red)',
+              border:          '1px solid rgba(240,84,84,0.2)',
+            }}
+          >
+            {deleteError}
+            <button
+              onClick={() => setDeleteError(null)}
+              className="ml-2 underline text-xs"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
 
         {open && schedules.length === 0 && (
           <div className="text-center py-8 text-sm text-muted-themed border border-themed rounded-xl">
