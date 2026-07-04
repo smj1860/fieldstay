@@ -1,14 +1,14 @@
 'use client'
 
 import { useEffect, useState }     from 'react'
+import { useLiveQuery }            from 'dexie-react-hooks'
 import { useDexieDb }              from '@/lib/dexie/context'
 import { useRouter }              from 'next/navigation'
 import { ArrowLeft, Wrench }      from 'lucide-react'
-import type { CrewWorkOrderRow, PropertyRow } from '@/lib/dexie/schema'
+import type { PropertyRow } from '@/lib/dexie/schema'
 
 export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const [id, setId]               = useState<string | null>(null)
-  const [wo, setWo]               = useState<CrewWorkOrderRow | null>(null)
   const [property, setProperty]   = useState<PropertyRow | null>(null)
   const [completing, setCompleting] = useState(false)
   const [completeError, setCompleteError] = useState<string | null>(null)
@@ -18,11 +18,13 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
   const router = useRouter()
 
   useEffect(() => {
-    params.then(({ id }) => {
-      setId(id)
-      db.crew_work_orders.get(id).then((w) => setWo(w ?? null))
-    })
-  }, [params, db])
+    params.then(({ id }) => setId(id))
+  }, [params])
+
+  const wo = useLiveQuery(
+    () => id ? db.crew_work_orders.get(id) : undefined,
+    [id, db]
+  )
 
   useEffect(() => {
     if (!wo?.property_id) return
