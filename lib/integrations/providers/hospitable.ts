@@ -13,6 +13,7 @@
 // ============================================================
 
 import type { IntegrationProvider, TokenResponse } from '@/lib/integrations/types'
+import type { CrewRole } from '@/types/database'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,28 @@ export interface HospitableReservation {
   guests:             { first_name?: string; last_name?: string } | HospitableGuest | null
   // Populated only when include=properties is passed
   properties?:        Array<{ id: string }>
+}
+
+export interface HospitableTeammate {
+  id:             string         // UUID — use as external_id
+  name:           string | null  // Full name (first_name + last_name combined)
+  first_name:     string | null
+  last_name:      string | null
+  is_company:     boolean
+  company_name:   string | null
+  email:          string | null
+  phone_number:   string | null  // Note: Hospitable uses phone_number, not phone
+  all_services:   boolean
+  all_properties: boolean
+  services:       Array<{ id: number; label: string }>
+}
+
+export interface HospitablePagedTeammates {
+  data: HospitableTeammate[]
+  links: {
+    next: string | null
+    prev: string | null
+  }
 }
 
 export interface HospitablePagedProperties {
@@ -454,6 +477,44 @@ export async function hospFetchReservations(
   return reservations
 }
 
+// Fetches all teammates for the authenticated account, paginated via
+// links.next (same cursor style as properties). Non-fatal on failure —
+// teammate sync is additive and must not abort the rest of initial sync
+// (e.g. an existing connection without the teammate:read scope gets 403).
+export async function hospFetchTeammates(token: string): Promise<HospitableTeammate[]> {
+  const teammates: HospitableTeammate[] = []
+  const MAX_PAGES = 50
+
+  let url: string | null = `${HOSPITABLE_API_BASE}/teammates?per_page=100`
+  let pageCount = 0
+
+  while (url) {
+    pageCount++
+    if (pageCount > MAX_PAGES) {
+      console.error('[Hospitable] teammates pagination exceeded limit — aborting')
+      break
+    }
+
+    const res = await fetch(url, {
+      headers: hospitableProvider.getApiHeaders(token),
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      console.warn(
+        `[Hospitable] GET /teammates failed (${res.status}): ${text.slice(0, 200)}`
+      )
+      return []
+    }
+
+    const data = await res.json() as HospitablePagedTeammates
+    teammates.push(...(data.data ?? []))
+    url = data.links?.next ?? null
+  }
+
+  return teammates
+}
+
 // ── Status mapping ────────────────────────────────────────────────────────────
 
 export function mapHospitableStatus(
@@ -478,6 +539,35 @@ export function mapHospitableChannel(
   if (p === 'booking')                  return 'booking_com'
   if (p === 'direct' || p === 'manual') return 'direct'
   return 'other'
+}
+
+// Maps Hospitable service labels to the FieldStay crew_role enum
+// (cleaning | landscaping | maintenance | general — the enum has no
+// crew/manager/owner values, so Check-in, Check-out, Concierge, Manager,
+// Owner, and any unrecognized label all fall back to 'general'; the raw
+// Hospitable labels are preserved separately in crew_members.specialty).
+export function mapHospitableTeammateRole(
+  services: Array<{ label: string }>
+): CrewRole {
+  const labels = services.map((s) => s.label.toLowerCase())
+
+  if (labels.includes('maintenance')) return 'maintenance'
+  if (labels.includes('cleaning'))    return 'cleaning'
+  if (labels.includes('laundry'))     return 'cleaning'
+
+  return 'general'
+}
+
+// Derives a display name from a Hospitable teammate record.
+// Prefers the pre-combined `name` field; falls back to
+// first_name + last_name construction; falls back to company_name.
+export function resolveHospitableTeammateName(t: HospitableTeammate): string | null {
+  if (t.name) return t.name
+  if (t.first_name || t.last_name) {
+    return [t.first_name, t.last_name].filter(Boolean).join(' ')
+  }
+  if (t.is_company && t.company_name) return t.company_name
+  return null
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────

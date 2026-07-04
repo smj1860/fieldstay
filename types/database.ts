@@ -255,6 +255,8 @@ export interface CrewMember {
   invite_token:       string | null
   invite_sent_at:     string | null
   invite_accepted_at: string | null
+  external_id:        string | null
+  external_source:    string | null
   created_at:         string
   updated_at:         string
 }

@@ -5,9 +5,10 @@
 //  1. read-token              — pull Bearer token from Vault
 //  2. fetch-and-upsert-props  — hospFetchProperties → upsert to properties
 //  3. apply-master-checklist  — applyMasterChecklistToProperty per new property
-//  4. fetch-and-upsert-res    — hospFetchReservations → upsert to bookings
-//  5. generate-turnovers      — generateTurnoversForProperty per affected property
-//  6. mark-complete           — write last_sync_status to integration_connections
+//  4. fetch-and-upsert-teammates — hospFetchTeammates → upsert to crew_members
+//  5. fetch-and-upsert-res    — hospFetchReservations → upsert to bookings
+//  6. generate-turnovers      — generateTurnoversForProperty per affected property
+//  7. mark-complete           — write last_sync_status to integration_connections
 // ============================================================
 
 import { inngest }             from '@/lib/inngest/client'
@@ -17,9 +18,13 @@ import { readIntegrationToken } from '@/lib/integrations/vault'
 import {
   hospFetchProperties,
   hospFetchReservations,
+  hospFetchTeammates,
+  mapHospitableTeammateRole,
+  resolveHospitableTeammateName,
   mapHospitableStatus,
   mapHospitableChannel,
   type HospitableReservation,
+  type HospitableTeammate,
 } from '@/lib/integrations/providers/hospitable'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
@@ -119,7 +124,64 @@ export const hospInitialSync = inngest.createFunction(
         })
       }
 
-      // ── 4. Fetch reservations and upsert bookings ─────────────────────────
+      // ── 4. Fetch teammates and upsert as crew members ──────────────────────
+      const teammateCount = await step.run('fetch-and-upsert-teammates', async () => {
+        const teammates = await hospFetchTeammates(token)
+        logger.info(`[Hospitable:${user_id}] Fetched ${teammates.length} teammates`)
+
+        if (!teammates.length) return 0
+
+        const resolved = teammates
+          .map((t) => ({ t, name: resolveHospitableTeammateName(t) }))
+          .filter((entry): entry is { t: HospitableTeammate; name: string } =>
+            entry.name !== null && entry.name.trim().length > 0
+          )
+
+        if (!resolved.length) return 0
+
+        const rows = resolved.map(({ t, name }) => {
+          const role      = mapHospitableTeammateRole(t.services)
+          const specialty = t.services.length
+            ? t.services.map((s) => s.label).join(', ')
+            : null
+
+          return {
+            org_id,
+            name,
+            email:            t.email        ?? null,
+            phone:            t.phone_number ?? null,
+            role,
+            is_active:        true,
+            specialty,
+            // reliability_score / capacity_score are 0–1 scale, NOT NULL —
+            // 1.0 matches the column DEFAULT and is a neutral starting score
+            // for auto-assign-turnover's scoring algorithm.
+            reliability_score: 1.0,
+            capacity_score:    1.0,
+            external_id:      t.id,
+            external_source:  PROVIDER,
+          }
+        })
+
+        const supabase = createServiceClient()
+
+        const { error } = await supabase
+          .from('crew_members')
+          .upsert(rows, {
+            onConflict:       'org_id,external_id,external_source',
+            ignoreDuplicates: false,
+          })
+
+        if (error) {
+          logger.error(`[Hospitable:${user_id}] crew_members upsert failed: ${error.message}`)
+          throw new Error(`Teammates upsert failed: ${error.message}`)
+        }
+
+        logger.info(`[Hospitable:${user_id}] Upserted ${rows.length} crew members from teammates`)
+        return rows.length
+      })
+
+      // ── 5. Fetch reservations and upsert bookings ─────────────────────────
       const reservationCount = await step.run('fetch-and-upsert-reservations', async () => {
         const hospPropertyIds = Object.keys(propertyIdMap)
         if (!hospPropertyIds.length) return 0
@@ -174,7 +236,7 @@ export const hospInitialSync = inngest.createFunction(
         return count
       })
 
-      // ── 5. Generate turnovers for each property that received bookings ─────
+      // ── 6. Generate turnovers for each property that received bookings ─────
       const affectedPropertyIds = [...new Set(Object.values(propertyIdMap as Record<string, string>))]
 
       const newTurnoverIds = await step.run('generate-turnovers', async () => {
@@ -219,7 +281,7 @@ export const hospInitialSync = inngest.createFunction(
         }
       }
 
-      // ── 6. Mark sync complete ─────────────────────────────────────────────
+      // ── 7. Mark sync complete ─────────────────────────────────────────────
       await step.run('mark-complete', async () => {
         await updateConnectionMeta(user_id, {
           last_sync_status: 'success',
@@ -232,11 +294,12 @@ export const hospInitialSync = inngest.createFunction(
 
       logger.info(
         `[Hospitable:${user_id}] Initial sync complete — ` +
-        `${Object.keys(propertyIdMap).length} properties, ${reservationCount} bookings`
+        `${Object.keys(propertyIdMap).length} properties, ${teammateCount} crew members, ${reservationCount} bookings`
       )
 
       return {
         properties:   Object.keys(propertyIdMap).length,
+        crew_members: teammateCount,
         reservations: reservationCount,
       }
     } catch (err) {
