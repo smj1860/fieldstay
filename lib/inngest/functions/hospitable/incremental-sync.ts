@@ -20,6 +20,7 @@ import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable
 import {
   mapHospitableStatus,
   mapHospitableChannel,
+  resolveHospitableTimezone,
   type HospitableReservation,
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
@@ -328,7 +329,7 @@ export const hospIncrementalSync = inngest.createFunction(
             max_guests:    prop.capacity.max      ?? 2,
             checkin_time:  prop['check-in']       ?? '15:00',
             checkout_time: prop['check-out']      ?? '11:00',
-            timezone:      prop.timezone           ?? 'America/New_York',
+            timezone:      resolveHospitableTimezone(prop.timezone, addr.state),
             is_active:     prop.listed,
             updated_at:    new Date().toISOString(),
           })
