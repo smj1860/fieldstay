@@ -22,7 +22,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           .from('work_orders')
           .select(`
             id, wo_number, title, description, nte_amount, scheduled_date,
-            completion_token, completion_token_expires_at, portal_enabled,
+            scheduled_time, completion_token, completion_token_expires_at, portal_enabled,
             status, org_id, property_id, vendor_id
           `)
           .eq('id', workOrderId)
@@ -42,7 +42,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
       const [propRes, orgRes] = await Promise.all([
         supabase
           .from('properties')
-          .select('id, name, address')
+          .select('id, name, address, timezone')
           .eq('id', woRes.data.property_id)
           .single(),
         supabase
@@ -193,6 +193,18 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
         const e164 = normalizePhoneToE164(vendor.phone!)
         if (!e164) return { skipped: true, reason: 'invalid-phone' }
 
+        let vendorWindow: string | undefined
+        if (wo.scheduled_time && wo.scheduled_date) {
+          const { formatPropertyTime } = await import('@/lib/utils/timezone')
+          const propTz = property?.timezone ?? 'America/New_York'
+          vendorWindow = formatPropertyTime(
+            wo.scheduled_time.slice(0, 5),
+            wo.scheduled_date,
+            propTz,
+            'long'
+          )
+        }
+
         const smsBody = buildVendorWorkOrderSMS({
           vendorName:   vendor.name   ?? '',
           woNumber:     wo.wo_number  ?? '',
@@ -201,6 +213,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           orgName:      org?.name     ?? 'FieldStay Property Management',
           nteAmount:    (wo.nte_amount as number | null) ?? 0,
           portalUrl:    publicUrl,
+          window:       vendorWindow,
         })
 
         try {
