@@ -21,6 +21,7 @@ import {
   mapHospitableStatus,
   mapHospitableChannel,
   resolveHospitableTimezone,
+  extractHospitableTime,
   type HospitableReservation,
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
@@ -141,7 +142,7 @@ export const hospIncrementalSync = inngest.createFunction(
 
       const upsertResult = await step.run('upsert-booking', async () => {
         const supabase       = createServiceClient()
-        const hospPropertyId = reservation.properties?.[0]?.id ?? null
+        const hospPropertyId = reservation.property?.id ?? null
 
         if (!hospPropertyId) {
           throw new NonRetriableError(
@@ -171,11 +172,14 @@ export const hospIncrementalSync = inngest.createFunction(
           .maybeSingle()
 
         const datesChanged = !existing
-          || existing.checkin_date  !== reservation.arrival_date
-          || existing.checkout_date !== reservation.departure_date
+          || existing.checkin_date  !== (reservation.arrival_date?.split('T')[0]   ?? null)
+          || existing.checkout_date !== (reservation.departure_date?.split('T')[0] ?? null)
 
-        const status    = mapHospitableStatus(reservation.reservation_status.current.category)
-        const guest     = reservation.guests as { first_name?: string; last_name?: string } | null
+        const status = mapHospitableStatus(reservation.reservation_status.current.category)
+
+        // reservation.guest (singular) = GuestInfo name data (via include=guest)
+        // reservation.guests (plural)  = GuestCounts — not name data
+        const guest     = reservation.guest ?? null
         const guestName = guest
           ? [guest.first_name, guest.last_name].filter(Boolean).join(' ') || null
           : null
@@ -188,10 +192,10 @@ export const hospIncrementalSync = inngest.createFunction(
               property_id:     property.id,
               external_id:     reservation.id,
               external_source: PROVIDER,
-              checkin_date:    reservation.arrival_date,
-              checkout_date:   reservation.departure_date,
-              checkin_time:    reservation.check_in  ?? '15:00',
-              checkout_time:   reservation.check_out ?? '11:00',
+              checkin_date:    reservation.arrival_date?.split('T')[0]   ?? null,
+              checkout_date:   reservation.departure_date?.split('T')[0] ?? null,
+              checkin_time:    extractHospitableTime(reservation.check_in,  '15:00'),
+              checkout_time:   extractHospitableTime(reservation.check_out, '11:00'),
               status,
               guest_name:      guestName,
               source:          mapHospitableChannel(reservation.platform),

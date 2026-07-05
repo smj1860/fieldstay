@@ -24,6 +24,7 @@ import {
   resolveHospitableTimezone,
   mapHospitableStatus,
   mapHospitableChannel,
+  extractHospitableTime,
   type HospitableReservation,
   type HospitableTeammate,
 } from '@/lib/integrations/providers/hospitable'
@@ -197,13 +198,26 @@ export const hospInitialSync = inngest.createFunction(
 
         const bookingRows = reservations
           .map((res: HospitableReservation) => {
-            const propertyExternalId = res.properties?.[0]?.id ?? null
-            const propertyId         = propertyExternalId ? propertyIdMap[propertyExternalId] : null
-            if (!propertyId) return null
+            // Response key is 'property' (singular object), NOT 'properties[]'.
+            const propertyExternalId = res.property?.id ?? null
+            const propertyId         = propertyExternalId
+              ? propertyIdMap[propertyExternalId]
+              : null
+
+            if (!propertyId) {
+              logger.warn(
+                `[Hospitable:${user_id}] Skipping reservation ${res.id} — ` +
+                `no FieldStay property found for Hospitable property ` +
+                `${propertyExternalId ?? 'unknown'}`
+              )
+              return null
+            }
 
             const status = mapHospitableStatus(res.reservation_status.current.category)
 
-            const guest     = res.guests as { first_name?: string; last_name?: string } | null
+            // res.guest (singular) = GuestInfo, only present when include=guest.
+            // res.guests (plural)  = GuestCounts (adults/children/etc) — not name data.
+            const guest     = res.guest ?? null
             const guestName = guest
               ? [guest.first_name, guest.last_name].filter(Boolean).join(' ') || null
               : null
@@ -213,14 +227,19 @@ export const hospInitialSync = inngest.createFunction(
               property_id:     propertyId,
               external_id:     res.id,
               external_source: PROVIDER,
-              checkin_date:    res.arrival_date,
-              checkout_date:   res.departure_date,
-              checkin_time:    res.check_in  ?? '15:00',
-              checkout_time:   res.check_out ?? '11:00',
+
+              // arrival_date / departure_date are ISO datetimes at midnight
+              checkin_date:    res.arrival_date?.split('T')[0]   ?? null,
+              checkout_date:   res.departure_date?.split('T')[0] ?? null,
+
+              // check_in / check_out are ISO datetimes with the actual time of day
+              checkin_time:    extractHospitableTime(res.check_in,  '15:00'),
+              checkout_time:   extractHospitableTime(res.check_out, '11:00'),
+
               status,
-              guest_name:      guestName,
-              source:          mapHospitableChannel(res.platform),
-              is_block:        false,
+              guest_name: guestName,
+              source:     mapHospitableChannel(res.platform),
+              is_block:   false,
             }
           })
           .filter((row): row is NonNullable<typeof row> => row !== null)

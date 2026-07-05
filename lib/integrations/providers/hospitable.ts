@@ -64,25 +64,49 @@ export interface HospitableReservationStatus {
 }
 
 export interface HospitableGuest {
-  first_name: string
-  last_name:  string
-  email:      string
-  phone:      string | null
+  first_name:    string | null
+  last_name:     string | null
+  email:         string | null
+  phone_numbers: string[] | null
+}
+
+export interface HospitableGuestCounts {
+  adults:   number
+  children: number
+  infants:  number
+  pets:     number
 }
 
 export interface HospitableReservation {
-  id:                 string   // UUID
-  platform:           string   // 'airbnb' | 'homeaway' | 'booking' | 'direct' | ...
-  platform_id:        string   // Channel-native confirmation code
-  arrival_date:       string   // YYYY-MM-DD
-  departure_date:     string   // YYYY-MM-DD
-  check_in:           string   // "HH:MM"
-  check_out:          string   // "HH:MM"
-  nights:             number
+  id:               string   // UUID
+  platform:         string   // 'airbnb' | 'homeaway' | 'booking' | 'direct' | ...
+  platform_id:      string   // Channel-native confirmation code
+
+  // All four fields are ISO datetime strings (format: date-time), NOT plain
+  // date or time strings.
+  //   arrival_date / departure_date — date portion only, at midnight:
+  //     e.g. "2019-01-03T00:00:00-05:00" → extract date with .split('T')[0]
+  //   check_in / check_out — the actual check-in/out time of day:
+  //     e.g. "2019-01-03T13:00:00-05:00" → extract HH:MM with extractHospitableTime()
+  arrival_date:     string
+  departure_date:   string
+  check_in:         string
+  check_out:        string
+
   reservation_status: { current: HospitableReservationStatus }
-  guests:             { first_name?: string; last_name?: string } | HospitableGuest | null
-  // Populated only when include=properties is passed
-  properties?:        Array<{ id: string }>
+
+  // guests = GuestCounts (adults, children, infants, pets) — always present.
+  // guest  = GuestInfo (name, email, phone) — only present when include=guest.
+  guests:  HospitableGuestCounts
+  guest?:  HospitableGuest | null
+
+  // property = single object, populated when include=properties is passed.
+  // The request param name is plural (properties); the response key is singular (property).
+  property?: {
+    id:          string
+    name:        string
+    public_name: string
+  } | null
 }
 
 export interface HospitableTeammate {
@@ -658,6 +682,17 @@ export function resolveHospitableTimezone(
 }
 
 // ── Utility ───────────────────────────────────────────────────────────────────
+
+// Extracts "HH:MM" from a Hospitable ISO datetime string
+// (e.g. "2019-01-03T13:00:00-05:00" → "13:00"). Falls back when
+// the field is missing or doesn't match the expected shape.
+export function extractHospitableTime(
+  isoDatetime: string | null | undefined,
+  fallback:    string
+): string {
+  const match = isoDatetime?.match(/T(\d{2}:\d{2})/)
+  return match?.[1] ?? fallback
+}
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false
