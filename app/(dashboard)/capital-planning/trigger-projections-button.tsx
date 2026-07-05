@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Loader2 }                      from 'lucide-react'
+import { Loader2, Check }                from 'lucide-react'
 import { triggerCapexProjections }      from './actions'
 import { createClient }                 from '@/lib/supabase/client'
 
@@ -69,8 +69,8 @@ export function TriggerProjectionsButton({
   }
   if (done) {
     return (
-      <span className="text-xs font-medium" style={{ color: 'var(--accent-green)' }}>
-        ✓ Projections updated
+      <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
+        <Check className="w-3.5 h-3.5" /> Projections updated
       </span>
     )
   }

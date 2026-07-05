@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Check } from 'lucide-react'
 import { requireOrgMember } from '@/lib/auth'
 import { ONBOARDING_STEPS, calcOnboardingProgress } from '@/lib/onboarding-wizard'
 import { cn } from '@/lib/utils'
@@ -60,7 +61,7 @@ export default async function OnboardingLayout({
                   ? { background: 'var(--accent-gold)', color: 'var(--text-inverse)' }
                   : { background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
               >
-                {done ? '✓' : i + 1}
+                {done ? <Check className="w-2.5 h-2.5" /> : i + 1}
               </span>
               {step.label}
             </Link>

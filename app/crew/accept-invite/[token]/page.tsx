@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { AcceptInviteForm } from './accept-invite-form'
+import { CheckCircle2 } from 'lucide-react'
 
 interface Props { params: Promise<{ token: string }> }
 
@@ -20,7 +21,7 @@ export default async function AcceptInvitePage({ params }: Props) {
     return (
       <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
         <div className="bg-card-themed rounded-2xl p-8 max-w-md w-full text-center">
-          <p className="text-3xl mb-3">✅</p>
+          <CheckCircle2 className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--accent-green)' }} />
           <h2 className="text-lg font-bold text-primary-themed mb-2">Account Already Active</h2>
           <p className="text-sm text-muted-themed mb-6">
             Your FieldStay account is set up. Log in to see your assignments.

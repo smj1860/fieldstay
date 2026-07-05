@@ -1,6 +1,7 @@
 'use client'
 
 import { useState }              from 'react'
+import { Check }                  from 'lucide-react'
 import { submitWorkOrderSignOff } from '@/app/actions/work-order-public'
 
 const ORANGE       = '#FF6B00'
@@ -177,9 +178,10 @@ export function WorkOrderPublicClient({ token, workOrder: wo }: Props) {
                   background: signed ? 'rgba(16,185,129,0.15)' : 'rgba(255,107,0,0.15)',
                   color:      signed ? '#34D399' : ORANGE,
                   border:     `1px solid ${signed ? 'rgba(52,211,153,0.3)' : 'rgba(255,107,0,0.4)'}`,
-                  fontSize:11, fontWeight:700, padding:'5px 12px', borderRadius:99
+                  fontSize:11, fontWeight:700, padding:'5px 12px', borderRadius:99,
+                  display:'inline-flex', alignItems:'center', gap:4
                 }}>
-                  {signed ? '✓ Complete' : '● Active'}
+                  {signed ? <><Check size={11} /> Complete</> : '● Active'}
                 </div>
               </div>
               <div style={{ color:CHROME, fontSize:10, fontWeight:700,

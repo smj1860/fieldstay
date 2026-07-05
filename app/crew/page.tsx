@@ -5,7 +5,7 @@ import { useLiveQuery }   from 'dexie-react-hooks'
 import { useDexieDb }     from '@/lib/dexie/context'
 
 import Link                              from 'next/link'
-import { AlertCircle, MapPin, Clock, MessageCircle } from 'lucide-react'
+import { AlertCircle, MapPin, Clock, MessageCircle, PartyPopper } from 'lucide-react'
 import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
 import { distanceMiles }                 from '@/lib/geocoding'
@@ -441,7 +441,7 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
 
         {submitted ? (
           <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
-            <p style={{ fontSize: 32, marginBottom: 8 }}>🙌</p>
+            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}><PartyPopper size={32} /></div>
             <p style={{ fontSize: 15, fontWeight: 700, color: '#0D1F3C', marginBottom: 4 }}>
               Thank you!
             </p>

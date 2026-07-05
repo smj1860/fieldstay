@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react'
 import {
   MapPin, Wrench, Calendar, AlertTriangle, CheckCircle2,
   Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight, ChevronDown,
-  ShieldAlert, ClipboardList, User, Star, Camera, Send, Copy,
+  ShieldAlert, ClipboardList, User, Star, Camera, Send, Copy, Check,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
@@ -103,8 +103,8 @@ const STATUS_STYLES: Record<WoStatus, { dot: string; label: string }> = {
   cancelled:       { dot: 'bg-red-400',     label: 'Cancelled'       },
 }
 
-const INVOICE_STATUS_STYLES: Record<'pending_payment' | 'paid' | 'cancelled', { badge: string; label: string }> = {
-  paid:            { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: '✓ Paid' },
+const INVOICE_STATUS_STYLES: Record<'pending_payment' | 'paid' | 'cancelled', { badge: string; label: React.ReactNode }> = {
+  paid:            { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: <span className="inline-flex items-center gap-1"><Check className="w-3 h-3" /> Paid</span> },
   pending_payment: { badge: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',       label: 'Pending Payment →' },
   cancelled:       { badge: 'bg-slate-500/15 text-slate-400 border border-slate-500/30 line-through', label: 'Cancelled' },
 }

@@ -8,7 +8,7 @@ import {
   Wrench, Mail, BarChart3, Settings, ChevronLeft,
   ChevronRight, Menu, X, Sun, Moon,
   Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
-  LifeBuoy, Bell, BookOpen, Inbox,
+  LifeBuoy, Bell, BookOpen, Inbox, Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -299,7 +299,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
               border:     '1px solid rgba(252,209,22,0.2)',
             }}
           >
-            <span>⚡</span>
+            <Zap className="w-4 h-4" />
             <span>Complete Setup</span>
             <span className="ml-auto text-xs opacity-70">{onboardingPct}%</span>
           </Link>
