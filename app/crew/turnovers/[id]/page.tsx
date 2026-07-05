@@ -239,7 +239,7 @@ export default function CrewTurnoverPage() {
 
   if (!turnover) {
     return (
-      <div className="text-center py-20 text-accent-400">
+      <div className="text-center py-20 text-muted-themed">
         <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
         <p className="text-sm">Loading…</p>
       </div>
@@ -253,15 +253,15 @@ export default function CrewTurnoverPage() {
       {/* Back button — always visible */}
       <button
         onClick={() => view === 'hub' ? router.push('/crew') : setView('hub')}
-        className="flex items-center justify-center w-8 h-8 rounded-lg text-accent-400 hover:text-accent-700 hover:bg-accent-100 transition-colors mb-4"
+        className="flex items-center justify-center w-8 h-8 rounded-lg text-muted-themed hover:text-secondary-themed hover:bg-raised-themed transition-colors mb-4"
         aria-label={view === 'hub' ? 'Back to assignments' : 'Back to turnover'}
       >
         <ArrowLeft className="w-4 h-4" />
       </button>
 
       {/* Property info card — always visible across all views */}
-      <div className="bg-white rounded-xl border border-accent-200 p-4 mb-4">
-        <p className="font-bold text-accent-900 text-lg leading-tight">
+      <div className="bg-card-themed rounded-xl border border-themed p-4 mb-4">
+        <p className="font-bold text-primary-themed text-lg leading-tight">
           {property?.name ?? 'Loading property…'}
         </p>
         {fullAddress && (
@@ -276,17 +276,17 @@ export default function CrewTurnoverPage() {
           </a>
         )}
 
-        <div className="mt-3 pt-3 border-t border-accent-100 flex items-center justify-between flex-wrap gap-2">
+        <div className="mt-3 pt-3 border-t border-themed flex items-center justify-between flex-wrap gap-2">
           <span className={cn(
             'text-xs font-semibold px-2 py-0.5 rounded-full',
             turnover.priority === 'urgent' ? 'bg-red-50 text-red-600' :
             turnover.priority === 'high'   ? 'bg-amber-50 text-amber-700' :
-            'bg-accent-100 text-accent-600'
+            'bg-raised-themed text-secondary-themed'
           )}>
             {turnover.priority} priority
           </span>
           {turnover.window_minutes && (
-            <span className="text-sm font-semibold text-accent-600">
+            <span className="text-sm font-semibold text-secondary-themed">
               {Math.floor(turnover.window_minutes / 60)}h
               {turnover.window_minutes % 60 > 0 ? ` ${turnover.window_minutes % 60}m` : ''} window
             </span>
@@ -295,12 +295,12 @@ export default function CrewTurnoverPage() {
 
         <div className="mt-2 space-y-1 text-sm">
           <div className="flex gap-3">
-            <span className="text-accent-400 w-20 flex-shrink-0">Checkout</span>
-            <span className="font-medium text-accent-900">{formatDateTime(turnover.checkout_datetime)}</span>
+            <span className="text-muted-themed w-20 flex-shrink-0">Checkout</span>
+            <span className="font-medium text-primary-themed">{formatDateTime(turnover.checkout_datetime)}</span>
           </div>
           <div className="flex gap-3">
-            <span className="text-accent-400 w-20 flex-shrink-0">Next In</span>
-            <span className="font-medium text-accent-900">{formatDateTime(turnover.checkin_datetime)}</span>
+            <span className="text-muted-themed w-20 flex-shrink-0">Next In</span>
+            <span className="font-medium text-primary-themed">{formatDateTime(turnover.checkin_datetime)}</span>
           </div>
         </div>
 
@@ -434,14 +434,14 @@ export default function CrewTurnoverPage() {
         <>
           <div className="mb-3">
             <div className="flex items-center justify-between mb-1.5">
-              <span className="text-sm font-semibold text-accent-700">
+              <span className="text-sm font-semibold text-secondary-themed">
                 Checklist — {completedCount} of {totalCount}
               </span>
-              <span className="text-sm text-accent-400">
+              <span className="text-sm text-muted-themed">
                 {Math.round((completedCount / totalCount) * 100)}%
               </span>
             </div>
-            <div className="h-2 bg-accent-200 rounded-full overflow-hidden">
+            <div className="h-2 bg-raised-themed rounded-full overflow-hidden">
               <div
                 className={cn('h-full rounded-full transition-all duration-300',
                   completedCount === totalCount ? 'bg-green-500' : 'bg-brand-800'
@@ -460,24 +460,24 @@ export default function CrewTurnoverPage() {
 
           {Object.entries(sections).map(([sectionName, sectionItems]) => (
             <div key={sectionName} className="mb-4">
-              <h3 className="text-xs font-semibold text-accent-500 uppercase tracking-wide mb-2 px-1">
+              <h3 className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2 px-1">
                 {sectionName}
               </h3>
-              <div className="bg-white rounded-xl border border-accent-200 divide-y divide-accent-100 overflow-hidden">
+              <div className="bg-card-themed rounded-xl border border-themed divide-y divide-themed overflow-hidden">
                 {sectionItems.map((item: ChecklistItem) => {
                   const needsPhoto = item.requires_photo && !item.photo_storage_path
                   const uploading  = uploadingItemId === item.id
 
                   return (
                     <div key={item.id}>
-                      <div className={cn('flex items-start gap-3 px-4 py-3', item.is_completed ? 'bg-green-50' : 'bg-white')}>
+                      <div className={cn('flex items-start gap-3 px-4 py-3', item.is_completed ? 'bg-green-50' : 'bg-card-themed')}>
                         <button
                           className="flex-shrink-0 mt-0.5"
                           onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
                         >
                           {item.is_completed
                             ? <CheckCircle2 className="w-5 h-5 text-green-500" />
-                            : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-accent-300')} />}
+                            : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-muted-themed')} />}
                         </button>
 
                         <button
@@ -486,11 +486,11 @@ export default function CrewTurnoverPage() {
                           onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
                         >
                           <p className={cn('text-sm leading-snug',
-                            item.is_completed ? 'text-green-700 line-through' : 'text-accent-800')}>
+                            item.is_completed ? 'text-green-700 line-through' : 'text-primary-themed')}>
                             {item.task}
                           </p>
                           {item.crew_notes && openNoteItemId !== item.id && (
-                            <p className="text-xs text-accent-400 mt-0.5 italic">Note: {item.crew_notes}</p>
+                            <p className="text-xs text-muted-themed mt-0.5 italic">Note: {item.crew_notes}</p>
                           )}
                           {item.photo_storage_path && (
                             <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
@@ -529,7 +529,7 @@ export default function CrewTurnoverPage() {
                         {item.requires_photo && (
                           <div className="flex-shrink-0">
                             {uploading ? (
-                              <div className="p-1.5"><Loader2 className="w-4 h-4 text-accent-400 animate-spin" /></div>
+                              <div className="p-1.5"><Loader2 className="w-4 h-4 text-muted-themed animate-spin" /></div>
                             ) : (
                               <button
                                 onClick={() => fileInputRefs.current[item.id]?.click()}
@@ -558,7 +558,7 @@ export default function CrewTurnoverPage() {
 
                       {/* Inline note textarea — appears below the item row */}
                       {openNoteItemId === item.id && (
-                        <div className="px-4 pb-3 bg-white border-t border-accent-100">
+                        <div className="px-4 pb-3 bg-card-themed border-t border-themed">
                           <textarea
                             autoFocus
                             value={noteText}
@@ -566,7 +566,7 @@ export default function CrewTurnoverPage() {
                             onBlur={() => void saveNote(item.id, item.is_completed)}
                             rows={2}
                             placeholder="Add a note for this item…"
-                            className="w-full mt-2 text-sm rounded-lg px-3 py-2 resize-none border border-accent-200 focus:outline-none focus:border-brand-400"
+                            className="w-full mt-2 text-sm rounded-lg px-3 py-2 resize-none border border-themed focus:outline-none focus:border-brand-400"
                             style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
                           />
                           <div className="flex justify-end gap-2 mt-1.5">
@@ -627,7 +627,7 @@ export default function CrewTurnoverPage() {
                   </button>
                   <button
                     onClick={() => setSectionPhotoPrompt(null)}
-                    className="text-xs px-2 py-1.5 rounded-lg text-accent-500 hover:bg-accent-100"
+                    className="text-xs px-2 py-1.5 rounded-lg text-muted-themed hover:bg-raised-themed"
                   >
                     Skip
                   </button>
@@ -639,7 +639,7 @@ export default function CrewTurnoverPage() {
       )}
 
       {totalCount === 0 && (
-        <div className="bg-white rounded-xl border border-accent-200 p-6 text-center text-accent-400 text-sm mb-4">
+        <div className="bg-card-themed rounded-xl border border-themed p-6 text-center text-muted-themed text-sm mb-4">
           No checklist for this turnover.
         </div>
       )}
@@ -666,24 +666,24 @@ export default function CrewTurnoverPage() {
       {/* Inventory section */}
       {inventoryItems && inventoryItems.length > 0 && (
         <div className="mb-4">
-          <h3 className="text-xs font-semibold text-accent-500 uppercase tracking-wide mb-2 px-1">
+          <h3 className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2 px-1">
             Inventory
           </h3>
           <div className="space-y-3">
             {Object.entries(invByCategory).map(([category, catItems]) => (
               <div key={category}>
-                <p className="text-xs text-accent-400 font-medium uppercase tracking-wide mb-1.5 px-1">
+                <p className="text-xs text-muted-themed font-medium uppercase tracking-wide mb-1.5 px-1">
                   {category.replace(/_/g, ' ')}
                 </p>
-                <div className="bg-white rounded-xl border border-accent-200 divide-y divide-accent-100 overflow-hidden">
+                <div className="bg-card-themed rounded-xl border border-themed divide-y divide-themed overflow-hidden">
                   {catItems.map((item) => {
                     const qty    = getCount(item)
                     const isLow  = qty < item.par_level
                     return (
                       <div key={item.id} className="flex items-center gap-3 px-4 py-2.5">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-accent-800 truncate">{item.name}</p>
-                          <p className="text-xs text-accent-400">
+                          <p className="text-sm font-medium text-primary-themed truncate">{item.name}</p>
+                          <p className="text-xs text-muted-themed">
                             Par {item.par_level} {item.unit}
                             {isLow && (
                               <span className="ml-1.5 text-amber-600 font-medium">· Low</span>
@@ -693,7 +693,7 @@ export default function CrewTurnoverPage() {
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <button
                             onClick={() => handleCountChange(item.id, qty - 1)}
-                            className="w-7 h-7 rounded-lg border border-accent-200 flex items-center justify-center text-accent-500 hover:bg-accent-100 active:bg-accent-200 transition-colors"
+                            className="w-7 h-7 rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
                           >
                             <Minus className="w-3.5 h-3.5" />
                           </button>
@@ -710,11 +710,11 @@ export default function CrewTurnoverPage() {
                               inputs[idx + 1]?.focus()
                             }}
                             data-inv-count-input
-                            className="w-12 text-center text-sm font-semibold text-accent-900 border border-accent-200 rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-brand-400"
+                            className="w-12 text-center text-sm font-semibold text-primary-themed border border-themed rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-brand-400"
                           />
                           <button
                             onClick={() => handleCountChange(item.id, qty + 1)}
-                            className="w-7 h-7 rounded-lg border border-accent-200 flex items-center justify-center text-accent-500 hover:bg-accent-100 active:bg-accent-200 transition-colors"
+                            className="w-7 h-7 rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
                           >
                             <Plus className="w-3.5 h-3.5" />
                           </button>
@@ -726,7 +726,7 @@ export default function CrewTurnoverPage() {
               </div>
             ))}
           </div>
-          <p className="text-xs text-accent-400 text-center mt-2">Inventory updates save automatically</p>
+          <p className="text-xs text-muted-themed text-center mt-2">Inventory updates save automatically</p>
         </div>
       )}
 
@@ -799,7 +799,7 @@ function IssueReportModal({
       {success ? (
         <div className="text-center py-4">
           <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
-          <p className="text-sm text-accent-500 mb-4">
+          <p className="text-sm text-muted-themed mb-4">
             Saved. The property manager will be notified and a work order created as
             soon as your phone has a connection.
           </p>
@@ -815,7 +815,7 @@ function IssueReportModal({
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="label text-accent-900">What's the issue? *</label>
+              <label className="label text-primary-themed">What's the issue? *</label>
               <input
                 type="text"
                 value={title}
@@ -826,7 +826,7 @@ function IssueReportModal({
               />
             </div>
             <div>
-              <label className="label text-accent-900">Details (optional)</label>
+              <label className="label text-primary-themed">Details (optional)</label>
               <textarea
                 value={details}
                 onChange={(e) => setDetails(e.target.value)}
@@ -836,7 +836,7 @@ function IssueReportModal({
               />
             </div>
             <div>
-              <label className="label text-accent-900">Urgency</label>
+              <label className="label text-primary-themed">Urgency</label>
               <div className="flex gap-2">
                 {(['medium', 'high', 'urgent'] as const).map((p) => (
                   <button
@@ -849,7 +849,7 @@ function IssueReportModal({
                         ? p === 'urgent' ? 'bg-red-500 text-white border-red-500'
                           : p === 'high' ? 'bg-amber-500 text-white border-amber-500'
                           : 'bg-blue-500 text-white border-blue-500'
-                        : 'bg-white text-accent-600 border-accent-300 hover:border-accent-400'
+                        : 'bg-card-themed text-secondary-themed border-themed hover:border-themed'
                     )}
                   >
                     {p}

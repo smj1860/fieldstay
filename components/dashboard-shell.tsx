@@ -18,6 +18,7 @@ import { PmMoreDrawer } from '@/components/pm-more-drawer'
 import { NotificationBell } from '@/components/notification-bell'
 import { SidebarUserMenu } from '@/components/layout/SidebarUserMenu'
 import { InstallBanner } from '@/components/pwa/install-banner'
+import { useTheme } from '@/lib/hooks/use-theme'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -104,7 +105,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [moreDrawerOpen, setMoreDrawerOpen] = useState(false)
-  const [theme,      setTheme]      = useState<'dark' | 'light'>('dark')
+  const { theme, toggle: toggleTheme } = useTheme()
   const [time,       setTime]       = useState('')
   const [swReg,        setSwReg]        = useState<ServiceWorkerRegistration | null>(null)
   const [notifVisible, setNotifVisible] = useState(false)
@@ -119,14 +120,6 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
     tick()
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
-  }, [])
-
-  // Persist + apply theme
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('fs-theme') as 'dark' | 'light' | null
-      if (stored) setTheme(stored)
-    } catch {}
   }, [])
 
   // Register service worker for dashboard push — no permission prompt on mount
@@ -165,17 +158,6 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
       await subscribeToDashboardPush(swReg)
     } catch (err) {
       console.error('[push] dashboard subscription failed:', err)
-    }
-  }
-
-  const toggleTheme = () => {
-    const next = theme === 'dark' ? 'light' : 'dark'
-    setTheme(next)
-    try { localStorage.setItem('fs-theme', next) } catch {}
-    if (next === 'light') {
-      document.documentElement.classList.add('light')
-    } else {
-      document.documentElement.classList.remove('light')
     }
   }
 

@@ -133,9 +133,33 @@
    scope it with :where() against a `.theme-locked-light` wrapper class that
    Doc 2 adds to the portal root layout only. Do not add this to :root, or it
    will silently override the PM dashboard's manual toggle for OS-dark users. */
+/* Base: force the Doc 1 light-mode values regardless of the visiting device's
+   stored `fs-theme` (or lack thereof) — a portal visitor has no persistent
+   identity to honor a dark preference against, so this always wins over
+   :root's dark default. The media query below is the one and only path back
+   to dark for these surfaces, driven purely by the OS-level signal. */
+.theme-locked-light-passive-dark {
+  --bg-base:        #F8F9FA;
+  --bg-canvas:      #F8F9FA;
+  --bg-card:        #FFFFFF;
+  --bg-raised:      #E9ECEF;
+  --bg-hover:       #DEE2E6;
+  --border:         #DEE2E6;
+  --border-strong:  #CED4DA;
+  --text-primary:   #0D0F11;
+  --text-secondary: #343A40;
+  --text-muted:     #6C757D;
+}
+
 @media (prefers-color-scheme: dark) {
   .theme-locked-light-passive-dark {
-    /* intentionally left for Doc 2 to populate once the portal root wrapper exists */
+    --bg-base:   #0a1628;
+    --bg-canvas: #0e1e3e;
+    --bg-card:   #152b52;
+    --text-primary:   #ffffff;
+    --text-secondary: #dce9f5;
+    --text-muted:     #9ab5cc;
+    --border:         rgba(255,255,255,0.07);
   }
 }
 

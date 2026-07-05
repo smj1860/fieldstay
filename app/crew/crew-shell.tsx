@@ -2,7 +2,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
-import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle } from 'lucide-react'
+import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, Sun, Moon } from 'lucide-react'
 import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
@@ -13,6 +13,7 @@ import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
 import { Dialog }                   from '@/components/ui/Dialog'
+import { useTheme }                 from '@/lib/hooks/use-theme'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -50,6 +51,7 @@ export function CrewShell({
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const { theme, toggle: toggleTheme } = useTheme()
 
   const [swReg, setSwReg]               = useState<ServiceWorkerRegistration | null>(null)
   const [notifVisible, setNotifVisible] = useState(false)
@@ -125,7 +127,7 @@ export function CrewShell({
   return (
     <CrewContext.Provider value={{ crewName, userId }}>
     <DexieProvider userId={userId}>
-      <div className="min-h-screen bg-accent-50 flex flex-col max-w-lg mx-auto">
+      <div className="min-h-screen bg-canvas-themed flex flex-col max-w-lg mx-auto">
         {/* ── Branded header ─────────────────────────────────────────────── */}
         <header
           className="relative sticky top-0 z-10"
@@ -146,6 +148,13 @@ export function CrewShell({
           {/* Sync status + logout — pinned right, vertically centered */}
           <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
             <SyncStatus />
+            <button
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="text-brand-200 hover:text-white transition-colors"
+            >
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
             <button
               onClick={handleLogout}
               disabled={isPending}
@@ -222,7 +231,7 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
   ]
 
   return (
-    <nav className="sticky bottom-0 bg-white border-t border-accent-200 flex items-center">
+    <nav className="sticky bottom-0 bg-card-themed border-t border-themed flex items-center">
       {tabs.map(({ href, label, icon: Icon, badge }) => {
         const active = href === '/crew' ? pathname === '/crew' : pathname.startsWith(href)
         return (
@@ -231,7 +240,7 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
             href={href}
             className={cn(
               'relative flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors',
-              active ? 'text-brand-800' : 'text-accent-400 hover:text-accent-600'
+              active ? 'text-brand-800' : 'text-muted-themed hover:text-secondary-themed'
             )}
           >
             <span className="relative">
@@ -250,7 +259,7 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
       {/* Support — opens FAQ panel */}
       <button
         onClick={onHelpClick}
-        className="flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-accent-400 hover:text-accent-600 transition-colors"
+        className="flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-muted-themed hover:text-secondary-themed transition-colors"
       >
         <HelpCircle className="w-5 h-5" />
         Help

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { X } from 'lucide-react'
 
 interface DialogProps {
   open: boolean
@@ -97,7 +98,7 @@ export function Dialog({
             aria-label="Close"
             className="btn-ghost !p-1.5 !min-h-0"
           >
-            ✕
+            <X className="w-4 h-4" />
           </button>
         </div>
         {children}
