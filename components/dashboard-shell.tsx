@@ -122,14 +122,6 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
     return () => clearInterval(id)
   }, [])
 
-  // The shell fills the viewport (h-screen) and scrolls internally via <main> —
-  // lock the document body so it never grows a second, competing scrollbar.
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = previousOverflow }
-  }, [])
-
   // Register service worker for dashboard push — no permission prompt on mount
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -421,11 +413,11 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
   }
 
   return (
-    <div className="flex h-screen overflow-hidden"
+    <div className="flex min-h-screen"
          style={{ background: 'var(--bg-base)' }}>
 
-      {/* Desktop sidebar */}
-      <div className="hidden md:flex h-full flex-shrink-0">
+      {/* Desktop sidebar — pinned via sticky positioning while the page scrolls as one unit */}
+      <div className="hidden md:flex flex-shrink-0 sticky top-0 h-screen">
         <Sidebar />
       </div>
 
@@ -448,11 +440,11 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
       )}
 
       {/* Main area */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+      <div className="flex flex-col flex-1 min-w-0">
 
-        {/* Top bar */}
+        {/* Top bar — pinned to the top of the viewport as the page scrolls */}
         <header
-          className="h-[60px] relative flex items-center justify-between px-5 flex-shrink-0"
+          className="h-[60px] relative flex items-center justify-between px-5 flex-shrink-0 sticky top-0 z-20"
           style={{
             background:   'var(--bg-card)',
             borderBottom: '1px solid var(--border)',
@@ -574,9 +566,10 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
 
         <InstallBanner />
 
-        {/* Page content */}
+        {/* Page content — no internal scroll region; the page itself
+            (document/body) is the single scrollable surface */}
         <main
-          className="flex-1 overflow-y-auto"
+          className="flex-1"
           style={{ background: 'var(--bg-canvas)' }}
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 sm:py-7 pb-24 md:pb-7">
