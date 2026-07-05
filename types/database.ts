@@ -1090,7 +1090,7 @@ export interface OAuthState {
   expires_at:  string
 }
 
-export interface OwnerRezProcessedWebhook {
+export interface ProcessedWebhook {
   webhook_id:   string
   processed_at: string
 }
@@ -1410,7 +1410,7 @@ export interface Database {
       integration_providers:          { Row: IntegrationProvider;         Insert: Partial<IntegrationProvider>;         Update: Partial<IntegrationProvider>;         Relationships: [] }
       integration_connections:        { Row: IntegrationConnection;       Insert: Partial<IntegrationConnection>;       Update: Partial<IntegrationConnection>;       Relationships: [] }
       oauth_states:                   { Row: OAuthState;                  Insert: Partial<OAuthState>;                  Update: Partial<OAuthState>;                  Relationships: [] }
-      ownerrez_processed_webhooks:    { Row: OwnerRezProcessedWebhook;    Insert: Partial<OwnerRezProcessedWebhook>;    Update: Partial<OwnerRezProcessedWebhook>;    Relationships: [] }
+      processed_webhooks:             { Row: ProcessedWebhook;            Insert: Partial<ProcessedWebhook>;            Update: Partial<ProcessedWebhook>;            Relationships: [] }
 
       // ── Support bot ────────────────────────────────────────
       support_kb_chunks:     { Row: SupportKbChunk;     Insert: Partial<SupportKbChunk>;     Update: Partial<SupportKbChunk>;     Relationships: [] }

@@ -309,6 +309,8 @@ export const hospitableProvider: IntegrationProvider = {
 
   // Webhook payload: { id, action, data, created, version }
   // action 'reservation.changed' covers both create and update.
+  // reservation.created (new bookings) and reservation.cancelled (cancellations)
+  // are also sent — confirmed via Vercel logs (action="reservation.created").
   // Webhooks are configured globally in the partner portal — no per-account registration.
   async handleWebhookEvent({ action, payload }) {
     const data = payload as Record<string, unknown>
@@ -317,9 +319,10 @@ export const hospitableProvider: IntegrationProvider = {
     const entityId   = entityData?.id as string | undefined
 
     switch (action) {
+      case 'reservation.created':
       case 'reservation.changed': {
         if (!entityId) {
-          console.warn('[Hospitable webhook] reservation.changed missing data.id:', data)
+          console.warn('[Hospitable webhook] reservation event missing data.id:', data)
           break
         }
         const { inngest } = await import('@/lib/inngest/client')
@@ -328,6 +331,26 @@ export const hospitableProvider: IntegrationProvider = {
           data: {
             provider_id:  'hospitable',
             event_type:   action,
+            entity_type:  'reservation',
+            entity_id:    entityId,
+            triggered_at: new Date().toISOString(),
+          },
+        })
+        break
+      }
+
+      // Reservation cancelled — incremental sync marks it as cancelled in FieldStay
+      case 'reservation.cancelled': {
+        if (!entityId) {
+          console.warn('[Hospitable webhook] reservation.cancelled missing data.id:', data)
+          break
+        }
+        const { inngest } = await import('@/lib/inngest/client')
+        await inngest.send({
+          name: 'integration/hospitable.sync.requested',
+          data: {
+            provider_id:  'hospitable',
+            event_type:   'reservation.cancelled',
             entity_type:  'reservation',
             entity_id:    entityId,
             triggered_at: new Date().toISOString(),

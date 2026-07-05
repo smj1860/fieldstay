@@ -143,8 +143,8 @@ export async function POST(
   //    Most providers retry failed webhooks several times (exponential backoff).
   //    A successful DB write that times out before the response window
   //    generates retries — all of which we must discard after the first success.
-  //    Keyed by `${providerId}:${payload.id}` in the same ledger table OwnerRez
-  //    already used, so two providers can never collide on the same raw id.
+  //    Keyed by `${providerId}:${payload.id}` so two providers can never collide
+  //    on the same raw webhook id.
   //    payload.id (not the synthesized crypto.randomUUID() fallback in
   //    correlationId above) is required — without a real id from the
   //    provider there's nothing stable to dedup against.
@@ -154,7 +154,7 @@ export async function POST(
     const admin = createServiceClient()
 
     const { error: dedupErr } = await admin
-      .from('ownerrez_processed_webhooks')
+      .from('processed_webhooks')
       .insert({ webhook_id: `${providerId}:${webhookId}` })
 
     if (dedupErr) {
@@ -167,12 +167,11 @@ export async function POST(
     }
   }
 
-  // Periodic TTL cleanup — fire-and-forget, never delays webhook response.
-  // Keeps ownerrez_processed_webhooks from growing unbounded.
-  if (providerId === 'ownerrez' && Math.random() < 0.05) {
-    // Run on ~5% of requests to amortise cleanup cost without a cron job
+  // Periodic TTL cleanup — fire-and-forget, runs on ~5% of ALL provider webhook
+  // requests to amortise cleanup cost without a dedicated cron job.
+  if (Math.random() < 0.05) {
     void (async () => {
-      const { error } = await createServiceClient().rpc('cleanup_ownerrez_webhook_dedup')
+      const { error } = await createServiceClient().rpc('cleanup_webhook_dedup')
       if (error) {
         console.warn(`[Webhook:${providerId}] TTL cleanup failed (non-fatal): ${error.message}`)
       }
