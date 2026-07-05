@@ -8,10 +8,10 @@ export const metadata: Metadata = { title: 'Forgot Password' }
 export default function ForgotPasswordPage() {
   return (
     <>
-      <h2 className="text-xl font-bold mb-1" style={{ color: '#0a1628' }}>
+      <h2 className="text-xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>
         Reset your password
       </h2>
-      <p className="text-sm mb-6" style={{ color: '#64748b' }}>
+      <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
         Enter your email and we&apos;ll send you a reset link
       </p>
 
@@ -19,7 +19,7 @@ export default function ForgotPasswordPage() {
         <ForgotPasswordForm />
       </Suspense>
 
-      <p className="text-center text-sm mt-6" style={{ color: '#64748b' }}>
+      <p className="text-center text-sm mt-6" style={{ color: 'var(--text-muted)' }}>
         <Link href="/login" className="text-brand-700 font-medium hover:underline">
           Back to sign in
         </Link>

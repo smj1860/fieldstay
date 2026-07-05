@@ -4,7 +4,7 @@ export default function AuthLayout({
   children: React.ReactNode
 }>) {
   return (
-    <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4 theme-locked-light-passive-dark">
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-8">
@@ -17,7 +17,7 @@ export default function AuthLayout({
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-card-lg p-8">
+        <div className="bg-card-themed rounded-2xl shadow-card-lg p-8">
           {children}
         </div>
       </div>
