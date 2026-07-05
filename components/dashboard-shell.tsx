@@ -122,6 +122,14 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
     return () => clearInterval(id)
   }, [])
 
+  // The shell fills the viewport (h-screen) and scrolls internally via <main> —
+  // lock the document body so it never grows a second, competing scrollbar.
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = previousOverflow }
+  }, [])
+
   // Register service worker for dashboard push — no permission prompt on mount
   useEffect(() => {
     if (typeof window === 'undefined') return
