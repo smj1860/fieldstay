@@ -6,9 +6,11 @@ import Link from 'next/link'
 import {
   Plus, RefreshCw, CalendarCheck, Clock, ChevronDown,
   AlertTriangle, CheckCircle2, Flag, X, UserPlus, LayoutList, GanttChartSquare, Camera,
+  Sparkles, Check,
 } from 'lucide-react'
 import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
+import { StatusDot } from '@/components/ui/StatusDot'
 import {
   assignCrew, assignCrewIndividually, addCrewToTurnover, removeCrewFromTurnover,
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
@@ -175,7 +177,10 @@ function CrewAssignment({
     if (entry === undefined) return null
     return (
       <span title={entry ? 'Marked available that day' : 'Marked unavailable that day'}>
-        {entry ? '🟢' : '🔴'}
+        <StatusDot
+          status={entry ? 'good' : 'critical'}
+          label={entry ? 'Marked available that day' : 'Marked unavailable that day'}
+        />
       </span>
     )
   }
@@ -466,8 +471,9 @@ function TurnoverCard({
               style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}
               onClick={(e) => e.stopPropagation()}
             >
-              <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                ✨ Suggested: <strong style={{ color: 'var(--text-primary)' }}>{suggestedNames.join(', ')}</strong>
+              <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+                <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+                Suggested: <strong style={{ color: 'var(--text-primary)' }}>{suggestedNames.join(', ')}</strong>
               </span>
               {turnover.suggestion_reasoning && (
                 <span className="text-xs hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
@@ -478,10 +484,10 @@ function TurnoverCard({
                 <button
                   onClick={handleAcceptSuggestion}
                   disabled={accepting || dismissing}
-                  className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50 transition-colors"
+                  className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50 transition-colors inline-flex items-center gap-1"
                   style={{ background: 'var(--accent-green)', color: '#fff' }}
                 >
-                  {accepting ? '…' : '✓ Accept'}
+                  {accepting ? '…' : <><Check className="w-3.5 h-3.5" /> Accept</>}
                 </button>
                 <button
                   onClick={handleDismissSuggestion}
@@ -711,7 +717,7 @@ function BoardSection({
   onToggle,
   onWarning,
 }: {
-  label: string
+  label: React.ReactNode
   turnovers: Turnover[]
   propertyMap: Record<string, Property>
   crewMembers: CrewMember[]
@@ -1169,7 +1175,7 @@ export function TurnoverBoard({
             className="input text-sm py-1.5 w-auto"
           >
             <option value="all">All Crew</option>
-            <option value="unassigned">🔴 Unassigned only</option>
+            <option value="unassigned">Unassigned only</option>
             {crewMembers.map(c => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
@@ -1270,7 +1276,7 @@ export function TurnoverBoard({
           ) : (
             <>
               <BoardSection
-                label="🚨 Needs Attention"
+                label={<span className="inline-flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Needs Attention</span>}
                 turnovers={groups.urgent}
                 propertyMap={propertyMap}
                 crewMembers={crewMembers}

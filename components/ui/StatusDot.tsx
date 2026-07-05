@@ -1,4 +1,5 @@
-type Status = 'good' | 'warning' | 'critical' | 'attention' | 'offline' | 'unknown'
+export type StatusDotStatus = 'good' | 'warning' | 'critical' | 'attention' | 'offline' | 'unknown'
+type Status = StatusDotStatus
 
 const toneClass: Record<Status, string> = {
   good:      'bg-[var(--accent-green)]',

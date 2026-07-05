@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { QRCodeSVG } from 'qrcode.react'
+import { Sun, Wine, CloudRain, Tent, MapPin, Pencil, Check, type LucideIcon } from 'lucide-react'
 import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
 import { upsertPropertyGuidebookConfig, updateStayExtensionSettings } from '@/app/actions/guidebook'
@@ -11,13 +12,13 @@ import type { GuidebookSponsor, GuidebookConfiguration, GuidebookSlotType, Guide
 
 type Property = { id: string; name: string; address: string | null; lat: number | null; lng: number | null }
 
-const SLOT_TYPE_LABELS: Record<GuidebookSlotType, string> = {
-  morning_brew:      '☀️ Morning Brew',
-  dinner_pints:      '🍷 Dinner & Pints',
-  rainy_day:         '🌧️ Rainy Day',
-  outdoor_adventure: '🏕️ Outdoor Adventure',
-  general:           '📍 General',
-  other:             '✏️ Custom',
+const SLOT_TYPE_CONFIG: Record<GuidebookSlotType, { icon: LucideIcon; label: string }> = {
+  morning_brew:      { icon: Sun,       label: 'Morning Brew' },
+  dinner_pints:      { icon: Wine,      label: 'Dinner & Pints' },
+  rainy_day:         { icon: CloudRain, label: 'Rainy Day' },
+  outdoor_adventure: { icon: Tent,      label: 'Outdoor Adventure' },
+  general:           { icon: MapPin,    label: 'General' },
+  other:             { icon: Pencil,    label: 'Custom' },
 }
 
 const STATUS_CONFIG: Record<GuidebookSponsorStatus, { label: string; color: string }> = {
@@ -327,8 +328,12 @@ export function GuidebookClient({
                       {sponsor.business_name}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                        {SLOT_TYPE_LABELS[sponsor.slot_type]}
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        {(() => {
+                          const SlotIcon = SLOT_TYPE_CONFIG[sponsor.slot_type].icon
+                          return <SlotIcon className="w-3.5 h-3.5" />
+                        })()}
+                        {SLOT_TYPE_CONFIG[sponsor.slot_type].label}
                       </span>
                       {statusCfg && (
                         <span
@@ -827,7 +832,9 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
             {saving ? 'Saving…' : 'Save Settings'}
           </button>
           {saved && (
-            <span style={{ fontSize: '13px', color: 'var(--accent-green)' }}>Saved ✓</span>
+            <span style={{ fontSize: '13px', color: 'var(--accent-green)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              Saved <Check className="w-3.5 h-3.5" />
+            </span>
           )}
         </div>
       </div>

@@ -7,6 +7,7 @@ import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   Pencil, Trash2, Camera, List, BarChart2, Send, LayoutGrid, Loader2,
+  ShieldOff, Check, Info,
 } from 'lucide-react'
 import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
 import {
@@ -661,7 +662,7 @@ function CreateWorkOrderModal({
                       const label  = [
                         v.name,
                         dist != null ? `${dist.toFixed(1)} mi` : null,
-                        blocked ? '⛔ Blocked' : status === 'expiring_soon' ? '⚠️ Expiring' : null,
+                        blocked ? 'Blocked' : status === 'expiring_soon' ? 'Expiring' : null,
                       ].filter(Boolean).join(' · ')
                       return (
                         <option key={v.id} value={v.id} disabled={blocked}>
@@ -673,27 +674,31 @@ function CreateWorkOrderModal({
 
                   {/* Compliance banner */}
                   {selectedCompliance === 'hard_blocked' && (
-                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
-                      ⛔ This vendor has expired compliance documents (31+ days). Assignment is blocked.
+                      <ShieldOff className="w-3.5 h-3.5 flex-shrink-0" />
+                      This vendor has expired compliance documents (31+ days). Assignment is blocked.
                     </div>
                   )}
                   {selectedCompliance === 'grace_period' && (
-                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      ⚠️ Compliance docs expired recently (grace period). You can assign but should follow up with the vendor.
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                      Compliance docs expired recently (grace period). You can assign but should follow up with the vendor.
                     </div>
                   )}
                   {selectedCompliance === 'expiring_soon' && (
-                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      ⚠️ COI or license expires soon — assign now but remind vendor to renew.
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                      COI or license expires soon — assign now but remind vendor to renew.
                     </div>
                   )}
                   {selectedCompliance === 'no_documents' && (
-                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      ℹ️ No compliance documents on file for this vendor.
+                      <Info className="w-3.5 h-3.5 flex-shrink-0" />
+                      No compliance documents on file for this vendor.
                     </div>
                   )}
 
@@ -1293,7 +1298,10 @@ function TemplateBroadcastModal({
                       <span className="text-secondary-themed truncate">{item.name}</span>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         {item.is_optional_flag && (
-                          <span className="badge badge-amber text-xs">⚠️ {item.is_optional_flag}</span>
+                          <span className="badge badge-amber text-xs flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {item.is_optional_flag}
+                          </span>
                         )}
                         <span className="badge badge-slate text-xs">
                           {FREQUENCY_LABELS[item.schedule_frequency] ?? item.schedule_frequency}
@@ -1679,7 +1687,10 @@ function CreateTemplateModal({
                               />
                               <span className="text-secondary-themed flex-1 truncate">{ci.name}</span>
                               {ci.is_optional_flag && (
-                                <span className="badge badge-amber text-xs flex-shrink-0">⚠️ {ci.is_optional_flag}</span>
+                                <span className="badge badge-amber text-xs flex-shrink-0 flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  {ci.is_optional_flag}
+                                </span>
                               )}
                               <span className="badge badge-slate text-xs flex-shrink-0">
                                 {FREQUENCY_LABELS[ci.schedule_frequency] ?? ci.schedule_frequency}
@@ -1926,8 +1937,9 @@ function EditTemplateModal({
     <Dialog open onClose={onClose} title="Edit Template" maxWidthClassName="max-w-md">
         {success ? (
           <div className="text-center py-4">
-            <p className="text-sm font-medium mb-4" style={{ color: 'var(--accent-green)' }}>
-              ✓ Template updated
+            <p className="text-sm font-medium mb-4 flex items-center justify-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
+              <Check className="w-4 h-4" />
+              Template updated
             </p>
             <button onClick={onClose} className="btn-primary">Done</button>
           </div>

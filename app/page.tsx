@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import { MessageSquare, Package, Wrench, BarChart3, Check } from 'lucide-react'
 
 export default function LandingPage() {
   const [annual, setAnnual] = useState(false)
@@ -102,22 +103,22 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {[
               {
-                icon: '💬',
+                icon: MessageSquare,
                 title: 'Coordinating cleaners over group text',
                 body: 'Scrolling back through 40 messages trying to figure out if someone confirmed Saturday\'s checkout.',
               },
               {
-                icon: '📦',
+                icon: Package,
                 title: 'Finding out you\'re out of supplies at 9pm',
                 body: 'Crew texts you mid-turnover that there\'s no laundry pods. Next guests check in tomorrow at 3pm.',
               },
               {
-                icon: '🔧',
+                icon: Wrench,
                 title: 'Chasing vendors for work order updates',
                 body: 'You submitted the repair request two weeks ago. Still no idea if anyone has looked at it.',
               },
               {
-                icon: '📊',
+                icon: BarChart3,
                 title: 'Copy-pasting P&Ls to owners every month',
                 body: 'Manually pulling numbers from your booking platform and pasting them into a spreadsheet to email out.',
               },
@@ -125,9 +126,9 @@ export default function LandingPage() {
               <div key={item.title}
                    className="flex items-start gap-4 rounded-xl p-5"
                    style={{ background: '#fff', border: '1px solid #E5E7EB' }}>
-                <div className="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center text-lg"
+                <div className="flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center"
                      style={{ background: '#FFF8E7' }}>
-                  {item.icon}
+                  <item.icon className="w-5 h-5" style={{ color: '#111827' }} />
                 </div>
                 <div>
                   <p className="font-bold text-sm mb-1" style={{ color: '#111827' }}>{item.title}</p>
@@ -457,9 +458,9 @@ export default function LandingPage() {
                 <div className="flex flex-col gap-2.5 flex-1 mb-6">
                   {plan.features.map((f) => (
                     <div key={f} className="flex items-start gap-2 text-sm" style={{ color: '#374151' }}>
-                      <span className="flex-shrink-0 flex items-center justify-center rounded-full text-xs font-black mt-0.5 bg-brand-800 text-gold-300"
-                            style={{ width: 18, height: 18, minWidth: 18, lineHeight: '18px' }}>
-                        ✓
+                      <span className="flex-shrink-0 flex items-center justify-center rounded-full mt-0.5 bg-brand-800 text-gold-300"
+                            style={{ width: 18, height: 18, minWidth: 18 }}>
+                        <Check className="w-3 h-3" strokeWidth={3} />
                       </span>
                       {f}
                     </div>

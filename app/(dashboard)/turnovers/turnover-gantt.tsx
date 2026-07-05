@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link                             from 'next/link'
+import { AlertTriangle, Sparkle }       from 'lucide-react'
 
 // ── Types (match what TurnoverBoard already receives) ─────────────────────
 
@@ -357,9 +358,9 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
                             color:      colors.fg,
                             border:     `1px solid ${colors.border}`,
                           }}
-                          title={`${isTight ? '⚠ Tight window — ' : ''}${turnover.status} · ${Math.round(windowMinutes / 60 * 10) / 10}h window`}
+                          title={`${isTight ? 'Tight window — ' : ''}${turnover.status} · ${Math.round(windowMinutes / 60 * 10) / 10}h window`}
                         >
-                          {isTight ? '⚠' : '✦'} {Math.round(windowMinutes / 60 * 10) / 10}h
+                          {isTight ? <AlertTriangle className="w-2.5 h-2.5 flex-shrink-0" /> : <Sparkle className="w-2.5 h-2.5 flex-shrink-0" />} {Math.round(windowMinutes / 60 * 10) / 10}h
                         </Link>
                       )
                     })}
@@ -409,7 +410,7 @@ export function TurnoverGantt({ turnovers, properties, bookings }: Props) {
             className="w-4 h-2.5 rounded-sm inline-block"
             style={{ background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red)' }}
           />
-          ⚠ Tight window
+          Tight window
         </div>
       </div>
     </div>

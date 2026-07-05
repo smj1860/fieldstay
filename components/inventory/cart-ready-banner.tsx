@@ -1,5 +1,6 @@
 'use client'
 
+import { ShoppingCart, ClipboardList } from 'lucide-react'
 import type { CartBuildResult } from '@/lib/kroger/types'
 
 interface CartReadyBannerProps {
@@ -27,8 +28,8 @@ export function CartReadyBanner({ cartData }: CartReadyBannerProps) {
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-xl flex-shrink-0">
-            {cartAdded ? '🛒' : '📋'}
+          <span className="flex-shrink-0" style={{ color: 'var(--text-primary)' }}>
+            {cartAdded ? <ShoppingCart className="w-5 h-5" /> : <ClipboardList className="w-5 h-5" />}
           </span>
           <div>
             <p

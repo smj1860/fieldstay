@@ -1,4 +1,5 @@
 import type { PropertyAsset, AssetTypeStandard } from '@/types/database'
+import type { StatusDotStatus } from '@/components/ui/StatusDot'
 
 export interface AssetRepairSummary {
   total_repairs:     number
@@ -74,12 +75,12 @@ export function healthColor(score: number): string {
   return '#6b7280'
 }
 
-export function healthDot(score: number): string {
-  if (score >= 80) return '🟢'
-  if (score >= 60) return '🟡'
-  if (score >= 40) return '🟠'
-  if (score >= 20) return '🔴'
-  return '⚫'
+export function healthDot(score: number): StatusDotStatus {
+  if (score >= 80) return 'good'
+  if (score >= 60) return 'warning'
+  if (score >= 40) return 'attention'
+  if (score >= 20) return 'critical'
+  return 'offline'
 }
 
 export function healthBgStyle(score: number): string {

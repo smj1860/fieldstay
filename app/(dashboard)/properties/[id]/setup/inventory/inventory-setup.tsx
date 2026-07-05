@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { upsertInventoryItems, deleteInventoryItem, completeInventoryStep, applyTemplateToProperty, cloneInventoryFromProperty } from './actions'
-import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Zap, Check } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
 import type { InventoryCatalogItem, InventoryItem, InventoryCategory } from '@/types/database'
@@ -269,8 +269,9 @@ export function InventorySetup({
                         className="text-xs border border-themed rounded px-2 py-0.5 bg-transparent text-primary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)] w-40"
                       />
                       {isOverride && (
-                        <span className="text-xs font-medium" style={{ color: 'var(--accent-amber)' }}>
-                          ⚡ Property override
+                        <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
+                          <Zap className="w-3 h-3" />
+                          Property override
                         </span>
                       )}
                     </div>
@@ -346,7 +347,7 @@ export function InventorySetup({
                         >
                           <Plus className="w-3 h-3 flex-shrink-0" style={added ? { color: 'var(--accent-green)' } : undefined} />
                           {ci.name}
-                          {added && <span className="ml-auto text-xs">✓</span>}
+                          {added && <Check className="w-3 h-3 ml-auto" />}
                         </button>
                       )
                     })}

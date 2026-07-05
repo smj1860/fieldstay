@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { Flag } from "lucide-react";
 
 interface Scenario {
   id: string;
@@ -543,7 +544,7 @@ export default function RepuGuardSandbox() {
                         alignItems: "flex-start",
                       }}
                     >
-                      <span style={{ fontSize: 13 }}>🚩</span>
+                      <Flag style={{ width: 13, height: 13, color: "#ef4444", flexShrink: 0 }} />
                       <div>
                         <div
                           style={{

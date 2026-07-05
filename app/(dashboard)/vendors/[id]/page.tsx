@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ComplianceSection } from './compliance-section'
 import { formatDate } from '@/lib/utils'
 import type { Metadata } from 'next'
+import { CheckCircle2, AlertTriangle, Ban, Star } from 'lucide-react'
 
 export const metadata: Metadata = { title: 'Vendor' }
 
@@ -69,11 +70,18 @@ export default async function VendorDetailPage({ params }: Props) {
     'var(--text-muted)'
 
   const statusLabel =
-    status === 'compliant'      ? '✓ Compliant'           :
-    status === 'expiring_soon'  ? '⚠ Expiring Soon'      :
-    status === 'grace_period'   ? '⚠ Grace Period'        :
-    status === 'hard_blocked'   ? '⛔ Blocked'            :
+    status === 'compliant'      ? 'Compliant'      :
+    status === 'expiring_soon'  ? 'Expiring Soon'  :
+    status === 'grace_period'   ? 'Grace Period'   :
+    status === 'hard_blocked'   ? 'Blocked'        :
     'No Documents'
+
+  const StatusIcon =
+    status === 'compliant'      ? CheckCircle2 :
+    status === 'expiring_soon'  ? AlertTriangle :
+    status === 'grace_period'   ? AlertTriangle :
+    status === 'hard_blocked'   ? Ban :
+    null
 
   const completedWOs = (recentWOs ?? []).filter((w) => w.status === 'completed')
   const totalSpend   = completedWOs.reduce((s, w) => s + (w.actual_cost ?? 0), 0)
@@ -96,9 +104,10 @@ export default async function VendorDetailPage({ params }: Props) {
           </p>
         </div>
         <span
-          className="px-3 py-1 rounded-full text-sm font-semibold"
+          className="px-3 py-1 rounded-full text-sm font-semibold inline-flex items-center gap-1.5"
           style={{ color: statusColor, background: `${statusColor}1a`, border: `1px solid ${statusColor}44` }}
         >
+          {StatusIcon && <StatusIcon className="w-4 h-4" />}
           {statusLabel}
         </span>
       </div>

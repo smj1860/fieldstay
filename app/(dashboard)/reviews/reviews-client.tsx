@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { requestBatchGeneration, submitManualReview } from './actions'
 import { Dialog } from '@/components/ui/Dialog'
+import { Star, Flag, Check } from 'lucide-react'
 
 interface ReviewResponseRow {
   id: string
@@ -47,11 +48,14 @@ interface Props {
 
 function StarRating({ rating }: { rating: number }) {
   return (
-    <span className="text-base" aria-label={`${rating} out of 5 stars`}>
+    <span className="inline-flex items-center gap-0.5" aria-label={`${rating} out of 5 stars`}>
       {Array.from({ length: 5 }, (_, i) => (
-        <span key={i} style={{ color: i < rating ? '#FCD116' : 'var(--border)' }}>
-          ★
-        </span>
+        <Star
+          key={i}
+          className="w-3.5 h-3.5"
+          fill={i < rating ? '#FCD116' : 'none'}
+          style={{ color: i < rating ? '#FCD116' : 'var(--border)' }}
+        />
       ))}
     </span>
   )
@@ -323,7 +327,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
             className="inline-flex items-center justify-center w-14 h-14 rounded-2xl mb-5"
             style={{ background: 'var(--accent-gold-dim)' }}
           >
-            <span style={{ fontSize: 24 }}>★</span>
+            <Star className="w-6 h-6" fill="var(--accent-gold)" style={{ color: 'var(--accent-gold)' }} />
           </div>
           <h2 className="font-black text-xl mb-2 tracking-tight" style={{ color: 'var(--text-primary)' }}>
             No reviews yet
@@ -378,10 +382,10 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {flagged && (
                       <span
-                        className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1"
                         style={{ background: 'rgba(239,68,68,0.15)', color: '#DC2626' }}
                       >
-                        ⚑ Flagged
+                        <Flag className="w-3 h-3" /> Flagged
                       </span>
                     )}
                     <DeadlineBadge
@@ -463,7 +467,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                   className="rounded-xl px-4 py-3 text-sm"
                   style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#DC2626' }}
                 >
-                  <strong>⚑ Flagged:</strong>{' '}
+                  <strong className="inline-flex items-center gap-1"><Flag className="w-3.5 h-3.5" /> Flagged:</strong>{' '}
                   {selected.review_responses?.flags.join(', ')}
                   {selected.review_responses?.flag_reason && (
                     <span className="block mt-1 text-xs opacity-80">{selected.review_responses.flag_reason}</span>
@@ -523,9 +527,13 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                     <button
                       onClick={markReady}
                       className="flex-1 rounded-xl font-bold text-sm py-3 transition-opacity hover:opacity-90"
-                      style={{ background: '#059669', color: '#fff', border: 'none', cursor: 'pointer' }}
+                      style={{ background: '#059669', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                     >
-                      {savingStatus === 'saving' ? 'Saving…' : savingStatus === 'saved' ? '✓ Saved' : 'Mark as Ready'}
+                      {savingStatus === 'saving'
+                        ? 'Saving…'
+                        : savingStatus === 'saved'
+                        ? <><Check className="w-4 h-4" /> Saved</>
+                        : 'Mark as Ready'}
                     </button>
 
                     {canRegen && (
@@ -601,8 +609,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                   )}
 
                   {selected.response_status === 'posted' && (
-                    <p className="mt-3 text-center text-sm font-semibold" style={{ color: '#2563EB' }}>
-                      ✓ Posted to OwnerRez
+                    <p className="mt-3 text-center text-sm font-semibold inline-flex items-center justify-center gap-1 w-full" style={{ color: '#2563EB' }}>
+                      <Check className="w-4 h-4" /> Posted to OwnerRez
                     </p>
                   )}
                 </div>
@@ -654,10 +662,10 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                 <button
                   key={n}
                   onClick={() => setManualForm(f => ({ ...f, starRating: n }))}
-                  className="text-2xl transition-transform active:scale-90"
+                  className="transition-transform active:scale-90"
                   style={{ color: n <= manualForm.starRating ? '#FCD116' : 'var(--border)' }}
                 >
-                  ★
+                  <Star className="w-6 h-6" fill={n <= manualForm.starRating ? '#FCD116' : 'none'} />
                 </button>
               ))}
             </div>

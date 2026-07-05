@@ -1320,7 +1320,7 @@ export function InventoryManager({
             >
               {cartPending
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Building…</>
-                : <><ShoppingCart className="w-4 h-4" /> Build Cart 🛒</>}
+                : <><ShoppingCart className="w-4 h-4" /> Build Cart</>}
             </button>
           </div>
           {cartTriggered && (

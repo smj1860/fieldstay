@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Share, Plus, Check, AlertTriangle, Home } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,10 +45,10 @@ function IOSInstructions() {
       </p>
       <ol className="space-y-3">
         {([
-          { icon: '⬆️', text: 'Tap the Share button at the bottom of Safari' },
-          { icon: '➕', text: 'Scroll down and tap "Add to Home Screen"' },
-          { icon: '✅', text: 'Tap "Add" in the top-right corner' },
-        ] as const).map(({ icon, text }, i) => (
+          { icon: Share, text: 'Tap the Share button at the bottom of Safari' },
+          { icon: Plus,  text: 'Scroll down and tap "Add to Home Screen"' },
+          { icon: Check, text: 'Tap "Add" in the top-right corner' },
+        ] as const).map(({ icon: Icon, text }, i) => (
           <li key={i} className="flex items-start gap-3">
             <span
               className="w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5"
@@ -55,18 +56,19 @@ function IOSInstructions() {
             >
               {i + 1}
             </span>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              <span className="mr-1">{icon}</span>{text}
+            <p className="text-sm flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+              <Icon className="w-4 h-4 flex-shrink-0" />{text}
             </p>
           </li>
         ))}
       </ol>
       <div
-        className="rounded-xl px-3 py-2.5 text-xs"
+        className="rounded-xl px-3 py-2.5 text-xs flex items-start gap-1.5"
         style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}
       >
-        ⚠️ Must be opened in <strong>Safari</strong> — Chrome on iOS does not
-        support home screen install.
+        <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+        <span>Must be opened in <strong>Safari</strong> — Chrome on iOS does not
+        support home screen install.</span>
       </div>
     </div>
   )
@@ -80,10 +82,10 @@ function AndroidInstructions() {
       </p>
       <ol className="space-y-3">
         {([
-          { icon: '⋮',  text: 'Tap the menu icon (⋮) in Chrome\'s top-right corner' },
-          { icon: '➕', text: 'Tap "Add to Home screen"' },
-          { icon: '✅', text: 'Tap "Add" to confirm' },
-        ] as const).map(({ icon, text }, i) => (
+          { icon: null, text: 'Tap the menu icon (⋮) in Chrome\'s top-right corner' },
+          { icon: Plus,  text: 'Tap "Add to Home screen"' },
+          { icon: Check, text: 'Tap "Add" to confirm' },
+        ] as const).map(({ icon: Icon, text }, i) => (
           <li key={i} className="flex items-start gap-3">
             <span
               className="w-7 h-7 rounded-full font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5"
@@ -91,8 +93,8 @@ function AndroidInstructions() {
             >
               {i + 1}
             </span>
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              <span className="mr-1">{icon}</span>{text}
+            <p className="text-sm flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+              {Icon && <Icon className="w-4 h-4 flex-shrink-0" />}{text}
             </p>
           </li>
         ))}
@@ -177,7 +179,7 @@ export function CrewInstallClient() {
             style={{ background: 'var(--bg-card)' }}
           >
             {/* App icon placeholder — replace with <Image> pointing to /icon-192.png */}
-            <span className="text-4xl">🏠</span>
+            <Home className="w-9 h-9" style={{ color: 'var(--accent-gold)' }} />
           </div>
           <h1
             className="text-2xl font-bold tracking-tight"

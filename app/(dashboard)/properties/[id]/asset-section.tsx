@@ -1,13 +1,14 @@
 'use client'
 
 import { useState, useTransition, useActionState, useRef } from 'react'
-import { Plus, X, Pencil, Loader2, ChevronDown, Camera, Upload, Info } from 'lucide-react'
+import { Plus, X, Pencil, Loader2, ChevronDown, Camera, Upload, Info, AlertTriangle, Check } from 'lucide-react'
 import {
   createAsset, updateAsset, deactivateAsset, bulkImportAssets,
   type AssetActionState, type CsvAssetRow,
 } from '../actions'
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
 import { Dialog } from '@/components/ui/Dialog'
+import { StatusDot } from '@/components/ui/StatusDot'
 import type { PropertyAsset, AssetTypeStandard, AssetType } from '@/types/database'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -75,7 +76,7 @@ function HealthPill({ score }: { score: number | null }) {
       className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
       style={{ color, background: healthBgStyle(score), border: `1px solid ${color}44` }}
     >
-      {healthDot(score)} {score}/100 · {healthLabel(score)}
+      <StatusDot status={healthDot(score)} label={healthLabel(score)} /> {score}/100 · {healthLabel(score)}
     </span>
   )
 }
@@ -217,8 +218,8 @@ function AssetForm({
                    border:     `1px solid ${scanResult.confidence === 'low' ? 'rgba(245,158,11,0.3)' : 'rgba(34,197,94,0.2)'}`,
                  }}>
               {scanResult.confidence === 'low'
-                ? '⚠ Low confidence — please verify details below.'
-                : '✓ Data plate read — review and confirm.'}
+                ? <><AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" /> Low confidence — please verify details below.</>
+                : <><Check className="w-3.5 h-3.5 flex-shrink-0" /> Data plate read — review and confirm.</>}
             </div>
           )}
         </div>
@@ -545,7 +546,7 @@ function CsvImportModal({
                       <td className="px-2 py-2 text-muted-themed">{row.installation_date || '—'}</td>
                       <td className="px-2 py-2">
                         {row._valid
-                          ? <span className="text-xs font-medium" style={{ color: 'var(--accent-green)' }}>✓ Ready</span>
+                          ? <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: 'var(--accent-green)' }}><Check className="w-3.5 h-3.5" /> Ready</span>
                           : <span className="text-xs font-medium" style={{ color: 'var(--accent-red)' }}>Fix required</span>
                         }
                       </td>
@@ -706,18 +707,19 @@ export function AssetSection({
           <>
             {assets.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-4">
-                {goodCount     > 0 && <span className="badge" style={{ background: 'rgba(34,197,94,0.1)',  color: 'var(--accent-green)', border: '1px solid rgba(34,197,94,0.2)' }}>🟢 {goodCount} Good</span>}
-                {fairCount     > 0 && <span className="badge" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)' }}>🟡 {fairCount} Fair</span>}
-                {agingCount    > 0 && <span className="badge" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>🟠 {agingCount} Aging</span>}
-                {poorCount     > 0 && <span className="badge" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)' }}>🔴 {poorCount} Poor</span>}
-                {criticalCount > 0 && <span className="badge" style={{ background: 'rgba(107,114,128,0.1)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.2)' }}>⚫ {criticalCount} Critical</span>}
+                {goodCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.1)',  color: 'var(--accent-green)', border: '1px solid rgba(34,197,94,0.2)' }}><StatusDot status="good" label="Good" /> {goodCount} Good</span>}
+                {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)' }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
+                {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
+                {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)' }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
+                {criticalCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(107,114,128,0.1)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.2)' }}><StatusDot status="offline" label="Critical" /> {criticalCount} Critical</span>}
               </div>
             )}
 
             {urgentAssets.length > 0 && (
-              <div className="rounded-lg px-3 py-2 mb-3 text-sm"
+              <div className="rounded-lg px-3 py-2 mb-3 text-sm flex items-center gap-1.5"
                    style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
-                🚨 {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or Critical condition — budget for replacement.
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or Critical condition — budget for replacement.
               </div>
             )}
 
