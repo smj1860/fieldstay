@@ -1077,6 +1077,8 @@ export interface IntegrationConnection {
   refresh_token_vault_secret_id: string | null
   /** When the access token expires. NULL for non-expiring tokens. */
   expires_at:       string | null
+  /** Set when a reconnect-required email was sent after a proactive refresh failure. Cleared on next successful token store. */
+  reconnect_email_sent_at: string | null
 }
 
 export interface OAuthState {
