@@ -332,12 +332,12 @@ export const dailyWorkOrderOps = inngest.createFunction(
     }
 
     // ── Webhook inbox TTL cleanup ─────────────────────────────────────────────
-    // Removes ownerrez_processed_webhooks entries older than 72 hours.
+    // Removes processed_webhooks entries older than 72 hours (all providers).
     // Moved off the webhook hot path — runs once daily here instead.
-    await step.run('cleanup-ownerrez-webhook-inbox', async () => {
+    await step.run('cleanup-webhook-inbox', async () => {
       const supabase = createServiceClient()
       await supabase
-        .from('ownerrez_processed_webhooks')
+        .from('processed_webhooks')
         .delete()
         .lt('processed_at', new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString())
     })
