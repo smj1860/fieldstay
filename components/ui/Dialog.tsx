@@ -69,7 +69,7 @@ export function Dialog({
   if (!open) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center print:hidden">
       <div
         className="fixed inset-0 bg-black/40"
         onClick={onClose}

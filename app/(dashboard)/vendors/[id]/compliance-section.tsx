@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import { createComplianceDocument, deleteComplianceDocument, verifyComplianceDocument } from '../actions'
 import type { ComplianceDocActionState } from '../actions'
 import type { VendorComplianceDocument, ComplianceDocType } from '@/types/database'
+import { Dialog } from '@/components/ui/Dialog'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -73,17 +74,8 @@ function AddDocumentForm({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div
-        className="rounded-2xl shadow-card-lg w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
-        style={{ background: 'var(--bg-card)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Add Compliance Document</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
-
+    <Dialog open onClose={onClose} title="Add Compliance Document" maxWidthClassName="max-w-lg">
+      <div className="max-h-[70vh] overflow-y-auto -mx-6 px-6">
         {state?.error && (
           <div className="text-sm rounded-lg px-3 py-2 mb-4"
                style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}>
@@ -176,7 +168,7 @@ function AddDocumentForm({
           </div>
         </form>
       </div>
-    </div>
+    </Dialog>
   )
 }
 

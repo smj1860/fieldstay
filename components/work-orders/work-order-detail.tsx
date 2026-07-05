@@ -4,9 +4,10 @@ import { useState, useTransition } from 'react'
 import {
   MapPin, Wrench, Calendar, AlertTriangle, CheckCircle2,
   Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight, ChevronDown,
-  ShieldAlert, ClipboardList, User, Star, Camera, Send, Copy, X,
+  ShieldAlert, ClipboardList, User, Star, Camera, Send, Copy,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Dialog } from '@/components/ui/Dialog'
 import { LineItemsEditor, type WorkOrderLineItem } from './line-items-editor'
 import {
   markVendorAcknowledged,
@@ -717,37 +718,16 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
 
       {/* ── Dispatch Modal ────────────────────────────────────── */}
       {showDispatch && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden"
-          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-          role="button"
-          tabIndex={0}
-          aria-label="Close dialog"
-          onClick={e => { if (e.target === e.currentTarget) setShowDispatch(false) }}
-          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDispatch(false) } }}
+        <Dialog
+          open
+          onClose={() => { setShowDispatch(false); setDispatchedUrl(null); setDispatchError(null) }}
+          title="Send to Vendor"
+          maxWidthClassName="max-w-sm"
         >
-          <div
-            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
-                  Send to Vendor
-                </h3>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  Vendor receives a magic link to view and sign off this work order
-                </p>
-              </div>
-              <button
-                onClick={() => { setShowDispatch(false); setDispatchedUrl(null); setDispatchError(null) }}
-                className="p-1.5 rounded-lg transition-colors"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+          <div className="space-y-4">
+            <p className="text-xs -mt-2" style={{ color: 'var(--text-muted)' }}>
+              Vendor receives a magic link to view and sign off this work order
+            </p>
 
             {!dispatchedUrl ? (
               <>
@@ -891,7 +871,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
               </>
             )}
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   )

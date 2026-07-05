@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation'
 import Timeline, { TimelineMarkers, TodayMarker } from 'react-calendar-timeline'
 import type { Id, TimelineItemBase } from 'react-calendar-timeline'
 import dayjs from 'dayjs'
-import { X, ExternalLink } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { useToast } from '@/components/dashboard-toast-provider'
+import { Dialog } from '@/components/ui/Dialog'
 import { updateBookingDates } from './calendar-actions'
 import type { VacancyGap } from './page'
 import type { BookingSource, BookingStatus } from '@/types/database'
@@ -126,73 +127,53 @@ function BookingDetailPanel({
   const sourceStyle = SOURCE_STYLE[booking.source] ?? SOURCE_STYLE.other
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      onClick={onClose}
-      role="button"
-      tabIndex={0}
-      aria-label="Close booking details"
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
-    >
-      <div
-        className="rounded-2xl w-full max-w-md p-6"
-        style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-lg)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-            {bookingTitle(booking)}
-          </h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
-
-        <div className="flex items-center gap-2 mb-4 flex-wrap">
-          <span
-            className="text-xs font-medium px-2 py-0.5 rounded-full"
-            style={{ background: sourceStyle.bg, color: sourceStyle.fg, border: `1px solid ${sourceStyle.border}` }}
-          >
-            {SOURCE_LABELS[booking.source]}
-          </span>
-          <span
-            className="text-xs font-medium px-2 py-0.5 rounded-full capitalize"
-            style={STATUS_BADGE_STYLE[booking.status]}
-          >
-            {booking.status}
-          </span>
-        </div>
-
-        <div className="space-y-2.5 text-sm">
-          <DetailRow label="Property"  value={booking.properties?.name ?? '—'} />
-          <DetailRow
-            label="Check-in"
-            value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ` at ${booking.checkin_time}` : ''}`}
-          />
-          <DetailRow
-            label="Check-out"
-            value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ` at ${booking.checkout_time}` : ''}`}
-          />
-          <DetailRow label="Nights" value={`${nights} night${nights !== 1 ? 's' : ''}`} />
-        </div>
-
-        {booking.notes && (
-          <div
-            className="text-sm rounded-lg p-3 mt-4"
-            style={{ background: 'var(--bg-canvas)', color: 'var(--text-secondary)' }}
-          >
-            {booking.notes}
-          </div>
-        )}
-
-        <button
-          onClick={() => { onViewInList(booking.guest_name ?? ''); onClose() }}
-          className="flex items-center gap-1.5 text-sm font-medium hover:underline mt-5"
-          style={{ color: 'var(--accent-blue)' }}
+    <Dialog open onClose={onClose} title={bookingTitle(booking)} maxWidthClassName="max-w-md">
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span
+          className="text-xs font-medium px-2 py-0.5 rounded-full"
+          style={{ background: sourceStyle.bg, color: sourceStyle.fg, border: `1px solid ${sourceStyle.border}` }}
         >
-          <ExternalLink className="w-3.5 h-3.5" />
-          View in list
-        </button>
+          {SOURCE_LABELS[booking.source]}
+        </span>
+        <span
+          className="text-xs font-medium px-2 py-0.5 rounded-full capitalize"
+          style={STATUS_BADGE_STYLE[booking.status]}
+        >
+          {booking.status}
+        </span>
       </div>
-    </div>
+
+      <div className="space-y-2.5 text-sm">
+        <DetailRow label="Property"  value={booking.properties?.name ?? '—'} />
+        <DetailRow
+          label="Check-in"
+          value={`${formatDate(booking.checkin_date)}${booking.checkin_time ? ` at ${booking.checkin_time}` : ''}`}
+        />
+        <DetailRow
+          label="Check-out"
+          value={`${formatDate(booking.checkout_date)}${booking.checkout_time ? ` at ${booking.checkout_time}` : ''}`}
+        />
+        <DetailRow label="Nights" value={`${nights} night${nights !== 1 ? 's' : ''}`} />
+      </div>
+
+      {booking.notes && (
+        <div
+          className="text-sm rounded-lg p-3 mt-4"
+          style={{ background: 'var(--bg-canvas)', color: 'var(--text-secondary)' }}
+        >
+          {booking.notes}
+        </div>
+      )}
+
+      <button
+        onClick={() => { onViewInList(booking.guest_name ?? ''); onClose() }}
+        className="flex items-center gap-1.5 text-sm font-medium hover:underline mt-5"
+        style={{ color: 'var(--accent-blue)' }}
+      >
+        <ExternalLink className="w-3.5 h-3.5" />
+        View in list
+      </button>
+    </Dialog>
   )
 }
 
