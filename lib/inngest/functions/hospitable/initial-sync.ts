@@ -86,6 +86,7 @@ export const hospInitialSync = inngest.createFunction(
             avg_turnovers_per_month: 0,
             checkin_time:            prop['check-in']  ?? '15:00',
             checkout_time:           prop['check-out'] ?? '11:00',
+            timezone:                prop.timezone     ?? 'America/New_York',
             setup_steps_completed:   {} as Record<string, boolean>,
             is_active:               true,
           }

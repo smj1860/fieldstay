@@ -33,6 +33,7 @@ export async function createWorkOrder(
   const vendor_id              = (formData.get('vendor_id') as string) || null
   const assigned_crew_member_id = (formData.get('assigned_crew_member_id') as string) || null
   const scheduled_date         = (formData.get('scheduled_date') as string) || null
+  const scheduled_time         = (formData.get('scheduled_time') as string) || null
   const estimated_cost         = formData.get('estimated_cost')
     ? parseFloat(formData.get('estimated_cost') as string)
     : null
@@ -84,6 +85,7 @@ export async function createWorkOrder(
       status:                  woStatus,
       source:                  'manual',
       scheduled_date:          scheduled_date || null,
+      scheduled_time:          scheduled_time || null,
       estimated_cost,
       nte_amount,
       portal_enabled:          usePortal,
@@ -262,6 +264,7 @@ export async function updateWorkOrder(
     priority:        string
     vendor_id:       string | null
     scheduled_date:  string | null
+    scheduled_time:  string | null
     estimated_cost:  number | null
     portal_enabled:  boolean
   }
@@ -289,6 +292,7 @@ export async function updateWorkOrder(
       priority,
       vendor_id:      newVendorId,
       scheduled_date: data.scheduled_date || null,
+      scheduled_time: data.scheduled_time || null,
       estimated_cost: data.estimated_cost || null,
       portal_enabled: data.portal_enabled,
     })

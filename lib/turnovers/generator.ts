@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PriorityLevel } from '@/types/database'
 import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
+import { propertyLocalToUtc } from '@/lib/utils/timezone'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DBClient = SupabaseClient<any>
@@ -30,9 +31,10 @@ export async function generateTurnoversForProperty(
   // Use maybeSingle() — .single() errors when 0 rows, causing the step to throw
   const { data: property } = await supabase
     .from('properties')
-    .select('checkin_time, checkout_time, checklist_template_id')
+    .select('checkin_time, checkout_time, checklist_template_id, timezone')
     .eq('id', propertyId)
     .maybeSingle()
+  const tz = property?.timezone ?? 'America/New_York'
   const { data: defaultTemplate } = await supabase
     .from('checklist_templates')
     .select('id')
@@ -65,7 +67,9 @@ export async function generateTurnoversForProperty(
     )
     if (alreadyPaired) continue
     const checkoutTimeStr = (booking.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)
-    const checkoutDT      = new Date(`${booking.checkout_date}T${checkoutTimeStr}:00`)
+    // Convert local wall-clock checkout to UTC using property timezone.
+    // Without this, "11:00 AM CDT" is stored as 11:00 UTC = 6:00 AM local — wrong.
+    const checkoutDT = propertyLocalToUtc(booking.checkout_date, checkoutTimeStr, tz)
     if (isNaN(checkoutDT.getTime())) {
       console.error('[generator] invalid date in Pass 1', {
         propertyId, checkout_date: booking.checkout_date, checkoutTimeStr,
@@ -114,8 +118,9 @@ export async function generateTurnoversForProperty(
     // Slice to 5 chars ('HH:MM') to handle both 'HH:MM' and 'HH:MM:SS' storage formats
     const checkoutTimeStr = (outgoing.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)
     const checkinTimeStr  = (incoming.checkin_time  ?? property?.checkin_time  ?? '15:00').slice(0, 5)
-    const checkoutDT = new Date(`${outgoing.checkout_date}T${checkoutTimeStr}:00`)
-    const checkinDT  = new Date(`${incoming.checkin_date}T${checkinTimeStr}:00`)
+    // Both datetimes converted from local wall-clock to true UTC.
+    const checkoutDT = propertyLocalToUtc(outgoing.checkout_date, checkoutTimeStr, tz)
+    const checkinDT  = propertyLocalToUtc(incoming.checkin_date,  checkinTimeStr,  tz)
     if (isNaN(checkoutDT.getTime()) || isNaN(checkinDT.getTime())) {
       console.error('[generator] invalid date constructed', {
         propertyId, checkout_date: outgoing.checkout_date, checkoutTimeStr,

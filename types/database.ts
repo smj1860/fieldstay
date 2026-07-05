@@ -145,6 +145,7 @@ export interface Property {
   door_code:               string | null
   checkout_time:           string
   checkin_time:            string
+  timezone:                string
   internal_notes:          string | null
   setup_steps_completed:   Record<string, boolean>
   is_active:               boolean
@@ -616,6 +617,7 @@ export interface WorkOrder {
   source_turnover_id:          string | null
   asset_id:                    string | null
   scheduled_date:              string | null
+  scheduled_time:              string | null
   completed_date:              string | null
   estimated_cost:              number | null
   nte_amount:                  number | null

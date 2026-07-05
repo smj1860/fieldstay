@@ -140,14 +140,18 @@ export function buildVendorWorkOrderSMS(params: {
   orgName:      string
   nteAmount:    number
   portalUrl:    string
+  window?:      string   // pre-formatted: "11:00 AM – 3:00 PM CDT"
 }): string {
   const nte = params.nteAmount > 0
     ? `\nNTE: $${params.nteAmount.toLocaleString()}`
     : ''
+  const windowLine = params.window
+    ? `\nAvailable window: ${params.window}\nProperty must be ready before guest check-in.`
+    : ''
 
   return [
     `New work order from ${params.pmName} at ${params.orgName}:`,
-    `${params.woNumber} — ${params.propertyName}${nte}`,
+    `${params.woNumber} — ${params.propertyName}${nte}${windowLine}`,
     ``,
     `Review & sign off:`,
     params.portalUrl,

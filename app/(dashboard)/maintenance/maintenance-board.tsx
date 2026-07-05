@@ -570,6 +570,13 @@ function CreateWorkOrderModal({
                 <div>
                   <label htmlFor="wo-date" className="label">Completed By Date</label>
                   <input id="wo-date" name="scheduled_date" type="date" className="input" />
+                  <label htmlFor="wo-time" className="label mt-3">
+                    Scheduled time
+                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                      Optional — use for same-day flip vendor windows
+                    </span>
+                  </label>
+                  <input id="wo-time" name="scheduled_time" type="time" className="input" />
                 </div>
                 <div>
                   <label htmlFor="wo-nte" className="label">

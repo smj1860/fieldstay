@@ -37,8 +37,9 @@ export const handleWorkOrderCreated = inngest.createFunction(
             id, title, description, wo_number, nte_amount,
             completion_token,
             vendor_id,
+            scheduled_date, scheduled_time,
             vendors ( name, email, phone ),
-            properties ( name, address )
+            properties ( name, address, timezone )
           `)
           .eq('id', work_order_id)
           .single()
@@ -52,6 +53,19 @@ export const handleWorkOrderCreated = inngest.createFunction(
 
         const vendor   = Array.isArray(wo.vendors)    ? wo.vendors[0]    : wo.vendors
         const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+
+        // Build vendor window string for same-day flip dispatch
+        let vendorWindow: string | undefined
+        if (wo.scheduled_time && wo.scheduled_date) {
+          const propTz = property?.timezone ?? 'America/New_York'
+          const { formatPropertyTime } = await import('@/lib/utils/timezone')
+          vendorWindow = formatPropertyTime(
+            wo.scheduled_time.slice(0, 5),
+            wo.scheduled_date,
+            propTz,
+            'long'
+          )
+        }
 
         if (!vendor?.email) {
           // Non-retriable: retrying will never produce an email address.
@@ -169,6 +183,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
               orgName,
               nteAmount:    (wo.nte_amount as number | null) ?? 0,
               portalUrl:    publicUrl,
+              window:       vendorWindow,
             })
             try {
               await sendSMS(e164, smsBody)
