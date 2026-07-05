@@ -6,10 +6,10 @@ import { AlertTriangle } from 'lucide-react'
 export default function CrewError({
   error,
   reset,
-}: {
+}: Readonly<{
   error: Error & { digest?: string }
   reset: () => void
-}) {
+}>) {
   useEffect(() => {
     console.error('[crew-error-boundary]', error)
   }, [error])

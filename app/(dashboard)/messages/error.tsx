@@ -2,13 +2,13 @@
 
 import { useEffect } from 'react'
 
-export default function Error({
+export default function DashboardSegmentError({
   error,
   reset,
-}: {
+}: Readonly<{
   error: Error & { digest?: string }
   reset: () => void
-}) {
+}>) {
   useEffect(() => {
     console.error('[dashboard-segment-error]', error.digest, error.message)
   }, [error])

@@ -3,12 +3,12 @@
 export default function GlobalError({
   error,
   reset,
-}: {
+}: Readonly<{
   error: Error & { digest?: string }
   reset: () => void
-}) {
+}>) {
   return (
-    <html>
+    <html lang="en">
       <body style={{ background: '#0a1628', color: '#fff', fontFamily: 'sans-serif' }}>
         <div style={{ maxWidth: 480, margin: '80px auto', textAlign: 'center' }}>
           <h1 style={{ fontSize: 20, fontWeight: 700 }}>Something went wrong.</h1>
