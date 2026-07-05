@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import Script                       from 'next/script'
 import { Syne, DM_Sans } from 'next/font/google'
 import { SessionRefreshGuard } from '@/components/session-refresh-guard'
 import { CookieNotice } from '@/components/cookie-notice'
@@ -41,21 +42,14 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning
           className={`${syne.variable} ${dmSans.variable}`}>
-      {/*
-        Theme init script — runs before paint to avoid flash.
-        Reads localStorage and applies .light class if needed.
-        Dark is the default so we only act if user chose light.
-      */}
       <head>
-        <script dangerouslySetInnerHTML={{ __html: `
-          (function() {
-            try {
-              if (localStorage.getItem('fs-theme') === 'light') {
-                document.documentElement.classList.add('light');
-              }
-            } catch(e) {}
-          })();
-        ` }} />
+        {/*
+          Theme init — loaded from static file to avoid requiring
+          'unsafe-inline' on script-src in the Content Security Policy.
+          strategy="beforeInteractive" guarantees it runs before paint,
+          preventing a flash of the wrong theme.
+        */}
+        <Script src="/theme-init.js" strategy="beforeInteractive" />
       </head>
       <body>
         <SessionRefreshGuard />
