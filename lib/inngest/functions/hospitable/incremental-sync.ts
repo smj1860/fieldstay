@@ -193,7 +193,7 @@ export const hospIncrementalSync = inngest.createFunction(
               checkout_time:   reservation.check_out ?? '11:00',
               status,
               guest_name:      guestName,
-              channel_source:  mapHospitableChannel(reservation.platform),
+              source:          mapHospitableChannel(reservation.platform),
               is_block:        false,
             },
             { onConflict: 'external_id,external_source' }
