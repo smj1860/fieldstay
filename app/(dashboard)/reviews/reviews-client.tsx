@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { requestBatchGeneration, submitManualReview } from './actions'
+import { Dialog } from '@/components/ui/Dialog'
 
 interface ReviewResponseRow {
   id: string
@@ -612,131 +613,111 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
       )}
 
       {/* Manual review paste modal */}
-      {showManualModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.5)' }}
-          role="button"
-          tabIndex={0}
-          aria-label="Close modal"
-          onClick={() => setShowManualModal(false)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowManualModal(false) } }}
-        >
-          <div
-            className="w-full max-w-lg mx-4 rounded-2xl p-6 space-y-4"
-            style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
-                Add Review Manually
-              </h2>
-              <button
-                onClick={() => setShowManualModal(false)}
-                style={{ color: 'var(--text-muted)', fontSize: 20 }}
-              >×</button>
-            </div>
+      <Dialog
+        open={showManualModal}
+        onClose={() => setShowManualModal(false)}
+        title="Add Review Manually"
+      >
+        <div className="space-y-4">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            For reviews from Airbnb, Vrbo, Google, or other platforms that don&apos;t sync
+            automatically. AI response is generated once — edit the draft as needed.
+          </p>
 
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              For reviews from Airbnb, Vrbo, Google, or other platforms that don&apos;t sync
-              automatically. AI response is generated once — edit the draft as needed.
+          {manualError && (
+            <p className="text-sm font-medium" style={{ color: 'var(--accent-red)' }}>
+              {manualError}
             </p>
+          )}
 
-            {manualError && (
-              <p className="text-sm font-medium" style={{ color: 'var(--accent-red)' }}>
-                {manualError}
-              </p>
-            )}
-
-            {/* Platform */}
-            <div>
-              <label className="label">Platform</label>
-              <select
-                value={manualForm.platform}
-                onChange={(e) => setManualForm(f => ({ ...f, platform: e.target.value }))}
-                className="input"
-              >
-                <option value="airbnb">Airbnb</option>
-                <option value="vrbo">Vrbo</option>
-                <option value="google">Google</option>
-                <option value="booking">Booking.com</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-
-            {/* Star rating */}
-            <div>
-              <label className="label">Star Rating</label>
-              <div className="flex gap-2">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setManualForm(f => ({ ...f, starRating: n }))}
-                    className="text-2xl transition-transform active:scale-90"
-                    style={{ color: n <= manualForm.starRating ? '#FCD116' : 'var(--border)' }}
-                  >
-                    ★
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Guest name */}
-            <div>
-              <label className="label">Guest Name (optional)</label>
-              <input
-                type="text"
-                value={manualForm.guestName}
-                onChange={(e) => setManualForm(f => ({ ...f, guestName: e.target.value }))}
-                placeholder="First name or initials"
-                className="input"
-              />
-            </div>
-
-            {/* Review text */}
-            <div>
-              <label className="label">Review Text</label>
-              <textarea
-                value={manualForm.reviewText}
-                onChange={(e) => setManualForm(f => ({ ...f, reviewText: e.target.value }))}
-                rows={5}
-                placeholder="Paste the review text here…"
-                className="input resize-none"
-              />
-            </div>
-
-            <button
-              onClick={async () => {
-                setManualSubmitting(true)
-                setManualError(null)
-                const result = await submitManualReview(manualForm)
-                if ('error' in result) {
-                  setManualError(result.error)
-                  setManualSubmitting(false)
-                  return
-                }
-                // Immediately generate response
-                await fetch('/api/repuguard/generate', {
-                  method:  'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body:    JSON.stringify({ review_id: result.reviewId }),
-                })
-                setManualUsed(u => u + 1)
-                setShowManualModal(false)
-                setManualSubmitting(false)
-                setManualForm({ reviewText: '', starRating: 5, guestName: '', propertyId: null, platform: 'airbnb' })
-                // Reload to show the new review with its generated response
-                window.location.reload()
-              }}
-              disabled={manualSubmitting || !manualForm.reviewText.trim()}
-              className="w-full rounded-xl font-bold text-sm py-3 transition-opacity disabled:opacity-50"
-              style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+          {/* Platform */}
+          <div>
+            <label className="label">Platform</label>
+            <select
+              value={manualForm.platform}
+              onChange={(e) => setManualForm(f => ({ ...f, platform: e.target.value }))}
+              className="input"
             >
-              {manualSubmitting ? 'Generating response…' : 'Submit & Generate Response'}
-            </button>
+              <option value="airbnb">Airbnb</option>
+              <option value="vrbo">Vrbo</option>
+              <option value="google">Google</option>
+              <option value="booking">Booking.com</option>
+              <option value="other">Other</option>
+            </select>
           </div>
+
+          {/* Star rating */}
+          <div>
+            <label className="label">Star Rating</label>
+            <div className="flex gap-2">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setManualForm(f => ({ ...f, starRating: n }))}
+                  className="text-2xl transition-transform active:scale-90"
+                  style={{ color: n <= manualForm.starRating ? '#FCD116' : 'var(--border)' }}
+                >
+                  ★
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Guest name */}
+          <div>
+            <label className="label">Guest Name (optional)</label>
+            <input
+              type="text"
+              value={manualForm.guestName}
+              onChange={(e) => setManualForm(f => ({ ...f, guestName: e.target.value }))}
+              placeholder="First name or initials"
+              className="input"
+            />
+          </div>
+
+          {/* Review text */}
+          <div>
+            <label className="label">Review Text</label>
+            <textarea
+              value={manualForm.reviewText}
+              onChange={(e) => setManualForm(f => ({ ...f, reviewText: e.target.value }))}
+              rows={5}
+              placeholder="Paste the review text here…"
+              className="input resize-none"
+            />
+          </div>
+
+          <button
+            onClick={async () => {
+              setManualSubmitting(true)
+              setManualError(null)
+              const result = await submitManualReview(manualForm)
+              if ('error' in result) {
+                setManualError(result.error)
+                setManualSubmitting(false)
+                return
+              }
+              // Immediately generate response
+              await fetch('/api/repuguard/generate', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ review_id: result.reviewId }),
+              })
+              setManualUsed(u => u + 1)
+              setShowManualModal(false)
+              setManualSubmitting(false)
+              setManualForm({ reviewText: '', starRating: 5, guestName: '', propertyId: null, platform: 'airbnb' })
+              // Reload to show the new review with its generated response
+              window.location.reload()
+            }}
+            disabled={manualSubmitting || !manualForm.reviewText.trim()}
+            className="w-full rounded-xl font-bold text-sm py-3 transition-opacity disabled:opacity-50"
+            style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+          >
+            {manualSubmitting ? 'Generating response…' : 'Submit & Generate Response'}
+          </button>
         </div>
-      )}
+      </Dialog>
     </div>
   )
 }

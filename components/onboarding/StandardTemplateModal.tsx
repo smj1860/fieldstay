@@ -5,7 +5,8 @@ import { createClient } from '@/lib/supabase/client'
 import { broadcastMaintenanceTemplate } from '@/app/(dashboard)/maintenance/actions'
 import type { MaintenanceScheduleTemplateItem, ScheduleFrequency } from '@/types/database'
 import { RECURRENCE_LABELS, MONTH_NAMES } from '@/types/database'
-import { X, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import { Dialog } from '@/components/ui/Dialog'
 
 const STANDARD_TEMPLATE_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
 
@@ -83,26 +84,12 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Props
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
-
-      <div className="relative w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl flex flex-col max-h-[90vh]"
-           style={{ background: 'var(--bg-card)' }}>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-themed shrink-0">
-          <div>
-            <h2 className="font-bold text-primary-themed">Standard Maintenance Template</h2>
-            <p className="text-xs text-muted-themed mt-0.5">Adjust frequencies and start dates below</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="btn-ghost p-1.5"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <Dialog open onClose={onClose} title="Standard Maintenance Template" mobileSheet>
+      <div className="flex flex-col max-h-[75vh] -m-6">
+        {/* Sub-header */}
+        <p className="text-xs text-muted-themed px-5 pt-1 pb-3 border-b border-themed shrink-0">
+          Adjust frequencies and start dates below
+        </p>
 
         {/* Scrollable list */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
@@ -170,6 +157,6 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Props
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }

@@ -20,6 +20,7 @@ import { distanceMiles } from '@/lib/geocoding'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { createClient } from '@/lib/supabase/client'
+import { Dialog } from '@/components/ui/Dialog'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -470,15 +471,7 @@ function CreateWorkOrderModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">New Work Order</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+    <Dialog open onClose={onClose} title="New Work Order" maxWidthClassName="max-w-3xl">
         {state?.error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
             {state.error}
@@ -797,8 +790,7 @@ function CreateWorkOrderModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -940,12 +932,7 @@ function AddScheduleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Add Maintenance Schedule</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onClose={onClose} title="Add Maintenance Schedule">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
         )}
@@ -956,8 +943,7 @@ function AddScheduleModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -998,12 +984,7 @@ function EditScheduleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Edit Schedule</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onClose={onClose} title="Edit Schedule">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
         )}
@@ -1014,8 +995,7 @@ function EditScheduleModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -1260,15 +1240,8 @@ function TemplateBroadcastModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h3 className="text-lg font-semibold text-primary-themed">Broadcast Template</h3>
-            <p className="text-xs text-muted-themed mt-0.5">{template.name} · {items.length} item{items.length !== 1 ? 's' : ''}</p>
-          </div>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onClose={onClose} title="Broadcast Template">
+        <p className="text-xs text-muted-themed -mt-3 mb-4">{template.name} · {items.length} item{items.length !== 1 ? 's' : ''}</p>
 
         {!result && (
           <div className="flex items-center gap-2 mb-5">
@@ -1398,8 +1371,7 @@ function TemplateBroadcastModal({
             )}
           </>
         )}
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -1560,15 +1532,8 @@ function CreateTemplateModal({
 
   if (createdTemplateId) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-        <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="text-lg font-semibold text-primary-themed">Apply Template</h3>
-              <p className="text-xs text-muted-themed mt-0.5">"{createdTemplateName}" was created</p>
-            </div>
-            <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-          </div>
+      <Dialog open onClose={onClose} title="Apply Template">
+          <p className="text-xs text-muted-themed -mt-3 mb-4">"{createdTemplateName}" was created</p>
 
           {applyError && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{applyError}</div>
@@ -1658,18 +1623,12 @@ function CreateTemplateModal({
               </div>
             </div>
           )}
-        </div>
-      </div>
+      </Dialog>
     )
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Create Schedule Template</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onClose={onClose} title="Create Schedule Template" maxWidthClassName="max-w-2xl">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
         )}
@@ -1796,8 +1755,7 @@ function CreateTemplateModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 

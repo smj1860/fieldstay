@@ -2,9 +2,10 @@
 
 import { useState, useTransition, useEffect } from 'react'
 import { useSearchParams, useRouter }          from 'next/navigation'
-import { Loader2, PlugZap, Unplug, X }         from 'lucide-react'
+import { Loader2, PlugZap, Unplug }             from 'lucide-react'
 import { disconnectIntegration, getSyncProgress, connectWithApiKey } from './actions'
 import { formatDate }                          from '@/lib/utils'
+import { Dialog }                              from '@/components/ui/Dialog'
 
 // ── Provider credential definitions ──────────────────────────────────────────
 // Each api_key provider declares what fields the PM needs to fill in.
@@ -198,91 +199,75 @@ function CredentialModalContent({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
-      <div
-        className="relative w-full max-w-md rounded-2xl p-6"
-        style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-xl)' }}
-      >
-        <button
-          onClick={onClose}
-          className="absolute right-4 top-4 p-1 rounded-lg"
-          style={{ color: 'var(--text-muted)' }}
+    <Dialog open onClose={onClose} title={`Connect ${displayName}`} maxWidthClassName="max-w-md">
+      <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
+        {config.description}
+      </p>
+
+      {error && (
+        <div
+          className="text-sm rounded-lg px-3 py-2.5 mb-4"
+          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
         >
-          <X className="w-4 h-4" />
-        </button>
+          {error}
+        </div>
+      )}
 
-        <h2 className="text-lg font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-          Connect {displayName}
-        </h2>
-        <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
-          {config.description}
-        </p>
-
-        {error && (
-          <div
-            className="text-sm rounded-lg px-3 py-2.5 mb-4"
-            style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
-          >
-            {error}
+      <div className="space-y-4 mb-6">
+        {config.fields.map((field) => (
+          <div key={field.key}>
+            <label
+              htmlFor={field.key}
+              className="block text-sm font-medium mb-1.5"
+              style={{ color: 'var(--text-secondary)' }}
+            >
+              {field.label}
+            </label>
+            <input
+              id={field.key}
+              type={field.sensitive ? 'password' : 'text'}
+              value={values[field.key] ?? ''}
+              onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+              placeholder={field.placeholder}
+              className="input w-full"
+              autoComplete="off"
+            />
           </div>
-        )}
-
-        <div className="space-y-4 mb-6">
-          {config.fields.map((field) => (
-            <div key={field.key}>
-              <label
-                htmlFor={field.key}
-                className="block text-sm font-medium mb-1.5"
-                style={{ color: 'var(--text-secondary)' }}
-              >
-                {field.label}
-              </label>
-              <input
-                id={field.key}
-                type={field.sensitive ? 'password' : 'text'}
-                value={values[field.key] ?? ''}
-                onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
-                placeholder={field.placeholder}
-                className="input w-full"
-                autoComplete="off"
-              />
-            </div>
-          ))}
-        </div>
-
-        <div className="flex gap-3">
-          <button
-            onClick={handleConnect}
-            disabled={pending}
-            className="btn-primary flex-1 flex items-center justify-center gap-2"
-          >
-            {pending ? (
-              <><Loader2 className="w-4 h-4 animate-spin" /> Connecting…</>
-            ) : (
-              <><PlugZap className="w-4 h-4" /> Connect</>
-            )}
-          </button>
-          <button onClick={onClose} className="btn-secondary px-4">
-            Cancel
-          </button>
-        </div>
-
-        {/* Where to find credentials — provider-specific help text */}
-        {providerId === 'hostaway' && (
-          <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
-            Find these in your Hostaway dashboard under{' '}
-            <strong>Settings → Hostaway API → Create</strong>. The key is only shown once — save it securely.
-          </p>
-        )}
-        {/* Guesty is not yet wired — hidden until the integration is live.
-        {providerId === 'guesty' && (
-          <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
-            Create these in your Guesty dashboard under{' '}
-            <strong>Integrations → API &amp; Webhooks → New Application</strong>.
-          </p>
-        )} */}
+        ))}
       </div>
-    </div>
+
+      <div className="flex gap-3">
+        <button
+          onClick={handleConnect}
+          disabled={pending}
+          className="btn-primary flex-1 flex items-center justify-center gap-2"
+        >
+          {pending ? (
+            <><Loader2 className="w-4 h-4 animate-spin" /> Connecting…</>
+          ) : (
+            <><PlugZap className="w-4 h-4" /> Connect</>
+          )}
+        </button>
+        <button onClick={onClose} className="btn-secondary px-4">
+          Cancel
+        </button>
+      </div>
+
+      {/* Where to find credentials — provider-specific help text */}
+      {providerId === 'hostaway' && (
+        <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
+          Find these in your Hostaway dashboard under{' '}
+          <strong>Settings → Hostaway API → Create</strong>. The key is only shown once — save it securely.
+        </p>
+      )}
+      {/* Guesty is not yet wired — hidden until the integration is live.
+      {providerId === 'guesty' && (
+        <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
+          Create these in your Guesty dashboard under{' '}
+          <strong>Integrations → API &amp; Webhooks → New Application</strong>.
+        </p>
+      )} */}
+    </Dialog>
   )
 }
 

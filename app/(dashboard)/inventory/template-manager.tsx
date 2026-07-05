@@ -3,6 +3,7 @@
 import { useState, useTransition, useRef } from 'react'
 import { Plus, X, Loader2, Check, Upload } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { Dialog } from '@/components/ui/Dialog'
 import {
   createOrGetTemplate,
   addTemplateItem,
@@ -761,59 +762,54 @@ export function TemplateManager({
       </div>
 
       {/* Apply to property modal */}
-      {applyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-md">
-            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-themed">
-              <h3 className="font-semibold text-primary-themed">Apply Template to Properties</h3>
-              <button onClick={() => setApplyModal(false)} className="btn-ghost p-1.5">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="px-5 py-4 space-y-2 max-h-60 overflow-y-auto">
-              <label className="flex items-center gap-3 cursor-pointer py-1.5 border-b border-themed pb-3 mb-1">
-                <input
-                  type="checkbox"
-                  checked={properties.length > 0 && properties.every(p => selectedProps.has(p.id))}
-                  onChange={e => {
-                    const next = new Set<string>()
-                    if (e.target.checked) properties.forEach(p => next.add(p.id))
-                    setSelectedProps(next)
-                  }}
-                  className="w-4 h-4 rounded"
-                />
-                <span className="text-sm font-medium text-primary-themed">Select all properties</span>
-              </label>
-              {properties.map(p => (
-                <label key={p.id} className="flex items-center gap-3 cursor-pointer py-1.5">
-                  <input
-                    type="checkbox"
-                    checked={selectedProps.has(p.id)}
-                    onChange={e => {
-                      const next = new Set(selectedProps)
-                      if (e.target.checked) next.add(p.id)
-                      else next.delete(p.id)
-                      setSelectedProps(next)
-                    }}
-                    className="w-4 h-4 rounded"
-                  />
-                  <span className="text-sm text-primary-themed">{p.name}</span>
-                </label>
-              ))}
-            </div>
-            <div className="px-5 pb-5 pt-3 border-t border-themed flex gap-3">
-              <button
-                onClick={handleApply}
-                disabled={isPending || selectedProps.size === 0}
-                className="btn-primary flex-1"
-              >
-                {isPending ? 'Applying…' : `Apply to ${selectedProps.size} propert${selectedProps.size !== 1 ? 'ies' : 'y'}`}
-              </button>
-              <button onClick={() => setApplyModal(false)} className="btn-ghost">Cancel</button>
-            </div>
-          </div>
+      <Dialog
+        open={applyModal}
+        onClose={() => setApplyModal(false)}
+        title="Apply Template to Properties"
+        maxWidthClassName="max-w-md"
+      >
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          <label className="flex items-center gap-3 cursor-pointer py-1.5 border-b border-themed pb-3 mb-1">
+            <input
+              type="checkbox"
+              checked={properties.length > 0 && properties.every(p => selectedProps.has(p.id))}
+              onChange={e => {
+                const next = new Set<string>()
+                if (e.target.checked) properties.forEach(p => next.add(p.id))
+                setSelectedProps(next)
+              }}
+              className="w-4 h-4 rounded"
+            />
+            <span className="text-sm font-medium text-primary-themed">Select all properties</span>
+          </label>
+          {properties.map(p => (
+            <label key={p.id} className="flex items-center gap-3 cursor-pointer py-1.5">
+              <input
+                type="checkbox"
+                checked={selectedProps.has(p.id)}
+                onChange={e => {
+                  const next = new Set(selectedProps)
+                  if (e.target.checked) next.add(p.id)
+                  else next.delete(p.id)
+                  setSelectedProps(next)
+                }}
+                className="w-4 h-4 rounded"
+              />
+              <span className="text-sm text-primary-themed">{p.name}</span>
+            </label>
+          ))}
         </div>
-      )}
+        <div className="flex gap-3 mt-4">
+          <button
+            onClick={handleApply}
+            disabled={isPending || selectedProps.size === 0}
+            className="btn-primary flex-1"
+          >
+            {isPending ? 'Applying…' : `Apply to ${selectedProps.size} propert${selectedProps.size !== 1 ? 'ies' : 'y'}`}
+          </button>
+          <button onClick={() => setApplyModal(false)} className="btn-ghost">Cancel</button>
+        </div>
+      </Dialog>
     </div>
   )
 }

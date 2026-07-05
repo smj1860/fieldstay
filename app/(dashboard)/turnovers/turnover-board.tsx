@@ -8,6 +8,7 @@ import {
   AlertTriangle, CheckCircle2, Flag, X, UserPlus, LayoutList, GanttChartSquare, Camera,
 } from 'lucide-react'
 import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
+import { Dialog } from '@/components/ui/Dialog'
 import {
   assignCrew, assignCrewIndividually, addCrewToTurnover, removeCrewFromTurnover,
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
@@ -521,86 +522,67 @@ function TurnoverCard({
       </div>
 
       {/* Quick-flag bottom sheet */}
-      {showQuickFlag && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4"
-          style={{ background: 'rgba(0,0,0,0.5)' }}
-          onClick={() => setShowQuickFlag(false)}
-          role="button"
-          tabIndex={0}
-          aria-label="Close"
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowQuickFlag(false) } }}
-        >
-          <div
-            className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 pb-8 sm:pb-5"
-            style={{ background: 'var(--bg-card)' }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                Flag Issue — {propertyName}
-              </h4>
-              <button onClick={() => setShowQuickFlag(false)} className="btn-ghost p-1.5">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      <Dialog
+        open={showQuickFlag}
+        onClose={() => setShowQuickFlag(false)}
+        title={`Flag Issue — ${propertyName}`}
+        mobileSheet
+        maxWidthClassName="max-w-sm"
+      >
+        <textarea
+          value={quickFlagNotes}
+          onChange={e => setQuickFlagNotes(e.target.value)}
+          rows={3}
+          className="input resize-none w-full text-sm"
+          placeholder="Describe the issue…"
+          autoFocus
+        />
 
-            <textarea
-              value={quickFlagNotes}
-              onChange={e => setQuickFlagNotes(e.target.value)}
-              rows={3}
-              className="input resize-none w-full text-sm"
-              placeholder="Describe the issue…"
-              autoFocus
-            />
-
-            <div className="mt-3">
-              <input
-                ref={flagPhotoRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={handleFlagPhotoSelect}
-              />
-              {flagPhotoPreview ? (
-                <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-themed">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={flagPhotoPreview} alt="Flag photo" className="w-full h-full object-cover" />
-                  <button
-                    onClick={() => { setFlagPhotoPreview(null); setFlagPhotoFile(null) }}
-                    className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
-                  >
-                    <X className="w-3 h-3 text-white" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => flagPhotoRef.current?.click()}
-                  className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border-dashed border-2 border-themed w-full justify-center transition-colors"
-                  style={{ color: 'var(--text-muted)' }}
-                >
-                  <Camera className="w-4 h-4" />
-                  Add Photo (optional)
-                </button>
-              )}
-            </div>
-
-            <div className="flex gap-2 mt-4">
+        <div className="mt-3">
+          <input
+            ref={flagPhotoRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={handleFlagPhotoSelect}
+          />
+          {flagPhotoPreview ? (
+            <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-themed">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={flagPhotoPreview} alt="Flag photo" className="w-full h-full object-cover" />
               <button
-                onClick={handleQuickFlag}
-                disabled={!quickFlagNotes.trim() || quickFlagging}
-                className="btn-danger flex-1 text-sm"
+                onClick={() => { setFlagPhotoPreview(null); setFlagPhotoFile(null) }}
+                className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
               >
-                {quickFlagging ? 'Flagging…' : 'Flag Issue'}
-              </button>
-              <button onClick={() => setShowQuickFlag(false)} className="btn-ghost text-sm">
-                Cancel
+                <X className="w-3 h-3 text-white" />
               </button>
             </div>
-          </div>
+          ) : (
+            <button
+              onClick={() => flagPhotoRef.current?.click()}
+              className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border-dashed border-2 border-themed w-full justify-center transition-colors"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <Camera className="w-4 h-4" />
+              Add Photo (optional)
+            </button>
+          )}
         </div>
-      )}
+
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={handleQuickFlag}
+            disabled={!quickFlagNotes.trim() || quickFlagging}
+            className="btn-danger flex-1 text-sm"
+          >
+            {quickFlagging ? 'Flagging…' : 'Flag Issue'}
+          </button>
+          <button onClick={() => setShowQuickFlag(false)} className="btn-ghost text-sm">
+            Cancel
+          </button>
+        </div>
+      </Dialog>
 
       {/* Expanded detail */}
       {expanded && (
@@ -808,64 +790,55 @@ function AddTurnoverModal({
   const [state, action, pending] = useActionState(createManualTurnover, null)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-md p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Add Turnover</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
+    <Dialog open onClose={onClose} title="Add Turnover" maxWidthClassName="max-w-md">
+      {state?.error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+          {state.error}
         </div>
+      )}
 
-        {state?.error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
-            {state.error}
-          </div>
-        )}
-
-        <form action={async (fd) => { await action(fd); if (!state?.error) onClose() }} className="space-y-4">
+      <form action={async (fd) => { await action(fd); if (!state?.error) onClose() }} className="space-y-4">
+        <div>
+          <label className="label">Property</label>
+          <select name="property_id" required className="input">
+            <option value="">Select property…</option>
+            {properties.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="label">Property</label>
-            <select name="property_id" required className="input">
-              <option value="">Select property…</option>
-              {properties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label">Checkout Date</label>
-              <input name="checkout_date" type="date" required className="input" />
-            </div>
-            <div>
-              <label className="label">Checkout Time</label>
-              <input name="checkout_time" type="time" defaultValue="11:00" className="input" />
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label">Next Check-in Date</label>
-              <input name="checkin_date" type="date" required className="input" />
-            </div>
-            <div>
-              <label className="label">Check-in Time</label>
-              <input name="checkin_time" type="time" defaultValue="15:00" className="input" />
-            </div>
+            <label className="label">Checkout Date</label>
+            <input name="checkout_date" type="date" required className="input" />
           </div>
           <div>
-            <label className="label">Notes (optional)</label>
-            <textarea name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
+            <label className="label">Checkout Time</label>
+            <input name="checkout_time" type="time" defaultValue="11:00" className="input" />
           </div>
-          <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={pending} className="btn-primary flex-1">
-              {pending ? 'Creating…' : 'Create Turnover'}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Next Check-in Date</label>
+            <input name="checkin_date" type="date" required className="input" />
           </div>
-        </form>
-      </div>
-    </div>
+          <div>
+            <label className="label">Check-in Time</label>
+            <input name="checkin_time" type="time" defaultValue="15:00" className="input" />
+          </div>
+        </div>
+        <div>
+          <label className="label">Notes (optional)</label>
+          <textarea name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
+        </div>
+        <div className="flex gap-3 pt-2">
+          <button type="submit" disabled={pending} className="btn-primary flex-1">
+            {pending ? 'Creating…' : 'Create Turnover'}
+          </button>
+          <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 
@@ -918,77 +891,67 @@ function SplitAssignModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg p-6 max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between mb-4 flex-shrink-0">
-          <div>
-            <h3 className="text-lg font-semibold text-primary-themed">Assign Individually</h3>
-            <p className="text-xs text-muted-themed mt-0.5">
-              {selected.length} turnovers — pick a crew member for each
-            </p>
-          </div>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
+    <Dialog open onClose={onClose} title="Assign Individually" maxWidthClassName="max-w-lg">
+      <p className="text-xs text-muted-themed -mt-3 mb-4">
+        {selected.length} turnovers — pick a crew member for each
+      </p>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+          {error}
+        </div>
+      )}
+
+      <div className="overflow-y-auto max-h-[50vh] space-y-2 -mx-1 px-1">
+        {selected.map(t => {
+          const property = propertyMap[t.property_id]
+          const date = new Date(t.checkout_datetime).toLocaleDateString('en-US', {
+            weekday: 'short', month: 'short', day: 'numeric',
+          })
+          return (
+            <div
+              key={t.id}
+              className="flex items-center justify-between gap-3 py-2 px-3 rounded-xl"
+              style={{ background: 'var(--bg-raised)' }}
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                  {property?.name ?? 'Unknown property'}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{date}</p>
+              </div>
+              <select
+                className="input text-sm py-1.5 flex-shrink-0"
+                style={{ maxWidth: '160px' }}
+                value={picks[t.id] ?? ''}
+                onChange={e => setPicks(prev => ({ ...prev, [t.id]: e.target.value }))}
+              >
+                <option value="">Unassigned</option>
+                {crewMembers.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-themed">
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          {pickedCount} of {selected.length} assigned
+        </p>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
+          <button
+            onClick={handleApply}
+            disabled={submitting || pickedCount === 0}
+            className="btn-primary text-sm"
+          >
+            {submitting ? 'Applying…' : 'Apply Assignments'}
           </button>
         </div>
-
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4 flex-shrink-0">
-            {error}
-          </div>
-        )}
-
-        <div className="overflow-y-auto flex-1 space-y-2 -mx-1 px-1">
-          {selected.map(t => {
-            const property = propertyMap[t.property_id]
-            const date = new Date(t.checkout_datetime).toLocaleDateString('en-US', {
-              weekday: 'short', month: 'short', day: 'numeric',
-            })
-            return (
-              <div
-                key={t.id}
-                className="flex items-center justify-between gap-3 py-2 px-3 rounded-xl"
-                style={{ background: 'var(--bg-raised)' }}
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                    {property?.name ?? 'Unknown property'}
-                  </p>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{date}</p>
-                </div>
-                <select
-                  className="input text-sm py-1.5 flex-shrink-0"
-                  style={{ maxWidth: '160px' }}
-                  value={picks[t.id] ?? ''}
-                  onChange={e => setPicks(prev => ({ ...prev, [t.id]: e.target.value }))}
-                >
-                  <option value="">Unassigned</option>
-                  {crewMembers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            )
-          })}
-        </div>
-
-        <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-themed flex-shrink-0">
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            {pickedCount} of {selected.length} assigned
-          </p>
-          <div className="flex gap-2">
-            <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
-            <button
-              onClick={handleApply}
-              disabled={submitting || pickedCount === 0}
-              className="btn-primary text-sm"
-            >
-              {submitting ? 'Applying…' : 'Apply Assignments'}
-            </button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Dialog>
   )
 }
 

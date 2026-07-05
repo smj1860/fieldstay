@@ -7,6 +7,7 @@ import {
   type AssetActionState, type CsvAssetRow,
 } from '../actions'
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
+import { Dialog } from '@/components/ui/Dialog'
 import type { PropertyAsset, AssetTypeStandard, AssetType } from '@/types/database'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -183,19 +184,7 @@ function AssetForm({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div
-        className="rounded-2xl shadow-card-lg w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto"
-        style={{ background: 'var(--bg-card)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">
-            {isEdit ? 'Edit Asset' : 'Add Asset'}
-          </h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
-
+    <Dialog open onClose={onClose} title={isEdit ? 'Edit Asset' : 'Add Asset'} maxWidthClassName="max-w-2xl">
         {/* Scan Data Plate — mobile only */}
         <div className="sm:hidden mb-4">
           <input
@@ -397,8 +386,7 @@ function AssetForm({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -491,28 +479,17 @@ function CsvImportModal({
 
   if (done) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-        <div className="card w-full max-w-sm text-center p-8" style={{ background: 'var(--bg-card)' }}>
-          <p className="text-lg font-semibold text-primary-themed mb-2">Import Complete</p>
+      <Dialog open onClose={onClose} title="Import Complete" maxWidthClassName="max-w-sm">
+        <div className="text-center py-2">
           <p className="text-sm text-muted-themed mb-4">{rows.filter((r) => r._valid).length} assets imported.</p>
           <button onClick={onClose} className="btn-primary">Done</button>
         </div>
-      </div>
+      </Dialog>
     )
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div
-        className="rounded-2xl shadow-card-lg w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto"
-        style={{ background: 'var(--bg-card)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Import Assets from CSV</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
-
+    <Dialog open onClose={onClose} title="Import Assets from CSV" maxWidthClassName="max-w-3xl">
         {rows.length === 0 ? (
           <>
             <p className="text-sm text-muted-themed mb-4">
@@ -596,8 +573,7 @@ function CsvImportModal({
             </div>
           </>
         )}
-      </div>
-    </div>
+    </Dialog>
   )
 }
 

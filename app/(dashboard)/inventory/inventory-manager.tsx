@@ -15,6 +15,7 @@ import { TemplateManager } from './template-manager'
 import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
 import { NudgeBanner } from '@/components/nudge-banner'
+import { Dialog } from '@/components/ui/Dialog'
 import type { CartBuildResult } from '@/lib/kroger/types'
 
 // ── Local types ───────────────────────────────────────────────────────────────

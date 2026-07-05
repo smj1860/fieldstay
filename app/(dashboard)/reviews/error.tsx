@@ -1,0 +1,25 @@
+'use client'
+
+import { useEffect } from 'react'
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string }
+  reset: () => void
+}) {
+  useEffect(() => {
+    console.error('[dashboard-segment-error]', error.digest, error.message)
+  }, [error])
+
+  return (
+    <div className="card text-center py-12">
+      <p className="text-primary-themed font-semibold mb-1">Something went wrong loading this page.</p>
+      <p className="text-muted-themed text-sm mb-4">
+        This has been logged. Try again, or contact support if it keeps happening.
+      </p>
+      <button onClick={reset} className="btn-secondary">Try again</button>
+    </div>
+  )
+}

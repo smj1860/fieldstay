@@ -21,6 +21,7 @@ import {
 } from '@/types/database'
 import { Pencil, Copy, Trash2, Plus, BookOpen, X, Loader2, Check } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { Dialog } from '@/components/ui/Dialog'
 
 // ── Due date badge ────────────────────────────────────────────────────────────
 
@@ -132,83 +133,73 @@ function EditModal({
   const monthOptions = MONTH_NAMES.slice(1).map((m, i) => ({ value: i + 1, label: m }))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="rounded-2xl shadow-card-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"
-           style={{ background: 'var(--bg-card)' }}
-           onClick={(e) => e.stopPropagation()}>
+    <Dialog open onClose={onClose} title="Edit Schedule Item" maxWidthClassName="max-w-md">
+      {error && (
+        <div className="text-sm rounded-lg px-3 py-2 mb-4"
+             style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}>
+          {error}
+        </div>
+      )}
 
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-primary-themed">Edit Schedule Item</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="edit-name" className="label">Name</label>
+          <input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} className="input" />
         </div>
 
-        {error && (
-          <div className="text-sm rounded-lg px-3 py-2 mb-4"
-               style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}>
-            {error}
-          </div>
-        )}
-
-        <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="edit-name" className="label">Name</label>
-            <input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} className="input" />
+            <label htmlFor="edit-recurrence" className="label">Recurrence</label>
+            <select id="edit-recurrence" value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
+              {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
           </div>
+          <div>
+            <label htmlFor="edit-next-due-date" className="label">Next Due Date</label>
+            <input id="edit-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
+          </div>
+        </div>
 
+        <div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)}
+                   className="rounded" style={{ accentColor: 'var(--accent-gold)' }} />
+            <span className="text-sm text-primary-themed">Seasonal item (restrict to specific months)</span>
+          </label>
+        </div>
+
+        {seasonal && (
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="edit-recurrence" className="label">Recurrence</label>
-              <select id="edit-recurrence" value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
-                {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
+              <label htmlFor="edit-active-from" className="label">Active From</label>
+              <select id="edit-active-from" value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
+                {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
             </div>
             <div>
-              <label htmlFor="edit-next-due-date" className="label">Next Due Date</label>
-              <input id="edit-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
+              <label htmlFor="edit-active-to" className="label">Active To</label>
+              <select id="edit-active-to" value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
+                {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
             </div>
           </div>
+        )}
 
-          <div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)}
-                     className="rounded" style={{ accentColor: 'var(--accent-gold)' }} />
-              <span className="text-sm text-primary-themed">Seasonal item (restrict to specific months)</span>
-            </label>
-          </div>
-
-          {seasonal && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="edit-active-from" className="label">Active From</label>
-                <select id="edit-active-from" value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
-                  {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="edit-active-to" className="label">Active To</label>
-                <select id="edit-active-to" value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
-                  {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </select>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label htmlFor="edit-notes" className="label">Notes / Instructions</label>
-            <textarea id="edit-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
-          </div>
-        </div>
-
-        <div className="flex gap-2 mt-5">
-          <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
-            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
-          </button>
-          <button onClick={onClose} className="btn-ghost">Cancel</button>
+        <div>
+          <label htmlFor="edit-notes" className="label">Notes / Instructions</label>
+          <textarea id="edit-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
         </div>
       </div>
-    </div>
+
+      <div className="flex gap-2 mt-5">
+        <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
+          {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
+        </button>
+        <button onClick={onClose} className="btn-ghost">Cancel</button>
+      </div>
+    </Dialog>
   )
 }
 
@@ -237,40 +228,30 @@ function DuplicateModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="rounded-2xl shadow-card-lg w-full max-w-sm p-6"
-           style={{ background: 'var(--bg-card)' }}
-           onClick={(e) => e.stopPropagation()}>
+    <Dialog open onClose={onClose} title="Duplicate Item" maxWidthClassName="max-w-sm">
+      <p className="text-sm text-muted-themed mb-4">
+        Duplicating: <strong className="text-primary-themed">{item.name}</strong>
+      </p>
 
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-primary-themed">Duplicate Item</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+      {error && (
+        <div className="text-sm rounded-lg px-3 py-2 mb-4"
+             style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
+          {error}
         </div>
+      )}
 
-        <p className="text-sm text-muted-themed mb-4">
-          Duplicating: <strong className="text-primary-themed">{item.name}</strong>
-        </p>
-
-        {error && (
-          <div className="text-sm rounded-lg px-3 py-2 mb-4"
-               style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
-            {error}
-          </div>
-        )}
-
-        <div className="mb-4">
-          <label htmlFor="duplicate-next-due-date" className="label">Next Due Date for Duplicate</label>
-          <input id="duplicate-next-due-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
-        </div>
-
-        <div className="flex gap-2">
-          <button onClick={handleDuplicate} disabled={saving} className="btn-primary flex items-center gap-2">
-            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Duplicating…</> : 'Duplicate'}
-          </button>
-          <button onClick={onClose} className="btn-ghost">Cancel</button>
-        </div>
+      <div className="mb-4">
+        <label htmlFor="duplicate-next-due-date" className="label">Next Due Date for Duplicate</label>
+        <input id="duplicate-next-due-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
       </div>
-    </div>
+
+      <div className="flex gap-2">
+        <button onClick={handleDuplicate} disabled={saving} className="btn-primary flex items-center gap-2">
+          {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Duplicating…</> : 'Duplicate'}
+        </button>
+        <button onClick={onClose} className="btn-ghost">Cancel</button>
+      </div>
+    </Dialog>
   )
 }
 
@@ -317,90 +298,80 @@ function CatalogModal({
   const categories = Object.keys(byCategory) as MaintenanceCatalogCategory[]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="rounded-2xl shadow-card-lg w-full max-w-md p-6 max-h-[85vh] flex flex-col"
-           style={{ background: 'var(--bg-card)' }}
-           onClick={(e) => e.stopPropagation()}>
-
-        <div className="flex items-center justify-between mb-4 shrink-0">
-          <h3 className="font-semibold text-primary-themed">Add from Catalog</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+    <Dialog open onClose={onClose} title="Add from Catalog" maxWidthClassName="max-w-md">
+      {!selectedItem ? (
+        <div className="max-h-[60vh] overflow-y-auto space-y-4">
+          {categories.map((cat) => (
+            <div key={cat}>
+              <p className="text-xs font-bold uppercase tracking-wider text-muted-themed mb-1.5 px-1">
+                {CATALOG_CATEGORY_LABELS[cat] ?? cat}
+              </p>
+              <div className="space-y-1">
+                {byCategory[cat].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => selectItem(item)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-themed text-left hover:bg-raised-themed transition-colors"
+                  >
+                    <span className="text-sm text-primary-themed">{item.name}</span>
+                    {item.suggested_recurrence && (
+                      <span className="text-xs text-muted-themed ml-2 shrink-0">
+                        {RECURRENCE_LABELS[item.suggested_recurrence as ScheduleFrequency]}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
+      ) : (
+        <div className="space-y-4">
+          <button
+            onClick={() => setSelectedItem(null)}
+            className="text-sm text-muted-themed hover:text-secondary-themed"
+          >
+            ← Back to catalog
+          </button>
 
-        {!selectedItem ? (
-          <div className="flex-1 overflow-y-auto space-y-4">
-            {categories.map((cat) => (
-              <div key={cat}>
-                <p className="text-xs font-bold uppercase tracking-wider text-muted-themed mb-1.5 px-1">
-                  {CATALOG_CATEGORY_LABELS[cat] ?? cat}
-                </p>
-                <div className="space-y-1">
-                  {byCategory[cat].map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => selectItem(item)}
-                      className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-themed text-left hover:bg-raised-themed transition-colors"
-                    >
-                      <span className="text-sm text-primary-themed">{item.name}</span>
-                      {item.suggested_recurrence && (
-                        <span className="text-xs text-muted-themed ml-2 shrink-0">
-                          {RECURRENCE_LABELS[item.suggested_recurrence as ScheduleFrequency]}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="flex-1 space-y-4">
-            <button
-              onClick={() => setSelectedItem(null)}
-              className="text-sm text-muted-themed hover:text-secondary-themed"
-            >
-              ← Back to catalog
-            </button>
-
-            <div className="rounded-xl border border-themed p-3" style={{ background: 'var(--bg-raised)' }}>
-              <p className="text-sm font-semibold text-primary-themed">{selectedItem.name}</p>
-              {selectedItem.description && (
-                <p className="text-xs text-muted-themed mt-1">{selectedItem.description}</p>
-              )}
-            </div>
-
-            {error && (
-              <div className="text-sm rounded-lg px-3 py-2"
-                   style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
-                {error}
-              </div>
+          <div className="rounded-xl border border-themed p-3" style={{ background: 'var(--bg-raised)' }}>
+            <p className="text-sm font-semibold text-primary-themed">{selectedItem.name}</p>
+            {selectedItem.description && (
+              <p className="text-xs text-muted-themed mt-1">{selectedItem.description}</p>
             )}
+          </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="catalog-recurrence" className="label">Recurrence</label>
-                <select id="catalog-recurrence" value={recurrence} onChange={(e) => setRecurrence(e.target.value as ScheduleFrequency)} className="input">
-                  {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
-                    <option key={v} value={v}>{l}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="catalog-next-due-date" className="label">Next Due Date</label>
-                <input id="catalog-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
-              </div>
+          {error && (
+            <div className="text-sm rounded-lg px-3 py-2"
+                 style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
+              {error}
             </div>
+          )}
 
-            <div className="flex gap-2 pt-2">
-              <button onClick={handleAdd} disabled={saving} className="btn-primary flex items-center gap-2">
-                {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add to Property'}
-              </button>
-              <button onClick={onClose} className="btn-ghost">Cancel</button>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="catalog-recurrence" className="label">Recurrence</label>
+              <select id="catalog-recurrence" value={recurrence} onChange={(e) => setRecurrence(e.target.value as ScheduleFrequency)} className="input">
+                {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="catalog-next-due-date" className="label">Next Due Date</label>
+              <input id="catalog-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
             </div>
           </div>
-        )}
-      </div>
-    </div>
+
+          <div className="flex gap-2 pt-2">
+            <button onClick={handleAdd} disabled={saving} className="btn-primary flex items-center gap-2">
+              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add to Property'}
+            </button>
+            <button onClick={onClose} className="btn-ghost">Cancel</button>
+          </div>
+        </div>
+      )}
+    </Dialog>
   )
 }
 
@@ -447,82 +418,72 @@ function CustomItemModal({
   const monthOptions = MONTH_NAMES.slice(1).map((m, i) => ({ value: i + 1, label: m }))
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="rounded-2xl shadow-card-lg w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"
-           style={{ background: 'var(--bg-card)' }}
-           onClick={(e) => e.stopPropagation()}>
+    <Dialog open onClose={onClose} title="Add Custom Item" maxWidthClassName="max-w-md">
+      {error && (
+        <div className="text-sm rounded-lg px-3 py-2 mb-4"
+             style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
+          {error}
+        </div>
+      )}
 
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-primary-themed">Add Custom Item</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
+      <div className="space-y-4">
+        <div>
+          <label htmlFor="custom-name" className="label">Name <span className="text-red-500">*</span></label>
+          <input id="custom-name" value={name} onChange={(e) => setName(e.target.value)} className="input"
+                 placeholder="e.g. Boat dock winterization" />
         </div>
 
-        {error && (
-          <div className="text-sm rounded-lg px-3 py-2 mb-4"
-               style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
-            {error}
-          </div>
-        )}
-
-        <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label htmlFor="custom-name" className="label">Name <span className="text-red-500">*</span></label>
-            <input id="custom-name" value={name} onChange={(e) => setName(e.target.value)} className="input"
-                   placeholder="e.g. Boat dock winterization" />
+            <label htmlFor="custom-recurrence" className="label">Recurrence</label>
+            <select id="custom-recurrence" value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
+              {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
           </div>
+          <div>
+            <label htmlFor="custom-next-due-date" className="label">Next Due Date</label>
+            <input id="custom-next-due-date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
+          </div>
+        </div>
 
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)}
+                 className="rounded" style={{ accentColor: 'var(--accent-gold)' }} />
+          <span className="text-sm text-primary-themed">Seasonal (restrict to specific months)</span>
+        </label>
+
+        {seasonal && (
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="custom-recurrence" className="label">Recurrence</label>
-              <select id="custom-recurrence" value={frequency} onChange={(e) => setFrequency(e.target.value as ScheduleFrequency)} className="input">
-                {(Object.entries(RECURRENCE_LABELS) as [ScheduleFrequency, string][]).map(([v, l]) => (
-                  <option key={v} value={v}>{l}</option>
-                ))}
+              <label htmlFor="custom-active-from" className="label">Active From</label>
+              <select id="custom-active-from" value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
+                {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
             </div>
             <div>
-              <label htmlFor="custom-next-due-date" className="label">Next Due Date</label>
-              <input id="custom-next-due-date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
+              <label htmlFor="custom-active-to" className="label">Active To</label>
+              <select id="custom-active-to" value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
+                {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
             </div>
           </div>
+        )}
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)}
-                   className="rounded" style={{ accentColor: 'var(--accent-gold)' }} />
-            <span className="text-sm text-primary-themed">Seasonal (restrict to specific months)</span>
-          </label>
-
-          {seasonal && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="custom-active-from" className="label">Active From</label>
-                <select id="custom-active-from" value={activeFrom} onChange={(e) => setActiveFrom(Number(e.target.value))} className="input">
-                  {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="custom-active-to" className="label">Active To</label>
-                <select id="custom-active-to" value={activeTo} onChange={(e) => setActiveTo(Number(e.target.value))} className="input">
-                  {monthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                </select>
-              </div>
-            </div>
-          )}
-
-          <div>
-            <label htmlFor="custom-notes" className="label">Notes</label>
-            <textarea id="custom-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
-          </div>
-        </div>
-
-        <div className="flex gap-2 mt-5">
-          <button onClick={handleAdd} disabled={saving} className="btn-primary flex items-center gap-2">
-            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Item'}
-          </button>
-          <button onClick={onClose} className="btn-ghost">Cancel</button>
+        <div>
+          <label htmlFor="custom-notes" className="label">Notes</label>
+          <textarea id="custom-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
         </div>
       </div>
-    </div>
+
+      <div className="flex gap-2 mt-5">
+        <button onClick={handleAdd} disabled={saving} className="btn-primary flex items-center gap-2">
+          {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Item'}
+        </button>
+        <button onClick={onClose} className="btn-ghost">Cancel</button>
+      </div>
+    </Dialog>
   )
 }
 

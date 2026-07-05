@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { Dialog } from '@/components/ui/Dialog'
 
 export default function AccountSettingsPage() {
   const router = useRouter()
@@ -48,48 +49,48 @@ export default function AccountSettingsPage() {
         </button>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-white rounded-2xl shadow-lg w-full max-w-md p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Account</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              This will permanently delete your account, cancel any active subscriptions, revoke all
-              integration tokens, and erase all your data. Type <strong>DELETE</strong> to confirm.
-            </p>
+      <Dialog
+        open={showModal}
+        onClose={() => { setShowModal(false); setConfirm(''); setError(null) }}
+        title="Delete Account"
+        maxWidthClassName="max-w-md"
+      >
+        <p className="text-sm text-gray-600 mb-4">
+          This will permanently delete your account, cancel any active subscriptions, revoke all
+          integration tokens, and erase all your data. Type <strong>DELETE</strong> to confirm.
+        </p>
 
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
-                {error}
-              </div>
-            )}
-
-            <input
-              type="text"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder="Type DELETE to confirm"
-              className="input mb-4 w-full"
-              autoComplete="off"
-            />
-
-            <div className="flex gap-3">
-              <button
-                onClick={handleDelete}
-                disabled={confirm !== 'DELETE' || pending}
-                className="flex-1 bg-red-600 text-white text-sm font-medium rounded-lg px-4 py-2 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                {pending ? 'Deleting…' : 'Permanently Delete Account'}
-              </button>
-              <button
-                onClick={() => { setShowModal(false); setConfirm(''); setError(null) }}
-                className="flex-1 border border-gray-200 text-gray-700 text-sm font-medium rounded-lg px-4 py-2 hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-            </div>
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+            {error}
           </div>
+        )}
+
+        <input
+          type="text"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="Type DELETE to confirm"
+          className="input mb-4 w-full"
+          autoComplete="off"
+        />
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleDelete}
+            disabled={confirm !== 'DELETE' || pending}
+            className="flex-1 bg-red-600 text-white text-sm font-medium rounded-lg px-4 py-2 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {pending ? 'Deleting…' : 'Permanently Delete Account'}
+          </button>
+          <button
+            onClick={() => { setShowModal(false); setConfirm(''); setError(null) }}
+            className="flex-1 border border-gray-200 text-gray-700 text-sm font-medium rounded-lg px-4 py-2 hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
         </div>
-      )}
+      </Dialog>
     </div>
   )
 }

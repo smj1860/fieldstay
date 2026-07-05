@@ -5,11 +5,12 @@ import { useParams, useRouter }            from 'next/navigation'
 import { useState, useRef }                from 'react'
 import {
   ArrowLeft, Camera, CheckCircle2, Circle,
-  Loader2, ImageIcon, AlertCircle, AlertTriangle, X,
+  Loader2, ImageIcon, AlertCircle, AlertTriangle,
   Minus, Plus, MapPin, CheckSquare, ChevronRight, Package,
   StickyNote,
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
+import { Dialog } from '@/components/ui/Dialog'
 import { createClient }       from '@/lib/supabase/client'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -794,94 +795,81 @@ function IssueReportModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 bg-black/50">
-      <div className="bg-white rounded-2xl w-full max-w-sm p-5 shadow-xl">
-        {success ? (
-          <div className="text-center py-4">
-            <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
-            <h3 className="font-semibold text-accent-900 mb-1">Issue Reported</h3>
-            <p className="text-sm text-accent-500 mb-4">
-              Saved. The property manager will be notified and a work order created as
-              soon as your phone has a connection.
-            </p>
-            <button onClick={onClose} className="btn-primary w-full">Done</button>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-accent-900 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                Report an Issue
-              </h3>
-              <button onClick={onClose} className="text-accent-400 hover:text-accent-600">
-                <X className="w-4 h-4" />
-              </button>
+    <Dialog open onClose={onClose} title={success ? 'Issue Reported' : 'Report an Issue'} maxWidthClassName="max-w-sm" mobileSheet>
+      {success ? (
+        <div className="text-center py-4">
+          <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
+          <p className="text-sm text-accent-500 mb-4">
+            Saved. The property manager will be notified and a work order created as
+            soon as your phone has a connection.
+          </p>
+          <button onClick={onClose} className="btn-primary w-full">Done</button>
+        </div>
+      ) : (
+        <>
+          {error && (
+            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+              {error}
             </div>
+          )}
 
-            {error && (
-              <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
-                {error}
+          <form onSubmit={handleSubmit} className="space-y-3">
+            <div>
+              <label className="label text-accent-900">What's the issue? *</label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="input"
+                placeholder="e.g. Leaking faucet in master bath"
+                required
+              />
+            </div>
+            <div>
+              <label className="label text-accent-900">Details (optional)</label>
+              <textarea
+                value={details}
+                onChange={(e) => setDetails(e.target.value)}
+                rows={2}
+                className="input resize-none"
+                placeholder="Location, severity, anything else the PM should know…"
+              />
+            </div>
+            <div>
+              <label className="label text-accent-900">Urgency</label>
+              <div className="flex gap-2">
+                {(['medium', 'high', 'urgent'] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPriority(p)}
+                    className={cn(
+                      'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors capitalize',
+                      priority === p
+                        ? p === 'urgent' ? 'bg-red-500 text-white border-red-500'
+                          : p === 'high' ? 'bg-amber-500 text-white border-amber-500'
+                          : 'bg-blue-500 text-white border-blue-500'
+                        : 'bg-white text-accent-600 border-accent-300 hover:border-accent-400'
+                    )}
+                  >
+                    {p}
+                  </button>
+                ))}
               </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-3">
-              <div>
-                <label className="label text-accent-900">What's the issue? *</label>
-                <input
-                  type="text"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="input"
-                  placeholder="e.g. Leaking faucet in master bath"
-                  required
-                />
-              </div>
-              <div>
-                <label className="label text-accent-900">Details (optional)</label>
-                <textarea
-                  value={details}
-                  onChange={(e) => setDetails(e.target.value)}
-                  rows={2}
-                  className="input resize-none"
-                  placeholder="Location, severity, anything else the PM should know…"
-                />
-              </div>
-              <div>
-                <label className="label text-accent-900">Urgency</label>
-                <div className="flex gap-2">
-                  {(['medium', 'high', 'urgent'] as const).map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setPriority(p)}
-                      className={cn(
-                        'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors capitalize',
-                        priority === p
-                          ? p === 'urgent' ? 'bg-red-500 text-white border-red-500'
-                            : p === 'high' ? 'bg-amber-500 text-white border-amber-500'
-                            : 'bg-blue-500 text-white border-blue-500'
-                          : 'bg-white text-accent-600 border-accent-300 hover:border-accent-400'
-                      )}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {submitting
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</>
-                  : <><AlertTriangle className="w-4 h-4" /> Submit Report</>
-                }
-              </button>
-            </form>
-          </>
-        )}
-      </div>
-    </div>
+            </div>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {submitting
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</>
+                : <><AlertTriangle className="w-4 h-4" /> Submit Report</>
+              }
+            </button>
+          </form>
+        </>
+      )}
+    </Dialog>
   )
 }

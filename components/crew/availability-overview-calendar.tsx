@@ -1,7 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { Dialog } from '@/components/ui/Dialog'
 import type { CrewMember, CrewAvailabilityEntry } from '@/types/database'
 
 // Deterministic color palette — index-stable across renders
@@ -301,72 +302,52 @@ function DayAvailabilityModal({
   })
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-      role="button"
-      tabIndex={0}
-      aria-label="Close dialog"
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
-    >
-      <div
-        className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto"
-        style={{ background: 'var(--bg-card)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <h3 className="font-semibold text-base text-primary-themed">{dateLabel}</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5 -mt-1 -mr-1">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        {records.length === 0 ? (
-          <p className="text-sm text-muted-themed">
-            No availability changes recorded for this day — all crew are assumed available.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {records.map(({ member, entry }) => (
-              <div
-                key={member.id}
-                className="flex items-center gap-3 p-2 rounded-lg"
-                style={{ background: 'var(--bg-raised)' }}
+    <Dialog open onClose={onClose} title={dateLabel} maxWidthClassName="max-w-sm">
+      {records.length === 0 ? (
+        <p className="text-sm text-muted-themed">
+          No availability changes recorded for this day — all crew are assumed available.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {records.map(({ member, entry }) => (
+            <div
+              key={member.id}
+              className="flex items-center gap-3 p-2 rounded-lg"
+              style={{ background: 'var(--bg-raised)' }}
+            >
+              <span
+                className="w-7 h-7 rounded-full flex-shrink-0 flex items-center
+                           justify-center text-[11px] font-bold"
+                style={{ background: crewColor.get(member.id), color: '#fff' }}
+              >
+                {member.name[0]?.toUpperCase()}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-primary-themed truncate">
+                  {member.name}
+                </p>
+                {entry.notes && (
+                  <p className="text-xs text-muted-themed truncate">{entry.notes}</p>
+                )}
+              </div>
+              <span
+                className="text-xs font-semibold flex items-center gap-1.5 flex-shrink-0"
+                style={{
+                  color: entry.is_available ? 'var(--accent-green)' : 'var(--accent-red)',
+                }}
               >
                 <span
-                  className="w-7 h-7 rounded-full flex-shrink-0 flex items-center
-                             justify-center text-[11px] font-bold"
-                  style={{ background: crewColor.get(member.id), color: '#fff' }}
-                >
-                  {member.name[0]?.toUpperCase()}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-primary-themed truncate">
-                    {member.name}
-                  </p>
-                  {entry.notes && (
-                    <p className="text-xs text-muted-themed truncate">{entry.notes}</p>
-                  )}
-                </div>
-                <span
-                  className="text-xs font-semibold flex items-center gap-1.5 flex-shrink-0"
+                  className="w-1.5 h-1.5 rounded-full"
                   style={{
-                    color: entry.is_available ? 'var(--accent-green)' : 'var(--accent-red)',
+                    background: entry.is_available ? 'var(--accent-green)' : 'var(--accent-red)',
                   }}
-                >
-                  <span
-                    className="w-1.5 h-1.5 rounded-full"
-                    style={{
-                      background: entry.is_available ? 'var(--accent-green)' : 'var(--accent-red)',
-                    }}
-                  />
-                  {entry.is_available ? 'Available' : 'Unavailable'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+                />
+                {entry.is_available ? 'Available' : 'Unavailable'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Dialog>
   )
 }

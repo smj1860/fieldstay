@@ -3,6 +3,7 @@
 import { useState, useTransition, useActionState, useEffect } from 'react'
 import { Plus, X, Link2, RefreshCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Trash2, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Dialog } from '@/components/ui/Dialog'
 import {
   addPropertyOwner,
   generatePortalToken,
@@ -539,71 +540,62 @@ function AddOwnerModal({
   }, [state?.success])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg p-6">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Add Property Owner</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
+    <Dialog open onClose={onClose} title="Add Property Owner">
+      {state?.error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+          {state.error}
+        </div>
+      )}
+
+      <form action={formAction} className="space-y-4">
+        <div>
+          <label htmlFor="property_id" className="label">
+            Property <span className="text-red-500">*</span>
+          </label>
+          <select id="property_id" name="property_id" required className="input">
+            <option value="">Select property…</option>
+            {properties.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
         </div>
 
-        {state?.error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
-            {state.error}
-          </div>
-        )}
+        <div>
+          <label htmlFor="name" className="label">
+            Owner Name <span className="text-red-500">*</span>
+          </label>
+          <input id="name" name="name" type="text" required className="input" placeholder="Jane Smith" />
+        </div>
 
-        <form action={formAction} className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="property_id" className="label">
-              Property <span className="text-red-500">*</span>
-            </label>
-            <select id="property_id" name="property_id" required className="input">
-              <option value="">Select property…</option>
-              {properties.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+            <label htmlFor="email" className="label">Email</label>
+            <input id="email" name="email" type="email" className="input" placeholder="jane@example.com" />
           </div>
-
           <div>
-            <label htmlFor="name" className="label">
-              Owner Name <span className="text-red-500">*</span>
-            </label>
-            <input id="name" name="name" type="text" required className="input" placeholder="Jane Smith" />
+            <label htmlFor="phone" className="label">Phone</label>
+            <input id="phone" name="phone" type="tel" className="input" placeholder="(555) 123-4567" />
           </div>
+        </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="email" className="label">Email</label>
-              <input id="email" name="email" type="email" className="input" placeholder="jane@example.com" />
-            </div>
-            <div>
-              <label htmlFor="phone" className="label">Phone</label>
-              <input id="phone" name="phone" type="tel" className="input" placeholder="(555) 123-4567" />
-            </div>
-          </div>
+        <div>
+          <label htmlFor="revenue_share_pct" className="label">Revenue Share %</label>
+          <input id="revenue_share_pct" name="revenue_share_pct" type="number" min="0" max="100" step="0.1" className="input" placeholder="e.g. 80" />
+        </div>
 
-          <div>
-            <label htmlFor="revenue_share_pct" className="label">Revenue Share %</label>
-            <input id="revenue_share_pct" name="revenue_share_pct" type="number" min="0" max="100" step="0.1" className="input" placeholder="e.g. 80" />
-          </div>
+        <div>
+          <label htmlFor="notes" className="label">Notes</label>
+          <textarea id="notes" name="notes" rows={2} className="input resize-none" placeholder="Any additional notes…" />
+        </div>
 
-          <div>
-            <label htmlFor="notes" className="label">Notes</label>
-            <textarea id="notes" name="notes" rows={2} className="input resize-none" placeholder="Any additional notes…" />
-          </div>
-
-          <div className="flex gap-3 pt-2">
-            <button type="submit" disabled={pending} className="btn-primary flex-1">
-              {pending ? 'Saving…' : 'Add Owner'}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="flex gap-3 pt-2">
+          <button type="submit" disabled={pending} className="btn-primary flex-1">
+            {pending ? 'Saving…' : 'Add Owner'}
+          </button>
+          <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 

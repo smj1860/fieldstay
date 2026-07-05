@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from 'react'
 import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate, cloneChecklistFromProperty } from './actions'
-import { Plus, Trash2, ChevronUp, ChevronDown, Camera, X, Check } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check } from 'lucide-react'
+import { Dialog } from '@/components/ui/Dialog'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
 interface Section { tempId: string; id?: string; name: string; items: Item[] }
@@ -382,86 +383,71 @@ export function ChecklistBuilder({
         )}
       </div>
 
-      {broadcastModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-card-themed rounded-2xl shadow-xl w-full max-w-sm">
-            <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-themed">
-              <h3 className="font-semibold text-primary-themed">Apply to Other Properties</h3>
-              <button onClick={() => setBroadcastModal(false)} className="p-1.5 rounded-lg text-muted-themed hover:text-primary-themed">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="px-5 py-4 space-y-2 max-h-60 overflow-y-auto">
-              <p className="text-xs text-muted-themed mb-3">
-                This will replace the existing checklist at each selected property.
-              </p>
-              {otherProperties.map(p => (
-                <label key={p.id} className="flex items-center gap-3 cursor-pointer py-1">
-                  <input
-                    type="checkbox"
-                    checked={broadcastTargets.has(p.id)}
-                    onChange={e => {
-                      const next = new Set(broadcastTargets)
-                      if (e.target.checked) next.add(p.id)
-                      else next.delete(p.id)
-                      setBroadcastTargets(next)
-                    }}
-                    className="w-4 h-4 rounded"
-                    style={{ accentColor: 'var(--accent-gold)' }}
-                  />
-                  <span className="text-sm text-primary-themed">{p.name}</span>
-                </label>
-              ))}
-            </div>
-            <div className="px-5 pb-5 pt-3 border-t border-themed flex gap-3">
-              <button
-                onClick={handleBroadcast}
-                disabled={broadcasting || broadcastTargets.size === 0}
-                className="btn-primary flex-1 text-sm"
-              >
-                {broadcasting ? 'Applying…' : `Apply to ${broadcastTargets.size} propert${broadcastTargets.size !== 1 ? 'ies' : 'y'}`}
-              </button>
-              <button onClick={() => setBroadcastModal(false)} className="btn-ghost text-sm">Cancel</button>
-            </div>
-          </div>
+      <Dialog open={broadcastModal} onClose={() => setBroadcastModal(false)} title="Apply to Other Properties" maxWidthClassName="max-w-sm">
+        <div className="space-y-2 max-h-60 overflow-y-auto">
+          <p className="text-xs text-muted-themed mb-3">
+            This will replace the existing checklist at each selected property.
+          </p>
+          {otherProperties.map(p => (
+            <label key={p.id} className="flex items-center gap-3 cursor-pointer py-1">
+              <input
+                type="checkbox"
+                checked={broadcastTargets.has(p.id)}
+                onChange={e => {
+                  const next = new Set(broadcastTargets)
+                  if (e.target.checked) next.add(p.id)
+                  else next.delete(p.id)
+                  setBroadcastTargets(next)
+                }}
+                className="w-4 h-4 rounded"
+                style={{ accentColor: 'var(--accent-gold)' }}
+              />
+              <span className="text-sm text-primary-themed">{p.name}</span>
+            </label>
+          ))}
         </div>
-      )}
+        <div className="pt-3 mt-3 border-t border-themed flex gap-3">
+          <button
+            onClick={handleBroadcast}
+            disabled={broadcasting || broadcastTargets.size === 0}
+            className="btn-primary flex-1 text-sm"
+          >
+            {broadcasting ? 'Applying…' : `Apply to ${broadcastTargets.size} propert${broadcastTargets.size !== 1 ? 'ies' : 'y'}`}
+          </button>
+          <button onClick={() => setBroadcastModal(false)} className="btn-ghost text-sm">Cancel</button>
+        </div>
+      </Dialog>
 
-      {cloneFromModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-sm p-6">
-            <h3 className="font-semibold text-primary-themed mb-1">Import Checklist From</h3>
-            <p className="text-xs text-muted-themed mb-1">
-              This will replace the current checklist entirely with a copy from the selected property.
-            </p>
-            <p className="text-xs font-semibold mb-4" style={{ color: 'var(--accent-amber)' }}>
-              ⚠ Any existing checklist on this property will be overwritten.
-            </p>
-            <select
-              value={cloneFromSource}
-              onChange={e => setCloneFromSource(e.target.value)}
-              className="input w-full mb-4"
-            >
-              <option value="">Select a property…</option>
-              {sourceProperties.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.sectionCount} sections)
-                </option>
-              ))}
-            </select>
-            <div className="flex gap-2">
-              <button
-                onClick={handleCloneFrom}
-                disabled={!cloneFromSource || cloningFrom}
-                className="btn-primary flex-1"
-              >
-                {cloningFrom ? 'Importing…' : 'Import Checklist'}
-              </button>
-              <button onClick={() => setCloneFromModal(false)} className="btn-ghost">Cancel</button>
-            </div>
-          </div>
+      <Dialog open={cloneFromModal} onClose={() => setCloneFromModal(false)} title="Import Checklist From" maxWidthClassName="max-w-sm">
+        <p className="text-xs text-muted-themed mb-1">
+          This will replace the current checklist entirely with a copy from the selected property.
+        </p>
+        <p className="text-xs font-semibold mb-4" style={{ color: 'var(--accent-amber)' }}>
+          ⚠ Any existing checklist on this property will be overwritten.
+        </p>
+        <select
+          value={cloneFromSource}
+          onChange={e => setCloneFromSource(e.target.value)}
+          className="input w-full mb-4"
+        >
+          <option value="">Select a property…</option>
+          {sourceProperties.map(p => (
+            <option key={p.id} value={p.id}>
+              {p.name} ({p.sectionCount} sections)
+            </option>
+          ))}
+        </select>
+        <div className="flex gap-2">
+          <button
+            onClick={handleCloneFrom}
+            disabled={!cloneFromSource || cloningFrom}
+            className="btn-primary flex-1"
+          >
+            {cloningFrom ? 'Importing…' : 'Import Checklist'}
+          </button>
+          <button onClick={() => setCloneFromModal(false)} className="btn-ghost">Cancel</button>
         </div>
-      )}
+      </Dialog>
     </div>
   )
 }

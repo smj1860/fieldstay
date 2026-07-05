@@ -12,7 +12,8 @@ import {
   RECURRENCE_LABELS,
   CATALOG_CATEGORY_LABELS,
 } from '@/types/database'
-import { X, Loader2, Check } from 'lucide-react'
+import { Loader2, Check } from 'lucide-react'
+import { Dialog } from '@/components/ui/Dialog'
 
 interface SelectedItem {
   catalogItem: MaintenanceCatalogItem
@@ -108,39 +109,30 @@ export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) 
   const categories = Object.keys(byCategory) as MaintenanceCatalogCategory[]
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
-
-      <div className="relative w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl flex flex-col max-h-[90vh]"
-           style={{ background: 'var(--bg-card)' }}>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-themed shrink-0">
-          <div className="flex items-center gap-3">
-            {step === 2 && (
-              <button
-                onClick={() => setStep(1)}
-                className="text-sm font-medium"
-                style={{ color: 'var(--accent-gold)' }}
-              >
-                ← Back
-              </button>
-            )}
-            <div>
-              <h2 className="font-bold text-primary-themed">
-                {step === 1 ? 'Build Your Schedule' : 'Set Dates & Frequency'}
-              </h2>
-              <p className="text-xs text-muted-themed mt-0.5">
-                {step === 1
-                  ? `${selected.size} item${selected.size !== 1 ? 's' : ''} selected`
-                  : `${selected.size} item${selected.size !== 1 ? 's' : ''} to configure`
-                }
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
+    <Dialog
+      open
+      onClose={onClose}
+      title={step === 1 ? 'Build Your Schedule' : 'Set Dates & Frequency'}
+      mobileSheet
+    >
+      <div className="flex flex-col max-h-[75vh] -m-6">
+        {/* Sub-header */}
+        <div className="flex items-center gap-3 px-5 pt-1 pb-3 border-b border-themed shrink-0">
+          {step === 2 && (
+            <button
+              onClick={() => setStep(1)}
+              className="text-sm font-medium"
+              style={{ color: 'var(--accent-gold)' }}
+            >
+              ← Back
+            </button>
+          )}
+          <p className="text-xs text-muted-themed">
+            {step === 1
+              ? `${selected.size} item${selected.size !== 1 ? 's' : ''} selected`
+              : `${selected.size} item${selected.size !== 1 ? 's' : ''} to configure`
+            }
+          </p>
         </div>
 
         {/* Step 1: select from catalog */}
@@ -273,6 +265,6 @@ export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) 
           </>
         )}
       </div>
-    </div>
+    </Dialog>
   )
 }

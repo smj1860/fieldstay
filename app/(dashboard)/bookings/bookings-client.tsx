@@ -12,6 +12,7 @@ import {
 import { cn, formatDate } from '@/lib/utils'
 import { createBooking, cancelBooking, triggerSync } from './actions'
 import { BookingsCalendar } from './bookings-calendar'
+import { Dialog } from '@/components/ui/Dialog'
 import type { VacancyGap } from './page'
 import type { BookingSource, BookingStatus } from '@/types/database'
 
@@ -380,18 +381,7 @@ function AddBookingModal({
   if (state?.success) { onSuccess(); onClose(); return null }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-y-auto">
-      <div
-        className="rounded-2xl w-full max-w-lg p-6 my-4"
-        style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-lg)' }}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Log Non-Synced Booking
-          </h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
-
+    <Dialog open onClose={onClose} title="Log Non-Synced Booking">
         {state?.error && (
           <div
             className="text-sm rounded-lg px-3 py-2 mb-4"
@@ -474,8 +464,7 @@ function AddBookingModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 

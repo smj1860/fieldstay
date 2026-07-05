@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { cn, formatDate, formatDateTime } from '@/lib/utils'
 import { createCommunicationLog, deleteCommunicationLog } from './actions'
+import { Dialog } from '@/components/ui/Dialog'
 import type { CommChannel, CommRecipientType } from '@/types/database'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -244,20 +245,7 @@ function AddEntryModal({
   if (state?.success) { onClose(); return null }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 overflow-y-auto">
-      <div
-        className="rounded-2xl w-full max-w-lg p-6 my-4"
-        style={{ background: 'var(--bg-card)', boxShadow: 'var(--shadow-lg)' }}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>
-            Log Communication
-          </h3>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+    <Dialog open onClose={onClose} title="Log Communication">
         {vendors.length === 0 && crew.length === 0 && (
           <div className="mb-4 px-3 py-2 rounded-lg text-sm"
                style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}>
@@ -396,8 +384,7 @@ function AddEntryModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 

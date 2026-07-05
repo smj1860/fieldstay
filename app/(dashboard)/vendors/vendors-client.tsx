@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { X, Loader2, Upload, Briefcase, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
+import { Dialog } from '@/components/ui/Dialog'
 import type { Vendor, VendorSpecialty } from '@/types/database'
 import {
   addVendor,
@@ -207,29 +208,13 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
   if (state?.success) { onClose(); return null }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-         onClick={onClose}
-         role="button"
-         tabIndex={0}
-         aria-label="Close modal"
-         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}>
-      <div
-        className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm"
-        style={{ background: 'var(--bg-card)' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="font-semibold text-base text-primary-themed">{vendor.name}</h3>
-            {!editing && <span className="badge badge-blue mt-1">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>}
+    <Dialog open onClose={onClose} title={vendor.name} maxWidthClassName="max-w-sm">
+        {!editing && (
+          <div className="flex items-center justify-between mb-4">
+            <span className="badge badge-blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>
+            <button onClick={() => setEditing(true)} className="btn-ghost p-1.5 text-xs">Edit</button>
           </div>
-          <div className="flex items-center gap-1">
-            {!editing && (
-              <button onClick={() => setEditing(true)} className="btn-ghost p-1.5 text-xs">Edit</button>
-            )}
-            <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-          </div>
-        </div>
+        )}
 
         {state?.error && (
           <div className="text-sm rounded-lg px-3 py-2 mb-3"
@@ -359,8 +344,7 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
             )}
           </div>
         )}
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
