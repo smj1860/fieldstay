@@ -59,24 +59,24 @@ export default function CrewInventoryPage() {
     <div>
       <button
         onClick={() => router.back()}
-        className="flex items-center gap-1.5 text-sm text-accent-400 hover:text-accent-600 mb-4"
+        className="flex items-center gap-1.5 text-sm text-muted-themed hover:text-secondary-themed mb-4"
       >
         <ArrowLeft className="w-3.5 h-3.5" />
         Back to Turnover
       </button>
 
-      <h2 className="text-lg font-bold text-accent-900 mb-4">Inventory Count</h2>
+      <h2 className="text-lg font-bold text-primary-themed mb-4">Inventory Count</h2>
 
       {!items?.length && (
-        <div className="bg-white rounded-xl border border-accent-200 p-6 text-center">
-          <Package className="w-8 h-8 text-accent-300 mx-auto mb-2" />
-          <p className="text-sm text-accent-500">No inventory items for this property.</p>
+        <div className="bg-card-themed rounded-xl border border-themed p-6 text-center">
+          <Package className="w-8 h-8 text-muted-themed mx-auto mb-2" />
+          <p className="text-sm text-muted-themed">No inventory items for this property.</p>
         </div>
       )}
 
       {Object.entries(grouped).map(([category, catItems]) => (
         <div key={category} className="mb-6">
-          <h3 className="text-xs font-semibold text-accent-500 uppercase tracking-wide mb-2">
+          <h3 className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2">
             {INVENTORY_CATEGORY_LABELS[category as InventoryCategory] ?? category}
           </h3>
           <div className="grid grid-cols-1 gap-3">
@@ -116,7 +116,7 @@ export default function CrewInventoryPage() {
               placeholder="Any notes about this count…"
             />
           </div>
-          <p className="text-xs text-center text-accent-400">
+          <p className="text-xs text-center text-muted-themed">
             Each count saves automatically as you enter it.
             Tap below when you&apos;re done.
           </p>

@@ -5,7 +5,7 @@ import { useLiveQuery }   from 'dexie-react-hooks'
 import { useDexieDb }     from '@/lib/dexie/context'
 
 import Link                              from 'next/link'
-import { AlertCircle, MapPin, Clock, MessageCircle } from 'lucide-react'
+import { AlertCircle, MapPin, Clock, MessageCircle, PartyPopper } from 'lucide-react'
 import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
 import { distanceMiles }                 from '@/lib/geocoding'
@@ -62,19 +62,19 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
       href={`/crew/turnovers/${t.id}`}
       className={cn(
         'block rounded-xl border p-3 mb-2 transition-shadow active:scale-[0.98]',
-        'bg-white',
-        isUrgent ? 'border-amber-300' : 'border-accent-200'
+        'bg-card-themed',
+        isUrgent ? 'border-amber-300' : 'border-themed'
       )}
     >
       <div className="flex items-start justify-between gap-1 mb-1.5">
-        <p className="font-bold text-accent-900 text-sm leading-tight">
+        <p className="font-bold text-primary-themed text-sm leading-tight">
           {property?.name ?? 'Property'}
         </p>
         {isUrgent && <AlertCircle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />}
       </div>
 
       {fullAddress && (
-        <div className="text-xs text-accent-500 flex items-center gap-1 mb-1.5">
+        <div className="text-xs text-muted-themed flex items-center gap-1 mb-1.5">
           <MapPin className="w-3 h-3 flex-shrink-0" />
           <span className="truncate">{fullAddress}</span>
         </div>
@@ -85,16 +85,16 @@ function TurnoverCard({ t, property }: { t: TurnoverRow; property?: PropertyRow 
           'text-xs font-semibold px-2 py-0.5 rounded-full',
           t.status === 'assigned'    ? 'bg-blue-50 text-blue-700' :
           t.status === 'in_progress' ? 'bg-purple-50 text-purple-700' :
-          'bg-accent-100 text-accent-600'
+          'bg-raised-themed text-secondary-themed'
         )}>
           {t.status === 'assigned' ? 'Assigned' :
            t.status === 'in_progress' ? 'In Progress' : t.status}
         </span>
-        <span className="text-xs text-accent-600">
+        <span className="text-xs text-secondary-themed">
           {checkout.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
         </span>
         {t.window_minutes && (
-          <span className="text-xs text-accent-500 flex items-center gap-0.5">
+          <span className="text-xs text-muted-themed flex items-center gap-0.5">
             <Clock className="w-3 h-3" />
             {Math.floor(t.window_minutes / 60)}h
             {t.window_minutes % 60 > 0 ? ` ${t.window_minutes % 60}m` : ''}
@@ -118,7 +118,7 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
       )}
     >
       <div className="flex items-start justify-between gap-1 mb-1.5">
-        <p className="font-bold text-accent-900 text-sm leading-tight">
+        <p className="font-bold text-primary-themed text-sm leading-tight">
           {wo.title}
         </p>
         <span className="text-xs font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0">
@@ -126,10 +126,10 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
         </span>
       </div>
       {property?.name && (
-        <p className="text-xs text-accent-700 font-medium mb-1">{property.name}</p>
+        <p className="text-xs text-secondary-themed font-medium mb-1">{property.name}</p>
       )}
       {fullAddress && (
-        <div className="text-xs text-accent-500 flex items-center gap-1 mb-1.5">
+        <div className="text-xs text-muted-themed flex items-center gap-1 mb-1.5">
           <MapPin className="w-3 h-3 flex-shrink-0" />
           <span className="truncate">{fullAddress}</span>
         </div>
@@ -139,13 +139,13 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
           'text-xs font-semibold px-2 py-0.5 rounded-full',
           wo.status === 'assigned'    ? 'bg-blue-50 text-blue-700' :
           wo.status === 'in_progress' ? 'bg-purple-50 text-purple-700' :
-          'bg-accent-100 text-accent-600'
+          'bg-raised-themed text-secondary-themed'
         )}>
           {wo.status === 'assigned' ? 'Assigned' :
            wo.status === 'in_progress' ? 'In Progress' : wo.status}
         </span>
         {wo.scheduled_date && (
-          <span className="text-xs text-accent-500">
+          <span className="text-xs text-muted-themed">
             Scheduled {new Date(wo.scheduled_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
           </span>
         )}
@@ -157,7 +157,7 @@ function WorkOrderCard({ wo, property }: { wo: CrewWorkOrderRow; property?: Prop
 function EmptyColumn({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-center">
-      <p className="text-xs text-accent-400">No {label.toLowerCase()}</p>
+      <p className="text-xs text-muted-themed">No {label.toLowerCase()}</p>
     </div>
   )
 }
@@ -173,12 +173,12 @@ function CrewPageSkeleton() {
         {[0, 1].map((col) => (
           <div key={col} className="flex-1 min-w-0 px-3">
             <div className="flex justify-center mb-3">
-              <div className="h-6 w-32 rounded-full bg-accent-100 animate-pulse" />
+              <div className="h-6 w-32 rounded-full bg-raised-themed animate-pulse" />
             </div>
             {[0, 1].map((i) => (
               <div
                 key={i}
-                className="rounded-xl border border-accent-200 bg-white p-3 mb-2 h-20 animate-pulse"
+                className="rounded-xl border border-themed bg-card-themed p-3 mb-2 h-20 animate-pulse"
               />
             ))}
           </div>
@@ -295,7 +295,7 @@ export default function CrewDashboardPage() {
             </span>
           </div>
           {todayTurnovers.length > 0 && (
-            <p className="text-xs text-center text-accent-500 mb-3">
+            <p className="text-xs text-center text-muted-themed mb-3">
               {travelSummary.available
                 ? `Total Travel Time: ${travelSummary.miles.toFixed(1)} mi, ${Math.floor(travelSummary.minutes / 60)}:${String(travelSummary.minutes % 60).padStart(2, '0')}`
                 : 'Total Travel Time: unavailable'}
@@ -369,7 +369,7 @@ export default function CrewDashboardPage() {
       <div className="px-4 pt-6 pb-2 mt-2">
         <button
           onClick={() => setShowFeedback(true)}
-          className="w-full py-2.5 rounded-xl text-xs font-semibold border border-accent-200 text-accent-600 hover:text-accent-800 hover:border-accent-300 transition-colors flex items-center justify-center gap-1.5"
+          className="w-full py-2.5 rounded-xl text-xs font-semibold border border-themed text-secondary-themed hover:text-primary-themed hover:border-themed transition-colors flex items-center justify-center gap-1.5"
         >
           <MessageCircle className="w-3.5 h-3.5" />
           Send feedback
@@ -441,7 +441,7 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
 
         {submitted ? (
           <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
-            <p style={{ fontSize: 32, marginBottom: 8 }}>🙌</p>
+            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}><PartyPopper size={32} /></div>
             <p style={{ fontSize: 15, fontWeight: 700, color: '#0D1F3C', marginBottom: 4 }}>
               Thank you!
             </p>

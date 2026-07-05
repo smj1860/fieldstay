@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from 'react'
 import { addCrewMember, completeCrewStep } from './actions'
-import { Plus, User, CheckCircle2 } from 'lucide-react'
+import { Plus, User, CheckCircle2, PartyPopper } from 'lucide-react'
 
 interface CrewMember {
   id: string; name: string; email: string | null
@@ -126,8 +126,8 @@ export function CrewSetup({
 
       {/* Finish setup */}
       <div className="border rounded-xl p-5" style={{ borderColor: 'var(--accent-green)', background: 'var(--accent-green-dim)' }}>
-        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--accent-green)' }}>
-          {crew.length > 0 ? '🎉 Almost done!' : 'Finish setup'}
+        <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
+          {crew.length > 0 ? <><PartyPopper className="w-4 h-4" /> Almost done!</> : 'Finish setup'}
         </h3>
         <p className="text-sm mb-4" style={{ color: 'var(--accent-green)' }}>
           {crew.length > 0

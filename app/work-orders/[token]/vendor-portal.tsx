@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign } from 'lucide-react'
+import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap } from 'lucide-react'
 
 interface WorkOrderInfo {
   id:             string
@@ -53,7 +53,7 @@ const PRIORITY_STYLES: Record<string, { bg: string; text: string }> = {
 function PortalShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-accent-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-[0_4px_24px_0_rgba(0,0,0,.10)] w-full max-w-md p-8">
+      <div className="bg-card-themed rounded-2xl shadow-[0_4px_24px_0_rgba(0,0,0,.10)] w-full max-w-md p-8">
         <div className="text-center mb-6">
           <span className="text-brand-800 text-2xl font-bold tracking-tight">FieldStay</span>
           <p className="text-accent-400 text-xs mt-1">Vendor Portal</p>
@@ -93,7 +93,7 @@ function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: P
         )}
       </div>
 
-      <div className="bg-white p-4 space-y-3">
+      <div className="bg-card-themed p-4 space-y-3">
         {/* Property address */}
         {property && (
           <div className="bg-accent-50 rounded-lg px-3 py-2.5 border-l-2 border-yellow-400">
@@ -316,7 +316,9 @@ export function VendorPortal({
   if (success) {
     return shell(
       <div style={{ textAlign: 'center', padding: '8px 0' }}>
-        <div style={{ fontSize: 48, marginBottom: 12 }}>✅</div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <CheckCircle2 style={{ width: 48, height: 48, color: '#16a34a' }} />
+        </div>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
           Invoice Submitted!
         </h2>
@@ -331,7 +333,9 @@ export function VendorPortal({
   if (expired) {
     return shell(
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 36, marginBottom: 12 }}>⏰</div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <Clock style={{ width: 36, height: 36, color: '#64748b' }} />
+        </div>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>Link Expired</h2>
         <p style={{ fontSize: 14, color: '#64748b' }}>Contact the property manager for a new link.</p>
       </div>
@@ -341,7 +345,9 @@ export function VendorPortal({
   if (alreadyDone) {
     return shell(
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 36, marginBottom: 12 }}>✓</div>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <Check style={{ width: 36, height: 36, color: '#16a34a' }} />
+        </div>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
           Already {workOrder.status === 'completed' ? 'Completed' : 'Closed'}
         </h2>
@@ -363,8 +369,8 @@ export function VendorPortal({
           padding:         '16px',
           marginBottom:    16,
         }}>
-          <p style={{ fontSize: 14, fontWeight: 700, color: '#9a3412', margin: '0 0 6px' }}>
-            ⚡ Set up payouts before submitting
+          <p style={{ fontSize: 14, fontWeight: 700, color: '#9a3412', margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Zap style={{ width: 16, height: 16, flexShrink: 0 }} /> Set up payouts before submitting
           </p>
           <p style={{ fontSize: 13, color: '#7c2d12', lineHeight: 1.55, margin: 0 }}>
             Invoices are paid via Stripe Connect directly to your bank.
@@ -530,8 +536,8 @@ export function VendorPortal({
         </div>
 
         {workOrder.nte_amount != null && subtotal > workOrder.nte_amount && (
-          <p style={{ fontSize: 12, color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '8px 10px', marginBottom: 12 }}>
-            ⚠️ Total exceeds the Not-to-Exceed amount of ${workOrder.nte_amount.toFixed(2)}. Contact the PM before submitting.
+          <p style={{ fontSize: 12, color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '8px 10px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+            <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 1 }} /> Total exceeds the Not-to-Exceed amount of ${workOrder.nte_amount.toFixed(2)}. Contact the PM before submitting.
           </p>
         )}
 

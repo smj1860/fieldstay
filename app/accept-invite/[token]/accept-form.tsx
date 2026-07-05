@@ -2,6 +2,7 @@
 
 import { useActionState } from 'react'
 import Link from 'next/link'
+import { Mail } from 'lucide-react'
 import { acceptTeamInvite } from './actions'
 
 interface Props {
@@ -39,7 +40,7 @@ export function AcceptForm({ token, email, orgName }: Props) {
           <div className="text-center mb-6">
             <div className="inline-flex items-center justify-center w-12 h-12 rounded-full mb-3"
                  style={{ background: 'rgba(16,34,70,0.08)' }}>
-              <span className="text-xl">✉️</span>
+              <Mail className="w-5 h-5" style={{ color: '#102246' }} />
             </div>
             <h1 className="text-xl font-black tracking-tight mb-1"
                 style={{ color: '#111827', letterSpacing: '-0.5px' }}>

@@ -4,9 +4,10 @@ import { useState, useTransition } from 'react'
 import {
   MapPin, Wrench, Calendar, AlertTriangle, CheckCircle2,
   Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight, ChevronDown,
-  ShieldAlert, ClipboardList, User, Star, Camera, Send, Copy, X,
+  ShieldAlert, ClipboardList, User, Star, Camera, Send, Copy, Check,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Dialog } from '@/components/ui/Dialog'
 import { LineItemsEditor, type WorkOrderLineItem } from './line-items-editor'
 import {
   markVendorAcknowledged,
@@ -102,8 +103,8 @@ const STATUS_STYLES: Record<WoStatus, { dot: string; label: string }> = {
   cancelled:       { dot: 'bg-red-400',     label: 'Cancelled'       },
 }
 
-const INVOICE_STATUS_STYLES: Record<'pending_payment' | 'paid' | 'cancelled', { badge: string; label: string }> = {
-  paid:            { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: '✓ Paid' },
+const INVOICE_STATUS_STYLES: Record<'pending_payment' | 'paid' | 'cancelled', { badge: string; label: React.ReactNode }> = {
+  paid:            { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: <span className="inline-flex items-center gap-1"><Check className="w-3 h-3" /> Paid</span> },
   pending_payment: { badge: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',       label: 'Pending Payment →' },
   cancelled:       { badge: 'bg-slate-500/15 text-slate-400 border border-slate-500/30 line-through', label: 'Cancelled' },
 }
@@ -717,37 +718,16 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
 
       {/* ── Dispatch Modal ────────────────────────────────────── */}
       {showDispatch && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 print:hidden"
-          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-          role="button"
-          tabIndex={0}
-          aria-label="Close dialog"
-          onClick={e => { if (e.target === e.currentTarget) setShowDispatch(false) }}
-          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDispatch(false) } }}
+        <Dialog
+          open
+          onClose={() => { setShowDispatch(false); setDispatchedUrl(null); setDispatchError(null) }}
+          title="Send to Vendor"
+          maxWidthClassName="max-w-sm"
         >
-          <div
-            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
-                  Send to Vendor
-                </h3>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  Vendor receives a magic link to view and sign off this work order
-                </p>
-              </div>
-              <button
-                onClick={() => { setShowDispatch(false); setDispatchedUrl(null); setDispatchError(null) }}
-                className="p-1.5 rounded-lg transition-colors"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+          <div className="space-y-4">
+            <p className="text-xs -mt-2" style={{ color: 'var(--text-muted)' }}>
+              Vendor receives a magic link to view and sign off this work order
+            </p>
 
             {!dispatchedUrl ? (
               <>
@@ -891,7 +871,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
               </>
             )}
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   )

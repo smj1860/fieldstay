@@ -5,6 +5,7 @@ import { Plus, X, Upload, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { saveMasterChecklistItems, applyMasterChecklistToProperties, type ChecklistItemInput } from './actions'
 import { CLEANING_CATALOG } from '@/lib/checklists/standard-catalog'
+import { Dialog } from '@/components/ui/Dialog'
 
 const ALL_SECTIONS = Object.keys(CLEANING_CATALOG)
 
@@ -477,50 +478,36 @@ export function MasterChecklistBuilder({
       </div>
 
       {/* ── Confirm dialog ───────────────────────────────────────────────────── */}
-      {showConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          role="button"
-          tabIndex={0}
-          aria-label="Close dialog"
-          onClick={() => setShowConfirm(false)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowConfirm(false) } }}
-        >
-          <div className="absolute inset-0 bg-black/50" />
-          <div
-            className="relative rounded-2xl p-6 w-full max-w-sm mx-4 shadow-xl"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-            onClick={(e) => e.stopPropagation()}
+      <Dialog
+        open={showConfirm}
+        onClose={() => setShowConfirm(false)}
+        title="Apply checklist to all properties?"
+        maxWidthClassName="max-w-sm"
+      >
+        <p className="text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>
+          This will replace the default cleaning template on all {properties.length} {properties.length === 1 ? 'property' : 'properties'} with your current master checklist.
+        </p>
+        <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+          Any customisations made per-property will be overwritten.
+        </p>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={handleApplyToAll}
+            disabled={applying}
+            className="btn-primary flex-1 text-sm"
           >
-            <h3 className="text-base font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>
-              Apply checklist to all properties?
-            </h3>
-            <p className="text-sm mb-1" style={{ color: 'var(--text-secondary)' }}>
-              This will replace the default cleaning template on all {properties.length} {properties.length === 1 ? 'property' : 'properties'} with your current master checklist.
-            </p>
-            <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
-              Any customisations made per-property will be overwritten.
-            </p>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={handleApplyToAll}
-                disabled={applying}
-                className="btn-primary flex-1 text-sm"
-              >
-                {applying ? 'Applying…' : 'Yes, apply to all'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowConfirm(false)}
-                className="btn-ghost text-sm"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+            {applying ? 'Applying…' : 'Yes, apply to all'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowConfirm(false)}
+            className="btn-ghost text-sm"
+          >
+            Cancel
+          </button>
         </div>
-      )}
+      </Dialog>
     </div>
   )
 }

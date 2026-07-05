@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { clonePropertySetup } from './clone-actions'
+import { Dialog } from '@/components/ui/Dialog'
 
 interface Property {
   id: string
@@ -34,24 +35,15 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.6)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-      role="button"
-      tabIndex={0}
-      aria-label="Close modal"
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
+    <Dialog
+      open
+      onClose={onClose}
+      title={done ? 'Setup copied' : `Copy setup to ${targetProperty.name}`}
+      maxWidthClassName="max-w-md"
     >
-      <div
-        className="rounded-2xl border p-6 w-full max-w-md space-y-4"
-        style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
-      >
+      <div className="space-y-4">
         {done ? (
           <>
-            <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-              Setup copied
-            </h3>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
               Inventory, checklist, and maintenance schedules from the selected property have been
               applied to <strong>{targetProperty.name}</strong>.
@@ -62,15 +54,10 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
           </>
         ) : (
           <>
-            <div>
-              <h3 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
-                Copy setup to {targetProperty.name}
-              </h3>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                Copies inventory items, checklist template, and maintenance schedules from the
-                source property. Existing setup on {targetProperty.name} will be replaced.
-              </p>
-            </div>
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              Copies inventory items, checklist template, and maintenance schedules from the
+              source property. Existing setup on {targetProperty.name} will be replaced.
+            </p>
 
             {otherProperties.length === 0 ? (
               <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -123,6 +110,6 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
           </>
         )}
       </div>
-    </div>
+    </Dialog>
   )
 }

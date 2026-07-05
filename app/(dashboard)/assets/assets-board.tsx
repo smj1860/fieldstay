@@ -3,10 +3,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
+import { AlertTriangle } from 'lucide-react'
+import { healthLabel, healthColor, healthBgStyle, healthDot } from '@/lib/assets/health-score'
 import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discovery/config'
 import { createClient } from '@/lib/supabase/client'
+import { StatusDot } from '@/components/ui/StatusDot'
 import type { AssetType } from '@/types/database'
+
+function healthStatus(score: number): 'good' | 'warning' | 'attention' | 'critical' | 'offline' {
+  if (score >= 80) return 'good'
+  if (score >= 60) return 'warning'
+  if (score >= 40) return 'attention'
+  if (score >= 20) return 'critical'
+  return 'offline'
+}
 
 export interface AssetRow {
   id:                      string
@@ -153,19 +163,20 @@ export function AssetsBoard({
       {/* Health breakdown pills */}
       {scored.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-6">
-          {goodCount     > 0 && <span className="badge" style={{ background: 'rgba(34,197,94,0.1)',  color: 'var(--accent-green)', border: '1px solid rgba(34,197,94,0.2)'  }}>🟢 {goodCount} Good</span>}
-          {fairCount     > 0 && <span className="badge" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)'  }}>🟡 {fairCount} Fair</span>}
-          {agingCount    > 0 && <span className="badge" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>🟠 {agingCount} Aging</span>}
-          {poorCount     > 0 && <span className="badge" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)'  }}>🔴 {poorCount} Poor</span>}
-          {criticalCount > 0 && <span className="badge" style={{ background: 'rgba(107,114,128,0.1)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.2)' }}>⚫ {criticalCount} Critical</span>}
+          {goodCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.1)',  color: 'var(--accent-green)', border: '1px solid rgba(34,197,94,0.2)'  }}><StatusDot status="good" label="Good" /> {goodCount} Good</span>}
+          {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)'  }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
+          {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
+          {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)'  }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
+          {criticalCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(107,114,128,0.1)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.2)' }}><StatusDot status="offline" label="Critical" /> {criticalCount} Critical</span>}
         </div>
       )}
 
       {/* Urgent assets alert */}
       {urgentAssets.length > 0 && (
-        <div className="rounded-lg px-4 py-3 mb-6 text-sm"
+        <div className="rounded-lg px-4 py-3 mb-6 text-sm flex items-center gap-2"
              style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
-          🚨 {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or Critical condition — budget for replacement.
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or Critical condition — budget for replacement.
         </div>
       )}
 
@@ -201,7 +212,7 @@ export function AssetsBoard({
                   const score  = asset.health_score
                   const color  = score !== null ? healthColor(score) : '#6b7280'
                   const bg     = score !== null ? healthBgStyle(score) : 'rgba(107,114,128,0.1)'
-                  const dot    = score !== null ? healthDot(score) : '⚪'
+                  const dot    = score !== null ? healthDot(score) : 'unknown'
                   const label  = score !== null ? healthLabel(score) : 'Unknown'
 
                   return (
@@ -232,7 +243,7 @@ export function AssetsBoard({
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
                             style={{ color, background: bg, border: `1px solid ${color}44` }}
                           >
-                            {dot} {score}/100 · {label}
+                            <StatusDot status={dot} label={label} /> {score}/100 · {label}
                           </span>
                         ) : (
                           <span className="badge badge-slate">Unknown</span>

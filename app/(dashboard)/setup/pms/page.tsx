@@ -1,4 +1,5 @@
 import Link                    from 'next/link'
+import { Check }                from 'lucide-react'
 import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { markStepComplete }    from '../actions'
@@ -66,7 +67,7 @@ export default async function OnboardingPmsPage() {
           className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium"
           style={{ background: 'var(--accent-green-dim)', color: 'var(--accent-green)' }}
         >
-          <span className="text-base">✓</span>
+          <Check className="w-4 h-4" />
           {activeConnections.length === 1
             ? `${(providers ?? []).find((p) => p.id === activeConnections[0].provider_id)?.display_name ?? 'PMS'} connected`
             : `${activeConnections.length} integrations connected`}

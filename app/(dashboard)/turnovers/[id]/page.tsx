@@ -224,7 +224,9 @@ export default async function TurnoverDetailPage({ params }: Props) {
                             <p className="text-xs text-accent-400 mt-0.5">{item.crew_notes}</p>
                           )}
                           {item.requires_photo && item.photo_reason && (
-                            <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
+                            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                              <Camera className="w-3.5 h-3.5 flex-shrink-0" /> {item.photo_reason}
+                            </p>
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">

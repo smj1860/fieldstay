@@ -4,11 +4,12 @@ import { useState } from 'react'
 import Link from 'next/link'
 import {
   Clock, User, Wrench, Package, ChevronDown, ChevronRight, Car,
-  RefreshCw, AlertCircle, type LucideIcon,
+  RefreshCw, AlertCircle, Check, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
 import { distanceMiles } from '@/lib/geocoding'
+import { StatusDot } from '@/components/ui/StatusDot'
 
 const AVG_DRIVE_SPEED_MPH = 30
 
@@ -559,11 +560,11 @@ export function OpsSnapshot({
               <span>
                 <span style={{ color: 'var(--accent-green)' }}>{kpis.todayAssigned} assigned</span>
                 {' · '}
-                <span style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>
-                  🔴 {kpis.todayUnassigned} unassigned
+                <span className="inline-flex items-center gap-1" style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>
+                  <StatusDot status="critical" label="Unassigned" /> {kpis.todayUnassigned} unassigned
                 </span>
               </span>
-            ) : `All ${kpis.turnoversToday} assigned ✓`
+            ) : <span className="inline-flex items-center gap-1">All {kpis.turnoversToday} assigned <Check className="w-3.5 h-3.5" /></span>
           }
         />
         <KpiCard

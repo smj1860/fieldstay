@@ -39,7 +39,7 @@ export function AcceptInviteForm({
           type="email"
           value={email}
           disabled
-          className="input bg-accent-50 text-accent-500 cursor-not-allowed"
+          className="input bg-raised-themed text-muted-themed cursor-not-allowed"
         />
       </div>
 

@@ -2,7 +2,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
-import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle } from 'lucide-react'
+import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, Sun, Moon, WifiOff } from 'lucide-react'
 import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
@@ -12,6 +12,8 @@ import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
+import { Dialog }                   from '@/components/ui/Dialog'
+import { useTheme }                 from '@/lib/hooks/use-theme'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -49,6 +51,7 @@ export function CrewShell({
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const { theme, toggle: toggleTheme } = useTheme()
 
   const [swReg, setSwReg]               = useState<ServiceWorkerRegistration | null>(null)
   const [notifVisible, setNotifVisible] = useState(false)
@@ -124,7 +127,7 @@ export function CrewShell({
   return (
     <CrewContext.Provider value={{ crewName, userId }}>
     <DexieProvider userId={userId}>
-      <div className="min-h-screen bg-accent-50 flex flex-col max-w-lg mx-auto">
+      <div className="min-h-screen bg-canvas-themed flex flex-col max-w-lg mx-auto">
         {/* ── Branded header ─────────────────────────────────────────────── */}
         <header
           className="relative sticky top-0 z-10"
@@ -145,6 +148,13 @@ export function CrewShell({
           {/* Sync status + logout — pinned right, vertically centered */}
           <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
             <SyncStatus />
+            <button
+              onClick={toggleTheme}
+              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              className="text-brand-200 hover:text-white transition-colors"
+            >
+              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
             <button
               onClick={handleLogout}
               disabled={isPending}
@@ -221,7 +231,7 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
   ]
 
   return (
-    <nav className="sticky bottom-0 bg-white border-t border-accent-200 flex items-center">
+    <nav className="sticky bottom-0 bg-card-themed border-t border-themed flex items-center">
       {tabs.map(({ href, label, icon: Icon, badge }) => {
         const active = href === '/crew' ? pathname === '/crew' : pathname.startsWith(href)
         return (
@@ -230,7 +240,7 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
             href={href}
             className={cn(
               'relative flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors',
-              active ? 'text-brand-800' : 'text-accent-400 hover:text-accent-600'
+              active ? 'text-brand-800' : 'text-muted-themed hover:text-secondary-themed'
             )}
           >
             <span className="relative">
@@ -249,7 +259,7 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
       {/* Support — opens FAQ panel */}
       <button
         onClick={onHelpClick}
-        className="flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-accent-400 hover:text-accent-600 transition-colors"
+        className="flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium text-muted-themed hover:text-secondary-themed transition-colors"
       >
         <HelpCircle className="w-5 h-5" />
         Help
@@ -291,54 +301,31 @@ function SyncStatus() {
       </button>
 
       {showInfo && (
-        <div
-          className="fixed inset-0 z-50 flex items-end"
-          role="button"
-          tabIndex={0}
-          aria-label="Close offline info"
-          onClick={() => setShowInfo(false)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowInfo(false) } }}
-        >
-          <div className="absolute inset-0 bg-black/40" />
-          <div
-            className="relative w-full rounded-t-2xl p-6 pb-10"
-            style={{ background: 'var(--bg-card)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className="w-10 h-1 rounded-full mx-auto mb-5"
-              style={{ background: 'var(--border)' }}
-            />
-            <div className="flex items-center gap-3 mb-3">
-              <span
-                className="w-10 h-10 rounded-full flex items-center justify-center text-lg"
-                style={{ background: 'var(--accent-gold-dim)' }}
-              >
-                📶
-              </span>
-              <div>
-                <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                  You&apos;re offline
-                </p>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Working from cached data
-                </p>
-              </div>
-            </div>
-            <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text-secondary)' }}>
-              Your assignments and checklists are saved on your device.
-              You can complete turnovers and check off tasks without a
-              signal — everything syncs automatically when you reconnect.
-            </p>
-            <button
-              onClick={() => setShowInfo(false)}
-              className="w-full py-3 rounded-xl text-sm font-semibold"
-              style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+        <Dialog open onClose={() => setShowInfo(false)} title="You're offline" mobileSheet maxWidthClassName="max-w-sm">
+          <div className="flex items-center gap-3 mb-3">
+            <span
+              className="w-10 h-10 rounded-full flex items-center justify-center"
+              style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}
             >
-              Got it
-            </button>
+              <WifiOff className="w-5 h-5" />
+            </span>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Working from cached data
+            </p>
           </div>
-        </div>
+          <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text-secondary)' }}>
+            Your assignments and checklists are saved on your device.
+            You can complete turnovers and check off tasks without a
+            signal — everything syncs automatically when you reconnect.
+          </p>
+          <button
+            onClick={() => setShowInfo(false)}
+            className="w-full py-3 rounded-xl text-sm font-semibold"
+            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+          >
+            Got it
+          </button>
+        </Dialog>
       )}
     </>
   )

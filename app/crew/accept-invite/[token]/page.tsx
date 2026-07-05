@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { AcceptInviteForm } from './accept-invite-form'
+import { CheckCircle2 } from 'lucide-react'
 
 interface Props { params: Promise<{ token: string }> }
 
@@ -19,10 +20,10 @@ export default async function AcceptInvitePage({ params }: Props) {
   if (crew.user_id || crew.invite_accepted_at) {
     return (
       <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center">
-          <p className="text-3xl mb-3">✅</p>
-          <h2 className="text-lg font-bold text-accent-900 mb-2">Account Already Active</h2>
-          <p className="text-sm text-accent-500 mb-6">
+        <div className="bg-card-themed rounded-2xl p-8 max-w-md w-full text-center">
+          <CheckCircle2 className="w-8 h-8 mx-auto mb-3" style={{ color: 'var(--accent-green)' }} />
+          <h2 className="text-lg font-bold text-primary-themed mb-2">Account Already Active</h2>
+          <p className="text-sm text-muted-themed mb-6">
             Your FieldStay account is set up. Log in to see your assignments.
           </p>
           <a href="/login" className="btn-primary w-full block text-center py-2.5">
@@ -38,10 +39,10 @@ export default async function AcceptInvitePage({ params }: Props) {
     if (expired) {
       return (
         <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-8 max-w-md w-full text-center">
+          <div className="bg-card-themed rounded-2xl p-8 max-w-md w-full text-center">
             <p className="text-3xl mb-3">⏰</p>
-            <h2 className="text-lg font-bold text-accent-900 mb-2">Invite Link Expired</h2>
-            <p className="text-sm text-accent-500">
+            <h2 className="text-lg font-bold text-primary-themed mb-2">Invite Link Expired</h2>
+            <p className="text-sm text-muted-themed">
               This link has expired. Ask your property manager to send a new invite.
             </p>
           </div>
@@ -57,9 +58,9 @@ export default async function AcceptInvitePage({ params }: Props) {
           <h1 className="text-3xl font-bold text-white tracking-tight">FieldStay</h1>
           <p className="text-brand-200 text-sm mt-1">Crew App</p>
         </div>
-        <div className="bg-white rounded-2xl shadow-lg p-8">
-          <h2 className="text-xl font-bold text-accent-900 mb-1">Welcome, {crew.name}</h2>
-          <p className="text-sm text-accent-500 mb-6">
+        <div className="bg-card-themed rounded-2xl shadow-lg p-8">
+          <h2 className="text-xl font-bold text-primary-themed mb-1">Welcome, {crew.name}</h2>
+          <p className="text-sm text-muted-themed mb-6">
             Create a password to activate your account.
           </p>
           <AcceptInviteForm

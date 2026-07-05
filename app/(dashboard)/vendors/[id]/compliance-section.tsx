@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useTransition, useActionState } from 'react'
-import { Plus, X, CheckCircle2, Loader2, ExternalLink, Shield, ShieldOff, ShieldCheck } from 'lucide-react'
+import { Plus, X, CheckCircle2, Loader2, ExternalLink, Shield, ShieldOff, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { createComplianceDocument, deleteComplianceDocument, verifyComplianceDocument } from '../actions'
 import type { ComplianceDocActionState } from '../actions'
 import type { VendorComplianceDocument, ComplianceDocType } from '@/types/database'
+import { Dialog } from '@/components/ui/Dialog'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -73,17 +74,8 @@ function AddDocumentForm({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div
-        className="rounded-2xl shadow-card-lg w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto"
-        style={{ background: 'var(--bg-card)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Add Compliance Document</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
-
+    <Dialog open onClose={onClose} title="Add Compliance Document" maxWidthClassName="max-w-lg">
+      <div className="max-h-[70vh] overflow-y-auto -mx-6 px-6">
         {state?.error && (
           <div className="text-sm rounded-lg px-3 py-2 mb-4"
                style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}>
@@ -176,7 +168,7 @@ function AddDocumentForm({
           </div>
         </form>
       </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -236,15 +228,17 @@ export function ComplianceSection({
         </div>
 
         {expiredCount > 0 && (
-          <div className="text-sm rounded-lg px-3 py-2 mb-3"
+          <div className="text-sm rounded-lg px-3 py-2 mb-3 flex items-center gap-1.5"
                style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
-            ⛔ {expiredCount} document{expiredCount > 1 ? 's' : ''} expired — this vendor may be blocked from new WO assignments.
+            <ShieldOff className="w-4 h-4 flex-shrink-0" />
+            {expiredCount} document{expiredCount > 1 ? 's' : ''} expired — this vendor may be blocked from new WO assignments.
           </div>
         )}
         {soonCount > 0 && expiredCount === 0 && (
-          <div className="text-sm rounded-lg px-3 py-2 mb-3"
+          <div className="text-sm rounded-lg px-3 py-2 mb-3 flex items-center gap-1.5"
                style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
-            ⚠️ {soonCount} document{soonCount > 1 ? 's' : ''} expiring within 30 days.
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            {soonCount} document{soonCount > 1 ? 's' : ''} expiring within 30 days.
           </div>
         )}
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Check } from 'lucide-react'
 import { triggerDepreciationLedger } from './actions'
 import { createClient } from '@/lib/supabase/client'
 
@@ -74,8 +74,8 @@ export function TriggerLedgerButton({ taxYear, orgId }: Readonly<{ taxYear: numb
   }
   if (result && typeof result === 'object') {
     return (
-      <span className="text-xs font-medium" style={{ color: 'var(--accent-green)' }}>
-        ✓ {result.entries} {result.entries === 1 ? 'entry' : 'entries'} generated
+      <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
+        <Check className="w-3.5 h-3.5" /> {result.entries} {result.entries === 1 ? 'entry' : 'entries'} generated
       </span>
     )
   }

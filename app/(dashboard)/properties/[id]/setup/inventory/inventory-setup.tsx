@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from 'react'
 import { upsertInventoryItems, deleteInventoryItem, completeInventoryStep, applyTemplateToProperty, cloneInventoryFromProperty } from './actions'
-import { Plus, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Zap, Check } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { Dialog } from '@/components/ui/Dialog'
 import type { InventoryCatalogItem, InventoryItem, InventoryCategory } from '@/types/database'
 
 interface EditableItem {
@@ -157,39 +158,34 @@ export function InventorySetup({
         </div>
       )}
 
-      {cloneModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-sm p-6">
-            <h3 className="font-semibold text-primary-themed mb-1">Clone Inventory From</h3>
-            <p className="text-xs text-muted-themed mb-4">
-              Items already on this property will be skipped. Counts are not copied — only par levels and items.
-            </p>
-            <select
-              value={cloneSource}
-              onChange={e => setCloneSource(e.target.value)}
-              className="input w-full mb-4"
-              style={{ color: '#1a1d20' }}
-            >
-              <option value="">Select a property…</option>
-              {sourceProperties.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.itemCount} items)
-                </option>
-              ))}
-            </select>
-            <div className="flex gap-2">
-              <button
-                onClick={handleClone}
-                disabled={!cloneSource || cloning}
-                className="btn-primary flex-1"
-              >
-                {cloning ? 'Cloning…' : 'Clone Items'}
-              </button>
-              <button onClick={() => setCloneModal(false)} className="btn-ghost">Cancel</button>
-            </div>
-          </div>
+      <Dialog open={cloneModal} onClose={() => setCloneModal(false)} title="Clone Inventory From" maxWidthClassName="max-w-sm">
+        <p className="text-xs text-muted-themed mb-4">
+          Items already on this property will be skipped. Counts are not copied — only par levels and items.
+        </p>
+        <select
+          value={cloneSource}
+          onChange={e => setCloneSource(e.target.value)}
+          className="input w-full mb-4"
+          style={{ color: '#1a1d20' }}
+        >
+          <option value="">Select a property…</option>
+          {sourceProperties.map(p => (
+            <option key={p.id} value={p.id}>
+              {p.name} ({p.itemCount} items)
+            </option>
+          ))}
+        </select>
+        <div className="flex gap-2">
+          <button
+            onClick={handleClone}
+            disabled={!cloneSource || cloning}
+            className="btn-primary flex-1"
+          >
+            {cloning ? 'Cloning…' : 'Clone Items'}
+          </button>
+          <button onClick={() => setCloneModal(false)} className="btn-ghost">Cancel</button>
         </div>
-      )}
+      </Dialog>
 
       {templateId && items.length === 0 && (
         <div
@@ -273,8 +269,9 @@ export function InventorySetup({
                         className="text-xs border border-themed rounded px-2 py-0.5 bg-transparent text-primary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)] w-40"
                       />
                       {isOverride && (
-                        <span className="text-xs font-medium" style={{ color: 'var(--accent-amber)' }}>
-                          ⚡ Property override
+                        <span className="text-xs font-medium flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
+                          <Zap className="w-3 h-3" />
+                          Property override
                         </span>
                       )}
                     </div>
@@ -350,7 +347,7 @@ export function InventorySetup({
                         >
                           <Plus className="w-3 h-3 flex-shrink-0" style={added ? { color: 'var(--accent-green)' } : undefined} />
                           {ci.name}
-                          {added && <span className="ml-auto text-xs">✓</span>}
+                          {added && <Check className="w-3 h-3 ml-auto" />}
                         </button>
                       )
                     })}

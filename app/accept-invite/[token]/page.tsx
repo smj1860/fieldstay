@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { AcceptForm }           from './accept-form'
+import { AlertTriangle }        from 'lucide-react'
 
 export default async function AcceptInvitePage({
   params,
@@ -22,7 +23,9 @@ export default async function AcceptInvitePage({
       <div className="min-h-screen flex items-center justify-center px-4"
            style={{ background: '#102246' }}>
         <div className="text-center max-w-sm">
-          <div className="text-5xl mb-4">⚠️</div>
+          <div className="flex justify-center mb-4">
+            <AlertTriangle className="w-12 h-12" style={{ color: '#FCD116' }} />
+          </div>
           <h1 className="text-xl font-bold text-white mb-2">
             Invitation no longer valid
           </h1>

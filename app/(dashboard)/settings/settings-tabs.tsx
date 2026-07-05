@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useTransition, useActionState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook } from 'lucide-react'
+import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { StatusDot } from '@/components/ui/StatusDot'
 import type { Organization } from '@/types/database'
 import {
   updateOrgSettings,
@@ -209,7 +210,7 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
-                <span style={{ color: 'var(--accent-green)' }}>●</span>
+                <StatusDot status="good" label="Connected" />
                 Connected
                 {typeof connections.kroger.metadata?.location_name === 'string' && (
                   <> — {connections.kroger.metadata.location_name as string}</>
@@ -219,8 +220,9 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
                 Below-par items are added to your Kroger Family cart automatically when you click Build Cart.
               </p>
               {krogerNeedsStore && (
-                <p className="text-xs mt-1.5 font-medium" style={{ color: 'var(--accent-amber)' }}>
-                  ⚠️ We couldn&apos;t find a Kroger store near your properties. Add a
+                <p className="text-xs mt-1.5 font-medium flex items-start gap-1" style={{ color: 'var(--accent-amber)' }}>
+                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  We couldn&apos;t find a Kroger store near your properties. Add a
                   property with a ZIP code, then click Reconnect below.
                 </p>
               )}

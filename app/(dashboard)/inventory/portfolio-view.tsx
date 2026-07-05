@@ -5,6 +5,7 @@ import { AlertTriangle, Download, Clipboard, Check } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { generateAggregatedPurchaseList } from './actions'
 import type { InventoryCategory } from '@/types/database'
+import { Dialog } from '@/components/ui/Dialog'
 
 interface PortfolioItem {
   id: string
@@ -111,56 +112,55 @@ export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioIte
 
       {/* Purchase list modal */}
       {showList && purchaseList && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-          <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-2xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-themed flex-shrink-0">
-              <h3 className="font-semibold text-primary-themed">Aggregated Reorder List</h3>
-              <div className="flex items-center gap-2">
-                <button onClick={handleCopyClipboard} className="btn-secondary text-xs flex items-center gap-1">
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Clipboard className="w-3.5 h-3.5" />}
-                  {copied ? 'Copied!' : 'Copy'}
-                </button>
-                <button onClick={handleDownloadCsv} className="btn-secondary text-xs flex items-center gap-1">
-                  <Download className="w-3.5 h-3.5" /> CSV
-                </button>
-                <button onClick={() => setShowList(false)} className="btn-ghost text-xs">Close</button>
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-              {purchaseList.length === 0 ? (
-                <p className="text-sm text-muted-themed text-center py-8">No below-par items found.</p>
-              ) : (
-                <div className="border border-themed rounded-xl overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-canvas-themed border-b border-themed text-xs font-semibold text-muted-themed uppercase">
-                        <th className="text-left px-4 py-2.5">Item</th>
-                        <th className="text-right px-4 py-2.5">Total Needed</th>
-                        <th className="text-left px-4 py-2.5">Properties</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-themed">
-                      {purchaseList.map(item => (
-                        <tr key={item.name}>
-                          <td className="px-4 py-2.5 font-medium text-primary-themed">
-                            {item.name}
-                            <span className="text-xs text-muted-themed ml-1">({item.unit})</span>
-                          </td>
-                          <td className="px-4 py-2.5 text-right font-mono font-bold" style={{ color: 'var(--accent-red)' }}>
-                            {item.totalNeeded}
-                          </td>
-                          <td className="px-4 py-2.5 text-xs text-muted-themed">
-                            {item.properties.map(p => `${p.name} (${p.needed})`).join(', ')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+        <Dialog
+          open
+          onClose={() => setShowList(false)}
+          title="Aggregated Reorder List"
+          maxWidthClassName="max-w-2xl"
+        >
+          <div className="flex items-center justify-end gap-2 mb-4 flex-shrink-0">
+            <button onClick={handleCopyClipboard} className="btn-secondary text-xs flex items-center gap-1">
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Clipboard className="w-3.5 h-3.5" />}
+              {copied ? 'Copied!' : 'Copy'}
+            </button>
+            <button onClick={handleDownloadCsv} className="btn-secondary text-xs flex items-center gap-1">
+              <Download className="w-3.5 h-3.5" /> CSV
+            </button>
           </div>
-        </div>
+          <div className="max-h-[60vh] overflow-y-auto -mx-6 px-6">
+            {purchaseList.length === 0 ? (
+              <p className="text-sm text-muted-themed text-center py-8">No below-par items found.</p>
+            ) : (
+              <div className="border border-themed rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-canvas-themed border-b border-themed text-xs font-semibold text-muted-themed uppercase">
+                      <th className="text-left px-4 py-2.5">Item</th>
+                      <th className="text-right px-4 py-2.5">Total Needed</th>
+                      <th className="text-left px-4 py-2.5">Properties</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-themed">
+                    {purchaseList.map(item => (
+                      <tr key={item.name}>
+                        <td className="px-4 py-2.5 font-medium text-primary-themed">
+                          {item.name}
+                          <span className="text-xs text-muted-themed ml-1">({item.unit})</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono font-bold" style={{ color: 'var(--accent-red)' }}>
+                          {item.totalNeeded}
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-muted-themed">
+                          {item.properties.map(p => `${p.name} (${p.needed})`).join(', ')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </Dialog>
       )}
 
       {/* Portfolio table */}

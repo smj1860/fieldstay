@@ -34,6 +34,7 @@
   --text-inverse:   #0a1628;
 
   --accent-gold:       #FCD116;
+  --accent-gold-text:  #FCD116;
   --accent-gold-dim:   rgba(252, 209, 22, 0.12);
   --accent-green:      #2fd98c;
   --accent-green-dim:  rgba(47, 217, 140, 0.10);
@@ -90,25 +91,22 @@
 
 /* ── Light theme override ─────────────────────────────────────── */
 :root.light {
-  /* Neutral gray canvas — white cards float on it, navy chrome (sidebar,
-   * header, KPI cards) stays constant against it */
-  --bg-base:        #e6e9ed;
-  --bg-canvas:      #eef0f3;
-  --bg-card:        #ffffff;
-  --bg-raised:      #f4f6f8;
-  --bg-hover:       #e9edf1;
+  --bg-base:        #F8F9FA;
+  --bg-canvas:      #F8F9FA;
+  --bg-card:        #FFFFFF;
+  --bg-raised:      #E9ECEF;
+  --bg-hover:       #DEE2E6;
 
-  --border:         rgba(10, 22, 40, 0.10);
-  --border-strong:  rgba(10, 22, 40, 0.20);
+  --border:         #DEE2E6;
+  --border-strong:  #CED4DA;
 
-  /* Dark text on light canvas */
-  --text-primary:   #0a1628;
-  --text-secondary: #2d4a6e;
-  --text-muted:     #6b8cae;
+  --text-primary:   #0D0F11;
+  --text-secondary: #343A40;
+  --text-muted:     #6C757D;
   --text-inverse:   #ffffff;
 
-  /* Brand gold accents */
   --accent-gold:       #b8900a;
+  --accent-gold-text:  #7a5e07;
   --accent-gold-dim:   rgba(184, 144, 10, 0.12);
   --accent-green:      #16a34a;
   --accent-green-dim:  rgba(22, 163, 74, 0.12);
@@ -122,10 +120,47 @@
   --shadow-card: 0 1px 4px rgba(10,22,40,0.10), 0 4px 16px rgba(10,22,40,0.08);
   --shadow-lg:   0 8px 32px rgba(10,22,40,0.18);
 
-  --bg-elevated:    #dceaf5;
+  --bg-elevated:    #E9ECEF;
   --bg-overlay:     #ffffff;
-  --border-subtle:  rgba(10, 22, 40, 0.06);
-  --border-medium:  rgba(10, 22, 40, 0.15);
+  --border-subtle:  rgba(13, 15, 17, 0.05);
+  --border-medium:  rgba(13, 15, 17, 0.12);
+}
+
+/* Passive OS-level dark fallback for surfaces that are otherwise locked light
+   (see Doc 2 — crew PWA locked-light-with-manual-toggle, and public portals
+   locked light with no toggle at all). This block must NOT apply inside any
+   subtree that already has .light or is the PM dashboard's own dark default —
+   scope it with :where() against a `.theme-locked-light` wrapper class that
+   Doc 2 adds to the portal root layout only. Do not add this to :root, or it
+   will silently override the PM dashboard's manual toggle for OS-dark users. */
+/* Base: force the Doc 1 light-mode values regardless of the visiting device's
+   stored `fs-theme` (or lack thereof) — a portal visitor has no persistent
+   identity to honor a dark preference against, so this always wins over
+   :root's dark default. The media query below is the one and only path back
+   to dark for these surfaces, driven purely by the OS-level signal. */
+.theme-locked-light-passive-dark {
+  --bg-base:        #F8F9FA;
+  --bg-canvas:      #F8F9FA;
+  --bg-card:        #FFFFFF;
+  --bg-raised:      #E9ECEF;
+  --bg-hover:       #DEE2E6;
+  --border:         #DEE2E6;
+  --border-strong:  #CED4DA;
+  --text-primary:   #0D0F11;
+  --text-secondary: #343A40;
+  --text-muted:     #6C757D;
+}
+
+@media (prefers-color-scheme: dark) {
+  .theme-locked-light-passive-dark {
+    --bg-base:   #0a1628;
+    --bg-canvas: #0e1e3e;
+    --bg-card:   #152b52;
+    --text-primary:   #ffffff;
+    --text-secondary: #dce9f5;
+    --text-muted:     #9ab5cc;
+    --border:         rgba(255,255,255,0.07);
+  }
 }
 
 
@@ -235,7 +270,7 @@
     font-family:    var(--font-syne), sans-serif;
     font-size:      22px;
     font-weight:    700;
-    color:          var(--accent-gold);
+    color:          var(--accent-gold-text);
     letter-spacing: -0.02em;
   }
 
@@ -276,19 +311,10 @@
   .btn-primary {
     @apply btn;
     background: #102246;
-    color:      var(--text-primary);
-    border:     1px solid var(--border-strong);
+    color:      #ffffff;
+    border:     1px solid rgba(255, 255, 255, 0.15);
   }
   .btn-primary:hover { background: #1a3464; }
-
-  :root.light .btn-primary {
-    background: rgba(255,255,255,0.12);
-    color:      var(--accent-gold);
-    border:     1px solid rgba(255,255,255,0.25);
-  }
-  :root.light .btn-primary:hover {
-    background: rgba(255,255,255,0.20);
-  }
 
   .btn-cta {
     @apply btn;
@@ -361,6 +387,22 @@
     margin-bottom: 6px;
     letter-spacing: 0.02em;
   }
+
+  /* ── Homepage (marketing) ──
+     app/page.tsx is intentionally locked to the dark navy brand palette —
+     no theme toggle, no `.theme-locked-light-passive-dark` wrapper, no
+     --text-* / --bg-* vars. These classes use static values (not CSS vars)
+     on purpose so the page never reacts to the stored `fs-theme` preference
+     or prefers-color-scheme. Replaces what used to be onMouseOver/onMouseOut
+     inline handlers on the nav "Log In" link. */
+  .homepage-link {
+    color: rgba(255, 255, 255, 0.65);
+    transition: color 0.15s ease;
+  }
+  .homepage-link:hover,
+  .homepage-link:focus-visible {
+    color: #ffffff;
+  }
 }
 
 /* ── Compatibility: map legacy Tailwind light-palette classes to CSS vars ── */
@@ -394,4 +436,13 @@
   .divide-themed > * + * { border-color: var(--border); }
 
   .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

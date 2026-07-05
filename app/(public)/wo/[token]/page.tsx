@@ -1,6 +1,7 @@
 import { getWorkOrderByToken }   from '@/app/actions/work-order-public'
 import { WorkOrderPublicClient } from './WorkOrderPublicClient'
 import type { Metadata }         from 'next'
+import { AlertTriangle } from 'lucide-react'
 
 interface Props {
   params: Promise<{ token: string }>
@@ -27,7 +28,7 @@ export default async function WorkOrderPublicPage({ params }: Props) {
         fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
       }}>
         <div style={{ textAlign:'center', color:'#fff', padding:32 }}>
-          <div style={{ fontSize:48, marginBottom:16 }}>⚠️</div>
+          <div style={{ marginBottom:16, display:'flex', justifyContent:'center' }}><AlertTriangle size={48} /></div>
           <div style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
             Work Order Not Found
           </div>

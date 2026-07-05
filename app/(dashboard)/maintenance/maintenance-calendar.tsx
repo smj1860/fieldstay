@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface CalendarWO {
@@ -220,7 +220,7 @@ export function MaintenanceCalendar({
                       }}
                       title={s.name}
                     >
-                      📋 {s.name}
+                      <ClipboardList className="inline w-2.5 h-2.5 mr-0.5" style={{ verticalAlign: '-1px' }} />{s.name}
                     </div>
                   ))}
 
@@ -302,7 +302,7 @@ export function MaintenanceCalendar({
                       style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}
                       title={s.name}
                     >
-                      📋 {s.name}
+                      <ClipboardList className="inline w-2.5 h-2.5 mr-0.5" style={{ verticalAlign: '-1px' }} />{s.name}
                     </div>
                   ))}
                 </div>

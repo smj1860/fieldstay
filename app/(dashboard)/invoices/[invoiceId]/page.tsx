@@ -2,6 +2,7 @@ import { notFound }            from 'next/navigation'
 import { requireOrgMember }    from '@/lib/auth'
 import type { Metadata }       from 'next'
 import { PayInvoiceButton }    from './pay-button'
+import { Check } from 'lucide-react'
 
 export const metadata: Metadata = { title: 'Invoice — FieldStay' }
 
@@ -97,8 +98,8 @@ export default async function InvoicePage({
         </div>
         <div style={{ textAlign: 'right' }}>
           <p style={{ color: '#ffffff', fontSize: 13, fontWeight: 700, margin: 0 }}>{invoice.invoice_number}</p>
-          <p style={{ color: '#94a3b8', fontSize: 11, margin: '2px 0 0' }}>
-            {isPaid ? '✓ PAID' : isCancelled ? 'CANCELLED' : 'PENDING PAYMENT'}
+          <p style={{ color: '#94a3b8', fontSize: 11, margin: '2px 0 0', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+            {isPaid ? <><Check size={12} /> PAID</> : isCancelled ? 'CANCELLED' : 'PENDING PAYMENT'}
           </p>
         </div>
       </div>
@@ -108,7 +109,7 @@ export default async function InvoicePage({
         {/* Status banner */}
         {isPaid && (
           <div style={{ backgroundColor: '#dcfce7', border: '1px solid #86efac', borderRadius: 10, padding: '12px 16px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 20 }}>✅</span>
+            <Check size={20} color="#166534" />
             <div>
               <p style={{ fontSize: 14, fontWeight: 700, color: '#166534', margin: 0 }}>Invoice Paid</p>
               {invoice.paid_at && (

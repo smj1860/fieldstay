@@ -15,6 +15,7 @@ import { TemplateManager } from './template-manager'
 import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
 import { NudgeBanner } from '@/components/nudge-banner'
+import { Dialog } from '@/components/ui/Dialog'
 import type { CartBuildResult } from '@/lib/kroger/types'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -291,15 +292,9 @@ function AddItemsModal({
   const selectedArray = Array.from(selected.values())
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-lg flex flex-col max-h-[90vh]">
-
-        <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
-          <h3 className="text-lg font-semibold text-primary-themed">Add Inventory Items</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
-
-        <div className="flex gap-1 px-6 border-b border-themed flex-shrink-0">
+    <Dialog open onClose={onClose} title="Add Inventory Items">
+      <div className="flex flex-col max-h-[90vh] -m-6">
+        <div className="flex gap-1 px-6 pt-6 border-b border-themed flex-shrink-0">
           {(['catalog', 'custom'] as const).map((t) => (
             <button
               key={t}
@@ -545,7 +540,7 @@ function AddItemsModal({
           )}
         </div>
       </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -571,17 +566,9 @@ function RunCountModal({
     .filter(({ catItems }) => catItems.length > 0)
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center p-4 pt-8 bg-black/40 overflow-y-auto">
-      <div className="bg-card-themed rounded-2xl shadow-card-lg w-full max-w-2xl p-6 mb-8">
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h3 className="text-lg font-semibold text-primary-themed">Run Inventory Count</h3>
-            <p className="text-sm text-muted-themed mt-0.5">Enter current quantities for each item</p>
-          </div>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <Dialog open onClose={onClose} title="Run Inventory Count" maxWidthClassName="max-w-2xl">
+      <div className="max-h-[80vh] overflow-y-auto -m-6 p-6">
+        <p className="text-sm text-muted-themed -mt-3 mb-4">Enter current quantities for each item</p>
 
         {state?.error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
@@ -665,7 +652,7 @@ function RunCountModal({
           </form>
         )}
       </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -1333,7 +1320,7 @@ export function InventoryManager({
             >
               {cartPending
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Building…</>
-                : <><ShoppingCart className="w-4 h-4" /> Build Cart 🛒</>}
+                : <><ShoppingCart className="w-4 h-4" /> Build Cart</>}
             </button>
           </div>
           {cartTriggered && (

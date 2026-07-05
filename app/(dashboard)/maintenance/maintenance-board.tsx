@@ -7,6 +7,7 @@ import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   Pencil, Trash2, Camera, List, BarChart2, Send, LayoutGrid, Loader2,
+  ShieldOff, Check, Info,
 } from 'lucide-react'
 import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
 import {
@@ -20,6 +21,7 @@ import { distanceMiles } from '@/lib/geocoding'
 import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-orders/work-order-detail'
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { createClient } from '@/lib/supabase/client'
+import { Dialog } from '@/components/ui/Dialog'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -470,15 +472,7 @@ function CreateWorkOrderModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">New Work Order</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+    <Dialog open onClose={onClose} title="New Work Order" maxWidthClassName="max-w-3xl">
         {state?.error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
             {state.error}
@@ -668,7 +662,7 @@ function CreateWorkOrderModal({
                       const label  = [
                         v.name,
                         dist != null ? `${dist.toFixed(1)} mi` : null,
-                        blocked ? '⛔ Blocked' : status === 'expiring_soon' ? '⚠️ Expiring' : null,
+                        blocked ? 'Blocked' : status === 'expiring_soon' ? 'Expiring' : null,
                       ].filter(Boolean).join(' · ')
                       return (
                         <option key={v.id} value={v.id} disabled={blocked}>
@@ -680,27 +674,31 @@ function CreateWorkOrderModal({
 
                   {/* Compliance banner */}
                   {selectedCompliance === 'hard_blocked' && (
-                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
-                      ⛔ This vendor has expired compliance documents (31+ days). Assignment is blocked.
+                      <ShieldOff className="w-3.5 h-3.5 flex-shrink-0" />
+                      This vendor has expired compliance documents (31+ days). Assignment is blocked.
                     </div>
                   )}
                   {selectedCompliance === 'grace_period' && (
-                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      ⚠️ Compliance docs expired recently (grace period). You can assign but should follow up with the vendor.
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                      Compliance docs expired recently (grace period). You can assign but should follow up with the vendor.
                     </div>
                   )}
                   {selectedCompliance === 'expiring_soon' && (
-                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      ⚠️ COI or license expires soon — assign now but remind vendor to renew.
+                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+                      COI or license expires soon — assign now but remind vendor to renew.
                     </div>
                   )}
                   {selectedCompliance === 'no_documents' && (
-                    <div className="text-xs rounded-lg px-3 py-2 mt-2"
+                    <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}>
-                      ℹ️ No compliance documents on file for this vendor.
+                      <Info className="w-3.5 h-3.5 flex-shrink-0" />
+                      No compliance documents on file for this vendor.
                     </div>
                   )}
 
@@ -797,8 +795,7 @@ function CreateWorkOrderModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -940,12 +937,7 @@ function AddScheduleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Add Maintenance Schedule</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onClose={onClose} title="Add Maintenance Schedule">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
         )}
@@ -956,8 +948,7 @@ function AddScheduleModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -998,12 +989,7 @@ function EditScheduleModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Edit Schedule</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onClose={onClose} title="Edit Schedule">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
         )}
@@ -1014,8 +1000,7 @@ function EditScheduleModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -1260,15 +1245,8 @@ function TemplateBroadcastModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h3 className="text-lg font-semibold text-primary-themed">Broadcast Template</h3>
-            <p className="text-xs text-muted-themed mt-0.5">{template.name} · {items.length} item{items.length !== 1 ? 's' : ''}</p>
-          </div>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onClose={onClose} title="Broadcast Template">
+        <p className="text-xs text-muted-themed -mt-3 mb-4">{template.name} · {items.length} item{items.length !== 1 ? 's' : ''}</p>
 
         {!result && (
           <div className="flex items-center gap-2 mb-5">
@@ -1320,7 +1298,10 @@ function TemplateBroadcastModal({
                       <span className="text-secondary-themed truncate">{item.name}</span>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         {item.is_optional_flag && (
-                          <span className="badge badge-amber text-xs">⚠️ {item.is_optional_flag}</span>
+                          <span className="badge badge-amber text-xs flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {item.is_optional_flag}
+                          </span>
                         )}
                         <span className="badge badge-slate text-xs">
                           {FREQUENCY_LABELS[item.schedule_frequency] ?? item.schedule_frequency}
@@ -1398,8 +1379,7 @@ function TemplateBroadcastModal({
             )}
           </>
         )}
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -1560,15 +1540,8 @@ function CreateTemplateModal({
 
   if (createdTemplateId) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-        <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h3 className="text-lg font-semibold text-primary-themed">Apply Template</h3>
-              <p className="text-xs text-muted-themed mt-0.5">"{createdTemplateName}" was created</p>
-            </div>
-            <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-          </div>
+      <Dialog open onClose={onClose} title="Apply Template">
+          <p className="text-xs text-muted-themed -mt-3 mb-4">"{createdTemplateName}" was created</p>
 
           {applyError && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{applyError}</div>
@@ -1658,18 +1631,12 @@ function CreateTemplateModal({
               </div>
             </div>
           )}
-        </div>
-      </div>
+      </Dialog>
     )
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div className="bg-card-themed rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,.16)] w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Create Schedule Template</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5"><X className="w-4 h-4" /></button>
-        </div>
+    <Dialog open onClose={onClose} title="Create Schedule Template" maxWidthClassName="max-w-2xl">
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
         )}
@@ -1720,7 +1687,10 @@ function CreateTemplateModal({
                               />
                               <span className="text-secondary-themed flex-1 truncate">{ci.name}</span>
                               {ci.is_optional_flag && (
-                                <span className="badge badge-amber text-xs flex-shrink-0">⚠️ {ci.is_optional_flag}</span>
+                                <span className="badge badge-amber text-xs flex-shrink-0 flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  {ci.is_optional_flag}
+                                </span>
                               )}
                               <span className="badge badge-slate text-xs flex-shrink-0">
                                 {FREQUENCY_LABELS[ci.schedule_frequency] ?? ci.schedule_frequency}
@@ -1796,8 +1766,7 @@ function CreateTemplateModal({
             <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
@@ -1965,22 +1934,12 @@ function EditTemplateModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div
-        className="rounded-2xl shadow-card-lg w-full max-w-md p-6"
-        style={{ background: 'var(--bg-card)' }}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Edit Template</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+    <Dialog open onClose={onClose} title="Edit Template" maxWidthClassName="max-w-md">
         {success ? (
           <div className="text-center py-4">
-            <p className="text-sm font-medium mb-4" style={{ color: 'var(--accent-green)' }}>
-              ✓ Template updated
+            <p className="text-sm font-medium mb-4 flex items-center justify-center gap-1.5" style={{ color: 'var(--accent-green)' }}>
+              <Check className="w-4 h-4" />
+              Template updated
             </p>
             <button onClick={onClose} className="btn-primary">Done</button>
           </div>
@@ -2024,8 +1983,7 @@ function EditTemplateModal({
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Dialog>
   )
 }
 
