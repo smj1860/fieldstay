@@ -1923,18 +1923,7 @@ function EditTemplateModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-      <div
-        className="rounded-2xl shadow-card-lg w-full max-w-md p-6"
-        style={{ background: 'var(--bg-card)' }}
-      >
-        <div className="flex items-center justify-between mb-5">
-          <h3 className="text-lg font-semibold text-primary-themed">Edit Template</h3>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+    <Dialog open onClose={onClose} title="Edit Template" maxWidthClassName="max-w-md">
         {success ? (
           <div className="text-center py-4">
             <p className="text-sm font-medium mb-4" style={{ color: 'var(--accent-green)' }}>
@@ -1982,8 +1971,7 @@ function EditTemplateModal({
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Dialog>
   )
 }
 

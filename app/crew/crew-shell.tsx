@@ -12,6 +12,7 @@ import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
+import { Dialog }                   from '@/components/ui/Dialog'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -291,54 +292,31 @@ function SyncStatus() {
       </button>
 
       {showInfo && (
-        <div
-          className="fixed inset-0 z-50 flex items-end"
-          role="button"
-          tabIndex={0}
-          aria-label="Close offline info"
-          onClick={() => setShowInfo(false)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowInfo(false) } }}
-        >
-          <div className="absolute inset-0 bg-black/40" />
-          <div
-            className="relative w-full rounded-t-2xl p-6 pb-10"
-            style={{ background: 'var(--bg-card)' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div
-              className="w-10 h-1 rounded-full mx-auto mb-5"
-              style={{ background: 'var(--border)' }}
-            />
-            <div className="flex items-center gap-3 mb-3">
-              <span
-                className="w-10 h-10 rounded-full flex items-center justify-center text-lg"
-                style={{ background: 'var(--accent-gold-dim)' }}
-              >
-                📶
-              </span>
-              <div>
-                <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-                  You&apos;re offline
-                </p>
-                <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  Working from cached data
-                </p>
-              </div>
-            </div>
-            <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text-secondary)' }}>
-              Your assignments and checklists are saved on your device.
-              You can complete turnovers and check off tasks without a
-              signal — everything syncs automatically when you reconnect.
-            </p>
-            <button
-              onClick={() => setShowInfo(false)}
-              className="w-full py-3 rounded-xl text-sm font-semibold"
-              style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+        <Dialog open onClose={() => setShowInfo(false)} title="You're offline" mobileSheet maxWidthClassName="max-w-sm">
+          <div className="flex items-center gap-3 mb-3">
+            <span
+              className="w-10 h-10 rounded-full flex items-center justify-center text-lg"
+              style={{ background: 'var(--accent-gold-dim)' }}
             >
-              Got it
-            </button>
+              📶
+            </span>
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              Working from cached data
+            </p>
           </div>
-        </div>
+          <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text-secondary)' }}>
+            Your assignments and checklists are saved on your device.
+            You can complete turnovers and check off tasks without a
+            signal — everything syncs automatically when you reconnect.
+          </p>
+          <button
+            onClick={() => setShowInfo(false)}
+            className="w-full py-3 rounded-xl text-sm font-semibold"
+            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+          >
+            Got it
+          </button>
+        </Dialog>
       )}
     </>
   )

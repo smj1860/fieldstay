@@ -508,7 +508,7 @@ function CsvImportModal({
           </>
         ) : (
           <>
-            <div className="overflow-x-auto mb-4">
+            <div className="overflow-x-auto overflow-y-auto max-h-[50vh] mb-4">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-themed">

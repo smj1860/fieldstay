@@ -19,7 +19,7 @@ import {
   MONTH_NAMES,
   CATALOG_CATEGORY_LABELS,
 } from '@/types/database'
-import { Pencil, Copy, Trash2, Plus, BookOpen, X, Loader2, Check } from 'lucide-react'
+import { Pencil, Copy, Trash2, Plus, BookOpen, Loader2, Check } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Dialog } from '@/components/ui/Dialog'
 

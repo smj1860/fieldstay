@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
 import type { ContactPref } from '@/types/database'
 import { AvailabilityOverviewCalendar } from '@/components/crew/availability-overview-calendar'
+import { Dialog } from '@/components/ui/Dialog'
 import {
   addCrewMember,
   updateCrewMember,
@@ -267,38 +268,18 @@ function CrewCardModal({
   onClose:      () => void
 }) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
-      role="button"
-      tabIndex={0}
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
-      aria-label="Close modal"
-    >
-      <div
-        className="rounded-2xl shadow-card-lg p-6 w-full max-w-sm"
-        style={{ background: 'var(--bg-card)' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0"
-                 style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}>
-              {member.name[0]?.toUpperCase()}
-            </div>
-            <div>
-              <h3 className="font-semibold text-base text-primary-themed">{member.name}</h3>
-              <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>
-                {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
-              </span>
-            </div>
-          </div>
-          <button onClick={onClose} className="btn-ghost p-1.5">
-            <X className="w-4 h-4" />
-          </button>
+    <Dialog open onClose={onClose} title={member.name} maxWidthClassName="max-w-sm">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0"
+             style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}>
+          {member.name[0]?.toUpperCase()}
         </div>
+        <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>
+          {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
+        </span>
+      </div>
 
-        <div className="space-y-2 text-sm">
+      <div className="space-y-2 text-sm">
           {/* Quick availability status */}
           <div className="flex justify-between items-center pb-2 mb-1 border-b border-themed">
             <span className="text-muted-themed">Availability</span>
@@ -427,13 +408,12 @@ function CrewCardModal({
           </div>
         </div>
 
-        {!member.user_id && (
-          <div className="pt-3 border-t border-themed mt-3">
-            <InviteButton memberId={member.id} inviteSentAt={member.invite_sent_at} />
-          </div>
-        )}
-      </div>
-    </div>
+      {!member.user_id && (
+        <div className="pt-3 border-t border-themed mt-3">
+          <InviteButton memberId={member.id} inviteSentAt={member.invite_sent_at} />
+        </div>
+      )}
+    </Dialog>
   )
 }
 
