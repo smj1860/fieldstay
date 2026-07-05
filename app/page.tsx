@@ -2,40 +2,33 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { cn } from '@/lib/utils'
 
 export default function LandingPage() {
   const [annual, setAnnual] = useState(false)
 
   return (
-    <div className="min-h-screen" style={{ fontFamily: "'Helvetica Neue', Arial, sans-serif" }}>
+    <div className="min-h-screen">
 
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
-      <nav className="sticky top-0 z-50 flex items-center justify-between px-8 h-16"
-           style={{ background: '#102246' }}>
-        <span className="text-xl font-black tracking-tight" style={{ color: '#fff' }}>
-          Field<span style={{ color: '#FCD116' }}>Stay</span>
+      <nav className="sticky top-0 z-50 flex items-center justify-between px-8 h-16 bg-brand-800">
+        <span className="font-display text-xl font-black tracking-tight text-white">
+          Field<span className="text-gold-300">Stay</span>
         </span>
         <div className="flex items-center gap-2">
           <Link href="/login"
-                className="text-sm px-4 py-2 rounded-md transition-colors"
-                style={{ color: 'rgba(255,255,255,0.65)' }}
-                onMouseOver={e => (e.currentTarget.style.color = '#fff')}
-                onFocus={e     => (e.currentTarget.style.color = '#fff')}
-                onMouseOut={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}
-                onBlur={e     => (e.currentTarget.style.color = 'rgba(255,255,255,0.65)')}>
+                className="homepage-link text-sm px-4 py-2 rounded-md">
             Log In
           </Link>
           <Link href="/signup"
-                className="text-sm font-bold px-4 py-2 rounded-md transition-opacity"
-                style={{ background: '#FCD116', color: '#102246' }}>
+                className="text-sm font-bold px-4 py-2 rounded-md transition-opacity bg-gold-300 text-brand-800">
             Start Free Trial
           </Link>
         </div>
       </nav>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden text-center px-8 py-24"
-               style={{ background: '#102246' }}>
+      <section className="relative overflow-hidden text-center px-8 py-24 bg-brand-800">
         {/* Dot grid texture */}
         <div className="absolute inset-0 pointer-events-none"
              style={{
@@ -45,20 +38,19 @@ export default function LandingPage() {
 
         {/* Eyebrow */}
         <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold
-                        uppercase tracking-widest mb-7"
-             style={{ background: 'rgba(252,209,22,0.12)', border: '1px solid rgba(252,209,22,0.25)', color: '#FCD116' }}>
+                        uppercase tracking-widest mb-7 bg-gold-300/12 border border-gold-300/25 text-gold-300">
           Built for STR Property Managers
         </div>
 
         {/* Headline */}
-        <h1 className="mx-auto mb-5 font-black leading-[1.08] tracking-tight"
-            style={{ fontSize: 'clamp(36px, 5vw, 54px)', color: '#fff', maxWidth: 720, letterSpacing: '-1.5px' }}>
+        <h1 className="font-display mx-auto mb-5 font-black leading-[1.08] tracking-tight text-white"
+            style={{ fontSize: 'clamp(36px, 5vw, 54px)', maxWidth: 720, letterSpacing: '-1.5px' }}>
           Built for the work that happens{' '}
-          <span style={{ color: '#FCD116' }}>between checkouts.</span>
+          <span className="text-gold-300">between checkouts.</span>
         </h1>
 
         {/* Subhead */}
-        <p className="mx-auto mb-9" style={{ fontSize: 18, color: 'rgba(255,255,255,0.62)', maxWidth: 580, lineHeight: 1.65 }}>
+        <p className="mx-auto mb-9 text-white/62" style={{ fontSize: 18, maxWidth: 580, lineHeight: 1.65 }}>
           FieldStay handles crew scheduling, turnovers, maintenance, inventory,
           vendor work orders, and guest communications — so the gap between
           checkout and check-in runs itself.
@@ -66,30 +58,28 @@ export default function LandingPage() {
 
         {/* CTA */}
         <Link href="/signup"
-              className="inline-flex items-center gap-2 rounded-lg font-black text-base transition-all"
-              style={{ background: '#FCD116', color: '#102246', padding: '16px 36px' }}>
+              className="inline-flex items-center gap-2 rounded-lg font-black text-base transition-all bg-gold-300 text-brand-800"
+              style={{ padding: '16px 36px' }}>
           Start Free Trial <span style={{ fontSize: 20 }}>→</span>
         </Link>
-        <p className="mt-4 text-sm" style={{ color: 'rgba(255,255,255,0.38)' }}>
+        <p className="mt-4 text-sm text-white/38">
           14-day free trial · No credit card required · Cancel anytime
         </p>
       </section>
 
       {/* ── Stats bar ────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row justify-center gap-6 sm:gap-16 px-8 py-6 sm:py-5"
-           style={{ background: '#0d1e3d', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+      <div className="flex flex-col sm:flex-row justify-center gap-6 sm:gap-16 px-8 py-6 sm:py-5 bg-brand-900 border-b border-white/6">
         {[
           { num: '15 min', label: 'Avg. property setup' },
           { num: '0',      label: 'Spreadsheets needed' },
           { num: '100%',   label: 'Offline crew access' },
         ].map((s) => (
           <div key={s.label} className="text-center flex sm:block items-center justify-between sm:justify-start gap-4">
-            <div className="font-black leading-none mb-1"
-                 style={{ fontSize: 28, color: '#FCD116', letterSpacing: '-1px' }}>
+            <div className="font-black leading-none mb-1 text-gold-300"
+                 style={{ fontSize: 28, letterSpacing: '-1px' }}>
               {s.num}
             </div>
-            <div className="text-xs font-bold uppercase tracking-wider"
-                 style={{ color: 'rgba(255,255,255,0.45)' }}>
+            <div className="text-xs font-bold uppercase tracking-wider text-white/45">
               {s.label}
             </div>
           </div>
@@ -99,12 +89,11 @@ export default function LandingPage() {
       {/* ── Pain section ─────────────────────────────────────────────────── */}
       <section className="px-8 py-20" style={{ background: '#F8F9FA' }}>
         <div className="mx-auto" style={{ maxWidth: 900 }}>
-          <p className="text-xs font-bold uppercase tracking-widest mb-3"
-             style={{ color: '#102246' }}>
+          <p className="text-xs font-bold uppercase tracking-widest mb-3 text-brand-800">
             Sound familiar?
           </p>
-          <h2 className="font-black mb-2 tracking-tight"
-              style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
+          <h2 className="font-display font-black mb-2 tracking-tight text-brand-800"
+              style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
             Managing properties today is chaotic.
           </h2>
           <p className="mb-10 text-base" style={{ color: '#6B7280' }}>
@@ -154,8 +143,8 @@ export default function LandingPage() {
       <section className="px-8 py-20" style={{ background: '#fff' }}>
         <div className="mx-auto" style={{ maxWidth: 960 }}>
           <div className="text-center mb-14">
-            <h2 className="font-black mb-3 tracking-tight"
-                style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
+            <h2 className="font-display font-black mb-3 tracking-tight text-brand-800"
+                style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
               Built for every part of the operation.
             </h2>
             <p className="text-base mx-auto" style={{ color: '#6B7280', maxWidth: 480 }}>
@@ -169,13 +158,11 @@ export default function LandingPage() {
             {/* Feature 1 — Offline Crew App */}
             <div className="rounded-2xl p-7 relative overflow-hidden"
                  style={{ border: '1px solid #E5E7EB' }}>
-              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
-                   style={{ background: '#102246' }} />
-              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
-                    style={{ background: '#EEF2FF', color: '#102246' }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl bg-brand-800" />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 Crew Mobile App
               </span>
-              <h3 className="font-black mb-3 tracking-tight"
+              <h3 className="font-display font-black mb-3 tracking-tight"
                   style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
                 Your crew has to work fast even without a signal. Their app should too.
               </h3>
@@ -189,13 +176,11 @@ export default function LandingPage() {
             {/* Feature 2 — Smart Crew Scheduling */}
             <div className="rounded-2xl p-7 relative overflow-hidden"
                  style={{ border: '1px solid #E5E7EB' }}>
-              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
-                   style={{ background: '#102246' }} />
-              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
-                    style={{ background: '#EEF2FF', color: '#102246' }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl bg-brand-800" />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 Intelligent Scheduling
               </span>
-              <h3 className="font-black mb-3 tracking-tight"
+              <h3 className="font-display font-black mb-3 tracking-tight"
                   style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
                 Suggested crew assignment that gets smarter every turnover.
               </h3>
@@ -210,13 +195,11 @@ export default function LandingPage() {
             {/* Feature 3 — Flat Pricing */}
             <div className="rounded-2xl p-7 relative overflow-hidden"
                  style={{ border: '1px solid #E5E7EB' }}>
-              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
-                   style={{ background: '#102246' }} />
-              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
-                    style={{ background: '#EEF2FF', color: '#102246' }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl bg-brand-800" />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 Pricing
               </span>
-              <h3 className="font-black mb-3 tracking-tight"
+              <h3 className="font-display font-black mb-3 tracking-tight"
                   style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
                 Gates are for fences. Not features.
               </h3>
@@ -231,13 +214,11 @@ export default function LandingPage() {
             {/* Feature 5 — RepuGuard */}
             <div className="rounded-2xl p-7 relative overflow-hidden"
                  style={{ border: '1px solid #E5E7EB' }}>
-              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl"
-                   style={{ background: '#102246' }} />
-              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4"
-                    style={{ background: '#EEF2FF', color: '#102246' }}>
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl bg-brand-800" />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 RepuGuard
               </span>
-              <h3 className="font-black mb-3 tracking-tight"
+              <h3 className="font-display font-black mb-3 tracking-tight"
                   style={{ fontSize: 20, color: '#111827', letterSpacing: '-0.3px' }}>
                 A professional review response that sounds as authentic as you. One click to post.
               </h3>
@@ -253,19 +234,17 @@ export default function LandingPage() {
       </section>
 
       {/* ── Feature 4 — Guest Guidebook (highlighted band) ───────────────── */}
-      <section className="px-8 py-16" style={{ background: '#102246' }}>
+      <section className="px-8 py-16 bg-brand-800">
         <div className="mx-auto" style={{ maxWidth: 960 }}>
-          <div className="rounded-2xl p-8 md:p-10"
-               style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)' }}>
-            <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-5"
-                  style={{ background: 'rgba(252,209,22,0.15)', color: '#FCD116', border: '1px solid rgba(252,209,22,0.3)' }}>
+          <div className="rounded-2xl p-8 md:p-10 bg-white/5 border border-white/12">
+            <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-5 bg-gold-300/15 text-gold-300 border border-gold-300/30">
               Guest Guidebook
             </span>
-            <h3 className="font-black mb-4 tracking-tight"
-                style={{ fontSize: 'clamp(22px, 3vw, 28px)', color: '#fff', letterSpacing: '-0.5px', maxWidth: 680 }}>
+            <h3 className="font-display font-black mb-4 tracking-tight text-white"
+                style={{ fontSize: 'clamp(22px, 3vw, 28px)', letterSpacing: '-0.5px', maxWidth: 680 }}>
               Not just another guidebook. A guest experience tool with a personal touch — and we&apos;ll pay you to use it.*
             </h3>
-            <p className="text-base leading-relaxed mb-3" style={{ color: 'rgba(255,255,255,0.6)', maxWidth: 700 }}>
+            <p className="text-base leading-relaxed mb-3 text-white/60" style={{ maxWidth: 700 }}>
               Every FieldStay property gets a personalized guest guidebook: door codes, WiFi
               credentials, check-in instructions, and contextual recommendations driven by
               your property&apos;s amenities and live weather. Guests opt in to receive their door
@@ -273,7 +252,7 @@ export default function LandingPage() {
               complete. Local business sponsors pay $15/month for featured placement. At 5
               active sponsors, you earn a $10/month plan credit. At 6, it&apos;s $25/month.
             </p>
-            <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
+            <p className="text-xs text-white/30">
               *Plan credits applied monthly based on active sponsor count. Subject to plan tier.
             </p>
           </div>
@@ -281,13 +260,13 @@ export default function LandingPage() {
       </section>
 
       {/* ── How it works ─────────────────────────────────────────────────── */}
-      <section className="px-8 py-20 text-center" style={{ background: '#102246' }}>
+      <section className="px-8 py-20 text-center bg-brand-800">
         <div className="mx-auto" style={{ maxWidth: 800 }}>
-          <h2 className="font-black mb-3 tracking-tight"
-              style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#fff', letterSpacing: '-1px' }}>
+          <h2 className="font-display font-black mb-3 tracking-tight text-white"
+              style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
             Up and running in minutes.
           </h2>
-          <p className="mb-14 text-base" style={{ color: 'rgba(255,255,255,0.5)' }}>
+          <p className="mb-14 text-base text-white/50">
             No implementation fees. No onboarding call required.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-left">
@@ -309,14 +288,13 @@ export default function LandingPage() {
               },
             ].map((step) => (
               <div key={step.n}
-                   className="rounded-2xl p-7"
-                   style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-                <div className="font-black mb-3 leading-none"
-                     style={{ fontSize: 40, color: 'rgba(252,209,22,0.2)', letterSpacing: '-2px' }}>
+                   className="rounded-2xl p-7 bg-white/6 border border-white/10">
+                <div className="font-black mb-3 leading-none text-gold-300/20"
+                     style={{ fontSize: 40, letterSpacing: '-2px' }}>
                   {step.n}
                 </div>
-                <p className="font-bold mb-2" style={{ fontSize: 17, color: '#fff' }}>{step.title}</p>
-                <p className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                <p className="font-bold mb-2 text-white" style={{ fontSize: 17 }}>{step.title}</p>
+                <p className="text-sm leading-relaxed text-white/50">
                   {step.desc}
                 </p>
               </div>
@@ -329,8 +307,8 @@ export default function LandingPage() {
       <section className="px-8 py-20" style={{ background: '#F8F9FA' }}>
         <div className="mx-auto" style={{ maxWidth: 900 }}>
           <div className="text-center mb-10">
-            <h2 className="font-black mb-2 tracking-tight"
-                style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
+            <h2 className="font-display font-black mb-2 tracking-tight text-brand-800"
+                style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
               Simple, transparent pricing.
             </h2>
             <p className="text-sm" style={{ color: '#6B7280' }}>
@@ -340,30 +318,26 @@ export default function LandingPage() {
 
           {/* Billing toggle */}
           <div className="flex items-center justify-center gap-3 mb-9">
-            <span className="text-sm font-bold"
-                  style={{ color: annual ? '#9CA3AF' : '#102246' }}>
+            <span className={cn('text-sm font-bold', annual ? 'text-gray-400' : 'text-brand-800')}>
               Monthly
             </span>
             <button
               onClick={() => setAnnual(!annual)}
-              className="relative rounded-full transition-colors"
-              style={{ width: 48, height: 26, background: '#102246', border: 'none', cursor: 'pointer' }}
+              className="relative rounded-full transition-colors bg-brand-800 border-none cursor-pointer"
+              style={{ width: 48, height: 26 }}
             >
-              <span className="absolute top-[3px] rounded-full transition-transform"
+              <span className="absolute top-[3px] rounded-full transition-transform bg-gold-300"
                     style={{
                       width: 20, height: 20,
-                      background: '#FCD116',
                       left: 3,
                       transform: annual ? 'translateX(22px)' : 'translateX(0)',
                       display: 'block',
                       transition: 'transform 0.2s',
                     }} />
             </button>
-            <span className="text-sm font-bold flex items-center gap-2"
-                  style={{ color: annual ? '#102246' : '#9CA3AF' }}>
+            <span className={cn('text-sm font-bold flex items-center gap-2', annual ? 'text-brand-800' : 'text-gray-400')}>
               Annual
-              <span className="rounded-full px-2 py-0.5 text-xs font-black"
-                    style={{ background: '#FCD116', color: '#102246' }}>
+              <span className="rounded-full px-2 py-0.5 text-xs font-black bg-gold-300 text-brand-800">
                 Save 2 months
               </span>
             </span>
@@ -437,15 +411,14 @@ export default function LandingPage() {
               },
             ].map((plan) => (
               <div key={plan.name}
-                   className="rounded-2xl p-7 flex flex-col"
-                   style={{
-                     background: '#fff',
-                     border: plan.highlight ? '2px solid #102246' : '1.5px solid #E5E7EB',
-                     boxShadow: plan.highlight ? '0 0 0 4px rgba(16,34,70,0.07)' : 'none',
-                   }}>
+                   className={cn(
+                     'rounded-2xl p-7 flex flex-col bg-white',
+                     plan.highlight
+                       ? 'border-2 border-brand-800 ring-4 ring-brand-800/7'
+                       : 'border-[1.5px] border-gray-200'
+                   )}>
                 {plan.badge && (
-                  <span className="self-start rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4"
-                        style={{ background: '#FCD116', color: '#102246' }}>
+                  <span className="self-start rounded-full px-3 py-1 text-xs font-black uppercase tracking-wider mb-4 bg-gold-300 text-brand-800">
                     {plan.badge}
                   </span>
                 )}
@@ -459,8 +432,8 @@ export default function LandingPage() {
                 <div className="mb-5">
                   {plan.monthly !== null ? (
                     <>
-                      <span className="font-black tracking-tight"
-                            style={{ fontSize: 42, color: '#102246', letterSpacing: '-2px', lineHeight: 1 }}>
+                      <span className="font-black tracking-tight text-brand-800"
+                            style={{ fontSize: 42, letterSpacing: '-2px', lineHeight: 1 }}>
                         {annual ? `$${plan.annual!.toLocaleString()}` : `$${plan.monthly}`}
                       </span>
                       <span className="text-sm ml-1" style={{ color: '#9CA3AF' }}>
@@ -468,12 +441,12 @@ export default function LandingPage() {
                       </span>
                       {!annual && (
                         <p className="text-xs mt-1" style={{ color: '#9CA3AF' }}>
-                          or ${plan.annual!.toLocaleString()}/yr — save ${(plan.monthly! * 12 - plan.annual!)} 
+                          or ${plan.annual!.toLocaleString()}/yr — save ${(plan.monthly! * 12 - plan.annual!)}
                         </p>
                       )}
                     </>
                   ) : (
-                    <span className="font-black" style={{ fontSize: 34, color: '#102246', letterSpacing: '-1px' }}>
+                    <span className="font-black text-brand-800" style={{ fontSize: 34, letterSpacing: '-1px' }}>
                       Custom
                     </span>
                   )}
@@ -484,8 +457,8 @@ export default function LandingPage() {
                 <div className="flex flex-col gap-2.5 flex-1 mb-6">
                   {plan.features.map((f) => (
                     <div key={f} className="flex items-start gap-2 text-sm" style={{ color: '#374151' }}>
-                      <span className="flex-shrink-0 flex items-center justify-center rounded-full text-xs font-black mt-0.5"
-                            style={{ width: 18, height: 18, minWidth: 18, background: '#102246', color: '#FCD116', lineHeight: '18px' }}>
+                      <span className="flex-shrink-0 flex items-center justify-center rounded-full text-xs font-black mt-0.5 bg-brand-800 text-gold-300"
+                            style={{ width: 18, height: 18, minWidth: 18, lineHeight: '18px' }}>
                         ✓
                       </span>
                       {f}
@@ -494,12 +467,14 @@ export default function LandingPage() {
                 </div>
 
                 <Link href={plan.ctaHref}
-                      className="block text-center rounded-lg font-bold text-sm py-3 transition-opacity"
-                      style={{
-                        background: plan.highlight ? '#FCD116' : plan.monthly === null ? 'transparent' : '#102246',
-                        color: plan.highlight ? '#102246' : plan.monthly === null ? '#102246' : '#fff',
-                        border: plan.monthly === null ? '1.5px solid #E5E7EB' : 'none',
-                      }}>
+                      className={cn(
+                        'block text-center rounded-lg font-bold text-sm py-3 transition-opacity',
+                        plan.highlight
+                          ? 'bg-gold-300 text-brand-800'
+                          : plan.monthly === null
+                          ? 'bg-transparent text-brand-800 border-[1.5px] border-gray-200'
+                          : 'bg-brand-800 text-white'
+                      )}>
                   {plan.cta}
                 </Link>
               </div>
@@ -513,26 +488,25 @@ export default function LandingPage() {
       </section>
 
       {/* ── Bottom CTA ───────────────────────────────────────────────────── */}
-      <section className="px-8 py-20 text-center" style={{ background: '#FCD116' }}>
-        <h2 className="font-black mb-3 tracking-tight"
-            style={{ fontSize: 'clamp(28px, 4vw, 38px)', color: '#102246', letterSpacing: '-1px' }}>
+      <section className="px-8 py-20 text-center bg-gold-300">
+        <h2 className="font-display font-black mb-3 tracking-tight text-brand-800"
+            style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
           Ready to stop firefighting?
         </h2>
-        <p className="text-base mb-9 mx-auto" style={{ color: 'rgba(16,34,70,0.62)', maxWidth: 440 }}>
+        <p className="text-base mb-9 mx-auto text-brand-800/62" style={{ maxWidth: 440 }}>
           Join property managers who replaced their texts and spreadsheets with one platform that actually works.
         </p>
         <Link href="/signup"
-              className="inline-flex items-center gap-2 rounded-lg font-black text-base transition-opacity"
-              style={{ background: '#102246', color: '#fff', padding: '16px 36px' }}>
+              className="inline-flex items-center gap-2 rounded-lg font-black text-base transition-opacity bg-brand-800 text-white"
+              style={{ padding: '16px 36px' }}>
           Start Free — 14 Days Free <span style={{ fontSize: 20 }}>→</span>
         </Link>
       </section>
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
-      <footer className="flex items-center justify-between px-8 py-7"
-              style={{ background: '#0d1e3d' }}>
-        <span className="font-black text-base" style={{ color: '#fff' }}>
-          Field<span style={{ color: '#FCD116' }}>Stay</span>
+      <footer className="flex items-center justify-between px-8 py-7 bg-brand-900">
+        <span className="font-display font-black text-base text-white">
+          Field<span className="text-gold-300">Stay</span>
         </span>
         <div className="flex items-center gap-6">
           {[
@@ -541,8 +515,7 @@ export default function LandingPage() {
             { label: 'Sign Up', href: '/signup' },
           ].map((l) => (
             <Link key={l.label} href={l.href}
-                  className="text-sm transition-colors"
-                  style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  className="text-sm transition-colors text-white/40">
               {l.label}
             </Link>
           ))}

@@ -55,13 +55,13 @@ export default function CrewMessagesPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-9.5rem)] -mx-4 -my-6">
-      <div className="px-4 py-3 border-b border-accent-200 bg-white">
+      <div className="px-4 py-3 border-b border-themed bg-card-themed">
         <span className="font-semibold text-brand-800">FieldStay Operations</span>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
         {conversation.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-accent-400">
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-themed">
             <MessageSquare className="w-10 h-10" />
             <p className="text-sm">Send a message to your operations team</p>
           </div>
@@ -73,16 +73,16 @@ export default function CrewMessagesPage() {
               <div
                 className={cn(
                   'max-w-[75%] rounded-2xl px-3.5 py-2',
-                  fromMe ? 'bg-brand-800 text-white' : 'bg-accent-100 text-accent-800'
+                  fromMe ? 'bg-brand-800 text-white' : 'bg-raised-themed text-primary-themed'
                 )}
               >
                 <p className="text-sm whitespace-pre-wrap break-words">{m.content}</p>
                 {!fromMe && m.group_label && (
-                  <p className="text-[10px] mt-0.5 text-accent-400 italic">
+                  <p className="text-[10px] mt-0.5 text-muted-themed italic">
                     {m.group_label}
                   </p>
                 )}
-                <p className={cn('text-[10px] mt-1', fromMe ? 'text-brand-200' : 'text-accent-400')}>
+                <p className={cn('text-[10px] mt-1', fromMe ? 'text-brand-200' : 'text-muted-themed')}>
                   {formatDateTime(m.created_at)}
                 </p>
               </div>
@@ -92,7 +92,7 @@ export default function CrewMessagesPage() {
         <div ref={bottomRef} />
       </div>
 
-      <div className="border-t border-accent-200 bg-white">
+      <div className="border-t border-themed bg-card-themed">
         {sendError && (
           <div className="px-3 pt-2 text-xs text-red-600">{sendError}</div>
         )}
@@ -108,7 +108,7 @@ export default function CrewMessagesPage() {
           }}
           placeholder="Type a message..."
           rows={1}
-          className="flex-1 px-3 py-2 rounded-lg text-sm outline-none resize-none border border-accent-200 bg-white text-accent-900"
+          className="flex-1 px-3 py-2 rounded-lg text-sm outline-none resize-none border border-themed bg-card-themed text-primary-themed"
         />
         <button
           onClick={handleSend}

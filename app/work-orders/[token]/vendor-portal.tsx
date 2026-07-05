@@ -53,7 +53,7 @@ const PRIORITY_STYLES: Record<string, { bg: string; text: string }> = {
 function PortalShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-accent-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-[0_4px_24px_0_rgba(0,0,0,.10)] w-full max-w-md p-8">
+      <div className="bg-card-themed rounded-2xl shadow-[0_4px_24px_0_rgba(0,0,0,.10)] w-full max-w-md p-8">
         <div className="text-center mb-6">
           <span className="text-brand-800 text-2xl font-bold tracking-tight">FieldStay</span>
           <p className="text-accent-400 text-xs mt-1">Vendor Portal</p>
@@ -93,7 +93,7 @@ function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: P
         )}
       </div>
 
-      <div className="bg-white p-4 space-y-3">
+      <div className="bg-card-themed p-4 space-y-3">
         {/* Property address */}
         {property && (
           <div className="bg-accent-50 rounded-lg px-3 py-2.5 border-l-2 border-yellow-400">

@@ -387,6 +387,22 @@
     margin-bottom: 6px;
     letter-spacing: 0.02em;
   }
+
+  /* ── Homepage (marketing) ──
+     app/page.tsx is intentionally locked to the dark navy brand palette —
+     no theme toggle, no `.theme-locked-light-passive-dark` wrapper, no
+     --text-*/--bg-* vars. These classes use static values (not CSS vars)
+     on purpose so the page never reacts to the stored `fs-theme` preference
+     or prefers-color-scheme. Replaces what used to be onMouseOver/onMouseOut
+     inline handlers on the nav "Log In" link. */
+  .homepage-link {
+    color: rgba(255, 255, 255, 0.65);
+    transition: color 0.15s ease;
+  }
+  .homepage-link:hover,
+  .homepage-link:focus-visible {
+    color: #ffffff;
+  }
 }
 
 /* ── Compatibility: map legacy Tailwind light-palette classes to CSS vars ── */

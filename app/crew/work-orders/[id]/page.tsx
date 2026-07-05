@@ -52,14 +52,14 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
   }
 
   if (!wo) return (
-    <div className="p-4 text-sm text-accent-500">Loading...</div>
+    <div className="p-4 text-sm text-muted-themed">Loading...</div>
   )
 
   if (done) return (
     <div className="p-6 text-center">
       <div className="text-4xl mb-4">✅</div>
-      <h2 className="font-bold text-accent-900 text-lg mb-2">Work Complete</h2>
-      <p className="text-sm text-accent-500 mb-6">Your PM has been notified.</p>
+      <h2 className="font-bold text-primary-themed text-lg mb-2">Work Complete</h2>
+      <p className="text-sm text-muted-themed mb-6">Your PM has been notified.</p>
       <button
         onClick={() => router.push('/crew')}
         className="text-sm font-semibold text-brand-600 underline"
@@ -71,27 +71,27 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="flex flex-col min-h-full">
-      <div className="flex items-center gap-2 p-4 border-b border-accent-200">
+      <div className="flex items-center gap-2 p-4 border-b border-themed">
         <button onClick={() => router.back()}>
-          <ArrowLeft className="w-5 h-5 text-accent-600" />
+          <ArrowLeft className="w-5 h-5 text-secondary-themed" />
         </button>
         <div className="flex items-center gap-2">
           <Wrench className="w-4 h-4 text-amber-600" />
-          <span className="font-bold text-sm text-accent-900">Work Order</span>
+          <span className="font-bold text-sm text-primary-themed">Work Order</span>
           {wo.wo_number && (
-            <span className="text-xs text-accent-500">{wo.wo_number}</span>
+            <span className="text-xs text-muted-themed">{wo.wo_number}</span>
           )}
         </div>
       </div>
 
       <div className="p-4 space-y-4">
         <div>
-          <h1 className="font-bold text-accent-900 text-base">{wo.title}</h1>
+          <h1 className="font-bold text-primary-themed text-base">{wo.title}</h1>
           {property?.name && (
-            <p className="text-sm text-accent-600 mt-0.5">{property.name}</p>
+            <p className="text-sm text-secondary-themed mt-0.5">{property.name}</p>
           )}
           {wo.scheduled_date && (
-            <p className="text-xs text-accent-500 mt-0.5">
+            <p className="text-xs text-muted-themed mt-0.5">
               Scheduled: {new Date(wo.scheduled_date).toLocaleDateString('en-US', {
                 weekday: 'long', month: 'long', day: 'numeric',
               })}
@@ -101,16 +101,16 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
 
         {wo.description && (
           <div>
-            <h2 className="text-xs font-bold text-accent-500 uppercase tracking-wide mb-1">
+            <h2 className="text-xs font-bold text-muted-themed uppercase tracking-wide mb-1">
               Description
             </h2>
-            <p className="text-sm text-accent-800 whitespace-pre-wrap">{wo.description}</p>
+            <p className="text-sm text-primary-themed whitespace-pre-wrap">{wo.description}</p>
           </div>
         )}
 
         {wo.status !== 'completed' && (
-          <div className="pt-4 border-t border-accent-200">
-            <h2 className="text-xs font-bold text-accent-500 uppercase tracking-wide mb-2">
+          <div className="pt-4 border-t border-themed">
+            <h2 className="text-xs font-bold text-muted-themed uppercase tracking-wide mb-2">
               Completion Notes (optional)
             </h2>
             <textarea
@@ -118,7 +118,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Describe what was done, any issues found..."
               rows={3}
-              className="w-full rounded-lg border border-accent-200 px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="w-full rounded-lg border border-themed px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
             <button
               onClick={handleComplete}
