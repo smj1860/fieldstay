@@ -116,7 +116,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
             subject: `Work order escalated to Urgent — open ${daysOpen} days`,
             html:    await renderPmAlert({
               heading:  'Work order auto-escalated to Urgent',
-              body:     `${wo.category.replace(/_/g, ' ')} has been open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without an update and was auto-escalated to Urgent priority.`,
+              body:     `${(wo.category ?? 'Work order').replace(/_/g, ' ')} has been open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without an update and was auto-escalated to Urgent priority.`,
               details: [
                 { label: 'Opened', value: new Date(wo.created_at).toLocaleDateString() },
               ],

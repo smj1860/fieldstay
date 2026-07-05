@@ -215,7 +215,7 @@ export const hospInitialSync = inngest.createFunction(
               checkout_time:   res.check_out ?? '11:00',
               status,
               guest_name:      guestName,
-              channel_source:  mapHospitableChannel(res.platform),
+              source:          mapHospitableChannel(res.platform),
               is_block:        false,
             }
           })
