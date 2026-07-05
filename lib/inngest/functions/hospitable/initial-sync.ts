@@ -21,6 +21,7 @@ import {
   hospFetchTeammates,
   mapHospitableTeammateRole,
   resolveHospitableTeammateName,
+  resolveHospitableTimezone,
   mapHospitableStatus,
   mapHospitableChannel,
   type HospitableReservation,
@@ -86,7 +87,9 @@ export const hospInitialSync = inngest.createFunction(
             avg_turnovers_per_month: 0,
             checkin_time:            prop['check-in']  ?? '15:00',
             checkout_time:           prop['check-out'] ?? '11:00',
-            timezone:                prop.timezone     ?? 'America/New_York',
+            // prop.timezone is a UTC offset (e.g. "-0500"), not an IANA identifier.
+            // Derive from property state for DST-correct Intl compatibility.
+            timezone:                resolveHospitableTimezone(prop.timezone, addr.state),
             setup_steps_completed:   {} as Record<string, boolean>,
             is_active:               true,
           }

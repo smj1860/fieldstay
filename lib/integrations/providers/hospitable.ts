@@ -593,6 +593,70 @@ export function resolveHospitableTeammateName(t: HospitableTeammate): string | n
   return null
 }
 
+/**
+ * Resolves an IANA timezone identifier for a Hospitable property.
+ *
+ * Hospitable's prop.timezone field returns a UTC offset string (e.g. "-0500")
+ * not an IANA identifier. Node's Intl API requires IANA identifiers for DST-aware
+ * timezone math — passing a raw UTC offset produces wrong results across DST
+ * transitions (e.g. a Chicago property's "-0500" offset is only correct half the
+ * year; in winter it's UTC-6).
+ *
+ * Strategy: derive timezone from the property's US state. State is stable, reliable,
+ * and covers 99%+ of the US STR market without a geocoding API dependency.
+ *
+ * @param hospTimezone  Raw timezone value from Hospitable API (e.g. "-0500") —
+ *                      intentionally not used; parameter exists for documentation
+ * @param state         Two-letter US state code from the property address (e.g. "AL")
+ * @returns             IANA timezone string safe for use with Intl.DateTimeFormat
+ */
+export function resolveHospitableTimezone(
+  hospTimezone: string | null | undefined,
+  state:        string | null | undefined
+): string {
+  const STATE_TIMEZONE: Record<string, string> = {
+    // Eastern (UTC-5/UTC-4 DST)
+    CT: 'America/New_York',  DE: 'America/New_York',  FL: 'America/New_York',
+    GA: 'America/New_York',  MA: 'America/New_York',  MD: 'America/New_York',
+    ME: 'America/New_York',  MI: 'America/Detroit',   NC: 'America/New_York',
+    NH: 'America/New_York',  NJ: 'America/New_York',  NY: 'America/New_York',
+    OH: 'America/New_York',  PA: 'America/New_York',  RI: 'America/New_York',
+    SC: 'America/New_York',  VA: 'America/New_York',  VT: 'America/New_York',
+    WV: 'America/New_York',
+    // Indiana splits — use Indianapolis as the dominant zone
+    IN: 'America/Indiana/Indianapolis',
+    // Central (UTC-6/UTC-5 DST)
+    AL: 'America/Chicago',   AR: 'America/Chicago',   IA: 'America/Chicago',
+    IL: 'America/Chicago',   KS: 'America/Chicago',   KY: 'America/Chicago',
+    LA: 'America/Chicago',   MN: 'America/Chicago',   MO: 'America/Chicago',
+    MS: 'America/Chicago',   ND: 'America/Chicago',   NE: 'America/Chicago',
+    OK: 'America/Chicago',   SD: 'America/Chicago',   TN: 'America/Chicago',
+    TX: 'America/Chicago',   WI: 'America/Chicago',
+    // Mountain (UTC-7/UTC-6 DST)
+    CO: 'America/Denver',    MT: 'America/Denver',    NM: 'America/Denver',
+    UT: 'America/Denver',    WY: 'America/Denver',
+    // Mountain no-DST
+    AZ: 'America/Phoenix',
+    // Pacific (UTC-8/UTC-7 DST)
+    CA: 'America/Los_Angeles', NV: 'America/Los_Angeles',
+    OR: 'America/Los_Angeles', WA: 'America/Los_Angeles',
+    // Non-contiguous
+    AK: 'America/Anchorage',
+    HI: 'Pacific/Honolulu',
+    // Idaho splits — Boise (south) is most common for STR market
+    ID: 'America/Boise',
+  }
+
+  const normalized = state?.trim().toUpperCase()
+  if (normalized && STATE_TIMEZONE[normalized]) {
+    return STATE_TIMEZONE[normalized]!
+  }
+
+  // Fallback — Central is the most common timezone in the US STR market
+  // and is preferable to Eastern as a generic default for unknown states
+  return 'America/Chicago'
+}
+
 // ── Utility ───────────────────────────────────────────────────────────────────
 
 function timingSafeEqual(a: string, b: string): boolean {
