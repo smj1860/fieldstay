@@ -7,7 +7,7 @@ import {
   ArrowLeft, Camera, CheckCircle2, Circle,
   Loader2, ImageIcon, AlertCircle, AlertTriangle,
   Minus, Plus, MapPin, CheckSquare, ChevronRight, Package,
-  StickyNote,
+  StickyNote, Check,
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
@@ -305,8 +305,9 @@ export default function CrewTurnoverPage() {
         </div>
 
         {turnover.notes && (
-          <p className="mt-3 text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2">
-            📝 {turnover.notes}
+          <p className="mt-3 text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2 flex items-start gap-1.5">
+            <StickyNote className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>{turnover.notes}</span>
           </p>
         )}
       </div>
@@ -399,7 +400,7 @@ export default function CrewTurnoverPage() {
             {completing
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
               : turnover.status === 'completed'
-              ? '✓ Marked Complete'
+              ? <><Check className="w-4 h-4" /> Marked Complete</>
               : 'Mark as Complete'}
           </button>
 
@@ -506,7 +507,9 @@ export default function CrewTurnoverPage() {
                             <p className="text-xs text-amber-600 mt-0.5">Photo required before completing</p>
                           )}
                           {item.requires_photo && item.photo_reason && (
-                            <p className="text-xs text-amber-600 mt-0.5">📷 {item.photo_reason}</p>
+                            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                              <Camera className="w-3.5 h-3.5 flex-shrink-0" /> {item.photo_reason}
+                            </p>
                           )}
                         </button>
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useActionState } from 'react'
-import { Plus, Check } from 'lucide-react'
+import { Plus, Check, AlertTriangle } from 'lucide-react'
 import {
   addCrewMember,
   inviteCrewMember,
@@ -67,7 +67,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
             border:          '1px solid var(--accent-amber)',
           }}
         >
-          <span className="text-base flex-shrink-0">⚠️</span>
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent-amber)' }} />
           <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
             You haven't added any crew members yet. Add at least one crew member
             before continuing so FieldStay can assign turnovers automatically.
@@ -163,7 +163,7 @@ function InviteChip({
   const [busy, setBusy] = useState(false)
 
   if (hasApp) return <span className="badge badge-green text-xs">In App</span>
-  if (sent)   return <span className="text-xs" style={{ color: 'var(--accent-green)' }}>✓ Invited</span>
+  if (sent)   return <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--accent-green)' }}><Check className="w-3.5 h-3.5" /> Invited</span>
 
   return (
     <button onClick={async () => { setBusy(true); await inviteCrewMember(memberId); setBusy(false); setSent(true) }}

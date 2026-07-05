@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate, cloneChecklistFromProperty } from './actions'
-import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check, ClipboardList, AlertTriangle } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
@@ -353,8 +353,8 @@ export function ChecklistBuilder({
       )}
 
       <div className="flex items-center gap-3 pt-4 border-t border-themed flex-wrap">
-        <button onClick={save} disabled={saving} className="btn-secondary">
-          {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Checklist'}
+        <button onClick={save} disabled={saving} className="btn-secondary inline-flex items-center gap-1.5">
+          {saving ? 'Saving…' : saved ? <><Check className="w-4 h-4" /> Saved</> : 'Save Checklist'}
         </button>
         <button
           disabled={completing}
@@ -376,9 +376,9 @@ export function ChecklistBuilder({
           <button
             type="button"
             onClick={() => setBroadcastModal(true)}
-            className={sourceProperties.length > 0 ? 'btn-secondary text-xs' : 'btn-secondary text-xs ml-auto'}
+            className={`inline-flex items-center gap-1.5 ${sourceProperties.length > 0 ? 'btn-secondary text-xs' : 'btn-secondary text-xs ml-auto'}`}
           >
-            📋 Apply to Other Properties
+            <ClipboardList className="w-3.5 h-3.5" /> Apply to Other Properties
           </button>
         )}
       </div>
@@ -422,8 +422,9 @@ export function ChecklistBuilder({
         <p className="text-xs text-muted-themed mb-1">
           This will replace the current checklist entirely with a copy from the selected property.
         </p>
-        <p className="text-xs font-semibold mb-4" style={{ color: 'var(--accent-amber)' }}>
-          ⚠ Any existing checklist on this property will be overwritten.
+        <p className="text-xs font-semibold mb-4 flex items-center gap-1.5" style={{ color: 'var(--accent-amber)' }}>
+          <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
+          Any existing checklist on this property will be overwritten.
         </p>
         <select
           value={cloneFromSource}

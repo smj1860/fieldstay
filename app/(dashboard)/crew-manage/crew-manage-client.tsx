@@ -437,7 +437,7 @@ function InviteButton({ memberId, inviteSentAt }: { memberId: string; inviteSent
 
   if (sent) {
     return (
-      <p className="text-xs text-center" style={{ color: 'var(--accent-green)' }}>✓ Invite sent</p>
+      <p className="text-xs text-center inline-flex items-center justify-center gap-1" style={{ color: 'var(--accent-green)' }}><Check className="w-3.5 h-3.5" /> Invite sent</p>
     )
   }
 
@@ -863,7 +863,7 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
             Active
           </span>
         ) : inviteSent ? (
-          <span className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>✓ Invite sent</span>
+          <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: 'var(--accent-gold)' }}><Check className="w-3.5 h-3.5" /> Invite sent</span>
         ) : member.invite_sent_at ? (
           <button onClick={handleInvite} disabled={inviting}
                   className="text-xs underline underline-offset-2 disabled:opacity-50"

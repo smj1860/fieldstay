@@ -4,7 +4,7 @@ import { useEffect, useState }     from 'react'
 import { useLiveQuery }            from 'dexie-react-hooks'
 import { useDexieDb }              from '@/lib/dexie/context'
 import { useRouter }              from 'next/navigation'
-import { ArrowLeft, Wrench }      from 'lucide-react'
+import { ArrowLeft, Wrench, CheckCircle2, Check } from 'lucide-react'
 import type { PropertyRow } from '@/lib/dexie/schema'
 
 export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: string }> }) {
@@ -57,7 +57,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
 
   if (done) return (
     <div className="p-6 text-center">
-      <div className="text-4xl mb-4">✅</div>
+      <CheckCircle2 className="w-10 h-10 mx-auto mb-4" style={{ color: 'var(--accent-green)' }} />
       <h2 className="font-bold text-primary-themed text-lg mb-2">Work Complete</h2>
       <p className="text-sm text-muted-themed mb-6">Your PM has been notified.</p>
       <button
@@ -138,7 +138,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
 
         {wo.status === 'completed' && (
           <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-            <p className="text-sm font-bold text-green-700">Completed ✓</p>
+            <p className="text-sm font-bold text-green-700 flex items-center justify-center gap-1"><Check className="w-4 h-4" /> Completed</p>
           </div>
         )}
       </div>

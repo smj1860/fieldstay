@@ -150,8 +150,18 @@ export default async function VendorDetailPage({ params }: Props) {
           {vendor.avg_rating !== null && vendor.rating_count > 0 && (
             <>
               <span className="text-muted-themed">Rating</span>
-              <span className="text-secondary-themed font-medium">
-                {'★'.repeat(Math.round(vendor.avg_rating))}{'☆'.repeat(5 - Math.round(vendor.avg_rating))} ({vendor.rating_count})
+              <span className="text-secondary-themed font-medium inline-flex items-center gap-0.5">
+                {Array.from({ length: 5 }, (_, i) => (
+                  <Star
+                    key={i}
+                    className="w-3.5 h-3.5"
+                    style={{
+                      color: i < Math.round(vendor.avg_rating!) ? 'var(--accent-gold)' : 'var(--border-strong)',
+                      fill:  i < Math.round(vendor.avg_rating!) ? 'var(--accent-gold)' : 'none',
+                    }}
+                  />
+                ))}
+                <span className="ml-1">({vendor.rating_count})</span>
               </span>
             </>
           )}
