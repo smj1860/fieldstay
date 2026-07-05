@@ -1,5 +1,12 @@
 // lib/inngest/functions/hospitable/token-refresh-cron.ts
 // ============================================================
+// DEPRECATED — superseded by integrationTokenRefreshCron
+// (lib/inngest/functions/cron/integration-token-refresh.ts), which covers
+// Hospitable and Kroger on a bi-hourly, expiry-aware schedule instead of
+// this weekly blanket refresh. Kept running for one deploy cycle rather
+// than removed outright; safe to leave in place in the meantime since a
+// redundant refresh is a no-op. Slated for removal in a follow-up.
+//
 // Weekly cron — dispatches one refresh event per active Hospitable connection.
 // Each connection is handled by hospTokenRefreshHandler in its own function
 // invocation, avoiding unbounded step counts and scale limits.

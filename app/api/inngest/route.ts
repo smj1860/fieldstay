@@ -39,6 +39,11 @@ import { hospIncrementalSync }          from '@/lib/inngest/functions/hospitable
 import { hospTokenRefreshCron }         from '@/lib/inngest/functions/hospitable/token-refresh-cron'
 import { hospTokenRefreshHandler }      from '@/lib/inngest/functions/hospitable/token-refresh-handler'
 
+// Proactive token refresh — unified cron covering all OAuth providers,
+// supersedes hospTokenRefreshCron/Handler above (deprecated, not yet removed)
+import { integrationTokenRefreshCron }    from '@/lib/inngest/functions/cron/integration-token-refresh'
+import { integrationTokenRefreshHandler } from '@/lib/inngest/functions/cron/integration-token-refresh-handler'
+
 // Turnover flag → WO
 import { flaggedTurnoverToWO } from '@/lib/inngest/functions/flagged-turnover-wo'
 
@@ -171,6 +176,10 @@ export const { GET, POST, PUT } = serve({
     hospIncrementalSync,
     hospTokenRefreshCron,
     hospTokenRefreshHandler,
+
+    // Proactive token refresh — all OAuth providers
+    integrationTokenRefreshCron,
+    integrationTokenRefreshHandler,
 
     // Flagged turnover → WO
     flaggedTurnoverToWO,

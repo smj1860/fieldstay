@@ -1,5 +1,11 @@
 // lib/inngest/functions/hospitable/token-refresh-handler.ts
 // ============================================================
+// DEPRECATED — paired with the deprecated hospTokenRefreshCron above.
+// See lib/inngest/functions/cron/integration-token-refresh-handler.ts for
+// the unified replacement, which also marks the connection revoked and
+// emails the PM on terminal failure (this handler does neither). Slated
+// for removal in a follow-up along with the cron.
+//
 // Handles a single Hospitable token refresh, triggered by the weekly cron.
 // Running per-user in isolation means one failure never blocks others.
 // ============================================================

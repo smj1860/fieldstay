@@ -600,6 +600,19 @@ export type FieldStayEvents = {
   }
 
   // ----------------------------------------------------------
+  // Proactive token refresh (all OAuth providers)
+  // ----------------------------------------------------------
+
+  'integration/token.proactive.refresh.requested': {
+    data: {
+      user_id:          string
+      org_id:           string | null
+      provider_id:      string
+      external_user_id: string
+    }
+  }
+
+  // ----------------------------------------------------------
   // Hostaway Integration
   // ----------------------------------------------------------
 
