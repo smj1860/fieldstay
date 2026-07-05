@@ -391,7 +391,7 @@
   /* ── Homepage (marketing) ──
      app/page.tsx is intentionally locked to the dark navy brand palette —
      no theme toggle, no `.theme-locked-light-passive-dark` wrapper, no
-     --text-*/--bg-* vars. These classes use static values (not CSS vars)
+     --text-* / --bg-* vars. These classes use static values (not CSS vars)
      on purpose so the page never reacts to the stored `fs-theme` preference
      or prefers-color-scheme. Replaces what used to be onMouseOver/onMouseOut
      inline handlers on the nav "Log In" link. */
