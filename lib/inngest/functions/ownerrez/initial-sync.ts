@@ -14,7 +14,12 @@ import { NonRetriableError }    from 'inngest'
 import { createServiceClient }  from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
-import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing, OwnerRezListingAmenityCategory } from '@/lib/integrations/types'
+import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing } from '@/lib/integrations/types'
+import {
+  mapOwnerRezBookingStatus,
+  mapOwnerRezChannelToSource,
+  buildOwnerRezDetailPatch,
+} from '@/lib/integrations/providers/ownerrez'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
@@ -29,23 +34,6 @@ import {
 } from '@/lib/guidebook/sync'
 
 const PROVIDER = 'ownerrez'
-
-// Actual structure is amenity_categories with nested amenities[].title —
-// not a flat array with an amenity_id field.
-function normalizeAmenities(categories: OwnerRezListingAmenityCategory[]): Record<string, boolean> {
-  const result: Record<string, boolean> = {}
-  for (const category of categories ?? []) {
-    for (const amenity of category.amenities ?? []) {
-      if (!amenity.title) continue
-      const key = amenity.title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '_')
-        .replace(/^_|_$/g, '')
-      result[key] = true // presence in the list = amenity exists at the property
-    }
-  }
-  return result
-}
 
 async function writeSyncCount(
   user_id: string,
@@ -278,56 +266,11 @@ export const ownerRezInitialSync = inngest.createFunction(
           const orId     = Number(dbProp.external_id)
           const detail   = await client.getPropertyDetail(orId).catch(() => null)
 
-          const patch: Record<string, unknown> = {}
-
-          if (detail) {
-            // NOTE: WiFi, check-in instructions, and house manual are NOT on
-            // GET /v2/properties/{id} — they live on the listings endpoint
-            // and are mapped from `listing` below instead.
-
-            // Extract address fields from the addresses array
-            const defaultAddress =
-              (detail.addresses ?? []).find((a) => a.is_default) ??
-              (detail.addresses ?? [])[0]
-
-            if (defaultAddress) {
-              if (defaultAddress.street1)     patch.address = defaultAddress.street1
-              if (defaultAddress.state)       patch.state   = defaultAddress.state
-              if (defaultAddress.city)        patch.city    = defaultAddress.city
-              if (defaultAddress.postal_code) patch.zip     = defaultAddress.postal_code
-            }
-            if (detail.latitude)  patch.lat = detail.latitude
-            if (detail.longitude) patch.lng = detail.longitude
-
-            // Occupancy and rules — always sync from OwnerRez
-            if (detail.max_guests)                     patch.max_guests      = detail.max_guests
-            if (detail.smoking_allowed !== undefined)  patch.smoking_allowed = detail.smoking_allowed
-            if (detail.pets_allowed !== undefined)     patch.pets_allowed    = detail.pets_allowed
-            if (detail.max_pets !== undefined)         patch.max_pets        = detail.max_pets
-            if (detail.events_allowed !== undefined)   patch.events_allowed  = detail.events_allowed
-            if (detail.min_renter_age)                 patch.min_renter_age  = detail.min_renter_age
-          }
-
-          // WiFi, instructions, house manual, and amenities — from the batch
-          // listings call, which is the actual source for these fields
+          // NOTE: WiFi, check-in instructions, and house manual are NOT on
+          // GET /v2/properties/{id} — they live on the listings endpoint
+          // and are mapped from `listing` instead.
           const listing = listingByPropertyId[String(orId)]
-          if (listing) {
-            if (!dbProp.wifi_name && listing.wifi_network)
-              patch.wifi_name = listing.wifi_network
-
-            if (!dbProp.wifi_password && listing.wifi_password)
-              patch.wifi_password = listing.wifi_password
-
-            if (!dbProp.access_instructions && listing.check_in_instructions)
-              patch.access_instructions = listing.check_in_instructions
-
-            if (!dbProp.house_manual && listing.house_manual)
-              patch.house_manual = listing.house_manual
-
-            if (listing.amenity_categories?.length) {
-              patch.amenities = normalizeAmenities(listing.amenity_categories)
-            }
-          }
+          const patch    = buildOwnerRezDetailPatch(dbProp, detail, listing)
 
           if (Object.keys(patch).length === 0) return { skipped: true }
 
@@ -519,8 +462,8 @@ export const ownerRezInitialSync = inngest.createFunction(
             guest_email:     b.guest?.email ?? null,
             checkin_date:    b.arrival,
             checkout_date:   b.departure,
-            source:          mapChannelToSource(b.channel_name),
-            status:          mapBookingStatus(b.status),
+            source:          mapOwnerRezChannelToSource(b.channel_name),
+            status:          mapOwnerRezBookingStatus(b.status),
             external_id:     String(b.id),
             external_source: PROVIDER,
             is_block:        b.is_block ?? false,
@@ -774,23 +717,3 @@ export const ownerRezInitialSync = inngest.createFunction(
     return { user_id, synced: true }
   }
 )
-
-// ── Data mapping helpers ──────────────────────────────────────────────────────
-
-function mapBookingStatus(status: string): string {
-  const s = status.toLowerCase()
-  if (s === 'confirmed') return 'confirmed'
-  if (s === 'cancelled' || s === 'canceled') return 'cancelled'
-  if (s === 'tentative') return 'tentative'
-  return 'confirmed'
-}
-
-function mapChannelToSource(channel?: string): string {
-  if (!channel) return 'other'
-  const c = channel.toLowerCase()
-  if (c.includes('airbnb'))                    return 'airbnb'
-  if (c.includes('vrbo') || c.includes('homeaway')) return 'vrbo'
-  if (c.includes('booking'))                   return 'booking_com'
-  if (c.includes('direct'))                    return 'direct'
-  return 'other'
-}
