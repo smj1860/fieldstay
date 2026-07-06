@@ -19,6 +19,7 @@ import type { AssetType }       from '@/types/database'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
+import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 import {
   ensureGuidebookConfiguration,
   createGuidebookPropertyConfigsForProperties,
@@ -489,6 +490,22 @@ export const ownerRezInitialSync = inngest.createFunction(
           `[OwnerRez:${user_id}] Asset discovery seeded for ${seeded}/${propertiesWithAmenities.length} properties`
         )
         return { seeded, total: propertiesWithAmenities.length }
+      })
+
+      // ── Step 1f: Seed confirmed-present assets from amenity data ───────────
+      // Complements the step above: creates a bare-stub, active property_assets
+      // row (is_na: false, no make/model) for washer/dryer/dishwasher/microwave/
+      // refrigerator/oven_range/fire_extinguisher when amenity data confirms
+      // they're present. Crew discovery still runs normally to capture full
+      // details later — see seedPresentAssetsFromAmenities() for why.
+      await step.run('seed-present-assets-from-amenities', async () => {
+        try {
+          const { seeded, total } = await seedPresentAssetsFromAmenities(org_id)
+          logger.info(`[OwnerRez:${user_id}] Present-asset seeding: ${seeded}/${total} properties`)
+        } catch (err) {
+          logger.error(`[OwnerRez:${user_id}] present-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
+          // Non-fatal — don't throw, don't block the sync
+        }
       })
 
       // ── Create org-level guidebook config with 30-day trial ───────────────────

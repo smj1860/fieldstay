@@ -35,6 +35,7 @@ import { resend, FROM }                 from '@/lib/resend/client'
 import { getPmEmail }                   from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
+import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 
 const PROVIDER = 'ownerrez'
 
@@ -542,6 +543,17 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             await createGuidebookPropertyConfigsForProperties(conn.org_id, affectedIds)
           } catch (err) {
             logger.error(`[OwnerRez:${conn.user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
+          }
+        })
+
+        // No-op until amenities data exists for these properties (this file
+        // doesn't currently fetch property details — see the TODO above), but
+        // included for parity so it activates automatically once it does.
+        await step.run(`seed-present-assets-from-amenities-${conn.user_id}`, async () => {
+          try {
+            await seedPresentAssetsFromAmenities(conn.org_id, affectedIds)
+          } catch (err) {
+            logger.error(`[OwnerRez:${conn.user_id}] present-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
           }
         })
       }
