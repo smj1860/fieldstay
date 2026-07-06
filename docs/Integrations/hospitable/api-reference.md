@@ -51,9 +51,15 @@
 ```
 per_page: 100
 include:  "listings"  (requires listing:read)
-include:  "details"   (no additional scope — adds amenities, house_rules,
-                        description, summary, house_manual, wifi_network,
-                        wifi_password, capacity.bathrooms, currency)
+include:  "details"   (no additional scope — see confirmed shape below)
+```
+
+**✅ Confirmed live (2026-07-06) top-level keys with `include=details`:**
+```
+id, name, public_name, picture, address, timezone, listed, currency,
+summary, description, checkin, checkout, amenities, capacity,
+room_details, property_type, room_type, tags, house_rules, details,
+calendar_restricted, parent_child
 ```
 
 **FieldStay field mapping (✅ confirmed live):**
@@ -68,15 +74,19 @@ include:  "details"   (no additional scope — adds amenities, house_rules,
 | `details.addresses[0].postal_code` | `properties.zip` | |
 | `details.capacity.bedrooms` | `properties.bedrooms` | |
 | `details.capacity.max` | `properties.max_guests` | |
-| `check-in` | `properties.checkin_time` | ⚠️ Use `extractHospitableTime()` — returns ISO datetime, not HH:MM |
-| `check-out` | `properties.checkout_time` | ⚠️ Same as above |
+| `checkin` | `properties.checkin_time` | ✅ Confirmed live — plain `"HH:MM"` string. ⚠️ NOT `check-in` (hyphenated) — that key does not exist in the response. Every sync before this fix silently fell back to the `'15:00'` default instead of the real time |
+| `checkout` | `properties.checkout_time` | ✅ Confirmed live — plain `"HH:MM"` string. Same `check-out` correction as above |
 | `timezone` | `properties.timezone` | ⚠️ Returns UTC offset (`-0500`), NOT IANA — use `resolveHospitableTimezone(prop.timezone, addr.state)` |
 | `listed` | — | DO NOT use for `is_active` — listed = published to channels, not in PM's portfolio. Always set `is_active: true` |
 
-**⚠️ Unconfirmed — `include=details` fields (added to `HospitableProperty`, not yet verified against a live response):**
-`amenities` (string[]), `currency`, `description`, `summary`, `house_rules` ({pets_allowed, smoking_allowed, events_allowed}), `house_manual`, `wifi_network`, `wifi_password`, `capacity.bathrooms`. `hospFetchProperties()` in `lib/integrations/providers/hospitable.ts` requests and types these, but **nothing maps them into a DB upsert yet** — that's a separate follow-up.
+**✅ Confirmed live — additional `include=details` fields:**
+`amenities` (string[], e.g. `['ac', 'dishwasher', 'wireless_internet', ...]`), `currency` (e.g. `'USD'`), `description` / `summary` (empty string `''` when unset, NOT `null`), `house_rules` (`{pets_allowed, smoking_allowed, events_allowed}`), `capacity.bathrooms`.
 
-**🔒 Security note — `wifi_password`:** This is a credential, not property metadata. When wiring it into a DB upsert, do **not** add it to the `properties` table or any row a wider audience (e.g. the owner portal) can select from. Route it through `guidebook_property_configs` instead — that table already exists for guest/crew-facing WiFi, check-in, and house-rule content, and is scoped by its own RLS policy. Never log this field.
+**⚠️ Unconfirmed — not yet inspected:** `picture`, `tags`, `calendar_restricted`, `parent_child` (likely multi-unit/parent-listing linkage), and the contents of the top-level **`details`** object.
+
+**Important — `house_manual` / `wifi_network` / `wifi_password` are NOT top-level fields.** An earlier assumption (before live verification) had them flattened onto the property object — confirmed wrong. They're presumed nested inside the top-level `details` key instead; exact shape not yet inspected. `hospFetchProperties()` in `lib/integrations/providers/hospitable.ts` types `details` as `Record<string, unknown> | null` pending that. **Nothing from `include=details` maps into a DB upsert yet** — that's a separate follow-up.
+
+**🔒 Security note — `wifi_password` (and anything else inside `details`):** This is a credential, not property metadata. When wiring it into a DB upsert, do **not** add it to the `properties` table or any row a wider audience (e.g. the owner portal) can select from. Route it through `guidebook_property_configs` instead — that table already exists for guest/crew-facing WiFi, check-in, and house-rule content, and is scoped by its own RLS policy. Never log this field, or any `details` sub-value whose key name looks wifi/password/manual-shaped, without redacting to presence/length first.
 
 **Known quirks:**
 - `prop.timezone` is a UTC offset string like `-0500`. Node's `Intl` API requires IANA identifiers. Derive timezone from `addr.state` using `resolveHospitableTimezone()` in `lib/integrations/providers/hospitable.ts`.

@@ -57,26 +57,39 @@ export const hospInitialSync = inngest.createFunction(
         const properties = await hospFetchProperties(token)
         logger.info(`[Hospitable:${user_id}] Fetched ${properties.length} properties`)
 
-        // ── DIAGNOSTIC — remove once include=details shape is confirmed live.
-        // Logs the first property's raw field names plus the non-sensitive
-        // include=details values, to confirm what Hospitable actually returns
-        // before wiring any of it into a DB upsert. wifi_password, wifi_network,
-        // and house_manual are credential-adjacent (house_manual often embeds
-        // the WiFi password as free text) — only their presence/length is
-        // logged, never their content.
+        // ── DIAGNOSTIC — remove once the nested `details` object shape is
+        // confirmed live. house_manual/wifi_network/wifi_password are NOT
+        // top-level fields (confirmed 2026-07-06) — they're presumed nested
+        // under the top-level `details` key instead. Any sub-key whose name
+        // looks wifi/password/manual-shaped only ever logs presence/length,
+        // never its value, since house_manual free text often embeds the
+        // WiFi password.
         if (properties.length > 0) {
           const p = properties[0] as unknown as Record<string, unknown>
+          const details = (p.details ?? null) as Record<string, unknown> | null
+          const SENSITIVE_KEY = /wifi|password|manual/i
+
+          const detailsSummary = details
+            ? Object.fromEntries(
+                Object.entries(details).map(([key, value]) => [
+                  key,
+                  SENSITIVE_KEY.test(key)
+                    ? { present: Boolean(value), length: typeof value === 'string' ? value.length : null }
+                    : value,
+                ])
+              )
+            : 'FIELD_MISSING'
+
           logger.info(`[Hospitable:${user_id}] Property details diagnostic`, {
-            rawKeys:      Object.keys(p),
-            amenities:    properties[0].amenities ?? 'FIELD_MISSING',
-            currency:     properties[0].currency ?? 'FIELD_MISSING',
-            description:  properties[0].description?.slice(0, 80) ?? 'FIELD_MISSING',
-            summary:      properties[0].summary?.slice(0, 80) ?? 'FIELD_MISSING',
-            house_rules:  properties[0].house_rules ?? 'FIELD_MISSING',
-            bathrooms:    properties[0].capacity?.bathrooms ?? 'FIELD_MISSING',
-            house_manual: { present: Boolean(p.house_manual), length: (p.house_manual as string | null)?.length ?? 0 },
-            wifi_network: { present: Boolean(p.wifi_network) },
-            wifi_password: { present: Boolean(p.wifi_password) },
+            rawKeys:     Object.keys(p),
+            amenities:   properties[0].amenities ?? 'FIELD_MISSING',
+            currency:    properties[0].currency ?? 'FIELD_MISSING',
+            description: properties[0].description?.slice(0, 80) ?? 'FIELD_MISSING',
+            summary:     properties[0].summary?.slice(0, 80) ?? 'FIELD_MISSING',
+            house_rules: properties[0].house_rules ?? 'FIELD_MISSING',
+            bathrooms:   properties[0].capacity?.bathrooms ?? 'FIELD_MISSING',
+            detailsKeys: details ? Object.keys(details) : 'FIELD_MISSING',
+            details:     detailsSummary,
           })
         }
         // ── END DIAGNOSTIC ─────────────────────────────────────────────────
@@ -110,8 +123,8 @@ export const hospInitialSync = inngest.createFunction(
             property_type:           'other' as const,
             avg_stay_length:         0,
             avg_turnovers_per_month: 0,
-            checkin_time:            prop['check-in']  ?? '15:00',
-            checkout_time:           prop['check-out'] ?? '11:00',
+            checkin_time:            prop.checkin  ?? '15:00',
+            checkout_time:           prop.checkout ?? '11:00',
             // prop.timezone is a UTC offset (e.g. "-0500"), not an IANA identifier.
             // Derive from property state for DST-correct Intl compatibility.
             timezone:                resolveHospitableTimezone(prop.timezone, addr.state),
