@@ -57,43 +57,6 @@ export const hospInitialSync = inngest.createFunction(
         const properties = await hospFetchProperties(token)
         logger.info(`[Hospitable:${user_id}] Fetched ${properties.length} properties`)
 
-        // ── DIAGNOSTIC — remove once the nested `details` object shape is
-        // confirmed live. house_manual/wifi_network/wifi_password are NOT
-        // top-level fields (confirmed 2026-07-06) — they're presumed nested
-        // under the top-level `details` key instead. Any sub-key whose name
-        // looks wifi/password/manual-shaped only ever logs presence/length,
-        // never its value, since house_manual free text often embeds the
-        // WiFi password.
-        if (properties.length > 0) {
-          const p = properties[0] as unknown as Record<string, unknown>
-          const details = (p.details ?? null) as Record<string, unknown> | null
-          const SENSITIVE_KEY = /wifi|password|manual/i
-
-          const detailsSummary = details
-            ? Object.fromEntries(
-                Object.entries(details).map(([key, value]) => [
-                  key,
-                  SENSITIVE_KEY.test(key)
-                    ? { present: Boolean(value), length: typeof value === 'string' ? value.length : null }
-                    : value,
-                ])
-              )
-            : 'FIELD_MISSING'
-
-          logger.info(`[Hospitable:${user_id}] Property details diagnostic`, {
-            rawKeys:     Object.keys(p),
-            amenities:   properties[0].amenities ?? 'FIELD_MISSING',
-            currency:    properties[0].currency ?? 'FIELD_MISSING',
-            description: properties[0].description?.slice(0, 80) ?? 'FIELD_MISSING',
-            summary:     properties[0].summary?.slice(0, 80) ?? 'FIELD_MISSING',
-            house_rules: properties[0].house_rules ?? 'FIELD_MISSING',
-            bathrooms:   properties[0].capacity?.bathrooms ?? 'FIELD_MISSING',
-            detailsKeys: details ? Object.keys(details) : 'FIELD_MISSING',
-            details:     detailsSummary,
-          })
-        }
-        // ── END DIAGNOSTIC ─────────────────────────────────────────────────
-
         const supabase = createServiceClient()
         const idMap: Record<string, string> = {}  // hospitable UUID → fieldstay UUID
 

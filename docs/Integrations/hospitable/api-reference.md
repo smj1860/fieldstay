@@ -68,25 +68,37 @@ calendar_restricted, parent_child
 |---|---|---|
 | `id` | `properties.external_id` | UUID |
 | `name` / `public_name` | `properties.name` | Prefer `public_name` |
-| `details.addresses[0].street1` | `properties.address` | Split from address object |
-| `details.addresses[0].city` | `properties.city` | |
-| `details.addresses[0].state` | `properties.state` | 2-letter abbrev |
-| `details.addresses[0].postal_code` | `properties.zip` | |
-| `details.capacity.bedrooms` | `properties.bedrooms` | |
-| `details.capacity.max` | `properties.max_guests` | |
+| `address.number` + `address.street` | `properties.address` | ✅ Confirmed live — `address` is a flat top-level object (`HospitableAddress`), NOT nested under `details` and NOT an array. Fields are `number`/`street`/`city`/`state`/`country`/`postcode` — NOT `street1`/`postal_code` |
+| `address.city` | `properties.city` | |
+| `address.state` | `properties.state` | 2-letter abbrev |
+| `address.postcode` | `properties.zip` | |
+| `capacity.bedrooms` | `properties.bedrooms` | ✅ Confirmed live — `capacity` is top-level, not nested under `details` |
+| `capacity.max` | `properties.max_guests` | |
 | `checkin` | `properties.checkin_time` | ✅ Confirmed live — plain `"HH:MM"` string. ⚠️ NOT `check-in` (hyphenated) — that key does not exist in the response. Every sync before this fix silently fell back to the `'15:00'` default instead of the real time |
 | `checkout` | `properties.checkout_time` | ✅ Confirmed live — plain `"HH:MM"` string. Same `check-out` correction as above |
 | `timezone` | `properties.timezone` | ⚠️ Returns UTC offset (`-0500`), NOT IANA — use `resolveHospitableTimezone(prop.timezone, addr.state)` |
-| `listed` | — | DO NOT use for `is_active` — listed = published to channels, not in PM's portfolio. Always set `is_active: true` |
+| `listed` | — | DO NOT use for `is_active` — listed = published to channels, not in PM's portfolio. Always set `is_active: true`. The incremental-sync webhook handler previously set `is_active: prop.listed` on every `property.changed` update, silently deactivating a property the moment it was unlisted from a channel — fixed to leave `is_active` untouched on updates; only the 404 (property deleted from Hospitable) branch may deactivate |
 
 **✅ Confirmed live — additional `include=details` fields:**
 `amenities` (string[], e.g. `['ac', 'dishwasher', 'wireless_internet', ...]`), `currency` (e.g. `'USD'`), `description` / `summary` (empty string `''` when unset, NOT `null`), `house_rules` (`{pets_allowed, smoking_allowed, events_allowed}`), `capacity.bathrooms`.
 
-**⚠️ Unconfirmed — not yet inspected:** `picture`, `tags`, `calendar_restricted`, `parent_child` (likely multi-unit/parent-listing linkage), and the contents of the top-level **`details`** object.
+**⚠️ Unconfirmed — not yet inspected:** `picture`, `tags`, `calendar_restricted`, `parent_child` (likely multi-unit/parent-listing linkage).
 
-**Important — `house_manual` / `wifi_network` / `wifi_password` are NOT top-level fields.** An earlier assumption (before live verification) had them flattened onto the property object — confirmed wrong. They're presumed nested inside the top-level `details` key instead; exact shape not yet inspected. `hospFetchProperties()` in `lib/integrations/providers/hospitable.ts` types `details` as `Record<string, unknown> | null` pending that. **Nothing from `include=details` maps into a DB upsert yet** — that's a separate follow-up.
+**✅ Confirmed live (2026-07-06) — the top-level `details` object.** Naming collision to watch for: this is unrelated to the `details.addresses[...]`/`details.capacity` notation this doc previously (incorrectly) used — `address` and `capacity` are their own top-level fields. The real `details` object contains free-text and WiFi credential fields:
+```
+details.space_overview
+details.guest_access
+details.house_manual            — credential-adjacent, often embeds the WiFi password as free text
+details.other_details
+details.additional_rules
+details.neighborhood_description
+details.getting_around
+details.wifi_name                — NOT wifi_network as first assumed before live verification
+details.wifi_password            — credential
+```
+**Nothing from `include=details` maps into a DB upsert yet** — that's a separate follow-up.
 
-**🔒 Security note — `wifi_password` (and anything else inside `details`):** This is a credential, not property metadata. When wiring it into a DB upsert, do **not** add it to the `properties` table or any row a wider audience (e.g. the owner portal) can select from. Route it through `guidebook_property_configs` instead — that table already exists for guest/crew-facing WiFi, check-in, and house-rule content, and is scoped by its own RLS policy. Never log this field, or any `details` sub-value whose key name looks wifi/password/manual-shaped, without redacting to presence/length first.
+**🔒 Security note — `details.wifi_password` / `details.house_manual`:** These are credentials, not property metadata. When wiring `details` into a DB upsert, do **not** add them to the `properties` table or any row a wider audience (e.g. the owner portal) can select from. Route them through `guidebook_property_configs` instead — that table already exists for guest/crew-facing WiFi, check-in, and house-rule content, and is scoped by its own RLS policy. Never log `wifi_name`, `wifi_password`, or `house_manual` without redacting to presence/length first.
 
 **Known quirks:**
 - `prop.timezone` is a UTC offset string like `-0500`. Node's `Intl` API requires IANA identifiers. Derive timezone from `addr.state` using `resolveHospitableTimezone()` in `lib/integrations/providers/hospitable.ts`.
