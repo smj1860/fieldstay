@@ -22,16 +22,16 @@ import {
   hospFetchProperties,
   hospFetchReservations,
   hospFetchTeammates,
+  hospitablePropertyToNormalized,
   mapHospitableTeammateRole,
   resolveHospitableTeammateName,
-  resolveHospitableTimezone,
   mapHospitableStatus,
   mapHospitableChannel,
   extractHospitableTime,
-  normalizeHospitableAmenities,
   type HospitableReservation,
   type HospitableTeammate,
 } from '@/lib/integrations/providers/hospitable'
+import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
 import {
@@ -70,82 +70,16 @@ export const hospInitialSync = inngest.createFunction(
         const properties = await hospFetchProperties(token)
         logger.info(`[Hospitable:${user_id}] Fetched ${properties.length} properties`)
 
-        const supabase = createServiceClient()
-        const idMap: Record<string, string> = {}  // hospitable UUID → fieldstay UUID
+        if (!properties.length) return {}
 
-        if (!properties.length) return idMap
+        const normalized = properties.map(hospitablePropertyToNormalized)
 
-        const rows = properties.map((prop) => {
-          const addr = prop.address
-          const addressParts = [addr.number, addr.street].filter(Boolean)
-          const addressStr   = addressParts.join(' ') || null
-
-          const bedroomCount = prop.capacity.bedrooms
-            ?? prop.room_details.filter((r) => r.type === 'bedroom').length
-            ?? 1
-
-          return {
-            org_id,
-            name:                    prop.public_name || prop.name,
-            address:                 addressStr,
-            city:                    addr.city ?? null,
-            state:                   addr.state ?? null,
-            zip:                     addr.postcode ?? null,
-            bedrooms:                bedroomCount,
-            bathrooms:               prop.capacity.bathrooms ?? 1,   // ✅ confirmed live via include=details
-            max_guests:              prop.capacity.max ?? 2,
-            external_id:             prop.id,
-            external_source:         PROVIDER,
-            property_type:           'other' as const,
-            avg_stay_length:         0,
-            avg_turnovers_per_month: 0,
-            checkin_time:            prop.checkin  ?? '15:00',
-            checkout_time:           prop.checkout ?? '11:00',
-            // prop.timezone is a UTC offset (e.g. "-0500"), not an IANA identifier.
-            // Derive from property state for DST-correct Intl compatibility.
-            timezone:                resolveHospitableTimezone(prop.timezone, addr.state),
-            setup_steps_completed:   {} as Record<string, boolean>,
-            is_active:               true,
-
-            // ── Staging fields for the guidebook sync — mirrors the OwnerRez
-            // pattern: raw provider data lands here first, then
-            // syncGuidebookConfigsFromProperty() copies it into
-            // guidebook_property_configs only where the PM hasn't already
-            // entered their own value. wifi_password/house_manual are
-            // credentials/free-text that may embed a credential — this
-            // table already has the exact same columns for OwnerRez.
-            wifi_name:               prop.details?.wifi_name       || null,
-            wifi_password:           prop.details?.wifi_password   || null,
-            access_instructions:     prop.details?.guest_access    || null,
-            house_manual:            prop.details?.house_manual    || null,
-            amenities:               normalizeHospitableAmenities(prop.amenities),
-            smoking_allowed:         prop.house_rules?.smoking_allowed ?? null,
-            pets_allowed:            prop.house_rules?.pets_allowed    ?? null,
-            events_allowed:          prop.house_rules?.events_allowed  ?? null,
-          }
-        })
-
-        const { error: upsertError } = await supabase
-          .from('properties')
-          .upsert(rows, { onConflict: 'external_id,external_source' })
-
-        if (upsertError) {
-          logger.error(`[Hospitable:${user_id}] properties upsert failed: ${upsertError.message}`)
-          throw new Error(`Properties upsert failed: ${upsertError.message}`)
+        try {
+          return await upsertNormalizedProperties(org_id, PROVIDER, normalized)
+        } catch (err) {
+          logger.error(`[Hospitable:${user_id}] properties upsert failed: ${err instanceof Error ? err.message : String(err)}`)
+          throw err
         }
-
-        const { data: upserted } = await supabase
-          .from('properties')
-          .select('id, external_id')
-          .eq('org_id', org_id)
-          .eq('external_source', PROVIDER)
-          .in('external_id', properties.map((p) => p.id))
-
-        for (const row of upserted ?? []) {
-          idMap[row.external_id] = row.id
-        }
-
-        return idMap
       })
 
       // ── 3. Apply master checklist to new properties ───────────────────────
