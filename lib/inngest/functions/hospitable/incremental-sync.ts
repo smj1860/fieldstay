@@ -20,13 +20,13 @@ import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable
 import {
   mapHospitableStatus,
   mapHospitableChannel,
-  resolveHospitableTimezone,
   extractHospitableTime,
-  normalizeHospitableAmenities,
   hospitableFetch,
+  hospitablePropertyToNormalized,
   type HospitableReservation,
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
+import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import {
   createGuidebookPropertyConfigsForProperties,
@@ -319,54 +319,24 @@ export const hospIncrementalSync = inngest.createFunction(
           )
         }
 
-        const data     = await res.json() as { data: HospitableProperty }
-        const prop     = data.data
-        const addr     = prop.address
-        const addressStr = [addr.number, addr.street].filter(Boolean).join(' ') || null
+        const data = await res.json() as { data: HospitableProperty }
+        const prop = data.data
 
-        const supabase = createServiceClient()
-        const { data: updated, error } = await supabase
-          .from('properties')
-          .update({
-            name:          prop.public_name || prop.name,
-            address:       addressStr,
-            city:          addr.city     ?? null,
-            state:         addr.state    ?? null,
-            zip:           addr.postcode ?? null,
-            bedrooms:      prop.capacity.bedrooms  ?? 1,
-            bathrooms:     prop.capacity.bathrooms ?? 1,
-            max_guests:    prop.capacity.max       ?? 2,
-            checkin_time:  prop.checkin  ?? '15:00',
-            checkout_time: prop.checkout ?? '11:00',
-            timezone:      resolveHospitableTimezone(prop.timezone, addr.state),
-            // Do NOT set is_active from prop.listed — listed means "published
-            // to a channel," not "still in the PM's portfolio." A property
-            // unlisted from Airbnb should stay active in FieldStay; the only
-            // path that deactivates a property is the 404 branch above, which
-            // means Hospitable itself no longer has the property at all.
-            //
-            // Staging fields for the guidebook sync — see initial-sync.ts for
-            // the full explanation. syncGuidebookConfigsFromProperty() below
-            // copies these into guidebook_property_configs only where the PM
-            // hasn't already entered their own value.
-            wifi_name:           prop.details?.wifi_name     || null,
-            wifi_password:       prop.details?.wifi_password || null,
-            access_instructions: prop.details?.guest_access  || null,
-            house_manual:        prop.details?.house_manual  || null,
-            amenities:           normalizeHospitableAmenities(prop.amenities),
-            smoking_allowed:     prop.house_rules?.smoking_allowed ?? null,
-            pets_allowed:        prop.house_rules?.pets_allowed    ?? null,
-            events_allowed:      prop.house_rules?.events_allowed  ?? null,
-            updated_at:    new Date().toISOString(),
-          })
-          .eq('external_id',     entity_id)
-          .eq('external_source', PROVIDER)
-          .eq('org_id',          orgId)
-          .select('id')
-          .single()
+        // Do NOT set is_active from prop.listed — listed means "published to
+        // a channel," not "still in the PM's portfolio." A property unlisted
+        // from Airbnb should stay active in FieldStay; the only path that
+        // deactivates a property is the 404 branch above, which means
+        // Hospitable itself no longer has the property at all.
+        //
+        // The PMS is always the source of truth for every field here,
+        // including wifi_name/wifi_password/access_instructions/house_manual
+        // (PM-editable elsewhere) — upsertNormalizedProperties() logs an
+        // audit event before overwriting a real existing value for those,
+        // rather than blocking the overwrite. See lib/properties/normalize.ts.
+        const normalized = hospitablePropertyToNormalized(prop)
+        const idMap = await upsertNormalizedProperties(orgId, PROVIDER, [normalized])
 
-        if (error) throw new Error(`Property update failed: ${error.message}`)
-        return { action: 'updated', propertyId: updated?.id as string | undefined }
+        return { action: 'updated', propertyId: idMap[prop.id] }
       })
 
       const propertyId = fetchAndUpsertResult?.propertyId

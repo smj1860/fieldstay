@@ -91,6 +91,7 @@ export type AuditAction =
   | 'guidebook.grace_period.cleared'
   | 'sms.consent.revoked'
   | 'sms.consent.restored'
+  | 'property.content.overwritten_by_sync'
 
 interface AuditParams {
   orgId?:         string

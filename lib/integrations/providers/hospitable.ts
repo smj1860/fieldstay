@@ -15,6 +15,7 @@
 import { RateLimitError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
 import type { CrewRole } from '@/types/database'
 import { hospitableApiLimiter } from '@/lib/rate-limit'
+import type { NormalizedProperty } from '@/lib/properties/normalize'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -657,6 +658,52 @@ export function normalizeHospitableAmenities(
 ): Record<string, boolean> | null {
   if (!amenities?.length) return null
   return Object.fromEntries(amenities.map((a) => [a, true]))
+}
+
+/**
+ * Maps a raw HospitableProperty into the shared NormalizedProperty shape
+ * (see lib/properties/normalize.ts) for lib/properties/upsert-normalized.ts
+ * to write. Pure function — no I/O, no org context (the writer supplies
+ * org_id at write time).
+ */
+export function hospitablePropertyToNormalized(
+  prop: HospitableProperty
+): NormalizedProperty {
+  const addr          = prop.address
+  const addressParts  = [addr.number, addr.street].filter(Boolean)
+  const addressStr    = addressParts.join(' ') || null
+  const bedroomCount  = prop.capacity.bedrooms
+    ?? prop.room_details.filter((r) => r.type === 'bedroom').length
+    ?? 1
+
+  return {
+    external_id: prop.id,
+    name:        prop.public_name || prop.name,
+    address:     addressStr,
+    city:        addr.city ?? null,
+    state:       addr.state ?? null,
+    zip:         addr.postcode ?? null,
+    bedrooms:    bedroomCount,
+    bathrooms:   prop.capacity.bathrooms ?? 1,
+    max_guests:  prop.capacity.max ?? 2,
+    checkin_time:  prop.checkin  ?? '15:00',
+    checkout_time: prop.checkout ?? '11:00',
+    // prop.timezone is a UTC offset (e.g. "-0500"), not an IANA identifier.
+    // Derive from property state for DST-correct Intl compatibility.
+    timezone: resolveHospitableTimezone(prop.timezone, addr.state),
+    amenities:       normalizeHospitableAmenities(prop.amenities),
+    smoking_allowed: prop.house_rules?.smoking_allowed ?? null,
+    pets_allowed:    prop.house_rules?.pets_allowed    ?? null,
+    events_allowed:  prop.house_rules?.events_allowed  ?? null,
+
+    // Content fields — also always overwritten; see lib/properties/
+    // upsert-normalized.ts's logContentOverwrites() for the audit trail
+    // written before a real existing value is replaced.
+    wifi_name:           prop.details?.wifi_name     || null,
+    wifi_password:       prop.details?.wifi_password || null,
+    access_instructions: prop.details?.guest_access  || null,
+    house_manual:        prop.details?.house_manual  || null,
+  }
 }
 
 // ── Status mapping ────────────────────────────────────────────────────────────
