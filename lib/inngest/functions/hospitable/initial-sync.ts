@@ -212,11 +212,14 @@ export const hospInitialSync = inngest.createFunction(
             : 'API_RETURNED_EMPTY_ARRAY',
         })
 
-        // ── DIAGNOSTIC 2 — isolate whether properties[]/date filters are the
-        // cause, by hitting /reservations with the widest possible net (no
-        // properties[] scoping, 1 year lookback, include=properties only —
-        // no include=guest, so no guest PII ever enters this log). Remove
-        // alongside DIAGNOSTIC 1 once bookings are confirmed landing.
+        // ── DIAGNOSTIC 2 — properties[] is REQUIRED by this endpoint (confirmed
+        // by the 400 the previous version of this diagnostic got when it
+        // omitted properties[] entirely). Keep properties[] but push to the
+        // widest legal window: 1 year lookback, no status[] filter at all,
+        // and log the raw status/body verbatim (capped at 500 chars) so a
+        // non-2xx response is never misread as "zero results". No include=guest,
+        // so no guest PII ever enters this log. Remove alongside DIAGNOSTIC 1
+        // once bookings are confirmed landing.
         if (reservations.length === 0) {
           const wideParams = new URLSearchParams({
             page:       '1',
@@ -225,17 +228,23 @@ export const hospInitialSync = inngest.createFunction(
             include:    'properties',
             date_query: 'checkin',
           })
-          const wideRes = await fetch(
-            `https://public.api.hospitable.com/v2/reservations?${wideParams.toString()}`,
-            { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }
-          )
-          const wideBody = await wideRes.json().catch(() => null) as
-            | { data?: Array<Record<string, unknown>>; meta?: Record<string, unknown> }
-            | null
-          logger.info(`[Hospitable:${user_id}] Account-wide reservation diagnostic (no properties[] filter, 1yr lookback)`, {
-            status: wideRes.status,
-            meta:   wideBody?.meta ?? null,
-            count:  wideBody?.data?.length ?? 0,
+          const widePropertiesQuery = hospPropertyIds
+            .map((id) => `properties[]=${encodeURIComponent(id)}`)
+            .join('&')
+          const wideUrl = `https://public.api.hospitable.com/v2/reservations?${wideParams.toString()}&${widePropertiesQuery}`
+          const wideRes = await fetch(wideUrl, {
+            headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+          })
+          const wideText = await wideRes.text().catch(() => '')
+          let wideBody: { data?: Array<Record<string, unknown>>; meta?: Record<string, unknown> } | null = null
+          try { wideBody = JSON.parse(wideText) } catch { /* leave null, raw text logged below */ }
+
+          logger.info(`[Hospitable:${user_id}] Account-wide reservation diagnostic (properties[] kept, 1yr lookback, no status filter)`, {
+            status:  wideRes.status,
+            ok:      wideRes.ok,
+            rawBody: wideRes.ok ? undefined : wideText.slice(0, 500),
+            meta:    wideBody?.meta ?? null,
+            count:   wideBody?.data?.length ?? 0,
             sample: (wideBody?.data ?? []).slice(0, 3).map((r) => ({
               id:                 r.id,
               platform:           r.platform,
