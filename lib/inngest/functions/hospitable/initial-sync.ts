@@ -57,6 +57,30 @@ export const hospInitialSync = inngest.createFunction(
         const properties = await hospFetchProperties(token)
         logger.info(`[Hospitable:${user_id}] Fetched ${properties.length} properties`)
 
+        // ── DIAGNOSTIC — remove once include=details shape is confirmed live.
+        // Logs the first property's raw field names plus the non-sensitive
+        // include=details values, to confirm what Hospitable actually returns
+        // before wiring any of it into a DB upsert. wifi_password, wifi_network,
+        // and house_manual are credential-adjacent (house_manual often embeds
+        // the WiFi password as free text) — only their presence/length is
+        // logged, never their content.
+        if (properties.length > 0) {
+          const p = properties[0] as unknown as Record<string, unknown>
+          logger.info(`[Hospitable:${user_id}] Property details diagnostic`, {
+            rawKeys:      Object.keys(p),
+            amenities:    properties[0].amenities ?? 'FIELD_MISSING',
+            currency:     properties[0].currency ?? 'FIELD_MISSING',
+            description:  properties[0].description?.slice(0, 80) ?? 'FIELD_MISSING',
+            summary:      properties[0].summary?.slice(0, 80) ?? 'FIELD_MISSING',
+            house_rules:  properties[0].house_rules ?? 'FIELD_MISSING',
+            bathrooms:    properties[0].capacity?.bathrooms ?? 'FIELD_MISSING',
+            house_manual: { present: Boolean(p.house_manual), length: (p.house_manual as string | null)?.length ?? 0 },
+            wifi_network: { present: Boolean(p.wifi_network) },
+            wifi_password: { present: Boolean(p.wifi_password) },
+          })
+        }
+        // ── END DIAGNOSTIC ─────────────────────────────────────────────────
+
         const supabase = createServiceClient()
         const idMap: Record<string, string> = {}  // hospitable UUID → fieldstay UUID
 
