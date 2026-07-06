@@ -336,7 +336,11 @@ export const hospIncrementalSync = inngest.createFunction(
             checkin_time:  prop.checkin  ?? '15:00',
             checkout_time: prop.checkout ?? '11:00',
             timezone:      resolveHospitableTimezone(prop.timezone, addr.state),
-            is_active:     prop.listed,
+            // Do NOT set is_active from prop.listed — listed means "published
+            // to a channel," not "still in the PM's portfolio." A property
+            // unlisted from Airbnb should stay active in FieldStay; the only
+            // path that deactivates a property is the 404 branch above, which
+            // means Hospitable itself no longer has the property at all.
             updated_at:    new Date().toISOString(),
           })
           .eq('external_id',     entity_id)
