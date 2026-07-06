@@ -672,9 +672,14 @@ export function hospitablePropertyToNormalized(
   const addr          = prop.address
   const addressParts  = [addr.number, addr.street].filter(Boolean)
   const addressStr    = addressParts.join(' ') || null
+  // ?? only falls through on null/undefined, not 0 — if capacity.bedrooms
+  // is null and no bedroom-type room_details exist, .length is 0 (not
+  // null), so a trailing `?? 1` would never fire. Using `|| 1` on the
+  // room_details fallback specifically ensures "found zero bedroom rooms"
+  // (an unknown-data signal) still defaults to 1, while a genuine
+  // capacity.bedrooms of 0 (e.g. a true studio) is preserved as-is.
   const bedroomCount  = prop.capacity.bedrooms
-    ?? prop.room_details.filter((r) => r.type === 'bedroom').length
-    ?? 1
+    ?? (prop.room_details.filter((r) => r.type === 'bedroom').length || 1)
 
   return {
     external_id: prop.id,
