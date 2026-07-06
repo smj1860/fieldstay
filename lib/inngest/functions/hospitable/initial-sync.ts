@@ -5,6 +5,7 @@
 //  1. read-token              — pull Bearer token from Vault
 //  2. fetch-and-upsert-props  — hospFetchProperties → upsert to properties
 //  3. apply-master-checklist  — applyMasterChecklistToProperty per new property
+//  3b. seed-asset-discovery-from-amenities — seedPresentAssetsFromAmenities per confirmed amenity
 //  4. fetch-and-upsert-teammates — hospFetchTeammates → upsert to crew_members
 //  5. fetch-and-upsert-res    — hospFetchReservations → upsert to bookings
 //  6. generate-turnovers      — generateTurnoversForProperty per affected property
@@ -37,6 +38,7 @@ import {
   createGuidebookPropertyConfigsForProperties,
   syncGuidebookConfigsFromProperty,
 } from '@/lib/guidebook/sync'
+import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 
 const PROVIDER = 'hospitable'
 
@@ -151,6 +153,21 @@ export const hospInitialSync = inngest.createFunction(
           await applyMasterChecklistToProperty(propertyId, org_id, supabase)
         })
       }
+
+      // ── 3b. Seed confirmed-present assets from amenity data ─────────────────
+      // Creates bare-stub, active property_assets rows for washer/dryer/
+      // dishwasher/microwave/refrigerator/oven_range/fire_extinguisher when
+      // Hospitable's amenities confirm they're present — crew discovery
+      // still runs normally to capture make/model/photo details later.
+      await step.run('seed-asset-discovery-from-amenities', async () => {
+        try {
+          const { seeded, total } = await seedPresentAssetsFromAmenities(org_id, propertyIds)
+          logger.info(`[Hospitable:${user_id}] Asset discovery seeded for ${seeded}/${total} properties`)
+        } catch (err) {
+          logger.error(`[Hospitable:${user_id}] asset discovery seed failed: ${err instanceof Error ? err.message : String(err)}`)
+          // Non-fatal — don't throw, don't block the sync
+        }
+      })
 
       // ── 4. Fetch teammates and upsert as crew members ──────────────────────
       const teammateCount = await step.run('fetch-and-upsert-teammates', async () => {

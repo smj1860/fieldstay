@@ -112,6 +112,22 @@ details.wifi_password            — credential
 
 `properties` is a **staging layer**, not the guest-facing record — `lib/guidebook/sync.ts`'s `syncGuidebookConfigsFromProperty()` copies these columns into `guidebook_property_configs` (`wifi_network`, `wifi_password`, `check_in_instructions`, `house_rules`, `check_out_instructions`) **only when the guidebook field is currently empty**, so a PM's own edits in the guidebook are never overwritten. `createGuidebookPropertyConfigsForProperties()` auto-creates a blank, unpublished (`is_published: false`) config with a unique slug for any active property lacking one, and `ensureGuidebookConfiguration()` starts the org's 30-day guidebook trial (idempotent — never resets an existing trial). All three run in both `hospitable/initial-sync.ts` and `hospitable/incremental-sync.ts`.
 
+**✅ Wired (2026-07-06) — amenity-confirmed appliances seed `property_assets`.** `lib/asset-discovery/seed-from-amenities.ts`'s `seedPresentAssetsFromAmenities()` creates a bare-stub, active `property_assets` row (no make/model — `is_na: false`, so crew is still prompted to capture full details during the next turnover) for asset types Hospitable's `amenities` confirm are present:
+
+| Asset type | Hospitable amenity slug(s) |
+|---|---|
+| `washer` | `washer` |
+| `dryer` | `dryer` |
+| `dishwasher` | `dishwasher` |
+| `microwave` | `microwave` |
+| `refrigerator` | `refrigerator` |
+| `oven_range` | `oven` OR `stove` (either present → one asset, not two) |
+| `fire_extinguisher` | `fire_extinguisher` |
+
+**Intentionally excluded** — amenity presence doesn't confirm a discrete, inspectable unit: `ac`/`heating` → `hvac` (could be a space heater or window unit), `hot_water` → `water_heater`, `wireless_internet` → `wifi_router`, `coffee_maker` → `coffee_station`. Revisit if a future need justifies the ambiguity.
+
+Never duplicates or overwrites an existing active `property_assets` row for the same type. Runs in both `hospitable/initial-sync.ts` (all synced properties) and `hospitable/incremental-sync.ts` (the single updated property).
+
 **🔒 Security note — `wifi_password` / `house_manual`:** These are credentials (or credential-adjacent free text). Storing them on `properties` mirrors the existing OwnerRez convention and is scoped by that table's RLS to org members — never expose them in any public-facing query. Never log `wifi_name`, `wifi_password`, or `house_manual` without redacting to presence/length first.
 
 **Known quirks:**
