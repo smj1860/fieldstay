@@ -82,17 +82,29 @@ export interface HospitableProperty {
   calendar_restricted: boolean  | null
   parent_child:        unknown  | null   // likely multi-unit/parent-listing linkage
 
-  // ✅ Confirmed live: house_manual/wifi_network/wifi_password are NOT
-  // top-level fields despite include=details — the response has a separate
-  // top-level `details` object and those fields are presumed nested inside
-  // it (exact shape pending inspection). wifi_password is a credential, not
-  // property metadata — do NOT persist it onto the `properties` table or any
-  // row a wider audience (e.g. the owner portal) can select from. Route
-  // guest/crew-facing WiFi info through guidebook_property_configs instead,
-  // which already exists for exactly this purpose and is scoped by its own
-  // RLS policy. Never log this field or any value from within `details`
-  // without redacting anything wifi/password/manual-shaped first.
-  details: Record<string, unknown> | null
+  // ✅ Confirmed live (2026-07-06) — house_manual/wifi credentials are NOT
+  // top-level fields despite include=details; they're nested under this
+  // `details` object instead. Note the field is `wifi_name`, NOT
+  // `wifi_network` as first assumed before live verification.
+  //
+  // wifi_password (and anything typed into house_manual, which often embeds
+  // it as free text) is a credential, not property metadata — do NOT persist
+  // it onto the `properties` table or any row a wider audience (e.g. the
+  // owner portal) can select from. Route guest/crew-facing WiFi info through
+  // guidebook_property_configs instead, which already exists for exactly
+  // this purpose and is scoped by its own RLS policy. Never log wifi_name,
+  // wifi_password, or house_manual — redact to presence/length only.
+  details: {
+    space_overview:            string | null
+    guest_access:              string | null
+    house_manual:              string | null
+    other_details:             string | null
+    additional_rules:          string | null
+    neighborhood_description:  string | null
+    getting_around:            string | null
+    wifi_name:                 string | null
+    wifi_password:             string | null
+  } | null
 }
 
 export interface HospitableReservationStatus {
@@ -607,6 +619,17 @@ export async function hospFetchTeammates(token: string): Promise<HospitableTeamm
   }
 
   return teammates
+}
+
+// Converts Hospitable's flat amenity slug array (e.g. ['ac', 'dishwasher'])
+// into the Record<string, boolean> shape properties.amenities expects.
+// Unlike OwnerRez's normalizeAmenities(), Hospitable's slugs are already
+// clean snake_case — no title normalization needed.
+export function normalizeHospitableAmenities(
+  amenities: string[] | null
+): Record<string, boolean> | null {
+  if (!amenities?.length) return null
+  return Object.fromEntries(amenities.map((a) => [a, true]))
 }
 
 // ── Status mapping ────────────────────────────────────────────────────────────

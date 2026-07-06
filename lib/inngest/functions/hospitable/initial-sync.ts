@@ -5,10 +5,12 @@
 //  1. read-token              — pull Bearer token from Vault
 //  2. fetch-and-upsert-props  — hospFetchProperties → upsert to properties
 //  3. apply-master-checklist  — applyMasterChecklistToProperty per new property
+//  3b. seed-asset-discovery-from-amenities — seedPresentAssetsFromAmenities per confirmed amenity
 //  4. fetch-and-upsert-teammates — hospFetchTeammates → upsert to crew_members
 //  5. fetch-and-upsert-res    — hospFetchReservations → upsert to bookings
 //  6. generate-turnovers      — generateTurnoversForProperty per affected property
-//  7. mark-complete           — write last_sync_status to integration_connections
+//  7. guidebook config sync   — ensureGuidebookConfiguration / createGuidebookPropertyConfigsForProperties / syncGuidebookConfigsFromProperty
+//  8. mark-complete           — write last_sync_status to integration_connections
 // ============================================================
 
 import { inngest }             from '@/lib/inngest/client'
@@ -25,11 +27,18 @@ import {
   mapHospitableStatus,
   mapHospitableChannel,
   extractHospitableTime,
+  normalizeHospitableAmenities,
   type HospitableReservation,
   type HospitableTeammate,
 } from '@/lib/integrations/providers/hospitable'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
+import {
+  ensureGuidebookConfiguration,
+  createGuidebookPropertyConfigsForProperties,
+  syncGuidebookConfigsFromProperty,
+} from '@/lib/guidebook/sync'
+import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 
 const PROVIDER = 'hospitable'
 
@@ -57,43 +66,6 @@ export const hospInitialSync = inngest.createFunction(
         const properties = await hospFetchProperties(token)
         logger.info(`[Hospitable:${user_id}] Fetched ${properties.length} properties`)
 
-        // ── DIAGNOSTIC — remove once the nested `details` object shape is
-        // confirmed live. house_manual/wifi_network/wifi_password are NOT
-        // top-level fields (confirmed 2026-07-06) — they're presumed nested
-        // under the top-level `details` key instead. Any sub-key whose name
-        // looks wifi/password/manual-shaped only ever logs presence/length,
-        // never its value, since house_manual free text often embeds the
-        // WiFi password.
-        if (properties.length > 0) {
-          const p = properties[0] as unknown as Record<string, unknown>
-          const details = (p.details ?? null) as Record<string, unknown> | null
-          const SENSITIVE_KEY = /wifi|password|manual/i
-
-          const detailsSummary = details
-            ? Object.fromEntries(
-                Object.entries(details).map(([key, value]) => [
-                  key,
-                  SENSITIVE_KEY.test(key)
-                    ? { present: Boolean(value), length: typeof value === 'string' ? value.length : null }
-                    : value,
-                ])
-              )
-            : 'FIELD_MISSING'
-
-          logger.info(`[Hospitable:${user_id}] Property details diagnostic`, {
-            rawKeys:     Object.keys(p),
-            amenities:   properties[0].amenities ?? 'FIELD_MISSING',
-            currency:    properties[0].currency ?? 'FIELD_MISSING',
-            description: properties[0].description?.slice(0, 80) ?? 'FIELD_MISSING',
-            summary:     properties[0].summary?.slice(0, 80) ?? 'FIELD_MISSING',
-            house_rules: properties[0].house_rules ?? 'FIELD_MISSING',
-            bathrooms:   properties[0].capacity?.bathrooms ?? 'FIELD_MISSING',
-            detailsKeys: details ? Object.keys(details) : 'FIELD_MISSING',
-            details:     detailsSummary,
-          })
-        }
-        // ── END DIAGNOSTIC ─────────────────────────────────────────────────
-
         const supabase = createServiceClient()
         const idMap: Record<string, string> = {}  // hospitable UUID → fieldstay UUID
 
@@ -116,7 +88,7 @@ export const hospInitialSync = inngest.createFunction(
             state:                   addr.state ?? null,
             zip:                     addr.postcode ?? null,
             bedrooms:                bedroomCount,
-            bathrooms:               1,   // Hospitable v2 has no bathroom count in schema
+            bathrooms:               prop.capacity.bathrooms ?? 1,   // ✅ confirmed live via include=details
             max_guests:              prop.capacity.max ?? 2,
             external_id:             prop.id,
             external_source:         PROVIDER,
@@ -130,6 +102,22 @@ export const hospInitialSync = inngest.createFunction(
             timezone:                resolveHospitableTimezone(prop.timezone, addr.state),
             setup_steps_completed:   {} as Record<string, boolean>,
             is_active:               true,
+
+            // ── Staging fields for the guidebook sync — mirrors the OwnerRez
+            // pattern: raw provider data lands here first, then
+            // syncGuidebookConfigsFromProperty() copies it into
+            // guidebook_property_configs only where the PM hasn't already
+            // entered their own value. wifi_password/house_manual are
+            // credentials/free-text that may embed a credential — this
+            // table already has the exact same columns for OwnerRez.
+            wifi_name:               prop.details?.wifi_name       || null,
+            wifi_password:           prop.details?.wifi_password   || null,
+            access_instructions:     prop.details?.guest_access    || null,
+            house_manual:            prop.details?.house_manual    || null,
+            amenities:               normalizeHospitableAmenities(prop.amenities),
+            smoking_allowed:         prop.house_rules?.smoking_allowed ?? null,
+            pets_allowed:            prop.house_rules?.pets_allowed    ?? null,
+            events_allowed:          prop.house_rules?.events_allowed  ?? null,
           }
         })
 
@@ -165,6 +153,21 @@ export const hospInitialSync = inngest.createFunction(
           await applyMasterChecklistToProperty(propertyId, org_id, supabase)
         })
       }
+
+      // ── 3b. Seed confirmed-present assets from amenity data ─────────────────
+      // Creates bare-stub, active property_assets rows for washer/dryer/
+      // dishwasher/microwave/refrigerator/oven_range/fire_extinguisher when
+      // Hospitable's amenities confirm they're present — crew discovery
+      // still runs normally to capture make/model/photo details later.
+      await step.run('seed-asset-discovery-from-amenities', async () => {
+        try {
+          const { seeded, total } = await seedPresentAssetsFromAmenities(org_id, propertyIds)
+          logger.info(`[Hospitable:${user_id}] Asset discovery seeded for ${seeded}/${total} properties`)
+        } catch (err) {
+          logger.error(`[Hospitable:${user_id}] asset discovery seed failed: ${err instanceof Error ? err.message : String(err)}`)
+          // Non-fatal — don't throw, don't block the sync
+        }
+      })
 
       // ── 4. Fetch teammates and upsert as crew members ──────────────────────
       const teammateCount = await step.run('fetch-and-upsert-teammates', async () => {
@@ -343,7 +346,32 @@ export const hospInitialSync = inngest.createFunction(
         }
       }
 
-      // ── 7. Mark sync complete ─────────────────────────────────────────────
+      // ── 7. Guidebook config sync ────────────────────────────────────────────
+      // Mirrors the OwnerRez pattern: start the org's 30-day guidebook trial
+      // if it doesn't already have one, auto-create blank guidebook configs
+      // (with unique slugs) for any active property that lacks one, then
+      // copy the WiFi/house-manual/access-instructions staged onto
+      // `properties` above into the guidebook config — but only where the
+      // PM hasn't already entered their own value.
+      await step.run('create-guidebook-org-config', async () => {
+        await ensureGuidebookConfiguration(org_id)
+      })
+
+      await step.run('create-guidebook-property-configs', async () => {
+        try {
+          await createGuidebookPropertyConfigsForProperties(org_id)
+        } catch (err) {
+          logger.error(`[Hospitable:${user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
+          // Non-fatal — don't throw, don't block the sync
+        }
+      })
+
+      await step.run('sync-guidebook-configs-from-property', async () => {
+        await syncGuidebookConfigsFromProperty(org_id, PROVIDER)
+        logger.info(`[Hospitable:${user_id}] Synced guidebook configs for org ${org_id}`)
+      })
+
+      // ── 8. Mark sync complete ─────────────────────────────────────────────
       await step.run('mark-complete', async () => {
         await updateConnectionMeta(user_id, {
           last_sync_status: 'success',

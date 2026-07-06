@@ -34,7 +34,8 @@ import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { resend, FROM }                 from '@/lib/resend/client'
 import { getPmEmail }                   from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
-import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
+import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
+import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 
 const PROVIDER = 'ownerrez'
 
@@ -538,48 +539,21 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       // Auto-create guidebook property configs for newly synced properties
       if (affectedIds.length) {
         await step.run(`create-guidebook-property-configs-${conn.user_id}`, async () => {
-          const supabase = createServiceClient()
+          try {
+            await createGuidebookPropertyConfigsForProperties(conn.org_id, affectedIds)
+          } catch (err) {
+            logger.error(`[OwnerRez:${conn.user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
+          }
+        })
 
-          const { data: propertiesToCheck } = await supabase
-            .from('properties')
-            .select('id, name')
-            .in('id', affectedIds)
-
-          if (!propertiesToCheck?.length) return
-
-          const { data: existingConfigs } = await supabase
-            .from('guidebook_property_configs')
-            .select('property_id')
-            .in('property_id', affectedIds)
-
-          const alreadyConfigured = new Set(
-            (existingConfigs ?? []).map((c) => c.property_id)
-          )
-
-          const newProperties = propertiesToCheck.filter(
-            (p) => !alreadyConfigured.has(p.id)
-          )
-
-          if (newProperties.length === 0) return
-
-          const slugMap = await generateUniqueSlugsForProperties(newProperties)
-
-          const rows = newProperties.map((p) => ({
-            org_id:       conn.org_id,
-            property_id:  p.id,
-            slug:         slugMap.get(p.id) ?? generateBaseSlug(p.name),
-            is_published: false,
-          }))
-
-          const { error } = await supabase
-            .from('guidebook_property_configs')
-            .upsert(rows, {
-              onConflict:       'org_id,property_id',
-              ignoreDuplicates: true,
-            })
-
-          if (error) {
-            logger.error(`[OwnerRez:${conn.user_id}] guidebook config creation failed: ${error.message}`)
+        // No-op until amenities data exists for these properties (this file
+        // doesn't currently fetch property details — see the TODO above), but
+        // included for parity so it activates automatically once it does.
+        await step.run(`seed-present-assets-from-amenities-${conn.user_id}`, async () => {
+          try {
+            await seedPresentAssetsFromAmenities(conn.org_id, affectedIds)
+          } catch (err) {
+            logger.error(`[OwnerRez:${conn.user_id}] present-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
           }
         })
       }
