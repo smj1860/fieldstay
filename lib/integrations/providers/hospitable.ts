@@ -621,6 +621,17 @@ export async function hospFetchTeammates(token: string): Promise<HospitableTeamm
   return teammates
 }
 
+// Converts Hospitable's flat amenity slug array (e.g. ['ac', 'dishwasher'])
+// into the Record<string, boolean> shape properties.amenities expects.
+// Unlike OwnerRez's normalizeAmenities(), Hospitable's slugs are already
+// clean snake_case — no title normalization needed.
+export function normalizeHospitableAmenities(
+  amenities: string[] | null
+): Record<string, boolean> | null {
+  if (!amenities?.length) return null
+  return Object.fromEntries(amenities.map((a) => [a, true]))
+}
+
 // ── Status mapping ────────────────────────────────────────────────────────────
 
 export function mapHospitableStatus(

@@ -22,10 +22,15 @@ import {
   mapHospitableChannel,
   resolveHospitableTimezone,
   extractHospitableTime,
+  normalizeHospitableAmenities,
   type HospitableReservation,
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
+import {
+  createGuidebookPropertyConfigsForProperties,
+  syncGuidebookConfigsFromProperty,
+} from '@/lib/guidebook/sync'
 
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
@@ -291,9 +296,9 @@ export const hospIncrementalSync = inngest.createFunction(
         return { orgId: property.org_id, token: validToken }
       })
 
-      await step.run('fetch-and-upsert-property', async () => {
+      const fetchAndUpsertResult = await step.run('fetch-and-upsert-property', async () => {
         const res = await fetch(
-          `${HOSPITABLE_API_BASE}/properties/${entity_id}`,
+          `${HOSPITABLE_API_BASE}/properties/${entity_id}?include=details`,
           { headers: buildApiHeaders(token) }
         )
 
@@ -323,7 +328,7 @@ export const hospIncrementalSync = inngest.createFunction(
         const addressStr = [addr.number, addr.street].filter(Boolean).join(' ') || null
 
         const supabase = createServiceClient()
-        const { error } = await supabase
+        const { data: updated, error } = await supabase
           .from('properties')
           .update({
             name:          prop.public_name || prop.name,
@@ -331,8 +336,9 @@ export const hospIncrementalSync = inngest.createFunction(
             city:          addr.city     ?? null,
             state:         addr.state    ?? null,
             zip:           addr.postcode ?? null,
-            bedrooms:      prop.capacity.bedrooms ?? 1,
-            max_guests:    prop.capacity.max      ?? 2,
+            bedrooms:      prop.capacity.bedrooms  ?? 1,
+            bathrooms:     prop.capacity.bathrooms ?? 1,
+            max_guests:    prop.capacity.max       ?? 2,
             checkin_time:  prop.checkin  ?? '15:00',
             checkout_time: prop.checkout ?? '11:00',
             timezone:      resolveHospitableTimezone(prop.timezone, addr.state),
@@ -341,15 +347,43 @@ export const hospIncrementalSync = inngest.createFunction(
             // unlisted from Airbnb should stay active in FieldStay; the only
             // path that deactivates a property is the 404 branch above, which
             // means Hospitable itself no longer has the property at all.
+            //
+            // Staging fields for the guidebook sync — see initial-sync.ts for
+            // the full explanation. syncGuidebookConfigsFromProperty() below
+            // copies these into guidebook_property_configs only where the PM
+            // hasn't already entered their own value.
+            wifi_name:           prop.details?.wifi_name     || null,
+            wifi_password:       prop.details?.wifi_password || null,
+            access_instructions: prop.details?.guest_access  || null,
+            house_manual:        prop.details?.house_manual  || null,
+            amenities:           normalizeHospitableAmenities(prop.amenities),
+            smoking_allowed:     prop.house_rules?.smoking_allowed ?? null,
+            pets_allowed:        prop.house_rules?.pets_allowed    ?? null,
+            events_allowed:      prop.house_rules?.events_allowed  ?? null,
             updated_at:    new Date().toISOString(),
           })
           .eq('external_id',     entity_id)
           .eq('external_source', PROVIDER)
           .eq('org_id',          orgId)
+          .select('id')
+          .single()
 
         if (error) throw new Error(`Property update failed: ${error.message}`)
-        return { action: 'updated' }
+        return { action: 'updated', propertyId: updated?.id as string | undefined }
       })
+
+      const propertyId = fetchAndUpsertResult?.propertyId
+      if (propertyId) {
+        await step.run('sync-guidebook-config-for-property', async () => {
+          try {
+            await createGuidebookPropertyConfigsForProperties(orgId, [propertyId])
+            await syncGuidebookConfigsFromProperty(orgId, PROVIDER, [propertyId])
+          } catch (err) {
+            logger.error(`[Hospitable incremental] guidebook config sync failed for property ${propertyId}: ${err instanceof Error ? err.message : String(err)}`)
+            // Non-fatal — don't throw, don't block the sync
+          }
+        })
+      }
 
       return { action: 'synced', entity_id }
     }

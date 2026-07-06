@@ -19,7 +19,11 @@ import type { AssetType }       from '@/types/database'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
-import { generateUniqueSlugsForProperties, generateBaseSlug } from '@/lib/guidebook/slug'
+import {
+  ensureGuidebookConfiguration,
+  createGuidebookPropertyConfigsForProperties,
+  syncGuidebookConfigsFromProperty,
+} from '@/lib/guidebook/sync'
 
 const PROVIDER = 'ownerrez'
 
@@ -488,74 +492,19 @@ export const ownerRezInitialSync = inngest.createFunction(
       })
 
       // ── Create org-level guidebook config with 30-day trial ───────────────────
-      // ignoreDuplicates: true ensures we never overwrite an existing config
-      // (e.g. if the org reconnects OwnerRez after already having a config).
+      // ensureGuidebookConfiguration is idempotent — never overwrites an
+      // existing trial (e.g. if the org reconnects OwnerRez after already
+      // having a config).
       await step.run('create-guidebook-org-config', async () => {
-        const supabase    = createServiceClient()
-        const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-
-        await supabase
-          .from('guidebook_configurations')
-          .upsert(
-            {
-              org_id:        org_id,
-              is_active:     true,
-              trial_ends_at: trialEndsAt,
-            },
-            {
-              onConflict:       'org_id',
-              ignoreDuplicates: true,
-            }
-          )
+        await ensureGuidebookConfiguration(org_id)
       })
 
       // ── Auto-create guidebook property configs for new properties ─────────────
       await step.run('create-guidebook-property-configs', async () => {
-        const supabase = createServiceClient()
-
-        // Find properties in this org that have no guidebook config yet
-        const { data: allProperties } = await supabase
-          .from('properties')
-          .select('id, name')
-          .eq('org_id', org_id)
-          .eq('is_active', true)
-
-        if (!allProperties?.length) return
-
-        const { data: existingConfigs } = await supabase
-          .from('guidebook_property_configs')
-          .select('property_id')
-          .eq('org_id', org_id)
-
-        const alreadyConfigured = new Set(
-          (existingConfigs ?? []).map((c) => c.property_id)
-        )
-
-        const newProperties = allProperties.filter(
-          (p) => !alreadyConfigured.has(p.id)
-        )
-
-        if (newProperties.length === 0) return
-
-        // Generate unique slugs for all new properties in one batch
-        const slugMap = await generateUniqueSlugsForProperties(newProperties)
-
-        const rows = newProperties.map((p) => ({
-          org_id:      org_id,
-          property_id: p.id,
-          slug:        slugMap.get(p.id) ?? generateBaseSlug(p.name),
-          is_published: false,  // PM must explicitly publish
-        }))
-
-        const { error } = await supabase
-          .from('guidebook_property_configs')
-          .upsert(rows, {
-            onConflict:       'org_id,property_id',
-            ignoreDuplicates: true,  // never overwrite an existing config
-          })
-
-        if (error) {
-          logger.error(`[OwnerRez:${user_id}] guidebook config creation failed: ${error.message}`)
+        try {
+          await createGuidebookPropertyConfigsForProperties(org_id)
+        } catch (err) {
+          logger.error(`[OwnerRez:${user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
           // Non-fatal — don't throw, don't block the sync
         }
       })
@@ -564,51 +513,8 @@ export const ownerRezInitialSync = inngest.createFunction(
       // guidebook_property_configs stores guest-facing content. If a PM has
       // already filled in their check-in instructions in OwnerRez, pre-populate
       // the guidebook config with that data. Never overwrites PM-entered values.
-
       await step.run('sync-guidebook-configs-from-property', async () => {
-        const supabase = createServiceClient()
-
-        const { data: props } = await supabase
-          .from('properties')
-          .select('id, wifi_name, wifi_password, access_instructions, house_manual, checkout_instructions')
-          .eq('org_id', org_id)
-          .eq('external_source', PROVIDER)
-          .eq('is_active', true)
-
-        if (!props?.length) return
-
-        const { data: configs } = await supabase
-          .from('guidebook_property_configs')
-          .select('id, property_id, wifi_network, wifi_password, check_in_instructions, house_rules, check_out_instructions')
-          .eq('org_id', org_id)
-          .in('property_id', props.map((p) => p.id))
-
-        const configByPropertyId = new Map(
-          (configs ?? []).map((c) => [c.property_id, c])
-        )
-
-        for (const prop of props) {
-          const config = configByPropertyId.get(prop.id)
-          if (!config) continue // no guidebook config yet — auto-slug step handles creation
-
-          const patch: Record<string, unknown> = {}
-
-          if (!config.wifi_network          && prop.wifi_name)             patch.wifi_network           = prop.wifi_name
-          if (!config.wifi_password         && prop.wifi_password)         patch.wifi_password          = prop.wifi_password
-          if (!config.check_in_instructions && prop.access_instructions)   patch.check_in_instructions  = prop.access_instructions
-          if (!config.house_rules           && prop.house_manual)          patch.house_rules            = prop.house_manual
-          if (!config.check_out_instructions && prop.checkout_instructions) patch.check_out_instructions = prop.checkout_instructions
-
-          if (Object.keys(patch).length === 0) continue
-
-          patch.updated_at = new Date().toISOString()
-
-          await supabase
-            .from('guidebook_property_configs')
-            .update(patch)
-            .eq('id', config.id)
-        }
-
+        await syncGuidebookConfigsFromProperty(org_id, PROVIDER)
         logger.info(`[OwnerRez:${user_id}] Synced guidebook configs for org ${org_id}`)
       })
 

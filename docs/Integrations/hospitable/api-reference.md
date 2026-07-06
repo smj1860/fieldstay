@@ -96,9 +96,23 @@ details.getting_around
 details.wifi_name                — NOT wifi_network as first assumed before live verification
 details.wifi_password            — credential
 ```
-**Nothing from `include=details` maps into a DB upsert yet** — that's a separate follow-up.
+**✅ Wired (2026-07-06) — `include=details` now maps into a DB upsert**, following the exact pattern already established by OwnerRez's sync (shared helpers in `lib/guidebook/sync.ts`):
 
-**🔒 Security note — `details.wifi_password` / `details.house_manual`:** These are credentials, not property metadata. When wiring `details` into a DB upsert, do **not** add them to the `properties` table or any row a wider audience (e.g. the owner portal) can select from. Route them through `guidebook_property_configs` instead — that table already exists for guest/crew-facing WiFi, check-in, and house-rule content, and is scoped by its own RLS policy. Never log `wifi_name`, `wifi_password`, or `house_manual` without redacting to presence/length first.
+| Hospitable field | `properties` staging column | Notes |
+|---|---|---|
+| `details.wifi_name` | `wifi_name` | |
+| `details.wifi_password` | `wifi_password` | Credential — see security note below |
+| `details.guest_access` | `access_instructions` | Best semantic match — no dedicated Hospitable "check-in instructions" field exists |
+| `details.house_manual` | `house_manual` | Often embeds the WiFi password as free text |
+| `amenities` (string[]) | `amenities` (`Record<string, boolean>`) | Converted via `normalizeHospitableAmenities()` — Hospitable slugs are already clean snake_case, no title normalization needed unlike OwnerRez's `normalizeAmenities()` |
+| `house_rules.smoking_allowed` / `.pets_allowed` / `.events_allowed` | `smoking_allowed` / `pets_allowed` / `events_allowed` | Direct mapping |
+| `capacity.bathrooms` | `bathrooms` | Previously hardcoded to `1` with a comment claiming "Hospitable v2 has no bathroom count" — that was wrong; fixed alongside this change |
+
+**Not mapped — no dedicated destination column exists:** `details.space_overview`, `details.other_details`, `details.additional_rules`, `details.neighborhood_description`, `details.getting_around`, `checkout_instructions` (no Hospitable source field). `properties.checkout_instructions` and these five `details` fields are left untouched; a future schema change would be needed to surface them.
+
+`properties` is a **staging layer**, not the guest-facing record — `lib/guidebook/sync.ts`'s `syncGuidebookConfigsFromProperty()` copies these columns into `guidebook_property_configs` (`wifi_network`, `wifi_password`, `check_in_instructions`, `house_rules`, `check_out_instructions`) **only when the guidebook field is currently empty**, so a PM's own edits in the guidebook are never overwritten. `createGuidebookPropertyConfigsForProperties()` auto-creates a blank, unpublished (`is_published: false`) config with a unique slug for any active property lacking one, and `ensureGuidebookConfiguration()` starts the org's 30-day guidebook trial (idempotent — never resets an existing trial). All three run in both `hospitable/initial-sync.ts` and `hospitable/incremental-sync.ts`.
+
+**🔒 Security note — `wifi_password` / `house_manual`:** These are credentials (or credential-adjacent free text). Storing them on `properties` mirrors the existing OwnerRez convention and is scoped by that table's RLS to org members — never expose them in any public-facing query. Never log `wifi_name`, `wifi_password`, or `house_manual` without redacting to presence/length first.
 
 **Known quirks:**
 - `prop.timezone` is a UTC offset string like `-0500`. Node's `Intl` API requires IANA identifiers. Derive timezone from `addr.state` using `resolveHospitableTimezone()` in `lib/integrations/providers/hospitable.ts`.
