@@ -211,6 +211,41 @@ export const hospInitialSync = inngest.createFunction(
               }
             : 'API_RETURNED_EMPTY_ARRAY',
         })
+
+        // ── DIAGNOSTIC 2 — isolate whether properties[]/date filters are the
+        // cause, by hitting /reservations with the widest possible net (no
+        // properties[] scoping, 1 year lookback, include=properties only —
+        // no include=guest, so no guest PII ever enters this log). Remove
+        // alongside DIAGNOSTIC 1 once bookings are confirmed landing.
+        if (reservations.length === 0) {
+          const wideParams = new URLSearchParams({
+            page:       '1',
+            per_page:   '100',
+            start_date: new Date(Date.now() - 365 * 86_400_000).toISOString().split('T')[0],
+            include:    'properties',
+            date_query: 'checkin',
+          })
+          const wideRes = await fetch(
+            `https://public.api.hospitable.com/v2/reservations?${wideParams.toString()}`,
+            { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } }
+          )
+          const wideBody = await wideRes.json().catch(() => null) as
+            | { data?: Array<Record<string, unknown>>; meta?: Record<string, unknown> }
+            | null
+          logger.info(`[Hospitable:${user_id}] Account-wide reservation diagnostic (no properties[] filter, 1yr lookback)`, {
+            status: wideRes.status,
+            meta:   wideBody?.meta ?? null,
+            count:  wideBody?.data?.length ?? 0,
+            sample: (wideBody?.data ?? []).slice(0, 3).map((r) => ({
+              id:                 r.id,
+              platform:           r.platform,
+              arrival_date:       r.arrival_date,
+              departure_date:     r.departure_date,
+              reservation_status: r.reservation_status,
+              properties:         r.properties ?? 'FIELD_MISSING',
+            })),
+          })
+        }
         // ── END DIAGNOSTIC ─────────────────────────────────────────────────
 
         logger.info(`[Hospitable:${user_id}] Fetched ${reservations.length} reservations`)
