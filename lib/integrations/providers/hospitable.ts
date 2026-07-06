@@ -12,8 +12,9 @@
 //   - Token expiry: access tokens 12 hours, refresh tokens 90 days
 // ============================================================
 
-import type { IntegrationProvider, TokenResponse } from '@/lib/integrations/types'
+import { RateLimitError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
 import type { CrewRole } from '@/types/database'
+import { hospitableApiLimiter } from '@/lib/rate-limit'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -475,6 +476,36 @@ export const hospitableProvider: IntegrationProvider = {
 
 // ── Hospitable API fetch helpers ──────────────────────────────────────────────
 
+/**
+ * Shared fetch wrapper for Hospitable's data endpoints (/properties,
+ * /reservations, /teammates — NOT the OAuth token/user endpoints, which
+ * have their own, much higher documented limit and stay on plain fetch()).
+ *
+ * Applies hospitableApiLimiter's proactive budget check first (throws our
+ * own RateLimitError before Hospitable would actually 429 us), then falls
+ * back to reactive handling if a real 429 comes back anyway — parses
+ * Retry-After and throws RateLimitError with that exact wait time. Every
+ * call site should use this instead of calling fetch() directly so both
+ * layers apply uniformly. Inngest's own step retry handles backing off and
+ * re-attempting — see translateSyncError() for the PM-facing message.
+ */
+export async function hospitableFetch(url: string, token: string): Promise<Response> {
+  const { success, reset } = await hospitableApiLimiter.limit('hospitable-api')
+  if (!success) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
+    throw new RateLimitError(retryAfterSeconds)
+  }
+
+  const res = await fetch(url, { headers: hospitableProvider.getApiHeaders(token) })
+
+  if (res.status === 429) {
+    const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10)
+    throw new RateLimitError(retryAfter)
+  }
+
+  return res
+}
+
 export async function hospFetchProperties(token: string): Promise<HospitableProperty[]> {
   const properties: HospitableProperty[] = []
   const PER_PAGE  = 100
@@ -490,7 +521,7 @@ export async function hospFetchProperties(token: string): Promise<HospitableProp
       break
     }
 
-    const res = await fetch(url, { headers: hospitableProvider.getApiHeaders(token) })
+    const res = await hospitableFetch(url, token)
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
@@ -564,9 +595,7 @@ export async function hospFetchReservations(
       + (propertiesQuery ? `&${propertiesQuery}` : '')
       + `&${statusQuery}`
 
-    const res = await fetch(url, {
-      headers: hospitableProvider.getApiHeaders(token),
-    })
+    const res = await hospitableFetch(url, token)
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
@@ -601,9 +630,7 @@ export async function hospFetchTeammates(token: string): Promise<HospitableTeamm
       break
     }
 
-    const res = await fetch(url, {
-      headers: hospitableProvider.getApiHeaders(token),
-    })
+    const res = await hospitableFetch(url, token)
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')

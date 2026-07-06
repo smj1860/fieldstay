@@ -238,30 +238,32 @@ export class RateLimitError extends Error {
 }
 
 // ── Sync error → PM-friendly message ────────────────────────────────────────
-// Shared by all OwnerRez sync functions (initial, incremental, reviews) so
-// integration_connections.metadata.last_sync_error and the Settings UI show
-// a consistent, actionable message regardless of which sync wrote it.
+// Shared by all provider sync functions (OwnerRez, Hospitable — initial,
+// incremental, reviews) so integration_connections.metadata.last_sync_error
+// and the Settings UI show a consistent, actionable message regardless of
+// which sync wrote it. Pass the provider's display name; defaults to
+// 'OwnerRez' so existing call sites that don't pass one are unaffected.
 
-export function translateSyncError(err: unknown): string {
+export function translateSyncError(err: unknown, providerLabel: string = 'OwnerRez'): string {
   if (err instanceof RateLimitError) {
-    return 'OwnerRez sync paused due to rate limiting — will retry automatically'
+    return `${providerLabel} sync paused due to rate limiting — will retry automatically`
   }
   if (err instanceof TokenRevokedError) {
-    return 'OwnerRez authorization expired — reconnect your account to resume syncing'
+    return `${providerLabel} authorization expired — reconnect your account to resume syncing`
   }
   const msg = err instanceof Error ? err.message : String(err)
   const lower = msg.toLowerCase()
   if (lower.includes('401') || lower.includes('unauthorized') || lower.includes('invalid_token')) {
-    return 'OwnerRez authorization expired — reconnect your account to resume syncing'
+    return `${providerLabel} authorization expired — reconnect your account to resume syncing`
   }
   if (lower.includes('403') || lower.includes('forbidden')) {
-    return 'OwnerRez access denied — reconnect your account'
+    return `${providerLabel} access denied — reconnect your account`
   }
   if (lower.includes('timeout') || lower.includes('econnreset') || lower.includes('network')) {
-    return 'Could not reach OwnerRez — sync will retry automatically'
+    return `Could not reach ${providerLabel} — sync will retry automatically`
   }
   if (lower.includes('vault') || lower.includes('credentials not found')) {
-    return 'OwnerRez credentials not found — reconnect your account'
+    return `${providerLabel} credentials not found — reconnect your account`
   }
   if (lower.includes('upsert') || lower.includes('insert') || lower.includes('database')) {
     return 'Sync completed with errors — some bookings may not have updated'

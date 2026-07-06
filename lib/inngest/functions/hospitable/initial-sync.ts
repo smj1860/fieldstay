@@ -17,6 +17,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { NonRetriableError }   from 'inngest'
 import { createServiceClient } from '@/lib/supabase/server'
 import { readIntegrationToken } from '@/lib/integrations/vault'
+import { translateSyncError } from '@/lib/integrations/types'
 import {
   hospFetchProperties,
   hospFetchReservations,
@@ -411,7 +412,8 @@ export const hospInitialSync = inngest.createFunction(
         reservations: reservationCount,
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
+      const msg         = err instanceof Error ? err.message : String(err)
+      const friendlyMsg = translateSyncError(err, 'Hospitable')
       logger.error(`[Hospitable:${user_id}] initial sync failed: ${msg}`)
 
       await step.run('handle-failure', async () => {
@@ -424,7 +426,7 @@ export const hospInitialSync = inngest.createFunction(
 
         await updateConnectionMeta(user_id, {
           last_sync_status: 'error',
-          last_sync_error:  msg,
+          last_sync_error:  friendlyMsg,
           last_synced_at:   new Date().toISOString(),
         })
       })
