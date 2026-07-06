@@ -217,15 +217,9 @@ export const hospInitialSync = inngest.createFunction(
 
         const bookingRows = reservations
           .map((res: HospitableReservation) => {
-            // Defensively handle both possible key names Hospitable may use
-            // for the included property: 'property' (singular per ReservationFull schema)
-            // or 'properties' (matching the include parameter name)
-            const raw = res as unknown as Record<string, unknown>
-            const propertyExternalId: string | null =
-              res.property?.id ??
-              (raw['properties'] as { id?: string } | null)?.id ??
-              (raw['properties'] as { id?: string }[] | null)?.[0]?.id ??
-              null
+            // Confirmed from the official Hospitable webhook spec: 'properties'
+            // is an array[Property], not a singular 'property' object.
+            const propertyExternalId = res.properties?.[0]?.id ?? null
             const propertyId         = propertyExternalId
               ? propertyIdMap[propertyExternalId]
               : null

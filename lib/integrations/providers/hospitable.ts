@@ -101,13 +101,15 @@ export interface HospitableReservation {
   guests:  HospitableGuestCounts
   guest?:  HospitableGuest | null
 
-  // property = single object, populated when include=properties is passed.
-  // The request param name is plural (properties); the response key is singular (property).
-  property?: {
+  // properties = array[Property], populated when include=properties is passed.
+  // Confirmed from the official Hospitable webhook spec — the response key
+  // is plural (properties), matching the request param name. Use
+  // properties?.[0]?.id, not a singular 'property' key.
+  properties?: Array<{
     id:          string
     name:        string
     public_name: string
-  } | null
+  }> | null
 }
 
 export interface HospitableTeammate {
@@ -332,10 +334,13 @@ export const hospitableProvider: IntegrationProvider = {
     return timingSafeEqual(signatureHeader, expected)
   },
 
-  // Webhook payload: { id, action, data, created, version }
+  // Webhook payload: { id, action, data, created, version, triggers }
   // action 'reservation.changed' covers both create and update.
-  // reservation.created (new bookings) and reservation.cancelled (cancellations)
-  // are also sent — confirmed via Vercel logs (action="reservation.created").
+  // reservation.created (new bookings) is also sent — confirmed via Vercel
+  // logs (action="reservation.created"). There is NO 'reservation.cancelled'
+  // action — cancellations fire as 'reservation.changed' with
+  // triggers: ["status_changed"]; incremental sync detects the cancellation
+  // by re-fetching the reservation and checking reservation_status.current.category.
   // Webhooks are configured globally in the partner portal — no per-account registration.
   async handleWebhookEvent({ action, payload }) {
     const data = payload as Record<string, unknown>
@@ -356,26 +361,6 @@ export const hospitableProvider: IntegrationProvider = {
           data: {
             provider_id:  'hospitable',
             event_type:   action,
-            entity_type:  'reservation',
-            entity_id:    entityId,
-            triggered_at: new Date().toISOString(),
-          },
-        })
-        break
-      }
-
-      // Reservation cancelled — incremental sync marks it as cancelled in FieldStay
-      case 'reservation.cancelled': {
-        if (!entityId) {
-          console.warn('[Hospitable webhook] reservation.cancelled missing data.id:', data)
-          break
-        }
-        const { inngest } = await import('@/lib/inngest/client')
-        await inngest.send({
-          name: 'integration/hospitable.sync.requested',
-          data: {
-            provider_id:  'hospitable',
-            event_type:   'reservation.cancelled',
             entity_type:  'reservation',
             entity_id:    entityId,
             triggered_at: new Date().toISOString(),
