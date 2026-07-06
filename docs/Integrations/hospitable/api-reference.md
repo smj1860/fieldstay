@@ -51,6 +51,9 @@
 ```
 per_page: 100
 include:  "listings"  (requires listing:read)
+include:  "details"   (no additional scope — adds amenities, house_rules,
+                        description, summary, house_manual, wifi_network,
+                        wifi_password, capacity.bathrooms, currency)
 ```
 
 **FieldStay field mapping (✅ confirmed live):**
@@ -69,6 +72,11 @@ include:  "listings"  (requires listing:read)
 | `check-out` | `properties.checkout_time` | ⚠️ Same as above |
 | `timezone` | `properties.timezone` | ⚠️ Returns UTC offset (`-0500`), NOT IANA — use `resolveHospitableTimezone(prop.timezone, addr.state)` |
 | `listed` | — | DO NOT use for `is_active` — listed = published to channels, not in PM's portfolio. Always set `is_active: true` |
+
+**⚠️ Unconfirmed — `include=details` fields (added to `HospitableProperty`, not yet verified against a live response):**
+`amenities` (string[]), `currency`, `description`, `summary`, `house_rules` ({pets_allowed, smoking_allowed, events_allowed}), `house_manual`, `wifi_network`, `wifi_password`, `capacity.bathrooms`. `hospFetchProperties()` in `lib/integrations/providers/hospitable.ts` requests and types these, but **nothing maps them into a DB upsert yet** — that's a separate follow-up.
+
+**🔒 Security note — `wifi_password`:** This is a credential, not property metadata. When wiring it into a DB upsert, do **not** add it to the `properties` table or any row a wider audience (e.g. the owner portal) can select from. Route it through `guidebook_property_configs` instead — that table already exists for guest/crew-facing WiFi, check-in, and house-rule content, and is scoped by its own RLS policy. Never log this field.
 
 **Known quirks:**
 - `prop.timezone` is a UTC offset string like `-0500`. Node's `Intl` API requires IANA identifiers. Derive timezone from `addr.state` using `resolveHospitableTimezone()` in `lib/integrations/providers/hospitable.ts`.

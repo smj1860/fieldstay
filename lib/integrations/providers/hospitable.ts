@@ -47,15 +47,38 @@ export interface HospitableProperty {
   timezone:      string
   listed:        boolean
   capacity: {
-    max:      number | null
-    bedrooms: number | null
-    beds:     number | null
+    max:       number | null
+    bedrooms:  number | null
+    beds:      number | null
+    bathrooms: number | null   // ⚠️ Unconfirmed — from include=details, not yet verified live
   }
   room_details: Array<{ type: string; beds: Array<{ type: string; quantity: number }> }>
   'check-in':  string   // "HH:MM"
   'check-out': string   // "HH:MM"
   property_type: string
   room_type:     string
+
+  // ── The following are populated by include=details and are ⚠️ Unconfirmed
+  // — added per a documented include, not yet verified against a live response.
+  amenities:    string[]           | null
+  currency:     string             | null
+  description:  string             | null
+  summary:      string             | null
+  house_rules: {
+    pets_allowed:    boolean | null
+    smoking_allowed: boolean | null
+    events_allowed:  boolean | null
+  } | null
+  house_manual: string | null
+
+  // wifi_network / wifi_password come back from include=details. These are
+  // credentials, not property metadata — do NOT persist wifi_password onto
+  // the `properties` table or any row a wider audience (e.g. owner portal)
+  // can select from. Route guest/crew-facing WiFi info through
+  // guidebook_property_configs instead, which already exists for exactly
+  // this purpose and is scoped by its own RLS policy. Never log this field.
+  wifi_network:  string | null
+  wifi_password: string | null
 }
 
 export interface HospitableReservationStatus {
@@ -431,7 +454,7 @@ export async function hospFetchProperties(token: string): Promise<HospitableProp
   const PER_PAGE  = 100
   const MAX_PAGES = 200
 
-  let url: string | null = `${HOSPITABLE_API_BASE}/properties?per_page=${PER_PAGE}`
+  let url: string | null = `${HOSPITABLE_API_BASE}/properties?per_page=${PER_PAGE}&include=details`
   let pageCount = 0
 
   while (url) {
