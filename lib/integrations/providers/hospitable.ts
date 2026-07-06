@@ -71,10 +71,11 @@ export interface HospitableGuest {
 }
 
 export interface HospitableGuestCounts {
-  adults:   number
-  children: number
-  infants:  number
-  pets:     number
+  total:        number
+  adult_count:  number
+  child_count:  number
+  infant_count: number
+  pet_count:    number
 }
 
 export interface HospitableReservation {

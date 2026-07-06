@@ -191,6 +191,25 @@ export const hospInitialSync = inngest.createFunction(
         const hospPropertyIds = Object.keys(propertyIdMap)
         if (!hospPropertyIds.length) return 0
         const reservations = await hospFetchReservations(token, undefined, hospPropertyIds)
+
+        // ONE-TIME DIAGNOSTIC — log raw structure of first reservation
+        // to confirm 'property' vs 'properties' key and field presence
+        if (reservations.length > 0) {
+          const sample = reservations[0] as unknown as Record<string, unknown>
+          logger.info(`[Hospitable:${user_id}] Reservation sample`, {
+            count:           reservations.length,
+            hasProperty:     'property'   in sample,
+            hasProperties:   'properties' in sample,
+            propertyValue:   sample['property']   ?? 'MISSING',
+            propertiesValue: sample['properties'] ?? 'MISSING',
+            hasGuest:        'guest'  in sample,
+            platform:        sample['platform'],
+            arrival_date:    sample['arrival_date'],
+          })
+        } else {
+          logger.info(`[Hospitable:${user_id}] API returned 0 reservations`, { hospPropertyIds })
+        }
+
         logger.info(`[Hospitable:${user_id}] Fetched ${reservations.length} reservations`)
 
         const supabase = createServiceClient()
@@ -198,8 +217,15 @@ export const hospInitialSync = inngest.createFunction(
 
         const bookingRows = reservations
           .map((res: HospitableReservation) => {
-            // Response key is 'property' (singular object), NOT 'properties[]'.
-            const propertyExternalId = res.property?.id ?? null
+            // Defensively handle both possible key names Hospitable may use
+            // for the included property: 'property' (singular per ReservationFull schema)
+            // or 'properties' (matching the include parameter name)
+            const raw = res as unknown as Record<string, unknown>
+            const propertyExternalId: string | null =
+              res.property?.id ??
+              (raw['properties'] as { id?: string } | null)?.id ??
+              (raw['properties'] as { id?: string }[] | null)?.[0]?.id ??
+              null
             const propertyId         = propertyExternalId
               ? propertyIdMap[propertyExternalId]
               : null
@@ -216,7 +242,7 @@ export const hospInitialSync = inngest.createFunction(
             const status = mapHospitableStatus(res.reservation_status.current.category)
 
             // res.guest (singular) = GuestInfo, only present when include=guest.
-            // res.guests (plural)  = GuestCounts (adults/children/etc) — not name data.
+            // res.guests (plural)  = GuestCounts (total/adult_count/etc) — not name data.
             const guest     = res.guest ?? null
             const guestName = guest
               ? [guest.first_name, guest.last_name].filter(Boolean).join(' ') || null
