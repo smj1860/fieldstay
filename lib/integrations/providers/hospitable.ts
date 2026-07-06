@@ -487,9 +487,10 @@ export async function hospFetchReservations(
       date_query: 'checkin',
     })
 
-    if (propertyIds?.length) {
-      propertyIds.forEach((id) => params.append('properties[]', id))
-    }
+    // TEMP DIAGNOSTIC — removed properties[] filter to test raw API response
+    // if (propertyIds?.length) {
+    //   propertyIds.forEach((id) => params.append('properties[]', id))
+    // }
 
     const res = await fetch(`${HOSPITABLE_API_BASE}/reservations?${params}`, {
       headers: hospitableProvider.getApiHeaders(token),
