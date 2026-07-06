@@ -189,6 +189,10 @@ export const hospInitialSync = inngest.createFunction(
       // ── 5. Fetch reservations and upsert bookings ─────────────────────────
       const reservationCount = await step.run('fetch-and-upsert-reservations', async () => {
         const hospPropertyIds = Object.keys(propertyIdMap)
+        logger.info(`[Hospitable:${user_id}] hospPropertyIds before reservations fetch`, {
+          hospPropertyIds,
+          propertyIdMapKeys: Object.keys(propertyIdMap),
+        })
         if (!hospPropertyIds.length) return 0
         const reservations = await hospFetchReservations(token, undefined, hospPropertyIds)
 

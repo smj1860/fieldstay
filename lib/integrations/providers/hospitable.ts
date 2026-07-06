@@ -472,6 +472,14 @@ export async function hospFetchReservations(
   let lastPage  = 1
   let pageCount = 0
 
+  // Guard: Hospitable requires at least one property UUID — return early if none
+  if (!propertyIds?.length) {
+    console.warn('[Hospitable] hospFetchReservations called with empty propertyIds — Hospitable requires this field')
+    return []
+  }
+
+  console.log('[Hospitable] hospFetchReservations called with propertyIds:', propertyIds)
+
   while (page <= lastPage) {
     pageCount++
     if (pageCount > MAX_PAGES) {
