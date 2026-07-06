@@ -23,12 +23,9 @@ import {
   hospFetchReservations,
   hospFetchTeammates,
   hospitablePropertyToNormalized,
+  hospitableReservationToNormalized,
   mapHospitableTeammateRole,
   resolveHospitableTeammateName,
-  mapHospitableStatus,
-  mapHospitableChannel,
-  extractHospitableTime,
-  type HospitableReservation,
   type HospitableTeammate,
 } from '@/lib/integrations/providers/hospitable'
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
@@ -191,50 +188,35 @@ export const hospInitialSync = inngest.createFunction(
         let count = 0
 
         const bookingRows = reservations
-          .map((res: HospitableReservation) => {
-            // Confirmed from the official Hospitable webhook spec: 'properties'
-            // is an array[Property], not a singular 'property' object.
-            const propertyExternalId = res.properties?.[0]?.id ?? null
-            const propertyId         = propertyExternalId
-              ? propertyIdMap[propertyExternalId]
+          .map((res) => {
+            const normalized = hospitableReservationToNormalized(res)
+            const propertyId = normalized.property_external_id
+              ? propertyIdMap[normalized.property_external_id]
               : null
 
             if (!propertyId) {
               logger.warn(
                 `[Hospitable:${user_id}] Skipping reservation ${res.id} — ` +
                 `no FieldStay property found for Hospitable property ` +
-                `${propertyExternalId ?? 'unknown'}`
+                `${normalized.property_external_id ?? 'unknown'}`
               )
               return null
             }
 
-            const status = mapHospitableStatus(res.reservation_status.current.category)
-
-            // res.guest (singular) = GuestInfo, only present when include=guest.
-            // res.guests (plural)  = GuestCounts (total/adult_count/etc) — not name data.
-            const guest     = res.guest ?? null
-            const guestName = guest
-              ? [guest.first_name, guest.last_name].filter(Boolean).join(' ') || null
-              : null
-
             return {
               org_id,
               property_id:     propertyId,
-              external_id:     res.id,
               external_source: PROVIDER,
-
-              // arrival_date / departure_date are ISO datetimes at midnight
-              checkin_date:    res.arrival_date?.split('T')[0]   ?? null,
-              checkout_date:   res.departure_date?.split('T')[0] ?? null,
-
-              // check_in / check_out are ISO datetimes with the actual time of day
-              checkin_time:    extractHospitableTime(res.check_in,  '15:00'),
-              checkout_time:   extractHospitableTime(res.check_out, '11:00'),
-
-              status,
-              guest_name: guestName,
-              source:     mapHospitableChannel(res.platform),
-              is_block:   false,
+              external_id:     normalized.external_id,
+              checkin_date:    normalized.checkin_date,
+              checkout_date:   normalized.checkout_date,
+              checkin_time:    normalized.checkin_time,
+              checkout_time:   normalized.checkout_time,
+              status:          normalized.status,
+              guest_name:      normalized.guest_name,
+              guest_email:     normalized.guest_email,
+              source:          normalized.source,
+              is_block:        normalized.is_block,
             }
           })
           .filter((row): row is NonNullable<typeof row> => row !== null)

@@ -17,7 +17,9 @@ import type {
   OwnerRezProperty,
   OwnerRezListing,
   OwnerRezListingAmenityCategory,
+  OwnerRezBooking,
 } from '../types'
+import type { NormalizedBooking } from '@/lib/bookings/normalize'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -354,4 +356,34 @@ export function buildOwnerRezDetailPatch(
   }
 
   return patch
+}
+
+/**
+ * Pure raw -> NormalizedBooking mapper for an OwnerRez booking. Extracted
+ * from the previously-duplicated inline row-building logic in
+ * ownerrez/initial-sync.ts and ownerrez/incremental-sync.ts — consolidated
+ * here as the single source of truth, mirroring
+ * hospitableReservationToNormalized.
+ *
+ * OwnerRez's booking endpoint doesn't return a time-of-day for arrival/
+ * departure (unlike Hospitable's check_in/check_out) — checkin_time and
+ * checkout_time are left null, matching existing behavior; the bookings
+ * table already treats both columns as nullable for this reason.
+ */
+export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooking {
+  return {
+    external_id: String(b.id),
+    property_external_id: b.property_id !== null && b.property_id !== undefined
+      ? String(b.property_id)
+      : null,
+    checkin_date:  b.arrival,
+    checkout_date: b.departure,
+    checkin_time:  null,
+    checkout_time: null,
+    status:      mapOwnerRezBookingStatus(b.status),
+    guest_name:  b.guest?.name  ?? null,
+    guest_email: b.guest?.email ?? null,
+    source:      mapOwnerRezChannelToSource(b.channel_name),
+    is_block:    b.is_block ?? false,
+  }
 }

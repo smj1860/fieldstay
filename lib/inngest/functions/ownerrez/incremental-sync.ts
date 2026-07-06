@@ -36,10 +36,7 @@ import { getPmEmail }                   from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
-import {
-  mapOwnerRezBookingStatus,
-  mapOwnerRezChannelToSource,
-} from '@/lib/integrations/providers/ownerrez'
+import { ownerRezBookingToNormalized } from '@/lib/integrations/providers/ownerrez'
 
 const PROVIDER = 'ownerrez'
 
@@ -171,21 +168,32 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               }
             }
 
-            const bookingRows = bookings.map((b) => ({
-              org_id:          conn.org_id,
-              property_id:     b.property_id !== null
-                                 ? (externalToFsId[String(b.property_id)] ?? null)
-                                 : null,
-              guest_name:      b.guest?.name  ?? null,
-              guest_email:     b.guest?.email ?? null,
-              checkin_date:    b.arrival,
-              checkout_date:   b.departure,
-              source:          mapOwnerRezChannelToSource(b.channel_name),
-              status:          mapOwnerRezBookingStatus(b.status),
-              external_id:     String(b.id),
-              external_source: PROVIDER,
-              is_block:        b.is_block ?? false,
-            }))
+            // NOTE: checkin_time/checkout_time are intentionally omitted —
+            // OwnerRez never provides a time-of-day, so writing null on every
+            // sync would clobber a PM's manual edit to those fields. See the
+            // matching note in ownerrez/initial-sync.ts.
+            const bookingRows = bookings.map((b) => {
+              const normalized = ownerRezBookingToNormalized(b)
+              return {
+                org_id:          conn.org_id,
+                property_id:     normalized.property_external_id
+                                   ? (externalToFsId[normalized.property_external_id] ?? null)
+                                   : null,
+                external_source: PROVIDER,
+                external_id:     normalized.external_id,
+                // b.arrival/b.departure used directly (not normalized.checkin_date/
+                // checkout_date) so these stay typed as non-nullable strings —
+                // OwnerRez's booking payload always has both, unlike Hospitable
+                // where the normalized fields can be null.
+                checkin_date:    b.arrival,
+                checkout_date:   b.departure,
+                status:          normalized.status,
+                guest_name:      normalized.guest_name,
+                guest_email:     normalized.guest_email,
+                source:          normalized.source,
+                is_block:        normalized.is_block,
+              }
+            })
 
             const { error } = await supabase
               .from('bookings')
