@@ -314,7 +314,7 @@ export const hospIncrementalSync = inngest.createFunction(
 
           if (error) throw new Error(`mark-inactive failed: ${error.message}`)
           logger.info(`[Hospitable incremental] Property ${entity_id} marked inactive`)
-          return { action: 'deactivated' }
+          return { action: 'deactivated', propertyId: undefined as string | undefined }
         }
 
         if (!res.ok) {
