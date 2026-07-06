@@ -29,6 +29,24 @@ export const syncNowLimiter = new Ratelimit({
   prefix:    'ownerrez-sync-now',
 })
 
+// Proactive outbound budget for our own calls TO Hospitable's API (not an
+// inbound limit on FieldStay's endpoints, unlike the others in this file).
+// Hospitable's documented general API limit is ~60 requests/minute per
+// vendor — ⚠️ sourced from a search AI Overview summary, not confirmed
+// against Hospitable's own developer docs; treat as a working assumption
+// and revisit if real 429s in production logs suggest otherwise. Slides at
+// 54/60 (10% headroom) so we throw our own RateLimitError before Hospitable
+// would 429 us. All FieldStay tenants share one Vercel deployment's
+// outbound identity, so this is a shared budget across every org syncing
+// Hospitable concurrently, mirroring the same rationale as OwnerRez's
+// per-IP tracker in lib/integrations/providers/ownerrez-api.ts.
+export const hospitableApiLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(54, '60 s'),
+  analytics: true,
+  prefix:    'hospitable-api',
+})
+
 // Public work order page — 20 requests per minute per IP
 // Allows a contractor to refresh and interact normally, blocks enumeration
 export const workOrderRatelimit = new Ratelimit({

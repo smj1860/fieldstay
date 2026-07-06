@@ -6,8 +6,19 @@
 **Pagination:** `meta.last_page` (page-number based) · `per_page` max 100
 **Webhook IP range:** `38.80.170.0/24` — whitelist only this range
 **Webhook signature:** `Signature` header — raw SHA-256 HMAC hex (no prefix)
+**Rate limit (general API):** ~60 requests/minute per vendor — ⚠️ sourced from a search AI Overview summary, not confirmed against Hospitable's own developer docs; treat as a working assumption. `/exchange` (OAuth token) is a separate, much higher-limit endpoint (~300 req/min) and is intentionally NOT covered by the limiter below. Messages endpoint has its own documented limit — see the Messaging section.
 
 ---
+
+## Rate Limiting & Request Optimization
+
+**Batching (✅ already optimized):** `hospFetchProperties`, `hospFetchReservations`, and `hospFetchTeammates` each make one paginated call, not one call per property/reservation. `hospFetchReservations` scopes by a batched `properties[]` filter rather than looping per property. The incremental sync's single-property/reservation/review refetch is correctly 1:1 with its triggering webhook event, not a batch operation.
+
+**Rate limiting (`lib/integrations/providers/hospitable.ts`'s `hospitableFetch()`):** every call to `/properties`, `/reservations`, and `/teammates` (not the OAuth endpoints) goes through this shared wrapper, which applies two layers, mirroring the pattern already established for OwnerRez in `lib/integrations/providers/ownerrez-api.ts`:
+1. **Proactive** — `hospitableApiLimiter` (`lib/rate-limit.ts`), a sliding window of 54/60 requests per minute (10% headroom under the assumed 60/min limit), shared across every org syncing Hospitable concurrently (all tenants share one Vercel deployment's outbound identity). Throws our own `RateLimitError` before Hospitable would actually 429 us.
+2. **Reactive** — a real 429 is still handled as a fallback: parses `Retry-After` and throws `RateLimitError` with that exact wait time.
+
+`RateLimitError` propagates up through Inngest's own step-level `retries` (2 for initial sync, 3 for incremental) rather than a custom `step.sleep()` backoff — appropriate here because, unlike OwnerRez's cron job (which loops over every connected org within a single execution and needs an explicit sleep so one tenant's burst doesn't block the next), each Hospitable sync is its own Inngest function invocation per org/event; Inngest's step retry (with memoized/skipped completed steps) is sufficient. `translateSyncError(err, 'Hospitable')` turns it into a PM-facing message ("Hospitable sync paused due to rate limiting — will retry automatically") written to `integration_connections.metadata.last_sync_error` in `initial-sync.ts`'s failure handler. `translateSyncError()` itself was generalized from OwnerRez-only (hardcoded "OwnerRez" in every message) to accept a `providerLabel` parameter, defaulting to `'OwnerRez'` so existing call sites are unaffected.
 
 ## Confidence Key
 

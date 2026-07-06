@@ -23,6 +23,7 @@ import {
   resolveHospitableTimezone,
   extractHospitableTime,
   normalizeHospitableAmenities,
+  hospitableFetch,
   type HospitableReservation,
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
@@ -38,14 +39,6 @@ import {
 
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
-
-function buildApiHeaders(token: string): Record<string, string> {
-  return {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type':  'application/json',
-    'Accept':        'application/json',
-  }
-}
 
 export const hospIncrementalSync = inngest.createFunction(
   {
@@ -116,9 +109,9 @@ export const hospIncrementalSync = inngest.createFunction(
       })
 
       const reservation = await step.run('fetch-reservation', async () => {
-        const res = await fetch(
+        const res = await hospitableFetch(
           `${HOSPITABLE_API_BASE}/reservations/${entity_id}?include=guest,properties`,
-          { headers: buildApiHeaders(token) }
+          token
         )
 
         if (res.status === 404) return null
@@ -301,9 +294,9 @@ export const hospIncrementalSync = inngest.createFunction(
       })
 
       const fetchAndUpsertResult = await step.run('fetch-and-upsert-property', async () => {
-        const res = await fetch(
+        const res = await hospitableFetch(
           `${HOSPITABLE_API_BASE}/properties/${entity_id}?include=details`,
-          { headers: buildApiHeaders(token) }
+          token
         )
 
         if (res.status === 404) {
@@ -462,9 +455,9 @@ export const hospIncrementalSync = inngest.createFunction(
       //   guest_name, review_text, rating (NOT NULL), review_date, property_id (UUID FK)
       // ⚠️ Confirm /reviews/{id} endpoint path from first real Hospitable delivery.
       const upsertResult = await step.run('fetch-and-upsert-review', async () => {
-        const res = await fetch(
+        const res = await hospitableFetch(
           `${HOSPITABLE_API_BASE}/reviews/${entity_id}`,
-          { headers: buildApiHeaders(token) }
+          token
         )
 
         if (!res.ok) {
