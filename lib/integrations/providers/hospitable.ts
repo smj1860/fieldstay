@@ -43,42 +43,56 @@ export interface HospitableProperty {
   id:            string   // UUID — use as external_id
   name:          string
   public_name:   string
+  picture:       string | null   // ⚠️ Unconfirmed shape — may be an object (thumbnail/original), not yet inspected
   address:       HospitableAddress
   timezone:      string
   listed:        boolean
+
+  // ✅ Confirmed live (2026-07-06) — real field names, NOT "check-in"/"check-out".
+  // Prior code assumed hyphenated keys per the REST spec's example, which do
+  // not exist in the actual response — every sync before this fix silently
+  // fell back to the '15:00'/'11:00' defaults instead of the real times.
+  checkin:  string   // "HH:MM"
+  checkout: string   // "HH:MM"
+
   capacity: {
     max:       number | null
     bedrooms:  number | null
     beds:      number | null
-    bathrooms: number | null   // ⚠️ Unconfirmed — from include=details, not yet verified live
+    bathrooms: number | null   // ✅ Confirmed live via include=details
   }
   room_details: Array<{ type: string; beds: Array<{ type: string; quantity: number }> }>
-  'check-in':  string   // "HH:MM"
-  'check-out': string   // "HH:MM"
   property_type: string
   room_type:     string
 
-  // ── The following are populated by include=details and are ⚠️ Unconfirmed
-  // — added per a documented include, not yet verified against a live response.
-  amenities:    string[]           | null
-  currency:     string             | null
-  description:  string             | null
-  summary:      string             | null
+  // ── The following are populated by include=details.
+  // ✅ Confirmed live (2026-07-06):
+  amenities:   string[] | null   // e.g. ['ac', 'dishwasher', 'wireless_internet', ...]
+  currency:    string   | null   // e.g. 'USD'
+  description: string   | null   // '' (empty string) when unset, not null
+  summary:     string   | null   // '' (empty string) when unset, not null
   house_rules: {
     pets_allowed:    boolean | null
     smoking_allowed: boolean | null
     events_allowed:  boolean | null
   } | null
-  house_manual: string | null
 
-  // wifi_network / wifi_password come back from include=details. These are
-  // credentials, not property metadata — do NOT persist wifi_password onto
-  // the `properties` table or any row a wider audience (e.g. owner portal)
-  // can select from. Route guest/crew-facing WiFi info through
-  // guidebook_property_configs instead, which already exists for exactly
-  // this purpose and is scoped by its own RLS policy. Never log this field.
-  wifi_network:  string | null
-  wifi_password: string | null
+  // ⚠️ Unconfirmed shape — present in the raw response, not yet inspected.
+  tags:                string[] | null
+  calendar_restricted: boolean  | null
+  parent_child:        unknown  | null   // likely multi-unit/parent-listing linkage
+
+  // ✅ Confirmed live: house_manual/wifi_network/wifi_password are NOT
+  // top-level fields despite include=details — the response has a separate
+  // top-level `details` object and those fields are presumed nested inside
+  // it (exact shape pending inspection). wifi_password is a credential, not
+  // property metadata — do NOT persist it onto the `properties` table or any
+  // row a wider audience (e.g. the owner portal) can select from. Route
+  // guest/crew-facing WiFi info through guidebook_property_configs instead,
+  // which already exists for exactly this purpose and is scoped by its own
+  // RLS policy. Never log this field or any value from within `details`
+  // without redacting anything wifi/password/manual-shaped first.
+  details: Record<string, unknown> | null
 }
 
 export interface HospitableReservationStatus {
