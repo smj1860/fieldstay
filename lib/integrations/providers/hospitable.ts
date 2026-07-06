@@ -479,6 +479,7 @@ export async function hospFetchReservations(
       break
     }
 
+    // Build base params via URLSearchParams (handles encoding for all standard params)
     const params = new URLSearchParams({
       page:       String(page),
       per_page:   String(PER_PAGE),
@@ -487,12 +488,19 @@ export async function hospFetchReservations(
       date_query: 'checkin',
     })
 
-    // TEMP DIAGNOSTIC — removed properties[] filter to test raw API response
-    // if (propertyIds?.length) {
-    //   propertyIds.forEach((id) => params.append('properties[]', id))
-    // }
+    // properties[] must use literal brackets — URLSearchParams encodes [] as %5B%5D
+    // which Hospitable does not accept. Build this portion of the URL manually.
+    // Each id is still percent-encoded individually so a malformed value can't
+    // inject extra query params.
+    const propertiesQuery = (propertyIds ?? [])
+      .map((id) => `properties[]=${encodeURIComponent(id)}`)
+      .join('&')
 
-    const res = await fetch(`${HOSPITABLE_API_BASE}/reservations?${params}`, {
+    const url = propertiesQuery
+      ? `${HOSPITABLE_API_BASE}/reservations?${params.toString()}&${propertiesQuery}`
+      : `${HOSPITABLE_API_BASE}/reservations?${params.toString()}`
+
+    const res = await fetch(url, {
       headers: hospitableProvider.getApiHeaders(token),
     })
 
