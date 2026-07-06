@@ -192,23 +192,26 @@ export const hospInitialSync = inngest.createFunction(
         if (!hospPropertyIds.length) return 0
         const reservations = await hospFetchReservations(token, undefined, hospPropertyIds)
 
-        // ONE-TIME DIAGNOSTIC — log raw structure of first reservation
-        // to confirm 'property' vs 'properties' key and field presence
-        if (reservations.length > 0) {
-          const sample = reservations[0] as unknown as Record<string, unknown>
-          logger.info(`[Hospitable:${user_id}] Reservation sample`, {
-            count:           reservations.length,
-            hasProperty:     'property'   in sample,
-            hasProperties:   'properties' in sample,
-            propertyValue:   sample['property']   ?? 'MISSING',
-            propertiesValue: sample['properties'] ?? 'MISSING',
-            hasGuest:        'guest'  in sample,
-            platform:        sample['platform'],
-            arrival_date:    sample['arrival_date'],
-          })
-        } else {
-          logger.info(`[Hospitable:${user_id}] API returned 0 reservations`, { hospPropertyIds })
-        }
+        // ── DIAGNOSTIC — remove after bookings confirmed landing ──────────
+        logger.info(`[Hospitable:${user_id}] Reservation fetch diagnostic`, {
+          hospPropertyIds,
+          reservationCount: reservations.length,
+          sample: reservations.length > 0
+            ? {
+                id:              reservations[0].id,
+                platform:        reservations[0].platform,
+                arrival_date:    reservations[0].arrival_date,
+                departure_date:  reservations[0].departure_date,
+                check_in:        reservations[0].check_in,
+                propertiesField: reservations[0].properties ?? 'FIELD_MISSING',
+                propertyId:      reservations[0].properties?.[0]?.id ?? 'NO_PROPERTIES_FIELD',
+                inPropertyIdMap: reservations[0].properties?.[0]?.id
+                                   ? Boolean(propertyIdMap[reservations[0].properties[0].id])
+                                   : false,
+              }
+            : 'API_RETURNED_EMPTY_ARRAY',
+        })
+        // ── END DIAGNOSTIC ─────────────────────────────────────────────────
 
         logger.info(`[Hospitable:${user_id}] Fetched ${reservations.length} reservations`)
 
