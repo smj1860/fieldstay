@@ -31,7 +31,10 @@ import {
   createGuidebookPropertyConfigsForProperties,
   syncGuidebookConfigsFromProperty,
 } from '@/lib/guidebook/sync'
-import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
+import {
+  seedPresentAssetsFromAmenities,
+  seedAbsentOptionalAssetsFromAmenities,
+} from '@/lib/asset-discovery/seed-from-amenities'
 
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
@@ -391,6 +394,15 @@ export const hospIncrementalSync = inngest.createFunction(
             logger.info(`[Hospitable incremental] Asset discovery seeded for property ${propertyId}: ${seeded ? 'yes' : 'no new assets'}`)
           } catch (err) {
             logger.error(`[Hospitable incremental] asset discovery seed failed for property ${propertyId}: ${err instanceof Error ? err.message : String(err)}`)
+            // Non-fatal — don't throw, don't block the sync
+          }
+        })
+
+        await step.run('seed-absent-optional-assets-for-property', async () => {
+          try {
+            await seedAbsentOptionalAssetsFromAmenities(orgId, [propertyId])
+          } catch (err) {
+            logger.warn(`[Hospitable incremental] absent-optional-asset seeding failed for property ${propertyId}: ${err instanceof Error ? err.message : String(err)}`)
             // Non-fatal — don't throw, don't block the sync
           }
         })
