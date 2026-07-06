@@ -36,6 +36,10 @@ import { getPmEmail }                   from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
+import {
+  mapOwnerRezBookingStatus,
+  mapOwnerRezChannelToSource,
+} from '@/lib/integrations/providers/ownerrez'
 
 const PROVIDER = 'ownerrez'
 
@@ -176,8 +180,8 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               guest_email:     b.guest?.email ?? null,
               checkin_date:    b.arrival,
               checkout_date:   b.departure,
-              source:          mapChannelToSource(b.channel_name),
-              status:          mapBookingStatus(b.status),
+              source:          mapOwnerRezChannelToSource(b.channel_name),
+              status:          mapOwnerRezBookingStatus(b.status),
               external_id:     String(b.id),
               external_source: PROVIDER,
               is_block:        b.is_block ?? false,
@@ -570,23 +574,3 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     return { synced: syncedCount, total: connections.length }
   }
 )
-
-// ── Data mapping helpers ──────────────────────────────────────────────────────
-
-function mapBookingStatus(status: string): string {
-  const s = status.toLowerCase()
-  if (s === 'confirmed')                     return 'confirmed'
-  if (s === 'cancelled' || s === 'canceled') return 'cancelled'
-  if (s === 'tentative')                     return 'tentative'
-  return 'confirmed'
-}
-
-function mapChannelToSource(channel?: string): string {
-  if (!channel) return 'other'
-  const c = channel.toLowerCase()
-  if (c.includes('airbnb'))                          return 'airbnb'
-  if (c.includes('vrbo') || c.includes('homeaway')) return 'vrbo'
-  if (c.includes('booking'))                        return 'booking_com'
-  if (c.includes('direct'))                         return 'direct'
-  return 'other'
-}

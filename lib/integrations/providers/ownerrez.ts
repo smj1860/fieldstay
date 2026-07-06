@@ -11,7 +11,13 @@
 //   - Revocation webhook body uses "action", not "event_type"
 // ============================================================
 
-import type { IntegrationProvider, TokenResponse } from '../types'
+import type {
+  IntegrationProvider,
+  TokenResponse,
+  OwnerRezProperty,
+  OwnerRezListing,
+  OwnerRezListingAmenityCategory,
+} from '../types'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -233,4 +239,119 @@ function timingSafeEqual(a: string, b: string): boolean {
     result |= a.charCodeAt(i) ^ b.charCodeAt(i)
   }
   return result === 0
+}
+
+// ── Data mapping helpers ─────────────────────────────────────────────────────
+// Previously duplicated verbatim in ownerrez/initial-sync.ts and
+// ownerrez/incremental-sync.ts — consolidated here as the single source of
+// truth, mirroring where Hospitable's equivalent mappers live.
+
+export function mapOwnerRezBookingStatus(status: string): string {
+  const s = status.toLowerCase()
+  if (s === 'confirmed') return 'confirmed'
+  if (s === 'cancelled' || s === 'canceled') return 'cancelled'
+  if (s === 'tentative') return 'tentative'
+  return 'confirmed'
+}
+
+export function mapOwnerRezChannelToSource(channel?: string): string {
+  if (!channel) return 'other'
+  const c = channel.toLowerCase()
+  if (c.includes('airbnb')) return 'airbnb'
+  if (c.includes('vrbo') || c.includes('homeaway')) return 'vrbo'
+  if (c.includes('booking')) return 'booking_com'
+  if (c.includes('direct')) return 'direct'
+  return 'other'
+}
+
+// Actual structure is amenity_categories with nested amenities[].title —
+// not a flat array with an amenity_id field.
+export function normalizeOwnerRezAmenities(
+  categories: OwnerRezListingAmenityCategory[]
+): Record<string, boolean> {
+  const result: Record<string, boolean> = {}
+  for (const category of categories ?? []) {
+    for (const amenity of category.amenities ?? []) {
+      if (!amenity.title) continue
+      const key = amenity.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '')
+      result[key] = true // presence in the list = amenity exists at the property
+    }
+  }
+  return result
+}
+
+/**
+ * Builds the DB patch for a property's enrichment pass (address, lat/lng,
+ * occupancy/rules from the detail endpoint; WiFi/instructions/house
+ * manual/amenities from the listings endpoint — WiFi and instructions are
+ * fill-only-if-null against `existing`, matching FieldStay's Hospitable
+ * mapper policy; everything else always overwrites). Pure function — no
+ * I/O — extracted from the per-property enrichment step in
+ * ownerrez/initial-sync.ts for direct unit test coverage.
+ *
+ * Fixes an inconsistency found while extracting this: several detail
+ * fields used truthy checks (`if (detail.latitude)`) instead of explicit
+ * null/undefined checks, meaning a legitimate value of exactly 0 (or,
+ * for min_renter_age, an explicit null clearing a prior value) would be
+ * silently skipped. Low real-world likelihood (no real US property sits
+ * on the equator or requires a minimum renter age of 0), but corrected
+ * for consistency with the rest of the codebase's null-handling
+ * convention now that it's being pulled out for direct testing.
+ */
+export function buildOwnerRezDetailPatch(
+  existing: {
+    wifi_name:           string | null
+    wifi_password:       string | null
+    access_instructions: string | null
+    house_manual:        string | null
+  },
+  detail:  OwnerRezProperty | null,
+  listing: OwnerRezListing | undefined
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+
+  if (detail) {
+    const defaultAddress =
+      (detail.addresses ?? []).find((a) => a.is_default) ??
+      (detail.addresses ?? [])[0]
+
+    if (defaultAddress) {
+      if (defaultAddress.street1)     patch.address = defaultAddress.street1
+      if (defaultAddress.state)       patch.state   = defaultAddress.state
+      if (defaultAddress.city)        patch.city    = defaultAddress.city
+      if (defaultAddress.postal_code) patch.zip     = defaultAddress.postal_code
+    }
+
+    if (detail.latitude       !== null && detail.latitude       !== undefined) patch.lat            = detail.latitude
+    if (detail.longitude      !== null && detail.longitude      !== undefined) patch.lng            = detail.longitude
+    if (detail.max_guests     !== null && detail.max_guests     !== undefined) patch.max_guests      = detail.max_guests
+    if (detail.smoking_allowed !== null && detail.smoking_allowed !== undefined) patch.smoking_allowed = detail.smoking_allowed
+    if (detail.pets_allowed    !== null && detail.pets_allowed    !== undefined) patch.pets_allowed    = detail.pets_allowed
+    if (detail.max_pets        !== null && detail.max_pets        !== undefined) patch.max_pets        = detail.max_pets
+    if (detail.events_allowed  !== null && detail.events_allowed  !== undefined) patch.events_allowed  = detail.events_allowed
+    if (detail.min_renter_age  !== null && detail.min_renter_age  !== undefined) patch.min_renter_age  = detail.min_renter_age
+  }
+
+  if (listing) {
+    if (!existing.wifi_name && listing.wifi_network)
+      patch.wifi_name = listing.wifi_network
+
+    if (!existing.wifi_password && listing.wifi_password)
+      patch.wifi_password = listing.wifi_password
+
+    if (!existing.access_instructions && listing.check_in_instructions)
+      patch.access_instructions = listing.check_in_instructions
+
+    if (!existing.house_manual && listing.house_manual)
+      patch.house_manual = listing.house_manual
+
+    if (listing.amenity_categories?.length) {
+      patch.amenities = normalizeOwnerRezAmenities(listing.amenity_categories)
+    }
+  }
+
+  return patch
 }
