@@ -496,9 +496,19 @@ export async function hospFetchReservations(
       .map((id) => `properties[]=${encodeURIComponent(id)}`)
       .join('&')
 
-    const url = propertiesQuery
-      ? `${HOSPITABLE_API_BASE}/reservations?${params.toString()}&${propertiesQuery}`
-      : `${HOSPITABLE_API_BASE}/reservations?${params.toString()}`
+    // status[] is optional per the API docs, but leaving it off relies on an
+    // undocumented server-side default. Reservations entered manually in the
+    // Hospitable UI (rather than synced from a channel like Airbnb) land in
+    // reservation_status categories other than "accepted" (e.g. "checkpoint"
+    // or "unknown") — pass every documented category explicitly so manual
+    // bookings aren't silently dropped by whatever the default turns out to be.
+    const statusQuery = [
+      'request', 'accepted', 'cancelled', 'not accepted', 'unknown', 'checkpoint',
+    ].map((s) => `status[]=${encodeURIComponent(s)}`).join('&')
+
+    const url = `${HOSPITABLE_API_BASE}/reservations?${params.toString()}`
+      + (propertiesQuery ? `&${propertiesQuery}` : '')
+      + `&${statusQuery}`
 
     const res = await fetch(url, {
       headers: hospitableProvider.getApiHeaders(token),
