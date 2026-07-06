@@ -142,7 +142,9 @@ export const hospIncrementalSync = inngest.createFunction(
 
       const upsertResult = await step.run('upsert-booking', async () => {
         const supabase       = createServiceClient()
-        const hospPropertyId = reservation.property?.id ?? null
+        // Confirmed from the official Hospitable webhook spec: 'properties'
+        // is an array[Property], not a singular 'property' object.
+        const hospPropertyId = reservation.properties?.[0]?.id ?? null
 
         if (!hospPropertyId) {
           throw new NonRetriableError(
