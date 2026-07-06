@@ -117,6 +117,10 @@ include:      "guest,properties"
 
 **⚠️ IMPORTANT — `include` format:** Use comma-separated string (`include=guest,properties`), NOT array format. Both are accepted per spec but comma-separated is the documented default.
 
+**✅ Confirmed accepted `status[]` values (from a live 400 response):** `not_accepted`, `request`, `accepted`, `cancelled`, `checkpoint` — note the underscore in `not_accepted` (the *response* field `reservation_status.current.category` uses a space, `"not accepted"`, but the filter value does not). `unknown` is a valid response category but is **not** a valid `status[]` filter value and will 400 if sent.
+
+**⚠️ CONFIRMED — reservations tied to an unlisted/inactive listing are excluded from this endpoint entirely.** A reservation created manually via Hospitable's Calendar ("Add Reservation", with real guest/dates/status — a genuine Reservation object, not a Block) will not appear in `GET /reservations` — with any combination of `status[]`, `date_query`, or lookback window — if the property's listing is unlisted/not published to a channel (e.g. Airbnb). Confirmed via a `200 OK` response with real pagination metadata (`meta.total: 0`) for a property with a reservation visible in the Calendar UI, ruling out a request/parameter bug. If bookings aren't syncing for a property, check whether its listing is active/published before assuming a FieldStay sync bug — `properties.listed` (see the Properties section above) is the relevant flag on our side, though note we deliberately ignore it for our own `is_active` and it isn't currently checked before attempting a reservation sync.
+
 **ReservationFull base fields (✅ confirmed from live developer docs):**
 
 | Field | Type | Example | Notes |
