@@ -16,9 +16,8 @@ import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing } from '@/lib/integrations/types'
 import {
-  mapOwnerRezBookingStatus,
-  mapOwnerRezChannelToSource,
   buildOwnerRezDetailPatch,
+  ownerRezBookingToNormalized,
 } from '@/lib/integrations/providers/ownerrez'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
@@ -453,21 +452,35 @@ export const ownerRezInitialSync = inngest.createFunction(
             fsProps.map((p) => [p.external_id, p.id])
           )
 
-          const bookingRows = bookings.map((b) => ({
-            org_id,
-            property_id:     b.property_id !== null
-                               ? (externalToFsId[String(b.property_id)] ?? null)
-                               : null,
-            guest_name:      b.guest?.name  ?? null,
-            guest_email:     b.guest?.email ?? null,
-            checkin_date:    b.arrival,
-            checkout_date:   b.departure,
-            source:          mapOwnerRezChannelToSource(b.channel_name),
-            status:          mapOwnerRezBookingStatus(b.status),
-            external_id:     String(b.id),
-            external_source: PROVIDER,
-            is_block:        b.is_block ?? false,
-          }))
+          // NOTE: checkin_time/checkout_time are intentionally omitted here.
+          // OwnerRez's booking endpoint never provides a time-of-day (unlike
+          // Hospitable's check_in/check_out), so ownerRezBookingToNormalized
+          // always returns null for both — writing that null on every sync
+          // would silently clobber a PM's manual edit to those fields
+          // (see app/(dashboard)/bookings/actions.ts). Omitting the keys
+          // entirely leaves them untouched on conflict, same as before this
+          // extraction.
+          const bookingRows = bookings.map((b) => {
+            const normalized = ownerRezBookingToNormalized(b)
+            return {
+              org_id,
+              property_id:     normalized.property_external_id
+                                 ? (externalToFsId[normalized.property_external_id] ?? null)
+                                 : null,
+              external_source: PROVIDER,
+              external_id:     normalized.external_id,
+              // b.arrival/b.departure used directly so these stay typed as
+              // non-nullable strings — OwnerRez always has both, unlike
+              // Hospitable where the normalized fields can be null.
+              checkin_date:    b.arrival,
+              checkout_date:   b.departure,
+              status:          normalized.status,
+              guest_name:      normalized.guest_name,
+              guest_email:     normalized.guest_email,
+              source:          normalized.source,
+              is_block:        normalized.is_block,
+            }
+          })
 
           const { error } = await supabase
             .from('bookings')

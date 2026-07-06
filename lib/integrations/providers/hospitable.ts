@@ -16,6 +16,7 @@ import { RateLimitError, type IntegrationProvider, type TokenResponse } from '@/
 import type { CrewRole } from '@/types/database'
 import { hospitableApiLimiter } from '@/lib/rate-limit'
 import type { NormalizedProperty } from '@/lib/properties/normalize'
+import type { NormalizedBooking } from '@/lib/bookings/normalize'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -735,6 +736,50 @@ export function mapHospitableChannel(
   if (p === 'booking')                  return 'booking_com'
   if (p === 'direct' || p === 'manual') return 'direct'
   return 'other'
+}
+
+/**
+ * Pure raw -> NormalizedBooking mapper for a Hospitable reservation.
+ * Extracted from the previously-duplicated inline row-building logic in
+ * hospitable/initial-sync.ts and hospitable/incremental-sync.ts —
+ * consolidated here as the single source of truth, mirroring
+ * hospitablePropertyToNormalized above.
+ *
+ * Fixes a gap found while extracting this: guest.email is available on
+ * every reservation fetched with include=guest (see HospitableGuest),
+ * but the inline code only ever captured guest_name, never guest_email.
+ * Both call sites already request include=guest, so this is populated
+ * for free with no additional API cost.
+ */
+export function hospitableReservationToNormalized(
+  res: HospitableReservation
+): NormalizedBooking {
+  // res.guest (singular) = GuestInfo (name/email/phone), only present when
+  // include=guest. res.guests (plural) = GuestCounts — not name data.
+  const guest     = res.guest ?? null
+  const guestName = guest
+    ? [guest.first_name, guest.last_name].filter(Boolean).join(' ') || null
+    : null
+
+  return {
+    external_id: res.id,
+    // Confirmed from the official Hospitable webhook spec: 'properties' is
+    // an array[Property], not a singular 'property' object.
+    property_external_id: res.properties?.[0]?.id ?? null,
+
+    // arrival_date / departure_date are ISO datetimes at midnight — extract
+    // the date portion. check_in / check_out carry the actual time of day.
+    checkin_date:  res.arrival_date?.split('T')[0]   ?? null,
+    checkout_date: res.departure_date?.split('T')[0] ?? null,
+    checkin_time:  extractHospitableTime(res.check_in,  '15:00'),
+    checkout_time: extractHospitableTime(res.check_out, '11:00'),
+
+    status:      mapHospitableStatus(res.reservation_status.current.category),
+    guest_name:  guestName,
+    guest_email: guest?.email ?? null,
+    source:      mapHospitableChannel(res.platform),
+    is_block:    false,
+  }
 }
 
 // Maps Hospitable service labels to the FieldStay crew_role enum

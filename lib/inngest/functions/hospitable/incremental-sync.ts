@@ -18,11 +18,9 @@ import { NonRetriableError }       from 'inngest'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import {
-  mapHospitableStatus,
-  mapHospitableChannel,
-  extractHospitableTime,
   hospitableFetch,
   hospitablePropertyToNormalized,
+  hospitableReservationToNormalized,
   type HospitableReservation,
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
@@ -175,18 +173,11 @@ export const hospIncrementalSync = inngest.createFunction(
           .eq('external_source', PROVIDER)
           .maybeSingle()
 
+        const normalized = hospitableReservationToNormalized(reservation)
+
         const datesChanged = !existing
-          || existing.checkin_date  !== (reservation.arrival_date?.split('T')[0]   ?? null)
-          || existing.checkout_date !== (reservation.departure_date?.split('T')[0] ?? null)
-
-        const status = mapHospitableStatus(reservation.reservation_status.current.category)
-
-        // reservation.guest (singular) = GuestInfo name data (via include=guest)
-        // reservation.guests (plural)  = GuestCounts — not name data
-        const guest     = reservation.guest ?? null
-        const guestName = guest
-          ? [guest.first_name, guest.last_name].filter(Boolean).join(' ') || null
-          : null
+          || existing.checkin_date  !== normalized.checkin_date
+          || existing.checkout_date !== normalized.checkout_date
 
         const { error } = await supabase
           .from('bookings')
@@ -194,16 +185,17 @@ export const hospIncrementalSync = inngest.createFunction(
             {
               org_id:          orgId,
               property_id:     property.id,
-              external_id:     reservation.id,
               external_source: PROVIDER,
-              checkin_date:    reservation.arrival_date?.split('T')[0]   ?? null,
-              checkout_date:   reservation.departure_date?.split('T')[0] ?? null,
-              checkin_time:    extractHospitableTime(reservation.check_in,  '15:00'),
-              checkout_time:   extractHospitableTime(reservation.check_out, '11:00'),
-              status,
-              guest_name:      guestName,
-              source:          mapHospitableChannel(reservation.platform),
-              is_block:        false,
+              external_id:     normalized.external_id,
+              checkin_date:    normalized.checkin_date,
+              checkout_date:   normalized.checkout_date,
+              checkin_time:    normalized.checkin_time,
+              checkout_time:   normalized.checkout_time,
+              status:          normalized.status,
+              guest_name:      normalized.guest_name,
+              guest_email:     normalized.guest_email,
+              source:          normalized.source,
+              is_block:        normalized.is_block,
             },
             { onConflict: 'external_id,external_source' }
           )
