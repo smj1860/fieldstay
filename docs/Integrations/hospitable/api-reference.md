@@ -126,7 +126,9 @@ details.wifi_password            — credential
 
 **Intentionally excluded** — amenity presence doesn't confirm a discrete, inspectable unit: `ac`/`heating` → `hvac` (could be a space heater or window unit), `hot_water` → `water_heater`, `wireless_internet` → `wifi_router`, `coffee_maker` → `coffee_station`. Revisit if a future need justifies the ambiguity.
 
-Never duplicates or overwrites an existing active `property_assets` row for the same type. Runs in both `hospitable/initial-sync.ts` (all synced properties) and `hospitable/incremental-sync.ts` (the single updated property).
+Never duplicates or overwrites an existing active `property_assets` row for the same type. Runs in both `hospitable/initial-sync.ts` (all synced properties) and `hospitable/incremental-sync.ts` (the single updated property). Wired into OwnerRez's sync too, for parity.
+
+**✅ Wired (2026-07-06) — absent-optional-asset seeding, for parity with OwnerRez.** `seedAbsentOptionalAssetsFromAmenities()` marks `pool_pump`, `hot_tub`, `well_pump`, `solar_inverter`, `whole_home_water_filter`, `heated_tile_system`, `coffee_station`, and `toaster_oven` as confirmed absent (`is_na: true`) when none of `OPTIONAL_ASSET_AMENITY_MAP`'s trigger slugs are present — dropping them from the crew's discovery queue. ⚠️ **Unconfirmed for Hospitable:** that trigger map was built for OwnerRez's free-text amenity titles (many synonym variants per type); Hospitable's amenities are a fixed, standardized slug set and we haven't seen a live Hospitable property with a pool/hot tub/solar/etc. to confirm its slugs match. A mismatch is harmless — it only means no extra signal for that property, since this exclusively marks *absence*, never a false claim of presence.
 
 **🔒 Security note — `wifi_password` / `house_manual`:** These are credentials (or credential-adjacent free text). Storing them on `properties` mirrors the existing OwnerRez convention and is scoped by that table's RLS to org members — never expose them in any public-facing query. Never log `wifi_name`, `wifi_password`, or `house_manual` without redacting to presence/length first.
 

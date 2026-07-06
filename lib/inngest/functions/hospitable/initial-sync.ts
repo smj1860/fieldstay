@@ -38,7 +38,10 @@ import {
   createGuidebookPropertyConfigsForProperties,
   syncGuidebookConfigsFromProperty,
 } from '@/lib/guidebook/sync'
-import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
+import {
+  seedPresentAssetsFromAmenities,
+  seedAbsentOptionalAssetsFromAmenities,
+} from '@/lib/asset-discovery/seed-from-amenities'
 
 const PROVIDER = 'hospitable'
 
@@ -165,6 +168,21 @@ export const hospInitialSync = inngest.createFunction(
           logger.info(`[Hospitable:${user_id}] Asset discovery seeded for ${seeded}/${total} properties`)
         } catch (err) {
           logger.error(`[Hospitable:${user_id}] asset discovery seed failed: ${err instanceof Error ? err.message : String(err)}`)
+          // Non-fatal — don't throw, don't block the sync
+        }
+      })
+
+      // ── 3c. Mark absent optional assets from amenity data ───────────────────
+      // Complements 3b: marks optional asset types (pool_pump, hot_tub, etc.)
+      // as confirmed absent (is_na: true) when none of their trigger amenity
+      // slugs are present — see OPTIONAL_ASSET_AMENITY_MAP for the caveat on
+      // Hospitable slug coverage for these specific amenities.
+      await step.run('seed-absent-optional-assets-from-amenities', async () => {
+        try {
+          const { seeded, total } = await seedAbsentOptionalAssetsFromAmenities(org_id, propertyIds)
+          logger.info(`[Hospitable:${user_id}] Absent-optional-asset seeding: ${seeded}/${total} properties`)
+        } catch (err) {
+          logger.warn(`[Hospitable:${user_id}] absent-optional-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
           // Non-fatal — don't throw, don't block the sync
         }
       })
