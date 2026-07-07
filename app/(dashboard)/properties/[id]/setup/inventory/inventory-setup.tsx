@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
-import { upsertInventoryItems, deleteInventoryItem, completeInventoryStep, applyTemplateToProperty, cloneInventoryFromProperty } from './actions'
-import { Plus, Trash2, ChevronDown, ChevronRight, Zap, Check } from 'lucide-react'
+import { useState, useTransition, useRef } from 'react'
+import { upsertInventoryItems, deleteInventoryItem, bulkDeleteInventoryItems, completeInventoryStep, applyTemplateToProperty, cloneInventoryFromProperty } from './actions'
+import { Plus, Trash2, ChevronDown, ChevronRight, Zap, Check, Upload } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
 import type { InventoryCatalogItem, InventoryItem, InventoryCategory } from '@/types/database'
@@ -60,6 +60,40 @@ export function InventorySetup({
   const [cloning, startClone] = useTransition()
   const [, setCloneResult] = useState<{ added: number; skipped: number } | null>(null)
 
+  // Bulk select / delete
+  const [selectedIdxs, setSelectedIdxs]             = useState<Set<number>>(new Set())
+  const [deletingSelected, startDeleteSelected]      = useTransition()
+
+  // CSV import
+  const csvRef                                       = useRef<HTMLInputElement | null>(null)
+  const [csvPreview, setCsvPreview]                  = useState<
+    Array<{ name: string; category: string; unit: string; par_level: number }>
+  >([])
+  const [showCsvImport, setShowCsvImport]            = useState(false)
+
+  const parseCsv = (text: string) => {
+    const lines   = text.split(/\r?\n/).filter((l) => l.trim())
+    if (!lines.length) return []
+    const headers = lines[0].toLowerCase().split(',').map((h) => h.trim())
+    const nameIdx = headers.findIndex((h) => h.includes('name'))
+    const catIdx  = headers.findIndex((h) => h.includes('cat'))
+    const unitIdx = headers.findIndex((h) => h.includes('unit'))
+    const parIdx  = headers.findIndex((h) => h.includes('par') || h.includes('level'))
+    const hasHeader = nameIdx >= 0 || catIdx >= 0 || unitIdx >= 0
+    const data    = hasHeader ? lines.slice(1) : lines
+    return data
+      .map((line) => {
+        const cols = line.split(',').map((c) => c.trim().replace(/^"|"$/g, ''))
+        return {
+          name:      nameIdx >= 0 ? (cols[nameIdx] ?? '') : (cols[0] ?? ''),
+          category:  catIdx  >= 0 ? (cols[catIdx]  ?? 'other') : 'other',
+          unit:      unitIdx >= 0 ? (cols[unitIdx]  ?? 'units') : 'units',
+          par_level: parIdx  >= 0 ? (parseFloat(cols[parIdx] ?? '1') || 1) : 1,
+        }
+      })
+      .filter((r) => r.name)
+  }
+
   // Group catalog by category
   const catalogByCategory = catalogItems.reduce<Record<string, InventoryCatalogItem[]>>((acc, item) => {
     const cat = item.category
@@ -84,6 +118,28 @@ export function InventorySetup({
       await deleteInventoryItem(item.id, propertyId)
     }
     setItems((prev) => prev.filter((_, i) => i !== idx))
+    // Shift selected indexes down past the removed slot
+    setSelectedIdxs((prev) => {
+      const next = new Set<number>()
+      prev.forEach((i) => {
+        if (i < idx) next.add(i)
+        else if (i > idx) next.add(i - 1)
+      })
+      return next
+    })
+  }
+
+  const removeSelected = () => {
+    startDeleteSelected(async () => {
+      const idsToDelete = Array.from(selectedIdxs)
+        .map((i) => items[i]?.id)
+        .filter((id): id is string => !!id)
+      if (idsToDelete.length > 0) {
+        await bulkDeleteInventoryItems(idsToDelete, propertyId)
+      }
+      setItems((prev) => prev.filter((_, i) => !selectedIdxs.has(i)))
+      setSelectedIdxs(new Set())
+    })
   }
 
   const updateItem = (idx: number, field: keyof EditableItem, value: unknown) => {
@@ -219,7 +275,44 @@ export function InventorySetup({
       {/* Current item list */}
       {items.length > 0 && (
         <div>
-          <p className="section-header">Your Inventory ({items.length} items)</p>
+          {/* Select-all header */}
+          <div className="flex items-center justify-between mb-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={items.length > 0 && selectedIdxs.size === items.length}
+                onChange={() => {
+                  if (selectedIdxs.size === items.length) {
+                    setSelectedIdxs(new Set())
+                  } else {
+                    setSelectedIdxs(new Set(items.map((_, i) => i)))
+                  }
+                }}
+                className="w-4 h-4 rounded"
+                style={{ accentColor: 'var(--accent-gold)' }}
+              />
+              <p className="section-header" style={{ margin: 0 }}>
+                Your Inventory ({items.length} items)
+                {selectedIdxs.size > 0 && (
+                  <span className="ml-1 font-normal text-muted-themed">
+                    — {selectedIdxs.size} selected
+                  </span>
+                )}
+              </p>
+            </label>
+            {selectedIdxs.size > 0 && (
+              <button
+                onClick={removeSelected}
+                disabled={deletingSelected}
+                className="text-xs font-medium"
+                style={{ color: 'var(--accent-red)' }}
+              >
+                {deletingSelected
+                  ? 'Removing…'
+                  : `Remove ${selectedIdxs.size} item${selectedIdxs.size !== 1 ? 's' : ''}`}
+              </button>
+            )}
+          </div>
           <div className="space-y-2">
             {items.map((item, idx) => {
               const templateBrand = templateBrands[item.name.toLowerCase()] ?? null
@@ -233,6 +326,19 @@ export function InventorySetup({
                     : { borderColor: 'var(--border)', background: 'var(--bg-canvas)' }
                   }
                 >
+                  <input
+                    type="checkbox"
+                    checked={selectedIdxs.has(idx)}
+                    onChange={() => {
+                      setSelectedIdxs((prev) => {
+                        const next = new Set(prev)
+                        next.has(idx) ? next.delete(idx) : next.add(idx)
+                        return next
+                      })
+                    }}
+                    className="w-4 h-4 rounded mt-0.5 flex-shrink-0"
+                    style={{ accentColor: 'var(--accent-gold)' }}
+                  />
                   <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-2 items-center min-w-0">
                     <p className="text-sm font-medium text-primary-themed truncate col-span-2">{item.name}</p>
                     <div className="flex items-center gap-1">
@@ -400,6 +506,117 @@ export function InventorySetup({
       ) : (
         <button onClick={() => setShowCustomForm(true)} className="btn-secondary w-full justify-center border-dashed">
           <Plus className="w-4 h-4" /> Add Custom Item
+        </button>
+      )}
+
+      {/* CSV upload */}
+      <input
+        type="file"
+        accept=".csv"
+        ref={csvRef}
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (!file) return
+          const reader = new FileReader()
+          reader.onload = (ev) => setCsvPreview(parseCsv(ev.target?.result as string))
+          reader.readAsText(file)
+          e.target.value = ''
+        }}
+      />
+
+      {showCsvImport ? (
+        <div className="border border-themed rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-primary-themed">Upload CSV</p>
+            <button
+              type="button"
+              onClick={() => { setShowCsvImport(false); setCsvPreview([]) }}
+              className="text-xs text-muted-themed hover:underline"
+            >
+              Cancel
+            </button>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Columns: <code>Name, Category, Unit, Par Level</code> (header row optional).{' '}
+            Category options: <code>paper_goods</code>, <code>cleaning</code>, <code>kitchen</code>,{' '}
+            <code>bath</code>, <code>laundry</code>, <code>bedroom_linens</code>, <code>outdoor</code>,{' '}
+            <code>maintenance_safety</code>, <code>guest_experience</code>, <code>technology</code>, <code>other</code>.
+          </p>
+          {csvPreview.length === 0 ? (
+            <button
+              type="button"
+              onClick={() => csvRef.current?.click()}
+              className="w-full border-2 border-dashed border-themed rounded-xl py-6 text-sm flex flex-col items-center gap-2 transition-colors hover:border-strong-themed"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <Upload className="w-5 h-5" />
+              Click to upload CSV
+            </button>
+          ) : (
+            <>
+              <div className="border border-themed rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr style={{ background: 'var(--bg-raised)' }}>
+                      <th className="text-left px-3 py-2 text-muted-themed">Name</th>
+                      <th className="text-left px-3 py-2 text-muted-themed">Category</th>
+                      <th className="text-right px-3 py-2 text-muted-themed">Par</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvPreview.map((row, i) => (
+                      <tr key={i} className="border-t border-themed">
+                        <td className="px-3 py-1.5 text-primary-themed">{row.name}</td>
+                        <td className="px-3 py-1.5 text-secondary-themed">{row.category}</td>
+                        <td className="px-3 py-1.5 text-right text-secondary-themed">{row.par_level}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setItems((prev) => [
+                      ...prev,
+                      ...csvPreview.map((row) => ({
+                        name:            row.name,
+                        category:        row.category,
+                        unit:            row.unit,
+                        par_level:       row.par_level,
+                        preferred_brand: null as null,
+                        notes:           '',
+                        isNew:           true,
+                        isDirty:         true,
+                      })),
+                    ])
+                    setCsvPreview([])
+                    setShowCsvImport(false)
+                  }}
+                  className="btn-primary flex-1 text-sm"
+                >
+                  Add {csvPreview.length} items
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCsvPreview([])}
+                  className="btn-ghost text-sm"
+                >
+                  Clear
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowCsvImport(true)}
+          className="btn-secondary w-full justify-center border-dashed text-sm"
+        >
+          <Upload className="w-4 h-4" /> Upload CSV
         </button>
       )}
 

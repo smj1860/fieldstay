@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useRef } from 'react'
 import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate, cloneChecklistFromProperty } from './actions'
-import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check, ClipboardList, AlertTriangle } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check, ClipboardList, AlertTriangle, Upload } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
@@ -103,6 +103,81 @@ export function ChecklistBuilder({
   const [cloneFromModal, setCloneFromModal] = useState(false)
   const [cloneFromSource, setCloneFromSource] = useState('')
   const [cloningFrom, startCloneFrom] = useTransition()
+
+  // Import (CSV / DOCX) state
+  const [showImport, setShowImport]         = useState(false)
+  const [importPreview, setImportPreview]   = useState<Array<{ section: string; task: string }>>([])
+  const csvImportRef                        = useRef<HTMLInputElement | null>(null)
+
+  const parseCsvImport = (text: string): Array<{ section: string; task: string }> => {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim())
+    if (!lines.length) return []
+    const header    = lines[0].toLowerCase()
+    const hasHeader = header.includes('section') || header.includes('task')
+    const data      = hasHeader ? lines.slice(1) : lines
+    return data
+      .map((line) => {
+        const cols    = line.split(',').map((c) => c.trim().replace(/^"|"$/g, ''))
+        const section = cols.length >= 2 ? (cols[0] ?? 'Imported') : 'Imported'
+        const task    = cols.length >= 2 ? (cols[1] ?? '') : (cols[0] ?? '')
+        return { section, task }
+      })
+      .filter((r) => r.task)
+  }
+
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+
+    if (file.name.endsWith('.docx')) {
+      try {
+        const mammoth       = await import('mammoth')
+        const buf           = await file.arrayBuffer()
+        const { value }     = await mammoth.extractRawText({ arrayBuffer: buf })
+        let currentSection  = 'Imported'
+        const parsed: Array<{ section: string; task: string }> = []
+        for (const line of value.split('\n').map((l) => l.trim()).filter(Boolean)) {
+          if (line.length < 60 && !line.endsWith('.') && !line.startsWith('-')) {
+            currentSection = line
+          } else {
+            parsed.push({ section: currentSection, task: line.replace(/^[-•·]\s*/, '') })
+          }
+        }
+        setImportPreview(parsed.filter((p) => p.task))
+      } catch {
+        setError('Could not parse DOCX. Try a CSV instead.')
+      }
+    } else {
+      const reader  = new FileReader()
+      reader.onload = (ev) => setImportPreview(parseCsvImport(ev.target?.result as string))
+      reader.readAsText(file)
+    }
+  }
+
+  const confirmImport = () => {
+    if (!importPreview.length) return
+    setSections((prev) => {
+      const next = prev.map((s) => ({ ...s, items: [...s.items] }))
+      for (const { section: sectionName, task } of importPreview) {
+        const existing = next.find(
+          (s) => s.name.toLowerCase() === sectionName.toLowerCase()
+        )
+        if (existing) {
+          existing.items.push({ tempId: makeId(), task, requires_photo: false, notes: '' })
+        } else {
+          next.push({
+            tempId: makeId(),
+            name:   sectionName,
+            items:  [{ tempId: makeId(), task, requires_photo: false, notes: '' }],
+          })
+        }
+      }
+      return next
+    })
+    setImportPreview([])
+    setShowImport(false)
+  }
 
   const toggleAllPhotos = () => {
     const totalItems = sections.reduce((n, s) => n + s.items.length, 0)
@@ -302,7 +377,7 @@ export function ChecklistBuilder({
           <div className="divide-y divide-themed">
             {section.items.map((item, ii) => (
               <div key={item.tempId} className="flex items-center gap-2 px-4 py-2.5 group hover:bg-raised-themed">
-                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex gap-0.5">
                   <button onClick={() => moveItem(section.tempId, item.tempId, -1)} disabled={ii === 0} className="btn-ghost p-0.5 disabled:opacity-30">
                     <ChevronUp className="w-3 h-3" />
                   </button>
@@ -314,7 +389,7 @@ export function ChecklistBuilder({
                   value={item.task}
                   onChange={(e) => updateItem(section.tempId, item.tempId, 'task', e.target.value)}
                   placeholder="Task description…"
-                  className="flex-1 text-sm text-primary-themed bg-transparent focus:outline-none placeholder:text-[var(--text-muted)]"
+                  className="flex-1 text-sm text-primary-themed bg-transparent focus:outline-none placeholder:text-[var(--text-muted)] border-b border-[color:var(--border)] focus:border-[var(--accent-gold)] transition-colors"
                 />
                 <button
                   onClick={() => updateItem(section.tempId, item.tempId, 'requires_photo', !item.requires_photo)}
@@ -324,7 +399,7 @@ export function ChecklistBuilder({
                 >
                   <Camera className="w-4 h-4" />
                 </button>
-                <button onClick={() => removeItem(section.tempId, item.tempId)} className="text-muted-themed hover:text-red-500 transition-colors p-1 opacity-0 group-hover:opacity-100">
+                <button onClick={() => removeItem(section.tempId, item.tempId)} className="text-muted-themed hover:text-red-500 transition-colors p-1">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -341,9 +416,86 @@ export function ChecklistBuilder({
         </div>
       ))}
 
-      <button onClick={addSection} className="btn-secondary w-full justify-center border-dashed">
-        <Plus className="w-4 h-4" /> Add Section
-      </button>
+      {/* Hidden file input for CSV/DOCX import */}
+      <input
+        type="file"
+        accept=".csv,.docx"
+        ref={csvImportRef}
+        className="hidden"
+        onChange={handleImportFileChange}
+      />
+
+      {showImport ? (
+        <div className="border border-themed rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-primary-themed">Import Tasks</p>
+            <button
+              type="button"
+              onClick={() => { setShowImport(false); setImportPreview([]) }}
+              className="text-xs text-muted-themed hover:underline"
+            >
+              Cancel
+            </button>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Upload a <strong>.csv</strong> (columns: <code>Section, Task</code>) or <strong>.docx</strong>{' '}
+            (headings become sections, bullet lines become tasks).
+          </p>
+          {importPreview.length === 0 ? (
+            <button
+              type="button"
+              onClick={() => csvImportRef.current?.click()}
+              className="w-full border-2 border-dashed border-themed rounded-xl py-6 text-sm flex flex-col items-center gap-2 transition-colors hover:border-strong-themed"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <Upload className="w-5 h-5" />
+              Click to upload CSV or DOCX
+            </button>
+          ) : (
+            <>
+              <div className="border border-themed rounded-xl overflow-hidden max-h-48 overflow-y-auto">
+                {importPreview.map((row, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 px-4 py-2 border-b border-themed last:border-0 text-sm"
+                  >
+                    <span className="text-xs font-medium text-muted-themed w-28 flex-shrink-0 truncate">
+                      {row.section}
+                    </span>
+                    <span className="text-primary-themed">{row.task}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={confirmImport} className="btn-primary flex-1 text-sm">
+                  Add {importPreview.length} tasks
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportPreview([])}
+                  className="btn-ghost text-sm"
+                >
+                  Clear
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <button onClick={addSection} className="btn-secondary flex-1 justify-center border-dashed">
+            <Plus className="w-4 h-4" /> Add Section
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowImport(true)}
+            className="btn-secondary px-3"
+            title="Import tasks from CSV or DOCX"
+          >
+            <Upload className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {broadcastResult && (
         <div className="flex items-center gap-2 px-4 py-3 rounded-lg text-sm border" style={{ background: 'var(--accent-green-dim)', borderColor: 'var(--accent-green)', color: 'var(--accent-green)' }}>
@@ -358,7 +510,29 @@ export function ChecklistBuilder({
         </button>
         <button
           disabled={completing}
-          onClick={() => startComplete(() => completeChecklistStep(propertyId))}
+          onClick={() =>
+            startComplete(async () => {
+              const payload = sections.map((s, si) => ({
+                id:         s.id,
+                name:       s.name,
+                sort_order: si,
+                items:      s.items.map((item, ii) => ({
+                  id:             item.id,
+                  task:           item.task,
+                  requires_photo: item.requires_photo,
+                  notes:          item.notes,
+                  sort_order:     ii,
+                })),
+              }))
+              const saveResult = await saveChecklistTemplate(
+                propertyId,
+                template?.id ?? null,
+                payload
+              )
+              if (saveResult.error) { setError(saveResult.error); return }
+              await completeChecklistStep(propertyId)
+            })
+          }
           className="btn-primary"
         >
           {completing ? 'Saving…' : 'Save & Continue →'}

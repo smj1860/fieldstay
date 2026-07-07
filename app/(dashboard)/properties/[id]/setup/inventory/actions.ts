@@ -78,6 +78,20 @@ export async function deleteInventoryItem(itemId: string, propertyId: string): P
   revalidatePath(`/properties/${propertyId}/setup/inventory`)
 }
 
+export async function bulkDeleteInventoryItems(
+  itemIds: string[],
+  propertyId: string
+): Promise<void> {
+  if (!itemIds.length) return
+  const { supabase, membership } = await requireOrgMember()
+  await supabase
+    .from('inventory_items')
+    .delete()
+    .in('id', itemIds)
+    .eq('org_id', membership.org_id)
+  revalidatePath(`/properties/${propertyId}/setup/inventory`)
+}
+
 export async function completeInventoryStep(propertyId: string): Promise<void> {
   await markStepComplete(propertyId, 'inventory')
   redirect(`/properties/${propertyId}/setup/checklist`)
