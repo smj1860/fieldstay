@@ -4,8 +4,10 @@ import { resend, FROM }                  from '@/lib/resend/client'
 import { renderIntegrationErrorEmail }   from '@/lib/resend/emails/integration-error'
 
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  ownerrez: 'OwnerRez',
-  kroger:   'Kroger',
+  ownerrez:   'OwnerRez',
+  kroger:     'Kroger',
+  hostaway:   'Hostaway',
+  hospitable: 'Hospitable',
 }
 
 export const notifyIntegrationError = inngest.createFunction(

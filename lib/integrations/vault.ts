@@ -10,6 +10,7 @@
 // ============================================================
 
 import { createClient } from '@supabase/supabase-js'
+import { randomBytes } from 'crypto'
 
 /** Service-role admin client. Instantiated fresh per call — never module-scoped. */
 function getAdminClient() {
@@ -190,4 +191,74 @@ export async function findUserByExternalId(
   if (error || !data) return null
 
   return data.user_id as string
+}
+
+// ── Marketplace install: pending links ──────────────────────────────────────
+// Holds an already-exchanged token for a user with no FieldStay session yet
+// (arriving from a provider's marketplace) until they finish signing up.
+// See supabase/migrations/*_marketplace_pending_integration_links.sql.
+
+/**
+ * Store an already-exchanged token in Vault under a random claim token,
+ * for a user who doesn't have a FieldStay account/session yet. Returns the
+ * pending_link_token to embed in the post-signup redirect URL.
+ */
+export async function holdPendingIntegrationToken(params: {
+  providerId: string
+  externalUserId: string
+  accessToken: string
+  refreshToken?: string
+  scope?: string
+  metadata?: Record<string, unknown>
+}): Promise<string> {
+  const admin = getAdminClient()
+  const pendingLinkToken = randomBytes(32).toString('hex')
+
+  const { error } = await admin.rpc('create_pending_integration_link', {
+    p_pending_link_token: pendingLinkToken,
+    p_provider_id:        params.providerId,
+    p_external_user_id:   params.externalUserId,
+    p_access_token:       params.accessToken,
+    p_refresh_token:      params.refreshToken ?? null,
+    p_scope:              params.scope ?? null,
+    p_metadata:           params.metadata ?? {},
+  })
+
+  if (error) {
+    throw new Error(
+      `[Vault] Failed to hold pending token for provider "${params.providerId}": ${error.message}`
+    )
+  }
+
+  return pendingLinkToken
+}
+
+/**
+ * Complete a marketplace install: link a previously-held pending token to a
+ * real FieldStay user now that they have an account. Single-use — returns
+ * null if the token doesn't exist or already expired (30 min TTL).
+ */
+export async function claimPendingIntegrationLink(
+  pendingLinkToken: string,
+  userId: string
+): Promise<{ providerId: string; externalUserId: string; orgId: string | null } | null> {
+  const admin = getAdminClient()
+
+  const { data, error } = await admin.rpc('claim_pending_integration_link', {
+    p_pending_link_token: pendingLinkToken,
+    p_user_id:            userId,
+  })
+
+  if (error) {
+    throw new Error(`[Vault] Failed to claim pending integration link: ${error.message}`)
+  }
+
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) return null
+
+  return {
+    providerId:     row.provider_id as string,
+    externalUserId: row.external_user_id as string,
+    orgId:          (row.org_id as string | null) ?? null,
+  }
 }

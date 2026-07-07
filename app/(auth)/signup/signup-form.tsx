@@ -36,14 +36,21 @@ export function SignupForm() {
 
     const supabase = createClient()
 
-    // Build the emailRedirectTo URL — include invite_token so the callback
-    // can process the invite acceptance after email confirmation.
-    const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? globalThis.location?.origin
-    const nextParam = inviteToken
-      ? `/auth/callback?invite_token=${encodeURIComponent(inviteToken)}`
-      : '/auth/callback'
+    // Build the emailRedirectTo URL — include invite_token and/or next as
+    // query params so the callback can process them after email confirmation.
+    // A cookie (like GoogleSignInButton uses for the OAuth path) doesn't work
+    // here: confirmation can happen minutes/hours later, on a different
+    // device/browser than the one that started signup. Query params on
+    // emailRedirectTo survive that round-trip; Supabase appends its own
+    // code param onto whatever URL we give it here.
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? globalThis.location?.origin
+    const callbackParams = new URLSearchParams()
+    if (inviteToken) callbackParams.set('invite_token', inviteToken)
+    if (next)        callbackParams.set('next', next)
+    const query     = callbackParams.toString()
+    const nextParam = `/auth/callback${query ? `?${query}` : ''}`
 
-    const { error } = await supabase.auth.signUp({
+    const { error, data } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -58,8 +65,14 @@ export function SignupForm() {
       return
     }
 
-    // If invite flow: show confirmation message (user needs to verify email)
-    router.push(inviteToken ? '/signup?check_email=1' : '/onboarding')
+    // If invite flow: show confirmation message (user needs to verify email).
+    // Otherwise: if this project has email confirmation disabled, signUp()
+    // already returns an active session — honor `next` immediately rather
+    // than waiting on a confirmation email that will never be sent. If
+    // confirmation IS required, this push lands on a page that requires auth
+    // and bounces to /login harmlessly; the real destination is reached via
+    // the emailRedirectTo link above once they confirm.
+    router.push(inviteToken ? '/signup?check_email=1' : (data.session ? (next ?? '/onboarding') : '/onboarding'))
     router.refresh()
   }
 

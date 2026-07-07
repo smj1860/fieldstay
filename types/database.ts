@@ -1100,6 +1100,20 @@ export interface ProcessedWebhook {
   processed_at: string
 }
 
+export interface PendingIntegrationLink {
+  id:                            string
+  pending_link_token:            string
+  provider_id:                   string
+  external_user_id:              string
+  vault_secret_id:                string
+  refresh_token_vault_secret_id: string | null
+  scope:                         string | null
+  metadata:                      Record<string, unknown>
+  /** 30-minute TTL from creation */
+  expires_at:                    string
+  created_at:                    string
+}
+
 // ── Self-Funding Guidebook ────────────────────────────────────────────────────
 
 export interface GuidebookConfiguration {
@@ -1417,6 +1431,7 @@ export interface Database {
       integration_connections:        { Row: IntegrationConnection;       Insert: Partial<IntegrationConnection>;       Update: Partial<IntegrationConnection>;       Relationships: [] }
       oauth_states:                   { Row: OAuthState;                  Insert: Partial<OAuthState>;                  Update: Partial<OAuthState>;                  Relationships: [] }
       processed_webhooks:             { Row: ProcessedWebhook;            Insert: Partial<ProcessedWebhook>;            Update: Partial<ProcessedWebhook>;            Relationships: [] }
+      pending_integration_links:      { Row: PendingIntegrationLink;      Insert: Partial<PendingIntegrationLink>;      Update: Partial<PendingIntegrationLink>;      Relationships: [] }
 
       // ── Support bot ────────────────────────────────────────
       support_kb_chunks:     { Row: SupportKbChunk;     Insert: Partial<SupportKbChunk>;     Update: Partial<SupportKbChunk>;     Relationships: [] }

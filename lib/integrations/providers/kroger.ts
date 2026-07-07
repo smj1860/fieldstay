@@ -17,6 +17,7 @@ import {
   refreshCustomerToken,
   getKrogerProfile,
 } from '@/lib/kroger/client'
+import { fail } from '../webhook-verification'
 
 const FALLBACK_EXTERNAL_USER_ID = 'kroger_customer'
 
@@ -77,8 +78,8 @@ export const krogerProvider: IntegrationProvider = {
   },
 
   // Kroger does not send webhooks to FieldStay
-  async validateWebhook(): Promise<boolean> {
-    return false
+  async validateWebhook() {
+    return fail('Kroger has no webhook events')
   },
 
   async handleWebhookEvent(): Promise<void> {

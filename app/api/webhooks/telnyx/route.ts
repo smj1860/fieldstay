@@ -3,10 +3,16 @@ import { createVerify } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
+import { isTimestampFresh } from '@/lib/integrations/webhook-verification'
 
 // ── Signature verification ────────────────────────────────────────────────────
 // Telnyx signs webhooks with ed25519. The signed payload is `timestamp|rawBody`.
 // Public key comes from Telnyx Portal → API Keys → Ed25519 Public Key.
+//
+// A cryptographically valid signature alone doesn't expire — without also
+// checking the signed timestamp, a captured request stays replayable
+// forever. isTimestampFresh() closes that window (5 min tolerance, same
+// default Stripe's SDK uses for its own webhook verification).
 function verifyTelnyxSignature(
   rawBody:   string,
   signature: string | null,
@@ -14,6 +20,9 @@ function verifyTelnyxSignature(
 ): boolean {
   const publicKey = process.env.TELNYX_WEBHOOK_PUBLIC_KEY
   if (!publicKey || !signature || !timestamp) return false
+
+  const timestampSeconds = Number(timestamp)
+  if (!Number.isFinite(timestampSeconds) || !isTimestampFresh(timestampSeconds)) return false
 
   try {
     const signedPayload = `${timestamp}|${rawBody}`
@@ -36,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   // ── Verify signature before processing any payload ──────────────────────────
   if (!verifyTelnyxSignature(rawBody, signature, timestamp)) {
-    console.error('[Telnyx webhook] Signature verification failed')
+    console.error('[Telnyx webhook] Signature verification failed (invalid signature or stale timestamp)')
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
