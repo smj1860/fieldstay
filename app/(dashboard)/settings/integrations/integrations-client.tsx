@@ -462,7 +462,11 @@ function IntegrationCard({
               </Button>
             ) : (
               <a
-                href={`/api/integrations/${provider.id}/connect`}
+                href={
+                  provider.id === 'ownerrez'
+                    ? `/api/integrations/${provider.id}/connect?return_to=${encodeURIComponent('/ops')}`
+                    : `/api/integrations/${provider.id}/connect`
+                }
                 className="btn-secondary text-sm flex items-center gap-1.5"
               >
                 <PlugZap className="w-3.5 h-3.5" />
