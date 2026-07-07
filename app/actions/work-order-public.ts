@@ -6,6 +6,7 @@ import { randomBytes }         from 'crypto'
 import { inngest }             from '@/lib/inngest/client'
 import { revalidatePath }      from 'next/cache'
 import { logAuditEvent }       from '@/lib/audit'
+import { renderSmsBody }       from '@/lib/sms/templates'
 
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
@@ -95,22 +96,28 @@ export async function dispatchWorkOrderToVendor(input: {
 
     // SMS — send alongside the dispatched email when vendor has a mobile number
     if (input.vendorPhone) {
-      const { normalizePhoneToE164, sendSMS, buildVendorWorkOrderSMS } =
-        await import('@/lib/sms/telnyx')
+      const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
 
       const e164 = normalizePhoneToE164(input.vendorPhone)
       if (e164) {
-        const smsBody = buildVendorWorkOrderSMS({
-          vendorName:   input.vendorName,
-          woNumber:     wo.wo_number ?? '',
-          propertyName: (property as { name: string } | null)?.name ?? 'Property',
-          pmName:       profile?.full_name ?? 'Your Property Manager',
-          orgName:      org?.name ?? 'FieldStay Property Management',
-          nteAmount:    (wo.nte_amount as number | null) ?? 0,
-          portalUrl:    `${APP_URL}/work-orders/${token}`,
-        })
+        const nteAmt     = (wo.nte_amount as number | null) ?? 0
+        const nteLine    = nteAmt > 0 ? `\nNTE: $${nteAmt.toLocaleString()}` : ''
+        const propName   = (property as { name: string } | null)?.name ?? 'Property'
+        const portalUrl  = `${APP_URL}/work-orders/${token}`
 
         try {
+          const smsBody = await renderSmsBody(membership.org_id, 'vendor_work_order', {
+            vendor_name:   input.vendorName,
+            wo_number:     wo.wo_number ?? '',
+            property_name: propName,
+            pm_name:       profile?.full_name ?? 'Your Property Manager',
+            org_name:      org?.name ?? 'FieldStay Property Management',
+            nte_amount:    nteAmt,
+            window:        null,    // manual dispatch has no scheduled window
+            nte_line:      nteLine,
+            window_line:   '',
+            portal_url:    portalUrl,
+          })
           await sendSMS(e164, smsBody)
         } catch (smsErr) {
           console.error('[dispatchWorkOrderToVendor] SMS failed (non-fatal):', smsErr)

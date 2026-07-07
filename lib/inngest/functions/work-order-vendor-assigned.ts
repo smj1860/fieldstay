@@ -219,8 +219,9 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           pm_name:       dispatcher.name,
           org_name:      org?.name     ?? 'FieldStay Property Management',
           nte_amount:    nteAmount,
-          nte_line:      nteLine,
-          window_line:   windowLine,
+          window:        vendorWindow ?? null,   // raw — used by renderDefault → buildVendorWorkOrderSMS
+          nte_line:      nteLine,                // pre-formatted — used by {{nte_line}} in custom template
+          window_line:   windowLine,             // pre-formatted — used by {{window_line}} in custom template
           portal_url:    publicUrl,
         })
 
