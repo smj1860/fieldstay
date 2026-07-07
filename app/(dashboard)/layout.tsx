@@ -6,6 +6,7 @@ import { DashboardShell } from '@/components/dashboard-shell'
 import { DashboardToastProvider } from '@/components/dashboard-toast-provider'
 import { SupportChatWidget } from '@/components/support/support-chat-widget'
 import { ReviewPrompt } from '@/components/review-prompt'
+import { NewPropertySetupPrompt } from '@/components/new-property-setup-prompt'
 import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 import { getNotifications } from '@/lib/notifications'
 
@@ -123,6 +124,23 @@ export default async function DashboardLayout({
       .eq('milestone', pendingMilestone.milestone)
   }
 
+  const { data: newPropertyMilestones } = await supabase
+    .from('org_milestones')
+    .select('milestone, value')
+    .eq('org_id', membership.org_id)
+    .eq('dismissed', false)
+    .like('milestone', 'new_property_setup:%')
+    .order('achieved_at', { ascending: false })
+    .limit(3)
+
+  const { data: orgProperties } = newPropertyMilestones?.length
+    ? await supabase
+        .from('properties')
+        .select('id, name')
+        .eq('org_id', membership.org_id)
+        .eq('is_active', true)
+    : { data: null }
+
   const { data: staffRow } = await supabase
     .from('platform_staff')
     .select('user_id')
@@ -186,6 +204,20 @@ export default async function DashboardLayout({
             message={MILESTONE_MESSAGES[pendingMilestone.milestone]!}
           />
         )}
+        {(newPropertyMilestones ?? []).map((m) => {
+          const value = (m.value ?? {}) as { property_id?: string; property_name?: string }
+          if (!value.property_id) return null
+
+          return (
+            <NewPropertySetupPrompt
+              key={m.milestone}
+              milestone={m.milestone}
+              propertyId={value.property_id}
+              propertyName={value.property_name ?? 'New property'}
+              otherProperties={(orgProperties ?? []).filter((p) => p.id !== value.property_id)}
+            />
+          )
+        })}
         {children}
       </DashboardShell>
 

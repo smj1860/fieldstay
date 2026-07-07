@@ -254,7 +254,7 @@ export const hospIncrementalSync = inngest.createFunction(
     // ── PROPERTY ─────────────────────────────────────────────────────────────
     if (entity_type === 'property') {
 
-      const { orgId, token } = await step.run('resolve-org-and-token', async () => {
+      const { orgId, token, isNewProperty } = await step.run('resolve-org-and-token', async () => {
         const supabase = createServiceClient()
 
         const { data: property } = await supabase
@@ -301,7 +301,7 @@ export const hospIncrementalSync = inngest.createFunction(
         }
 
         const validToken = await getValidHospitableToken(pmUserId!)
-        return { orgId: resolvedOrgId!, token: validToken }
+        return { orgId: resolvedOrgId!, token: validToken, isNewProperty: !property }
       })
 
       const fetchAndUpsertResult = await step.run('fetch-and-upsert-property', async () => {
@@ -321,7 +321,7 @@ export const hospIncrementalSync = inngest.createFunction(
 
           if (error) throw new Error(`mark-inactive failed: ${error.message}`)
           logger.info(`[Hospitable incremental] Property ${entity_id} marked inactive`)
-          return { action: 'deactivated', propertyId: undefined as string | undefined }
+          return { action: 'deactivated', propertyId: undefined as string | undefined, propertyName: undefined as string | undefined }
         }
 
         if (!res.ok) {
@@ -347,7 +347,7 @@ export const hospIncrementalSync = inngest.createFunction(
         const normalized = hospitablePropertyToNormalized(prop)
         const idMap = await upsertNormalizedProperties(orgId, PROVIDER, [normalized])
 
-        return { action: 'updated', propertyId: idMap[prop.id] }
+        return { action: 'updated', propertyId: idMap[prop.id], propertyName: normalized.name }
       })
 
       const propertyId = fetchAndUpsertResult?.propertyId
@@ -380,6 +380,35 @@ export const hospIncrementalSync = inngest.createFunction(
             // Non-fatal — don't throw, don't block the sync
           }
         })
+
+        // New property FieldStay has never seen before (as opposed to an
+        // update to one it already knew about) — nudge the PM to set up its
+        // checklist, inventory, and maintenance schedule. Surfaced via the
+        // org_milestones banner in app/(dashboard)/layout.tsx.
+        if (isNewProperty) {
+          await step.run('notify-new-property-setup', async () => {
+            try {
+              const supabase = createServiceClient()
+              const { error } = await supabase
+                .from('org_milestones')
+                .upsert(
+                  {
+                    org_id:    orgId,
+                    milestone: `new_property_setup:${propertyId}`,
+                    value: {
+                      property_id:   propertyId,
+                      property_name: fetchAndUpsertResult.propertyName ?? 'New property',
+                    },
+                  },
+                  { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+                )
+              if (error) throw new Error(error.message)
+            } catch (err) {
+              logger.error(`[Hospitable incremental] new-property milestone write failed for property ${propertyId}: ${err instanceof Error ? err.message : String(err)}`)
+              // Non-fatal — don't throw, don't block the sync
+            }
+          })
+        }
       }
 
       return { action: 'synced', entity_id }
