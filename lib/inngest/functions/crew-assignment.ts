@@ -2,6 +2,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
 import { formatDateTime }      from '@/lib/utils'
+import { renderSmsBody }       from '@/lib/sms/templates'
 
 /**
  * Triggered when one or more turnovers are assigned to a crew member via
@@ -106,7 +107,7 @@ export const handleCrewAssigned = inngest.createFunction(
     // SMS — turnover assigned notification for crew with a mobile number
     if (crew.phone) {
       await step.run('send-assignment-sms', async () => {
-        const { normalizePhoneToE164, sendSMS, buildCrewTurnoverAssignedSMS } =
+        const { normalizePhoneToE164, sendSMS } =
           await import('@/lib/sms/telnyx')
 
         const e164 = normalizePhoneToE164(crew.phone!)
@@ -128,10 +129,21 @@ export const handleCrewAssigned = inngest.createFunction(
           }
         })
 
-        const smsBody = buildCrewTurnoverAssignedSMS({
-          orgName:   org?.name ?? 'Your property manager',
-          turnovers: smsRows,
+        // Build the formatted bullet list for the {{assignments}} token
+        const assignmentLines = smsRows.map((t) => {
+          const date      = new Date(t.checkoutDatetime)
+          const dateStr   = date.toLocaleDateString('en-US', {
+            weekday: 'short', month: 'short', day: 'numeric',
+          })
+          const windowHrs = Math.round(t.windowMinutes / 60)
+          const windowStr = windowHrs > 0 ? ` · ${windowHrs}hr window` : ''
+          return `• ${t.propertyName} — ${dateStr}${windowStr}`
         })
+
+        const smsBody = await renderSmsBody(org_id, 'crew_turnover_assigned', {
+          org_name:    org?.name ?? 'Your property manager',
+          assignments: assignmentLines.join('\n'),
+        }, smsRows)
 
         try {
           await sendSMS(e164, smsBody)

@@ -6,6 +6,7 @@ import WorkOrderDispatchEmail   from '@/emails/WorkOrderDispatch'
 import { resend, FROM }         from '@/lib/resend/client'
 import { getPmEmail }           from '@/lib/inngest/helpers'
 import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
+import { renderSmsBody }        from '@/lib/sms/templates'
 import { randomBytes }          from 'crypto'
 
 export const handleWorkOrderVendorAssigned = inngest.createFunction(
@@ -187,7 +188,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     // SMS — alongside email when vendor has a mobile number
     if (vendor.phone) {
       await step.run('send-vendor-sms', async () => {
-        const { normalizePhoneToE164, sendSMS, buildVendorWorkOrderSMS } =
+        const { normalizePhoneToE164, sendSMS } =
           await import('@/lib/sms/telnyx')
 
         const e164 = normalizePhoneToE164(vendor.phone!)
@@ -205,15 +206,22 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           )
         }
 
-        const smsBody = buildVendorWorkOrderSMS({
-          vendorName:   vendor.name   ?? '',
-          woNumber:     wo.wo_number  ?? '',
-          propertyName,
-          pmName:       dispatcher.name,
-          orgName:      org?.name     ?? 'FieldStay Property Management',
-          nteAmount:    (wo.nte_amount as number | null) ?? 0,
-          portalUrl:    publicUrl,
-          window:       vendorWindow,
+        const nteAmount = (wo.nte_amount as number | null) ?? 0
+        const nteLine   = nteAmount > 0 ? `\nNTE: $${nteAmount.toLocaleString()}` : ''
+        const windowLine = vendorWindow
+          ? `\nAvailable window: ${vendorWindow}\nProperty must be ready before guest check-in.`
+          : ''
+
+        const smsBody = await renderSmsBody(orgId, 'vendor_work_order', {
+          vendor_name:   vendor.name   ?? '',
+          wo_number:     wo.wo_number  ?? '',
+          property_name: propertyName,
+          pm_name:       dispatcher.name,
+          org_name:      org?.name     ?? 'FieldStay Property Management',
+          nte_amount:    nteAmount,
+          nte_line:      nteLine,
+          window_line:   windowLine,
+          portal_url:    publicUrl,
         })
 
         try {
