@@ -17,6 +17,29 @@ import { logAuditEvent } from '@/lib/audit'
  * auto-creation paths (new property, OwnerRez sync) leave it as false so
  * they never clobber a template the PM already customised.
  */
+// The manual property setup wizard flags the checklist step complete itself
+// (saveChecklistTemplate + markStepComplete), but this function is also
+// called from three automatic paths (new-property creation, OwnerRez sync,
+// Hospitable sync) and the org-wide "Apply to All Properties" button, none
+// of which go through the wizard. Without this, a property that already has
+// a real, fully-populated checklist still shows the wizard's checklist step
+// as incomplete forever, because nothing ever wrote setup_steps_completed.
+async function markChecklistStepComplete(propertyId: string, supabase: SupabaseClient): Promise<void> {
+  const { data } = await supabase
+    .from('properties')
+    .select('setup_steps_completed')
+    .eq('id', propertyId)
+    .single()
+
+  const current = (data?.setup_steps_completed as Record<string, boolean>) ?? {}
+  if (current.checklist === true) return
+
+  await supabase
+    .from('properties')
+    .update({ setup_steps_completed: { ...current, checklist: true } })
+    .eq('id', propertyId)
+}
+
 export async function applyMasterChecklistToProperty(
   propertyId: string,
   orgId:      string,
@@ -58,7 +81,12 @@ export async function applyMasterChecklistToProperty(
     .eq('is_default', true)
     .maybeSingle()
 
-  if (existingTemplate && !force) return  // respect existing template
+  if (existingTemplate && !force) {
+    // Respect the existing (possibly PM-customised) template, but the
+    // property still has a real checklist in place either way.
+    await markChecklistStepComplete(propertyId, supabase)
+    return
+  }
 
   let templateId: string
 
@@ -123,6 +151,8 @@ export async function applyMasterChecklistToProperty(
       }))
     )
   }
+
+  await markChecklistStepComplete(propertyId, supabase)
 
   if (actorId) {
     await logAuditEvent({
