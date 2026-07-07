@@ -4,6 +4,10 @@ import { useState, useTransition, useActionState, useEffect } from 'react'
 import { Plus, X, Link2, RefreshCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Trash2, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import {
   addPropertyOwner,
   generatePortalToken,
@@ -163,9 +167,10 @@ function CopyButton({ text }: { text: string }) {
   }
 
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={handleCopy}
-      className="btn-ghost py-1 px-2 text-xs flex items-center gap-1"
+      className="py-1 px-2 text-xs flex items-center gap-1"
       title="Copy portal link"
     >
       {copied ? (
@@ -173,7 +178,7 @@ function CopyButton({ text }: { text: string }) {
       ) : (
         <><Copy className="w-3.5 h-3.5" /> Copy Link</>
       )}
-    </button>
+    </Button>
   )
 }
 
@@ -194,13 +199,14 @@ function RevokeAccessButton({ ownerId }: { ownerId: string }) {
 
   return (
     <div>
-      <button
+      <Button
+        variant="ghost"
         onClick={handleRevoke}
         disabled={pending}
-        className="btn-ghost py-1 px-2 text-xs flex items-center gap-1 text-red-600 hover:text-red-700 disabled:opacity-50"
+        className="py-1 px-2 text-xs flex items-center gap-1 text-red-600 hover:text-red-700 disabled:opacity-50"
       >
         {pending ? 'Revoking…' : 'Revoke Access'}
-      </button>
+      </Button>
       {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>
   )
@@ -222,14 +228,15 @@ function GenerateLinkButton({ ownerId }: { ownerId: string }) {
 
   return (
     <div>
-      <button
+      <Button
+        variant="secondary"
         onClick={handleGenerate}
         disabled={pending}
-        className="btn-secondary py-1 px-2 text-xs flex items-center gap-1 disabled:opacity-50"
+        className="py-1 px-2 text-xs flex items-center gap-1 disabled:opacity-50"
       >
         <RefreshCw className={cn('w-3.5 h-3.5', pending && 'animate-spin')} />
         {pending ? 'Generating…' : 'Generate Link'}
-      </button>
+      </Button>
       {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>
   )
@@ -258,9 +265,9 @@ function AddTransactionForm({
     <div className="mt-3 border border-themed rounded-xl p-4 bg-canvas-themed">
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-sm font-semibold text-primary-themed">Add Transaction</h4>
-        <button onClick={onClose} className="btn-ghost p-1">
+        <Button variant="ghost" onClick={onClose} className="p-1">
           <X className="w-3.5 h-3.5" />
-        </button>
+        </Button>
       </div>
 
       {state?.error && (
@@ -304,13 +311,13 @@ function AddTransactionForm({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="txn-date" className="label text-xs">Date</label>
-            <input
+            <Input
               id="txn-date"
               name="transaction_date"
               type="date"
               required
               defaultValue={todayIso()}
-              className="input text-sm"
+              className="text-sm"
             />
           </div>
           <div>
@@ -325,27 +332,27 @@ function AddTransactionForm({
 
         <div>
           <label htmlFor="txn-description" className="label text-xs">Description <span className="text-red-500">*</span></label>
-          <input id="txn-description" name="description" type="text" required className="input text-sm" placeholder="e.g. 4-night stay, HVAC repair" />
+          <Input id="txn-description" name="description" type="text" required className="text-sm" placeholder="e.g. 4-night stay, HVAC repair" />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="txn-amount" className="label text-xs">Amount ($) <span className="text-red-500">*</span></label>
-            <input id="txn-amount" name="amount" type="number" required min="0.01" step="0.01" className="input text-sm" placeholder="0.00" />
+            <Input id="txn-amount" name="amount" type="number" required min="0.01" step="0.01" className="text-sm" placeholder="0.00" />
           </div>
           <div>
             <label htmlFor="txn-notes" className="label text-xs">Notes</label>
-            <input id="txn-notes" name="notes" type="text" className="input text-sm" placeholder="Optional" />
+            <Input id="txn-notes" name="notes" type="text" className="text-sm" placeholder="Optional" />
           </div>
         </div>
 
         <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={pending} className="btn-primary py-1.5 text-sm flex-1">
+          <Button type="submit" disabled={pending} className="py-1.5 text-sm flex-1">
             {pending ? 'Saving…' : 'Add Transaction'}
-          </button>
-          <button type="button" onClick={onClose} className="btn-ghost py-1.5 text-sm">
+          </Button>
+          <Button variant="ghost" type="button" onClick={onClose} className="py-1.5 text-sm">
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -364,17 +371,18 @@ function VisibilityToggle({ txn }: { txn: Transaction }) {
   }
 
   return (
-    <button
+    <Button
+      variant="ghost"
       onClick={toggle}
       disabled={pending}
       title={txn.visible_to_owner ? 'Visible to owner — click to hide' : 'Hidden from owner — click to show'}
       className={cn(
-        'btn-ghost p-1 disabled:opacity-40',
+        'p-1 disabled:opacity-40',
         txn.visible_to_owner ? 'text-green-600 hover:text-green-700' : 'text-muted-themed hover:text-secondary-themed'
       )}
     >
       {txn.visible_to_owner ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-    </button>
+    </Button>
   )
 }
 
@@ -486,14 +494,15 @@ function TransactionPanel({
                       </td>
                       <td className="px-2 py-2">
                         {!txn.work_order_id && !txn.booking_id && (
-                          <button
+                          <Button
+                            variant="ghost"
                             onClick={() => handleDelete(txn.id)}
                             disabled={deletingId === txn.id}
-                            className="btn-ghost p-1 text-muted-themed hover:text-red-600"
+                            className="p-1 text-muted-themed hover:text-red-600"
                             title="Delete transaction"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          </Button>
                         )}
                       </td>
                     </tr>
@@ -509,13 +518,14 @@ function TransactionPanel({
           {showForm ? (
             <AddTransactionForm propertyId={propertyId} onClose={() => setShowForm(false)} />
           ) : (
-            <button
+            <Button
+              variant="ghost"
               type="button"
               onClick={() => setShowForm(true)}
-              className="btn-ghost text-xs flex items-center gap-1"
+              className="text-xs flex items-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" /> Add Transaction
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -564,23 +574,23 @@ function AddOwnerModal({
           <label htmlFor="name" className="label">
             Owner Name <span className="text-red-500">*</span>
           </label>
-          <input id="name" name="name" type="text" required className="input" placeholder="Jane Smith" />
+          <Input id="name" name="name" type="text" required placeholder="Jane Smith" />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="email" className="label">Email</label>
-            <input id="email" name="email" type="email" className="input" placeholder="jane@example.com" />
+            <Input id="email" name="email" type="email" placeholder="jane@example.com" />
           </div>
           <div>
             <label htmlFor="phone" className="label">Phone</label>
-            <input id="phone" name="phone" type="tel" className="input" placeholder="(555) 123-4567" />
+            <Input id="phone" name="phone" type="tel" placeholder="(555) 123-4567" />
           </div>
         </div>
 
         <div>
           <label htmlFor="revenue_share_pct" className="label">Revenue Share %</label>
-          <input id="revenue_share_pct" name="revenue_share_pct" type="number" min="0" max="100" step="0.1" className="input" placeholder="e.g. 80" />
+          <Input id="revenue_share_pct" name="revenue_share_pct" type="number" min="0" max="100" step="0.1" placeholder="e.g. 80" />
         </div>
 
         <div>
@@ -589,10 +599,10 @@ function AddOwnerModal({
         </div>
 
         <div className="flex gap-3 pt-2">
-          <button type="submit" disabled={pending} className="btn-primary flex-1">
+          <Button type="submit" disabled={pending} className="flex-1">
             {pending ? 'Saving…' : 'Add Owner'}
-          </button>
-          <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+          </Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
         </div>
       </form>
     </Dialog>
@@ -615,14 +625,15 @@ function GenerateCombinedLinkButton({ ownerIds }: { ownerIds: string[] }) {
 
   return (
     <div>
-      <button
+      <Button
+        variant="secondary"
         onClick={handleGenerate}
         disabled={pending}
-        className="btn-secondary py-1 px-2 text-xs flex items-center gap-1 disabled:opacity-50"
+        className="py-1 px-2 text-xs flex items-center gap-1 disabled:opacity-50"
       >
         <RefreshCw className={cn('w-3.5 h-3.5', pending && 'animate-spin')} />
         {pending ? 'Generating…' : 'Generate Combined Link'}
-      </button>
+      </Button>
       {error && <p className="text-xs text-red-600 mt-1">{error}</p>}
     </div>
   )
@@ -648,7 +659,7 @@ function MultiPropertyOwnerCard({
     .filter((n): n is string => !!n)
 
   return (
-    <div className="card p-4 border-dashed">
+    <Card className="p-4 border-dashed">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="font-semibold text-primary-themed">{group.name}</div>
@@ -661,9 +672,9 @@ function MultiPropertyOwnerCard({
         <div className="flex items-center gap-1 flex-wrap">
           {portalUrl ? (
             <>
-              <span className="badge badge-green text-xs flex items-center gap-1">
+              <Badge tone="green" className="text-xs flex items-center gap-1">
                 <Link2 className="w-3 h-3" /> Combined Link Active
-              </span>
+              </Badge>
               <CopyButton text={portalUrl} />
               <a href={portalUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost py-1 px-2 text-xs flex items-center gap-1">
                 <ExternalLink className="w-3.5 h-3.5" /> View
@@ -672,13 +683,13 @@ function MultiPropertyOwnerCard({
             </>
           ) : (
             <>
-              {combinedToken && expired && <span className="badge badge-amber text-xs">Expired</span>}
+              {combinedToken && expired && <Badge tone="amber" className="text-xs">Expired</Badge>}
               <GenerateCombinedLinkButton ownerIds={group.ownerIds} />
             </>
           )}
         </div>
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -741,7 +752,7 @@ function OwnerCard({
   }
 
   return (
-    <div className="card p-4">
+    <Card className="p-4">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <div className="font-semibold text-primary-themed">{owner.name}</div>
@@ -755,9 +766,9 @@ function OwnerCard({
         <div className="flex items-center gap-1 flex-wrap">
           {portalUrl ? (
             <>
-              <span className="badge badge-green text-xs flex items-center gap-1">
+              <Badge tone="green" className="text-xs flex items-center gap-1">
                 <Link2 className="w-3 h-3" /> Active Link
-              </span>
+              </Badge>
               <CopyButton text={portalUrl} />
               <a href={portalUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost py-1 px-2 text-xs flex items-center gap-1">
                 <ExternalLink className="w-3.5 h-3.5" /> View
@@ -767,8 +778,8 @@ function OwnerCard({
             </>
           ) : (
             <>
-              {token && expired && <span className="badge badge-amber text-xs">Expired</span>}
-              {!token && <span className="badge badge-slate text-xs">No link</span>}
+              {token && expired && <Badge tone="amber" className="text-xs">Expired</Badge>}
+              {!token && <Badge tone="slate" className="text-xs">No link</Badge>}
               <GenerateLinkButton ownerId={owner.id} />
             </>
           )}
@@ -782,26 +793,26 @@ function OwnerCard({
           <span className="text-muted-themed font-normal ml-1">— enter before sharing portal link</span>
         </label>
         <div className="flex gap-2 flex-wrap">
-          <input
+          <Input
             type="month"
             value={monthlyMonth}
             onChange={e => setMonthlyMonth(e.target.value)}
-            className="input text-sm py-1.5 w-36 flex-shrink-0"
+            className="text-sm py-1.5 w-36 flex-shrink-0"
           />
-          <input
+          <Input
             id="monthly-revenue-amount"
             type="number"
             min={0}
             step={0.01}
             value={monthlyRevenue}
             onChange={e => setMonthlyRevenue(e.target.value)}
-            className="input text-sm py-1.5 flex-1 min-w-[120px]"
+            className="text-sm py-1.5 flex-1 min-w-[120px]"
             placeholder="e.g. 4200.00"
           />
           {monthlyRevenue && parseFloat(monthlyRevenue) > 0 && (
-            <button onClick={handleSaveMonthlyRevenue} className="btn-secondary text-xs px-3">
+            <Button variant="secondary" onClick={handleSaveMonthlyRevenue} className="text-xs px-3">
               Save
-            </button>
+            </Button>
           )}
         </div>
         {revSuccess && (
@@ -819,7 +830,7 @@ function OwnerCard({
       <CapitalPlanToggle ownerId={owner.id} initialShared={owner.share_capital_plan} />
 
       <TransactionPanel propertyId={owner.property_id} transactions={transactions} />
-    </div>
+    </Card>
   )
 }
 
@@ -909,10 +920,10 @@ export function OwnersManager({
             Manage property owners and track P&L for each property
           </p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="btn-primary">
+        <Button onClick={() => setShowAdd(true)}>
           <Plus className="w-4 h-4" />
           Add Owner
-        </button>
+        </Button>
       </div>
 
       {multiPropertyGroups.length > 0 && (
@@ -934,17 +945,17 @@ export function OwnersManager({
       )}
 
       {owners.length === 0 ? (
-        <div className="card text-center py-16 max-w-md mx-auto">
+        <Card className="text-center py-16 max-w-md mx-auto">
           <Link2 className="w-10 h-10 text-muted-themed mx-auto mb-3" />
           <h3 className="font-semibold text-secondary-themed mb-1">No owners yet</h3>
           <p className="text-sm text-muted-themed mb-4">
             Add property owners to give them access to their P&L via a secure portal link.
           </p>
-          <button onClick={() => setShowAdd(true)} className="btn-primary mx-auto">
+          <Button onClick={() => setShowAdd(true)} className="mx-auto">
             <Plus className="w-4 h-4" />
             Add First Owner
-          </button>
-        </div>
+          </Button>
+        </Card>
       ) : (
         <div className="space-y-4">
           {owners.map((owner) => (

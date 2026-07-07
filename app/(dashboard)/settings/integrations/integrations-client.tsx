@@ -6,6 +6,10 @@ import { Loader2, PlugZap, Unplug }             from 'lucide-react'
 import { disconnectIntegration, getSyncProgress, connectWithApiKey } from './actions'
 import { formatDate }                          from '@/lib/utils'
 import { Dialog }                              from '@/components/ui/Dialog'
+import { Card }                                from '@/components/ui/Card'
+import { Badge }                               from '@/components/ui/Badge'
+import { Button }                               from '@/components/ui/Button'
+import { Input }                               from '@/components/ui/Input'
 
 // ── Provider credential definitions ──────────────────────────────────────────
 // Each api_key provider declares what fields the PM needs to fill in.
@@ -100,11 +104,11 @@ export function IntegrationsClient({
 
   if (!providers.length) {
     return (
-      <div className="card text-center py-10">
+      <Card className="text-center py-10">
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           No integrations are available yet.
         </p>
-      </div>
+      </Card>
     )
   }
 
@@ -223,13 +227,13 @@ function CredentialModalContent({
             >
               {field.label}
             </label>
-            <input
+            <Input
               id={field.key}
               type={field.sensitive ? 'password' : 'text'}
               value={values[field.key] ?? ''}
               onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
               placeholder={field.placeholder}
-              className="input w-full"
+              className="w-full"
               autoComplete="off"
             />
           </div>
@@ -237,20 +241,20 @@ function CredentialModalContent({
       </div>
 
       <div className="flex gap-3">
-        <button
+        <Button
           onClick={handleConnect}
           disabled={pending}
-          className="btn-primary flex-1 flex items-center justify-center gap-2"
+          className="flex-1 flex items-center justify-center gap-2"
         >
           {pending ? (
             <><Loader2 className="w-4 h-4 animate-spin" /> Connecting…</>
           ) : (
             <><PlugZap className="w-4 h-4" /> Connect</>
           )}
-        </button>
-        <button onClick={onClose} className="btn-secondary px-4">
+        </Button>
+        <Button variant="secondary" onClick={onClose} className="px-4">
           Cancel
-        </button>
+        </Button>
       </div>
 
       {/* Where to find credentials — provider-specific help text */}
@@ -376,7 +380,7 @@ function IntegrationCard({
   }
 
   return (
-    <div className="card">
+    <Card>
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -384,10 +388,10 @@ function IntegrationCard({
               {provider.display_name}
             </h3>
             {isConnected && (
-              <span className="badge badge-green text-xs">Connected</span>
+              <Badge tone="green" className="text-xs">Connected</Badge>
             )}
             {isError && (
-              <span className="badge badge-red text-xs">Error</span>
+              <Badge tone="red" className="text-xs">Error</Badge>
             )}
           </div>
 
@@ -429,13 +433,14 @@ function IntegrationCard({
             </div>
           ) : !connection || isError ? (
             provider.auth_type === 'api_key' ? (
-              <button
+              <Button
+                variant="secondary"
                 onClick={onConnectClick}
-                className="btn-secondary text-sm flex items-center gap-1.5"
+                className="text-sm flex items-center gap-1.5"
               >
                 <PlugZap className="w-3.5 h-3.5" />
                 {isError ? 'Reconnect' : 'Connect'}
-              </button>
+              </Button>
             ) : (
               <a
                 href={`/api/integrations/${provider.id}/connect`}
@@ -448,32 +453,35 @@ function IntegrationCard({
           ) : confirming ? (
             <div className="flex items-center gap-2">
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Disconnect?</span>
-              <button
+              <Button
+                variant="danger"
                 onClick={handleDisconnect}
                 disabled={disconnecting}
-                className="btn-danger text-xs py-1.5 px-2.5"
+                className="text-xs py-1.5 px-2.5"
               >
                 {disconnecting ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Yes, disconnect'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="ghost"
                 onClick={() => setConfirming(false)}
-                className="btn-ghost text-xs py-1.5"
+                className="text-xs py-1.5"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           ) : (
-            <button
+            <Button
+              variant="ghost"
               onClick={() => setConfirming(true)}
-              className="btn-ghost text-sm flex items-center gap-1.5"
+              className="text-sm flex items-center gap-1.5"
               style={{ color: 'var(--text-muted)' }}
             >
               <Unplug className="w-3.5 h-3.5" />
               Disconnect
-            </button>
+            </Button>
           )}
         </div>
       </div>
-    </div>
+    </Card>
   )
 }
