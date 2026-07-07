@@ -8,6 +8,8 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { LineItemsEditor, type WorkOrderLineItem } from './line-items-editor'
 import {
   markVendorAcknowledged,
@@ -695,14 +697,15 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
                   rows={2}
                   className="input w-full text-sm resize-none"
                 />
-                <button
+                <Button
                   type="button"
+                  variant="secondary"
                   onClick={handleRatingNotesSave}
                   disabled={ratingPending || !savedRating}
-                  className="btn-secondary text-xs py-1 px-3"
+                  className="text-xs py-1 px-3"
                 >
                   Save Notes
-                </button>
+                </Button>
               </div>
 
               {ratingSuccess && (
@@ -761,7 +764,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
                       ? 'Or enter an email directly for a one-off contractor:'
                       : 'Vendor Email *'}
                   </label>
-                  <input
+                  <Input
                     type="email"
                     value={dispatchEmail}
                     onChange={e => {
@@ -771,7 +774,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
                       }
                     }}
                     placeholder="contractor@email.com"
-                    className="input w-full text-sm"
+                    className="w-full text-sm"
                   />
                 </div>
 
@@ -780,12 +783,12 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
                   <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
                     Vendor Name
                   </label>
-                  <input
+                  <Input
                     type="text"
                     value={dispatchName}
                     onChange={e => setDispatchName(e.target.value)}
                     placeholder="e.g. Mike Johnson"
-                    className="input w-full text-sm"
+                    className="w-full text-sm"
                   />
                 </div>
 
@@ -841,10 +844,10 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
                     Magic Link (shareable)
                   </p>
                   <div className="flex items-center gap-2">
-                    <input
+                    <Input
                       readOnly
                       value={dispatchedUrl}
-                      className="input flex-1 text-xs font-mono"
+                      className="flex-1 text-xs font-mono"
                       onClick={e => (e.target as HTMLInputElement).select()}
                     />
                     <button
@@ -862,12 +865,13 @@ export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = []
                   </div>
                 </div>
 
-                <button
+                <Button
+                  variant="secondary"
                   onClick={() => { setShowDispatch(false); setDispatchedUrl(null) }}
-                  className="w-full btn-secondary text-sm py-2"
+                  className="w-full text-sm py-2"
                 >
                   Done
-                </button>
+                </Button>
               </>
             )}
           </div>
@@ -979,16 +983,17 @@ function SignOffRow({
       </div>
 
       {canAction && (
-        <button
+        <Button
+          variant="ghost"
           onClick={onAction}
           disabled={isPending}
-          className="btn btn-ghost text-xs flex-shrink-0 print:hidden"
+          className="text-xs flex-shrink-0 print:hidden"
           style={{ color: 'var(--accent-gold)' }}
         >
           {isPending
             ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
             : actionLabel}
-        </button>
+        </Button>
       )}
     </div>
   )
