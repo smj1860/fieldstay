@@ -536,13 +536,13 @@ export type FieldStayEvents = {
   // Org lifecycle
   // ----------------------------------------------------------
 
-  'org/created': {
+  'user/onboarding.drip.started': {
     data: {
-      org_id:     string
       user_id:    string
-      org_name:   string
-      user_email: string
+      org_id:     string
       first_name: string
+      email:      string
+      org_name:   string
     }
   }
 
