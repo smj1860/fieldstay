@@ -72,7 +72,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       const supabase = createServiceClient()
       const { data } = await supabase
         .from('integration_connections')
-        .select('id, user_id, org_id, metadata')
+        .select('id, user_id, org_id, external_user_id, metadata')
         .eq('provider_id', PROVIDER)
         .eq('status', 'active')
       return data ?? []
@@ -86,6 +86,54 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     let syncedCount = 0
 
     for (const conn of connections) {
+      // ── Check for properties added in OwnerRez since the last sync ──────
+      // getBookings() below only ever asks about properties FieldStay already
+      // knows — a property added in OwnerRez (or restored after a reconnect)
+      // was otherwise invisible until the PM noticed and clicked "Resync" by
+      // hand. The property list is small and cheap to fetch in full (unlike
+      // bookings, which use the since_utc cursor), so diff it every tick and
+      // re-fire the initial-sync event when something new shows up — that
+      // event's steps already no-op for properties that are fully set up, so
+      // re-running it is safe and only does real work for the new ones.
+      if (conn.org_id) {
+        const newPropertyIds = await step.run(`check-new-properties-${conn.user_id}`, async () => {
+          const supabase = createServiceClient()
+          try {
+            const orProperties = await new OwnerRezApiClient(conn.user_id).getProperties()
+            if (!orProperties.length) return []
+
+            const { data: known } = await supabase
+              .from('properties')
+              .select('external_id')
+              .eq('org_id', conn.org_id)
+              .eq('external_source', PROVIDER)
+
+            const knownIds = new Set((known ?? []).map((p) => p.external_id))
+            return orProperties
+              .map((p) => String(p.id))
+              .filter((id) => !knownIds.has(id))
+          } catch (err) {
+            logger.warn(`[OwnerRez:${conn.user_id}] new-property check failed: ${err instanceof Error ? err.message : String(err)}`)
+            return []
+          }
+        })
+
+        if (newPropertyIds.length) {
+          logger.info(
+            `[OwnerRez:${conn.user_id}] ${newPropertyIds.length} new propert` +
+            `${newPropertyIds.length === 1 ? 'y' : 'ies'} found — re-running initial sync`
+          )
+          await step.sendEvent(`fire-new-properties-sync-${conn.user_id}`, {
+            name: 'integration/ownerrez.connected',
+            data: {
+              user_id:          conn.user_id,
+              org_id:           conn.org_id,
+              external_user_id: conn.external_user_id ?? '',
+            },
+          })
+        }
+      }
+
       // HIGH-1: rateLimited flag set inside step.run; sleep called outside
       let rateLimited       = false
       let retryAfterSeconds = 60
