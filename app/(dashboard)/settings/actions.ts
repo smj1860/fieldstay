@@ -9,6 +9,7 @@ import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent } from '@/lib/audit'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
+import { renderSmsBody } from '@/lib/sms/templates'
 
 export type SettingsActionState = {
   error?: string
@@ -633,15 +634,15 @@ export async function inviteCrewMember(
   // SMS — crew with a phone number receive an invite via SMS in addition to
   // (or instead of) email. Non-fatal on failure.
   if (crew.phone) {
-    const { normalizePhoneToE164, sendSMS, buildCrewInviteSMS } =
+    const { normalizePhoneToE164, sendSMS } =
       await import('@/lib/sms/telnyx')
 
     const e164 = normalizePhoneToE164(crew.phone)
     if (e164) {
-      const smsBody = buildCrewInviteSMS({
-        crewName:  crew.name,
-        orgName:   org?.name ?? 'Your property manager',
-        inviteUrl,
+      const smsBody = await renderSmsBody(membership.org_id, 'crew_invite', {
+        crew_name:  crew.name,
+        org_name:   org?.name ?? 'Your property manager',
+        invite_url: inviteUrl,
       })
       try {
         await sendSMS(e164, smsBody)
@@ -852,4 +853,67 @@ export async function syncOwnerRezNow(): Promise<SettingsActionState> {
   })
 
   return { success: true }
+}
+
+// ── SMS Templates ─────────────────────────────────────────────────────────────
+
+export async function getOrgSmsTemplates(): Promise<
+  Array<{ key: string; body: string }>
+> {
+  const { supabase, membership } = await requireOrgMember()
+  const { data } = await supabase
+    .from('org_sms_templates')
+    .select('key, body')
+    .eq('org_id', membership.org_id)
+  return data ?? []
+}
+
+export async function saveOrgSmsTemplate(
+  key:  string,
+  body: string
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  if (!key || !body.trim()) return { error: 'Key and body are required.' }
+  if (body.trim().length > 1000) return { error: 'Template must be 1000 characters or fewer.' }
+
+  const { error } = await supabase
+    .from('org_sms_templates')
+    .upsert(
+      {
+        org_id:     membership.org_id,
+        key,
+        body:       body.trim(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'org_id,key' }
+    )
+
+  if (error) {
+    console.error('[saveOrgSmsTemplate]', error)
+    return { error: 'Failed to save template. Please try again.' }
+  }
+
+  revalidatePath('/settings')
+  return {}
+}
+
+export async function resetOrgSmsTemplate(
+  key: string
+): Promise<{ error?: string }> {
+  const { supabase, membership } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('org_sms_templates')
+    .delete()
+    .eq('org_id', membership.org_id)
+    .eq('key', key)
+
+  if (error) {
+    console.error('[resetOrgSmsTemplate]', error)
+    return { error: 'Failed to reset template.' }
+  }
+
+  revalidatePath('/settings')
+  return {}
 }

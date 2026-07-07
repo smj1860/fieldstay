@@ -2,7 +2,8 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { distanceMiles } from '@/lib/geocoding'
-import { sendSMS, buildEveningNudgeSMS, buildRainAlertSMS, formatOffer } from '@/lib/sms/telnyx'
+import { sendSMS, formatOffer } from '@/lib/sms/telnyx'
+import { renderSmsBody } from '@/lib/sms/templates'
 import type { GuidebookSponsor } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
@@ -95,14 +96,18 @@ export const guidebookSmsEveningCron = inngest.createFunction(
 
         if (!sponsor) return false
 
-        const message = isRainy && primaryPool.length > 0
-          ? buildRainAlertSMS(property.name)
-          : buildEveningNudgeSMS(
-              property.name,
-              formatOffer(sponsor.offer_type, sponsor.offer_value, sponsor.offer_item, sponsor.custom_offer_text)
-            )
-
-        const res = await sendSMS(optin.phone_e164, message)
+        const offerLine = formatOffer(
+          sponsor.offer_type,
+          sponsor.offer_value,
+          sponsor.offer_item,
+          sponsor.custom_offer_text
+        )
+        const templateKey = isRainy && primaryPool.length > 0 ? 'rain_alert' as const : 'evening_nudge' as const
+        const eveningBody = await renderSmsBody(optin.org_id, templateKey, {
+          property_name: property.name,
+          offer_line:    offerLine ?? '',
+        })
+        const res = await sendSMS(optin.phone_e164, eveningBody)
 
         if (res.sent) {
           await supabase

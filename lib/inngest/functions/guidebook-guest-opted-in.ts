@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { sendSMS, buildDoorCodeSMS } from '@/lib/sms/telnyx'
+import { sendSMS } from '@/lib/sms/telnyx'
+import { renderSmsBody } from '@/lib/sms/templates'
 
 export const guidebookGuestOptedIn = inngest.createFunction(
   { id: 'guidebook-guest-opted-in', name: 'Guidebook: Guest Opted In to SMS' },
@@ -14,7 +15,7 @@ export const guidebookGuestOptedIn = inngest.createFunction(
         const supabase = createServiceClient()
         const { data, error } = await supabase
           .from('properties')
-          .select('id, name, door_code')
+          .select('id, name, door_code, org_id')
           .eq('id', propertyId)
           .single()
         if (error) throw new Error(`Failed to fetch property: ${error.message}`)
@@ -59,10 +60,12 @@ export const guidebookGuestOptedIn = inngest.createFunction(
       const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
       const portalUrl = `${appUrl}/g/b/${booking.guidebook_token}`
 
-      const result = await sendSMS(
-        phoneE164,
-        buildDoorCodeSMS(property.name, property.door_code, portalUrl)
-      )
+      const body = await renderSmsBody(property.org_id, 'door_code', {
+        property_name: property.name,
+        door_code:     property.door_code,
+        portal_url:    portalUrl,
+      })
+      const result = await sendSMS(phoneE164, body)
 
       if (!result.sent) {
         // SMS failed — roll back the claim so a retry can attempt again

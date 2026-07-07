@@ -1,6 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendSMS }             from '@/lib/sms/telnyx'
+import { renderSmsBody }       from '@/lib/sms/templates'
 import { getPmEmail }          from '@/lib/inngest/helpers'
 
 export const guidebookStayExtensionHandler = inngest.createFunction(
@@ -39,17 +40,17 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
     // ── SMS to guest (if opted in) ────────────────────────────────────
     if (guestPhoneE164 && portalUrl) {
       await step.run('send-guest-sms', async () => {
-        const supabase = createServiceClient()
+        const supabase     = createServiceClient()
         const discountLine = discountPct
           ? ` We're offering ${discountPct}% off to extend your stay.`
           : ''
 
-        const text = [
-          `Enjoying ${property?.name ?? 'your stay'}?`,
-          `There's availability after your checkout on ${booking?.checkout_date}.${discountLine}`,
-          `Check availability here: ${portalUrl}`,
-          `Reply STOP to opt out.`,
-        ].join(' ')
+        const text = await renderSmsBody(orgId, 'stay_extension', {
+          property_name:  property?.name ?? 'your stay',
+          checkout_date:  booking?.checkout_date ?? '',
+          portal_url:     portalUrl,
+          discount_line:  discountLine,
+        })
 
         const result = await sendSMS(guestPhoneE164, text)
 
