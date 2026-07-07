@@ -232,17 +232,25 @@ export function TemplateManager({
     setError(null)
     const itemsToAdd = catalogItems.filter(c => catalogSelected.has(c.id))
     startTransition(async () => {
-      const newItems: TemplateItem[] = []
-      for (const c of itemsToAdd) {
-        const result = await addTemplateItem(currentTemplate.id, {
+      // Single batched insert — a per-item loop here would silently drop
+      // items on any mid-loop failure (e.g. selecting all 115 catalog items
+      // and one request stalling), leaving the template stuck partway full
+      // with no error shown.
+      const result = await bulkAddTemplateItems(
+        currentTemplate.id,
+        itemsToAdd.map(c => ({
           name:            c.name,
           category:        c.category,
           unit:            catalogUnits[c.id]   ?? c.default_unit,
           par_level:       parseInt(catalogParLevels[c.id] ?? '1') || 1,
           preferred_brand: catalogBrands[c.id]?.trim() || null,
-        })
-        if (result.item) newItems.push(result.item as TemplateItem)
+        }))
+      )
+      if (result.error) {
+        setError(result.error)
+        return
       }
+      const newItems = result.items ?? []
       setCurrentTemplate(prev => prev ? {
         ...prev,
         inventory_template_items: [
@@ -250,13 +258,12 @@ export function TemplateManager({
           ...newItems,
         ],
       } : prev)
-      const addedCount = newItems.length
       setCatalogSelected(new Set())
       setCatalogParLevels({})
       setCatalogUnits({})
       setCatalogBrands({})
-      if (addedCount > 0) {
-        setSuccess(`${addedCount} item${addedCount !== 1 ? 's' : ''} added to your inventory template`)
+      if (newItems.length > 0) {
+        setSuccess(`${newItems.length} item${newItems.length !== 1 ? 's' : ''} added to your inventory template`)
         setTimeout(() => setSuccess(null), 5000)
       }
     })
