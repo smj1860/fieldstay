@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { requestBatchGeneration, submitManualReview } from './actions'
 import { Dialog } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { Star, Flag, Check } from 'lucide-react'
 
 interface ReviewResponseRow {
@@ -287,7 +289,8 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
             </span>
           </button>
           {pendingCount > 0 && (
-            <button
+            <Button
+              variant="secondary"
               onClick={async () => {
                 setBatchRequesting(true)
                 const result = await requestBatchGeneration()
@@ -297,10 +300,10 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                 setBatchRequesting(false)
               }}
               disabled={batchRequesting}
-              className="btn-secondary text-sm"
+              className="text-sm"
             >
               {batchRequesting ? 'Starting…' : `Generate All Drafts (${pendingCount})`}
-            </button>
+            </Button>
           )}
           <span
             className="text-xs font-semibold px-3 py-1 rounded-full"
@@ -674,12 +677,11 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
           {/* Guest name */}
           <div>
             <label className="label">Guest Name (optional)</label>
-            <input
+            <Input
               type="text"
               value={manualForm.guestName}
               onChange={(e) => setManualForm(f => ({ ...f, guestName: e.target.value }))}
               placeholder="First name or initials"
-              className="input"
             />
           </div>
 

@@ -7,6 +7,10 @@ import { createComplianceDocument, deleteComplianceDocument, verifyComplianceDoc
 import type { ComplianceDocActionState } from '../actions'
 import type { VendorComplianceDocument, ComplianceDocType } from '@/types/database'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -100,43 +104,43 @@ function AddDocumentForm({
 
             <div className="sm:col-span-2">
               <label htmlFor="document-name" className="label">Document Name <span className="text-red-500">*</span></label>
-              <input id="document-name" name="document_name" type="text" required className="input"
+              <Input id="document-name" name="document_name" type="text" required
                      placeholder='e.g. "General Liability COI 2025"' />
             </div>
 
             <div>
               <label htmlFor="policy-number" className="label">Policy / License Number</label>
-              <input id="policy-number" name="policy_number" type="text" className="input" />
+              <Input id="policy-number" name="policy_number" type="text" />
             </div>
 
             <div>
               <label htmlFor="issuer-name" className="label">Issuing Company</label>
-              <input id="issuer-name" name="issuer_name" type="text" className="input" placeholder="e.g. State Farm" />
+              <Input id="issuer-name" name="issuer_name" type="text" placeholder="e.g. State Farm" />
             </div>
 
             <div>
               <label htmlFor="effective-date" className="label">Effective Date</label>
-              <input id="effective-date" name="effective_date" type="date" className="input" />
+              <Input id="effective-date" name="effective_date" type="date" />
             </div>
 
             <div>
               <label htmlFor="expiry-date" className="label">Expiry Date</label>
-              <input id="expiry-date" name="expiry_date" type="date" className="input" />
+              <Input id="expiry-date" name="expiry_date" type="date" />
             </div>
 
             <div className="sm:col-span-2">
               <label htmlFor="coverage-amount" className="label">Coverage Amount ($)</label>
-              <input id="coverage-amount" name="coverage_amount" type="number" min="0" step="1000" className="input" placeholder="0" />
+              <Input id="coverage-amount" name="coverage_amount" type="number" min="0" step="1000" placeholder="0" />
             </div>
 
             {/* File upload */}
             <div className="sm:col-span-2">
               <label htmlFor="document-file" className="label">Upload Document (PDF, image)</label>
-              <input
+              <Input
                 id="document-file"
                 type="file"
                 accept=".pdf,.jpg,.jpeg,.png,.webp"
-                className="input py-2 text-sm"
+                className="py-2 text-sm"
                 onChange={handleFileUpload}
                 disabled={uploading}
               />
@@ -157,14 +161,14 @@ function AddDocumentForm({
           </div>
 
           <div className="flex gap-2 pt-1">
-            <button
+            <Button
               type="submit"
               disabled={pending || uploading}
-              className="btn-primary flex items-center gap-2"
+              className="flex items-center gap-2"
             >
               {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Add Document'}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            </Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
         </form>
       </div>
@@ -214,17 +218,17 @@ export function ComplianceSection({
 
   return (
     <>
-      <div className="card mt-4">
+      <Card className="mt-4">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-primary-themed">Compliance Documents</h3>
             {activeDocs.length > 0 && (
-              <span className="badge badge-slate">{activeDocs.length}</span>
+              <Badge tone="slate">{activeDocs.length}</Badge>
             )}
           </div>
-          <button onClick={() => setShowAdd(true)} className="btn-primary text-sm">
+          <Button onClick={() => setShowAdd(true)} className="text-sm">
             <Plus className="w-4 h-4" /> Add Document
-          </button>
+          </Button>
         </div>
 
         {expiredCount > 0 && (
@@ -255,7 +259,7 @@ export function ComplianceSection({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium text-primary-themed">{doc.document_name}</span>
-                      <span className="badge badge-slate text-xs">{DOC_TYPE_LABELS[doc.document_type]}</span>
+                      <Badge tone="slate" className="text-xs">{DOC_TYPE_LABELS[doc.document_type]}</Badge>
                       <span
                         className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
                         style={{ color, background: bg, border: `1px solid ${color}44` }}
@@ -296,7 +300,8 @@ export function ComplianceSection({
                       </a>
                     )}
                     {!doc.is_verified && (
-                      <button
+                      <Button
+                        variant="ghost"
                         onClick={() => {
                           setActingId(doc.id)
                           startVerify(async () => {
@@ -305,36 +310,37 @@ export function ComplianceSection({
                           })
                         }}
                         disabled={verifying && actingId === doc.id}
-                        className="btn-ghost p-1.5 text-xs"
+                        className="p-1.5 text-xs"
                         title="Mark verified"
                       >
                         {verifying && actingId === doc.id
                           ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           : <ShieldCheck className="w-3.5 h-3.5" />
                         }
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
+                      variant="ghost"
                       onClick={() => {
                         setActingId(doc.id)
                         startRemove(() => deleteComplianceDocument(doc.id, vendorId))
                       }}
                       disabled={removing && actingId === doc.id}
-                      className="btn-ghost p-1.5 text-muted-themed hover:text-red-500"
+                      className="p-1.5 text-muted-themed hover:text-red-500"
                       title="Remove document"
                     >
                       {removing && actingId === doc.id
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         : <X className="w-3.5 h-3.5" />
                       }
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )
             })}
           </div>
         )}
-      </div>
+      </Card>
 
       {showAdd && (
         <AddDocumentForm

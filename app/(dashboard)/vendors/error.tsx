@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect } from 'react'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
 
 export default function DashboardSegmentError({
   error,
@@ -14,12 +16,12 @@ export default function DashboardSegmentError({
   }, [error])
 
   return (
-    <div className="card text-center py-12">
+    <Card className="text-center py-12">
       <p className="text-primary-themed font-semibold mb-1">Something went wrong loading this page.</p>
       <p className="text-muted-themed text-sm mb-4">
         This has been logged. Try again, or contact support if it keeps happening.
       </p>
-      <button onClick={reset} className="btn-secondary">Try again</button>
-    </div>
+      <Button variant="secondary" onClick={reset}>Try again</Button>
+    </Card>
   )
 }
