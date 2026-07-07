@@ -256,12 +256,17 @@ export async function GET(
     }
 
     // ── 7. Kick off initial data sync ─────────────────────────────
-    if (providerId === 'ownerrez') {
+    //    Gated on membership?.org_id: the sync writes org-scoped rows
+    //    (properties, bookings, ...) and fails outright without a real
+    //    org_id, which previously flipped the brand-new connection to
+    //    status='error' seconds after a successful connect. A user with
+    //    no org yet simply has nothing to sync until they have one.
+    if (providerId === 'ownerrez' && membership?.org_id) {
       await inngest.send({
         name: 'integration/ownerrez.connected',
         data: {
           user_id:          appUserId,
-          org_id:           membership?.org_id ?? '',
+          org_id:           membership.org_id,
           external_user_id: tokenData.externalUserId,
         },
       })
@@ -274,12 +279,12 @@ export async function GET(
       })
     }
 
-    if (providerId === 'hospitable') {
+    if (providerId === 'hospitable' && membership?.org_id) {
       await inngest.send({
         name: 'integration/hospitable.connected',
         data: {
           user_id:          appUserId,
-          org_id:           membership?.org_id ?? '',
+          org_id:           membership.org_id,
           external_user_id: tokenData.externalUserId,
         },
       })
