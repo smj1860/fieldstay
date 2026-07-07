@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { acceptInviteForCurrentUser } from './actions'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import Link from 'next/link'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -86,39 +88,37 @@ export function LoginForm() {
 
       <div>
         <label htmlFor="email" className="label">Email</label>
-        <input
+        <Input
           id="email"
           type="email"
           required
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="input"
           placeholder="you@example.com"
         />
       </div>
 
       <div>
         <label htmlFor="password" className="label">Password</label>
-        <input
+        <Input
           id="password"
           type="password"
           required
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="input"
           placeholder="••••••••"
         />
       </div>
 
-      <button
+      <Button
         type="submit"
         disabled={loading}
-        className="btn-primary w-full py-2.5"
+        className="w-full py-2.5"
       >
         {loading ? 'Signing in…' : 'Sign In'}
-      </button>
+      </Button>
       </form>
 
       <div className="flex items-center justify-center gap-4 pt-2">

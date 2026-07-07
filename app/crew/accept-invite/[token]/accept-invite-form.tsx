@@ -2,6 +2,8 @@
 
 import { useActionState } from 'react'
 import { activateCrewAccount } from './actions'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 export function AcceptInviteForm({
   token,
@@ -34,12 +36,12 @@ export function AcceptInviteForm({
 
       <div>
         <label htmlFor="email" className="label">Email</label>
-        <input
+        <Input
           id="email"
           type="email"
           value={email}
           disabled
-          className="input bg-raised-themed text-muted-themed cursor-not-allowed"
+          className="bg-raised-themed text-muted-themed cursor-not-allowed"
         />
       </div>
 
@@ -47,14 +49,13 @@ export function AcceptInviteForm({
         <label htmlFor="password" className="label">
           Password <span className="text-red-500">*</span>
         </label>
-        <input
+        <Input
           id="password"
           type="password"
           name="password"
           required
           minLength={8}
           maxLength={72}
-          className="input"
           placeholder="At least 8 characters"
           autoComplete="new-password"
         />
@@ -64,24 +65,24 @@ export function AcceptInviteForm({
         <label htmlFor="confirm-password" className="label">
           Confirm Password <span className="text-red-500">*</span>
         </label>
-        <input
+        <Input
           id="confirm-password"
           type="password"
           name="confirm"
           required
-          className="input"
           placeholder="Repeat password"
           autoComplete="new-password"
         />
       </div>
 
-      <button
+      <Button
+        variant="cta"
         type="submit"
         disabled={pending}
-        className="btn-cta w-full py-2.5 disabled:opacity-60"
+        className="w-full py-2.5 disabled:opacity-60"
       >
         {pending ? 'Creating account…' : 'Activate Account →'}
-      </button>
+      </Button>
 
       <p className="text-xs text-center text-muted">
         You'll be taken directly to the FieldStay crew app after activating.

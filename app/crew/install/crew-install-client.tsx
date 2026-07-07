@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Share, Plus, Check, AlertTriangle, Home } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -204,12 +205,13 @@ export function CrewInstallClient() {
                 Install FieldStay on your home screen for one-tap access to your
                 work orders and assignments.
               </p>
-              <button
+              <Button
+                variant="cta"
                 onClick={handleAndroidNativeInstall}
-                className="btn-cta w-full py-3"
+                className="w-full py-3"
               >
                 Install App →
-              </button>
+              </Button>
             </div>
           )}
 

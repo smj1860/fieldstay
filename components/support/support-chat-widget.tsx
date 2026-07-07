@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { createClient }                from '@/lib/supabase/client'
+import { Button }                      from '@/components/ui/Button'
 
 interface Message {
   role: 'user' | 'assistant' | 'human'
@@ -272,14 +273,13 @@ export function SupportChatWidget() {
                 overflowY:    'auto',
               }}
             />
-            <button
+            <Button
               onClick={() => void send()}
               disabled={loading || !input.trim()}
-              className="btn-primary"
               style={{ padding: '8px 14px', fontSize: '13px', flexShrink: 0 }}
             >
               Send
-            </button>
+            </Button>
           </div>
         </div>
       ) : (

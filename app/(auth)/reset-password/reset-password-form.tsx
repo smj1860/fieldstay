@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { AuthChangeEvent } from '@supabase/supabase-js'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 export function ResetPasswordForm() {
   const router = useRouter()
@@ -94,7 +96,7 @@ export function ResetPasswordForm() {
 
       <div>
         <label htmlFor="new-password" className="label">New Password</label>
-        <input
+        <Input
           id="new-password"
           type="password"
           required
@@ -102,21 +104,19 @@ export function ResetPasswordForm() {
           autoComplete="new-password"
           value={password}
           onChange={(e) => { setPassword(e.target.value); setMismatch(false) }}
-          className="input"
           placeholder="Min. 8 characters"
         />
       </div>
 
       <div>
         <label htmlFor="confirm-password" className="label">Confirm New Password</label>
-        <input
+        <Input
           id="confirm-password"
           type="password"
           required
           autoComplete="new-password"
           value={confirmPassword}
           onChange={(e) => { setConfirmPassword(e.target.value); setMismatch(false) }}
-          className="input"
           placeholder="Re-enter your new password"
         />
         {mismatch && (
@@ -124,13 +124,13 @@ export function ResetPasswordForm() {
         )}
       </div>
 
-      <button
+      <Button
         type="submit"
         disabled={loading}
-        className="btn-primary w-full py-2.5"
+        className="w-full py-2.5"
       >
         {loading ? 'Updating…' : 'Update Password'}
-      </button>
+      </Button>
     </form>
   )
 }
