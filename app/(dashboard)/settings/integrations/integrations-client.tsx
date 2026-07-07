@@ -2,8 +2,8 @@
 
 import { useState, useTransition, useEffect } from 'react'
 import { useSearchParams, useRouter }          from 'next/navigation'
-import { Loader2, PlugZap, Unplug }             from 'lucide-react'
-import { disconnectIntegration, getSyncProgress, connectWithApiKey } from './actions'
+import { Loader2, PlugZap, Unplug, RefreshCw }  from 'lucide-react'
+import { disconnectIntegration, getSyncProgress, connectWithApiKey, triggerResync } from './actions'
 import { formatDate }                          from '@/lib/utils'
 import { Dialog }                              from '@/components/ui/Dialog'
 import { Card }                                from '@/components/ui/Card'
@@ -304,6 +304,8 @@ function IntegrationCard({
   const [disconnecting, startDisconnect] = useTransition()
   const [confirming, setConfirming]      = useState(false)
   const [error, setError]                = useState<string | null>(null)
+  const [resyncing, startResync]         = useTransition()
+  const [resyncMessage, setResyncMessage] = useState<string | null>(null)
 
   // --- Sync progress polling ---
   const initialMeta        = (connection?.metadata ?? {}) as Record<string, unknown>
@@ -379,6 +381,14 @@ function IntegrationCard({
     })
   }
 
+  const handleResync = () => {
+    setResyncMessage(null)
+    startResync(async () => {
+      const result = await triggerResync(provider.id)
+      setResyncMessage(result.error ?? 'Resync started.')
+    })
+  }
+
   return (
     <Card>
       <div className="flex items-start justify-between gap-4">
@@ -416,6 +426,15 @@ function IntegrationCard({
 
           {error && (
             <p className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>
+          )}
+
+          {resyncMessage && (
+            <p
+              className="text-xs mt-2"
+              style={{ color: resyncMessage === 'Resync started.' ? 'var(--accent-green)' : 'var(--accent-red)' }}
+            >
+              {resyncMessage}
+            </p>
           )}
         </div>
 
@@ -470,15 +489,32 @@ function IntegrationCard({
               </Button>
             </div>
           ) : (
-            <Button
-              variant="ghost"
-              onClick={() => setConfirming(true)}
-              className="text-sm flex items-center gap-1.5"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              <Unplug className="w-3.5 h-3.5" />
-              Disconnect
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                onClick={handleResync}
+                disabled={resyncing}
+                className="text-sm flex items-center gap-1.5"
+                style={{ color: 'var(--text-muted)' }}
+                title="Manually re-run this integration's sync"
+              >
+                {resyncing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                Trigger Resync
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setConfirming(true)}
+                className="text-sm flex items-center gap-1.5"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                <Unplug className="w-3.5 h-3.5" />
+                Disconnect
+              </Button>
+            </div>
           )}
         </div>
       </div>
