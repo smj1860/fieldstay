@@ -17,6 +17,7 @@ import type { CrewRole } from '@/types/database'
 import { hospitableApiLimiter } from '@/lib/rate-limit'
 import type { NormalizedProperty } from '@/lib/properties/normalize'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
+import { ok, fail, timingSafeEqual } from '@/lib/integrations/webhook-verification'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -368,22 +369,25 @@ export const hospitableProvider: IntegrationProvider = {
 
   // Webhook auth: header 'Signature' (capital S), HMAC-SHA256 of raw body, raw hex, no prefix.
   // IP range: 38.80.170.0/24
-  async validateWebhook(request: Request): Promise<boolean> {
+  // Hospitable's HMAC is computed over the body only — there is no timestamp
+  // in the signed payload, so replay protection comes entirely from the
+  // processed_webhooks dedup table, not from anything checked here.
+  async validateWebhook(request: Request) {
     const secret = process.env.HOSPITABLE_WEBHOOK_SECRET
     if (!secret) {
       console.error('[Hospitable] HOSPITABLE_WEBHOOK_SECRET not set — rejecting webhook')
-      return false
+      return fail('HOSPITABLE_WEBHOOK_SECRET not configured')
     }
 
     const signatureHeader = request.headers.get('Signature')
-    if (!signatureHeader) return false
+    if (!signatureHeader) return fail('missing Signature header')
 
     const body = await request.text()
 
     const { createHmac } = await import('crypto')
     const expected = createHmac('sha256', secret).update(body).digest('hex')
 
-    return timingSafeEqual(signatureHeader, expected)
+    return timingSafeEqual(signatureHeader, expected) ? ok() : fail('signature mismatch')
   },
 
   // Webhook payload: { id, action, data, created, version, triggers }
@@ -886,13 +890,4 @@ export function extractHospitableTime(
 ): string {
   const match = isoDatetime?.match(/T(\d{2}:\d{2})/)
   return match?.[1] ?? fallback
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let result = 0
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  }
-  return result === 0
 }

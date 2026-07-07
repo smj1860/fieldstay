@@ -1691,6 +1691,53 @@ export type Database = {
         }
         Relationships: []
       }
+      pending_integration_links: {
+        Row: {
+          created_at: string
+          external_user_id: string
+          expires_at: string
+          id: string
+          metadata: Json
+          pending_link_token: string
+          provider_id: string
+          refresh_token_vault_secret_id: string | null
+          scope: string | null
+          vault_secret_id: string
+        }
+        Insert: {
+          created_at?: string
+          external_user_id: string
+          expires_at?: string
+          id?: string
+          metadata?: Json
+          pending_link_token: string
+          provider_id: string
+          refresh_token_vault_secret_id?: string | null
+          scope?: string | null
+          vault_secret_id: string
+        }
+        Update: {
+          created_at?: string
+          external_user_id?: string
+          expires_at?: string
+          id?: string
+          metadata?: Json
+          pending_link_token?: string
+          provider_id?: string
+          refresh_token_vault_secret_id?: string | null
+          scope?: string | null
+          vault_secret_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_integration_links_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "integration_providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       org_invites: {
         Row: {
           accepted_at: string | null

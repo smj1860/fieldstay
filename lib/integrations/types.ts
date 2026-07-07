@@ -1,3 +1,5 @@
+import type { WebhookVerificationResult } from './webhook-verification'
+
 export type ProviderAuthType = 'oauth2' | 'api_key'
 export type ConnectionStatus = 'active' | 'revoked' | 'error'
 
@@ -83,10 +85,11 @@ export interface IntegrationProvider {
 
   /**
    * Validate an incoming webhook request from this provider.
-   * Returns true if the request is authentic and should be processed.
-   * Each provider uses a different auth scheme (Basic Auth, HMAC, etc.)
+   * Each provider uses a different auth scheme (Basic Auth, HMAC, etc.) — see
+   * lib/integrations/webhook-verification.ts for the shared result shape and
+   * timestamp-freshness helper used where a provider's scheme supports one.
    */
-  validateWebhook(request: Request): Promise<boolean>
+  validateWebhook(request: Request): Promise<WebhookVerificationResult>
 
   /**
    * Process a validated webhook event payload.

@@ -183,12 +183,53 @@ resolve deterministically — do not add a new unordered `LIMIT 1` on
 6. Always return 200 quickly — never make the provider wait on downstream processing;
    dispatch an Inngest event for anything non-trivial.
 
-Provider-specific webhook auth is NOT unified behind one signature scheme — OwnerRez
-uses HTTP Basic Auth (`OWNERREZ_WEBHOOK_USER`/`OWNERREZ_WEBHOOK_PASSWORD`), Telnyx and
-Stripe verify cryptographic signatures on their own dedicated routes
-(`app/api/webhooks/telnyx/route.ts`, `app/api/webhooks/stripe/route.ts` — outside the
-generic `[provider]` handler). Check `providerAdapter.validateWebhook()` for the actual
-scheme in use per provider before assuming a pattern.
+Provider auth schemes are genuinely different (Basic Auth, HMAC, Ed25519, Stripe's own
+signature format) and are NOT forced through one algorithm — but every scheme's
+verification result now goes through the same shared contract:
+`lib/integrations/webhook-verification.ts` exports `WebhookVerificationResult`
+(`{ valid: boolean; reason?: string }`), `ok()`/`fail(reason)` constructors,
+`timingSafeEqual()`, and `isTimestampFresh(timestampSeconds, toleranceSeconds = 300)`.
+`IntegrationProvider.validateWebhook()` returns `WebhookVerificationResult` — a
+rejection always carries a reason, logged by the generic route handler.
+
+Not every scheme has a timestamp to check for freshness:
+- **OwnerRez** — HTTP Basic Auth, no timestamp concept at all.
+- **Hospitable** — HMAC-SHA256 over the raw body only, no timestamp mixed in.
+- **Telnyx** (`app/api/webhooks/telnyx/route.ts`) — Ed25519 over `timestamp|body`
+  DOES include one, and `verifyTelnyxSignature()` calls `isTimestampFresh()` before
+  accepting a signature — without it, a captured valid signature would stay
+  replayable forever.
+- **Stripe** (`app/api/webhooks/stripe/route.ts`) — `stripe.webhooks.constructEvent()`
+  already enforces its own tolerance window internally (same 300s default), so
+  `isTimestampFresh()` isn't called there — it would be redundant.
+
+For every scheme without a timestamp, replay protection comes entirely from the
+`processed_webhooks` dedup table, not from the signature check itself.
+
+Stripe and Telnyx deliberately keep dedicated routes rather than being forced through
+the generic `[provider]` adapter pattern — their SDKs/schemes are meaningfully
+different (Stripe's SDK already does more than a generic adapter method reasonably
+could), and reimplementing that would be worse, not better.
+
+---
+
+## Integration Health — Single Surface
+
+Status was previously scattered across three shapes that don't agree with each other:
+`integration_connections.status`, `integration_connections.metadata.last_sync_status`
+(free-form jsonb, set by whichever sync function last ran), and `ical_feeds
+.last_sync_status` (a separate per-property mechanism for manually-pasted calendar
+URLs — not an OAuth connection, but answers the same "is this healthy?" question).
+
+`lib/integrations/health.ts` → `getIntegrationHealth(orgId)` normalizes both into one
+shape (`{ kind, id, providerId, label, status, lastSyncAt, detail }`, status one of
+`healthy | never_synced | needs_attention | needs_reconnect`), exposed at
+`GET /api/integrations/health`. `org_milestones` is deliberately NOT part of this — it's
+a one-time onboarding/celebration flag mechanism, not ongoing health (see the Inngest
+section above). The Settings → Integrations page currently derives its own view
+directly from the same tables rather than this endpoint; it's not required to switch,
+but new health-surfacing code (ops tooling, alerts, a future dashboard) should use
+`getIntegrationHealth()` instead of re-deriving status logic again.
 
 ---
 
@@ -241,12 +282,39 @@ OAuth 2.0 via the generic registry pattern above.
 Initial/incremental sync: `lib/inngest/functions/ownerrez/{initial-sync,incremental-sync}.ts`.
 Reviews sync: `lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts`.
 
-Marketplace install (a brand-new user arriving from the OwnerRez marketplace with no
-FieldStay account yet) currently redirects to `/signup` and does **not** complete
-token linking post-signup — this is a known open gap in
-`app/api/integrations/[provider]/callback/route.ts`, not a bug to silently "fix" by
-guessing at OwnerRez's handoff behavior. Confirm with OwnerRez how a user arrives at
-`/connect` (already authenticated in OwnerRez or not) before implementing.
+### Marketplace install (no FieldStay account yet)
+
+A user arriving from a provider's marketplace (e.g. "Connect FieldStay" inside
+OwnerRez) may hit `/callback` with a valid, already-exchanged token but no FieldStay
+session and no account. The code exchange with the provider already succeeded by that
+point — throwing the token away and making the user re-authorize from scratch after
+signup would be wasteful and fragile. Instead:
+
+1. `holdPendingIntegrationToken()` (`lib/integrations/vault.ts`) stores the token in
+   Vault under a random claim token and inserts a row into `pending_integration_links`
+   (30 min TTL, single-use, RLS-enabled/no-policies like `oauth_states`). The callback
+   route redirects to `/signup?provider=X&next=/connect/finish?pending_link=<token>`.
+2. `app/(auth)/signup/signup-form.tsx` threads `next` through **both** signup paths:
+   Google (via the existing `fs-oauth-next` cookie mechanism, same as before) and
+   email/password (embedded directly in `emailRedirectTo`'s query string — a cookie
+   doesn't survive an email-confirmation click that can happen on a different
+   device/much later; query params on `emailRedirectTo` do, mirroring the existing
+   `invite_token` pattern). If the project has email confirmation disabled, `signUp()`
+   already returns a session and the client-side redirect honors `next` immediately too.
+3. `app/connect/finish/route.ts` requires an authenticated session (`requireAuth()` —
+   not `requireOrgMember()`, since the user may not have completed onboarding/org
+   creation yet) and calls `claimPendingIntegrationLink()`, which re-points the
+   already-encrypted Vault secret at a real `integration_connections` row for the new
+   user — no decrypt/re-encrypt round trip, since a Vault secret isn't tied to any
+   particular consumer row. This does NOT require a second provider authorization,
+   regardless of the exact OwnerRez marketplace handoff mechanics.
+4. Expired/already-claimed pending links (or a user who lands here with no
+   `pending_link` at all) redirect to Settings → Integrations where they can connect
+   normally — never a dead end.
+
+Never store a raw access/refresh token in `pending_integration_links` directly —
+`vault_secret_id`/`refresh_token_vault_secret_id` only, same rule as
+`integration_connections`.
 
 ---
 

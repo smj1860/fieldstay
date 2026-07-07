@@ -23,6 +23,7 @@ import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations
 import { logAuditEvent }                             from '@/lib/audit'
 import { createServiceClient }                       from '@/lib/supabase/server'
 import { inngest }                                   from '@/lib/inngest/client'
+import type { WebhookVerificationResult }            from '@/lib/integrations/webhook-verification'
 
 export async function POST(
   request: NextRequest,
@@ -46,19 +47,19 @@ export async function POST(
   //    so we can still read the JSON body afterward.
   const clonedForValidation = request.clone()
 
-  let isAuthentic: boolean
+  let verification: WebhookVerificationResult
   try {
-    isAuthentic = await providerAdapter.validateWebhook(clonedForValidation)
+    verification = await providerAdapter.validateWebhook(clonedForValidation)
   } catch (err) {
     console.error(`[Webhook:${providerId}] Validation error:`, err)
     // Fail closed — if we can't validate, reject
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  if (!isAuthentic) {
+  if (!verification.valid) {
     console.warn(
-      `[Webhook:${providerId}] Rejected unauthenticated request from IP ` +
-      `${request.headers.get('x-forwarded-for') ?? 'unknown'}`
+      `[Webhook:${providerId}] Rejected request from IP ` +
+      `${request.headers.get('x-forwarded-for') ?? 'unknown'}: ${verification.reason ?? 'no reason given'}`
     )
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }

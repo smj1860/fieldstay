@@ -10,6 +10,7 @@
 // ============================================================
 
 import type { IntegrationProvider } from '@/lib/integrations/types'
+import { fail } from '@/lib/integrations/webhook-verification'
 
 // Exact field names from Hostaway API GET /v1/listings response
 export interface HostawayListing {
@@ -64,12 +65,12 @@ export const hostawayProvider: IntegrationProvider = {
     }
   },
 
-  async validateWebhook(): Promise<boolean> {
+  async validateWebhook() {
     // Hostaway unified webhooks use HMAC-SHA256 signature verification.
     // The signing secret is set when registering the webhook endpoint.
     // Implement when webhook support is added — for now reject all inbound
     // webhooks since there is no registered endpoint or secret to verify yet.
-    return false
+    return fail('no webhook signing secret registered yet')
   },
 
   async handleWebhookEvent({ action, payload }) {
