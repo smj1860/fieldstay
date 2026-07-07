@@ -153,13 +153,16 @@
 
 @media (prefers-color-scheme: dark) {
   .theme-locked-light-passive-dark {
-    --bg-base:   #0a1628;
-    --bg-canvas: #0e1e3e;
-    --bg-card:   #152b52;
-    --text-primary:   #ffffff;
+    --bg-base:       #0a1628;
+    --bg-canvas:     #0e1e3e;
+    --bg-card:       #152b52;
+    --bg-raised:     #1a3464;
+    --bg-hover:      #1e3a72;
+    --text-primary:  #ffffff;
     --text-secondary: #dce9f5;
     --text-muted:     #9ab5cc;
     --border:         rgba(255,255,255,0.07);
+    --border-strong:  rgba(255,255,255,0.14);
   }
 }
 
