@@ -79,12 +79,13 @@ export type SupportMessageRole = 'user' | 'assistant'
 // ─────────────────────────────────────────────────────────────
 
 export interface Profile {
-  id:          string
-  full_name:   string | null
-  phone:       string | null
-  avatar_url:  string | null
-  created_at:  string
-  updated_at:  string
+  id:                     string
+  full_name:              string | null
+  phone:                  string | null
+  avatar_url:             string | null
+  email_unsubscribed_at:  string | null
+  created_at:             string
+  updated_at:             string
 }
 
 export interface Organization {
