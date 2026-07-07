@@ -56,9 +56,16 @@ export default async function GuestBookingGuidebookPage({
 
   const { data: sponsors } = await supabase
     .from('guidebook_sponsors')
-    .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item')
+    .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item, photo_storage_path')
     .eq('org_id', booking.org_id)
     .eq('status', 'active')
+
+  const sponsorsWithPhotos = (sponsors ?? []).map((s) => ({
+    ...s,
+    photoUrl: s.photo_storage_path
+      ? supabase.storage.from('guidebook-sponsor-photos').getPublicUrl(s.photo_storage_path).data.publicUrl
+      : null,
+  }))
 
   const hourOfDay = Number(
     new Intl.DateTimeFormat('en-US', { hour: 'numeric', hour12: false, timeZone: FALLBACK_TIMEZONE })
@@ -73,7 +80,7 @@ export default async function GuestBookingGuidebookPage({
     <GuestGuidebookView
       property={property}
       config={config as unknown as GuidebookPropertyConfig}
-      sponsors={(sponsors ?? []) as GuidebookSponsor[]}
+      sponsors={sponsorsWithPhotos as (GuidebookSponsor & { photoUrl: string | null })[]}
       isActive={isActive}
       hourOfDay={hourOfDay}
       weather={weather}

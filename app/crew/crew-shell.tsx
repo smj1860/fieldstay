@@ -2,7 +2,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
-import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, Sun, Moon, WifiOff } from 'lucide-react'
+import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff } from 'lucide-react'
 import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
@@ -13,7 +13,6 @@ import { createClient }             from '@/lib/supabase/client'
 import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
 import { Dialog }                   from '@/components/ui/Dialog'
-import { useTheme }                 from '@/lib/hooks/use-theme'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -51,7 +50,6 @@ export function CrewShell({
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const { theme, toggle: toggleTheme } = useTheme()
 
   const [swReg, setSwReg]               = useState<ServiceWorkerRegistration | null>(null)
   const [notifVisible, setNotifVisible] = useState(false)
@@ -148,13 +146,6 @@ export function CrewShell({
           {/* Sync status + logout — pinned right, vertically centered */}
           <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
             <SyncStatus />
-            <button
-              onClick={toggleTheme}
-              aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-              className="text-brand-200 hover:text-white transition-colors"
-            >
-              {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
             <button
               onClick={handleLogout}
               disabled={isPending}

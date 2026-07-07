@@ -166,6 +166,32 @@
   }
 }
 
+/* Crew PWA — permanently light, no passive OS-dark fallback. Outdoor
+   legibility in direct sunlight is about the crew member's environment, not
+   their device's OS theme setting, so this never reads prefers-color-scheme. */
+.theme-locked-light {
+  --bg-base:        #F8F9FA;
+  --bg-canvas:      #F8F9FA;
+  --bg-card:        #FFFFFF;
+  --bg-raised:      #E9ECEF;
+  --bg-hover:       #DEE2E6;
+
+  --border:         #DEE2E6;
+  --border-strong:  #CED4DA;
+
+  --text-primary:   #0D0F11;
+  --text-secondary: #343A40;
+  --text-muted:     #6C757D;
+  --text-inverse:   #ffffff;
+
+  --accent-gold:      #b8900a;
+  --accent-gold-text: #7a5e07;
+  --accent-green:      #16a34a;
+  --accent-red:        #dc2626;
+  --accent-amber:      #d97706;
+  --accent-blue:       #1d6fa4;
+}
+
 
 /* ── Base ─────────────────────────────────────────────────────── */
 @layer base {

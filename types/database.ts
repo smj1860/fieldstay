@@ -1166,6 +1166,7 @@ export interface GuidebookSponsor {
   slot_type:              GuidebookSlotType
   slot_context:           string | null
   media_kit_token:        string
+  photo_storage_path:     string | null
   stripe_customer_id:     string | null
   stripe_subscription_id: string | null
   checkout_session_id:    string | null

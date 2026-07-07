@@ -55,5 +55,9 @@ export default async function CrewLayout({
   }
   // ── End PM guard ───────────────────────────────────────────────────────────
 
-  return <CrewShell crewName={crewRecord.name} userId={user.id}>{children}</CrewShell>
+  return (
+    <div className="theme-locked-light">
+      <CrewShell crewName={crewRecord.name} userId={user.id}>{children}</CrewShell>
+    </div>
+  )
 }
