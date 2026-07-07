@@ -264,25 +264,44 @@ export const hospIncrementalSync = inngest.createFunction(
           .eq('external_source', PROVIDER)
           .maybeSingle()
 
-        if (!property) {
-          throw new NonRetriableError(
-            `Property ${entity_id} not in FieldStay — unknown properties cannot be synced incrementally`
-          )
+        let resolvedOrgId: string | null = property?.org_id ?? null
+        let pmUserId: string | null      = null
+
+        if (resolvedOrgId) {
+          const { data: member } = await supabase
+            .from('organization_members')
+            .select('user_id')
+            .eq('org_id', resolvedOrgId)
+            .in('role', ['owner', 'admin'])
+            .not('invite_accepted_at', 'is', null)
+            .limit(1)
+            .single()
+
+          if (!member) throw new NonRetriableError(`No admin for org ${resolvedOrgId}`)
+          pmUserId = member.user_id
+        } else {
+          // New property (property.created / property.merged for a property
+          // FieldStay hasn't synced yet) — find via an active Hospitable
+          // connection, same fallback used by the reservation and review
+          // handlers below.
+          const { data: connection } = await supabase
+            .from('integration_connections')
+            .select('user_id, org_id')
+            .eq('provider_id', PROVIDER)
+            .eq('status',      'active')
+            .not('org_id',     'is', null)
+            .limit(1)
+            .single()
+
+          if (!connection) {
+            throw new NonRetriableError('No active Hospitable connection found')
+          }
+          pmUserId      = connection.user_id
+          resolvedOrgId = connection.org_id
         }
 
-        const { data: member } = await supabase
-          .from('organization_members')
-          .select('user_id')
-          .eq('org_id', property.org_id)
-          .in('role', ['owner', 'admin'])
-          .not('invite_accepted_at', 'is', null)
-          .limit(1)
-          .single()
-
-        if (!member) throw new NonRetriableError(`No admin for org ${property.org_id}`)
-
-        const validToken = await getValidHospitableToken(member.user_id)
-        return { orgId: property.org_id, token: validToken }
+        const validToken = await getValidHospitableToken(pmUserId!)
+        return { orgId: resolvedOrgId!, token: validToken }
       })
 
       const fetchAndUpsertResult = await step.run('fetch-and-upsert-property', async () => {
