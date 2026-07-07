@@ -37,6 +37,105 @@ export async function getSyncProgress(providerId: string): Promise<{
   }
 }
 
+/**
+ * Manually re-fires a provider's sync from the Settings → Integrations card.
+ * Looks up the connection by org_id (not the current session's user_id) since
+ * the PM clicking resync may not be the PM who originally connected it.
+ */
+export async function triggerResync(
+  providerId: string
+): Promise<{ success?: boolean; error?: string }> {
+  const { membership, user } = await requireOrgMember()
+
+  if (!['owner', 'admin', 'manager'].includes(membership.role)) {
+    return { error: 'Permission denied' }
+  }
+
+  const supabase = createServiceClient()
+  const { data: connection } = await supabase
+    .from('integration_connections')
+    .select('user_id, org_id, external_user_id, status')
+    .eq('org_id', membership.org_id)
+    .eq('provider_id', providerId)
+    .maybeSingle()
+
+  if (!connection || connection.status === 'revoked') {
+    return { error: 'This integration isn’t connected — connect it first.' }
+  }
+
+  const { integrationResyncLimiter } = await import('@/lib/rate-limit')
+  const { success: withinLimit } = await integrationResyncLimiter.limit(`${providerId}:${membership.org_id}`)
+  if (!withinLimit) {
+    return { error: 'Sync already in progress — please wait 60 seconds before trying again' }
+  }
+
+  const { inngest } = await import('@/lib/inngest/client')
+
+  switch (providerId) {
+    case 'hospitable':
+      await inngest.send({
+        name: 'integration/hospitable.connected',
+        data: {
+          user_id:          connection.user_id,
+          org_id:            connection.org_id ?? membership.org_id,
+          external_user_id:  connection.external_user_id ?? '',
+        },
+      })
+      break
+
+    case 'ownerrez':
+      await inngest.send({
+        name: 'ownerrez/sync.now.requested',
+        data: {
+          org_id:  membership.org_id,
+          user_id: connection.user_id,
+          trigger: 'manual',
+        },
+      })
+      break
+
+    case 'hostaway':
+      await inngest.send({
+        name: 'integration/hostaway.sync.requested',
+        data: {
+          user_id:     connection.user_id,
+          org_id:      connection.org_id ?? membership.org_id,
+          provider_id: providerId,
+          full_sync:   true,
+        },
+      })
+      break
+
+    case 'kroger':
+      // Kroger has no property/booking sync — this re-runs the nearest-store
+      // lookup that picks preferred_retailer, in case the org's properties
+      // have changed since it last ran.
+      await inngest.send({
+        name: 'integration/kroger.connected',
+        data: {
+          org_id:  connection.org_id ?? membership.org_id,
+          user_id: connection.user_id,
+        },
+      })
+      break
+
+    default:
+      return { error: `Resync isn't supported for ${providerId} yet.` }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'integration.sync_triggered',
+    targetType: 'integration',
+    targetId:   providerId,
+    metadata:   { provider_id: providerId, trigger: 'manual' },
+  })
+
+  revalidatePath('/settings/integrations')
+  return { success: true }
+}
+
 export async function disconnectIntegration(
   providerId: string
 ): Promise<{ error?: string }> {

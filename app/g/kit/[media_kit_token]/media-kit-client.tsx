@@ -1,8 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { GuidebookSponsor } from '@/types/database'
+import { createClient } from '@/lib/supabase/client'
+import { uploadSponsorPhoto, removeSponsorPhoto } from '@/app/actions/guidebook-sponsor'
 
 const CHARCOAL  = '#0E0E0E'
 const CARD      = '#17171A'
@@ -15,9 +17,10 @@ const RED       = '#E5534B'
 
 interface MediaKitClientProps {
   sponsor: GuidebookSponsor
+  initialPhotoUrl: string | null
 }
 
-export function MediaKitClient({ sponsor }: MediaKitClientProps) {
+export function MediaKitClient({ sponsor, initialPhotoUrl }: MediaKitClientProps) {
   const searchParams = useSearchParams()
   const success       = searchParams.get('success') === 'true'
   const cancelled     = searchParams.get('cancelled') === 'true'
@@ -25,7 +28,47 @@ export function MediaKitClient({ sponsor }: MediaKitClientProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError]         = useState<string | null>(null)
 
+  const [photoUrl, setPhotoUrl]             = useState<string | null>(initialPhotoUrl)
+  const [photoUploading, setPhotoUploading] = useState(false)
+  const [photoError, setPhotoError]         = useState<string | null>(null)
+  const fileInputRef                        = useRef<HTMLInputElement>(null)
+
   const isActive = sponsor.status === 'active'
+
+  async function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setPhotoUploading(true)
+    setPhotoError(null)
+
+    const result = await uploadSponsorPhoto(sponsor.media_kit_token, file)
+
+    if ('error' in result) {
+      setPhotoError(result.error)
+      setPhotoUploading(false)
+      return
+    }
+
+    // Re-derive the public URL client-side rather than round-tripping the server for it.
+    const { data } = createClient()
+      .storage.from('guidebook-sponsor-photos')
+      .getPublicUrl(result.photoStoragePath)
+    setPhotoUrl(data.publicUrl)
+    setPhotoUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  async function handlePhotoRemove() {
+    setPhotoUploading(true)
+    const result = await removeSponsorPhoto(sponsor.media_kit_token)
+    if ('error' in result) {
+      setPhotoError(result.error)
+    } else {
+      setPhotoUrl(null)
+    }
+    setPhotoUploading(false)
+  }
 
   async function handleCheckout() {
     setIsLoading(true)
@@ -81,6 +124,58 @@ export function MediaKitClient({ sponsor }: MediaKitClientProps) {
           <h2 style={{ fontSize: '18px', fontWeight: 600, margin: '0 0 4px' }}>
             {sponsor.business_name}
           </h2>
+
+          {/* Optional photo — placed in the preview card, above business_description */}
+          <div style={{ margin: '12px 0 16px' }}>
+            <p style={{ fontSize: '12px', color: MUTED, margin: '0 0 8px' }}>
+              Photo <span style={{ opacity: 0.7 }}>(optional — listings with a photo get more taps)</span>
+            </p>
+            {photoUrl ? (
+              <div style={{ position: 'relative' }}>
+                <img
+                  src={photoUrl}
+                  alt=""
+                  style={{ width: '100%', height: '160px', objectFit: 'cover', borderRadius: '8px', display: 'block' }}
+                />
+                <button
+                  type="button"
+                  onClick={handlePhotoRemove}
+                  disabled={photoUploading}
+                  style={{
+                    position: 'absolute', top: '8px', right: '8px',
+                    background: 'rgba(14,14,14,0.7)', color: TEXT, border: `1px solid ${BORDER}`,
+                    borderRadius: '6px', padding: '4px 10px', fontSize: '12px',
+                    cursor: photoUploading ? 'default' : 'pointer',
+                  }}
+                >
+                  {photoUploading ? '...' : 'Remove'}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={photoUploading}
+                style={{
+                  width: '100%', height: '100px', borderRadius: '8px',
+                  border: `1px dashed ${BORDER}`, background: 'transparent', color: MUTED,
+                  fontSize: '13px', cursor: photoUploading ? 'default' : 'pointer',
+                }}
+              >
+                {photoUploading ? 'Uploading…' : '+ Add a photo'}
+              </button>
+            )}
+            <input
+              ref={fileInputRef}
+              type="file"
+              aria-label="Upload sponsor photo"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handlePhotoSelect}
+              style={{ display: 'none' }}
+            />
+            {photoError && <p style={{ fontSize: '12px', color: RED, margin: '8px 0 0' }}>{photoError}</p>}
+          </div>
+
           {sponsor.business_description && (
             <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 12px', lineHeight: 1.5 }}>
               {sponsor.business_description}

@@ -20,6 +20,7 @@ import type {
   OwnerRezBooking,
 } from '../types'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
+import { ok, fail, timingSafeEqual } from '../webhook-verification'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -146,10 +147,13 @@ export const ownerRezProvider: IntegrationProvider = {
 
   // Validates incoming webhook requests from OwnerRez using HTTP Basic Auth.
   // Credentials (user + password) are ones YOU defined in the app registration.
-  async validateWebhook(request: Request): Promise<boolean> {
+  // Basic Auth has no timestamp concept, so replay protection for OwnerRez
+  // webhooks comes entirely from the processed_webhooks dedup table, not
+  // from anything checked here.
+  async validateWebhook(request: Request) {
     const authHeader = request.headers.get('Authorization')
 
-    if (!authHeader?.startsWith('Basic ')) return false
+    if (!authHeader?.startsWith('Basic ')) return fail('missing or malformed Authorization header')
 
     const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8')
     const [user, pass] = decoded.split(':', 2)   // split on first colon only
@@ -167,7 +171,7 @@ export const ownerRezProvider: IntegrationProvider = {
     const userMatch = timingSafeEqual(user, expectedUser)
     const passMatch = timingSafeEqual(pass, expectedPass)
 
-    return userMatch && passMatch
+    return (userMatch && passMatch) ? ok() : fail('credential mismatch')
   },
 
   // Handles OwnerRez-specific webhook events beyond the generic revocation.
@@ -226,21 +230,6 @@ export const ownerRezProvider: IntegrationProvider = {
       }
     }
   },
-}
-
-// ── Utility ──────────────────────────────────────────────────────────────────
-
-/**
- * Constant-time string comparison to prevent timing-based credential attacks.
- * Regular === comparison leaks information about where strings differ.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false
-  let result = 0
-  for (let i = 0; i < a.length; i++) {
-    result |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  }
-  return result === 0
 }
 
 // ── Data mapping helpers ─────────────────────────────────────────────────────

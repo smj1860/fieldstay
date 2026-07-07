@@ -22,6 +22,8 @@ import { getProvider }                               from '@/lib/integrations/re
 import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations/vault'
 import { logAuditEvent }                             from '@/lib/audit'
 import { createServiceClient }                       from '@/lib/supabase/server'
+import { inngest }                                   from '@/lib/inngest/client'
+import type { WebhookVerificationResult }            from '@/lib/integrations/webhook-verification'
 
 export async function POST(
   request: NextRequest,
@@ -45,19 +47,19 @@ export async function POST(
   //    so we can still read the JSON body afterward.
   const clonedForValidation = request.clone()
 
-  let isAuthentic: boolean
+  let verification: WebhookVerificationResult
   try {
-    isAuthentic = await providerAdapter.validateWebhook(clonedForValidation)
+    verification = await providerAdapter.validateWebhook(clonedForValidation)
   } catch (err) {
     console.error(`[Webhook:${providerId}] Validation error:`, err)
     // Fail closed — if we can't validate, reject
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  if (!isAuthentic) {
+  if (!verification.valid) {
     console.warn(
-      `[Webhook:${providerId}] Rejected unauthenticated request from IP ` +
-      `${request.headers.get('x-forwarded-for') ?? 'unknown'}`
+      `[Webhook:${providerId}] Rejected request from IP ` +
+      `${request.headers.get('x-forwarded-for') ?? 'unknown'}: ${verification.reason ?? 'no reason given'}`
     )
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -95,7 +97,7 @@ export async function POST(
           const supabase = createServiceClient()
           const { data: existingConn } = await supabase
             .from('integration_connections')
-            .select('status')
+            .select('status, org_id')
             .eq('provider_id', providerId)
             .eq('external_user_id', externalUserId)
             .maybeSingle()
@@ -121,8 +123,24 @@ export async function POST(
             metadata:   { externalUserId, trigger: 'webhook' },
             correlationId,
           })
-          // TODO: Trigger an Inngest event here to notify the user via Resend email:
-          // await inngest.send({ name: 'integration/connection.revoked', data: { appUserId, providerId } })
+
+          // Notify the PM — reuses the same email + template already used for
+          // proactive-refresh-triggered revocations (lib/inngest/functions/notify-integration-error.ts)
+          if (existingConn.org_id) {
+            await inngest.send({
+              name: 'integration/connection.error',
+              data: {
+                user_id:     appUserId,
+                org_id:      existingConn.org_id,
+                provider_id: providerId,
+                reason:      'This connection was disconnected from the provider\'s side (someone revoked FieldStay\'s access). Reconnect to resume syncing.',
+              },
+            })
+          } else {
+            console.warn(
+              `[Webhook:${providerId}] Revoked connection has no org_id — cannot notify PM for user ${appUserId}`
+            )
+          }
         } else {
           console.warn(
             `[Webhook:${providerId}] Revocation for unknown external user ${externalUserId} — ` +

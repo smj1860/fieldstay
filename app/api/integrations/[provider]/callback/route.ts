@@ -28,7 +28,7 @@ import { createServerClient }             from '@supabase/ssr'
 import { createServiceClient }            from '@/lib/supabase/server'
 import { revalidatePath }                 from 'next/cache'
 import { getProvider }                    from '@/lib/integrations/registry'
-import { storeIntegrationToken, storeIntegrationRefreshToken } from '@/lib/integrations/vault'
+import { storeIntegrationToken, storeIntegrationRefreshToken, holdPendingIntegrationToken } from '@/lib/integrations/vault'
 import { logAuditEvent }                  from '@/lib/audit'
 import { inngest }                        from '@/lib/inngest/client'
 
@@ -177,22 +177,35 @@ export async function GET(
   const appUserId: string | null = sessionUser?.id ?? stateRecord.user_id ?? null
 
   if (!appUserId) {
-    // This is the "brand new user arriving from the OwnerRez marketplace" scenario.
-    // They have no FieldStay account and didn't start this flow while logged in.
-    //
-    // TODO: Implement post-signup token linking so the connection completes
-    // after the user creates their account.
-    //
-    // ⚠️ Ask OwnerRez: when a user clicks "Connect FieldStay" in your marketplace,
-    // do they arrive at our /connect endpoint already authenticated in OwnerRez,
-    // or do they land on a FieldStay page first? Understanding this handoff
-    // determines the best account-creation flow here.
+    // This is the "brand new user arriving from the provider's marketplace"
+    // scenario. They have no FieldStay account and didn't start this flow
+    // while logged in — but the code exchange above already succeeded, so we
+    // have a real, valid token in hand. Don't throw it away: hold it (Vault-
+    // backed, 30 min TTL, single-use) and redirect through signup with a
+    // claim token. Once they finish creating their account, /connect/finish
+    // links it to their new user without a second provider authorization.
     console.warn(
-      `[OAuth:${providerId}] No FieldStay user identity found. Redirecting to sign-up.`
+      `[OAuth:${providerId}] No FieldStay user identity found. Holding token for post-signup claim.`
     )
+
+    let pendingLinkToken: string
+    try {
+      pendingLinkToken = await holdPendingIntegrationToken({
+        providerId,
+        externalUserId: tokenData.externalUserId,
+        accessToken:    tokenData.accessToken,
+        refreshToken:   tokenData.refreshToken,
+        scope:          tokenData.scope,
+        metadata:       tokenData.metadata,
+      })
+    } catch (err) {
+      console.error(`[OAuth:${providerId}] Failed to hold pending token:`, err)
+      return errorRedirect('storage_failed')
+    }
+
     const signupUrl = new URL('/signup', appUrl)
     signupUrl.searchParams.set('provider', providerId)
-    signupUrl.searchParams.set('next',     `/api/integrations/${providerId}/connect`)
+    signupUrl.searchParams.set('next', `/connect/finish?pending_link=${pendingLinkToken}`)
     return makeRedirect(signupUrl)
   }
 

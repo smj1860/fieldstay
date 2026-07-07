@@ -52,15 +52,17 @@ export async function createOrganization(
   const result = data as { org_id: string; created: boolean }
   if (!result.created) redirect('/ops')
 
+  // Fire the onboarding drip — the Inngest function sends the welcome
+  // email immediately and schedules the rest of the sequence
   await inngest.send({
-    name: 'org/created',
+    name: 'user/onboarding.drip.started',
     data: {
-      org_id:     result.org_id,
       user_id:    user.id,
-      org_name:   name,
-      user_email: user.email ?? '',
+      org_id:     result.org_id,
       first_name: (user.user_metadata?.full_name as string | undefined)
         ?.split(' ')[0] ?? 'there',
+      email:      user.email ?? '',
+      org_name:   name,
     },
   })
 

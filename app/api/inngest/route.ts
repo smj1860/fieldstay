@@ -97,10 +97,12 @@ import { handleWorkOrderCrewAssigned }  from '@/lib/inngest/functions/work-order
 import { handleWorkOrderCrewCompleted } from '@/lib/inngest/functions/work-order-crew-completed'
 
 // Email lifecycle functions
-import { sendWelcomeEmail }           from '@/lib/inngest/functions/email-welcome'
 import { sendOwnerRezConnectedEmail } from '@/lib/inngest/functions/email-ownerrez-connected'
 import { handleTrialLifecycle }       from '@/lib/inngest/functions/email-trial-lifecycle'
 import { sendSubscriberCheckin }      from '@/lib/inngest/functions/email-subscriber-checkin'
+
+// Onboarding welcome email drip (4-email behavioral sequence)
+import { onboardingDrip } from '@/lib/inngest/functions/onboarding-drip'
 
 // Checklist signal intelligence
 import { computeChecklistSignals } from '@/lib/inngest/functions/cron/checklist-signals'
@@ -229,10 +231,10 @@ export const { GET, POST, PUT } = serve({
     handleWorkOrderCrewCompleted,
 
     // Email lifecycle
-    sendWelcomeEmail,
     sendOwnerRezConnectedEmail,
     handleTrialLifecycle,
     sendSubscriberCheckin,
+    onboardingDrip,
 
     // Dead-letter handler — listens for inngest/function.failed
     onFunctionFailure,

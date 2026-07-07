@@ -26,7 +26,7 @@ interface ExtensionConfigProp {
 interface GuestGuidebookViewProps {
   property:         Property
   config:           GuidebookPropertyConfig
-  sponsors:         GuidebookSponsor[]
+  sponsors:         (GuidebookSponsor & { photoUrl: string | null })[]
   isActive:         boolean
   hourOfDay:        number
   weather:          WeatherContext | null
@@ -129,29 +129,38 @@ export function GuestGuidebookView({
                 return (
                   <div
                     key={sponsor.id}
-                    style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', padding: '14px' }}
+                    style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', overflow: 'hidden' }}
                   >
-                    <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 4px' }}>
-                      {sponsor.business_name}
-                    </h3>
-                    {sponsor.business_description && (
-                      <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 8px', lineHeight: 1.5 }}>
-                        {sponsor.business_description}
-                      </p>
+                    {sponsor.photoUrl && (
+                      <img
+                        src={sponsor.photoUrl}
+                        alt=""
+                        style={{ width: '100%', height: '140px', objectFit: 'cover', display: 'block' }}
+                      />
                     )}
-                    {offerLine && (
-                      <div style={{ display: 'inline-block', background: 'rgba(212,165,55,0.12)', border: `1px solid ${GOLD}`, borderRadius: '8px', padding: '6px 10px', margin: '0 0 8px' }}>
-                        <p style={{ fontSize: '10px', color: GOLD, fontWeight: 700, letterSpacing: '0.06em', margin: '0 0 2px' }}>
-                          GUIDEBOOK EXCLUSIVE
+                    <div style={{ padding: '14px' }}>
+                      <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 4px' }}>
+                        {sponsor.business_name}
+                      </h3>
+                      {sponsor.business_description && (
+                        <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 8px', lineHeight: 1.5 }}>
+                          {sponsor.business_description}
                         </p>
-                        <p style={{ fontSize: '13px', color: GOLD, fontWeight: 600, margin: 0 }}>
-                          {offerLine}
-                        </p>
-                      </div>
-                    )}
-                    {sponsor.address && (
-                      <p style={{ fontSize: '12px', color: MUTED, margin: 0 }}>{sponsor.address}</p>
-                    )}
+                      )}
+                      {offerLine && (
+                        <div style={{ display: 'inline-block', background: 'rgba(212,165,55,0.12)', border: `1px solid ${GOLD}`, borderRadius: '8px', padding: '6px 10px', margin: '0 0 8px' }}>
+                          <p style={{ fontSize: '10px', color: GOLD, fontWeight: 700, letterSpacing: '0.06em', margin: '0 0 2px' }}>
+                            GUIDEBOOK EXCLUSIVE
+                          </p>
+                          <p style={{ fontSize: '13px', color: GOLD, fontWeight: 600, margin: 0 }}>
+                            {offerLine}
+                          </p>
+                        </div>
+                      )}
+                      {sponsor.address && (
+                        <p style={{ fontSize: '12px', color: MUTED, margin: 0 }}>{sponsor.address}</p>
+                      )}
+                    </div>
                   </div>
                 )
               })}
