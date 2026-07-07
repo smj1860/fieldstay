@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Copy } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
 import { ClonePropertyModal } from './clone-property-modal'
 
 interface Property {
@@ -21,14 +22,15 @@ export function CopyFromButton({ targetProperty, otherProperties }: CopyFromButt
 
   return (
     <>
-      <button
+      <Button
         type="button"
+        variant="ghost"
         onClick={() => setOpen(true)}
-        className="btn-ghost text-xs px-3 py-1.5"
+        className="text-xs px-3 py-1.5"
         title="Copy setup from another property"
       >
         <Copy className="w-3.5 h-3.5" />
-      </button>
+      </Button>
 
       {open && (
         <ClonePropertyModal

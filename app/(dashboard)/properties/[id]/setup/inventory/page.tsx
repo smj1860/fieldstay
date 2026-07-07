@@ -1,5 +1,6 @@
 import { requireProperty } from '@/lib/auth'
 import { InventorySetup } from './inventory-setup'
+import { Card } from '@/components/ui/Card'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Inventory Setup' }
@@ -60,7 +61,7 @@ export default async function InventoryPage({ params }: Props) {
     .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <div className="card">
+    <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Inventory</h2>
       <p className="text-sm text-accent-500 mb-6">
         Add items to track for this property. Set a par level — when crew counts
@@ -75,6 +76,6 @@ export default async function InventoryPage({ params }: Props) {
         templateName={templateName}
         sourceProperties={sourceProperties}
       />
-    </div>
+    </Card>
   )
 }

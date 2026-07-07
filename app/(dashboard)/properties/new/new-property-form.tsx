@@ -3,6 +3,8 @@
 import { useActionState } from 'react'
 import { createProperty } from '../actions'
 import Link from 'next/link'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 const PROPERTY_TYPES = [
   { value: 'house',     label: 'House' },
@@ -29,12 +31,11 @@ export function NewPropertyForm() {
         <label htmlFor="name" className="label">
           Property Name <span className="text-red-500">*</span>
         </label>
-        <input
+        <Input
           id="name"
           name="name"
           type="text"
           required
-          className="input"
           placeholder="e.g. Blue Haven, The Dock House"
         />
       </div>
@@ -51,16 +52,16 @@ export function NewPropertyForm() {
         </div>
         <div>
           <label htmlFor="bedrooms" className="label">Bedrooms</label>
-          <input
+          <Input
             id="bedrooms" name="bedrooms" type="number"
-            min="0" max="20" defaultValue={3} className="input"
+            min="0" max="20" defaultValue={3}
           />
         </div>
         <div>
           <label htmlFor="bathrooms" className="label">Bathrooms</label>
-          <input
+          <Input
             id="bathrooms" name="bathrooms" type="number"
-            min="0.5" max="20" step="0.5" defaultValue={2} className="input"
+            min="0.5" max="20" step="0.5" defaultValue={2}
           />
         </div>
       </div>
@@ -68,24 +69,24 @@ export function NewPropertyForm() {
       {/* Address */}
       <div>
         <label htmlFor="address" className="label">Street Address</label>
-        <input
+        <Input
           id="address" name="address" type="text"
-          className="input" placeholder="123 Lake Shore Drive"
+          placeholder="123 Lake Shore Drive"
         />
       </div>
 
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-1">
           <label htmlFor="city" className="label">City</label>
-          <input id="city" name="city" type="text" className="input" placeholder="Dadeville" />
+          <Input id="city" name="city" type="text" placeholder="Dadeville" />
         </div>
         <div>
           <label htmlFor="state" className="label">State</label>
-          <input id="state" name="state" type="text" className="input" placeholder="AL" maxLength={2} />
+          <Input id="state" name="state" type="text" placeholder="AL" maxLength={2} />
         </div>
         <div>
           <label htmlFor="zip" className="label">ZIP</label>
-          <input id="zip" name="zip" type="text" className="input" placeholder="36853" maxLength={10} />
+          <Input id="zip" name="zip" type="text" placeholder="36853" maxLength={10} />
         </div>
       </div>
 
@@ -93,16 +94,16 @@ export function NewPropertyForm() {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="checkin_time" className="label">Check-in Time</label>
-          <input
+          <Input
             id="checkin_time" name="checkin_time" type="time"
-            defaultValue="15:00" className="input"
+            defaultValue="15:00"
           />
         </div>
         <div>
           <label htmlFor="checkout_time" className="label">Check-out Time</label>
-          <input
+          <Input
             id="checkout_time" name="checkout_time" type="time"
-            defaultValue="11:00" className="input"
+            defaultValue="11:00"
           />
         </div>
       </div>
@@ -112,13 +113,12 @@ export function NewPropertyForm() {
         <label htmlFor="avg_nightly_rate" className="label">
           Average Nightly Rate ($)
         </label>
-        <input
+        <Input
           id="avg_nightly_rate"
           name="avg_nightly_rate"
           type="number"
           min="0"
           step="0.01"
-          className="input"
           placeholder="e.g. 285.00"
         />
         <p className="text-xs text-accent-400 mt-1">
@@ -130,19 +130,19 @@ export function NewPropertyForm() {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="wifi_name" className="label">Wi-Fi Name</label>
-          <input id="wifi_name" name="wifi_name" type="text" className="input" />
+          <Input id="wifi_name" name="wifi_name" type="text" />
         </div>
         <div>
           <label htmlFor="wifi_password" className="label">Wi-Fi Password</label>
-          <input id="wifi_password" name="wifi_password" type="text" className="input" />
+          <Input id="wifi_password" name="wifi_password" type="text" />
         </div>
       </div>
 
       <div>
         <label htmlFor="door_code" className="label">Door Code / Lockbox</label>
-        <input
+        <Input
           id="door_code" name="door_code" type="text"
-          className="input" placeholder="e.g. 1234 or lockbox on front door"
+          placeholder="e.g. 1234 or lockbox on front door"
         />
       </div>
 
@@ -157,9 +157,9 @@ export function NewPropertyForm() {
 
       {/* Actions */}
       <div className="flex items-center gap-3 pt-2 border-t border-accent-100">
-        <button type="submit" disabled={pending} className="btn-primary">
+        <Button type="submit" disabled={pending}>
           {pending ? 'Saving…' : 'Save & Continue →'}
-        </button>
+        </Button>
         <Link href="/properties" className="btn-ghost">
           Cancel
         </Link>

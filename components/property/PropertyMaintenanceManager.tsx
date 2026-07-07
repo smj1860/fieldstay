@@ -22,6 +22,9 @@ import {
 import { Pencil, Copy, Trash2, Plus, BookOpen, Loader2, Check } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Dialog } from '@/components/ui/Dialog'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 // ── Due date badge ────────────────────────────────────────────────────────────
 
@@ -144,7 +147,7 @@ function EditModal({
       <div className="space-y-4">
         <div>
           <label htmlFor="edit-name" className="label">Name</label>
-          <input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} className="input" />
+          <Input id="edit-name" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -158,7 +161,7 @@ function EditModal({
           </div>
           <div>
             <label htmlFor="edit-next-due-date" className="label">Next Due Date</label>
-            <input id="edit-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
+            <Input id="edit-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} />
           </div>
         </div>
 
@@ -194,10 +197,10 @@ function EditModal({
       </div>
 
       <div className="flex gap-2 mt-5">
-        <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2">
+        <Button onClick={handleSave} disabled={saving} className="flex items-center gap-2">
           {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
-        </button>
-        <button onClick={onClose} className="btn-ghost">Cancel</button>
+        </Button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
       </div>
     </Dialog>
   )
@@ -242,14 +245,14 @@ function DuplicateModal({
 
       <div className="mb-4">
         <label htmlFor="duplicate-next-due-date" className="label">Next Due Date for Duplicate</label>
-        <input id="duplicate-next-due-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
+        <Input id="duplicate-next-due-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
       </div>
 
       <div className="flex gap-2">
-        <button onClick={handleDuplicate} disabled={saving} className="btn-primary flex items-center gap-2">
+        <Button onClick={handleDuplicate} disabled={saving} className="flex items-center gap-2">
           {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Duplicating…</> : 'Duplicate'}
-        </button>
-        <button onClick={onClose} className="btn-ghost">Cancel</button>
+        </Button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
       </div>
     </Dialog>
   )
@@ -359,15 +362,15 @@ function CatalogModal({
             </div>
             <div>
               <label htmlFor="catalog-next-due-date" className="label">Next Due Date</label>
-              <input id="catalog-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} className="input" />
+              <Input id="catalog-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} />
             </div>
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button onClick={handleAdd} disabled={saving} className="btn-primary flex items-center gap-2">
+            <Button onClick={handleAdd} disabled={saving} className="flex items-center gap-2">
               {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add to Property'}
-            </button>
-            <button onClick={onClose} className="btn-ghost">Cancel</button>
+            </Button>
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
           </div>
         </div>
       )}
@@ -429,7 +432,7 @@ function CustomItemModal({
       <div className="space-y-4">
         <div>
           <label htmlFor="custom-name" className="label">Name <span className="text-red-500">*</span></label>
-          <input id="custom-name" value={name} onChange={(e) => setName(e.target.value)} className="input"
+          <Input id="custom-name" value={name} onChange={(e) => setName(e.target.value)}
                  placeholder="e.g. Boat dock winterization" />
         </div>
 
@@ -444,7 +447,7 @@ function CustomItemModal({
           </div>
           <div>
             <label htmlFor="custom-next-due-date" className="label">Next Due Date</label>
-            <input id="custom-next-due-date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
+            <Input id="custom-next-due-date" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
           </div>
         </div>
 
@@ -478,10 +481,10 @@ function CustomItemModal({
       </div>
 
       <div className="flex gap-2 mt-5">
-        <button onClick={handleAdd} disabled={saving} className="btn-primary flex items-center gap-2">
+        <Button onClick={handleAdd} disabled={saving} className="flex items-center gap-2">
           {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Item'}
-        </button>
-        <button onClick={onClose} className="btn-ghost">Cancel</button>
+        </Button>
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
       </div>
     </Dialog>
   )
@@ -533,22 +536,23 @@ export function PropertyMaintenanceManager({
         <div className="flex items-center gap-2">
           <h3 className="font-semibold text-primary-themed">Maintenance Schedule</h3>
           {schedules.length > 0 && (
-            <span className="badge badge-slate">{schedules.length}</span>
+            <Badge tone="slate">{schedules.length}</Badge>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setModal({ type: 'catalog' })}
-            className="btn-secondary text-sm flex items-center gap-1.5"
+            className="text-sm flex items-center gap-1.5"
           >
             <BookOpen className="w-3.5 h-3.5" /> From Catalog
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setModal({ type: 'custom' })}
-            className="btn-primary text-sm flex items-center gap-1.5"
+            className="text-sm flex items-center gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" /> Custom
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -564,9 +568,9 @@ export function PropertyMaintenanceManager({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium text-primary-themed">{s.name}</span>
-                  <span className="badge badge-slate text-xs">
+                  <Badge tone="slate" className="text-xs">
                     {RECURRENCE_LABELS[s.frequency ?? 'annual']}
-                  </span>
+                  </Badge>
                   {s.active_from_month != null && s.active_to_month != null && (
                     <span className="text-xs px-1.5 py-0.5 rounded-full"
                           style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}>
@@ -584,31 +588,34 @@ export function PropertyMaintenanceManager({
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
-                <button
+                <Button
+                  variant="ghost"
                   onClick={() => setModal({ type: 'edit', item: s })}
-                  className="btn-ghost p-1.5"
+                  className="p-1.5"
                   title="Edit"
                 >
                   <Pencil className="w-3.5 h-3.5" />
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
                   onClick={() => setModal({ type: 'duplicate', item: s })}
-                  className="btn-ghost p-1.5"
+                  className="p-1.5"
                   title="Duplicate"
                 >
                   <Copy className="w-3.5 h-3.5" />
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
                   onClick={() => handleRemove(s)}
                   disabled={removing && removingId === s.id}
-                  className="btn-ghost p-1.5 text-muted-themed hover:text-red-500"
+                  className="p-1.5 text-muted-themed hover:text-red-500"
                   title="Remove"
                 >
                   {removing && removingId === s.id
                     ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     : <Trash2 className="w-3.5 h-3.5" />
                   }
-                </button>
+                </Button>
               </div>
             </div>
           ))}

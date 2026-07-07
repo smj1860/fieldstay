@@ -6,8 +6,16 @@ import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Cl
 import { cn } from '@/lib/utils'
 import { AssetSection } from './asset-section'
 import { PropertyMaintenanceManager } from '@/components/property/PropertyMaintenanceManager'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
 import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/database'
 import type { Metadata } from 'next'
+
+function feedStatusTone(status: string): 'green' | 'red' | 'slate' {
+  if (status === 'success') return 'green'
+  if (status === 'error') return 'red'
+  return 'slate'
+}
 
 export const metadata: Metadata = { title: 'Property' }
 interface Props { params: Promise<{ id: string }> }
@@ -162,7 +170,7 @@ export default async function PropertyDetailPage({ params }: Props) {
       </div>
 
       {/* Property details */}
-      <div className="card mb-4">
+      <Card className="mb-4">
         <h3 className="font-semibold text-primary-themed mb-4">Property Details</h3>
         <div className="grid grid-cols-2 gap-y-3 text-sm">
           <DetailRow label="Type" value={property.property_type} className="capitalize" />
@@ -184,7 +192,7 @@ export default async function PropertyDetailPage({ params }: Props) {
             <DetailRow label="Same-Day Premium" value={`+${property.same_day_premium_pct}%`} />
           )}
         </div>
-      </div>
+      </Card>
 
       <AssetSection
         assets={assets ?? []}
@@ -193,16 +201,16 @@ export default async function PropertyDetailPage({ params }: Props) {
       />
 
       {/* ── Maintenance Schedule Manager ────────────────────────────────── */}
-      <div className="card mb-4">
+      <Card className="mb-4">
         <PropertyMaintenanceManager
           propertyId={property.id}
           initialSchedules={(allSchedules ?? []) as MaintenanceSchedule[]}
           catalog={(catalogItems ?? []) as MaintenanceCatalogItem[]}
         />
-      </div>
+      </Card>
 
       {/* ── Feature 6: Maintenance History ─────────────────────────────── */}
-      <div className="card mb-4">
+      <Card className="mb-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-primary-themed">Maintenance</h3>
           <Link href={`/maintenance?property=${property.id}`}
@@ -323,11 +331,11 @@ export default async function PropertyDetailPage({ params }: Props) {
         {openWOs.length === 0 && completedLog.length === 0 && (!upcomingSchedules || upcomingSchedules.length === 0) && (
           <p className="text-sm text-muted-themed text-center py-4">No maintenance history yet.</p>
         )}
-      </div>
+      </Card>
 
       {/* Calendar feeds */}
       {feeds && feeds.length > 0 && (
-        <div className="card">
+        <Card>
           <h3 className="font-semibold text-primary-themed mb-4">Calendar Feeds</h3>
           <div className="space-y-2">
             {feeds.map((feed) => (
@@ -337,17 +345,14 @@ export default async function PropertyDetailPage({ params }: Props) {
                   {feed.last_synced_at && (
                     <span className="text-xs text-muted-themed">Synced {formatDate(feed.last_synced_at)}</span>
                   )}
-                  <span className={`badge ${
-                    feed.last_sync_status === 'success' ? 'badge-green' :
-                    feed.last_sync_status === 'error'   ? 'badge-red' : 'badge-slate'
-                  }`}>
+                  <Badge tone={feedStatusTone(feed.last_sync_status)}>
                     {feed.last_sync_status}
-                  </span>
+                  </Badge>
                 </div>
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       )}
     </div>
   )

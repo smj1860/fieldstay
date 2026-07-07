@@ -4,6 +4,9 @@ import { useActionState, useEffect, useState } from 'react'
 import { addIcalFeed, deleteIcalFeed, completeIcalStep, triggerSingleFeedSync } from './actions'
 import { Plus, Trash2, RefreshCw, Link as LinkIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 import type { IcalFeed } from '@/types/database'
 
 const SOURCES = [
@@ -55,13 +58,13 @@ export function IcalManager({
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 {feed.last_sync_status === 'success' && (
-                  <span className="badge badge-green">Synced</span>
+                  <Badge tone="green">Synced</Badge>
                 )}
                 {feed.last_sync_status === 'error' && (
-                  <span className="badge badge-red">Error</span>
+                  <Badge tone="red">Error</Badge>
                 )}
                 {feed.last_sync_status === 'pending' && (
-                  <span className="badge badge-slate">Pending</span>
+                  <Badge tone="slate">Pending</Badge>
                 )}
                 <button
                   onClick={async () => { await triggerSingleFeedSync(feed.id, propertyId) }}
@@ -119,12 +122,11 @@ export function IcalManager({
               </div>
               <div>
                 <label htmlFor="ical-name" className="label">Label</label>
-                <input
+                <Input
                   id="ical-name"
                   name="name"
                   type="text"
                   defaultValue={SOURCES.find((s) => s.value === selectedSource)?.label}
-                  className="input"
                   placeholder="e.g. Airbnb"
                 />
               </div>
@@ -139,32 +141,32 @@ export function IcalManager({
 
             <div>
               <label htmlFor="ical-url" className="label">Calendar URL (.ics)</label>
-              <input
+              <Input
                 id="ical-url"
                 name="url"
                 type="url"
-                className="input font-mono text-xs"
+                className="font-mono text-xs"
                 placeholder="https://www.airbnb.com/calendar/ical/..."
               />
             </div>
 
             <div className="flex gap-3">
-              <button type="submit" disabled={pending} className="btn-primary">
+              <Button type="submit" disabled={pending}>
                 {pending ? 'Adding…' : 'Add Feed'}
-              </button>
+              </Button>
               {feeds.length > 0 && (
-                <button type="button" onClick={() => setShowForm(false)} className="btn-ghost">
+                <Button type="button" variant="ghost" onClick={() => setShowForm(false)}>
                   Cancel
-                </button>
+                </Button>
               )}
             </div>
           </form>
         </div>
       ) : (
-        <button onClick={() => setShowForm(true)} className="btn-secondary w-full justify-center py-3 border-dashed">
+        <Button variant="secondary" onClick={() => setShowForm(true)} className="w-full justify-center py-3 border-dashed">
           <Plus className="w-4 h-4" />
           Add Another Calendar
-        </button>
+        </Button>
       )}
 
       {/* Continue */}
@@ -173,9 +175,9 @@ export function IcalManager({
           setCompleting(true)
           await completeIcalStep(propertyId)
         }}>
-          <button type="submit" disabled={completing} className="btn-primary">
+          <Button type="submit" disabled={completing}>
             {completing ? 'Saving…' : feeds.length > 0 ? 'Save & Continue →' : 'Skip for now →'}
-          </button>
+          </Button>
         </form>
         <span className="text-xs text-muted-themed">
           {feeds.length === 0 && 'You can add calendars later'}

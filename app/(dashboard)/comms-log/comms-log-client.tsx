@@ -10,6 +10,10 @@ import {
 import { cn, formatDate, formatDateTime } from '@/lib/utils'
 import { createCommunicationLog, deleteCommunicationLog } from './actions'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import type { CommChannel, CommRecipientType } from '@/types/database'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -52,12 +56,12 @@ const CHANNEL_LABELS: Record<CommChannel, string> = {
   note:      'Note',
 }
 
-const CHANNEL_BADGE: Record<CommChannel, string> = {
-  email:     'badge-blue',
-  sms:       'badge-green',
-  phone:     'badge-amber',
-  in_person: 'badge-gold',
-  note:      'badge-slate',
+const CHANNEL_BADGE: Record<CommChannel, 'blue' | 'green' | 'amber' | 'gold' | 'slate'> = {
+  email:     'blue',
+  sms:       'green',
+  phone:     'amber',
+  in_person: 'gold',
+  note:      'slate',
 }
 
 const CHANNEL_ICON: Record<CommChannel, React.ReactNode> = {
@@ -109,14 +113,14 @@ function LogRow({ entry }: { entry: LogEntry }) {
             <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
               {recipientName}
             </span>
-            <span className={cn('badge flex items-center gap-1', CHANNEL_BADGE[entry.channel])}>
+            <Badge tone={CHANNEL_BADGE[entry.channel]} className="flex items-center gap-1">
               {CHANNEL_ICON[entry.channel]}
               {CHANNEL_LABELS[entry.channel]}
-            </span>
+            </Badge>
             {entry.source === 'system' && (
-              <span className="badge badge-slate flex items-center gap-1 text-xs">
+              <Badge tone="slate" className="flex items-center gap-1 text-xs">
                 <Cpu className="w-2.5 h-2.5" /> System
-              </span>
+              </Badge>
             )}
           </div>
 
@@ -320,10 +324,9 @@ function AddEntryModal({
           {/* Date */}
           <div>
             <label className="label">Date &amp; Time</label>
-            <input
+            <Input
               name="communicated_at"
               type="datetime-local"
-              className="input"
               defaultValue={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
                 .toISOString()
                 .slice(0, 16)}
@@ -336,10 +339,9 @@ function AddEntryModal({
           {/* Subject */}
           <div>
             <label className="label">Subject</label>
-            <input
+            <Input
               name="subject"
               type="text"
-              className="input"
               placeholder="e.g. HVAC repair instructions, Written warning"
             />
           </div>
@@ -378,10 +380,10 @@ function AddEntryModal({
           </div>
 
           <div className="flex gap-3 pt-1">
-            <button type="submit" disabled={pending} className="btn-primary flex-1">
+            <Button type="submit" disabled={pending} className="flex-1">
               {pending ? 'Saving…' : 'Save Entry'}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            </Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
         </form>
     </Dialog>
@@ -443,10 +445,10 @@ export function CommsLogClient({
           <h1 className="page-title">Comms Log</h1>
           <p className="page-subtitle">Record of all communications with crew and vendors</p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="btn-primary">
+        <Button onClick={() => setShowAdd(true)}>
           <Plus className="w-4 h-4" />
           Log Communication
-        </button>
+        </Button>
       </div>
 
       {/* Filters */}
@@ -456,12 +458,12 @@ export function CommsLogClient({
             className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
             style={{ color: 'var(--text-muted)' }}
           />
-          <input
+          <Input
             type="text"
             placeholder="Search by name, subject…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="input pl-8 text-sm py-1.5"
+            className="pl-8 text-sm py-1.5"
           />
         </div>
 
@@ -500,18 +502,19 @@ export function CommsLogClient({
         )}
 
         {hasFilters && (
-          <button
+          <Button
+            variant="ghost"
             onClick={() => {
               setSearch('')
               setFilterType('all')
               setFilterChannel('all')
               setFilterProperty('all')
             }}
-            className="btn-ghost text-xs py-1.5"
+            className="text-xs py-1.5"
             style={{ color: 'var(--text-muted)' }}
           >
             <X className="w-3 h-3" /> Clear
-          </button>
+          </Button>
         )}
       </div>
 
@@ -529,7 +532,7 @@ export function CommsLogClient({
 
       {/* Entries */}
       {filtered.length === 0 ? (
-        <div className="card text-center py-16 max-w-md mx-auto mt-4">
+        <Card className="text-center py-16 max-w-md mx-auto mt-4">
           <FileText className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
           <h3 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
             {logs.length === 0 ? 'No communications logged yet' : 'No entries match your filters'}
@@ -540,12 +543,12 @@ export function CommsLogClient({
               : 'Try adjusting your filters or search term.'}
           </p>
           {logs.length === 0 && (
-            <button onClick={() => setShowAdd(true)} className="btn-primary mx-auto">
+            <Button onClick={() => setShowAdd(true)} className="mx-auto">
               <Plus className="w-4 h-4" />
               Log First Entry
-            </button>
+            </Button>
           )}
-        </div>
+        </Card>
       ) : (
         <div className="space-y-2">
           {filtered.map((entry) => (

@@ -1,5 +1,6 @@
 import { requireProperty, requireOrgMember } from '@/lib/auth'
 import { ChecklistBuilder } from './checklist-builder'
+import { Card } from '@/components/ui/Card'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Turnover Checklist' }
@@ -45,7 +46,7 @@ export default async function ChecklistPage({ params }: Props) {
     .sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <div className="card">
+    <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Turnover Checklist</h2>
       <p className="text-sm text-accent-500 mb-6">
         Build the checklist your crew follows for every turnover. Organize by room or area.
@@ -57,6 +58,6 @@ export default async function ChecklistPage({ params }: Props) {
         otherProperties={otherProperties ?? []}
         sourceProperties={sourceProperties}
       />
-    </div>
+    </Card>
   )
 }

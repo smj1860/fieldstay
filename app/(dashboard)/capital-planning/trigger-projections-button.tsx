@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Loader2, Check }                from 'lucide-react'
 import { triggerCapexProjections }      from './actions'
 import { createClient }                 from '@/lib/supabase/client'
+import { Button }                       from '@/components/ui/Button'
 
 export function TriggerProjectionsButton({
   orgId,
@@ -76,14 +77,15 @@ export function TriggerProjectionsButton({
   }
 
   return (
-    <button
+    <Button
       onClick={handleClick}
       disabled={loading || polling}
-      className="btn-secondary text-sm flex items-center gap-1.5"
+      variant="secondary"
+      className="text-sm flex items-center gap-1.5"
     >
       {(loading || polling)
         ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {loading ? 'Starting…' : 'Generating…'}</>
         : 'Generate Projections'}
-    </button>
+    </Button>
   )
 }

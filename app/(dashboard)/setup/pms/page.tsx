@@ -3,6 +3,9 @@ import { Check }                from 'lucide-react'
 import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { markStepComplete }    from '../actions'
+import { Card }                from '@/components/ui/Card'
+import { Badge }                from '@/components/ui/Badge'
+import { Button }               from '@/components/ui/Button'
 
 // All PMS provider IDs — excludes non-PMS integrations (e.g. kroger, repuguard)
 // 'guesty' is commented out: it's registered as oauth2 in integration_providers but
@@ -87,9 +90,9 @@ export default async function OnboardingPmsPage() {
             : `/api/integrations/${provider.id}/connect`
 
           return (
-            <div
+            <Card
               key={provider.id}
-              className="card flex items-center justify-between gap-4"
+              className="flex items-center justify-between gap-4"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -97,7 +100,7 @@ export default async function OnboardingPmsPage() {
                     {provider.display_name}
                   </span>
                   {isConnected && (
-                    <span className="badge badge-green text-xs">Connected</span>
+                    <Badge tone="green" className="text-xs">Connected</Badge>
                   )}
                 </div>
                 {isConnected && connection.external_user_id && (
@@ -112,7 +115,7 @@ export default async function OnboardingPmsPage() {
                   Connect
                 </Link>
               )}
-            </div>
+            </Card>
           )
         })}
       </div>
@@ -140,9 +143,9 @@ export default async function OnboardingPmsPage() {
 
       <div className="flex flex-col gap-2">
         <form action={continueAction}>
-          <button type="submit" className="btn-primary">
+          <Button type="submit">
             {anyConnected ? 'Continue →' : 'Skip for now →'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

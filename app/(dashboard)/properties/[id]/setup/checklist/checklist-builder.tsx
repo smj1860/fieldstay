@@ -4,6 +4,7 @@ import { useState, useTransition, useRef } from 'react'
 import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate, cloneChecklistFromProperty } from './actions'
 import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check, ClipboardList, AlertTriangle, Upload } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
 interface Section { tempId: string; id?: string; name: string; items: Item[] }
@@ -361,15 +362,15 @@ export function ChecklistBuilder({
                   </button>
                 )
               })()}
-              <button onClick={() => moveSection(section.tempId, -1)} disabled={si === 0} className="btn-ghost p-1 disabled:opacity-30">
+              <Button variant="ghost" onClick={() => moveSection(section.tempId, -1)} disabled={si === 0} className="p-1 disabled:opacity-30">
                 <ChevronUp className="w-3.5 h-3.5" />
-              </button>
-              <button onClick={() => moveSection(section.tempId, 1)} disabled={si === sections.length - 1} className="btn-ghost p-1 disabled:opacity-30">
+              </Button>
+              <Button variant="ghost" onClick={() => moveSection(section.tempId, 1)} disabled={si === sections.length - 1} className="p-1 disabled:opacity-30">
                 <ChevronDown className="w-3.5 h-3.5" />
-              </button>
-              <button onClick={() => removeSection(section.tempId)} className="btn-ghost p-1 text-muted-themed hover:text-red-500">
+              </Button>
+              <Button variant="ghost" onClick={() => removeSection(section.tempId)} className="p-1 text-muted-themed hover:text-red-500">
                 <Trash2 className="w-3.5 h-3.5" />
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -378,12 +379,12 @@ export function ChecklistBuilder({
             {section.items.map((item, ii) => (
               <div key={item.tempId} className="flex items-center gap-2 px-4 py-2.5 group hover:bg-raised-themed">
                 <div className="flex gap-0.5">
-                  <button onClick={() => moveItem(section.tempId, item.tempId, -1)} disabled={ii === 0} className="btn-ghost p-0.5 disabled:opacity-30">
+                  <Button variant="ghost" onClick={() => moveItem(section.tempId, item.tempId, -1)} disabled={ii === 0} className="p-0.5 disabled:opacity-30">
                     <ChevronUp className="w-3 h-3" />
-                  </button>
-                  <button onClick={() => moveItem(section.tempId, item.tempId, 1)} disabled={ii === section.items.length - 1} className="btn-ghost p-0.5 disabled:opacity-30">
+                  </Button>
+                  <Button variant="ghost" onClick={() => moveItem(section.tempId, item.tempId, 1)} disabled={ii === section.items.length - 1} className="p-0.5 disabled:opacity-30">
                     <ChevronDown className="w-3 h-3" />
-                  </button>
+                  </Button>
                 </div>
                 <input
                   value={item.task}
@@ -467,33 +468,35 @@ export function ChecklistBuilder({
                 ))}
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={confirmImport} className="btn-primary flex-1 text-sm">
+                <Button type="button" onClick={confirmImport} className="flex-1 text-sm">
                   Add {importPreview.length} tasks
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setImportPreview([])}
-                  className="btn-ghost text-sm"
+                  className="text-sm"
                 >
                   Clear
-                </button>
+                </Button>
               </div>
             </>
           )}
         </div>
       ) : (
         <div className="flex gap-2">
-          <button onClick={addSection} className="btn-secondary flex-1 justify-center border-dashed">
+          <Button variant="secondary" onClick={addSection} className="flex-1 justify-center border-dashed">
             <Plus className="w-4 h-4" /> Add Section
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="secondary"
             onClick={() => setShowImport(true)}
-            className="btn-secondary px-3"
+            className="px-3"
             title="Import tasks from CSV or DOCX"
           >
             <Upload className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       )}
 
@@ -505,10 +508,10 @@ export function ChecklistBuilder({
       )}
 
       <div className="flex items-center gap-3 pt-4 border-t border-themed flex-wrap">
-        <button onClick={save} disabled={saving} className="btn-secondary inline-flex items-center gap-1.5">
+        <Button variant="secondary" onClick={save} disabled={saving} className="inline-flex items-center gap-1.5">
           {saving ? 'Saving…' : saved ? <><Check className="w-4 h-4" /> Saved</> : 'Save Checklist'}
-        </button>
-        <button
+        </Button>
+        <Button
           disabled={completing}
           onClick={() =>
             startComplete(async () => {
@@ -533,27 +536,28 @@ export function ChecklistBuilder({
               await completeChecklistStep(propertyId)
             })
           }
-          className="btn-primary"
         >
           {completing ? 'Saving…' : 'Save & Continue →'}
-        </button>
+        </Button>
         {sourceProperties.length > 0 && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={() => setCloneFromModal(true)}
-            className="btn-secondary text-xs ml-auto"
+            className="text-xs ml-auto"
           >
             Clone from property…
-          </button>
+          </Button>
         )}
         {otherProperties.length > 0 && (
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={() => setBroadcastModal(true)}
-            className={`inline-flex items-center gap-1.5 ${sourceProperties.length > 0 ? 'btn-secondary text-xs' : 'btn-secondary text-xs ml-auto'}`}
+            className={`inline-flex items-center gap-1.5 text-xs ${sourceProperties.length > 0 ? '' : 'ml-auto'}`}
           >
             <ClipboardList className="w-3.5 h-3.5" /> Apply to Other Properties
-          </button>
+          </Button>
         )}
       </div>
 
@@ -581,14 +585,14 @@ export function ChecklistBuilder({
           ))}
         </div>
         <div className="pt-3 mt-3 border-t border-themed flex gap-3">
-          <button
+          <Button
             onClick={handleBroadcast}
             disabled={broadcasting || broadcastTargets.size === 0}
-            className="btn-primary flex-1 text-sm"
+            className="flex-1 text-sm"
           >
             {broadcasting ? 'Applying…' : `Apply to ${broadcastTargets.size} propert${broadcastTargets.size !== 1 ? 'ies' : 'y'}`}
-          </button>
-          <button onClick={() => setBroadcastModal(false)} className="btn-ghost text-sm">Cancel</button>
+          </Button>
+          <Button variant="ghost" onClick={() => setBroadcastModal(false)} className="text-sm">Cancel</Button>
         </div>
       </Dialog>
 
@@ -613,14 +617,14 @@ export function ChecklistBuilder({
           ))}
         </select>
         <div className="flex gap-2">
-          <button
+          <Button
             onClick={handleCloneFrom}
             disabled={!cloneFromSource || cloningFrom}
-            className="btn-primary flex-1"
+            className="flex-1"
           >
             {cloningFrom ? 'Importing…' : 'Import Checklist'}
-          </button>
-          <button onClick={() => setCloneFromModal(false)} className="btn-ghost">Cancel</button>
+          </Button>
+          <Button variant="ghost" onClick={() => setCloneFromModal(false)}>Cancel</Button>
         </div>
       </Dialog>
     </div>

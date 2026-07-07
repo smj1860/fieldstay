@@ -7,6 +7,10 @@ import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/databa
 import type { ContactPref } from '@/types/database'
 import { AvailabilityOverviewCalendar } from '@/components/crew/availability-overview-calendar'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 import {
   addCrewMember,
   updateCrewMember,
@@ -97,11 +101,13 @@ function parsePastedText(text: string): ParsedRow[] {
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
-const ROLE_BADGE: Record<CrewRole, { label: string; cls: string }> = {
-  cleaning:    { label: 'Cleaning',    cls: 'badge badge-blue'  },
-  landscaping: { label: 'Landscaping', cls: 'badge badge-green' },
-  maintenance: { label: 'Maintenance', cls: 'badge badge-amber' },
-  general:     { label: 'General',     cls: 'badge badge-slate' },
+type RoleBadgeTone = 'blue' | 'green' | 'amber' | 'slate'
+
+const ROLE_BADGE: Record<CrewRole, { label: string; tone: RoleBadgeTone }> = {
+  cleaning:    { label: 'Cleaning',    tone: 'blue'  },
+  landscaping: { label: 'Landscaping', tone: 'green' },
+  maintenance: { label: 'Maintenance', tone: 'amber' },
+  general:     { label: 'General',     tone: 'slate' },
 }
 
 // ── Root client component ─────────────────────────────────────────────────────
@@ -131,13 +137,13 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="card">
+      <Card>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div className="flex items-center gap-2">
             <Users2 className="w-5 h-5" style={{ color: 'var(--accent-gold)' }} />
             <h2 className="text-base font-semibold text-primary-themed">
               Crew Members
-              <span className="ml-2 badge badge-slate">{crew.length}</span>
+              <Badge tone="slate" className="ml-2">{crew.length}</Badge>
             </h2>
             {inviteResult && (
               <span className="text-xs" style={{ color: 'var(--accent-green)' }}>
@@ -147,7 +153,8 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
           </div>
           <div className="flex gap-2 flex-wrap">
             {uninvitedCount > 0 && (
-              <button
+              <Button
+                variant="secondary"
                 disabled={inviting}
                 onClick={() =>
                   startInviteAll(async () => {
@@ -163,15 +170,16 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
                     }
                   })
                 }
-                className="btn-secondary text-sm"
+                className="text-sm"
               >
                 <Send className="w-4 h-4" />
                 {inviting ? 'Sending…' : `Invite All (${uninvitedCount})`}
-              </button>
+              </Button>
             )}
-            <button
+            <Button
+              variant="secondary"
               onClick={() => setView(view === 'calendar' ? 'list' : 'calendar')}
-              className="btn-secondary text-sm"
+              className="text-sm"
               style={
                 view === 'calendar'
                   ? { border: '1px solid var(--accent-gold)', color: 'var(--accent-gold)' }
@@ -180,20 +188,21 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
             >
               <CalendarDays className="w-4 h-4" />
               {view === 'calendar' ? 'List View' : 'Availability Calendar'}
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => setView(view === 'bulk' ? 'list' : 'bulk')}
-              className="btn-secondary text-sm"
+              className="text-sm"
             >
               <Upload className="w-4 h-4" />
               {view === 'bulk' ? 'Cancel' : 'Bulk Upload'}
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => setView(view === 'add' ? 'list' : 'add')}
-              className="btn-primary text-sm"
+              className="text-sm"
             >
               {view === 'add' ? 'Cancel' : '+ Add Member'}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -238,7 +247,7 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
             </table>
           </div>
         )}
-      </div>
+      </Card>
       {selectedMember && (
         <CrewCardModal
           member={selectedMember}
@@ -274,9 +283,9 @@ function CrewCardModal({
              style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}>
           {member.name[0]?.toUpperCase()}
         </div>
-        <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>
+        <Badge tone={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).tone}>
           {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
-        </span>
+        </Badge>
       </div>
 
       <div className="space-y-2 text-sm">
@@ -443,9 +452,9 @@ function InviteButton({ memberId, inviteSentAt }: { memberId: string; inviteSent
 
   return (
     <div>
-      <button onClick={handle} disabled={busy} className="btn-primary w-full text-sm">
+      <Button onClick={handle} disabled={busy} className="w-full text-sm">
         {busy ? 'Sending…' : inviteSentAt ? 'Resend Invite' : 'Invite to App'}
-      </button>
+      </Button>
       {inviteSentAt && !sent && (
         <p className="text-xs text-center mt-1" style={{ color: 'var(--text-muted)' }}>
           Invite sent {new Date(inviteSentAt).toLocaleDateString()}
@@ -481,7 +490,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="crew-name" className="label">Name <span className="text-red-400">*</span></label>
-            <input id="crew-name" name="name" type="text" required className="input" placeholder="Alex Johnson" />
+            <Input id="crew-name" name="name" type="text" required placeholder="Alex Johnson" />
           </div>
           <div>
             <label htmlFor="crew-role" className="label">Role</label>
@@ -496,22 +505,22 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="crew-specialty" className="label">Specialty</label>
-            <input id="crew-specialty" name="specialty" type="text" className="input" placeholder="e.g. Cleaning, HVAC" />
+            <Input id="crew-specialty" name="specialty" type="text" placeholder="e.g. Cleaning, HVAC" />
           </div>
           <div>
             <label htmlFor="crew-home-zip" className="label">Home ZIP</label>
-            <input id="crew-home-zip" name="home_zip" type="text" className="input" placeholder="e.g. 78701" />
+            <Input id="crew-home-zip" name="home_zip" type="text" placeholder="e.g. 78701" />
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="crew-email" className="label">Email <span className="text-red-400">*</span></label>
-            <input id="crew-email" name="email" type="email" required className="input" placeholder="alex@example.com" />
+            <Input id="crew-email" name="email" type="email" required placeholder="alex@example.com" />
           </div>
           <div>
             <label htmlFor="crew-phone" className="label">Mobile phone number</label>
-            <input id="crew-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
+            <Input id="crew-phone" name="phone" type="tel" placeholder="+1 555-0100" />
             <p className="text-xs text-muted-themed mt-1">
               Turnover assignment notifications will be sent to this number via SMS.
             </p>
@@ -528,9 +537,9 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
         </div>
 
         <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={pending} className="btn-primary text-sm">
+          <Button type="submit" disabled={pending} className="text-sm">
             {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Crew Member'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -604,7 +613,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
         {result.skipped > 0 && (
           <p className="text-xs text-muted-themed mt-1">{result.skipped} rows skipped (missing name)</p>
         )}
-        <button onClick={onSuccess} className="btn-primary text-sm mt-4">Done</button>
+        <Button onClick={onSuccess} className="text-sm mt-4">Done</Button>
       </div>
     )
   }
@@ -645,14 +654,15 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
             <code className="text-xs px-1 py-0.5 rounded" style={{ background: 'var(--bg-raised)' }}>Specialty</code>{' '}
             (optional). To use a Word doc, save it as CSV first or use Paste mode.
           </p>
-          <button
+          <Button
+            variant="secondary"
             onClick={() => fileRef.current?.click()}
-            className="flex items-center gap-2 btn-secondary text-sm mb-2"
+            className="flex items-center gap-2 text-sm mb-2"
           >
             <FileText className="w-4 h-4" />
             {fileName || 'Choose .csv file'}
-          </button>
-          <input
+          </Button>
+          <Input
             ref={fileRef}
             type="file"
             accept=".csv,text/csv,text/plain"
@@ -672,13 +682,14 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
             className="input text-xs font-mono h-32 resize-y mb-2"
             placeholder={"Alex Johnson, alex@example.com, 555-0101\nSarah Lee, 555-0102, sarah@example.com\n..."}
           />
-          <button
+          <Button
+            variant="secondary"
             onClick={handleParsePaste}
             disabled={!pasteText.trim()}
-            className="btn-secondary text-sm"
+            className="text-sm"
           >
             Parse Text
-          </button>
+          </Button>
         </div>
       )}
 
@@ -723,15 +734,15 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
           </div>
 
           <div className="mt-3 flex gap-2">
-            <button
+            <Button
               onClick={handleImport}
               disabled={importing}
-              className="btn-primary text-sm"
+              className="text-sm"
             >
               {importing
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</>
                 : `Import ${preview.length} Members`}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -786,7 +797,7 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
     return (
       <tr style={{ background: 'var(--bg-raised)' }}>
         <td className="py-2 pr-4">
-          <input value={name} onChange={(e) => setName(e.target.value)} className="input py-1 text-sm" />
+          <Input value={name} onChange={(e) => setName(e.target.value)} className="py-1 text-sm" />
           {rowError && <p className="text-xs text-red-400 mt-1">{rowError}</p>}
         </td>
         <td className="py-2 pr-4">
@@ -799,14 +810,14 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         </td>
         <td className="py-2 pr-4">
           <div className="space-y-1">
-            <input value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="input py-1 text-sm" placeholder="Specialty" />
-            <input value={homeZip} onChange={(e) => setHomeZip(e.target.value)} className="input py-1 text-sm" placeholder="Home ZIP" />
+            <Input value={specialty} onChange={(e) => setSpecialty(e.target.value)} className="py-1 text-sm" placeholder="Specialty" />
+            <Input value={homeZip} onChange={(e) => setHomeZip(e.target.value)} className="py-1 text-sm" placeholder="Home ZIP" />
           </div>
         </td>
         <td className="py-2 pr-4">
           <div className="space-y-1">
-            <input value={email} onChange={(e) => setEmail(e.target.value)} className="input py-1 text-sm" placeholder="Email" type="email" />
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} className="input py-1 text-sm" placeholder="Phone" type="tel" />
+            <Input value={email} onChange={(e) => setEmail(e.target.value)} className="py-1 text-sm" placeholder="Email" type="email" />
+            <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="py-1 text-sm" placeholder="Phone" type="tel" />
           </div>
         </td>
         <td className="py-2 pr-4">
@@ -819,12 +830,12 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         <td className="py-2 pr-4" />
         <td className="py-2 text-right">
           <div className="flex items-center justify-end gap-1">
-            <button onClick={handleSave} disabled={saving} className="btn-primary py-1 px-2 text-xs" title="Save">
+            <Button onClick={handleSave} disabled={saving} className="py-1 px-2 text-xs" title="Save">
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            </button>
-            <button onClick={() => setEditing(false)} className="btn-ghost py-1 px-2 text-xs" title="Cancel">
+            </Button>
+            <Button variant="ghost" onClick={() => setEditing(false)} className="py-1 px-2 text-xs" title="Cancel">
               <X className="w-3.5 h-3.5" />
-            </button>
+            </Button>
           </div>
         </td>
       </tr>
@@ -841,9 +852,9 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
     >
       <td className="py-2.5 pr-4 font-medium text-primary-themed">{member.name}</td>
       <td className="py-2.5 pr-4">
-        <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>
+        <Badge tone={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).tone}>
           {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
-        </span>
+        </Badge>
       </td>
       <td className="py-2.5 pr-4 text-secondary-themed">{member.specialty || '—'}</td>
       <td className="py-2.5 pr-4 text-secondary-themed">
@@ -854,7 +865,7 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         </div>
       </td>
       <td className="py-2.5 pr-4">
-        <span className="badge badge-slate capitalize">{member.preferred_contact}</span>
+        <Badge tone="slate" className="capitalize">{member.preferred_contact}</Badge>
       </td>
       <td className="py-2.5 pr-4">
         {member.user_id ? (
@@ -871,22 +882,22 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
             {inviting ? 'Sending…' : 'Resend invite'}
           </button>
         ) : (
-          <button onClick={handleInvite} disabled={inviting || !member.email}
-                  className="btn-secondary text-xs px-2.5 py-1 disabled:opacity-50"
+          <Button variant="secondary" onClick={handleInvite} disabled={inviting || !member.email}
+                  className="text-xs px-2.5 py-1 disabled:opacity-50"
                   title={!member.email ? 'Add an email address first' : undefined}>
             {inviting ? 'Sending…' : 'Invite to app'}
-          </button>
+          </Button>
         )}
         {inviteError && <p className="text-xs mt-0.5" style={{ color: 'var(--accent-red)' }}>{inviteError}</p>}
       </td>
       <td className="py-2.5 text-right">
         <div className="flex items-center justify-end gap-1">
-          <button onClick={() => setEditing(true)} className="btn-ghost py-1 px-2 text-xs" title="Edit">
+          <Button variant="ghost" onClick={() => setEditing(true)} className="py-1 px-2 text-xs" title="Edit">
             <Pencil className="w-3.5 h-3.5" />
-          </button>
-          <button onClick={handleDeactivate} disabled={deactivating} className="btn-danger py-1 px-2 text-xs" title="Deactivate">
+          </Button>
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate">
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-          </button>
+          </Button>
         </div>
       </td>
     </tr>

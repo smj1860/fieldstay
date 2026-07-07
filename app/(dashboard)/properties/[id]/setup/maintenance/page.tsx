@@ -1,5 +1,6 @@
 import { requireProperty } from '@/lib/auth'
 import { MaintenanceSetupStep } from './maintenance-form'
+import { Card } from '@/components/ui/Card'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Maintenance Schedule' }
@@ -10,8 +11,8 @@ export default async function MaintenancePage({ params }: Props) {
   await requireProperty(id)
 
   return (
-    <div className="card">
+    <Card>
       <MaintenanceSetupStep propertyId={id} />
-    </div>
+    </Card>
   )
 }

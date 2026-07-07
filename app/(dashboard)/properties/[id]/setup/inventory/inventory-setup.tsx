@@ -5,6 +5,8 @@ import { upsertInventoryItems, deleteInventoryItem, bulkDeleteInventoryItems, co
 import { Plus, Trash2, ChevronDown, ChevronRight, Zap, Check, Upload } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import type { InventoryCatalogItem, InventoryItem, InventoryCategory } from '@/types/database'
 
 interface EditableItem {
@@ -208,9 +210,9 @@ export function InventorySetup({
               Duplicate the inventory list from an existing property.
             </p>
           </div>
-          <button onClick={() => setCloneModal(true)} className="btn-secondary text-xs whitespace-nowrap">
+          <Button variant="secondary" onClick={() => setCloneModal(true)} className="text-xs whitespace-nowrap">
             Clone Inventory
-          </button>
+          </Button>
         </div>
       )}
 
@@ -232,14 +234,14 @@ export function InventorySetup({
           ))}
         </select>
         <div className="flex gap-2">
-          <button
+          <Button
             onClick={handleClone}
             disabled={!cloneSource || cloning}
-            className="btn-primary flex-1"
+            className="flex-1"
           >
             {cloning ? 'Cloning…' : 'Clone Items'}
-          </button>
-          <button onClick={() => setCloneModal(false)} className="btn-ghost">Cancel</button>
+          </Button>
+          <Button variant="ghost" onClick={() => setCloneModal(false)}>Cancel</Button>
         </div>
       </Dialog>
 
@@ -256,13 +258,14 @@ export function InventorySetup({
               Apply &#34;{templateName ?? 'Master Inventory'}&#34; to populate this property in one click.
             </p>
           </div>
-          <button
+          <Button
+            variant="cta"
             onClick={handleApplyTemplate}
             disabled={applying}
-            className="btn-cta text-xs whitespace-nowrap"
+            className="text-xs whitespace-nowrap"
           >
             {applying ? 'Applying…' : 'Apply Template'}
-          </button>
+          </Button>
         </div>
       )}
       {applyResult && (
@@ -390,9 +393,9 @@ export function InventorySetup({
             })}
           </div>
           {dirtyCount > 0 && (
-            <button onClick={saveAll} disabled={saving} className="btn-secondary text-sm mt-3">
+            <Button variant="secondary" onClick={saveAll} disabled={saving} className="text-sm mt-3">
               {saving ? 'Saving…' : `Save ${dirtyCount} change${dirtyCount > 1 ? 's' : ''}`}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -472,7 +475,7 @@ export function InventorySetup({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="custom-item-name" className="label">Item Name</label>
-              <input id="custom-item-name" value={customItem.name} onChange={(e) => setCustomItem((p) => ({ ...p, name: e.target.value }))} className="input" placeholder="e.g. Propane Tank" />
+              <Input id="custom-item-name" value={customItem.name} onChange={(e) => setCustomItem((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. Propane Tank" />
             </div>
             <div>
               <label htmlFor="custom-item-category" className="label">Category</label>
@@ -488,25 +491,24 @@ export function InventorySetup({
             </div>
             <div>
               <label htmlFor="custom-item-par-level" className="label">Par Level</label>
-              <input id="custom-item-par-level"
+              <Input id="custom-item-par-level"
                 type="number" min="0" step="0.5" value={customItem.par_level}
                 onChange={(e) => {
                   const n = e.target.value === '' ? 0 : Math.max(0, parseFloat(e.target.value) || 0)
                   setCustomItem((p) => ({ ...p, par_level: n }))
                 }}
-                className="input"
               />
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={addCustom} className="btn-primary text-sm">Add Item</button>
-            <button onClick={() => setShowCustomForm(false)} className="btn-ghost text-sm">Cancel</button>
+            <Button onClick={addCustom} className="text-sm">Add Item</Button>
+            <Button variant="ghost" onClick={() => setShowCustomForm(false)} className="text-sm">Cancel</Button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setShowCustomForm(true)} className="btn-secondary w-full justify-center border-dashed">
+        <Button variant="secondary" onClick={() => setShowCustomForm(true)} className="w-full justify-center border-dashed">
           <Plus className="w-4 h-4" /> Add Custom Item
-        </button>
+        </Button>
       )}
 
       {/* CSV upload */}
@@ -576,7 +578,7 @@ export function InventorySetup({
                 </table>
               </div>
               <div className="flex gap-2">
-                <button
+                <Button
                   type="button"
                   onClick={() => {
                     setItems((prev) => [
@@ -595,34 +597,36 @@ export function InventorySetup({
                     setCsvPreview([])
                     setShowCsvImport(false)
                   }}
-                  className="btn-primary flex-1 text-sm"
+                  className="flex-1 text-sm"
                 >
                   Add {csvPreview.length} items
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setCsvPreview([])}
-                  className="btn-ghost text-sm"
+                  className="text-sm"
                 >
                   Clear
-                </button>
+                </Button>
               </div>
             </>
           )}
         </div>
       ) : (
-        <button
+        <Button
           type="button"
+          variant="secondary"
           onClick={() => setShowCsvImport(true)}
-          className="btn-secondary w-full justify-center border-dashed text-sm"
+          className="w-full justify-center border-dashed text-sm"
         >
           <Upload className="w-4 h-4" /> Upload CSV
-        </button>
+        </Button>
       )}
 
       {/* Continue */}
       <div className="flex items-center gap-3 pt-4 border-t border-themed">
-        <button
+        <Button
           disabled={completing}
           onClick={() => startComplete(async () => {
             const dirty = items.filter((i) => i.isDirty)
@@ -636,10 +640,9 @@ export function InventorySetup({
             }
             await completeInventoryStep(propertyId)
           })}
-          className="btn-primary"
         >
           {completing ? 'Saving…' : items.length > 0 ? 'Save & Continue →' : 'Skip for now →'}
-        </button>
+        </Button>
       </div>
     </div>
   )

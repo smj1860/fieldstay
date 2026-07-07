@@ -6,6 +6,7 @@ import { cn, formatDateTime } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { sendMessageToCrew, sendGroupMessage, markConversationRead } from './actions'
+import { Button } from '@/components/ui/Button'
 import type { Message } from '@/types/database'
 
 interface CrewOption {
@@ -463,12 +464,13 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages, ha
         ) : (
           <>
             <div className="px-4 py-3 border-b flex items-center gap-2" style={{ borderColor: 'var(--border)' }}>
-              <button
-                className="md:hidden btn-ghost p-1.5 -ml-1 mr-1"
+              <Button
+                variant="ghost"
+                className="md:hidden p-1.5 -ml-1 mr-1"
                 onClick={() => setSelectedKey(null)}
               >
                 <ChevronLeft className="w-5 h-5" />
-              </button>
+              </Button>
               {selectedThread.type === 'group' ? (
                 <div>
                   <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>

@@ -3,6 +3,8 @@
 import { useState, useActionState } from 'react'
 import { Plus, Check } from 'lucide-react'
 import { addVendor, type SettingsActionState } from '@/app/(dashboard)/settings/actions'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 const VENDOR_SPECIALTIES = [
   { value: 'plumbing',     label: 'Plumbing'     },
@@ -92,13 +94,13 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
           <form action={formAction} className="space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><label htmlFor="vendor-name" className="label">Vendor Name *</label>
-                <input id="vendor-name" name="name" type="text" required className="input" placeholder="ABC Plumbing" /></div>
+                <Input id="vendor-name" name="name" type="text" required placeholder="ABC Plumbing" /></div>
               <div><label htmlFor="vendor-contact-name" className="label">Contact Name</label>
-                <input id="vendor-contact-name" name="contact_name" type="text" className="input" placeholder="John Smith" /></div>
+                <Input id="vendor-contact-name" name="contact_name" type="text" placeholder="John Smith" /></div>
               <div><label htmlFor="vendor-email" className="label">Email <span className="text-red-400 ml-0.5">*</span></label>
-                <input id="vendor-email" name="email" type="email" required className="input" placeholder="info@abcplumbing.com" /></div>
+                <Input id="vendor-email" name="email" type="email" required placeholder="info@abcplumbing.com" /></div>
               <div><label htmlFor="vendor-phone" className="label">Phone</label>
-                <input id="vendor-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" /></div>
+                <Input id="vendor-phone" name="phone" type="tel" placeholder="+1 555-0100" /></div>
               <div><label htmlFor="vendor-specialty" className="label">Specialty</label>
                 <select id="vendor-specialty" name="specialty" className="input" defaultValue="general">
                   {VENDOR_SPECIALTIES.map((s) => (
@@ -106,24 +108,24 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
                   ))}
                 </select></div>
               <div><label htmlFor="vendor-service-zip" className="label">Service ZIP</label>
-                <input id="vendor-service-zip" name="service_zip" type="text" className="input" placeholder="30301" maxLength={10} /></div>
+                <Input id="vendor-service-zip" name="service_zip" type="text" placeholder="30301" maxLength={10} /></div>
             </div>
             <div className="flex gap-2">
-              <button type="submit" disabled={pending} className="btn-primary text-sm">
+              <Button type="submit" disabled={pending} className="text-sm">
                 {pending ? 'Adding…' : 'Add Vendor'}
-              </button>
-              <button type="button" onClick={() => setView('list')} className="btn-ghost text-sm">
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setView('list')} className="text-sm">
                 Cancel
-              </button>
+              </Button>
             </div>
           </form>
         </div>
       ) : (
         <div className="space-y-2">
-          <button onClick={() => setView('add')} className="btn-secondary text-sm flex items-center gap-2 w-full justify-center">
+          <Button variant="secondary" onClick={() => setView('add')} className="text-sm flex items-center gap-2 w-full justify-center">
             <Plus className="w-4 h-4" />
             {vendors.length === 0 ? 'Add First Vendor' : 'Add Another'}
-          </button>
+          </Button>
           {vendors.length === 0 && (
             <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
               Tip: The <a href="/vendors" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: 'var(--accent-gold)' }}>Vendors section</a> supports bulk CSV import.
@@ -134,9 +136,9 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
 
       <div className="flex items-center gap-3 pt-4 border-t border-themed">
         <form action={continueAction}>
-          <button type="submit" className="btn-primary">
+          <Button type="submit">
             {vendors.length > 0 ? 'Continue →' : 'Skip for now →'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

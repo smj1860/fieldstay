@@ -4,6 +4,7 @@ import { TriggerLedgerButton }       from './trigger-ledger-button'
 import { TriggerProjectionsButton }  from './trigger-projections-button'
 import { StatusDropdown }            from './status-dropdown'
 import { PropertyFilterSelect }      from './property-filter-select'
+import { Card }                      from '@/components/ui/Card'
 import type { Metadata }             from 'next'
 import type {
   CapExProjectionPayload,
@@ -137,7 +138,7 @@ export default async function CapitalPlanningPage({
       )}
 
       {/* Depreciation ledger card */}
-      <div className="card mb-6">
+      <Card className="mb-6">
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="font-semibold text-primary-themed">Depreciation Ledger</h3>
@@ -156,7 +157,7 @@ export default async function CapitalPlanningPage({
             <TriggerLedgerButton taxYear={priorYear} orgId={membership.org_id} />
           </div>
         </div>
-      </div>
+      </Card>
 
       <p className="text-xs text-muted-themed mb-6 px-1">
         Depreciation entries use MACRS as defined by the IRS. Only assets with
@@ -166,8 +167,8 @@ export default async function CapitalPlanningPage({
 
       {/* 12-month urgency card */}
       {urgentItems.length > 0 && (
-        <div
-          className="card mb-6 border-l-4"
+        <Card
+          className="mb-6 border-l-4"
           style={{ borderLeftColor: 'var(--accent-amber)' }}
         >
           <div className="flex items-center justify-between mb-2">
@@ -202,12 +203,12 @@ export default async function CapitalPlanningPage({
               )
             })}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Reserve fund calculator */}
       {payload && totalHigh10 > 0 && (
-        <div className="card mb-6">
+        <Card className="mb-6">
           <h3 className="font-semibold text-primary-themed mb-3">Reserve Fund Recommendation</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -227,11 +228,11 @@ export default async function CapitalPlanningPage({
             Based on straight-line amortisation over 10 years
             {selectedProperty ? ` for ${selectedProperty.name}` : ' across all properties'}.
           </p>
-        </div>
+        </Card>
       )}
 
       {/* 10-year bar chart */}
-      <div className="card mb-6">
+      <Card className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-primary-themed">10-Year Replacement Forecast</h3>
           <TriggerProjectionsButton orgId={membership.org_id} currentYear={currentYear} />
@@ -286,7 +287,7 @@ export default async function CapitalPlanningPage({
             <p className="mt-1">Click Generate Projections — assets with installation dates will populate the forecast immediately.</p>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* Itemized list by year */}
       {payload && years.some((y) => (filteredProjections[y]?.items?.length ?? 0) > 0) && (
@@ -295,7 +296,7 @@ export default async function CapitalPlanningPage({
             const proj = filteredProjections[year]
             if (!proj?.items?.length) return null
             return (
-              <div key={year} className="card">
+              <Card key={year}>
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="font-semibold text-primary-themed">{year}</h4>
                   <span className="text-sm font-semibold" style={{ color: 'var(--accent-gold)' }}>
@@ -332,7 +333,7 @@ export default async function CapitalPlanningPage({
                     )
                   })}
                 </div>
-              </div>
+              </Card>
             )
           })}
         </div>

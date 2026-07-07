@@ -5,6 +5,7 @@ import { StandardTemplateModal } from '@/components/onboarding/StandardTemplateM
 import { CustomTemplateModal }   from '@/components/onboarding/CustomTemplateModal'
 import { completeMaintenanceStep } from './actions'
 import { Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
 
 interface Props {
   propertyId: string
@@ -31,18 +32,19 @@ export function MaintenanceSetupStep({ propertyId }: Props) {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-3 mt-8 w-full">
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setModal('custom')}
-            className="flex-1 py-4 rounded-xl border text-sm font-semibold transition-colors btn-secondary"
+            className="flex-1 py-4 rounded-xl border text-sm font-semibold transition-colors"
           >
             Build Custom Schedule
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={() => setModal('standard')}
-            className="flex-1 py-4 rounded-xl text-sm font-semibold transition-colors btn-primary"
+            className="flex-1 py-4 rounded-xl text-sm font-semibold transition-colors"
           >
             Use Standard Template
-          </button>
+          </Button>
         </div>
 
         <button

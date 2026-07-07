@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { Plus } from 'lucide-react'
 import { NudgeBanner } from '@/components/nudge-banner'
 import { PropertiesGrid } from './properties-grid'
+import { Card } from '@/components/ui/Card'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Properties' }
@@ -101,7 +102,7 @@ export default async function PropertiesPage() {
 
 function EmptyState() {
   return (
-    <div className="card text-center py-16 max-w-md mx-auto mt-8">
+    <Card className="text-center py-16 max-w-md mx-auto mt-8">
       <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: 'var(--accent-gold-dim)' }}>
         <Plus className="w-6 h-6" style={{ color: 'var(--accent-gold)' }} />
       </div>
@@ -112,6 +113,6 @@ function EmptyState() {
       <Link href="/properties/new" className="btn-primary">
         Add Property
       </Link>
-    </div>
+    </Card>
   )
 }

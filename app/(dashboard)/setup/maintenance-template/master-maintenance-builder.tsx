@@ -3,6 +3,9 @@
 import { useState, useTransition } from 'react'
 import { Plus, X, Check } from 'lucide-react'
 import { saveMasterMaintenanceSchedules, type MaintenanceScheduleInput } from './actions'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 const VENDOR_SPECIALTIES = [
   'plumbing', 'electrical', 'hvac', 'landscaping', 'cleaning',
@@ -165,7 +168,7 @@ export function MasterMaintenanceBuilder({
           {/* Batch-add button */}
           {selectedSuggestions.size > 0 && (
             <div className="px-4 py-3 border-t border-themed" style={{ background: 'var(--bg-raised)' }}>
-              <button
+              <Button
                 type="button"
                 onClick={() => {
                   const toAdd = suggestionItems
@@ -174,27 +177,26 @@ export function MasterMaintenanceBuilder({
                   setSchedules((prev) => [...prev, ...toAdd])
                   setSelectedSuggestions(new Set())
                 }}
-                className="btn-primary text-sm w-full"
+                className="text-sm w-full"
               >
                 Add {selectedSuggestions.size} schedule{selectedSuggestions.size !== 1 ? 's' : ''}
-              </button>
+              </Button>
             </div>
           )}
         </div>
       )}
 
       {schedules.map((s, i) => (
-        <div key={i} className="card p-4 space-y-3">
+        <Card key={i} className="p-4 space-y-3">
           <div className="flex items-start gap-3">
             <div className="flex-1 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="label">Title *</label>
-                  <input
+                  <Input
                     type="text"
                     value={s.title}
                     onChange={(e) => update(i, { title: e.target.value })}
-                    className="input"
                     placeholder="e.g. HVAC Filter Replacement"
                   />
                 </div>
@@ -225,13 +227,12 @@ export function MasterMaintenanceBuilder({
                 </div>
                 <div>
                   <label className="label">Est. Cost (optional)</label>
-                  <input
+                  <Input
                     type="number"
                     min={0}
                     step={0.01}
                     value={s.estimated_cost ?? ''}
                     onChange={(e) => update(i, { estimated_cost: e.target.value ? parseFloat(e.target.value) : null })}
-                    className="input"
                     placeholder="0.00"
                   />
                 </div>
@@ -256,39 +257,39 @@ export function MasterMaintenanceBuilder({
               <X className="w-4 h-4" />
             </button>
           </div>
-        </div>
+        </Card>
       ))}
 
-      <button
+      <Button
         type="button"
+        variant="secondary"
         onClick={() => setSchedules((prev) => [...prev, emptySchedule()])}
-        className="btn-secondary text-sm flex items-center gap-2 w-full justify-center"
+        className="text-sm flex items-center gap-2 w-full justify-center"
       >
         <Plus className="w-3.5 h-3.5" />
         Add Another
-      </button>
+      </Button>
 
       {error && (
         <p className="text-sm" style={{ color: 'var(--accent-red)' }}>{error}</p>
       )}
 
       <div className="flex items-center gap-3 pt-2 border-t border-themed">
-        <button
+        <Button
           type="button"
           onClick={() => handleSave(true)}
           disabled={saving}
-          className="btn-primary"
         >
           {saving ? 'Saving…' : 'Save & Finish'}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={() => handleSave(false)}
           disabled={saving}
-          className="btn-secondary"
+          variant="secondary"
         >
           Save
-        </button>
+        </Button>
         {success && (
           <span className="text-sm flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
             <Check className="w-3.5 h-3.5" /> Saved

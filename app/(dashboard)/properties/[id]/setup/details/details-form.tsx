@@ -3,6 +3,8 @@
 import { useActionState } from 'react'
 import { saveDetails } from './actions'
 import Link from 'next/link'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import type { Property } from '@/types/database'
 
 const PROPERTY_TYPES = [
@@ -25,7 +27,7 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
 
       <div>
         <label htmlFor="name" className="label">Property Name <span className="text-red-500">*</span></label>
-        <input id="name" name="name" type="text" required defaultValue={property.name} className="input" />
+        <Input id="name" name="name" type="text" required defaultValue={property.name} />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -37,75 +39,74 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
         </div>
         <div>
           <label htmlFor="bedrooms" className="label">Bedrooms</label>
-          <input id="bedrooms" name="bedrooms" type="number" min="0" max="20" defaultValue={property.bedrooms} className="input" />
+          <Input id="bedrooms" name="bedrooms" type="number" min="0" max="20" defaultValue={property.bedrooms} />
         </div>
         <div>
           <label htmlFor="bathrooms" className="label">Bathrooms</label>
-          <input id="bathrooms" name="bathrooms" type="number" min="0.5" max="20" step="0.5" defaultValue={property.bathrooms ?? ''} className="input" />
+          <Input id="bathrooms" name="bathrooms" type="number" min="0.5" max="20" step="0.5" defaultValue={property.bathrooms ?? ''} />
         </div>
         <div>
           <label htmlFor="square_footage" className="label">Sq Footage</label>
-          <input id="square_footage" name="square_footage" type="number" min="0" defaultValue={property.square_footage ?? ''} className="input" placeholder="e.g. 1400" />
+          <Input id="square_footage" name="square_footage" type="number" min="0" defaultValue={property.square_footage ?? ''} placeholder="e.g. 1400" />
         </div>
       </div>
 
       <div>
         <label htmlFor="address" className="label">Street Address</label>
-        <input id="address" name="address" type="text" defaultValue={property.address ?? ''} className="input" />
+        <Input id="address" name="address" type="text" defaultValue={property.address ?? ''} />
       </div>
 
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-1">
           <label htmlFor="city" className="label">City</label>
-          <input id="city" name="city" type="text" defaultValue={property.city ?? ''} className="input" />
+          <Input id="city" name="city" type="text" defaultValue={property.city ?? ''} />
         </div>
         <div>
           <label htmlFor="state" className="label">State</label>
-          <input id="state" name="state" type="text" maxLength={2} defaultValue={property.state ?? ''} className="input" />
+          <Input id="state" name="state" type="text" maxLength={2} defaultValue={property.state ?? ''} />
         </div>
         <div>
           <label htmlFor="zip" className="label">ZIP</label>
-          <input id="zip" name="zip" type="text" maxLength={10} defaultValue={property.zip ?? ''} className="input" />
+          <Input id="zip" name="zip" type="text" maxLength={10} defaultValue={property.zip ?? ''} />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="checkin_time" className="label">Check-in Time</label>
-          <input id="checkin_time" name="checkin_time" type="time" defaultValue={property.checkin_time} className="input" />
+          <Input id="checkin_time" name="checkin_time" type="time" defaultValue={property.checkin_time} />
         </div>
         <div>
           <label htmlFor="checkout_time" className="label">Check-out Time</label>
-          <input id="checkout_time" name="checkout_time" type="time" defaultValue={property.checkout_time} className="input" />
+          <Input id="checkout_time" name="checkout_time" type="time" defaultValue={property.checkout_time} />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="wifi_name" className="label">Wi-Fi Name</label>
-          <input id="wifi_name" name="wifi_name" type="text" defaultValue={property.wifi_name ?? ''} className="input" />
+          <Input id="wifi_name" name="wifi_name" type="text" defaultValue={property.wifi_name ?? ''} />
         </div>
         <div>
           <label htmlFor="wifi_password" className="label">Wi-Fi Password</label>
-          <input id="wifi_password" name="wifi_password" type="text" defaultValue={property.wifi_password ?? ''} className="input" />
+          <Input id="wifi_password" name="wifi_password" type="text" defaultValue={property.wifi_password ?? ''} />
         </div>
       </div>
 
       <div>
         <label htmlFor="door_code" className="label">Door Code / Lockbox</label>
-        <input id="door_code" name="door_code" type="text" defaultValue={property.door_code ?? ''} className="input" />
+        <Input id="door_code" name="door_code" type="text" defaultValue={property.door_code ?? ''} />
       </div>
 
       <div>
         <label htmlFor="avg_nightly_rate" className="label">Average Nightly Rate ($)</label>
-        <input
+        <Input
           id="avg_nightly_rate"
           name="avg_nightly_rate"
           type="number"
           min="0"
           step="0.01"
           defaultValue={property.avg_nightly_rate ?? ''}
-          className="input"
           placeholder="e.g. 285.00"
         />
         <p className="text-xs text-accent-400 mt-1">Used to automatically estimate booking revenue in the owner portal. You can always adjust individually.</p>
@@ -114,21 +115,20 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="cleaning_cost" className="label">Cleaning Fee ($)</label>
-          <input
+          <Input
             id="cleaning_cost"
             name="cleaning_cost"
             type="number"
             min="0"
             step="0.01"
             defaultValue={property.cleaning_cost ?? ''}
-            className="input"
             placeholder="e.g. 150.00"
           />
           <p className="text-xs text-accent-400 mt-1">Auto-posted as an expense when a turnover is completed.</p>
         </div>
         <div>
           <label htmlFor="same_day_premium_pct" className="label">Same-Day Premium (%)</label>
-          <input
+          <Input
             id="same_day_premium_pct"
             name="same_day_premium_pct"
             type="number"
@@ -136,7 +136,6 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
             max="200"
             step="1"
             defaultValue={property.same_day_premium_pct ?? ''}
-            className="input"
             placeholder="e.g. 25"
           />
           <p className="text-xs text-accent-400 mt-1">Added to cleaning fee when check-out and check-in are on the same day.</p>
@@ -161,9 +160,9 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
       </div>
 
       <div className="flex items-center gap-3 pt-2 border-t border-accent-100">
-        <button type="submit" disabled={pending} className="btn-primary">
+        <Button type="submit" disabled={pending}>
           {pending ? 'Saving…' : 'Save & Continue →'}
-        </button>
+        </Button>
         <Link href="/properties" className="btn-ghost text-sm">Done for now</Link>
       </div>
     </form>
