@@ -66,10 +66,13 @@ export async function saveChecklistTemplate(
       .select('id')
       .single()
 
-    if (se || !sectionRow) continue
+    if (se || !sectionRow) {
+      console.error('[saveChecklistTemplate] section insert failed', se)
+      return { error: 'Failed to save checklist section. Please try again.' }
+    }
 
     if (section.items.length > 0) {
-      await supabase.from('checklist_template_items').insert(
+      const { error: ie } = await supabase.from('checklist_template_items').insert(
         section.items.map((item) => ({
           section_id:     sectionRow.id,
           template_id:    tmplId!,
@@ -79,6 +82,10 @@ export async function saveChecklistTemplate(
           sort_order:     item.sort_order,
         }))
       )
+      if (ie) {
+        console.error('[saveChecklistTemplate] items insert failed', ie)
+        return { error: 'Failed to save checklist items. Please try again.' }
+      }
     }
   }
 
