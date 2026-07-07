@@ -15,8 +15,6 @@ DO $$ BEGIN
 END $$;
 
 -- Knowledge base chunks — platform-wide, NOT tenant-scoped
--- embedding is nullable; stays NULL until Phase 2's ingestion pipeline runs.
--- Dimension 1536 is a placeholder assumption.
 CREATE TABLE IF NOT EXISTS support_kb_chunks (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title       TEXT NOT NULL,
@@ -94,11 +92,9 @@ CREATE POLICY "org members access own conversation messages"
     )
   );
 
--- Seed placeholder KB content so the pipeline is testable before Phase 2
+-- Seed placeholder KB content
 INSERT INTO support_kb_chunks (title, content, source) VALUES
   ('Supported integrations', 'FieldStay currently integrates with OwnerRez, with Hospitable and Lodgify integrations in progress. Reach out to support if you need a different PMS connected.', 'placeholder'),
   ('Pricing tiers', 'FieldStay pricing: Starter $199/mo (1-15 properties), Growth $379/mo (16-50), Portfolio $599/mo (51-100), Enterprise custom for 100+. RepuGuard reputation monitoring is bundled into every tier.', 'placeholder'),
   ('Turnover management', 'Turnovers are created automatically from synced bookings. Crew members can be assigned individually or in bulk from the Turnover Board, and marking a turnover complete updates the cleaning status and notifies the property manager.', 'placeholder'),
   ('Getting help', 'For anything not covered here, ask and I will let you know if this needs to go to a human — just say so and I will flag it for the support team.', 'placeholder');
-
--- Index deferred to Phase 2 once embeddings are populated.

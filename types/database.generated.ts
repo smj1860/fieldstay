@@ -1922,11 +1922,8 @@ export type Database = {
           comms_log_retention_days: number
           created_at: string
           id: string
-          kroger_customer_token: string | null
           kroger_location_id: string | null
           kroger_location_name: string | null
-          kroger_refresh_token: string | null
-          kroger_token_expires_at: string | null
           max_properties: number
           name: string
           onboarding_steps_completed: Json
@@ -1952,11 +1949,8 @@ export type Database = {
           comms_log_retention_days?: number
           created_at?: string
           id?: string
-          kroger_customer_token?: string | null
           kroger_location_id?: string | null
           kroger_location_name?: string | null
-          kroger_refresh_token?: string | null
-          kroger_token_expires_at?: string | null
           max_properties?: number
           name: string
           onboarding_steps_completed?: Json
@@ -1982,11 +1976,8 @@ export type Database = {
           comms_log_retention_days?: number
           created_at?: string
           id?: string
-          kroger_customer_token?: string | null
           kroger_location_id?: string | null
           kroger_location_name?: string | null
-          kroger_refresh_token?: string | null
-          kroger_token_expires_at?: string | null
           max_properties?: number
           name?: string
           onboarding_steps_completed?: Json

@@ -1,0 +1,10 @@
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'water_shutoff_valve';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'solar_inverter';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'whole_home_water_filter';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'heated_tile_system';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'range_hood_vent';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'coffee_station';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'toaster_oven';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'wifi_router';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'fire_extinguisher';
+ALTER TYPE public.asset_type ADD VALUE IF NOT EXISTS 'thermostat';
