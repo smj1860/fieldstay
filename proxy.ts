@@ -71,6 +71,14 @@ const BYPASS_ROUTES = [
   '/manifest.webmanifest',       // kept for forward-compatibility
   '/sw.js',
 
+  // Theme init script — loaded via <Script strategy="beforeInteractive">
+  // in app/layout.tsx on every page, including the logged-out login page.
+  // Same failure mode as manifest.json/sw.js above: without this bypass,
+  // an unauthenticated request redirects to /login?next=/theme-init.js,
+  // returning HTML where the browser expects JS — surfaces as the
+  // "Refused to execute script... MIME type ('text/html')" console error.
+  '/theme-init.js',
+
   // Supabase auth callback (magic links, OAuth email confirmation)
   '/auth/callback',
 
