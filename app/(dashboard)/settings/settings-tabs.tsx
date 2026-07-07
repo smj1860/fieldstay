@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useActionState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook, AlertTriangle } from 'lucide-react'
+import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook, AlertTriangle, MessageSquare, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '@/components/ui/StatusDot'
 import type { Organization } from '@/types/database'
@@ -17,6 +17,8 @@ import {
   updateSlackWebhook,
   type SettingsActionState,
 } from './actions'
+import { SMS_TEMPLATE_REGISTRY, renderTemplate, type SmsTemplateKey } from '@/lib/sms/template-registry'
+import { getOrgSmsTemplates, saveOrgSmsTemplate, resetOrgSmsTemplate } from './actions'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -648,6 +650,266 @@ function NotificationsTab({ org }: { org: Organization }) {
             }
           </button>
         </form>
+      </div>
+
+      {/* SMS Message Templates */}
+      <SmsTemplatesCard />
+    </div>
+  )
+}
+
+// ── SMS Templates Card ────────────────────────────────────────────────────────
+
+const AUDIENCE_BADGE: Record<'guest' | 'crew' | 'vendor', string> = {
+  guest:  'badge-blue',
+  crew:   'badge-green',
+  vendor: 'badge-amber',
+}
+
+function SmsTemplatesCard() {
+  const [customTemplates, setCustomTemplates] = useState<Record<string, string>>({})
+  const [edits, setEdits]                     = useState<Record<string, string>>({})
+  const [expandedKey, setExpandedKey]         = useState<string | null>(null)
+  const [saving,   startSave]                 = useTransition()
+  const [resetting, startReset]               = useTransition()
+  const [saveKey,  setSaveKey]                = useState<string | null>(null)
+  const [statusMsg, setStatusMsg]             = useState<Record<string, string>>({})
+  const [loaded, setLoaded]                   = useState(false)
+
+  // Load existing custom templates once on mount
+  useEffect(() => {
+    getOrgSmsTemplates().then((rows) => {
+      const map: Record<string, string> = {}
+      rows.forEach((r) => { map[r.key] = r.body })
+      setCustomTemplates(map)
+      setLoaded(true)
+    })
+  }, [])
+
+  const getBodyForKey = (key: string) =>
+    edits[key] !== undefined
+      ? edits[key]
+      : (customTemplates[key] ?? SMS_TEMPLATE_REGISTRY.find(t => t.key === key)?.defaultBody ?? '')
+
+  const isCustomized = (key: string) => key in customTemplates
+
+  const hasUnsavedEdit = (key: string) =>
+    edits[key] !== undefined && edits[key] !== (customTemplates[key] ?? SMS_TEMPLATE_REGISTRY.find(t => t.key === key)?.defaultBody ?? '')
+
+  const setStatus = (key: string, msg: string) => {
+    setStatusMsg(prev => ({ ...prev, [key]: msg }))
+    setTimeout(() => setStatusMsg(prev => ({ ...prev, [key]: '' })), 3000)
+  }
+
+  const handleSave = (key: SmsTemplateKey) => {
+    const body = getBodyForKey(key)
+    setSaveKey(key)
+    startSave(async () => {
+      const result = await saveOrgSmsTemplate(key, body)
+      setSaveKey(null)
+      if (result.error) {
+        setStatus(key, result.error)
+      } else {
+        setCustomTemplates(prev => ({ ...prev, [key]: body }))
+        setEdits(prev => { const n = { ...prev }; delete n[key]; return n })
+        setStatus(key, '✓ Saved')
+      }
+    })
+  }
+
+  const handleReset = (key: SmsTemplateKey) => {
+    startReset(async () => {
+      const result = await resetOrgSmsTemplate(key)
+      if (result.error) {
+        setStatus(key, result.error)
+      } else {
+        setCustomTemplates(prev => { const n = { ...prev }; delete n[key]; return n })
+        setEdits(prev => { const n = { ...prev }; delete n[key]; return n })
+        setStatus(key, '✓ Reset to default')
+      }
+    })
+  }
+
+  if (!loaded) {
+    return (
+      <div className="card">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+               style={{ background: 'var(--accent-gold-dim)' }}>
+            <MessageSquare className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
+          </div>
+          <h2 className="text-base font-semibold text-primary-themed">SMS Message Templates</h2>
+        </div>
+        <p className="text-xs text-muted-themed">Loading…</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card">
+      <div className="flex items-center gap-3 mb-2">
+        <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+             style={{ background: 'var(--accent-gold-dim)' }}>
+          <MessageSquare className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-primary-themed">SMS Message Templates</h2>
+          <p className="text-xs text-muted-themed">
+            Customize the messages sent to guests, crew, and vendors on your behalf.
+            Use <code className="font-mono text-xs">{'{{variable}}'}</code> tokens shown below each template.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {SMS_TEMPLATE_REGISTRY.map((config) => {
+          const isOpen        = expandedKey === config.key
+          const body          = getBodyForKey(config.key)
+          const customized    = isCustomized(config.key)
+          const unsaved       = hasUnsavedEdit(config.key)
+          const isSavingThis  = saving && saveKey === config.key
+
+          // Live preview: substitute example values
+          const previewVars = Object.fromEntries(
+            config.variables.map(v => [
+              v.token.replace(/\{\{|\}\}/g, ''),
+              v.example,
+            ])
+          )
+          const preview = renderTemplate(body, previewVars)
+
+          return (
+            <div
+              key={config.key}
+              className="border border-themed rounded-xl overflow-hidden"
+            >
+              {/* Header row */}
+              <button
+                type="button"
+                onClick={() => setExpandedKey(isOpen ? null : config.key)}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-raised-themed transition-colors"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-primary-themed">{config.label}</span>
+                    <span className={cn('badge text-xs', AUDIENCE_BADGE[config.audience])}>
+                      {config.audience}
+                    </span>
+                    {customized && !unsaved && (
+                      <span className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
+                        Customized
+                      </span>
+                    )}
+                    {unsaved && (
+                      <span className="text-xs font-medium" style={{ color: 'var(--accent-amber)' }}>
+                        Unsaved
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-themed mt-0.5 truncate">{config.description}</p>
+                </div>
+                <svg
+                  className={cn('w-4 h-4 flex-shrink-0 transition-transform text-muted-themed', isOpen && 'rotate-180')}
+                  fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {/* Expanded panel */}
+              {isOpen && (
+                <div className="border-t border-themed px-4 py-4 space-y-4">
+                  {/* Variables */}
+                  <div>
+                    <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2">
+                      Available Variables
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {config.variables.map((v) => (
+                        <div key={v.token}
+                             className="px-2 py-1 rounded-md border border-themed text-xs"
+                             style={{ background: 'var(--bg-raised)', fontFamily: 'monospace' }}
+                             title={v.description}
+                        >
+                          {v.token}
+                          <span className="ml-1.5 font-sans not-italic text-muted-themed">
+                            {v.description}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Body editor */}
+                  <div>
+                    <label className="label">Message Body</label>
+                    <textarea
+                      value={body}
+                      onChange={(e) => setEdits(prev => ({ ...prev, [config.key]: e.target.value }))}
+                      rows={Math.min(10, body.split('\n').length + 2)}
+                      className="input resize-y font-mono text-xs leading-relaxed w-full"
+                      placeholder="Enter your custom message…"
+                      maxLength={1000}
+                    />
+                    <p className="text-xs text-muted-themed mt-1 text-right">
+                      {body.length}/1000
+                    </p>
+                  </div>
+
+                  {/* Live preview */}
+                  <div>
+                    <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2">
+                      Preview (sample data)
+                    </p>
+                    <div
+                      className="rounded-xl p-3 text-xs whitespace-pre-wrap leading-relaxed border border-themed"
+                      style={{ background: 'var(--bg-raised)', color: 'var(--text-secondary)', fontFamily: 'monospace' }}
+                    >
+                      {preview}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-3 pt-2 border-t border-themed flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => handleSave(config.key as SmsTemplateKey)}
+                      disabled={isSavingThis || !unsaved}
+                      className="btn-primary text-sm"
+                    >
+                      {isSavingThis ? 'Saving…' : 'Save Template'}
+                    </button>
+
+                    {customized && (
+                      <button
+                        type="button"
+                        onClick={() => handleReset(config.key as SmsTemplateKey)}
+                        disabled={resetting}
+                        className="btn-secondary text-sm flex items-center gap-1.5"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Reset to Default
+                      </button>
+                    )}
+
+                    {statusMsg[config.key] && (
+                      <span
+                        className="text-xs font-medium"
+                        style={{
+                          color: statusMsg[config.key]?.startsWith('✓')
+                            ? 'var(--accent-green)'
+                            : 'var(--accent-red)',
+                        }}
+                      >
+                        {statusMsg[config.key]}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </div>
   )

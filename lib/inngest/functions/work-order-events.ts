@@ -11,6 +11,7 @@ import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { randomBytes } from 'crypto'
+import { renderSmsBody } from '@/lib/sms/templates'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -169,23 +170,30 @@ export const handleWorkOrderCreated = inngest.createFunction(
 
         // SMS — send alongside email when vendor has a mobile number. Non-fatal.
         if (vendor.phone) {
-          const { normalizePhoneToE164, sendSMS, buildVendorWorkOrderSMS } =
-            await import('@/lib/sms/telnyx')
+          const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
 
           const vendorPhone = (vendor as { name: string; email: string; phone: string | null }).phone!
           const e164 = normalizePhoneToE164(vendorPhone)
           if (e164) {
-            const smsBody = buildVendorWorkOrderSMS({
-              vendorName:   vendor.name   ?? '',
-              woNumber:     wo.wo_number  ?? '',
-              propertyName,
-              pmName:       dispatcherName,
-              orgName,
-              nteAmount:    (wo.nte_amount as number | null) ?? 0,
-              portalUrl:    publicUrl,
-              window:       vendorWindow,
-            })
+            const nteAmt    = (wo.nte_amount as number | null) ?? 0
+            const nteLine   = nteAmt > 0 ? `\nNTE: $${nteAmt.toLocaleString()}` : ''
+            const windowLine = vendorWindow
+              ? `\nAvailable window: ${vendorWindow}\nProperty must be ready before guest check-in.`
+              : ''
+
             try {
+              const smsBody = await renderSmsBody(org_id, 'vendor_work_order', {
+                vendor_name:   vendor.name ?? '',
+                wo_number:     wo.wo_number ?? '',
+                property_name: propertyName,
+                pm_name:       dispatcherName,
+                org_name:      orgName,
+                nte_amount:    nteAmt,
+                window:        vendorWindow ?? null,
+                nte_line:      nteLine,
+                window_line:   windowLine,
+                portal_url:    publicUrl,
+              })
               await sendSMS(e164, smsBody)
             } catch (smsErr) {
               console.error('[WO dispatch-to-vendor] SMS failed (non-fatal):', smsErr)
