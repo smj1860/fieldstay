@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { ArrowLeft, Package } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
+import { Button } from '@/components/ui/Button'
 import type { InventoryCategory } from '@/types/database'
 
 export default function CrewInventoryPage() {
@@ -132,13 +133,13 @@ export default function CrewInventoryPage() {
               {submitError}
             </div>
           )}
-          <button
+          <Button
             onClick={handleSubmit}
             disabled={submitting}
-            className="btn-primary w-full py-3"
+            className="w-full py-3"
           >
             {submitting ? 'Saving…' : 'Inventory Complete'}
-          </button>
+          </Button>
         </div>
       )}
     </div>

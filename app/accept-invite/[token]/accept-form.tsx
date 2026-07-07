@@ -4,6 +4,7 @@ import { useActionState } from 'react'
 import Link from 'next/link'
 import { Mail } from 'lucide-react'
 import { acceptTeamInvite } from './actions'
+import { Input } from '@/components/ui/Input'
 
 interface Props {
   token:   string
@@ -62,12 +63,12 @@ export function AcceptForm({ token, email, orgName }: Props) {
 
             <div>
               <label htmlFor="invite-email" className="label">Email</label>
-              <input
+              <Input
                 id="invite-email"
                 type="email"
                 value={email}
                 disabled
-                className="input bg-accent-50 text-accent-500 cursor-not-allowed"
+                className="bg-accent-50 text-accent-500 cursor-not-allowed"
               />
             </div>
 
@@ -75,13 +76,12 @@ export function AcceptForm({ token, email, orgName }: Props) {
               <label htmlFor="full-name" className="label">
                 Full Name <span className="text-red-500">*</span>
               </label>
-              <input
+              <Input
                 id="full-name"
                 type="text"
                 name="fullName"
                 required
                 maxLength={200}
-                className="input"
                 placeholder="Jane Smith"
                 autoComplete="name"
               />
@@ -91,14 +91,13 @@ export function AcceptForm({ token, email, orgName }: Props) {
               <label htmlFor="password" className="label">
                 Password <span className="text-red-500">*</span>
               </label>
-              <input
+              <Input
                 id="password"
                 type="password"
                 name="password"
                 required
                 minLength={8}
                 maxLength={72}
-                className="input"
                 placeholder="At least 8 characters"
                 autoComplete="new-password"
               />
@@ -108,12 +107,11 @@ export function AcceptForm({ token, email, orgName }: Props) {
               <label htmlFor="confirm-password" className="label">
                 Confirm Password <span className="text-red-500">*</span>
               </label>
-              <input
+              <Input
                 id="confirm-password"
                 type="password"
                 name="confirm"
                 required
-                className="input"
                 placeholder="Repeat password"
                 autoComplete="new-password"
               />

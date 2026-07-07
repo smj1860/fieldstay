@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 export function ForgotPasswordForm() {
   const [email,     setEmail]     = useState('')
@@ -42,25 +44,24 @@ export function ForgotPasswordForm() {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <label htmlFor="email" className="label">Email</label>
-        <input
+        <Input
           id="email"
           type="email"
           required
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="input"
           placeholder="you@example.com"
         />
       </div>
 
-      <button
+      <Button
         type="submit"
         disabled={loading}
-        className="btn-primary w-full py-2.5"
+        className="w-full py-2.5"
       >
         {loading ? 'Sending…' : 'Send Reset Link'}
-      </button>
+      </Button>
     </form>
   )
 }

@@ -6,6 +6,10 @@ import { X, Loader2, Upload, Briefcase, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import type { Vendor, VendorSpecialty } from '@/types/database'
 import {
   addVendor,
@@ -120,29 +124,30 @@ export function VendorsClient({ vendors, showComplianceNudge }: Props) {
           linkText={vendors.length > 0 ? 'Add COI to first vendor →' : 'Add your first vendor →'}
         />
       )}
-      <div className="card">
+      <Card>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div className="flex items-center gap-2">
             <Briefcase className="w-5 h-5" style={{ color: 'var(--accent-gold)' }} />
             <h2 className="text-base font-semibold text-primary-themed">
               Vendors
-              <span className="ml-2 badge badge-slate">{vendors.length}</span>
+              <Badge tone="slate" className="ml-2">{vendors.length}</Badge>
             </h2>
           </div>
           <div className="flex gap-2">
-            <button
+            <Button
+              variant="secondary"
               onClick={() => setView(view === 'bulk' ? 'list' : 'bulk')}
-              className="btn-secondary text-sm"
+              className="text-sm"
             >
               <Upload className="w-4 h-4" />
               {view === 'bulk' ? 'Cancel' : 'Bulk Upload'}
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => setView(view === 'add' ? 'list' : 'add')}
-              className="btn-primary text-sm"
+              className="text-sm"
             >
               {view === 'add' ? 'Cancel' : '+ Add Vendor'}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -190,7 +195,7 @@ export function VendorsClient({ vendors, showComplianceNudge }: Props) {
             </table>
           </div>
         )}
-      </div>
+      </Card>
       {selectedVendor && (
         <VendorCardModal vendor={selectedVendor} onClose={() => setSelectedVendor(null)} />
       )}
@@ -211,8 +216,8 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
     <Dialog open onClose={onClose} title={vendor.name} maxWidthClassName="max-w-sm">
         {!editing && (
           <div className="flex items-center justify-between mb-4">
-            <span className="badge badge-blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>
-            <button onClick={() => setEditing(true)} className="btn-ghost p-1.5 text-xs">Edit</button>
+            <Badge tone="blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</Badge>
+            <Button variant="ghost" onClick={() => setEditing(true)} className="p-1.5 text-xs">Edit</Button>
           </div>
         )}
 
@@ -227,12 +232,12 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
           <form action={formAction} className="space-y-3">
             <div>
               <label className="label">Vendor Name</label>
-              <input name="name" type="text" required defaultValue={vendor.name} className="input" />
+              <Input name="name" type="text" required defaultValue={vendor.name} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Contact Name</label>
-                <input name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} className="input" />
+                <Input name="contact_name" type="text" defaultValue={vendor.contact_name ?? ''} />
               </div>
               <div>
                 <label className="label">Specialty</label>
@@ -246,40 +251,40 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Email</label>
-                <input name="email" type="email" defaultValue={vendor.email ?? ''} className="input" />
+                <Input name="email" type="email" defaultValue={vendor.email ?? ''} />
               </div>
               <div>
                 <label className="label">Phone</label>
-                <input name="phone" type="tel" defaultValue={vendor.phone ?? ''} className="input" />
+                <Input name="phone" type="tel" defaultValue={vendor.phone ?? ''} />
               </div>
             </div>
             <div>
               <label className="label">Street Address</label>
-              <input name="address" type="text" defaultValue={vendor.address ?? ''} className="input" placeholder="123 Main St" />
+              <Input name="address" type="text" defaultValue={vendor.address ?? ''} placeholder="123 Main St" />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">City</label>
-                <input name="city" type="text" defaultValue={vendor.city ?? ''} className="input" placeholder="Atlanta" />
+                <Input name="city" type="text" defaultValue={vendor.city ?? ''} placeholder="Atlanta" />
               </div>
               <div>
                 <label className="label">State</label>
-                <input name="state" type="text" defaultValue={vendor.state ?? ''} className="input" placeholder="GA" maxLength={2} />
+                <Input name="state" type="text" defaultValue={vendor.state ?? ''} placeholder="GA" maxLength={2} />
               </div>
             </div>
             <div>
               <label className="label">Service ZIP</label>
-              <input name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} className="input" placeholder="e.g. 30301" maxLength={10} />
+              <Input name="service_zip" type="text" defaultValue={vendor.service_zip ?? ''} placeholder="e.g. 30301" maxLength={10} />
             </div>
             <div>
               <label className="label">Notes</label>
               <textarea name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
             </div>
             <div className="flex gap-2 pt-1">
-              <button type="submit" disabled={pending} className="btn-primary text-sm flex-1">
+              <Button type="submit" disabled={pending} className="text-sm flex-1">
                 {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
-              </button>
-              <button type="button" onClick={() => setEditing(false)} className="btn-ghost text-sm">Cancel</button>
+              </Button>
+              <Button variant="ghost" type="button" onClick={() => setEditing(false)} className="text-sm">Cancel</Button>
             </div>
           </form>
         ) : (
@@ -373,22 +378,22 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="vendor-name" className="label">Vendor Name <span className="text-red-400">*</span></label>
-            <input id="vendor-name" name="name" type="text" required className="input" placeholder="ABC Plumbing" />
+            <Input id="vendor-name" name="name" type="text" required placeholder="ABC Plumbing" />
           </div>
           <div>
             <label htmlFor="vendor-contact" className="label">Contact Name</label>
-            <input id="vendor-contact" name="contact_name" type="text" className="input" placeholder="John Smith" />
+            <Input id="vendor-contact" name="contact_name" type="text" placeholder="John Smith" />
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="vendor-email" className="label">Email <span className="text-red-400">*</span></label>
-            <input id="vendor-email" name="email" type="email" required className="input" placeholder="info@abcplumbing.com" />
+            <Input id="vendor-email" name="email" type="email" required placeholder="info@abcplumbing.com" />
           </div>
           <div>
             <label htmlFor="vendor-phone" className="label">Mobile phone number</label>
-            <input id="vendor-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
+            <Input id="vendor-phone" name="phone" type="tel" placeholder="+1 555-0100" />
             <p className="text-xs text-muted-themed mt-1">
               Work orders will be dispatched to this number by SMS in addition to email.
             </p>
@@ -406,23 +411,23 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
           </div>
           <div>
             <label htmlFor="vendor-zip" className="label">Service ZIP</label>
-            <input id="vendor-zip" name="service_zip" type="text" className="input" placeholder="e.g. 30301" maxLength={10} />
+            <Input id="vendor-zip" name="service_zip" type="text" placeholder="e.g. 30301" maxLength={10} />
           </div>
         </div>
 
         <div>
           <label htmlFor="vendor-address" className="label">Street Address</label>
-          <input id="vendor-address" name="address" type="text" className="input" placeholder="123 Main St" />
+          <Input id="vendor-address" name="address" type="text" placeholder="123 Main St" />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label htmlFor="vendor-city" className="label">City</label>
-            <input id="vendor-city" name="city" type="text" className="input" placeholder="Atlanta" />
+            <Input id="vendor-city" name="city" type="text" placeholder="Atlanta" />
           </div>
           <div>
             <label htmlFor="vendor-state" className="label">State</label>
-            <input id="vendor-state" name="state" type="text" className="input" placeholder="GA" maxLength={2} />
+            <Input id="vendor-state" name="state" type="text" placeholder="GA" maxLength={2} />
           </div>
         </div>
 
@@ -440,9 +445,9 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
         </div>
 
         <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={pending} className="btn-primary text-sm">
+          <Button type="submit" disabled={pending} className="text-sm">
             {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Vendor'}
-          </button>
+          </Button>
         </div>
       </form>
     </div>
@@ -502,7 +507,7 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
         <div className="text-3xl font-bold mb-1" style={{ color: 'var(--accent-gold)' }}>{result.imported}</div>
         <p className="text-sm text-primary-themed font-medium">vendors imported</p>
         {result.skipped > 0 && <p className="text-xs text-muted-themed mt-1">{result.skipped} rows skipped</p>}
-        <button onClick={onSuccess} className="btn-primary text-sm mt-4">Done</button>
+        <Button onClick={onSuccess} className="text-sm mt-4">Done</Button>
       </div>
     )
   }
@@ -533,11 +538,11 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
             <code className="text-xs px-1 py-0.5 rounded" style={{ background: 'var(--bg-raised)' }}>Phone</code>.
             To use a Word doc, save as CSV or use Paste mode.
           </p>
-          <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 btn-secondary text-sm mb-2">
+          <Button variant="secondary" onClick={() => fileRef.current?.click()} className="flex items-center gap-2 text-sm mb-2">
             <FileText className="w-4 h-4" />
             {fileName || 'Choose .csv file'}
-          </button>
-          <input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" onChange={handleFile} className="hidden" />
+          </Button>
+          <Input ref={fileRef} type="file" accept=".csv,text/csv,text/plain" onChange={handleFile} className="hidden" />
         </div>
       ) : (
         <div>
@@ -547,7 +552,7 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
           <textarea value={pasteText} onChange={(e) => setPaste(e.target.value)}
                     className="input text-xs font-mono h-32 resize-y mb-2"
                     placeholder={"ABC Plumbing, John Smith, 555-0101, john@abcplumbing.com\n..."} />
-          <button onClick={handleParsePaste} disabled={!pasteText.trim()} className="btn-secondary text-sm">Parse Text</button>
+          <Button variant="secondary" onClick={handleParsePaste} disabled={!pasteText.trim()} className="text-sm">Parse Text</Button>
         </div>
       )}
 
@@ -587,9 +592,9 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
             </table>
           </div>
           <div className="mt-3">
-            <button onClick={handleImport} disabled={importing} className="btn-primary text-sm">
+            <Button onClick={handleImport} disabled={importing} className="text-sm">
               {importing ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</> : `Import ${preview.length} Vendors`}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -690,7 +695,7 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
         )}
       </td>
       <td className="py-2.5 pr-4">
-        <span className="badge badge-blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</span>
+        <Badge tone="blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</Badge>
       </td>
       <td className="py-2.5 pr-4 text-secondary-themed">
         <div className="space-y-0.5">
@@ -701,14 +706,14 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
         {/* SMS / Email channel indicator */}
         <div className="flex items-center gap-2 mt-1.5">
           {vendor.phone && (
-            <span className="badge badge-green" style={{ fontSize: 10, padding: '2px 7px' }}>
+            <Badge tone="green" style={{ fontSize: 10, padding: '2px 7px' }}>
               SMS Active
-            </span>
+            </Badge>
           )}
           {!vendor.phone && vendor.email && (
-            <span className="badge badge-slate" style={{ fontSize: 10, padding: '2px 7px' }}>
+            <Badge tone="slate" style={{ fontSize: 10, padding: '2px 7px' }}>
               Email only
-            </span>
+            </Badge>
           )}
         </div>
       </td>
@@ -740,9 +745,9 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
           >
             Details
           </Link>
-          <button onClick={handleDeactivate} disabled={deactivating} className="btn-danger py-1 px-2 text-xs" title="Deactivate vendor">
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor">
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-          </button>
+          </Button>
         </div>
       </td>
     </tr>

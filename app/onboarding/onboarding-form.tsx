@@ -4,6 +4,8 @@ import { useActionState, useState } from 'react'
 import { createOrganization }       from './actions'
 import Link                         from 'next/link'
 import { CheckCircle2, ArrowRight, PlugZap } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 type Step = 'name-org' | 'connect-pms'
 
@@ -90,12 +92,11 @@ export function OnboardingForm({ userEmail }: OnboardingFormProps) {
 
         <div>
           <label htmlFor="org_name" className="label">Organization Name</label>
-          <input
+          <Input
             id="org_name"
             name="org_name"
             type="text"
             required
-            className="input"
             placeholder="e.g. Lakeview Property Group"
           />
           <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
@@ -103,13 +104,13 @@ export function OnboardingForm({ userEmail }: OnboardingFormProps) {
           </p>
         </div>
 
-        <button
+        <Button
           type="submit"
           disabled={pending}
-          className="btn-primary w-full py-2.5 flex items-center justify-center gap-2"
+          className="w-full py-2.5 flex items-center justify-center gap-2"
         >
           {pending ? 'Setting up…' : <>Continue <ArrowRight className="w-4 h-4" /></>}
-        </button>
+        </Button>
       </form>
     </>
   )

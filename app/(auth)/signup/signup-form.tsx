@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import Link from 'next/link'
 
 export function SignupForm() {
@@ -91,35 +93,33 @@ export function SignupForm() {
 
       <div>
         <label htmlFor="fullName" className="label">Full Name</label>
-        <input
+        <Input
           id="fullName"
           type="text"
           required
           autoComplete="name"
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
-          className="input"
           placeholder="Jane Smith"
         />
       </div>
 
       <div>
         <label htmlFor="email" className="label">Email</label>
-        <input
+        <Input
           id="email"
           type="email"
           required
           autoComplete="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="input"
           placeholder="you@example.com"
         />
       </div>
 
       <div>
         <label htmlFor="password" className="label">Password</label>
-        <input
+        <Input
           id="password"
           type="password"
           required
@@ -127,7 +127,6 @@ export function SignupForm() {
           autoComplete="new-password"
           value={password}
           onChange={(e) => { setPassword(e.target.value); setPasswordMismatch(false) }}
-          className="input"
           placeholder="••••••••"
         />
         <p className="text-xs text-accent-400 mt-1">Minimum 8 characters</p>
@@ -135,14 +134,13 @@ export function SignupForm() {
 
       <div>
         <label htmlFor="confirmPassword" className="label">Confirm Password</label>
-        <input
+        <Input
           id="confirmPassword"
           type="password"
           required
           autoComplete="new-password"
           value={confirmPassword}
           onChange={(e) => { setConfirmPassword(e.target.value); setPasswordMismatch(false) }}
-          className="input"
           placeholder="Re-enter your password"
         />
         {passwordMismatch && (
@@ -150,13 +148,13 @@ export function SignupForm() {
         )}
       </div>
 
-      <button
+      <Button
         type="submit"
         disabled={loading}
-        className="btn-primary w-full py-2.5"
+        className="w-full py-2.5"
       >
         {loading ? 'Creating account…' : 'Create Account'}
-      </button>
+      </Button>
 
       <p className="text-xs text-center leading-relaxed" style={{ color: 'var(--text-muted)' }}>
         By creating an account you agree to our{' '}

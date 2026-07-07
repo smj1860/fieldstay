@@ -3,6 +3,10 @@
 import { useState, useTransition } from 'react'
 import { Loader2, UserMinus, MailX } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { inviteTeamMember, removeMember, revokeInvite } from './actions'
 
 interface Member {
@@ -72,7 +76,7 @@ function MembersSection({
   }
 
   return (
-    <div className="card">
+    <Card>
       <h2 className="text-base font-semibold text-primary-themed mb-4">
         Members ({members.length})
       </h2>
@@ -89,14 +93,15 @@ function MembersSection({
               <p className="text-xs text-muted-themed mt-0.5">Joined {formatDate(m.joinedAt)}</p>
             </div>
             <div className="flex items-center gap-3 flex-shrink-0">
-              <span className={m.role === 'owner' ? 'badge badge-amber' : 'badge badge-blue'}>
+              <Badge tone={m.role === 'owner' ? 'amber' : 'blue'}>
                 {m.role === 'owner' ? 'Owner' : 'Admin'}
-              </span>
+              </Badge>
               {isOwner && m.role !== 'owner' && m.userId !== currentUserId && (
-                <button
+                <Button
+                  variant="ghost"
                   onClick={() => handleRemove(m.userId)}
                   disabled={removing && removingId === m.userId}
-                  className="btn-ghost text-xs py-1 px-2 flex items-center gap-1"
+                  className="text-xs py-1 px-2 flex items-center gap-1"
                   style={{ color: 'var(--accent-red)' }}
                   title="Remove member"
                 >
@@ -105,13 +110,13 @@ function MembersSection({
                     : <UserMinus className="w-3 h-3" />
                   }
                   Remove
-                </button>
+                </Button>
               )}
             </div>
           </div>
         ))}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -139,7 +144,7 @@ function InviteSection() {
   }
 
   return (
-    <div className="card" id="invite">
+    <Card id="invite">
       <h2 className="text-base font-semibold text-primary-themed mb-1">Invite Team Member</h2>
       <p className="text-sm text-muted-themed mb-4">
         Admins have full operational access but cannot manage billing or team members.
@@ -153,23 +158,23 @@ function InviteSection() {
       )}
 
       <form onSubmit={handleInvite} className="flex gap-3">
-        <input
+        <Input
           type="email"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="teammate@example.com"
-          className="input flex-1"
+          className="flex-1"
         />
-        <button type="submit" disabled={pending} className="btn-primary flex-shrink-0">
+        <Button type="submit" disabled={pending} className="flex-shrink-0">
           {pending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Send Invite'}
-        </button>
+        </Button>
       </form>
 
       {error && (
         <p className="text-sm mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -191,7 +196,7 @@ function PendingInvitesSection({ invites }: Readonly<{ invites: Invite[] }>) {
   }
 
   return (
-    <div className="card">
+    <Card>
       <h2 className="text-base font-semibold text-primary-themed mb-4">
         Pending Invitations
       </h2>
@@ -212,10 +217,11 @@ function PendingInvitesSection({ invites }: Readonly<{ invites: Invite[] }>) {
                   Sent {formatDate(inv.createdAt)} · Expires {formatDate(inv.expiresAt)}
                 </p>
               </div>
-              <button
+              <Button
+                variant="ghost"
                 onClick={() => handleRevoke(inv.id)}
                 disabled={revoking && revokingId === inv.id}
-                className="btn-ghost text-xs py-1 px-2 flex items-center gap-1 flex-shrink-0"
+                className="text-xs py-1 px-2 flex items-center gap-1 flex-shrink-0"
                 style={{ color: 'var(--accent-red)' }}
               >
                 {revoking && revokingId === inv.id
@@ -223,11 +229,11 @@ function PendingInvitesSection({ invites }: Readonly<{ invites: Invite[] }>) {
                   : <MailX className="w-3 h-3" />
                 }
                 Revoke
-              </button>
+              </Button>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </Card>
   )
 }

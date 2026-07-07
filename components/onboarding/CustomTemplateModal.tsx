@@ -14,6 +14,7 @@ import {
 } from '@/types/database'
 import { Loader2, Check } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
 
 interface SelectedItem {
   catalogItem: MaintenanceCatalogItem
@@ -189,16 +190,16 @@ export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) 
             </div>
 
             <div className="px-4 py-4 border-t border-themed shrink-0">
-              <button
+              <Button
                 onClick={() => { if (selected.size > 0) setStep(2) }}
                 disabled={selected.size === 0 || loading}
-                className="btn-primary w-full py-3"
+                className="w-full py-3"
               >
                 {selected.size === 0
                   ? 'Select items to continue'
                   : `Continue with ${selected.size} item${selected.size !== 1 ? 's' : ''} →`
                 }
-              </button>
+              </Button>
             </div>
           </>
         )}
@@ -251,16 +252,16 @@ export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) 
               {error && (
                 <p className="text-xs text-center" style={{ color: 'var(--accent-red)' }}>{error}</p>
               )}
-              <button
+              <Button
                 onClick={handleAdd}
                 disabled={saving}
-                className="btn-primary w-full py-3"
+                className="w-full py-3"
               >
                 {saving
                   ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding items…</>
                   : `Add ${selected.size} Item${selected.size !== 1 ? 's' : ''} to Schedule`
                 }
-              </button>
+              </Button>
             </div>
           </>
         )}

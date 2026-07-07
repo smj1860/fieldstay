@@ -4,6 +4,7 @@ import { ComplianceSection } from './compliance-section'
 import { formatDate } from '@/lib/utils'
 import type { Metadata } from 'next'
 import { CheckCircle2, AlertTriangle, Ban, Star } from 'lucide-react'
+import { Card } from '@/components/ui/Card'
 
 export const metadata: Metadata = { title: 'Vendor' }
 
@@ -113,7 +114,7 @@ export default async function VendorDetailPage({ params }: Props) {
       </div>
 
       {/* Vendor info */}
-      <div className="card mb-4">
+      <Card className="mb-4">
         <h3 className="font-semibold text-primary-themed mb-4">Contact Info</h3>
         <div className="grid grid-cols-2 gap-y-3 text-sm">
           {vendor.contact_name && (
@@ -169,11 +170,11 @@ export default async function VendorDetailPage({ params }: Props) {
         {vendor.notes && (
           <p className="text-sm text-muted-themed mt-3 pt-3 border-t border-themed">{vendor.notes}</p>
         )}
-      </div>
+      </Card>
 
       {/* Work order stats */}
       {(recentWOs ?? []).length > 0 && (
-        <div className="card mb-4">
+        <Card className="mb-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-primary-themed">Work Orders</h3>
             <Link
@@ -211,7 +212,7 @@ export default async function VendorDetailPage({ params }: Props) {
               </Link>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Compliance documents */}

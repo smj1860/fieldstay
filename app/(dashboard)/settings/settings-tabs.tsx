@@ -5,6 +5,10 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2, Eye, EyeOff, Lock, Bell, BellOff, Webhook, AlertTriangle, MessageSquare, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '@/components/ui/StatusDot'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import type { Organization } from '@/types/database'
 import {
   updateOrgSettings,
@@ -26,20 +30,20 @@ const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team', 'A
 type Tab = typeof TABS[number]
 
 const PLAN_INFO = {
-  starter:    { name: 'Starter',   maxProperties: 15,  description: 'Up to 15 properties',   badge: 'badge-blue'  },
-  growth:     { name: 'Growth',    maxProperties: 50,  description: '16–50 properties',      badge: 'badge-green' },
-  portfolio:  { name: 'Portfolio', maxProperties: 100, description: '51–100 properties',     badge: 'badge-gold'  },
-  enterprise: { name: 'Enterprise',maxProperties: 999, description: '100+ properties',       badge: 'badge-amber' },
+  starter:    { name: 'Starter',   maxProperties: 15,  description: 'Up to 15 properties',   badge: 'blue'  },
+  growth:     { name: 'Growth',    maxProperties: 50,  description: '16–50 properties',      badge: 'green' },
+  portfolio:  { name: 'Portfolio', maxProperties: 100, description: '51–100 properties',     badge: 'gold'  },
+  enterprise: { name: 'Enterprise',maxProperties: 999, description: '100+ properties',       badge: 'amber' },
   // Legacy alias — orgs created before the 'pro' tier was renamed to 'starter'
-  pro:        { name: 'Starter',   maxProperties: 15,  description: 'Up to 15 properties',   badge: 'badge-blue'  },
+  pro:        { name: 'Starter',   maxProperties: 15,  description: 'Up to 15 properties',   badge: 'blue'  },
 } as const
 
-const PLAN_STATUS_BADGES: Record<string, string> = {
-  trialing:  'badge-amber',
-  active:    'badge-green',
-  past_due:  'badge-red',
-  cancelled: 'badge-red',
-  paused:    'badge-slate',
+const PLAN_STATUS_BADGES: Record<string, 'green' | 'amber' | 'red' | 'blue' | 'gold' | 'slate'> = {
+  trialing:  'amber',
+  active:    'green',
+  past_due:  'red',
+  cancelled: 'red',
+  paused:    'slate',
 }
 
 // ── Root component ───────────────────────────────────────────────────────────
@@ -119,19 +123,19 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
   const [state, formAction, pending] = useActionState(updateOrgSettings, null)
 
   const plan        = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
-  const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
+  const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'slate'
 
   return (
     <div className="max-w-xl space-y-6">
-      <div className="card">
+      <Card>
         <h2 className="text-base font-semibold text-primary-themed mb-4">Organization Settings</h2>
 
         {/* Plan info */}
         <div className="flex items-center gap-2 mb-6 p-3 bg-canvas-themed rounded-lg border border-themed">
-          <span className={cn('badge', plan.badge)}>{plan.name}</span>
-          <span className={cn('badge', statusBadge)}>
+          <Badge tone={plan.badge}>{plan.name}</Badge>
+          <Badge tone={statusBadge}>
             {org.plan_status.replace('_', ' ')}
-          </span>
+          </Badge>
           <span className="text-xs text-muted-themed ml-auto">{plan.description}</span>
         </div>
 
@@ -151,41 +155,39 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
             <label htmlFor="org-name" className="label">
               Organization Name <span className="text-red-400">*</span>
             </label>
-            <input
+            <Input
               id="org-name"
               name="name"
               type="text"
               required
               defaultValue={org.name}
-              className="input"
               placeholder="My Property Management Co."
             />
           </div>
 
           <div>
             <label htmlFor="billing-email" className="label">Billing Email</label>
-            <input
+            <Input
               id="billing-email"
               name="billing_email"
               type="email"
               defaultValue={org.billing_email ?? ''}
-              className="input"
               placeholder="billing@company.com"
             />
           </div>
 
           <div className="pt-2 border-t border-themed">
-            <button type="submit" disabled={pending} className="btn-primary">
+            <Button type="submit" disabled={pending}>
               {pending ? (
                 <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
               ) : 'Save Changes'}
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
+      </Card>
 
       {/* Connected Accounts — managed centrally on the Integrations page */}
-      <div className="card">
+      <Card>
         <h2 className="text-base font-semibold text-primary-themed mb-1">
           Connected Accounts
         </h2>
@@ -196,10 +198,10 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
         <a href="/settings/integrations" className="btn-secondary text-sm inline-flex items-center gap-1.5">
           Manage Integrations →
         </a>
-      </div>
+      </Card>
 
       {/* Kroger — Grocery Cart Automation */}
-      <div className="card">
+      <Card>
         <h2 className="text-base font-semibold text-primary-themed mb-1">Grocery Cart Automation</h2>
         <p className="text-xs text-muted-themed mb-1">
           Connect your Kroger account to build shopping carts automatically from below-par inventory.
@@ -237,19 +239,19 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
             <a href="/api/integrations/kroger/connect" className="btn-primary text-sm flex-shrink-0">Connect Kroger Account</a>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* Crew Auto-Assignment */}
-      <div className="card">
+      <Card>
         <h2 className="text-base font-semibold text-primary-themed mb-1">Crew Auto-Assignment</h2>
         <p className="text-xs text-muted-themed mb-4">
           Score crew members for new turnovers based on proximity, availability, familiarity, and reliability.
         </p>
         <AutoAssignToggle mode={org.auto_assign_mode ?? 'disabled'} />
-      </div>
+      </Card>
 
       {/* Communications Log */}
-      <div className="card">
+      <Card>
         <h2 className="text-base font-semibold text-primary-themed mb-1">Communications Log</h2>
         <p className="text-xs text-muted-themed mb-4">
           How long PM ↔ vendor/crew messages are kept before being removed.
@@ -257,7 +259,7 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
           permanently purged 30 days later.
         </p>
         <CommsRetentionSelector days={org.comms_log_retention_days ?? 365} />
-      </div>
+      </Card>
     </div>
   )
 }
@@ -389,7 +391,7 @@ function SecurityTab() {
 
   return (
     <div className="max-w-xl space-y-6">
-      <div className="card">
+      <Card>
         <div className="flex items-center gap-3 mb-4">
           <div
             className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -418,13 +420,13 @@ function SecurityTab() {
           <div>
             <label htmlFor="new-password" className="label">New Password</label>
             <div className="relative">
-              <input
+              <Input
                 id="new-password"
                 name="new_password"
                 type={showNew ? 'text' : 'password'}
                 required
                 minLength={8}
-                className="input pr-10"
+                className="pr-10"
                 placeholder="Min. 8 characters"
                 autoComplete="new-password"
               />
@@ -444,13 +446,13 @@ function SecurityTab() {
           <div>
             <label htmlFor="confirm-password" className="label">Confirm New Password</label>
             <div className="relative">
-              <input
+              <Input
                 id="confirm-password"
                 name="confirm_password"
                 type={showConfirm ? 'text' : 'password'}
                 required
                 minLength={8}
-                className="input pr-10"
+                className="pr-10"
                 placeholder="Re-enter your new password"
                 autoComplete="new-password"
               />
@@ -468,15 +470,15 @@ function SecurityTab() {
           </div>
 
           <div className="pt-2 border-t border-themed">
-            <button type="submit" disabled={pending} className="btn-primary">
+            <Button type="submit" disabled={pending}>
               {pending
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Updating…</>
                 : 'Update Password'
               }
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
+      </Card>
     </div>
   )
 }
@@ -503,7 +505,7 @@ function NotificationsTab({ org }: { org: Organization }) {
     <div className="max-w-xl space-y-6">
 
       {/* Push Notifications */}
-      <div className="card">
+      <Card>
         <div className="flex items-center gap-3 mb-4">
           <div
             className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -587,18 +589,18 @@ function NotificationsTab({ org }: { org: Organization }) {
           </div>
 
           <div className="pt-4 border-t border-themed">
-            <button type="submit" disabled={pending} className="btn-primary">
+            <Button type="submit" disabled={pending}>
               {pending
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
                 : 'Save Preferences'
               }
-            </button>
+            </Button>
           </div>
         </form>
-      </div>
+      </Card>
 
       {/* Slack Notifications */}
-      <div className="card">
+      <Card>
         <div className="flex items-center gap-3 mb-4">
           <div
             className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -628,13 +630,13 @@ function NotificationsTab({ org }: { org: Organization }) {
             <label htmlFor="slack-webhook-url" className="block text-xs font-medium text-muted-themed mb-1.5">
               Slack Incoming Webhook URL
             </label>
-            <input
+            <Input
               id="slack-webhook-url"
               type="url"
               name="slack_webhook_url"
               defaultValue={org.slack_webhook_url ?? ''}
               placeholder="https://hooks.slack.com/services/..."
-              className="input w-full"
+              className="w-full"
             />
             <p className="text-xs text-muted-themed mt-1.5">
               When a crew member sends you a message, it will also be posted to this Slack channel.
@@ -643,14 +645,14 @@ function NotificationsTab({ org }: { org: Organization }) {
             </p>
           </div>
 
-          <button type="submit" disabled={slackPending} className="btn-primary">
+          <Button type="submit" disabled={slackPending}>
             {slackPending
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
               : 'Save Webhook'
             }
-          </button>
+          </Button>
         </form>
-      </div>
+      </Card>
 
       {/* SMS Message Templates */}
       <SmsTemplatesCard />
@@ -660,10 +662,10 @@ function NotificationsTab({ org }: { org: Organization }) {
 
 // ── SMS Templates Card ────────────────────────────────────────────────────────
 
-const AUDIENCE_BADGE: Record<'guest' | 'crew' | 'vendor', string> = {
-  guest:  'badge-blue',
-  crew:   'badge-green',
-  vendor: 'badge-amber',
+const AUDIENCE_BADGE: Record<'guest' | 'crew' | 'vendor', 'blue' | 'green' | 'amber'> = {
+  guest:  'blue',
+  crew:   'green',
+  vendor: 'amber',
 }
 
 function SmsTemplatesCard() {
@@ -732,7 +734,7 @@ function SmsTemplatesCard() {
 
   if (!loaded) {
     return (
-      <div className="card">
+      <Card>
         <div className="flex items-center gap-3 mb-4">
           <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
                style={{ background: 'var(--accent-gold-dim)' }}>
@@ -741,12 +743,12 @@ function SmsTemplatesCard() {
           <h2 className="text-base font-semibold text-primary-themed">SMS Message Templates</h2>
         </div>
         <p className="text-xs text-muted-themed">Loading…</p>
-      </div>
+      </Card>
     )
   }
 
   return (
-    <div className="card">
+    <Card>
       <div className="flex items-center gap-3 mb-2">
         <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
              style={{ background: 'var(--accent-gold-dim)' }}>
@@ -792,9 +794,9 @@ function SmsTemplatesCard() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-primary-themed">{config.label}</span>
-                    <span className={cn('badge text-xs', AUDIENCE_BADGE[config.audience])}>
+                    <Badge tone={AUDIENCE_BADGE[config.audience]} className="text-xs">
                       {config.audience}
-                    </span>
+                    </Badge>
                     {customized && !unsaved && (
                       <span className="text-xs font-medium" style={{ color: 'var(--accent-gold)' }}>
                         Customized
@@ -871,25 +873,26 @@ function SmsTemplatesCard() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-3 pt-2 border-t border-themed flex-wrap">
-                    <button
+                    <Button
                       type="button"
                       onClick={() => handleSave(config.key as SmsTemplateKey)}
                       disabled={isSavingThis || !unsaved}
-                      className="btn-primary text-sm"
+                      className="text-sm"
                     >
                       {isSavingThis ? 'Saving…' : 'Save Template'}
-                    </button>
+                    </Button>
 
                     {customized && (
-                      <button
+                      <Button
+                        variant="secondary"
                         type="button"
                         onClick={() => handleReset(config.key as SmsTemplateKey)}
                         disabled={resetting}
-                        className="btn-secondary text-sm flex items-center gap-1.5"
+                        className="text-sm flex items-center gap-1.5"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         Reset to Default
-                      </button>
+                      </Button>
                     )}
 
                     {statusMsg[config.key] && (
@@ -911,7 +914,7 @@ function SmsTemplatesCard() {
           )
         })}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -969,7 +972,7 @@ function LegalTab() {
         FieldStay&apos;s legal documents governing your account and data.
       </p>
       {docs.map((doc) => (
-        <div key={doc.href} className="card flex items-center justify-between gap-4">
+        <Card key={doc.href} className="flex items-center justify-between gap-4">
           <div className="flex-1 min-w-0">
             <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>
               {doc.title}
@@ -989,10 +992,10 @@ function LegalTab() {
           >
             View →
           </a>
-        </div>
+        </Card>
       ))}
 
-      <div className="card mt-4">
+      <Card className="mt-4">
         <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>
           Questions about your data?
         </p>
@@ -1005,7 +1008,7 @@ function LegalTab() {
             privacy@fieldstay.app
           </a>
         </p>
-      </div>
+      </Card>
     </div>
   )
 }
@@ -1041,7 +1044,7 @@ const DISPLAY_PLANS = [
 
 function BillingTab({ org }: { org: Organization }) {
   const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
-  const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'badge-slate'
+  const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'slate'
   const isTrialing  = org.plan_status === 'trialing'
 
   const [interval, setInterval]           = useState<'monthly' | 'annual'>('monthly')
@@ -1072,15 +1075,15 @@ function BillingTab({ org }: { org: Organization }) {
     <div className="max-w-2xl space-y-6">
 
       {/* Current plan summary */}
-      <div className="card">
+      <Card>
         <h2 className="text-base font-semibold text-primary-themed mb-4">Current Plan</h2>
         <div className="flex items-center gap-3 flex-wrap">
-          <span className={cn('badge text-sm px-3 py-1', currentPlan.badge)}>
+          <Badge tone={currentPlan.badge} className="text-sm px-3 py-1">
             {currentPlan.name}
-          </span>
-          <span className={cn('badge', statusBadge)}>
+          </Badge>
+          <Badge tone={statusBadge}>
             {org.plan_status.replace('_', ' ')}
-          </span>
+          </Badge>
           <span className="text-sm text-secondary-themed">{currentPlan.description}</span>
         </div>
 
@@ -1098,19 +1101,19 @@ function BillingTab({ org }: { org: Organization }) {
 
         {org.stripe_customer_id && (
           <div className="mt-4 pt-4 border-t border-themed">
-            <button
+            <Button
+              variant="secondary"
               onClick={handleBillingPortal}
               disabled={portalPending}
-              className="btn-secondary"
             >
               {portalPending
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Opening portal…</>
                 : 'Manage Billing'
               }
-            </button>
+            </Button>
           </div>
         )}
-      </div>
+      </Card>
 
       {/* Plan upgrade cards */}
       <div>
@@ -1150,14 +1153,14 @@ function BillingTab({ org }: { org: Organization }) {
             const isPending = checkoutPlan === plan.key && checkoutPending
 
             return (
-              <div
+              <Card
                 key={plan.key}
-                className="card flex flex-col gap-3"
+                className="flex flex-col gap-3"
                 style={isCurrent ? { outline: '2px solid var(--accent-gold)', outlineOffset: '2px' } : undefined}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-primary-themed">{plan.name}</span>
-                  {isCurrent && <span className="badge badge-green text-xs">Current</span>}
+                  {isCurrent && <Badge tone="green" className="text-xs">Current</Badge>}
                 </div>
                 <p className="text-sm text-muted-themed">{plan.props}</p>
                 <div>
@@ -1179,23 +1182,23 @@ function BillingTab({ org }: { org: Organization }) {
                   )}
                 </div>
                 {!isCurrent && (
-                  <button
+                  <Button
                     onClick={() => handleCheckout(plan.key)}
                     disabled={checkoutPending}
-                    className="btn-primary text-sm mt-auto"
+                    className="text-sm mt-auto"
                   >
                     {isPending
                       ? <><Loader2 className="w-4 h-4 animate-spin" /> Redirecting…</>
                       : `Upgrade to ${plan.name}`
                     }
-                  </button>
+                  </Button>
                 )}
-              </div>
+              </Card>
             )
           })}
 
           {/* Enterprise */}
-          <div className="card flex flex-col gap-3 sm:col-span-3">
+          <Card className="flex flex-col gap-3 sm:col-span-3">
             <div className="flex items-start justify-between flex-wrap gap-3">
               <div>
                 <span className="font-semibold text-primary-themed">Enterprise</span>
@@ -1205,7 +1208,7 @@ function BillingTab({ org }: { org: Organization }) {
                 Contact Us →
               </a>
             </div>
-          </div>
+          </Card>
         </div>
       </div>
 

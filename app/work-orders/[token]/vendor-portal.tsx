@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 interface WorkOrderInfo {
   id:             string
@@ -704,7 +706,7 @@ export function VendorQuotePortal({
               </label>
               <div className="relative">
                 <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-accent-400" />
-                <input
+                <Input
                   id="quote-amount"
                   type="number"
                   min="1"
@@ -712,7 +714,7 @@ export function VendorQuotePortal({
                   required
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="input pl-8"
+                  className="pl-8"
                   placeholder="0.00"
                 />
               </div>
@@ -728,7 +730,7 @@ export function VendorQuotePortal({
                 placeholder="Parts included, timeline, any conditions or questions…"
               />
             </div>
-            <button type="submit" disabled={submitting} className="w-full btn-primary py-3 text-base">
+            <Button type="submit" disabled={submitting} className="w-full py-3 text-base">
               {submitting ? (
                 <span className="flex items-center justify-center gap-2">
                   <Clock className="w-4 h-4 animate-spin" /> Submitting…
@@ -738,7 +740,7 @@ export function VendorQuotePortal({
                   <DollarSign className="w-4 h-4" /> Submit Quote
                 </span>
               )}
-            </button>
+            </Button>
           </form>
         </>
       )}

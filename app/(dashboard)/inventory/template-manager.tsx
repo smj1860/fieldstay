@@ -4,6 +4,9 @@ import { useState, useTransition, useRef } from 'react'
 import { Plus, X, Loader2, Check, Upload } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import {
   createOrGetTemplate,
   addTemplateItem,
@@ -61,13 +64,13 @@ function TemplateBrandInput({ itemId, defaultBrand }: { itemId: string; defaultB
   }
 
   return (
-    <input
+    <Input
       type="text"
       value={value}
       onChange={e => setValue(e.target.value)}
       onBlur={handleBlur}
       placeholder="Any brand"
-      className="input py-0.5 px-2 text-xs w-28 flex-shrink-0"
+      className="py-0.5 px-2 text-xs w-28 flex-shrink-0"
       title="Preferred brand — used when building Kroger cart"
     />
   )
@@ -318,20 +321,19 @@ export function TemplateManager({
 
   if (!currentTemplate) {
     return (
-      <div className="card text-center py-12">
+      <Card className="text-center py-12">
         <h3 className="font-semibold text-secondary-themed mb-2">No Master Template Yet</h3>
         <p className="text-sm text-muted-themed mb-4">
           Create a master inventory template to quickly set up new properties.
         </p>
-        <button
+        <Button
           onClick={handleCreateTemplate}
           disabled={creating}
-          className="btn-primary"
         >
           {creating ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating…</> : <><Plus className="w-4 h-4" /> Create Master Template</>}
-        </button>
+        </Button>
         {error && <p className="text-xs text-red-500 mt-3">{error}</p>}
-      </div>
+      </Card>
     )
   }
 
@@ -347,9 +349,9 @@ export function TemplateManager({
           <p className="text-xs text-muted-themed mt-0.5">{templateItems.length} items</p>
         </div>
         {properties.length > 0 && (
-          <button onClick={() => setApplyModal(true)} className="btn-secondary text-xs">
+          <Button variant="secondary" onClick={() => setApplyModal(true)} className="text-xs">
             Apply to Property…
-          </button>
+          </Button>
         )}
       </div>
       <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -441,7 +443,7 @@ export function TemplateManager({
       )}
 
       {/* Add item — tabbed */}
-      <div className="card p-4 space-y-3">
+      <Card className="p-4 space-y-3">
         {/* Tab bar */}
         <div className="flex gap-1 rounded-lg p-1 w-fit" style={{ background: 'var(--bg-raised)' }}>
           {(['catalog', 'custom', 'csv'] as const).map(tab => (
@@ -572,7 +574,7 @@ export function TemplateManager({
                             <div className="flex items-center gap-2 px-4 pb-2.5 flex-wrap" onClick={e => e.stopPropagation()}>
                               <div className="flex items-center gap-1.5">
                                 <label className="text-xs text-muted-themed whitespace-nowrap">Par:</label>
-                                <input
+                                <Input
                                   type="number"
                                   min={1}
                                   value={catalogParLevels[c.id] ?? '1'}
@@ -582,26 +584,26 @@ export function TemplateManager({
                                       setCatalogParLevels(prev => ({ ...prev, [c.id]: '1' }))
                                     }
                                   }}
-                                  className="input w-16 py-0.5 text-xs"
+                                  className="w-16 py-0.5 text-xs"
                                 />
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <label className="text-xs text-muted-themed whitespace-nowrap">Unit:</label>
-                                <input
+                                <Input
                                   type="text"
                                   value={catalogUnits[c.id] ?? c.default_unit}
                                   onChange={e => setCatalogUnits(prev => ({ ...prev, [c.id]: e.target.value }))}
-                                  className="input w-20 py-0.5 text-xs"
+                                  className="w-20 py-0.5 text-xs"
                                   placeholder={c.default_unit}
                                 />
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <label className="text-xs text-muted-themed whitespace-nowrap">Brand:</label>
-                                <input
+                                <Input
                                   type="text"
                                   value={catalogBrands[c.id] ?? ''}
                                   onChange={e => setCatalogBrands(prev => ({ ...prev, [c.id]: e.target.value }))}
-                                  className="input w-28 py-0.5 text-xs"
+                                  className="w-28 py-0.5 text-xs"
                                   placeholder="Any"
                                 />
                               </div>
@@ -616,15 +618,15 @@ export function TemplateManager({
             })()}
 
             {catalogSelected.size > 0 && (
-              <button
+              <Button
                 onClick={handleAddCatalogItems}
                 disabled={isPending}
-                className="btn-primary text-sm w-full"
+                className="text-sm w-full"
               >
                 {isPending
                   ? 'Adding…'
                   : `Add ${catalogSelected.size} item${catalogSelected.size !== 1 ? 's' : ''} to Template`}
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -635,21 +637,19 @@ export function TemplateManager({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="label">Name *</label>
-                <input
+                <Input
                   type="text"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
-                  className="input"
                   placeholder="e.g. Paper Towels"
                 />
               </div>
               <div>
                 <label className="label">Unit *</label>
-                <input
+                <Input
                   type="text"
                   value={newUnit}
                   onChange={e => setNewUnit(e.target.value)}
-                  className="input"
                   placeholder="rolls, boxes…"
                 />
               </div>
@@ -663,33 +663,31 @@ export function TemplateManager({
               </div>
               <div>
                 <label className="label">Par Level</label>
-                <input
+                <Input
                   type="number" min={0} step={0.5}
                   value={newPar}
                   onChange={e => setNewPar(e.target.value)}
-                  className="input"
                 />
               </div>
               <div>
                 <label className="label">Brand <span className="text-muted-themed font-normal">(optional)</span></label>
-                <input
+                <Input
                   type="text"
                   value={newBrand}
                   onChange={e => setNewBrand(e.target.value)}
-                  className="input"
                   placeholder="e.g. Bounty, Dawn, Tide"
                 />
               </div>
             </div>
             {error && <p className="text-xs text-red-500">{error}</p>}
-            <button
+            <Button
               onClick={handleAddItem}
               disabled={isPending || !newName.trim() || !newUnit.trim()}
-              className="btn-primary text-sm"
+              className="text-sm"
             >
               {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
               Add to Template
-            </button>
+            </Button>
           </div>
         )}
 
@@ -741,25 +739,26 @@ export function TemplateManager({
                   </table>
                 </div>
                 <div className="flex gap-2">
-                  <button
+                  <Button
                     onClick={handleImportCsv}
                     disabled={isPending}
-                    className="btn-primary flex-1 text-sm"
+                    className="flex-1 text-sm"
                   >
                     {isPending ? 'Importing…' : `Import ${csvPreview.length} items`}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
                     onClick={() => setCsvPreview([])}
-                    className="btn-ghost text-sm"
+                    className="text-sm"
                   >
                     Clear
-                  </button>
+                  </Button>
                 </div>
               </>
             )}
           </div>
         )}
-      </div>
+      </Card>
 
       {/* Apply to property modal */}
       <Dialog
@@ -800,14 +799,14 @@ export function TemplateManager({
           ))}
         </div>
         <div className="flex gap-3 mt-4">
-          <button
+          <Button
             onClick={handleApply}
             disabled={isPending || selectedProps.size === 0}
-            className="btn-primary flex-1"
+            className="flex-1"
           >
             {isPending ? 'Applying…' : `Apply to ${selectedProps.size} propert${selectedProps.size !== 1 ? 'ies' : 'y'}`}
-          </button>
-          <button onClick={() => setApplyModal(false)} className="btn-ghost">Cancel</button>
+          </Button>
+          <Button variant="ghost" onClick={() => setApplyModal(false)}>Cancel</Button>
         </div>
       </Dialog>
     </div>

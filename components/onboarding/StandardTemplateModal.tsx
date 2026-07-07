@@ -7,6 +7,7 @@ import type { MaintenanceScheduleTemplateItem, ScheduleFrequency } from '@/types
 import { RECURRENCE_LABELS, MONTH_NAMES } from '@/types/database'
 import { Loader2 } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
 
 const STANDARD_TEMPLATE_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff'
 
@@ -148,13 +149,13 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Props
           {error && (
             <p className="text-xs text-center" style={{ color: 'var(--accent-red)' }}>{error}</p>
           )}
-          <button
+          <Button
             onClick={handleApply}
             disabled={saving || loading}
-            className="btn-primary w-full py-3"
+            className="w-full py-3"
           >
             {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Applying…</> : 'Apply to Property'}
-          </button>
+          </Button>
         </div>
       </div>
     </Dialog>

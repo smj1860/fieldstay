@@ -11,6 +11,8 @@ import {
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { createClient }       from '@/lib/supabase/client'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -351,9 +353,9 @@ export default function CrewTurnoverPage() {
 
           {/* Start Turnover — only if status === 'assigned' */}
           {turnover.status === 'assigned' && (
-            <button onClick={markInProgress} className="btn-secondary w-full py-4 text-base">
+            <Button variant="secondary" onClick={markInProgress} className="w-full py-4 text-base">
               Start Turnover
-            </button>
+            </Button>
           )}
 
           {/* Navigation buttons */}
@@ -391,10 +393,11 @@ export default function CrewTurnoverPage() {
           )}
 
           {/* Mark Complete */}
-          <button
+          <Button
+            variant="cta"
             onClick={markComplete}
             disabled={completing || turnover.status === 'completed'}
-            className="btn-cta w-full py-4 text-base flex items-center justify-center gap-2
+            className="w-full py-4 text-base flex items-center justify-center gap-2
                        disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {completing
@@ -402,7 +405,7 @@ export default function CrewTurnoverPage() {
               : turnover.status === 'completed'
               ? <><Check className="w-4 h-4" /> Marked Complete</>
               : 'Mark as Complete'}
-          </button>
+          </Button>
 
           {/* Report an Issue — secondary, at the bottom */}
           <button
@@ -649,12 +652,13 @@ export default function CrewTurnoverPage() {
 
         {/* After the checklist, a sticky "Done" button to return to hub */}
         <div className="sticky bottom-0 pt-3 pb-6" style={{ background: 'var(--bg-page)' }}>
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setView('hub')}
-            className="btn-secondary w-full py-3"
+            className="w-full py-3"
           >
             ← Back to Turnover
-          </button>
+          </Button>
         </div>
       </div>
       )}
@@ -734,12 +738,13 @@ export default function CrewTurnoverPage() {
       )}
 
         <div className="sticky bottom-0 pt-3 pb-6" style={{ background: 'var(--bg-page)' }}>
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setView('hub')}
-            className="btn-secondary w-full py-3"
+            className="w-full py-3"
           >
             ← Back to Turnover
-          </button>
+          </Button>
         </div>
       </div>
       )}
@@ -806,7 +811,7 @@ function IssueReportModal({
             Saved. The property manager will be notified and a work order created as
             soon as your phone has a connection.
           </p>
-          <button onClick={onClose} className="btn-primary w-full">Done</button>
+          <Button onClick={onClose} className="w-full">Done</Button>
         </div>
       ) : (
         <>
@@ -819,11 +824,10 @@ function IssueReportModal({
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label className="label text-primary-themed">What's the issue? *</label>
-              <input
+              <Input
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="input"
                 placeholder="e.g. Leaking faucet in master bath"
                 required
               />

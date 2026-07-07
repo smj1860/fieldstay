@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { Shield, Download } from 'lucide-react'
+import { Card } from '@/components/ui/Card'
 import type { AuditEvent } from '@/types/database'
 
 const PAGE_SIZE = 50
@@ -60,11 +61,11 @@ export default async function AuditLogPage({
       </div>
 
       {rows.length === 0 ? (
-        <div className="card text-center py-12">
+        <Card className="text-center py-12">
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No audit events recorded yet.</p>
-        </div>
+        </Card>
       ) : (
-        <div className="card overflow-hidden p-0">
+        <Card className="overflow-hidden p-0">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -147,7 +148,7 @@ export default async function AuditLogPage({
               ) : <span />}
             </div>
           )}
-        </div>
+        </Card>
       )}
     </div>
   )

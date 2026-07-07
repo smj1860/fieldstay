@@ -3,6 +3,8 @@
 import { useState, useTransition } from 'react'
 import { Plus, Trash2, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import {
   addWorkOrderLineItem,
   deleteWorkOrderLineItem,
@@ -248,26 +250,26 @@ export function LineItemsEditor({ workOrderId, items, canEdit }: Props) {
                 <option key={t} value={t}>{LINE_TYPE_LABELS[t]}</option>
               ))}
             </select>
-            <input
+            <Input
               type="text"
               placeholder="Description (e.g. Plumber – Service Call, P-Trap Assembly)"
               value={form.description}
               onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))}
-              className="input flex-1"
+              className="flex-1"
             />
           </div>
 
           {/* Qty + Unit + Unit Cost */}
           <div className="flex gap-2">
             <div className="flex gap-1 items-center">
-              <input
+              <Input
                 type="number"
                 min="0.01"
                 step="0.01"
                 placeholder="Qty"
                 value={form.quantity}
                 onChange={(e) => setForm(f => ({ ...f, quantity: parseFloat(e.target.value) || 1 }))}
-                className="input w-20"
+                className="w-20"
               />
               <select
                 value={form.unit}
@@ -283,14 +285,14 @@ export function LineItemsEditor({ workOrderId, items, canEdit }: Props) {
 
             <div className="flex items-center gap-1 flex-1">
               <span className="text-sm" style={{ color: 'var(--text-muted)' }}>$</span>
-              <input
+              <Input
                 type="number"
                 min="0"
                 step="0.01"
                 placeholder="Unit cost"
                 value={form.unit_cost || ''}
                 onChange={(e) => setForm(f => ({ ...f, unit_cost: parseFloat(e.target.value) || 0 }))}
-                className="input flex-1"
+                className="flex-1"
               />
             </div>
 
@@ -308,18 +310,18 @@ export function LineItemsEditor({ workOrderId, items, canEdit }: Props) {
           )}
 
           <div className="flex gap-2 justify-end">
-            <button onClick={handleCancel} className="btn btn-ghost text-sm">
+            <Button variant="ghost" onClick={handleCancel} className="text-sm">
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={handleAdd}
               disabled={isPending}
-              className="btn btn-primary text-sm"
+              className="text-sm"
             >
               {isPending
                 ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Adding…</>
                 : 'Add Item'}
-            </button>
+            </Button>
           </div>
         </div>
       )}

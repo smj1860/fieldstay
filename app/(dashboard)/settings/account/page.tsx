@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog } from '@/components/ui/Dialog'
+import { Input } from '@/components/ui/Input'
 
 export default function AccountSettingsPage() {
   const router = useRouter()
@@ -66,12 +67,12 @@ export default function AccountSettingsPage() {
           </div>
         )}
 
-        <input
+        <Input
           type="text"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           placeholder="Type DELETE to confirm"
-          className="input mb-4 w-full"
+          className="mb-4 w-full"
           autoComplete="off"
         />
 

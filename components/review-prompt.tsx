@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Star, X } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
 
 // Replace with real Google Place ID once Business Profile is verified.
 const REVIEW_URL = 'mailto:feedback@fieldstay.app?subject=FieldStay Feedback'
@@ -43,9 +44,9 @@ export function ReviewPrompt({ milestone, message }: ReviewPromptProps) {
         {' '}Would you mind leaving us a quick review?
       </p>
       <div className="flex items-center gap-2 flex-shrink-0">
-        <button onClick={handleReview} className="btn-cta text-xs px-3 py-1.5">
+        <Button variant="cta" onClick={handleReview} className="text-xs px-3 py-1.5">
           Leave a Review
-        </button>
+        </Button>
         <button
           onClick={handleDismiss}
           className="text-accent-400 hover:text-accent-600 transition-colors p-1"

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { ChevronLeft, ChevronRight, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/Button'
 
 interface CalendarWO {
   id: string
@@ -58,56 +59,60 @@ export function MaintenanceCalendar({
       <div className="flex items-center gap-3 mb-4 flex-wrap">
         {calView === 'month' ? (
           <>
-            <button
+            <Button
+              variant="ghost"
               onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-              className="btn-ghost p-1.5"
+              className="p-1.5"
             >
               <ChevronLeft className="w-4 h-4" />
-            </button>
+            </Button>
             <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
               {month.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
             </h3>
-            <button
+            <Button
+              variant="ghost"
               onClick={() => setMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-              className="btn-ghost p-1.5"
+              className="p-1.5"
             >
               <ChevronRight className="w-4 h-4" />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => setMonth(new Date(today.getFullYear(), today.getMonth(), 1))}
-              className="btn-secondary text-xs py-1"
+              className="text-xs py-1"
             >
               Today
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button onClick={() => setWeekStart(d => {
+            <Button variant="ghost" onClick={() => setWeekStart(d => {
               const n = new Date(d); n.setDate(n.getDate() - 7); return n
-            })} className="btn-ghost p-1.5">
+            })} className="p-1.5">
               <ChevronLeft className="w-4 h-4" />
-            </button>
+            </Button>
             <span className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
               {weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
               {' – '}
               {new Date(weekStart.getTime() + 6 * 86_400_000)
                 .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             </span>
-            <button onClick={() => setWeekStart(d => {
+            <Button variant="ghost" onClick={() => setWeekStart(d => {
               const n = new Date(d); n.setDate(n.getDate() + 7); return n
-            })} className="btn-ghost p-1.5">
+            })} className="p-1.5">
               <ChevronRight className="w-4 h-4" />
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => {
                 const d = new Date(today)
                 d.setDate(d.getDate() - d.getDay())
                 setWeekStart(d)
               }}
-              className="btn-secondary text-xs py-1"
+              className="text-xs py-1"
             >
               This Week
-            </button>
+            </Button>
           </>
         )}
 
