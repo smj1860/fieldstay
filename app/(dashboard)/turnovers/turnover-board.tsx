@@ -11,6 +11,10 @@ import {
 import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
 import { StatusDot } from '@/components/ui/StatusDot'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import {
   assignCrew, assignCrewIndividually, addCrewToTurnover, removeCrewFromTurnover,
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
@@ -435,9 +439,9 @@ function TurnoverCard({
               </span>
             )}
             {isOverdue && (
-              <span className="badge badge-red flex items-center gap-1">
+              <Badge tone="red" className="flex items-center gap-1">
                 <AlertTriangle className="w-2.5 h-2.5" /> Overdue
-              </span>
+              </Badge>
             )}
           </div>
 
@@ -577,16 +581,17 @@ function TurnoverCard({
         </div>
 
         <div className="flex gap-2 mt-4">
-          <button
+          <Button
             onClick={handleQuickFlag}
             disabled={!quickFlagNotes.trim() || quickFlagging}
-            className="btn-danger flex-1 text-sm"
+            variant="danger"
+            className="flex-1 text-sm"
           >
             {quickFlagging ? 'Flagging…' : 'Flag Issue'}
-          </button>
-          <button onClick={() => setShowQuickFlag(false)} className="btn-ghost text-sm">
+          </Button>
+          <Button onClick={() => setShowQuickFlag(false)} variant="ghost" className="text-sm">
             Cancel
-          </button>
+          </Button>
         </div>
       </Dialog>
 
@@ -611,14 +616,15 @@ function TurnoverCard({
                 placeholder="Describe the issue…"
               />
               <div className="flex gap-2">
-                <button
+                <Button
                   onClick={() => handleStatus('flagged')}
-                  className="btn-danger text-sm py-1.5"
+                  variant="danger"
+                  className="text-sm py-1.5"
                   disabled={!flagNotes.trim() || updating}
                 >
                   Flag Turnover
-                </button>
-                <button onClick={() => setShowFlagInput(false)} className="btn-ghost text-sm py-1.5">Cancel</button>
+                </Button>
+                <Button onClick={() => setShowFlagInput(false)} variant="ghost" className="text-sm py-1.5">Cancel</Button>
               </div>
             </div>
           )}
@@ -627,13 +633,14 @@ function TurnoverCard({
           {!showFlagInput && turnover.status !== 'completed' && turnover.status !== 'cancelled' && (
             <div className="flex items-center gap-2 flex-wrap">
               {turnover.status === 'assigned' && (
-                <button
+                <Button
                   onClick={() => handleStatus('in_progress')}
                   disabled={updating}
-                  className="btn-secondary text-xs py-1.5"
+                  variant="secondary"
+                  className="text-xs py-1.5"
                 >
                   Mark In Progress
-                </button>
+                </Button>
               )}
               {(turnover.status === 'assigned' || turnover.status === 'in_progress') && (
                 <button
@@ -645,13 +652,14 @@ function TurnoverCard({
                   {updating ? 'Saving…' : 'Mark Complete'}
                 </button>
               )}
-              <button
+              <Button
                 onClick={() => setShowFlagInput(true)}
                 disabled={updating}
-                className="btn-ghost text-xs py-1.5 text-amber-600 hover:bg-amber-50"
+                variant="ghost"
+                className="text-xs py-1.5 text-amber-600 hover:bg-amber-50"
               >
                 <Flag className="w-3.5 h-3.5" /> Flag Issue
-              </button>
+              </Button>
               <Link
                 href={`/turnovers/${turnover.id}`}
                 className="btn-ghost text-xs py-1.5 ml-auto"
@@ -678,22 +686,24 @@ function TurnoverCard({
                 </span>
               )}
               {turnover.is_archived ? (
-                <button
+                <Button
                   onClick={() => startArchive(async () => { await unarchiveTurnover([turnover.id]) })}
                   disabled={archiving}
-                  className="btn-ghost text-xs py-1.5 ml-auto disabled:opacity-50"
+                  variant="ghost"
+                  className="text-xs py-1.5 ml-auto disabled:opacity-50"
                   style={{ color: 'var(--accent-gold)' }}
                 >
                   {archiving ? 'Restoring…' : 'Unarchive'}
-                </button>
+                </Button>
               ) : (
-                <button
+                <Button
                   onClick={() => startArchive(async () => { await archiveTurnover([turnover.id]) })}
                   disabled={archiving}
-                  className="btn-ghost text-xs py-1.5 ml-auto text-muted-themed disabled:opacity-50"
+                  variant="ghost"
+                  className="text-xs py-1.5 ml-auto text-muted-themed disabled:opacity-50"
                 >
                   {archiving ? 'Archiving…' : 'Archive'}
-                </button>
+                </Button>
               )}
             </div>
           )}
@@ -816,21 +826,21 @@ function AddTurnoverModal({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Checkout Date</label>
-            <input name="checkout_date" type="date" required className="input" />
+            <Input name="checkout_date" type="date" required />
           </div>
           <div>
             <label className="label">Checkout Time</label>
-            <input name="checkout_time" type="time" defaultValue="11:00" className="input" />
+            <Input name="checkout_time" type="time" defaultValue="11:00" />
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="label">Next Check-in Date</label>
-            <input name="checkin_date" type="date" required className="input" />
+            <Input name="checkin_date" type="date" required />
           </div>
           <div>
             <label className="label">Check-in Time</label>
-            <input name="checkin_time" type="time" defaultValue="15:00" className="input" />
+            <Input name="checkin_time" type="time" defaultValue="15:00" />
           </div>
         </div>
         <div>
@@ -838,10 +848,10 @@ function AddTurnoverModal({
           <textarea name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
         </div>
         <div className="flex gap-3 pt-2">
-          <button type="submit" disabled={pending} className="btn-primary flex-1">
+          <Button type="submit" disabled={pending} className="flex-1">
             {pending ? 'Creating…' : 'Create Turnover'}
-          </button>
-          <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+          </Button>
+          <Button type="button" onClick={onClose} variant="ghost">Cancel</Button>
         </div>
       </form>
     </Dialog>
@@ -947,14 +957,14 @@ function SplitAssignModal({
           {pickedCount} of {selected.length} assigned
         </p>
         <div className="flex gap-2">
-          <button onClick={onClose} className="btn-ghost text-sm">Cancel</button>
-          <button
+          <Button onClick={onClose} variant="ghost" className="text-sm">Cancel</Button>
+          <Button
             onClick={handleApply}
             disabled={submitting || pickedCount === 0}
-            className="btn-primary text-sm"
+            className="text-sm"
           >
             {submitting ? 'Applying…' : 'Apply Assignments'}
-          </button>
+          </Button>
         </div>
       </div>
     </Dialog>
@@ -1113,27 +1123,27 @@ export function TurnoverBoard({
           <div className="flex items-center gap-3 mt-1">
             <p className="page-subtitle">{totalActive} active</p>
             {needsCrew > 0 && (
-              <span className="badge badge-amber">
+              <Badge tone="amber">
                 <AlertTriangle className="w-3 h-3" />
                 {needsCrew} need crew
-              </span>
+              </Badge>
             )}
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
+          <Button
             onClick={() => startSync(() => triggerManualSync())}
             disabled={syncing}
-            className="btn-secondary"
+            variant="secondary"
             title="Sync calendars now"
           >
             <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
             {syncing ? 'Syncing…' : 'Sync'}
-          </button>
-          <button onClick={() => setShowAdd(true)} className="btn-primary">
+          </Button>
+          <Button onClick={() => setShowAdd(true)}>
             <Plus className="w-4 h-4" />
             Add Turnover
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -1263,7 +1273,7 @@ export function TurnoverBoard({
         /* existing full list-view render block unchanged */
         <div>
           {filtered.length === 0 ? (
-            <div className="card text-center py-16 max-w-md mx-auto mt-4">
+            <Card className="text-center py-16 max-w-md mx-auto mt-4">
               <CalendarCheck className="w-10 h-10 text-muted-themed mx-auto mb-3" />
               <h3 className="font-semibold text-secondary-themed mb-1">No turnovers found</h3>
               <p className="text-sm text-muted-themed">
@@ -1272,7 +1282,7 @@ export function TurnoverBoard({
                   : 'No turnovers match the current filter.'
                 }
               </p>
-            </div>
+            </Card>
           ) : (
             <>
               <BoardSection
@@ -1381,7 +1391,7 @@ export function TurnoverBoard({
             </select>
           </div>
 
-          <button
+          <Button
             disabled={bulkAssigning}
             onClick={() =>
               startBulkAssign(async () => {
@@ -1389,30 +1399,33 @@ export function TurnoverBoard({
                 clearSelection()
               })
             }
-            className="btn-secondary text-xs flex-shrink-0 flex items-center gap-1"
+            variant="secondary"
+            className="text-xs flex-shrink-0 flex items-center gap-1"
           >
             <CheckCircle2 className="w-3.5 h-3.5" />
             Mark Complete
-          </button>
+          </Button>
 
           {selectedIds.size > 1 && (
-            <button
+            <Button
               onClick={() => setSplitAssignOpen(true)}
-              className="btn-ghost text-xs flex-shrink-0"
+              variant="ghost"
+              className="text-xs flex-shrink-0"
               style={{ color: 'var(--accent-gold)' }}
             >
               Split assign…
-            </button>
+            </Button>
           )}
 
-          <button
+          <Button
             onClick={clearSelection}
-            className="btn-ghost text-xs flex-shrink-0 flex items-center gap-1"
+            variant="ghost"
+            className="text-xs flex-shrink-0 flex items-center gap-1"
             style={{ color: 'var(--text-muted)' }}
           >
             <X className="w-3.5 h-3.5" />
             Clear
-          </button>
+          </Button>
         </div>
       )}
 

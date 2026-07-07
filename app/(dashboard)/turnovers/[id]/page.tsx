@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { formatDateTime, formatWindow, TURNOVER_STATUS_LABELS, PRIORITY_COLORS } from '@/lib/utils'
 import { CheckCircle2, Clock, User, Flag, ArrowLeft, Camera } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { Card } from '@/components/ui/Card'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Turnover Detail' }
@@ -100,7 +101,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
 
       <div className="grid grid-cols-2 gap-4 mb-6">
         {/* Timing card */}
-        <div className="card">
+        <Card>
           <h3 className="section-header">Timing</h3>
           <div className="space-y-3 text-sm">
             <div>
@@ -118,10 +119,10 @@ export default async function TurnoverDetailPage({ params }: Props) {
               </span>
             </div>
           </div>
-        </div>
+        </Card>
 
         {/* Guest + Crew card */}
-        <div className="card">
+        <Card>
           <h3 className="section-header">Assignment</h3>
           {incomingBooking && (
             <div className="mb-3">
@@ -154,12 +155,12 @@ export default async function TurnoverDetailPage({ params }: Props) {
               <p className="text-sm font-medium">No crew assigned</p>
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Notes */}
       {(turnover.notes || turnover.completion_notes) && (
-        <div className="card mb-4">
+        <Card className="mb-4">
           {turnover.notes && (
             <div className="mb-3">
               <p className="section-header">Notes</p>
@@ -172,12 +173,12 @@ export default async function TurnoverDetailPage({ params }: Props) {
               <p className="text-sm text-secondary-themed">{turnover.completion_notes}</p>
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {/* Checklist */}
       {totalCount > 0 && (
-        <div className="card">
+        <Card>
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-primary-themed">Turnover Checklist</h3>
             <div className="flex items-center gap-3">
@@ -241,16 +242,16 @@ export default async function TurnoverDetailPage({ params }: Props) {
               )
             })}
           </div>
-        </div>
+        </Card>
       )}
 
       {totalCount === 0 && (
-        <div className="card text-center py-8 text-accent-400">
+        <Card className="text-center py-8 text-accent-400">
           <p className="text-sm">No checklist template assigned to this turnover.</p>
           <Link href={`/properties/${turnover.property_id}/setup/checklist`} className="text-sm text-brand-700 hover:underline mt-1 block">
             Set up a checklist for this property →
           </Link>
-        </div>
+        </Card>
       )}
     </div>
   )

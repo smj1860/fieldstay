@@ -13,6 +13,10 @@ import { cn, formatDate } from '@/lib/utils'
 import { createBooking, cancelBooking, triggerSync } from './actions'
 import { BookingsCalendar } from './bookings-calendar'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import type { VacancyGap } from './page'
 import type { BookingSource, BookingStatus } from '@/types/database'
 
@@ -92,13 +96,15 @@ const SOURCE_LABELS: Record<BookingSource, string> = {
   other:       'Other',
 }
 
-const SOURCE_COLORS: Record<BookingSource, string> = {
-  airbnb:      'badge-red',
-  vrbo:        'badge-blue',
-  booking_com: 'badge-blue',
-  direct:      'badge-green',
-  manual:      'badge-gold',
-  other:       'badge-slate',
+type BadgeTone = 'green' | 'amber' | 'red' | 'blue' | 'gold' | 'slate'
+
+const SOURCE_COLORS: Record<BookingSource, BadgeTone> = {
+  airbnb:      'red',
+  vrbo:        'blue',
+  booking_com: 'blue',
+  direct:      'green',
+  manual:      'gold',
+  other:       'slate',
 }
 
 // ── Status display ────────────────────────────────────────────────────────────
@@ -198,9 +204,9 @@ function BookingCard({
 
                 {/* Source badge */}
                 {!isBlocked && (
-                  <span className={cn('badge text-xs', SOURCE_COLORS[booking.source])}>
+                  <Badge tone={SOURCE_COLORS[booking.source]} className="text-xs">
                     {SOURCE_LABELS[booking.source]}
-                  </span>
+                  </Badge>
                 )}
 
                 {/* Overlap conflict badge */}
@@ -410,25 +416,24 @@ function AddBookingModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Check-in <span className="text-red-500">*</span></label>
-              <input
+              <Input
                 name="checkin_date"
                 type="date"
                 required
                 min={todayStr}
                 value={checkinVal}
                 onChange={(e) => setCheckinVal(e.target.value)}
-                className="input"
               />
             </div>
             <div>
               <label className="label">Check-out <span className="text-red-500">*</span></label>
-              <input name="checkout_date" type="date" required min={checkinVal || todayStr} className="input" />
+              <Input name="checkout_date" type="date" required min={checkinVal || todayStr} />
             </div>
           </div>
 
           <div>
             <label className="label">Guest Name</label>
-            <input name="guest_name" type="text" className="input" placeholder="Optional" />
+            <Input name="guest_name" type="text" placeholder="Optional" />
           </div>
 
           <div>
@@ -458,10 +463,10 @@ function AddBookingModal({
           </p>
 
           <div className="flex gap-3 pt-1">
-            <button type="submit" disabled={pending} className="btn-primary flex-1">
+            <Button type="submit" disabled={pending} className="flex-1">
               {pending ? 'Saving…' : 'Add Booking'}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            </Button>
+            <Button type="button" onClick={onClose} variant="ghost">Cancel</Button>
           </div>
         </form>
     </Dialog>
@@ -591,19 +596,19 @@ export function BookingsClient({
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <button
+          <Button
             onClick={handleSync}
             disabled={syncing}
-            className="btn-secondary"
+            variant="secondary"
             title="Sync iCal feeds now"
           >
             <RefreshCw className={cn('w-4 h-4', syncing && 'animate-spin')} />
             {syncing ? 'Syncing…' : 'Sync'}
-          </button>
-          <button onClick={() => setShowAdd(true)} className="btn-primary">
+          </Button>
+          <Button onClick={() => setShowAdd(true)}>
             <Plus className="w-4 h-4" />
             Add Booking
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -660,12 +665,12 @@ export function BookingsClient({
       <div className="flex items-center gap-2 mb-5 flex-wrap">
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-          <input
+          <Input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search guest name…"
-            className="input pl-8 text-sm py-1.5 w-auto"
+            className="pl-8 text-sm py-1.5 w-auto"
           />
         </div>
 
@@ -706,32 +711,34 @@ export function BookingsClient({
           ))}
         </select>
 
-        <button
+        <Button
           onClick={() => setShowPast((v) => !v)}
-          className={cn('btn-ghost text-sm py-1.5', showPast && 'text-primary-themed')}
+          variant="ghost"
+          className={cn('text-sm py-1.5', showPast && 'text-primary-themed')}
           style={showPast ? { color: 'var(--accent-gold)' } : { color: 'var(--text-muted)' }}
         >
           {showPast ? 'Hiding past' : 'Show past'}
-        </button>
+        </Button>
 
         {hasFilters && (
-          <button
+          <Button
             onClick={() => {
               setFilterProperty('all')
               setFilterStatus('all')
               setFilterSource('all')
               setSearchQuery('')
             }}
-            className="btn-ghost text-xs py-1.5"
+            variant="ghost"
+            className="text-xs py-1.5"
             style={{ color: 'var(--text-muted)' }}
           >
             <X className="w-3 h-3" /> Clear
-          </button>
+          </Button>
         )}
 
-        <button onClick={handleExportCsv} className="btn-ghost text-xs py-1.5" style={{ color: 'var(--text-muted)' }}>
+        <Button onClick={handleExportCsv} variant="ghost" className="text-xs py-1.5" style={{ color: 'var(--text-muted)' }}>
           <Download className="w-3 h-3" /> Export CSV
-        </button>
+        </Button>
 
         <div
           className="flex items-center gap-0.5 rounded-lg p-0.5 ml-auto"
@@ -785,7 +792,7 @@ export function BookingsClient({
           onCanvasClick={(propertyId, checkinDate) => setCalendarPrefill({ propertyId, checkinDate })}
         />
       ) : filtered.length === 0 ? (
-        <div className="card text-center py-16 max-w-md mx-auto mt-4">
+        <Card className="text-center py-16 max-w-md mx-auto mt-4">
           <Calendar className="w-10 h-10 mx-auto mb-3" style={{ color: 'var(--text-muted)' }} />
           <h3 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>
             {localBookings.length === 0 ? 'No bookings yet' : 'No bookings match your filters'}
@@ -797,16 +804,16 @@ export function BookingsClient({
           </p>
           {localBookings.length === 0 && (
             <div className="flex gap-2 justify-center">
-              <button onClick={() => setShowAdd(true)} className="btn-primary text-sm">
+              <Button onClick={() => setShowAdd(true)} className="text-sm">
                 <Plus className="w-3.5 h-3.5" /> Add Booking
-              </button>
-              <button onClick={handleSync} disabled={syncing} className="btn-secondary text-sm">
+              </Button>
+              <Button onClick={handleSync} disabled={syncing} variant="secondary" className="text-sm">
                 <RefreshCw className={cn('w-3.5 h-3.5', syncing && 'animate-spin')} />
                 {syncing ? 'Syncing…' : 'Sync iCal'}
-              </button>
+              </Button>
             </div>
           )}
-        </div>
+        </Card>
       ) : (
         <div className="space-y-2">
           {filtered.map((booking) => (
