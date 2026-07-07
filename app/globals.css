@@ -163,6 +163,37 @@
   }
 }
 
+/* Crew PWA — permanently light, no passive OS-dark fallback. Glare/outdoor
+   legibility is the reason crew is light, which has nothing to do with the
+   device's OS theme setting — a crew member in direct sunlight needs light
+   UI regardless of what their phone is set to. Unlike
+   .theme-locked-light-passive-dark above, this has no
+   @media (prefers-color-scheme: dark) block — it always resolves to these
+   values regardless of stored `fs-theme`, device OS setting, or anything
+   else. Applied to the crew route tree root in app/crew/layout.tsx only. */
+.theme-locked-light {
+  --bg-base:        #F8F9FA;
+  --bg-canvas:      #F8F9FA;
+  --bg-card:        #FFFFFF;
+  --bg-raised:      #E9ECEF;
+  --bg-hover:       #DEE2E6;
+
+  --border:         #DEE2E6;
+  --border-strong:  #CED4DA;
+
+  --text-primary:   #0D0F11;
+  --text-secondary: #343A40;
+  --text-muted:     #6C757D;
+  --text-inverse:   #ffffff;
+
+  --accent-gold:      #b8900a;
+  --accent-gold-text: #7a5e07;
+  --accent-green:      #16a34a;
+  --accent-red:        #dc2626;
+  --accent-amber:      #d97706;
+  --accent-blue:       #1d6fa4;
+}
+
 
 /* ── Base ─────────────────────────────────────────────────────── */
 @layer base {
