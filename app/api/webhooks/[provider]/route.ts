@@ -166,7 +166,12 @@ export async function POST(
   //    payload.id (not the synthesized crypto.randomUUID() fallback in
   //    correlationId above) is required — without a real id from the
   //    provider there's nothing stable to dedup against.
-  const webhookId = payload.id !== null ? String(payload.id) : null
+  //    NOTE: must check both null AND undefined — `payload.id !== null` is
+  //    true when payload.id is undefined (e.g. OwnerRez entity_insert/
+  //    update/delete events, which carry entity_id, not a top-level id),
+  //    which coerced to the literal string "undefined" and made every such
+  //    webhook after the first collide on the same dedup key.
+  const webhookId = (payload.id !== null && payload.id !== undefined) ? String(payload.id) : null
 
   if (webhookId) {
     const admin = createServiceClient()
