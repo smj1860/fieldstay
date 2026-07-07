@@ -20,13 +20,15 @@ export const scanLimiter = new Ratelimit({
   prefix:    'scan-data-plate',
 })
 
-// Max 1 manual OwnerRez sync trigger per org per 60 seconds.
+// Max 1 manual "Trigger Resync" per provider per org per 60 seconds.
 // Prevents a panicking PM from hammering the button and burning API quota.
-export const syncNowLimiter = new Ratelimit({
+// Keyed by `${providerId}:${orgId}` so resyncing one integration doesn't
+// throttle resyncing another.
+export const integrationResyncLimiter = new Ratelimit({
   redis,
   limiter:   Ratelimit.slidingWindow(1, '60 s'),
   analytics: true,
-  prefix:    'ownerrez-sync-now',
+  prefix:    'integration-resync',
 })
 
 // Proactive outbound budget for our own calls TO Hospitable's API (not an
