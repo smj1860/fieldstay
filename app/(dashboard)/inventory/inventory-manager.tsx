@@ -16,6 +16,10 @@ import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
 import { NudgeBanner } from '@/components/nudge-banner'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import type { CartBuildResult } from '@/lib/kroger/types'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -129,10 +133,10 @@ function getStockStatus(item: InventoryItem): StockStatus {
 
 function StockBadge({ item }: { item: InventoryItem }) {
   const status = getStockStatus(item)
-  if (status === 'uncounted') return <span className="badge badge-slate">Needs Count</span>
-  if (status === 'critical')  return <span className="badge badge-red">At/Below Par</span>
-  if (status === 'low')       return <span className="badge badge-amber">Low</span>
-  return <span className="badge badge-green">Healthy</span>
+  if (status === 'uncounted') return <Badge tone="slate">Needs Count</Badge>
+  if (status === 'critical')  return <Badge tone="red">At/Below Par</Badge>
+  if (status === 'low')       return <Badge tone="amber">Low</Badge>
+  return <Badge tone="green">Healthy</Badge>
 }
 
 function poBadgeClass(status: PoStatus): string {
@@ -192,7 +196,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
 
   return (
     <div className="flex items-center gap-1">
-      <input
+      <Input
         type="number"
         min={0}
         step={0.5}
@@ -200,7 +204,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
         autoFocus
-        className="input py-0.5 px-1.5 w-16 text-sm"
+        className="py-0.5 px-1.5 w-16 text-sm"
       />
       <button
         onClick={handleSave}
@@ -398,25 +402,25 @@ function AddItemsModal({
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label htmlFor={`unit-${catalogItem.id}`} className="text-xs text-muted-themed block mb-1">Unit</label>
-                          <input
+                          <Input
                             id={`unit-${catalogItem.id}`}
                             type="text"
                             value={unit}
                             onChange={(e) => updateSelected(catalogItem.id, 'unit', e.target.value)}
-                            className="input py-1.5 px-2 text-sm w-full"
+                            className="py-1.5 px-2 text-sm w-full"
                             placeholder="rolls, boxes, oz…"
                           />
                         </div>
                         <div>
                           <label htmlFor={`par-level-${catalogItem.id}`} className="text-xs text-muted-themed block mb-1">Par Level</label>
-                          <input
+                          <Input
                             id={`par-level-${catalogItem.id}`}
                             type="number"
                             min={0}
                             step={0.5}
                             value={parLevel}
                             onChange={(e) => updateSelected(catalogItem.id, 'parLevel', e.target.value)}
-                            className="input py-1.5 px-2 text-sm w-full"
+                            className="py-1.5 px-2 text-sm w-full"
                           />
                         </div>
                       </div>
@@ -429,12 +433,11 @@ function AddItemsModal({
             <>
               <div>
                 <label htmlFor="custom-item-name" className="label">Item Name <span className="text-red-500">*</span></label>
-                <input
+                <Input
                   id="custom-item-name"
                   type="text"
                   value={customName}
                   onChange={(e) => setCustomName(e.target.value)}
-                  className="input"
                   placeholder="e.g. Paper Towels"
                 />
               </div>
@@ -454,26 +457,24 @@ function AddItemsModal({
                 </div>
                 <div>
                   <label htmlFor="custom-unit" className="label">Unit <span className="text-red-500">*</span></label>
-                  <input
+                  <Input
                     id="custom-unit"
                     type="text"
                     value={customUnit}
                     onChange={(e) => setCustomUnit(e.target.value)}
-                    className="input"
                     placeholder="rolls, boxes, oz…"
                   />
                 </div>
               </div>
               <div>
                 <label htmlFor="custom-par-level" className="label">Par Level</label>
-                <input
+                <Input
                   id="custom-par-level"
                   type="number"
                   min={0}
                   step={0.5}
                   value={customParLevel}
                   onChange={(e) => setCustomParLevel(e.target.value)}
-                  className="input"
                 />
               </div>
               <div>
@@ -505,18 +506,18 @@ function AddItemsModal({
                   <input type="hidden" name={`item_${i}_par_level`}      value={parLevel} />
                 </Fragment>
               ))}
-              <button
+              <Button
                 type="submit"
                 disabled={pending || selectedArray.length === 0}
-                className="btn-primary flex-1 disabled:opacity-50"
+                className="flex-1 disabled:opacity-50"
               >
                 {pending
                   ? 'Adding…'
                   : selectedArray.length === 0
                   ? 'Select items above'
                   : `Add ${selectedArray.length} item${selectedArray.length !== 1 ? 's' : ''}`}
-              </button>
-              <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+              </Button>
+              <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
             </form>
           ) : (
             <form action={action} className="flex gap-3">
@@ -528,14 +529,14 @@ function AddItemsModal({
               <input type="hidden" name="item_0_unit"        value={customUnit} />
               <input type="hidden" name="item_0_par_level"   value={customParLevel} />
               <input type="hidden" name="item_0_notes"       value={customNotes} />
-              <button
+              <Button
                 type="submit"
                 disabled={pending || !customName.trim() || !customUnit.trim()}
-                className="btn-primary flex-1 disabled:opacity-50"
+                className="flex-1 disabled:opacity-50"
               >
                 {pending ? 'Adding…' : 'Add Item'}
-              </button>
-              <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+              </Button>
+              <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
             </form>
           )}
         </div>
@@ -616,13 +617,13 @@ function RunCountModal({
                       </div>
                       <div className="flex flex-col items-end gap-0.5">
                         <label htmlFor={`count-${item.id}`} className="text-xs text-muted-themed">New Count</label>
-                        <input
+                        <Input
                           id={`count-${item.id}`}
                           name={`item_${item.id}`}
                           type="number"
                           min={0}
                           defaultValue={item.current_quantity}
-                          className="input py-1 px-2 text-sm w-20 text-right"
+                          className="py-1 px-2 text-sm w-20 text-right"
                         />
                       </div>
                     </div>
@@ -644,10 +645,10 @@ function RunCountModal({
             </div>
 
             <div className="flex gap-3 pt-2 border-t border-themed">
-              <button type="submit" disabled={pending} className="btn-primary flex-1">
+              <Button type="submit" disabled={pending} className="flex-1">
                 {pending ? 'Submitting…' : 'Submit Count'}
-              </button>
-              <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+              </Button>
+              <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
             </div>
           </form>
         )}
@@ -763,24 +764,25 @@ function PropertyInventoryDetail({
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <button
+          <Button
             onClick={() => setShowRunCount(true)}
             disabled={items.length === 0}
-            className="btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
+            className="text-xs px-3 py-1.5 disabled:opacity-50"
           >
             <ClipboardList className="w-3.5 h-3.5" />
             Run Count
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => setShowAddItems(true)}
-            className="btn-secondary text-xs px-3 py-1.5"
+            className="text-xs px-3 py-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
             Add Items
-          </button>
-          <button onClick={onClose} className="btn-ghost p-2 ml-1">
+          </Button>
+          <Button variant="ghost" onClick={onClose} className="p-2 ml-1">
             <X className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -789,7 +791,7 @@ function PropertyInventoryDetail({
         <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
 
           {/* Inventory list */}
-          <div className="card flex flex-col gap-0 p-0 overflow-hidden">
+          <Card className="flex flex-col gap-0 p-0 overflow-hidden">
             {items.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-themed gap-3">
                 <Package className="w-8 h-8" />
@@ -797,9 +799,9 @@ function PropertyInventoryDetail({
                   <p className="text-sm font-medium text-secondary-themed">No inventory items yet</p>
                   <p className="text-xs text-muted-themed mt-0.5">Add items to start tracking stock levels.</p>
                 </div>
-                <button onClick={() => setShowAddItems(true)} className="btn-primary text-xs px-3 py-1.5">
+                <Button onClick={() => setShowAddItems(true)} className="text-xs px-3 py-1.5">
                   <Plus className="w-3.5 h-3.5" /> Add First Item
-                </button>
+                </Button>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -817,10 +819,10 @@ function PropertyInventoryDetail({
               </div>
               </div>
             )}
-          </div>
+          </Card>
 
           {/* Prior counts */}
-          <div className="card flex flex-col gap-0 p-0 overflow-hidden">
+          <Card className="flex flex-col gap-0 p-0 overflow-hidden">
             <button
               onClick={() => setShowCounts((o) => !o)}
               className="flex items-center gap-2 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
@@ -828,7 +830,7 @@ function PropertyInventoryDetail({
               <History className="w-3.5 h-3.5 text-muted-themed" />
               <span className="text-sm font-medium text-secondary-themed">Prior Counts</span>
               {recentCounts.length > 0 && (
-                <span className="badge badge-slate text-xs">{Math.min(recentCounts.length, 6)}</span>
+                <Badge tone="slate" className="text-xs">{Math.min(recentCounts.length, 6)}</Badge>
               )}
               <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', showCounts && 'rotate-180')} />
             </button>
@@ -858,18 +860,18 @@ function PropertyInventoryDetail({
                 </div>
               )
             )}
-          </div>
+          </Card>
 
           {/* Purchase Orders */}
           {purchaseOrders.length > 0 && (
-            <div className="card flex flex-col gap-0 p-0 overflow-hidden">
+            <Card className="flex flex-col gap-0 p-0 overflow-hidden">
               <button
                 onClick={() => setShowPOs((o) => !o)}
                 className="flex items-center gap-2 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
               >
                 <ShoppingCart className="w-3.5 h-3.5 text-muted-themed" />
                 <span className="text-sm font-medium text-secondary-themed">Purchase Orders</span>
-                <span className="badge badge-slate text-xs">{purchaseOrders.length}</span>
+                <Badge tone="slate" className="text-xs">{purchaseOrders.length}</Badge>
                 <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', showPOs && 'rotate-180')} />
               </button>
               {showPOs && (
@@ -930,7 +932,7 @@ function PropertyInventoryDetail({
                   })}
                 </div>
               )}
-            </div>
+            </Card>
           )}
         </div>
       </div>
@@ -975,7 +977,7 @@ function PropertyInventoryCard({
   const uncountedCount = items.filter((i) => getStockStatus(i) === 'uncounted').length
 
   return (
-    <div className="card flex flex-col gap-4 hover:shadow-card-md transition-shadow">
+    <Card className="flex flex-col gap-4 hover:shadow-card-md transition-shadow">
 
       {/* Header — matches properties page card */}
       <div className="flex items-start justify-between gap-2">
@@ -991,20 +993,20 @@ function PropertyInventoryCard({
 
       {/* Stock summary badges */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="badge badge-slate">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+        <Badge tone="slate">{items.length} item{items.length !== 1 ? 's' : ''}</Badge>
         {criticalCount > 0 && (
-          <span className="badge badge-red flex items-center gap-0.5">
+          <Badge tone="red" className="flex items-center gap-0.5">
             <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
-          </span>
+          </Badge>
         )}
         {lowCount > 0 && criticalCount === 0 && (
-          <span className="badge badge-amber">{lowCount} low</span>
+          <Badge tone="amber">{lowCount} low</Badge>
         )}
         {uncountedCount > 0 && (
-          <span className="badge badge-slate">{uncountedCount} needs count</span>
+          <Badge tone="slate">{uncountedCount} needs count</Badge>
         )}
         {criticalCount === 0 && lowCount === 0 && uncountedCount === 0 && items.length > 0 && (
-          <span className="badge badge-green">All healthy</span>
+          <Badge tone="green">All healthy</Badge>
         )}
         {items.length === 0 && (
           <span className="text-xs text-muted-themed">No items yet</span>
@@ -1013,14 +1015,15 @@ function PropertyInventoryCard({
 
       {/* Actions — matches properties page card footer */}
       <div className="flex gap-2 pt-1 border-t border-themed">
-        <button
+        <Button
+          variant="secondary"
           onClick={onSelect}
-          className="btn-secondary text-xs px-3 py-1.5 flex-1 justify-center"
+          className="text-xs px-3 py-1.5 flex-1 justify-center"
         >
           View Inventory
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -1056,11 +1059,11 @@ function PendingCountReview({
   }
 
   return (
-    <div className="card p-0 overflow-hidden mb-6">
+    <Card className="p-0 overflow-hidden mb-6">
       <div className="px-5 py-3 border-b border-themed bg-canvas-themed flex items-center gap-2">
         <AlertTriangle className="w-4 h-4" style={{ color: 'var(--accent-amber)' }} />
         <span className="text-sm font-semibold text-primary-themed">Pending Count Review</span>
-        <span className="badge badge-amber">{drafts.length}</span>
+        <Badge tone="amber">{drafts.length}</Badge>
       </div>
       {drafts.map(draft => {
         const draftItems = draft.inventory_count_draft_items ?? []
@@ -1132,28 +1135,29 @@ function PendingCountReview({
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button
+                  <Button
                     onClick={() => handleApprove(draft.id)}
                     disabled={isPending}
-                    className="btn-primary text-sm flex-1"
+                    className="text-sm flex-1"
                   >
                     Approve & Commit
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
                     onClick={() => handleReject(draft.id)}
                     disabled={isPending}
-                    className="btn-ghost text-sm"
+                    className="text-sm"
                     style={{ color: 'var(--accent-red)' }}
                   >
                     Reject
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
           </div>
         )
       })}
-    </div>
+    </Card>
   )
 }
 
@@ -1245,15 +1249,15 @@ export function InventoryManager({
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <p className="page-subtitle">{totalItems} items across {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'}</p>
             {totalCritical > 0 && (
-              <span className="badge badge-red flex items-center gap-1">
+              <Badge tone="red" className="flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3" /> {totalCritical} critical
-              </span>
+              </Badge>
             )}
             {totalLow > 0 && (
-              <span className="badge badge-amber">{totalLow} low</span>
+              <Badge tone="amber">{totalLow} low</Badge>
             )}
             {totalUncounted > 0 && (
-              <span className="badge badge-slate">{totalUncounted} needs count</span>
+              <Badge tone="slate">{totalUncounted} needs count</Badge>
             )}
           </div>
         </div>
@@ -1288,11 +1292,11 @@ export function InventoryManager({
 
       {activeTab === 'property' && (
         properties.length === 0 ? (
-          <div className="card text-center py-16 max-w-md mx-auto mt-4">
+          <Card className="text-center py-16 max-w-md mx-auto mt-4">
             <Package className="w-10 h-10 text-muted-themed mx-auto mb-3" />
             <h3 className="font-semibold text-secondary-themed mb-1">No properties yet</h3>
             <p className="text-sm text-muted-themed">Add a property to start managing inventory.</p>
-          </div>
+          </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {properties.map((p) => (
@@ -1310,18 +1314,19 @@ export function InventoryManager({
       {activeTab === 'portfolio' && (
         <>
           <div className="flex justify-end mb-4">
-            <button
+            <Button
+              variant="secondary"
               onClick={() => startCartTransition(async () => {
                 const result = await triggerShoppingCart()
                 if (result.success) setCartTriggered(true)
               })}
               disabled={cartPending}
-              className="btn-secondary flex items-center gap-2"
+              className="flex items-center gap-2"
             >
               {cartPending
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Building…</>
                 : <><ShoppingCart className="w-4 h-4" /> Build Cart</>}
-            </button>
+            </Button>
           </div>
           {cartTriggered && (
             <div className="mb-4 text-sm rounded-xl px-4 py-3 border border-themed flex items-center gap-2"

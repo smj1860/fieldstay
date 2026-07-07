@@ -2,10 +2,13 @@
 
 import { useState, useTransition } from 'react'
 import { AlertTriangle, Download, Clipboard, Check } from 'lucide-react'
-import { cn, INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
+import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { generateAggregatedPurchaseList } from './actions'
 import type { InventoryCategory } from '@/types/database'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 
 interface PortfolioItem {
   id: string
@@ -29,10 +32,10 @@ interface AggregatedItem {
 
 function StatCard({ label, value, color }: Readonly<{ label: string; value: number; color: string }>) {
   return (
-    <div className="card p-4 text-center">
+    <Card className="p-4 text-center">
       <div className="text-2xl font-bold" style={{ color }}>{value}</div>
       <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{label}</div>
-    </div>
+    </Card>
   )
 }
 
@@ -100,14 +103,14 @@ export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioIte
 
       {/* Reorder button */}
       {critical.length > 0 && (
-        <button
+        <Button
           onClick={handleGenerateList}
           disabled={isPending}
-          className="btn-primary mb-4 w-full sm:w-auto"
+          className="mb-4 w-full sm:w-auto"
         >
           <AlertTriangle className="w-4 h-4" />
           {isPending ? 'Generating…' : `Generate Reorder List (${critical.length} items)`}
-        </button>
+        </Button>
       )}
 
       {/* Purchase list modal */}
@@ -119,13 +122,13 @@ export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioIte
           maxWidthClassName="max-w-2xl"
         >
           <div className="flex items-center justify-end gap-2 mb-4 flex-shrink-0">
-            <button onClick={handleCopyClipboard} className="btn-secondary text-xs flex items-center gap-1">
+            <Button variant="secondary" onClick={handleCopyClipboard} className="text-xs flex items-center gap-1">
               {copied ? <Check className="w-3.5 h-3.5" /> : <Clipboard className="w-3.5 h-3.5" />}
               {copied ? 'Copied!' : 'Copy'}
-            </button>
-            <button onClick={handleDownloadCsv} className="btn-secondary text-xs flex items-center gap-1">
+            </Button>
+            <Button variant="secondary" onClick={handleDownloadCsv} className="text-xs flex items-center gap-1">
               <Download className="w-3.5 h-3.5" /> CSV
-            </button>
+            </Button>
           </div>
           <div className="max-h-[60vh] overflow-y-auto -mx-6 px-6">
             {purchaseList.length === 0 ? (
@@ -202,10 +205,10 @@ export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioIte
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono text-secondary-themed">{item.par_level}</td>
                   <td className="px-4 py-2.5">
-                    {isUncounted ? <span className="badge badge-slate">Needs Count</span>
-                     : isCritical ? <span className="badge badge-red">At/Below Par</span>
-                     : isLow      ? <span className="badge badge-amber">Low</span>
-                                  : <span className={cn('badge', 'badge-green')}>Healthy</span>}
+                    {isUncounted ? <Badge tone="slate">Needs Count</Badge>
+                     : isCritical ? <Badge tone="red">At/Below Par</Badge>
+                     : isLow      ? <Badge tone="amber">Low</Badge>
+                                  : <Badge tone="green">Healthy</Badge>}
                   </td>
                 </tr>
               )

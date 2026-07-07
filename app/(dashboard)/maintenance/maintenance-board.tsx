@@ -22,6 +22,10 @@ import { WorkOrderDetail, type WorkOrderDetailData } from '@/components/work-ord
 import { MaintenanceCalendar } from './maintenance-calendar'
 import { createClient } from '@/lib/supabase/client'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -205,24 +209,26 @@ const KANBAN_COLUMNS: { key: WoStatus; label: string; accentColor: string }[] = 
   { key: 'completed',   label: 'Completed',   accentColor: 'var(--accent-green)' },
 ]
 
-function priorityBadgeClass(priority: PriorityLevel): string {
-  const map: Record<PriorityLevel, string> = {
-    low:    'badge badge-slate',
-    medium: 'badge badge-blue',
-    high:   'badge badge-amber',
-    urgent: 'badge badge-red',
+type BadgeTone = 'green' | 'amber' | 'red' | 'blue' | 'gold' | 'slate'
+
+function priorityBadgeTone(priority: PriorityLevel): BadgeTone {
+  const map: Record<PriorityLevel, BadgeTone> = {
+    low:    'slate',
+    medium: 'blue',
+    high:   'amber',
+    urgent: 'red',
   }
   return map[priority]
 }
 
-function statusBadgeClass(status: WoStatus): string {
-  const map: Record<WoStatus, string> = {
-    pending:         'badge badge-slate',
-    quote_requested: 'badge badge-gold',
-    assigned:        'badge badge-blue',
-    in_progress:     'badge badge-amber',
-    completed:       'badge badge-green',
-    cancelled:       'badge badge-slate',
+function statusBadgeTone(status: WoStatus): BadgeTone {
+  const map: Record<WoStatus, BadgeTone> = {
+    pending:         'slate',
+    quote_requested: 'gold',
+    assigned:        'blue',
+    in_progress:     'amber',
+    completed:       'green',
+    cancelled:       'slate',
   }
   return map[status]
 }
@@ -318,12 +324,12 @@ function WorkOrderCard({
                 {wo.wo_number}
               </span>
             )}
-            <span className={priorityBadgeClass(wo.priority)}>
+            <Badge tone={priorityBadgeTone(wo.priority)}>
               {PRIORITY_LABELS[wo.priority]}
-            </span>
-            <span className={statusBadgeClass(wo.status)}>
+            </Badge>
+            <Badge tone={statusBadgeTone(wo.status)}>
               {WO_STATUS_LABELS[wo.status]}
-            </span>
+            </Badge>
           </div>
 
           {/* Property + vendor */}
@@ -494,12 +500,11 @@ function CreateWorkOrderModal({
                 <label htmlFor="wo-title" className="label">
                   Title <span className="text-red-500">*</span>
                 </label>
-                <input
+                <Input
                   id="wo-title"
                   name="title"
                   type="text"
                   required
-                  className="input"
                   placeholder="e.g. Fix leaking faucet in master bath"
                 />
               </div>
@@ -569,14 +574,14 @@ function CreateWorkOrderModal({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label htmlFor="wo-date" className="label">Completed By Date</label>
-                  <input id="wo-date" name="scheduled_date" type="date" className="input" />
+                  <Input id="wo-date" name="scheduled_date" type="date" />
                   <label htmlFor="wo-time" className="label mt-3">
                     Scheduled time
                     <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
                       Optional — use for same-day flip vendor windows
                     </span>
                   </label>
-                  <input id="wo-time" name="scheduled_time" type="time" className="input" />
+                  <Input id="wo-time" name="scheduled_time" type="time" />
                 </div>
                 <div>
                   <label htmlFor="wo-nte" className="label">
@@ -585,13 +590,12 @@ function CreateWorkOrderModal({
                       ceiling
                     </span>
                   </label>
-                  <input
+                  <Input
                     id="wo-nte"
                     name="nte_amount"
                     type="number"
                     min="0"
                     step="0.01"
-                    className="input"
                     placeholder="0.00"
                   />
                 </div>
@@ -788,18 +792,18 @@ function CreateWorkOrderModal({
           </div>
 
           <div className="flex gap-3 pt-2 border-t border-themed">
-            <button
+            <Button
               type="submit"
               disabled={pending || selectedCompliance === 'hard_blocked'}
-              className="btn-primary flex-1"
+              className="flex-1"
             >
               {pending
                 ? 'Creating…'
                 : assignMode === 'quotes' && selectedQuoteVendors.length > 0
                 ? `Create & Request ${selectedQuoteVendors.length} Quote${selectedQuoteVendors.length !== 1 ? 's' : ''}`
                 : 'Create Work Order'}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            </Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
         </form>
     </Dialog>
@@ -823,7 +827,7 @@ function ScheduleFormFields({
     <>
       <div>
         <label className="label">Name <span className="text-red-500">*</span></label>
-        <input name="name" type="text" required className="input" defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
+        <Input name="name" type="text" required defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
       </div>
 
       {!defaults && (
@@ -872,11 +876,11 @@ function ScheduleFormFields({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="label">Next Due Date</label>
-          <input name="next_due_date" type="date" className="input" defaultValue={defaults?.next_due_date ?? ''} />
+          <Input name="next_due_date" type="date" defaultValue={defaults?.next_due_date ?? ''} />
         </div>
         <div>
           <label className="label">Est. Cost ($)</label>
-          <input name="estimated_cost" type="number" min="0" step="0.01" className="input" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
+          <Input name="estimated_cost" type="number" min="0" step="0.01" defaultValue={defaults?.estimated_cost ?? ''} placeholder="0.00" />
         </div>
       </div>
 
@@ -951,8 +955,8 @@ function AddScheduleModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <ScheduleFormFields properties={properties} vendors={vendors} />
           <div className="flex gap-3 pt-2 border-t border-themed">
-            <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving…' : 'Add Schedule'}</button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            <Button type="submit" disabled={saving} className="flex-1">{saving ? 'Saving…' : 'Add Schedule'}</Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
         </form>
     </Dialog>
@@ -1003,8 +1007,8 @@ function EditScheduleModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
           <div className="flex gap-3 pt-2 border-t border-themed">
-            <button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Saving…' : 'Save Changes'}</button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            <Button type="submit" disabled={saving} className="flex-1">{saving ? 'Saving…' : 'Save Changes'}</Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
         </form>
     </Dialog>
@@ -1065,16 +1069,17 @@ function SchedulesSection({
             <span className="text-sm font-semibold text-secondary-themed group-hover:text-primary-themed transition-colors">
               Maintenance Schedules
             </span>
-            <span className="badge badge-slate">{schedules.length}</span>
+            <Badge tone="slate">{schedules.length}</Badge>
             <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
           </button>
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setShowAdd(true)}
-            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"
+            className="text-xs py-1.5 px-3 flex items-center gap-1"
           >
             <Plus className="w-3 h-3" />
             Add Schedule
-          </button>
+          </Button>
         </div>
         <p className="text-xs text-muted-themed mb-3">Recurring tasks that generate work orders automatically</p>
 
@@ -1153,36 +1158,39 @@ function SchedulesSection({
                       </td>
                       <td className="px-4 py-3">
                         {s.auto_create_wo ? (
-                          <span className="badge badge-green">Auto</span>
+                          <Badge tone="green">Auto</Badge>
                         ) : (
-                          <span className="badge badge-slate">Manual</span>
+                          <Badge tone="slate">Manual</Badge>
                         )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <button
+                          <Button
+                            variant="secondary"
                             onClick={() => handleCreateWO(s.id)}
                             disabled={creating && creatingId === s.id}
-                            className="btn-secondary text-xs py-1.5 px-3 whitespace-nowrap"
+                            className="text-xs py-1.5 px-3 whitespace-nowrap"
                           >
                             {creating && creatingId === s.id ? <Clock className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
                             Create WO
-                          </button>
-                          <button
+                          </Button>
+                          <Button
+                            variant="ghost"
                             onClick={() => setEditingId(s.id)}
-                            className="btn-ghost p-1.5"
+                            className="p-1.5"
                             title="Edit schedule"
                           >
                             <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
+                          </Button>
+                          <Button
+                            variant="ghost"
                             onClick={() => handleDelete(s.id)}
                             disabled={deleting && deletingId === s.id}
-                            className="btn-ghost p-1.5 text-red-500 hover:text-red-600"
+                            className="p-1.5 text-red-500 hover:text-red-600"
                             title="Delete schedule"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -1292,7 +1300,7 @@ function TemplateBroadcastModal({
                 </p>
               )}
             </div>
-            <button onClick={onClose} className="btn-primary w-full">Done</button>
+            <Button onClick={onClose} className="w-full">Done</Button>
           </div>
         ) : (
           <>
@@ -1305,21 +1313,21 @@ function TemplateBroadcastModal({
                       <span className="text-secondary-themed truncate">{item.name}</span>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         {item.is_optional_flag && (
-                          <span className="badge badge-amber text-xs flex items-center gap-1">
+                          <Badge tone="amber" className="text-xs flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3" />
                             {item.is_optional_flag}
-                          </span>
+                          </Badge>
                         )}
-                        <span className="badge badge-slate text-xs">
+                        <Badge tone="slate" className="text-xs">
                           {FREQUENCY_LABELS[item.schedule_frequency] ?? item.schedule_frequency}
-                        </span>
+                        </Badge>
                       </div>
                     </li>
                   ))}
                 </ul>
                 <div className="flex gap-3 pt-4 mt-2 border-t border-themed">
-                  <button onClick={() => setStep(2)} className="btn-primary flex-1">Continue</button>
-                  <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+                  <Button onClick={() => setStep(2)} className="flex-1">Continue</Button>
+                  <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
                 </div>
               </div>
             )}
@@ -1346,14 +1354,14 @@ function TemplateBroadcastModal({
                   ))}
                 </div>
                 <div className="flex gap-3 pt-4 mt-2 border-t border-themed">
-                  <button onClick={() => setStep(1)} className="btn-ghost">Back</button>
-                  <button
+                  <Button variant="ghost" onClick={() => setStep(1)}>Back</Button>
+                  <Button
                     onClick={() => setStep(3)}
                     disabled={selectedPropertyIds.length === 0}
-                    className="btn-primary flex-1"
+                    className="flex-1"
                   >
                     Continue
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -1372,15 +1380,15 @@ function TemplateBroadcastModal({
                   </p>
                 </div>
                 <div className="flex gap-3 pt-2 border-t border-themed">
-                  <button onClick={() => setStep(2)} disabled={broadcasting} className="btn-ghost">Back</button>
-                  <button
+                  <Button variant="ghost" onClick={() => setStep(2)} disabled={broadcasting}>Back</Button>
+                  <Button
                     onClick={handleBroadcast}
                     disabled={broadcasting}
-                    className="btn-primary flex-1 flex items-center justify-center gap-2"
+                    className="flex-1 flex items-center justify-center gap-2"
                   >
                     {broadcasting ? <Clock className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                     {broadcasting ? 'Broadcasting…' : 'Broadcast'}
-                  </button>
+                  </Button>
                 </div>
               </div>
             )}
@@ -1566,12 +1574,12 @@ function CreateTemplateModal({
                   </p>
                 </div>
               </div>
-              <button onClick={onClose} className="btn-primary w-full">Done</button>
+              <Button onClick={onClose} className="w-full">Done</Button>
             </div>
           ) : properties.length === 0 ? (
             <div className="space-y-4">
               <p className="text-sm text-muted-themed">No properties found to apply this template to. You can broadcast it later from the Schedule Templates list.</p>
-              <button onClick={onClose} className="btn-primary w-full">Done</button>
+              <Button onClick={onClose} className="w-full">Done</Button>
             </div>
           ) : (
             <div className="space-y-4">
@@ -1626,15 +1634,15 @@ function CreateTemplateModal({
               )}
 
               <div className="flex gap-3 pt-4 mt-2 border-t border-themed">
-                <button type="button" onClick={onClose} className="btn-ghost">Skip</button>
-                <button
+                <Button variant="ghost" type="button" onClick={onClose}>Skip</Button>
+                <Button
                   onClick={handleApply}
                   disabled={applying || (applyMode === 'select' && selectedPropertyIds.length === 0)}
-                  className="btn-primary flex-1 flex items-center justify-center gap-2"
+                  className="flex-1 flex items-center justify-center gap-2"
                 >
                   {applying ? <Clock className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                   {applying ? 'Applying…' : 'Apply Template'}
-                </button>
+                </Button>
               </div>
             </div>
           )}
@@ -1650,11 +1658,11 @@ function CreateTemplateModal({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="label">Template Name <span className="text-red-500">*</span></label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. STR Annual Maintenance" required />
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. STR Annual Maintenance" required />
           </div>
           <div>
             <label className="label">Description</label>
-            <input value={description} onChange={(e) => setDesc(e.target.value)} className="input" placeholder="Optional description…" />
+            <Input value={description} onChange={(e) => setDesc(e.target.value)} placeholder="Optional description…" />
           </div>
 
           {catalogItems.length > 0 && (
@@ -1694,14 +1702,14 @@ function CreateTemplateModal({
                               />
                               <span className="text-secondary-themed flex-1 truncate">{ci.name}</span>
                               {ci.is_optional_flag && (
-                                <span className="badge badge-amber text-xs flex-shrink-0 flex items-center gap-1">
+                                <Badge tone="amber" className="text-xs flex-shrink-0 flex items-center gap-1">
                                   <AlertTriangle className="w-3 h-3" />
                                   {ci.is_optional_flag}
-                                </span>
+                                </Badge>
                               )}
-                              <span className="badge badge-slate text-xs flex-shrink-0">
+                              <Badge tone="slate" className="text-xs flex-shrink-0">
                                 {FREQUENCY_LABELS[ci.schedule_frequency] ?? ci.schedule_frequency}
-                              </span>
+                              </Badge>
                             </label>
                           ))}
                         </div>
@@ -1716,9 +1724,9 @@ function CreateTemplateModal({
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="label mb-0">Items <span className="text-red-500">*</span></label>
-              <button type="button" onClick={addItem} className="btn-secondary text-xs py-1 px-2 flex items-center gap-1">
+              <Button variant="secondary" type="button" onClick={addItem} className="text-xs py-1 px-2 flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Add Item
-              </button>
+              </Button>
             </div>
             <div className="space-y-2">
               {items.map((item, i) => (
@@ -1727,8 +1735,8 @@ function CreateTemplateModal({
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
                         <label className="label text-xs">Item Name <span className="text-red-500">*</span></label>
-                        <input value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
-                               className="input text-sm" placeholder="e.g. HVAC Filter Replacement" />
+                        <Input value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
+                               className="text-sm" placeholder="e.g. HVAC Filter Replacement" />
                       </div>
                       <div>
                         <label className="label text-xs">Frequency</label>
@@ -1749,16 +1757,16 @@ function CreateTemplateModal({
                       </div>
                       <div>
                         <label className="label text-xs">Est. Cost ($)</label>
-                        <input type="number" min="0" step="0.01" value={item.estimated_cost}
+                        <Input type="number" min="0" step="0.01" value={item.estimated_cost}
                                onChange={(e) => updateItem(i, 'estimated_cost', e.target.value)}
-                               className="input text-sm" placeholder="0.00" />
+                               className="text-sm" placeholder="0.00" />
                       </div>
                     </div>
                     {items.length > 1 && (
-                      <button type="button" onClick={() => removeItem(i)}
-                              className="btn-ghost p-1.5 text-red-500 hover:text-red-600 mt-5 flex-shrink-0">
+                      <Button variant="ghost" type="button" onClick={() => removeItem(i)}
+                              className="p-1.5 text-red-500 hover:text-red-600 mt-5 flex-shrink-0">
                         <Trash2 className="w-4 h-4" />
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -1767,10 +1775,10 @@ function CreateTemplateModal({
           </div>
 
           <div className="flex gap-3 pt-2 border-t border-themed">
-            <button type="submit" disabled={saving} className="btn-primary flex-1">
+            <Button type="submit" disabled={saving} className="flex-1">
               {saving ? 'Creating…' : 'Create Template'}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            </Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
         </form>
     </Dialog>
@@ -1806,16 +1814,17 @@ function TemplatesSection({
             <span className="text-sm font-semibold text-secondary-themed group-hover:text-primary-themed transition-colors">
               Schedule Templates
             </span>
-            <span className="badge badge-slate">{templates.length}</span>
+            <Badge tone="slate">{templates.length}</Badge>
             <ChevronDown className={cn('w-4 h-4 text-muted-themed ml-auto transition-transform', open && 'rotate-180')} />
           </button>
-          <button
+          <Button
+            variant="secondary"
             onClick={() => setShowCreateTemplate(true)}
-            className="btn-secondary text-xs py-1.5 px-3 flex items-center gap-1"
+            className="text-xs py-1.5 px-3 flex items-center gap-1"
           >
             <Plus className="w-3 h-3" />
             Create Template
-          </button>
+          </Button>
         </div>
         <p className="text-xs text-muted-themed mb-3">
           Broadcast a curated set of recurring maintenance schedules to multiple properties at once
@@ -1837,18 +1846,19 @@ function TemplatesSection({
                   <div className="flex items-start justify-between gap-2 mb-1">
                     <span className="font-medium text-primary-themed text-sm">{t.name}</span>
                     {t.is_system && (
-                      <span
-                        className="badge badge-blue flex-shrink-0"
+                      <Badge
+                        tone="blue"
+                        className="flex-shrink-0"
                         title="This is a read-only FieldStay template. Create your own template to customise it."
                       >
                         FieldStay · Read-only
-                      </span>
+                      </Badge>
                     )}
                   </div>
                   {t.description && (
                     <p className="text-xs text-muted-themed mb-2 truncate">{t.description}</p>
                   )}
-                  <span className="badge badge-slate w-fit mb-2">{items.length} item{items.length !== 1 ? 's' : ''}</span>
+                  <Badge tone="slate" className="w-fit mb-2">{items.length} item{items.length !== 1 ? 's' : ''}</Badge>
                   <ul className="text-xs text-secondary-themed space-y-0.5 mb-3 flex-1">
                     {preview.map((item) => (
                       <li key={item.id} className="truncate">• {item.name}</li>
@@ -1867,14 +1877,15 @@ function TemplatesSection({
                         Edit
                       </Link>
                     )}
-                    <button
+                    <Button
+                      variant="secondary"
                       onClick={() => setBroadcastTemplateId(t.id)}
                       disabled={properties.length === 0}
-                      className="btn-secondary text-xs py-1.5 px-3 flex items-center justify-center gap-1.5 flex-1"
+                      className="text-xs py-1.5 px-3 flex items-center justify-center gap-1.5 flex-1"
                     >
                       <Send className="w-3 h-3" />
                       Broadcast
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )
@@ -1948,17 +1959,17 @@ function EditTemplateModal({
               <Check className="w-4 h-4" />
               Template updated
             </p>
-            <button onClick={onClose} className="btn-primary">Done</button>
+            <Button onClick={onClose}>Done</Button>
           </div>
         ) : (
           <div className="space-y-4">
             <div>
               <label className="label">Template Name <span className="text-red-400">*</span></label>
-              <input
+              <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={100}
-                className="input w-full"
+                className="w-full"
                 placeholder="e.g. Seasonal Rental Prep"
               />
             </div>
@@ -1979,14 +1990,14 @@ function EditTemplateModal({
             )}
 
             <div className="flex gap-3 pt-1">
-              <button
+              <Button
                 onClick={handleSave}
                 disabled={saving}
-                className="btn-primary flex-1 flex items-center justify-center gap-2"
+                className="flex-1 flex items-center justify-center gap-2"
               >
                 {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
-              </button>
-              <button onClick={onClose} className="btn-ghost">Cancel</button>
+              </Button>
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
             </div>
           </div>
         )}
@@ -2110,22 +2121,22 @@ export function MaintenanceBoard({
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             <p className="page-subtitle">{openCount} open work order{openCount !== 1 ? 's' : ''}</p>
             {urgentCount > 0 && (
-              <span className="badge badge-red">
+              <Badge tone="red">
                 <AlertTriangle className="w-3 h-3" />
                 {urgentCount} urgent
-              </span>
+              </Badge>
             )}
             {pendingCount > 0 && (
-              <span className="badge badge-slate">
+              <Badge tone="slate">
                 {pendingCount} pending
-              </span>
+              </Badge>
             )}
           </div>
         </div>
-        <button onClick={() => setShowCreate(true)} className="btn-primary">
+        <Button onClick={() => setShowCreate(true)}>
           <Plus className="w-4 h-4" />
           New Work Order
-        </button>
+        </Button>
       </div>
 
       {/* Tabs */}
@@ -2189,12 +2200,13 @@ export function MaintenanceBoard({
           <option value="low">Low</option>
         </select>
         {(filterProperty !== 'all' || filterPriority !== 'all') && (
-          <button
+          <Button
+            variant="ghost"
             onClick={() => { setFilterProperty('all'); setFilterPriority('all') }}
-            className="btn-ghost text-xs py-1.5 text-muted-themed"
+            className="text-xs py-1.5 text-muted-themed"
           >
             <X className="w-3 h-3" /> Clear filters
-          </button>
+          </Button>
         )}
         <label className="flex items-center gap-1.5 text-xs cursor-pointer text-muted-themed">
           <input
@@ -2264,7 +2276,7 @@ export function MaintenanceBoard({
 
       {/* Work Orders List */}
       {viewMode === 'list' && (filtered.length === 0 ? (
-        <div className="card text-center py-16 max-w-md mx-auto mt-4">
+        <Card className="text-center py-16 max-w-md mx-auto mt-4">
           <Wrench className="w-10 h-10 text-muted-themed mx-auto mb-3" />
           <h3 className="font-semibold text-secondary-themed mb-1">No work orders found</h3>
           <p className="text-sm text-muted-themed mb-4">
@@ -2274,12 +2286,12 @@ export function MaintenanceBoard({
             }
           </p>
           {allWorkOrders.length === 0 && (
-            <button onClick={() => setShowCreate(true)} className="btn-primary mx-auto">
+            <Button onClick={() => setShowCreate(true)} className="mx-auto">
               <Plus className="w-4 h-4" />
               New Work Order
-            </button>
+            </Button>
           )}
-        </div>
+        </Card>
       ) : (
         <div>
           {filtered.length > 1 && (
@@ -2430,9 +2442,9 @@ export function MaintenanceBoard({
             <span className="text-sm font-semibold flex-shrink-0" style={{ color: 'var(--text-primary)' }}>
               {selectedIds.size} selected
             </span>
-            <button onClick={clearSelection} className="btn-ghost text-xs flex-shrink-0 flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+            <Button variant="ghost" onClick={clearSelection} className="text-xs flex-shrink-0 flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
               <X className="w-3.5 h-3.5" /> Clear
-            </button>
+            </Button>
           </div>
           <div className="flex items-center gap-2">
             <select
