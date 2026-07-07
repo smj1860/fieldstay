@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { Button } from '@/components/ui/Button'
 
 type AutoAssignMode = 'disabled' | 'suggest' | 'autopilot'
 
@@ -75,14 +76,13 @@ export function AutoAssignWizardStep({ initialMode, continueAction }: AutoAssign
         ))}
       </div>
 
-      <button
+      <Button
         type="button"
         onClick={handleSubmit}
         disabled={isPending}
-        className="btn-primary"
       >
         {isPending ? 'Saving…' : 'Continue →'}
-      </button>
+      </Button>
     </div>
   )
 }

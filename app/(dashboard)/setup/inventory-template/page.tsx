@@ -1,6 +1,7 @@
 import { requireOrgMember } from '@/lib/auth'
 import { TemplateManager } from '../../inventory/template-manager'
 import { markStepComplete } from '../actions'
+import { Button } from '@/components/ui/Button'
 
 export default async function OnboardingInventoryTemplatePage() {
   const { supabase, membership } = await requireOrgMember()
@@ -54,9 +55,9 @@ export default async function OnboardingInventoryTemplatePage() {
 
       <div className="pt-4 border-t border-themed">
         <form action={continueAction}>
-          <button type="submit" className="btn-primary">
+          <Button type="submit">
             Save &amp; Continue →
-          </button>
+          </Button>
         </form>
       </div>
     </div>

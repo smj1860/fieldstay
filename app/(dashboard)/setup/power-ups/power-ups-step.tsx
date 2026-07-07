@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useTransition } from 'react'
+import { Button } from '@/components/ui/Button'
 
 interface PowerUp {
   title: string
@@ -61,14 +62,13 @@ export function PowerUpsStep({ powerUps, finishAction }: PowerUpsStepProps) {
       </div>
 
       <div className="flex items-center gap-3">
-        <button
+        <Button
           type="button"
           onClick={handleFinish}
           disabled={isPending}
-          className="btn-primary"
         >
           {isPending ? 'Finishing…' : 'Finish setup →'}
-        </button>
+        </Button>
         <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
           You can connect integrations later in Settings.
         </span>

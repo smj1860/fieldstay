@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Loader2, Check } from 'lucide-react'
 import { triggerDepreciationLedger } from './actions'
 import { createClient } from '@/lib/supabase/client'
+import { Button } from '@/components/ui/Button'
 
 export function TriggerLedgerButton({ taxYear, orgId }: Readonly<{ taxYear: number; orgId: string }>) {
   const [loading, setLoading]   = useState(false)
@@ -81,14 +82,14 @@ export function TriggerLedgerButton({ taxYear, orgId }: Readonly<{ taxYear: numb
   }
 
   return (
-    <button
+    <Button
       onClick={handleClick}
       disabled={loading || polling}
-      className="btn-primary text-sm flex items-center gap-1.5"
+      className="text-sm flex items-center gap-1.5"
     >
       {(loading || polling)
         ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {loading ? 'Starting…' : 'Generating…'}</>
         : `Generate ${taxYear} Ledger`}
-    </button>
+    </Button>
   )
 }

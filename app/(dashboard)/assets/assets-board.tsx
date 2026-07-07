@@ -8,6 +8,8 @@ import { healthLabel, healthColor, healthBgStyle, healthDot } from '@/lib/assets
 import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discovery/config'
 import { createClient } from '@/lib/supabase/client'
 import { StatusDot } from '@/components/ui/StatusDot'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
 import type { AssetType } from '@/types/database'
 
 function healthStatus(score: number): 'good' | 'warning' | 'attention' | 'critical' | 'offline' {
@@ -181,7 +183,7 @@ export function AssetsBoard({
       )}
 
       {realAssets.length === 0 && placeholderTypes.length === 0 ? (
-        <div className="card text-center py-16">
+        <Card className="text-center py-16">
           <p className="text-muted-themed text-sm mb-4">No assets tracked yet.</p>
           <p className="text-muted-themed text-sm">
             Go to a{' '}
@@ -190,9 +192,9 @@ export function AssetsBoard({
             </Link>{' '}
             and add appliances, HVAC, roofing, and more.
           </p>
-        </div>
+        </Card>
       ) : (
-        <div className="card">
+        <Card>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -246,7 +248,7 @@ export function AssetsBoard({
                             <StatusDot status={dot} label={label} /> {score}/100 · {label}
                           </span>
                         ) : (
-                          <span className="badge badge-slate">Unknown</span>
+                          <Badge tone="slate">Unknown</Badge>
                         )}
                       </td>
                     </tr>
@@ -257,7 +259,7 @@ export function AssetsBoard({
                   <tr key={`placeholder-${assetType}`} className="opacity-70">
                     <td className="px-4 py-3">
                       <span className="font-medium text-primary-themed">{typeLabel(assetType)}</span>
-                      <span className="badge badge-slate text-xs ml-2">Awaiting Discovery</span>
+                      <Badge tone="slate" className="text-xs ml-2">Awaiting Discovery</Badge>
                     </td>
                     <td className="px-4 py-3 text-secondary-themed">{selectedPropertyName}</td>
                     <td className="px-4 py-3 text-muted-themed hidden sm:table-cell">—</td>
@@ -270,7 +272,7 @@ export function AssetsBoard({
               </tbody>
             </table>
           </div>
-        </div>
+        </Card>
       )}
     </div>
   )
@@ -286,7 +288,7 @@ function SummaryCard({
   accent?: string
 }>) {
   return (
-    <div className="card flex flex-col gap-1">
+    <Card className="flex flex-col gap-1">
       <p className="text-xs text-muted-themed">{label}</p>
       <p
         className="text-2xl font-bold"
@@ -294,6 +296,6 @@ function SummaryCard({
       >
         {value}
       </p>
-    </div>
+    </Card>
   )
 }

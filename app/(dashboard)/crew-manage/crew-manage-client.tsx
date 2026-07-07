@@ -7,6 +7,10 @@ import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/databa
 import type { ContactPref } from '@/types/database'
 import { AvailabilityOverviewCalendar } from '@/components/crew/availability-overview-calendar'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 import {
   addCrewMember,
   updateCrewMember,
@@ -97,11 +101,13 @@ function parsePastedText(text: string): ParsedRow[] {
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
-const ROLE_BADGE: Record<CrewRole, { label: string; cls: string }> = {
-  cleaning:    { label: 'Cleaning',    cls: 'badge badge-blue'  },
-  landscaping: { label: 'Landscaping', cls: 'badge badge-green' },
-  maintenance: { label: 'Maintenance', cls: 'badge badge-amber' },
-  general:     { label: 'General',     cls: 'badge badge-slate' },
+type RoleBadgeTone = 'blue' | 'green' | 'amber' | 'slate'
+
+const ROLE_BADGE: Record<CrewRole, { label: string; tone: RoleBadgeTone }> = {
+  cleaning:    { label: 'Cleaning',    tone: 'blue'  },
+  landscaping: { label: 'Landscaping', tone: 'green' },
+  maintenance: { label: 'Maintenance', tone: 'amber' },
+  general:     { label: 'General',     tone: 'slate' },
 }
 
 // ── Root client component ─────────────────────────────────────────────────────
@@ -274,9 +280,9 @@ function CrewCardModal({
              style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}>
           {member.name[0]?.toUpperCase()}
         </div>
-        <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>
+        <Badge tone={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).tone}>
           {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
-        </span>
+        </Badge>
       </div>
 
       <div className="space-y-2 text-sm">
@@ -841,9 +847,9 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
     >
       <td className="py-2.5 pr-4 font-medium text-primary-themed">{member.name}</td>
       <td className="py-2.5 pr-4">
-        <span className={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).cls}>
+        <Badge tone={(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).tone}>
           {(ROLE_BADGE[member.role ?? 'general'] ?? ROLE_BADGE['general']).label}
-        </span>
+        </Badge>
       </td>
       <td className="py-2.5 pr-4 text-secondary-themed">{member.specialty || '—'}</td>
       <td className="py-2.5 pr-4 text-secondary-themed">

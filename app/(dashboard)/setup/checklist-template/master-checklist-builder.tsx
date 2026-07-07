@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils'
 import { saveMasterChecklistItems, applyMasterChecklistToProperties, type ChecklistItemInput } from './actions'
 import { CLEANING_CATALOG } from '@/lib/checklists/standard-catalog'
 import { Dialog } from '@/components/ui/Dialog'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
 
 const ALL_SECTIONS = Object.keys(CLEANING_CATALOG)
 
@@ -227,7 +229,7 @@ export function MasterChecklistBuilder({
 
       {/* ── Catalog tab ─────────────────────────────────────────────────────── */}
       {tab === 'catalog' && (
-        <div className="card p-4 space-y-4">
+        <Card className="p-4 space-y-4">
           {/* Global select-all */}
           {(() => {
             const allTasks = ALL_SECTIONS.flatMap((s) => (CLEANING_CATALOG[s] ?? []).map((t) => ({ section: s, task: t })))
@@ -309,12 +311,12 @@ export function MasterChecklistBuilder({
               )
             })}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* ── Custom tab ──────────────────────────────────────────────────────── */}
       {tab === 'custom' && (
-        <div className="card p-4 space-y-3">
+        <Card className="p-4 space-y-3">
           <div>
             <label className="label">Section</label>
             <select
@@ -336,21 +338,22 @@ export function MasterChecklistBuilder({
               placeholder="Check appliances&#10;Vacuum rugs&#10;Wipe door handles"
             />
           </div>
-          <button
+          <Button
             type="button"
             onClick={addCustomItems}
             disabled={!customText.trim()}
-            className="btn-secondary text-sm flex items-center gap-2"
+            variant="secondary"
+            className="text-sm flex items-center gap-2"
           >
             <Plus className="w-3.5 h-3.5" />
             Add to checklist
-          </button>
-        </div>
+          </Button>
+        </Card>
       )}
 
       {/* ── Upload tab ──────────────────────────────────────────────────────── */}
       {tab === 'upload' && (
-        <div className="card p-4 space-y-3">
+        <Card className="p-4 space-y-3">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             Upload a <strong>.csv</strong> (columns: <code>section, task</code>) or <strong>.docx</strong> (headings become sections).
           </p>
@@ -377,16 +380,16 @@ export function MasterChecklistBuilder({
                 ))}
               </div>
               <div className="flex gap-2">
-                <button type="button" onClick={confirmUpload} className="btn-primary flex-1 text-sm">
+                <Button type="button" onClick={confirmUpload} className="flex-1 text-sm">
                   Add {uploadPreview.length} tasks
-                </button>
-                <button type="button" onClick={() => setUploadPreview([])} className="btn-ghost text-sm">
+                </Button>
+                <Button type="button" variant="ghost" onClick={() => setUploadPreview([])} className="text-sm">
                   Clear
-                </button>
+                </Button>
               </div>
             </>
           )}
-        </div>
+        </Card>
       )}
 
       {/* ── Selected items preview ───────────────────────────────────────────── */}
@@ -435,22 +438,21 @@ export function MasterChecklistBuilder({
       {/* ── Actions ─────────────────────────────────────────────────────────── */}
       <div className="space-y-3 pt-2 border-t border-themed">
         <div className="flex items-center gap-3">
-          <button
+          <Button
             type="button"
             onClick={() => handleSave(true)}
             disabled={saving}
-            className="btn-primary"
           >
             {saving ? 'Saving…' : 'Save & Continue →'}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             onClick={() => handleSave(false)}
             disabled={saving}
-            className="btn-secondary"
+            variant="secondary"
           >
             Save Checklist
-          </button>
+          </Button>
           {success && (
             <span className="text-sm flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
               <Check className="w-3.5 h-3.5" /> Saved
@@ -460,14 +462,15 @@ export function MasterChecklistBuilder({
 
         {properties.length > 0 && (
           <div className="pt-1">
-            <button
+            <Button
               type="button"
               onClick={() => setShowConfirm(true)}
               disabled={applying || items.length === 0}
-              className="btn-secondary text-sm"
+              variant="secondary"
+              className="text-sm"
             >
               {applying ? 'Applying…' : `Apply to All Properties (${properties.length})`}
-            </button>
+            </Button>
             {applyResult && (
               <p className="text-xs mt-1.5" style={{ color: applyResult.error ? 'var(--accent-red)' : 'var(--accent-green)' }}>
                 {applyResult.error ?? `Queued — applying to ${applyResult.queued} ${applyResult.queued === 1 ? 'property' : 'properties'} in the background`}
@@ -491,21 +494,22 @@ export function MasterChecklistBuilder({
           Any customisations made per-property will be overwritten.
         </p>
         <div className="flex gap-3">
-          <button
+          <Button
             type="button"
             onClick={handleApplyToAll}
             disabled={applying}
-            className="btn-primary flex-1 text-sm"
+            className="flex-1 text-sm"
           >
             {applying ? 'Applying…' : 'Yes, apply to all'}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => setShowConfirm(false)}
-            className="btn-ghost text-sm"
+            className="text-sm"
           >
             Cancel
-          </button>
+          </Button>
         </div>
       </Dialog>
     </div>

@@ -7,6 +7,9 @@ import {
   inviteCrewMember,
   type SettingsActionState,
 } from '@/app/(dashboard)/settings/actions'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 
 interface CrewPreview {
   id: string; name: string; role: string | null; specialty: string | null
@@ -108,7 +111,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label htmlFor="crew-name" className="label">Name *</label>
-                <input id="crew-name" name="name" type="text" required className="input" placeholder="Alex Johnson" />
+                <Input id="crew-name" name="name" type="text" required placeholder="Alex Johnson" />
               </div>
               <div>
                 <label htmlFor="crew-role" className="label">Role</label>
@@ -121,35 +124,35 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
               </div>
               <div>
                 <label htmlFor="crew-email" className="label">Email *</label>
-                <input id="crew-email" name="email" type="email" required className="input" placeholder="alex@example.com" />
+                <Input id="crew-email" name="email" type="email" required placeholder="alex@example.com" />
               </div>
               <div>
                 <label htmlFor="crew-phone" className="label">Phone</label>
-                <input id="crew-phone" name="phone" type="tel" className="input" placeholder="+1 555-0100" />
+                <Input id="crew-phone" name="phone" type="tel" placeholder="+1 555-0100" />
               </div>
             </div>
             <div className="flex gap-2">
-              <button type="submit" disabled={pending} className="btn-primary text-sm">
+              <Button type="submit" disabled={pending} className="text-sm">
                 {pending ? 'Adding…' : 'Add Member'}
-              </button>
-              <button type="button" onClick={() => setView('list')} className="btn-ghost text-sm">
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setView('list')} className="text-sm">
                 Cancel
-              </button>
+              </Button>
             </div>
           </form>
         </div>
       ) : (
-        <button onClick={() => setView('add')} className="btn-secondary text-sm flex items-center gap-2 w-full justify-center">
+        <Button variant="secondary" onClick={() => setView('add')} className="text-sm flex items-center gap-2 w-full justify-center">
           <Plus className="w-4 h-4" />
           {crew.length === 0 ? 'Add First Crew Member' : 'Add Another'}
-        </button>
+        </Button>
       )}
 
       <div className="flex items-center gap-3 pt-4 border-t border-themed">
         <form action={continueAction}>
-          <button type="submit" className="btn-primary">
+          <Button type="submit">
             {crew.length > 0 ? 'Continue →' : 'Skip for now →'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>
@@ -162,13 +165,14 @@ function InviteChip({
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  if (hasApp) return <span className="badge badge-green text-xs">In App</span>
+  if (hasApp) return <Badge tone="green" className="text-xs">In App</Badge>
   if (sent)   return <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--accent-green)' }}><Check className="w-3.5 h-3.5" /> Invited</span>
 
   return (
-    <button onClick={async () => { setBusy(true); await inviteCrewMember(memberId); setBusy(false); setSent(true) }}
-            disabled={busy} className="btn-secondary text-xs py-1 px-2.5">
+    <Button variant="secondary"
+            onClick={async () => { setBusy(true); await inviteCrewMember(memberId); setBusy(false); setSent(true) }}
+            disabled={busy} className="text-xs py-1 px-2.5">
       {busy ? 'Sending…' : inviteSentAt ? 'Resend Invite' : 'Invite to App'}
-    </button>
+    </Button>
   )
 }
