@@ -9,6 +9,10 @@ import {
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
 import { Dialog } from '@/components/ui/Dialog'
 import { StatusDot } from '@/components/ui/StatusDot'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 import type { PropertyAsset, AssetTypeStandard, AssetType } from '@/types/database'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -69,7 +73,7 @@ function normalizeAssetType(raw: string): AssetType | null {
 // ── Health score pill ─────────────────────────────────────────────────────────
 
 function HealthPill({ score }: { score: number | null }) {
-  if (score === null) return <span className="badge badge-slate">Unknown</span>
+  if (score === null) return <Badge tone="slate">Unknown</Badge>
   const color = healthColor(score)
   return (
     <span
@@ -196,17 +200,18 @@ function AssetForm({
             className="hidden"
             onChange={handleScan}
           />
-          <button
+          <Button
             type="button"
+            variant="secondary"
             onClick={() => fileInputRef.current?.click()}
             disabled={scanning}
-            className="btn-secondary w-full flex items-center justify-center gap-2 text-sm"
+            className="w-full flex items-center justify-center gap-2 text-sm"
           >
             {scanning
               ? <><Loader2 className="w-4 h-4 animate-spin" /> Scanning…</>
               : <><Camera className="w-4 h-4" /> Scan Data Plate</>
             }
-          </button>
+          </Button>
           {scanError && (
             <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }}>{scanError}</p>
           )}
@@ -261,13 +266,12 @@ function AssetForm({
             {/* Name */}
             <div className="sm:col-span-2">
               <label htmlFor="asset-name" className="label">Name <span className="text-red-500">*</span></label>
-              <input
+              <Input
                 id="asset-name"
                 name="name"
                 type="text"
                 required
                 defaultValue={asset?.name ?? ''}
-                className="input"
                 placeholder='e.g. "Main HVAC Unit", "Master Bath Water Heater"'
               />
             </div>
@@ -275,25 +279,23 @@ function AssetForm({
             {/* Make / Model — prefilled from scan */}
             <div>
               <label htmlFor="asset-make" className="label">Make</label>
-              <input
+              <Input
                 id="asset-make"
                 key={scanResult?.make}
                 name="make"
                 type="text"
                 defaultValue={scanResult?.make ?? asset?.make ?? ''}
-                className="input"
                 placeholder="e.g. Carrier"
               />
             </div>
             <div>
               <label htmlFor="asset-model" className="label">Model</label>
-              <input
+              <Input
                 id="asset-model"
                 key={scanResult?.model}
                 name="model"
                 type="text"
                 defaultValue={scanResult?.model ?? asset?.model ?? ''}
-                className="input"
                 placeholder="e.g. 24ACC636A003"
               />
             </div>
@@ -301,20 +303,19 @@ function AssetForm({
             {/* Serial Number */}
             <div>
               <label htmlFor="asset-serial-number" className="label">Serial Number</label>
-              <input
+              <Input
                 id="asset-serial-number"
                 key={scanResult?.serial_number}
                 name="serial_number"
                 type="text"
                 defaultValue={scanResult?.serial_number ?? asset?.serial_number ?? ''}
-                className="input"
               />
             </div>
 
             {/* Installation Date */}
             <div>
               <label htmlFor="asset-installation-date" className="label">Installation Date</label>
-              <input
+              <Input
                 id="asset-installation-date"
                 key={scanResult?.manufacture_year}
                 name="installation_date"
@@ -324,7 +325,6 @@ function AssetForm({
                     ? `${scanResult.manufacture_year}-01-01`
                     : (asset?.installation_date ?? '')
                 }
-                className="input"
               />
               <p className="text-xs text-muted-themed mt-1">
                 Also used as the placed-in-service date for tax depreciation. Edit
@@ -338,27 +338,25 @@ function AssetForm({
             {/* Purchase Price / Replacement Cost */}
             <div>
               <label htmlFor="asset-purchase-price" className="label">Purchase Price ($)</label>
-              <input
+              <Input
                 id="asset-purchase-price"
                 name="purchase_price"
                 type="number"
                 min="0"
                 step="0.01"
                 defaultValue={asset?.purchase_price ?? ''}
-                className="input"
                 placeholder="0.00"
               />
             </div>
             <div>
               <label htmlFor="asset-estimated-replacement-cost" className="label">Est. Replacement Cost ($)</label>
-              <input
+              <Input
                 id="asset-estimated-replacement-cost"
                 name="estimated_replacement_cost"
                 type="number"
                 min="0"
                 step="0.01"
                 defaultValue={asset?.estimated_replacement_cost ?? ''}
-                className="input"
                 placeholder="0.00"
               />
             </div>
@@ -366,11 +364,11 @@ function AssetForm({
             {/* Warranty */}
             <div>
               <label htmlFor="asset-warranty-expiry-date" className="label">Warranty Expiry Date</label>
-              <input id="asset-warranty-expiry-date" name="warranty_expiry_date" type="date" defaultValue={asset?.warranty_expiry_date ?? ''} className="input" />
+              <Input id="asset-warranty-expiry-date" name="warranty_expiry_date" type="date" defaultValue={asset?.warranty_expiry_date ?? ''} />
             </div>
             <div>
               <label htmlFor="asset-warranty-provider" className="label">Warranty Provider</label>
-              <input id="asset-warranty-provider" name="warranty_provider" type="text" defaultValue={asset?.warranty_provider ?? ''} className="input" placeholder="e.g. Carrier" />
+              <Input id="asset-warranty-provider" name="warranty_provider" type="text" defaultValue={asset?.warranty_provider ?? ''} placeholder="e.g. Carrier" />
             </div>
 
             {/* Notes */}
@@ -381,10 +379,10 @@ function AssetForm({
           </div>
 
           <div className="flex gap-2 pt-1">
-            <button type="submit" disabled={pending} className="btn-primary flex items-center gap-2">
+            <Button type="submit" disabled={pending} className="flex items-center gap-2">
               {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : (isEdit ? 'Save Changes' : 'Add Asset')}
-            </button>
-            <button type="button" onClick={onClose} className="btn-ghost">Cancel</button>
+            </Button>
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           </div>
         </form>
     </Dialog>
@@ -483,7 +481,7 @@ function CsvImportModal({
       <Dialog open onClose={onClose} title="Import Complete" maxWidthClassName="max-w-sm">
         <div className="text-center py-2">
           <p className="text-sm text-muted-themed mb-4">{rows.filter((r) => r._valid).length} assets imported.</p>
-          <button onClick={onClose} className="btn-primary">Done</button>
+          <Button onClick={onClose}>Done</Button>
         </div>
       </Dialog>
     )
@@ -500,10 +498,10 @@ function CsvImportModal({
               <strong>asset_type</strong> values: hvac, water_heater, roof, refrigerator, washer, dryer, dishwasher, microwave, oven_range, pool_pump, hot_tub, garage_door, smart_lock, deck_structure, electrical_panel, plumbing_system, septic_system, well_pump, generator, solar_system, other
             </p>
             {error && <p className="text-sm mb-3" style={{ color: 'var(--accent-red)' }}>{error}</p>}
-            <input
+            <Input
               type="file"
               accept=".csv,text/csv"
-              className="input py-2 text-sm"
+              className="py-2 text-sm"
               onChange={handleFile}
             />
           </>
@@ -526,7 +524,7 @@ function CsvImportModal({
                       <td className="px-2 py-2 text-primary-themed">{row.name || <span className="text-red-500">Missing</span>}</td>
                       <td className="px-2 py-2">
                         {row._typeResolved ? (
-                          <span className="badge badge-slate">{labelFor(row._typeResolved)}</span>
+                          <Badge tone="slate">{labelFor(row._typeResolved)}</Badge>
                         ) : (
                           <select
                             className="input py-0.5 text-xs"
@@ -557,17 +555,17 @@ function CsvImportModal({
             </div>
             {error && <p className="text-sm mb-3" style={{ color: 'var(--accent-red)' }}>{error}</p>}
             <div className="flex items-center gap-3">
-              <button
+              <Button
                 onClick={handleImport}
                 disabled={importing || !rows.some((r) => r._valid)}
-                className="btn-primary flex items-center gap-2"
+                className="flex items-center gap-2"
               >
                 {importing
                   ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</>
                   : `Import ${rows.filter((r) => r._valid).length} Assets`
                 }
-              </button>
-              <button onClick={onClose} className="btn-ghost">Cancel</button>
+              </Button>
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
               <span className="text-xs text-muted-themed ml-auto">
                 {rows.filter((r) => !r._valid).length > 0 && `${rows.filter((r) => !r._valid).length} row(s) need fixing`}
               </span>
@@ -611,7 +609,7 @@ function AssetRow({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-primary-themed">{asset.name}</span>
-          <span className="badge badge-slate text-xs">{typeName}</span>
+          <Badge tone="slate" className="text-xs">{typeName}</Badge>
           {ageYears != null && (
             <span className="text-xs text-muted-themed">{ageYears}y old</span>
           )}
@@ -632,20 +630,21 @@ function AssetRow({
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
         <HealthPill score={asset.health_score} />
-        <button onClick={() => onEdit(asset)} className="btn-ghost p-1.5" title="Edit asset">
+        <Button variant="ghost" onClick={() => onEdit(asset)} className="p-1.5" title="Edit asset">
           <Pencil className="w-3.5 h-3.5" />
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="ghost"
           onClick={() => startRemove(async () => {
             const result = await deactivateAsset(asset.id, propertyId)
             if (result?.error) throw new Error(result.error)
           })}
           disabled={removing}
-          className="btn-ghost p-1.5 text-muted-themed hover:text-red-500"
+          className="p-1.5 text-muted-themed hover:text-red-500"
           title="Deactivate asset"
         >
           {removing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -676,30 +675,31 @@ export function AssetSection({
 
   return (
     <>
-      <div className="card mb-4">
+      <Card className="mb-4">
         <div className="flex items-center justify-between mb-4">
           <button
             onClick={() => setExpanded((v) => !v)}
             className="flex items-center gap-2 text-left"
           >
             <h3 className="font-semibold text-primary-themed">Asset Health</h3>
-            {assets.length > 0 && <span className="badge badge-slate">{assets.length}</span>}
+            {assets.length > 0 && <Badge tone="slate">{assets.length}</Badge>}
             <ChevronDown
               className="w-4 h-4 text-muted-themed transition-transform"
               style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}
             />
           </button>
           <div className="flex items-center gap-2">
-            <button
+            <Button
+              variant="ghost"
               onClick={() => setShowImport(true)}
-              className="btn-ghost text-sm flex items-center gap-1"
+              className="text-sm flex items-center gap-1"
               title="Import from CSV"
             >
               <Upload className="w-3.5 h-3.5" /> Import
-            </button>
-            <button onClick={() => setShowAdd(true)} className="btn-primary text-sm">
+            </Button>
+            <Button onClick={() => setShowAdd(true)} className="text-sm">
               <Plus className="w-4 h-4" /> Add Asset
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -742,7 +742,7 @@ export function AssetSection({
             )}
           </>
         )}
-      </div>
+      </Card>
 
       {showAdd && (
         <AssetForm propertyId={propertyId} standards={standards} onClose={() => setShowAdd(false)} />

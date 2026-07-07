@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { NewPropertyForm } from './new-property-form'
+import { Card } from '@/components/ui/Card'
 
 export const metadata: Metadata = { title: 'Add Property' }
 
@@ -12,9 +13,9 @@ export default function NewPropertyPage() {
           Basic details first — you'll set up inventory, checklists, and more in the next steps.
         </p>
       </div>
-      <div className="card">
+      <Card>
         <NewPropertyForm />
-      </div>
+      </Card>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { requireProperty } from '@/lib/auth'
 import { IcalManager } from './ical-form'
+import { Card } from '@/components/ui/Card'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Calendar Feeds' }
@@ -17,13 +18,13 @@ export default async function IcalPage({ params }: Props) {
     .order('created_at')
 
   return (
-    <div className="card">
+    <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Calendar Feeds</h2>
       <p className="text-sm text-accent-500 mb-6">
         Connect your Airbnb and VRBO calendars. FieldStay syncs bookings every 4 hours
         and automatically creates turnovers in the gaps between stays.
       </p>
       <IcalManager propertyId={property.id} feeds={feeds ?? []} />
-    </div>
+    </Card>
   )
 }

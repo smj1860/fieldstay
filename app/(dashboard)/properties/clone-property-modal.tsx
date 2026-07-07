@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { clonePropertySetup } from './clone-actions'
 import { Dialog } from '@/components/ui/Dialog'
+import { Button } from '@/components/ui/Button'
 
 interface Property {
   id: string
@@ -48,9 +49,9 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
               Inventory, checklist, and maintenance schedules from the selected property have been
               applied to <strong>{targetProperty.name}</strong>.
             </p>
-            <button type="button" onClick={onClose} className="btn-primary w-full">
+            <Button type="button" onClick={onClose} className="w-full">
               Done
-            </button>
+            </Button>
           </>
         ) : (
           <>
@@ -95,17 +96,17 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
             )}
 
             <div className="flex gap-2 pt-1">
-              <button
+              <Button
                 type="button"
                 onClick={handleClone}
                 disabled={!selectedId || isPending}
-                className="btn-primary flex-1"
+                className="flex-1"
               >
                 {isPending ? 'Copying…' : 'Copy setup'}
-              </button>
-              <button type="button" onClick={onClose} className="btn-secondary flex-1">
+              </Button>
+              <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
                 Cancel
-              </button>
+              </Button>
             </div>
           </>
         )}

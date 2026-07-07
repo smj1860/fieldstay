@@ -3,6 +3,8 @@
 import { useActionState, useEffect, useState } from 'react'
 import { addCrewMember, completeCrewStep } from './actions'
 import { Plus, User, CheckCircle2, PartyPopper } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 interface CrewMember {
   id: string; name: string; email: string | null
@@ -68,16 +70,16 @@ export function CrewSetup({
           <form action={formAction} className="space-y-4">
             <div>
               <label htmlFor="crew-name" className="label">Name <span className="text-red-500">*</span></label>
-              <input id="crew-name" name="name" type="text" required className="input" placeholder="Full name" />
+              <Input id="crew-name" name="name" type="text" required placeholder="Full name" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label htmlFor="crew-email" className="label">Email</label>
-                <input id="crew-email" name="email" type="email" className="input" placeholder="crew@example.com" />
+                <Input id="crew-email" name="email" type="email" placeholder="crew@example.com" />
               </div>
               <div>
                 <label htmlFor="crew-phone" className="label">Phone</label>
-                <input id="crew-phone" name="phone" type="tel" className="input" placeholder="(555) 000-0000" />
+                <Input id="crew-phone" name="phone" type="tel" placeholder="(555) 000-0000" />
               </div>
             </div>
             <div>
@@ -89,20 +91,20 @@ export function CrewSetup({
               </select>
             </div>
             <div className="flex gap-3">
-              <button type="submit" disabled={pending} className="btn-primary text-sm">
+              <Button type="submit" disabled={pending} className="text-sm">
                 {pending ? 'Adding…' : 'Add Crew Member'}
-              </button>
+              </Button>
               {crew.length > 0 && (
-                <button type="button" onClick={() => setShowForm(false)} className="btn-ghost text-sm">Cancel</button>
+                <Button variant="ghost" type="button" onClick={() => setShowForm(false)} className="text-sm">Cancel</Button>
               )}
             </div>
           </form>
         </div>
       ) : crew.length > 0 ? (
         <div className="space-y-3">
-          <button onClick={() => setShowForm(true)} className="btn-primary w-full justify-center">
+          <Button onClick={() => setShowForm(true)} className="w-full justify-center">
             <Plus className="w-4 h-4" /> Add Another Crew Member
-          </button>
+          </Button>
           <div className="rounded-lg p-4" style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}>
             <p className="text-sm text-secondary-themed mb-1">
               Have a team? Upload a CSV with columns: name, email, phone, specialty
@@ -119,9 +121,9 @@ export function CrewSetup({
           </div>
         </div>
       ) : (
-        <button onClick={() => setShowForm(true)} className="btn-secondary w-full justify-center border-dashed">
+        <Button variant="secondary" onClick={() => setShowForm(true)} className="w-full justify-center border-dashed">
           <Plus className="w-4 h-4" /> Add Crew Member
-        </button>
+        </Button>
       )}
 
       {/* Finish setup */}
@@ -139,9 +141,9 @@ export function CrewSetup({
           setCompleting(true)
           await completeCrewStep(propertyId)
         }}>
-          <button type="submit" disabled={completing} className="btn-primary">
+          <Button type="submit" disabled={completing}>
             {completing ? 'Finishing…' : 'Finish Setup →'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

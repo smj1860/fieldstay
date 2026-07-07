@@ -1,5 +1,6 @@
 import { requireProperty } from '@/lib/auth'
 import { CrewSetup } from './crew-setup'
+import { Card } from '@/components/ui/Card'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Crew Setup' }
@@ -17,13 +18,13 @@ export default async function CrewPage({ params }: Props) {
     .order('name')
 
   return (
-    <div className="card">
+    <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Crew</h2>
       <p className="text-sm text-accent-500 mb-6">
         Add the cleaning and maintenance crew members you work with. You'll assign
         specific crew to each turnover when it's created.
       </p>
       <CrewSetup propertyId={property.id} crew={crew ?? []} />
-    </div>
+    </Card>
   )
 }

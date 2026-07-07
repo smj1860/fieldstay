@@ -5,6 +5,9 @@ import Link from 'next/link'
 import { Search, AlertCircle, CheckCircle2, Settings, Wrench, RefreshCw } from 'lucide-react'
 import { calcSetupProgress } from '@/lib/wizard'
 import { CopyFromButton } from './property-card-actions'
+import { Card } from '@/components/ui/Card'
+import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 
 interface PropertyRow {
   id: string
@@ -49,12 +52,12 @@ export function PropertiesGrid({
       {properties.length > 6 && (
         <div className="relative mb-5 max-w-sm">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-muted)' }} />
-          <input
+          <Input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by name, city, or address…"
-            className="input pl-9 text-sm w-full"
+            className="pl-9 text-sm w-full"
           />
         </div>
       )}
@@ -73,7 +76,7 @@ export function PropertiesGrid({
             const hasIssues = ops.openWorkOrders > 0 || ops.unassignedTurnovers > 0 || ops.syncErrors > 0
 
             return (
-              <div key={p.id} className="card flex flex-col gap-4 hover:shadow-card-md transition-shadow">
+              <Card key={p.id} className="flex flex-col gap-4 hover:shadow-card-md transition-shadow">
                 {/* Header */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -108,22 +111,22 @@ export function PropertiesGrid({
                 {hasIssues && (
                   <div className="flex flex-wrap gap-1.5">
                     {ops.openWorkOrders > 0 && (
-                      <span className="badge badge-blue text-xs flex items-center gap-1">
+                      <Badge tone="blue" className="text-xs flex items-center gap-1">
                         <Wrench className="w-3 h-3" />
                         {ops.openWorkOrders} open WO{ops.openWorkOrders !== 1 ? 's' : ''}
-                      </span>
+                      </Badge>
                     )}
                     {ops.unassignedTurnovers > 0 && (
-                      <span className="badge badge-amber text-xs flex items-center gap-1">
+                      <Badge tone="amber" className="text-xs flex items-center gap-1">
                         <AlertCircle className="w-3 h-3" />
                         {ops.unassignedTurnovers} unassigned
-                      </span>
+                      </Badge>
                     )}
                     {ops.syncErrors > 0 && (
-                      <span className="badge badge-red text-xs flex items-center gap-1">
+                      <Badge tone="red" className="text-xs flex items-center gap-1">
                         <RefreshCw className="w-3 h-3" />
                         Sync error
-                      </span>
+                      </Badge>
                     )}
                   </div>
                 )}
@@ -171,7 +174,7 @@ export function PropertiesGrid({
                     otherProperties={properties.filter((other) => other.id !== p.id).map((other) => ({ id: other.id, name: other.name }))}
                   />
                 </div>
-              </div>
+              </Card>
             )
           })}
         </div>
