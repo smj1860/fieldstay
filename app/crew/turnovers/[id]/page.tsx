@@ -1,6 +1,6 @@
 'use client'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
+import { useDexieDb, useDexieUserId, useCrewMemberId } from '@/lib/dexie/context'
 import { useParams, useRouter }            from 'next/navigation'
 import { useState, useRef }                from 'react'
 import {
@@ -22,9 +22,10 @@ import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as Inv
 export default function CrewTurnoverPage() {
   const { id }   = useParams<{ id: string }>()
   const router   = useRouter()
-  const db       = useDexieDb()
-  const userId   = useDexieUserId()
-  const supabase = createClient()
+  const db           = useDexieDb()
+  const userId       = useDexieUserId()
+  const crewMemberId = useCrewMemberId()
+  const supabase     = createClient()
 
   const [uploadingItemId,   setUploadingItemId]   = useState<string | null>(null)
   const [uploadError,       setUploadError]       = useState<string | null>(null)
@@ -103,7 +104,7 @@ export default function CrewTurnoverPage() {
       fileInputRefs.current[itemId]?.click()
       return
     }
-    await updateChecklistItem(userId, itemId, { isCompleted: !current })
+    await updateChecklistItem(userId, itemId, { isCompleted: !current }, crewMemberId)
     // Check if section is now fully complete
     if (!current) {
       const sectionItems = sections[sectionName] ?? []
@@ -124,7 +125,7 @@ export default function CrewTurnoverPage() {
     await updateChecklistItem(userId, itemId, {
       isCompleted: isCompleted === 1,
       crewNotes:   noteText,
-    })
+    }, crewMemberId)
     setOpenNoteItemId(null)
   }
 
@@ -188,7 +189,7 @@ export default function CrewTurnoverPage() {
         retry_count:    0,
         created_at:     new Date().toISOString(),
       })
-      await updateChecklistItem(userId, itemId, { isCompleted: true })
+      await updateChecklistItem(userId, itemId, { isCompleted: true }, crewMemberId)
 
       // Attempt immediately in case we're actually online — no need to wait
       // for the next interval tick or a reconnect event.

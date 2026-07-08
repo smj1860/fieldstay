@@ -16,11 +16,18 @@ export interface UpdateChecklistItemInput {
  * Only fields actually passed in `input` are touched — omitted fields are
  * left as-is locally and aren't included in the outbound mutation, so a
  * plain checkbox toggle never clobbers an existing crew note or photo.
+ *
+ * `crewMemberId` is optional only because useCrewMemberId() can briefly be
+ * null before it resolves — pass it whenever available so
+ * completed_by_crew_id records who actually did the work. This is what
+ * lets two crew members splitting a turnover's checklist see who
+ * completed which item.
  */
 export async function updateChecklistItem(
   userId: string,
   itemId: string,
   input: UpdateChecklistItemInput,
+  crewMemberId?: string | null,
 ): Promise<void> {
   const db = getDexieDb(userId)
   const completedAt = input.isCompleted ? new Date().toISOString() : null
@@ -28,6 +35,9 @@ export async function updateChecklistItem(
   const changes: Record<string, unknown> = {
     is_completed: input.isCompleted ? 1 : 0,
     completed_at: completedAt,
+  }
+  if (crewMemberId) {
+    changes.completed_by_crew_id = input.isCompleted ? crewMemberId : ''
   }
   if (input.crewNotes !== undefined) changes.crew_notes = input.crewNotes
   if (input.photoStoragePath !== undefined) changes.photo_storage_path = input.photoStoragePath
