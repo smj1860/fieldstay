@@ -169,6 +169,12 @@ export interface HospitableReservation {
     name:        string
     public_name: string
   }> | null
+
+  // Distinguishes the property owner staying at their own listing from a
+  // real paying guest reservation. owner_stay is only populated (and only
+  // meaningful) when stay_type is 'owner_stay'.
+  stay_type?: 'guest_stay' | 'owner_stay'
+  owner_stay?: { schedule_cleaning: boolean } | null
 }
 
 export interface HospitableTeammate {
@@ -933,6 +939,7 @@ export function hospitableReservationToNormalized(
     guest_email: guest?.email ?? null,
     source:      mapHospitableChannel(res.platform),
     is_block:    false,
+    stay_type:   res.stay_type === 'owner_stay' ? 'owner_stay' : 'guest_stay',
   }
 }
 

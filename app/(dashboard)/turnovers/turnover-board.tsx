@@ -60,6 +60,11 @@ interface TurnoverAssignment {
 interface Turnover {
   id: string
   property_id: string
+  // Resolved server-side from the booking this turnover was generated from
+  // (turnovers.booking_id → bookings.stay_type) — null for manually-created
+  // turnovers with no linked booking, or when the booking fell outside the
+  // page's fetched booking window.
+  stay_type: 'guest_stay' | 'owner_stay' | null
   checkout_datetime: string
   checkin_datetime: string
   window_minutes: number | null
@@ -442,6 +447,9 @@ function TurnoverCard({
               <Badge tone="red" className="flex items-center gap-1">
                 <AlertTriangle className="w-2.5 h-2.5" /> Overdue
               </Badge>
+            )}
+            {turnover.stay_type === 'owner_stay' && (
+              <Badge tone="amber">Owner Stay</Badge>
             )}
           </div>
 

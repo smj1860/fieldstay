@@ -227,6 +227,7 @@ export const hospIncrementalSync = inngest.createFunction(
               guest_email:     normalized.guest_email,
               source:          normalized.source,
               is_block:        normalized.is_block,
+              stay_type:       normalized.stay_type,
             },
             { onConflict: 'external_id,external_source' }
           )

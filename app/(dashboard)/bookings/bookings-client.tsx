@@ -37,6 +37,7 @@ interface BookingRow {
   created_at:           string
   ical_feed_id:         string | null
   external_source:      string | null
+  stay_type:            'guest_stay' | 'owner_stay'
   properties:           { id: string; name: string; city: string | null; state: string | null } | null
   turnovers:            { id: string; status: string; checkout_datetime: string }
                        | { id: string; status: string; checkout_datetime: string }[]
@@ -202,6 +203,14 @@ function BookingCard({
                 {!isBlocked && (
                   <Badge tone={SOURCE_COLORS[booking.source]} className="text-xs">
                     {SOURCE_LABELS[booking.source]}
+                  </Badge>
+                )}
+
+                {/* Owner stay badge — owner's own personal-use stay, not a
+                    paying guest reservation. Still gets a turnover. */}
+                {booking.stay_type === 'owner_stay' && (
+                  <Badge tone="amber" className="text-xs">
+                    Owner Stay
                   </Badge>
                 )}
 

@@ -230,6 +230,7 @@ export interface Booking {
   raw_ical_data:        Record<string, unknown> | null
   has_overlap_conflict: boolean
   is_block:             boolean
+  stay_type:            'guest_stay' | 'owner_stay'
   guidebook_token:      string | null
   guidebook_pre_arrival_email_sent_at: string | null
   created_at:           string

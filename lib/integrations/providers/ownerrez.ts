@@ -374,5 +374,8 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     guest_email: b.guest?.email ?? null,
     source:      mapOwnerRezChannelToSource(b.channel_name),
     is_block:    b.is_block ?? false,
+    // OwnerRez exposes no owner-personal-use concept equivalent to
+    // Hospitable's stay_type — every OwnerRez booking is a guest stay.
+    stay_type:   'guest_stay',
   }
 }

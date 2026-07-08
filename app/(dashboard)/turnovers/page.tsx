@@ -27,7 +27,7 @@ export default async function TurnoversPage() {
     supabase
       .from('turnovers')
       .select(`
-        id, property_id, checkout_datetime, checkin_datetime,
+        id, property_id, booking_id, checkout_datetime, checkin_datetime,
         window_minutes, status, priority, notes, completed_at, started_at,
         checklist_template_id, is_same_day_turnover, is_archived,
         suggested_crew_ids, suggestion_reasoning, suggestion_status,
@@ -49,7 +49,7 @@ export default async function TurnoversPage() {
       .order('name'),
     supabase
       .from('bookings')
-      .select('id, property_id, checkin_date, checkout_date, guest_name, status, source')
+      .select('id, property_id, checkin_date, checkout_date, guest_name, status, source, stay_type')
       .eq('org_id', membership.org_id)
       .gte('checkout_date', rangeStart)
       .lte('checkin_date',  rangeEnd)
@@ -80,8 +80,13 @@ export default async function TurnoversPage() {
 
   const showAutoAssignNudge = org?.auto_assign_mode === 'disabled'
 
+  const stayTypeByBookingId = Object.fromEntries(
+    (bookings ?? []).map((b) => [b.id, b.stay_type])
+  )
+
   const normalizedTurnovers = (turnovers ?? []).map((t) => ({
     ...t,
+    stay_type: t.booking_id ? (stayTypeByBookingId[t.booking_id] ?? null) : null,
     turnover_assignments: t.turnover_assignments.map((a) => ({
       ...a,
       crew_member: Array.isArray(a.crew_member)
