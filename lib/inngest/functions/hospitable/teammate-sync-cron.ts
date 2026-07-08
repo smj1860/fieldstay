@@ -7,7 +7,7 @@
 // reassigned, or removed in Hospitable after connecting would never be
 // reflected in FieldStay. This closes that gap with a lightweight full
 // resync once a day, same dispatch-per-connection pattern as
-// hospTokenRefreshCron so one org's failure never blocks another's.
+// integrationTokenRefreshCron so one org's failure never blocks another's.
 //
 // Schedule: daily at 09:00 UTC — clear of the 13:00/14:00 UTC cron cluster
 // (maintenance-schedules, work-order-ops, asset-health, comms-retention,
