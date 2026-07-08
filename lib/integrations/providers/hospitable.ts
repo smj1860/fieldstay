@@ -213,6 +213,40 @@ export interface HospitablePagedReservations {
   }
 }
 
+// GET /reservations/{uuid}/messages — no per-message id in the documented
+// response shape (only conversation_id/reservation_id at the message-list
+// level), so callers derive their own dedup key from conversation_id +
+// created_at + sender_type + a hash of body. attachments/reactions are
+// typed loosely (unknown[]) — not consumed by FieldStay today, just
+// preserved for a future UI.
+export interface HospitableMessage {
+  platform:          string
+  platform_id:       number
+  conversation_id:   string
+  reservation_id:    string | null
+  content_type:      string
+  body:              string
+  attachments:       unknown[] | null
+  sender_type:       'host' | 'guest'
+  sender_role:       string | null
+  sender: {
+    first_name:    string | null
+    full_name:     string | null
+    locale:        string | null
+    picture_url:   string | null
+    thumbnail_url: string | null
+    location:      string | null
+  } | null
+  created_at:        string
+  source:            string
+  integration:       string | null
+  sent_reference_id: string | null
+}
+
+export interface HospitablePagedMessages {
+  data: HospitableMessage[]
+}
+
 // ── Provider adapter ─────────────────────────────────────────────────────────
 
 export const hospitableProvider: IntegrationProvider = {
@@ -518,6 +552,42 @@ export const hospitableProvider: IntegrationProvider = {
         break
       }
 
+      // ⚠️ Unconfirmed payload shape — Hospitable's public docs for this
+      // webhook's body were not available when this was written (only the
+      // REST GET /reservations/{uuid}/messages endpoint was documented,
+      // via the partner portal's own webhook config screen listing
+      // "Messages: when a new message is created"). Like reservation.changed,
+      // this is expected to be a partial payload — an id/reservation
+      // reference only, not the message body itself — so this just kicks
+      // off the same fetch-then-upsert flow via Inngest. Tries the field
+      // names used by every other Hospitable webhook before giving up.
+      case 'message.created':
+      case 'message.updated': {
+        const messageReservationId =
+          (entityData?.reservation_id as string | undefined)
+          ?? entityId
+          ?? (data.reservation_id as string | undefined)
+          ?? (data.id as string | undefined)
+
+        if (!messageReservationId) {
+          console.warn('[Hospitable webhook] message event missing reservation_id (checked data.reservation_id, data.id, payload.id):', data)
+          break
+        }
+
+        const { inngest } = await import('@/lib/inngest/client')
+        await inngest.send({
+          name: 'integration/hospitable.sync.requested',
+          data: {
+            provider_id:  'hospitable',
+            event_type:   action,
+            entity_type:  'message',
+            entity_id:    messageReservationId,
+            triggered_at: new Date().toISOString(),
+          },
+        })
+        break
+      }
+
       case 'integration.disconnected':
       case 'integration_disconnected':
       case 'application_authorization_revoked':
@@ -666,6 +736,36 @@ export async function hospFetchReservations(
   }
 
   return reservations
+}
+
+// GET /reservations/{uuid}/messages — rate-limited by Hospitable to 2
+// requests/minute PER RESERVATION, much tighter than the general API budget
+// hospitableApiLimiter enforces. Deliberately not given its own proactive
+// limiter (would need a per-reservation key, adding real complexity for an
+// endpoint the Inngest concurrency limit — { limit: 2, key: 'entity_id' } in
+// incremental-sync.ts — already throttles per reservation); relies on
+// hospitableFetch's reactive 429 handling (Retry-After header) plus
+// Inngest's built-in step retries to absorb bursts instead.
+export async function hospFetchReservationMessages(
+  token:         string,
+  reservationId: string
+): Promise<HospitableMessage[]> {
+  const res = await hospitableFetch(
+    `${HOSPITABLE_API_BASE}/reservations/${reservationId}/messages`,
+    token
+  )
+
+  if (res.status === 404) return []
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(
+      `Hospitable GET /reservations/${reservationId}/messages failed (${res.status}): ${text.slice(0, 200)}`
+    )
+  }
+
+  const data = await res.json() as HospitablePagedMessages
+  return data.data ?? []
 }
 
 // Fetches all teammates for the authenticated account, paginated via

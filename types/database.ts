@@ -896,6 +896,26 @@ export interface StripeProcessedEvent {
   processed_at:    string
 }
 
+// ── Hospitable reservation conversation messages ────────────────────────────
+export interface ReservationMessage {
+  id:                      string
+  org_id:                  string
+  booking_id:              string | null
+  external_reservation_id: string
+  external_source:         string
+  conversation_id:         string | null
+  platform:                string | null
+  sender_type:             'host' | 'guest'
+  sender_name:             string | null
+  content_type:            string | null
+  body:                    string
+  attachments:             Record<string, unknown>[] | null
+  source:                  string | null
+  message_created_at:      string
+  dedup_key:               string
+  created_at:              string
+}
+
 // ── RepuGuard ────────────────────────────────────────────────────────────────
 export interface Review {
   id:              string

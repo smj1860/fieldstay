@@ -17,10 +17,12 @@ import { inngest }                 from '@/lib/inngest/client'
 import { NonRetriableError }       from 'inngest'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
+import { createHash } from 'crypto'
 import {
   hospitableFetch,
   hospitablePropertyToNormalized,
   hospitableReservationToNormalized,
+  hospFetchReservationMessages,
   type HospitableReservation,
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
@@ -586,6 +588,101 @@ export const hospIncrementalSync = inngest.createFunction(
       }
 
       return { action: 'synced', entity_id }
+    }
+
+    // ── MESSAGE ──────────────────────────────────────────────────────────────
+    // entity_id here is the RESERVATION uuid (message.created's webhook
+    // payload has no message id we can act on — see the handler in
+    // hospitable.ts), since GET /reservations/{uuid}/messages is scoped to a
+    // reservation, not a single message. Every message currently on the
+    // thread is re-fetched and upserted; dedup_key (org_id, dedup_key
+    // UNIQUE on reservation_messages) makes repeat fetches of the same
+    // conversation a no-op for messages already stored.
+    if (entity_type === 'message') {
+
+      const resolved = await step.run('resolve-org-booking-and-token', async () => {
+        const supabase = createServiceClient()
+
+        const { data: booking } = await supabase
+          .from('bookings')
+          .select('id, org_id')
+          .eq('external_id',     entity_id)
+          .eq('external_source', PROVIDER)
+          .maybeSingle()
+
+        let resolvedOrgId: string | null = booking?.org_id ?? null
+        let pmUserId: string | null      = null
+
+        if (resolvedOrgId) {
+          const { data: member } = await supabase
+            .from('organization_members')
+            .select('user_id')
+            .eq('org_id', resolvedOrgId)
+            .in('role', ['owner', 'admin'])
+            .not('invite_accepted_at', 'is', null)
+            .limit(1)
+            .single()
+
+          if (!member) throw new NonRetriableError(`No admin for org ${resolvedOrgId}`)
+          pmUserId = member.user_id
+        } else {
+          const { data: connection } = await supabase
+            .from('integration_connections')
+            .select('user_id, org_id')
+            .eq('provider_id', PROVIDER)
+            .eq('status',      'active')
+            .not('org_id',     'is', null)
+            .limit(1)
+            .single()
+
+          if (!connection) {
+            throw new NonRetriableError('No active Hospitable connection found for message sync')
+          }
+          pmUserId      = connection.user_id
+          resolvedOrgId = connection.org_id
+        }
+
+        const validToken = await getValidHospitableToken(pmUserId!)
+        return { orgId: resolvedOrgId!, bookingId: booking?.id ?? null, token: validToken }
+      })
+
+      const upsertCount = await step.run('fetch-and-upsert-messages', async () => {
+        const messages = await hospFetchReservationMessages(resolved.token, entity_id)
+        if (messages.length === 0) return 0
+
+        const rows = messages.map((m) => {
+          const dedupSource = `${m.conversation_id}|${m.created_at}|${m.sender_type}|${m.body}`
+          const dedupKey    = createHash('sha256').update(dedupSource).digest('hex').slice(0, 32)
+
+          return {
+            org_id:                   resolved.orgId,
+            booking_id:               resolved.bookingId,
+            external_reservation_id:  entity_id,
+            external_source:          PROVIDER,
+            conversation_id:          m.conversation_id,
+            platform:                 m.platform,
+            sender_type:              m.sender_type,
+            sender_name:              m.sender?.full_name ?? m.sender?.first_name ?? null,
+            content_type:             m.content_type,
+            body:                     m.body,
+            attachments:              m.attachments,
+            source:                   m.source,
+            message_created_at:       m.created_at,
+            dedup_key:                dedupKey,
+          }
+        })
+
+        const supabase = createServiceClient()
+        const { error } = await supabase
+          .from('reservation_messages')
+          .upsert(rows, { onConflict: 'org_id,dedup_key', ignoreDuplicates: true })
+
+        if (error) throw new Error(`reservation_messages upsert failed: ${error.message}`)
+
+        return rows.length
+      })
+
+      return { action: 'synced', entity_id, messageCount: upsertCount }
     }
 
     logger.warn(`[Hospitable incremental] Unhandled entity_type: ${entity_type}`)
