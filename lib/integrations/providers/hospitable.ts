@@ -17,13 +17,19 @@ import type { CrewRole } from '@/types/database'
 import { hospitableApiLimiter } from '@/lib/rate-limit'
 import type { NormalizedProperty } from '@/lib/properties/normalize'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
-import { ok, fail, timingSafeEqual } from '@/lib/integrations/webhook-verification'
+import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const HOSPITABLE_AUTHORIZE_URL = 'https://auth.hospitable.com/oauth/authorize'
 const HOSPITABLE_TOKEN_URL     = 'https://auth.hospitable.com/oauth/token'
 const HOSPITABLE_API_BASE      = 'https://public.api.hospitable.com/v2'
+
+// Hospitable's own webhook docs advise whitelisting only this range.
+// Defense-in-depth alongside the HMAC signature check below, which remains
+// the primary control — an out-of-range request is rejected before it's
+// worth spending a crypto comparison on.
+const HOSPITABLE_WEBHOOK_IP_CIDR = '38.80.170.0/24'
 
 // ── Hospitable API response types ────────────────────────────────────────────
 
@@ -368,11 +374,18 @@ export const hospitableProvider: IntegrationProvider = {
   },
 
   // Webhook auth: header 'Signature' (capital S), HMAC-SHA256 of raw body, raw hex, no prefix.
-  // IP range: 38.80.170.0/24
+  // IP range: 38.80.170.0/24 (checked below, ahead of the signature — cheap
+  // rejection for obviously-wrong-source traffic before spending a crypto
+  // comparison on it).
   // Hospitable's HMAC is computed over the body only — there is no timestamp
   // in the signed payload, so replay protection comes entirely from the
   // processed_webhooks dedup table, not from anything checked here.
   async validateWebhook(request: Request) {
+    const clientIp = extractClientIp(request)
+    if (!clientIp || !isIpInCidr(clientIp, HOSPITABLE_WEBHOOK_IP_CIDR)) {
+      return fail(`source IP not in Hospitable's allowed range: ${clientIp ?? 'unknown'}`)
+    }
+
     const secret = process.env.HOSPITABLE_WEBHOOK_SECRET
     if (!secret) {
       console.error('[Hospitable] HOSPITABLE_WEBHOOK_SECRET not set — rejecting webhook')
@@ -398,6 +411,15 @@ export const hospitableProvider: IntegrationProvider = {
   // triggers: ["status_changed"]; incremental sync detects the cancellation
   // by re-fetching the reservation and checking reservation_status.current.category.
   // Webhooks are configured globally in the partner portal — no per-account registration.
+  //
+  // ⚠️ reservation.changed sends a PARTIAL payload — confirmed from
+  // Hospitable's own docs example: a checkin-time-only change delivers
+  // data: { check_in: "..." }, with no `id` field on data at all. The
+  // reservation's own id is on the TOP-LEVEL payload.id instead for this
+  // event (differs from review.created, where the top-level id is the
+  // webhook's own ULID and the entity id is nested under data.id) — check
+  // data.id first for reservation.created (which may send the fuller
+  // object) and fall back to the top-level id.
   async handleWebhookEvent({ action, payload }) {
     const data = payload as Record<string, unknown>
 
@@ -407,18 +429,21 @@ export const hospitableProvider: IntegrationProvider = {
     switch (action) {
       case 'reservation.created':
       case 'reservation.changed': {
-        if (!entityId) {
-          console.warn('[Hospitable webhook] reservation event missing data.id:', data)
+        const reservationId = entityId ?? (data.id as string | undefined)
+        if (!reservationId) {
+          console.warn('[Hospitable webhook] reservation event missing id (checked data.id and payload.id):', data)
           break
         }
         const { inngest } = await import('@/lib/inngest/client')
+        const triggers = Array.isArray(data.triggers) ? data.triggers as string[] : undefined
         await inngest.send({
           name: 'integration/hospitable.sync.requested',
           data: {
             provider_id:  'hospitable',
             event_type:   action,
             entity_type:  'reservation',
-            entity_id:    entityId,
+            entity_id:    reservationId,
+            triggers,
             triggered_at: new Date().toISOString(),
           },
         })

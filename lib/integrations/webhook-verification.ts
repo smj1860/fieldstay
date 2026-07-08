@@ -57,3 +57,44 @@ export function isTimestampFresh(timestampSeconds: number, toleranceSeconds = 30
   const skew = Math.abs(Date.now() / 1000 - timestampSeconds)
   return skew <= toleranceSeconds
 }
+
+/**
+ * Extracts the originating client IP from a request's `x-forwarded-for`
+ * header — Vercel's edge network prepends the real client IP as the first
+ * entry (not client-spoofable there), so the first comma-separated value is
+ * the one to trust. Returns null if the header is absent or empty.
+ */
+export function extractClientIp(request: Request): string | null {
+  const header = request.headers.get('x-forwarded-for')
+  const first   = header?.split(',')[0]?.trim()
+  return first?.length ? first : null
+}
+
+function ipv4ToInt(ip: string): number | null {
+  const parts = ip.split('.').map(Number)
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
+    return null
+  }
+  return ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0
+}
+
+/**
+ * Checks whether an IPv4 address falls within a CIDR range (e.g.
+ * "38.80.170.0/24"). Used for providers (e.g. Hospitable) that advise IP
+ * allowlisting as defense-in-depth alongside signature verification — the
+ * signature check remains the primary control; this rejects out-of-range
+ * traffic before it's even worth spending a crypto comparison on.
+ */
+export function isIpInCidr(ip: string, cidr: string): boolean {
+  const [range, bitsStr] = cidr.split('/')
+  const bits    = parseInt(bitsStr ?? '', 10)
+  const ipInt    = ipv4ToInt(ip)
+  const rangeInt = range ? ipv4ToInt(range) : null
+
+  if (ipInt === null || rangeInt === null || Number.isNaN(bits) || bits < 0 || bits > 32) {
+    return false
+  }
+
+  const mask = bits === 0 ? 0 : (0xFFFFFFFF << (32 - bits)) >>> 0
+  return (ipInt & mask) === (rangeInt & mask)
+}

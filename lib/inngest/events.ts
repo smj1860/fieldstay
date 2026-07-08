@@ -587,6 +587,10 @@ export type FieldStayEvents = {
       event_type:   string
       entity_type:  string
       entity_id:    string
+      // Only populated for reservation events — Hospitable's `triggers`
+      // array naming what changed (e.g. "checkin_changed"), lets the
+      // handler skip re-fetching when nothing FieldStay stores changed.
+      triggers?:    string[]
       triggered_at: string
     }
   }
