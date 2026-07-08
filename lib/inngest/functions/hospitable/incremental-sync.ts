@@ -38,6 +38,23 @@ import {
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
 
+// Reservation `triggers` values that don't correspond to anything
+// NormalizedBooking/the `bookings` table stores:
+//   guests_changed        → guest counts, we don't store these (only guest name/email)
+//   notes_changed         → internal conversation notes, not synced
+//   financials_changed    → not synced (financials:read not granted)
+//   guest_issue_detected  → issue_alert field, not synced
+// Deliberately NOT included (so they still trigger a re-fetch): status_changed,
+// dates_changed, checkin_changed, checkout_changed (all map directly to
+// columns we write), and listing_changed (could mean the reservation moved
+// to a different property — safer to re-fetch and re-resolve than assume).
+const IRRELEVANT_RESERVATION_TRIGGERS = new Set([
+  'guests_changed',
+  'notes_changed',
+  'financials_changed',
+  'guest_issue_detected',
+])
+
 export const hospIncrementalSync = inngest.createFunction(
   {
     id:          'hospitable-incremental-sync',
@@ -47,7 +64,7 @@ export const hospIncrementalSync = inngest.createFunction(
   },
   { event: 'integration/hospitable.sync.requested' as const },
   async ({ event, step, logger }) => {
-    const { provider_id, event_type, entity_type, entity_id } = event.data
+    const { provider_id, event_type, entity_type, entity_id, triggers } = event.data
 
     if (provider_id !== PROVIDER) {
       logger.warn(`[Hospitable incremental] Unexpected provider_id: ${provider_id}`)
@@ -58,6 +75,18 @@ export const hospIncrementalSync = inngest.createFunction(
 
     // ── RESERVATION ──────────────────────────────────────────────────────────
     if (entity_type === 'reservation') {
+
+      // Hospitable's `triggers` array names what changed. If every trigger
+      // present is one FieldStay doesn't store anything for, skip the
+      // re-fetch entirely rather than hitting the API for no reason.
+      // Absent (e.g. reservation.created has none) or containing anything
+      // outside this set proceeds normally — this is an efficiency skip
+      // only, never the basis for deciding what actually changed once we
+      // do fetch (that's still the before/after date comparison below).
+      if (triggers?.length && triggers.every((t) => IRRELEVANT_RESERVATION_TRIGGERS.has(t))) {
+        logger.info(`[Hospitable incremental] Skipping ${entity_id} — only irrelevant triggers: ${triggers.join(', ')}`)
+        return { action: 'skipped', reason: 'irrelevant_trigger', entity_id, triggers }
+      }
 
       const { orgId, token } = await step.run('resolve-org-and-token', async () => {
         const supabase = createServiceClient()

@@ -587,6 +587,10 @@ export type FieldStayEvents = {
       event_type:   string
       entity_type:  string
       entity_id:    string
+      // Only populated for reservation events — Hospitable's `triggers`
+      // array naming what changed (e.g. "checkin_changed"), lets the
+      // handler skip re-fetching when nothing FieldStay stores changed.
+      triggers?:    string[]
       triggered_at: string
     }
   }
@@ -604,10 +608,13 @@ export type FieldStayEvents = {
     }
   }
 
-  'integration/hospitable.token.refresh.requested': {
+  // Dispatched daily, one per active connection — Hospitable has no
+  // teammate webhook, so this is the only path that picks up added/
+  // updated/removed crew after the initial connect.
+  'integration/hospitable.teammate_sync.requested': {
     data: {
       user_id:          string
-      org_id:           string | null
+      org_id:           string
       external_user_id: string
     }
   }

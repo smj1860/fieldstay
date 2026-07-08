@@ -2,7 +2,6 @@
 // Unified proactive token refresh cron — runs every 2 hours.
 // Covers all OAuth providers whose access tokens expire: Hospitable (12hr)
 // and Kroger (30min). OwnerRez tokens never expire and are excluded.
-// Supersedes the weekly hospTokenRefreshCron, which is deprecated.
 
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'

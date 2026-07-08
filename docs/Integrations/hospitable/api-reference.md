@@ -434,7 +434,8 @@ reservation_uuid: UUID | null
 ## Webhooks
 
 **Endpoint:** `https://app.fieldstay.app/api/webhooks/hospitable`
-**Verify:** `Signature` header — HMAC-SHA256 of raw body, secret from Partner Portal
+**Verify:** `Signature` header — HMAC-SHA256 of raw body, secret from Partner Portal. Sanity-checked byte-for-byte against Hospitable's own worked example (`HMAC-SHA256({"foo": "bar"}, "123456")` → `cc99bf59...`) — confirms `hospitableProvider.validateWebhook()` uses the raw body bytes, not a re-serialized JSON string, which matters because re-serializing (different whitespace/key order) would silently break every signature check.
+**IP allowlist:** ✅ Enforced (`lib/integrations/webhook-verification.ts`'s `isIpInCidr()`) — as Vendors (not per-customer Hosts), our secret is one Partner-Portal-managed value, not the per-host-email-derived secret the docs describe for direct Host integrations. Checked ahead of the signature, since it's the cheaper rejection.
 **Retry:** 5x with backoff: 1s → 5s → 10s → 1hr → 6hr
 **Dedup:** `id` (ULID) stored in `processed_webhooks` table
 
@@ -448,14 +449,23 @@ reservation_uuid: UUID | null
   "version": "1.0"
 }
 ```
-`data` shape = same as GET response for that resource type.
+`data` shape = same as GET response for that resource type — **except reservation.changed**, see below.
+
+**⚠️ CONFIRMED — `reservation.changed` sends a PARTIAL payload, not the full reservation.** Per Hospitable's own docs example, a check-in-time-only change delivers `data: { "check_in": "2019-01-03T16:30:00-05:00" }` — just the changed field(s), with no `id` on `data` at all. The reservation's own id is on the **top-level `payload.id`** for this event instead (differs from `review.created`, where the top-level `id` is the webhook's own ULID and the entity id is nested under `data.id` — the two events use `id` for different things). `handleWebhookEvent()` checks `data.id` first (for `reservation.created`, which may send the fuller object) and falls back to the top-level `payload.id`. Before this fix, any `reservation.changed` webhook carrying only a partial diff had no way to identify which reservation to re-fetch and was silently dropped.
+
+**`triggers` array — now wired.** Present on reservation webhooks (and per Hospitable, "some property/message" webhooks — not yet confirmed which ones). Full confirmed value list for reservations:
+```
+status_changed  dates_changed  guests_changed  listing_changed
+checkin_changed  checkout_changed  notes_changed  financials_changed  guest_issue_detected
+```
+`hospitableProvider.handleWebhookEvent()` passes `triggers` through on the fired event; `hospIncrementalSync` skips the re-fetch entirely when every trigger present is one FieldStay stores nothing for (`guests_changed`, `notes_changed`, `financials_changed`, `guest_issue_detected` — see `IRRELEVANT_RESERVATION_TRIGGERS` in `incremental-sync.ts`). `listing_changed` is deliberately NOT treated as skippable — it could mean the reservation moved to a different property, so it still triggers a re-fetch and re-resolve. This is purely an efficiency skip: once a fetch does happen, what actually changed is still decided by comparing before/after dates in our own DB, never by trusting Hospitable's trigger label alone.
 
 ### Active Webhook Events
 
 | Action | Status | FieldStay Handler |
 |---|---|---|
 | `reservation.created` | ✅ Confirmed from Vercel logs | `hospIncrementalSync` → upsert booking, generate turnovers |
-| `reservation.changed` | 📄 Spec | `hospIncrementalSync` → update booking, regenerate turnovers |
+| `reservation.changed` | 📄 Spec (payload shape ✅ confirmed — see partial-payload note above) | `hospIncrementalSync` → update booking, regenerate turnovers |
 | `reservation.cancelled` | 📄 Spec | `hospIncrementalSync` → set status cancelled |
 | `integration.disconnected` | 📄 Spec | Mark revoked, send PM reconnect email |
 
@@ -510,6 +520,8 @@ reservation_uuid: UUID | null
 **`mapHospitableTeammateRole(services)`** — maps service labels to `crew_members.role` enum.
 
 **Token refresh cron:** `integration-token-refresh-cron` runs every 2 hours, refreshes tokens expiring within 60 minutes. Covers Hospitable and Kroger. Located at `lib/inngest/functions/cron/integration-token-refresh.ts`.
+
+**Teammate resync cron:** Hospitable has no `teammate.*` webhook, so `hospTeammateSyncCron` (`lib/inngest/functions/hospitable/teammate-sync-cron.ts`) runs once daily at 09:00 UTC, dispatching one `integration/hospitable.teammate_sync.requested` event per active connection. `hospTeammateSyncHandler` (`teammate-sync-handler.ts`) re-fetches `/teammates`, upserts via the shared `hospitableTeammatesToCrewRows()` mapper (also used by initial sync), and deactivates (`is_active: false`) any previously-synced crew member no longer in the fetch — the only path that catches teammates removed in Hospitable.
 
 ---
 
