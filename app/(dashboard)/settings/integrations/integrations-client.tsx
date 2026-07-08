@@ -55,11 +55,12 @@ const API_KEY_PROVIDER_FIELDS: Record<string, {
 
 // ── Provider display config (descriptions shown on each card) ─────────────────
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
-  ownerrez: 'Syncs bookings, properties, and guest reviews. Enables automatic revenue posting to owner ledgers.',
-  hostaway: 'Connects your Hostaway account to sync all listings and reservations in real time.',
+  ownerrez:   'Syncs bookings, properties, and guest reviews. Enables automatic revenue posting to owner ledgers.',
+  hostaway:   'Connects your Hostaway account to sync all listings and reservations in real time.',
+  hospitable: 'Syncs properties, reservations, and crew from your Hospitable account.',
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
-  kroger:   'Builds Kroger grocery carts automatically from below-par inventory items.',
+  kroger:     'Builds Kroger grocery carts automatically from below-par inventory items.',
 }
 
 // Providers not yet wired — excluded from the rendered list until live.

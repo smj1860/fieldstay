@@ -591,6 +591,19 @@ export type FieldStayEvents = {
     }
   }
 
+  // property.merged carries { previous_id, new_id } — a different shape from
+  // every other property webhook (which carry a single property id) — so it
+  // gets its own event rather than being forced through
+  // integration/hospitable.sync.requested's single entity_id field.
+  'integration/hospitable.property_merged': {
+    data: {
+      provider_id:           string
+      previous_external_id:  string
+      new_external_id:       string
+      triggered_at:          string
+    }
+  }
+
   'integration/hospitable.token.refresh.requested': {
     data: {
       user_id:          string
