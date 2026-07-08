@@ -7,8 +7,27 @@ import { renderGuidebookGracePeriodEmail } from '@/emails/guidebook-grace-period
 /**
  * Resend client — single instance for all transactional email.
  * Only used server-side (Inngest functions, API routes).
+ *
+ * Constructed lazily via Proxy, not at module load — Resend's constructor
+ * throws ("Missing API key") on an empty string, and this file is imported
+ * widely enough that Next.js's build-time page-data-collection pass would
+ * crash outright in any environment without RESEND_API_KEY set. The Proxy
+ * keeps every existing `resend.emails.send(...)` call site unchanged.
  */
-export const resend = new Resend(process.env.RESEND_API_KEY ?? '')
+let realClient: Resend | null = null
+
+function getClient(): Resend {
+  if (!realClient) {
+    realClient = new Resend(process.env.RESEND_API_KEY ?? '')
+  }
+  return realClient
+}
+
+export const resend = new Proxy({} as Resend, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getClient(), prop, receiver)
+  },
+})
 
 export const FROM = `${process.env.RESEND_FROM_NAME} <${process.env.RESEND_FROM_EMAIL}>`
 

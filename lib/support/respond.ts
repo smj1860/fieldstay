@@ -1,6 +1,6 @@
 import 'server-only'
 import type Anthropic from '@anthropic-ai/sdk'
-import { anthropic } from './anthropic-client'
+import { getAnthropicClient } from './anthropic-client'
 import { retrieveContext } from './retrieve'
 import type { SupportCategory, SupportMessage, SupportResponse } from './types'
 import { ACCOUNT_TOOLS, callAccountTool } from './account-tools'
@@ -60,7 +60,7 @@ export async function generateResponse(params: {
     })
   }
 
-  const res = await anthropic.messages.create({
+  const res = await getAnthropicClient().messages.create({
     model,
     max_tokens:  800,
     system:      systemPrompt,
@@ -97,7 +97,7 @@ async function generateAccountSpecificResponse(params: {
     { role: 'user' as const, content: params.message },
   ]
 
-  let res = await anthropic.messages.create({
+  let res = await getAnthropicClient().messages.create({
     model:      params.model,
     max_tokens: 800,
     system:     params.systemPrompt,
@@ -123,7 +123,7 @@ async function generateAccountSpecificResponse(params: {
     messages.push({ role: 'assistant', content: res.content })
     messages.push({ role: 'user', content: toolResults })
 
-    res = await anthropic.messages.create({
+    res = await getAnthropicClient().messages.create({
       model:      params.model,
       max_tokens: 800,
       system:     params.systemPrompt,
@@ -151,7 +151,7 @@ async function generateAccountSpecificResponse(params: {
     messages.push({ role: 'user', content: toolResults })
   }
 
-  const finalRes = await anthropic.messages.create({
+  const finalRes = await getAnthropicClient().messages.create({
     model:       params.model,
     max_tokens:  800,
     system:      params.systemPrompt,

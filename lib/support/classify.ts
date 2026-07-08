@@ -1,6 +1,6 @@
 import 'server-only'
 import type Anthropic from '@anthropic-ai/sdk'
-import { anthropic } from './anthropic-client'
+import { getAnthropicClient } from './anthropic-client'
 import type { SupportCategory } from './types'
 
 const ROUTE_TOOL = {
@@ -20,7 +20,7 @@ const ROUTE_TOOL = {
 
 export async function classifyIntent(message: string): Promise<SupportCategory> {
   try {
-    const res = await anthropic.messages.create({
+    const res = await getAnthropicClient().messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 50,
       system:
