@@ -92,6 +92,7 @@ export type AuditAction =
   | 'sms.consent.revoked'
   | 'sms.consent.restored'
   | 'property.content.overwritten_by_sync'
+  | 'property.merge_conflict'
 
 interface AuditParams {
   orgId?:         string

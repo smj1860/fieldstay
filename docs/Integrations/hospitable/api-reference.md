@@ -36,7 +36,7 @@
 | `reservation:read` | ✅ Live | All reservation data |
 | `listing:read` | ✅ Live | Channel listing details |
 | `reviews:read` | ✅ Live | Guest reviews and responses |
-| `teammate:read` | ⏳ Pending Patrick | Crew/teammate sync |
+| `teammate:read` | ✅ Live | Crew/teammate sync |
 
 ## Scopes to Request from Patrick
 
@@ -301,7 +301,7 @@ const propertyExternalId =
 ### Teammates / Crew
 
 #### `GET /teammates`
-**Scope:** `teammate:read` *(⏳ pending Patrick)*
+**Scope:** `teammate:read` *(✅ live)*
 **Paginate:** `page` + `meta.last_page` · `per_page` max 100
 
 ```

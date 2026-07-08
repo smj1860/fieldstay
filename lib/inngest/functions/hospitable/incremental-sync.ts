@@ -463,7 +463,6 @@ export const hospIncrementalSync = inngest.createFunction(
 
       // Fetch review and upsert using live reviews table schema:
       //   guest_name, review_text, rating (NOT NULL), review_date, property_id (UUID FK)
-      // ⚠️ Confirm /reviews/{id} endpoint path from first real Hospitable delivery.
       const upsertResult = await step.run('fetch-and-upsert-review', async () => {
         const res = await hospitableFetch(
           `${HOSPITABLE_API_BASE}/reviews/${entity_id}`,
@@ -481,7 +480,20 @@ export const hospIncrementalSync = inngest.createFunction(
           )
         }
 
-        const data   = await res.json() as { data: Record<string, unknown> }
+        // Confirmed shape (Hospitable developer docs / webhook payload spec):
+        // rating and review text are nested under `public`, the reviewer's
+        // name under `guest`, and the date field is `reviewed_at` — NOT the
+        // flat `rating`/`public_review`/`guest_name`/`submitted_at` this
+        // previously read (which don't exist on the real response and left
+        // every synced review with a 0 rating and empty text).
+        const data = await res.json() as {
+          data: {
+            public?:   { rating?: number | null; review?: string | null } | null
+            guest?:    { first_name?: string | null; last_name?: string | null } | null
+            property?: { id?: string | null } | null
+            reviewed_at?: string | null
+          }
+        }
         const review = data.data
 
         const supabase          = createServiceClient()
@@ -489,7 +501,7 @@ export const hospIncrementalSync = inngest.createFunction(
         let   resolvedPropertyId: string | null = null
 
         // Resolve property_id (FK) and correct org from the Hospitable property UUID
-        const hospPropertyId = review.property_id as string | null
+        const hospPropertyId = review.property?.id ?? null
         if (hospPropertyId) {
           const { data: prop } = await supabase
             .from('properties')
@@ -504,6 +516,10 @@ export const hospIncrementalSync = inngest.createFunction(
           }
         }
 
+        const guestName = [review.guest?.first_name, review.guest?.last_name]
+          .filter(Boolean)
+          .join(' ') || null
+
         const { data: upserted, error } = await supabase
           .from('reviews')
           .upsert(
@@ -512,10 +528,10 @@ export const hospIncrementalSync = inngest.createFunction(
               external_id:     entity_id,
               external_source: PROVIDER,
               property_id:     resolvedPropertyId,
-              guest_name:      (review.guest_name as string | null) ?? null,
-              rating:          (review.rating as number | null) ?? 0,
-              review_text:     (review.public_review as string | null) ?? '',
-              review_date:     (review.submitted_at as string | null) ?? null,
+              guest_name:      guestName,
+              rating:          review.public?.rating ?? 0,
+              review_text:     review.public?.review ?? '',
+              review_date:     review.reviewed_at ?? null,
               response_status: 'pending',
             },
             { onConflict: 'external_id,external_source' }

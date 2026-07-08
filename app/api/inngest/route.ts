@@ -36,6 +36,7 @@ import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sy
 import { hospInitialSync }              from '@/lib/inngest/functions/hospitable/initial-sync'
 import { sendHospitableConnectedEmail } from '@/lib/inngest/functions/email-hospitable-connected'
 import { hospIncrementalSync }          from '@/lib/inngest/functions/hospitable/incremental-sync'
+import { hospPropertyMerge }            from '@/lib/inngest/functions/hospitable/property-merge'
 import { hospTokenRefreshCron }         from '@/lib/inngest/functions/hospitable/token-refresh-cron'
 import { hospTokenRefreshHandler }      from '@/lib/inngest/functions/hospitable/token-refresh-handler'
 
@@ -176,6 +177,7 @@ export const { GET, POST, PUT } = serve({
     hospInitialSync,
     sendHospitableConnectedEmail,
     hospIncrementalSync,
+    hospPropertyMerge,
     hospTokenRefreshCron,
     hospTokenRefreshHandler,
 

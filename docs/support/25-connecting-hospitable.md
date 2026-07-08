@@ -86,7 +86,7 @@ Wait two to three minutes and refresh the properties page. If they still don't a
 Bookings sync in real time via webhook. If a booking isn't appearing, check the date range on your FieldStay bookings page — the default filter shows upcoming bookings only. If the booking is upcoming and still missing, disconnect and reconnect Hospitable to trigger a fresh sync.
 
 **My crew members from Hospitable didn't sync.**
-Hospitable teammate sync requires the `teammate:read` scope to be enabled for the FieldStay integration. If your crew didn't appear after connecting, contact support — this scope may not be active for your account yet.
+Hospitable teammate sync requires the `teammate:read` scope. This is now enabled for the FieldStay integration — if your crew still didn't appear, disconnect and reconnect Hospitable (a connection made before the scope was enabled needs to re-authorize to pick it up), then contact support if it still doesn't sync.
 
 **I added a new property in Hospitable but it isn't in FieldStay.**
 Property additions trigger a sync automatically. If the property doesn't appear within a few minutes, disconnect and reconnect Hospitable.

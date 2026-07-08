@@ -428,8 +428,7 @@ export const hospitableProvider: IntegrationProvider = {
       case 'property.changed':
       case 'property.created':
       case 'property.updated':
-      case 'property.deleted':
-      case 'property.merged': {
+      case 'property.deleted': {
         if (!entityId) {
           console.warn('[Hospitable webhook] property event missing data.id:', data)
           break
@@ -443,6 +442,32 @@ export const hospitableProvider: IntegrationProvider = {
             entity_type:  'property',
             entity_id:    entityId,
             triggered_at: new Date().toISOString(),
+          },
+        })
+        break
+      }
+
+      // property.merged has a different payload shape from every other
+      // property event — { previous_id, new_id }, no single `id` field —
+      // so it can't go through the generic entityId extraction above.
+      case 'property.merged': {
+        const mergeData    = entityData as { previous_id?: string; new_id?: string } | undefined
+        const previousId   = mergeData?.previous_id
+        const newId        = mergeData?.new_id
+
+        if (!previousId || !newId) {
+          console.warn('[Hospitable webhook] property.merged missing previous_id/new_id:', data)
+          break
+        }
+
+        const { inngest } = await import('@/lib/inngest/client')
+        await inngest.send({
+          name: 'integration/hospitable.property_merged',
+          data: {
+            provider_id:          'hospitable',
+            previous_external_id: previousId,
+            new_external_id:      newId,
+            triggered_at:         new Date().toISOString(),
           },
         })
         break
