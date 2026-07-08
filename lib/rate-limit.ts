@@ -58,6 +58,16 @@ export const workOrderRatelimit = new Ratelimit({
   prefix:    'rl:wo',
 })
 
+// Public vendor Stripe Connect onboarding routes (/vendor-connect/[token]/*,
+// /api/vendor-connect/[token]/*) — same rationale and limit as workOrderRatelimit:
+// guards against stripe_connect_token enumeration on this unauthenticated route.
+export const vendorConnectRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:vendor-connect',
+})
+
 // Sign-off action — 5 submissions per 5 minutes per work order token
 // A contractor will never legitimately submit more than once
 export const signOffRatelimit = new Ratelimit({

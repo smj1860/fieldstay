@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
-import { workOrderRatelimit } from '@/lib/rate-limit'
+import { workOrderRatelimit, vendorConnectRatelimit } from '@/lib/rate-limit'
 
 // ── Public routes ──────────────────────────────────────────────────────────
 // Unauthenticated users can access these. Authenticated users are redirected
@@ -24,6 +24,8 @@ const TOKEN_ROUTES = [
   '/work-orders/',
   '/api/work-orders',
   '/wo/',
+  '/vendor-connect/',
+  '/api/vendor-connect',
 ]
 
 // ── Bypass routes ──────────────────────────────────────────────────────────
@@ -90,14 +92,27 @@ const BYPASS_ROUTES = [
   '/api/account/delete',
 ]
 
+// Each guessable-token surface gets its own limiter/prefix so hammering
+// one doesn't throttle another.
+function rateLimiterForPathname(pathname: string) {
+  if (pathname.startsWith('/wo/'))               return workOrderRatelimit
+  if (pathname.startsWith('/work-orders/'))       return workOrderRatelimit
+  if (pathname.startsWith('/api/work-orders'))    return workOrderRatelimit
+  if (pathname.startsWith('/vendor-connect/'))    return vendorConnectRatelimit
+  if (pathname.startsWith('/api/vendor-connect')) return vendorConnectRatelimit
+  return null
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return NextResponse.next()
 
-  // Rate limit the public work order page — guards against token
-  // enumeration and request flooding on this unauthenticated route.
-  if (pathname.startsWith('/wo/')) {
+  // Rate limit unauthenticated token-guessable routes — guards against
+  // token enumeration and request flooding.
+  const tokenRouteLimiter = rateLimiterForPathname(pathname)
+
+  if (tokenRouteLimiter) {
     const ip =
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
       request.headers.get('x-real-ip') ??
@@ -105,7 +120,7 @@ export async function proxy(request: NextRequest) {
 
     try {
       const { success, limit, remaining, reset } =
-        await workOrderRatelimit.limit(ip)
+        await tokenRouteLimiter.limit(ip)
 
       if (!success) {
         return new NextResponse(
@@ -123,8 +138,8 @@ export async function proxy(request: NextRequest) {
         )
       }
     } catch (err) {
-      // If Redis is unavailable, fail open — don't take down the public
-      // work order page over an infrastructure issue
+      // If Redis is unavailable, fail open — don't take down these public
+      // routes over an infrastructure issue
       console.error('[proxy] rate limit check failed', err)
     }
   }
