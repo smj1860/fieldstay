@@ -40,11 +40,16 @@ const DexieContext = createContext<DexieContextValue>({ db: null, userId: null }
 export function DexieProvider({ userId: userIdProp, children }: { userId?: string; children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(userIdProp ?? null)
 
+  // Sync a userIdProp change into state during render rather than in an
+  // effect, so the update lands in the same render pass as the prop change.
+  const [prevUserIdProp, setPrevUserIdProp] = useState(userIdProp)
+  if (userIdProp !== prevUserIdProp) {
+    setPrevUserIdProp(userIdProp)
+    if (userIdProp) setUserId(userIdProp)
+  }
+
   useEffect(() => {
-    if (userIdProp) {
-      setUserId(userIdProp)
-      return
-    }
+    if (userIdProp) return // parent already supplied the id — no need to resolve/subscribe
 
     const supabase = createClient()
 
@@ -62,7 +67,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     )
 
     return () => subscription.subscription.unsubscribe()
-  }, [])
+  }, [userIdProp])
 
   // Flush the outbox whenever the device comes back online — mirrors
   // crew-shell.tsx's 'online' listener for processPendingPhotoUploads.

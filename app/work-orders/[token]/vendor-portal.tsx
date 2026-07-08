@@ -376,7 +376,7 @@ export function VendorPortal({
           </p>
           <p style={{ fontSize: 13, color: '#7c2d12', lineHeight: 1.55, margin: 0 }}>
             Invoices are paid via Stripe Connect directly to your bank.
-            Setting up takes about 2 minutes — you'll need your bank details.
+            Setting up takes about 2 minutes — you&apos;ll need your bank details.
           </p>
         </div>
         <a

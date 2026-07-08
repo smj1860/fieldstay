@@ -26,7 +26,7 @@ interface ExtensionConfigProp {
 interface GuestGuidebookViewProps {
   property:         Property
   config:           GuidebookPropertyConfig
-  sponsors:         (GuidebookSponsor & { photoUrl: string | null })[]
+  sponsors:         GuidebookSponsor[]
   isActive:         boolean
   hourOfDay:        number
   weather:          WeatherContext | null
@@ -131,13 +131,6 @@ export function GuestGuidebookView({
                     key={sponsor.id}
                     style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', overflow: 'hidden' }}
                   >
-                    {sponsor.photoUrl && (
-                      <img
-                        src={sponsor.photoUrl}
-                        alt=""
-                        style={{ width: '100%', height: '140px', objectFit: 'cover', display: 'block' }}
-                      />
-                    )}
                     <div style={{ padding: '14px' }}>
                       <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 4px' }}>
                         {sponsor.business_name}

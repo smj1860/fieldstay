@@ -191,7 +191,7 @@ export function TemplateManager({
   const toggleSelected = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) { next.delete(id) } else { next.add(id) }
       return next
     })
   }
@@ -469,7 +469,7 @@ export function TemplateManager({
         {addTab === 'catalog' && (
           <div className="space-y-3">
             <div className="px-3 py-2.5 rounded-lg text-xs" style={{ background: 'var(--bg-raised)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-              If you always buy a specific brand — Bounty paper towels, Dawn dish soap, Tide pods — enter it in the Brand field. Without it, the cart may pull in a store brand and you'll have to swap it out manually every time.
+              If you always buy a specific brand — Bounty paper towels, Dawn dish soap, Tide pods — enter it in the Brand field. Without it, the cart may pull in a store brand and you&apos;ll have to swap it out manually every time.
             </div>
             <div className="flex gap-1.5 flex-wrap">
               {(['all', ...CATEGORY_ORDER] as const).map(c => (
@@ -543,7 +543,7 @@ export function TemplateManager({
                               if (alreadyInTemplate) return
                               setCatalogSelected(prev => {
                                 const next = new Set(prev)
-                                next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                                if (next.has(c.id)) { next.delete(c.id) } else { next.add(c.id) }
                                 return next
                               })
                             }}
@@ -553,7 +553,7 @@ export function TemplateManager({
                                 e.preventDefault()
                                 setCatalogSelected(prev => {
                                   const next = new Set(prev)
-                                  next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                                  if (next.has(c.id)) { next.delete(c.id) } else { next.add(c.id) }
                                   return next
                                 })
                               }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import { Download, Share2, X } from 'lucide-react'
 
 // Chrome/Android deferred install prompt — not yet in standard TypeScript DOM lib
@@ -47,19 +47,29 @@ function isStandalone(): boolean {
   )
 }
 
+// Only knowable client-side, and only ever needs to be read once at mount —
+// useSyncExternalStore gives the SSR render a safe default ('hidden') and
+// the client's first render already reflects the real value.
+function initialBannerState(): BannerState {
+  if (isStandalone()) return 'hidden'
+  if (checkRecentlyDismissed()) return 'hidden'
+  if (isIOSSafari()) return 'ios'
+  return 'hidden' // resolved to 'android' later, only if the browser fires beforeinstallprompt
+}
+const noopSubscribe = () => () => {}
+
 export function InstallBanner() {
-  const [state, setState]               = useState<BannerState>('hidden')
+  const initialState = useSyncExternalStore(noopSubscribe, initialBannerState, () => 'hidden' as BannerState)
+  const [state, setState]               = useState<BannerState>(initialState)
   const [prompt, setPrompt]             = useState<BeforeInstallPromptEvent | null>(null)
 
   useEffect(() => {
-    // Already installed as PWA — never show
+    // Already installed as PWA, or the user dismissed recently — never show
     if (isStandalone()) return
     if (checkRecentlyDismissed()) return
 
-    if (isIOSSafari()) {
-      setState('ios')
-      return
-    }
+    // iOS never fires beforeinstallprompt — already resolved via initialBannerState()
+    if (isIOSSafari()) return
 
     const handler = (e: Event) => {
       e.preventDefault()

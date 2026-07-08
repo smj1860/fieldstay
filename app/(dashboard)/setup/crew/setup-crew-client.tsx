@@ -50,7 +50,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Add cleaning and maintenance team members. Invite them to the crew app after adding.
           These team members belong to your organization and can be assigned to any property —
-          you'll choose who works which turnover as bookings come in.
+          you&apos;ll choose who works which turnover as bookings come in.
         </p>
       </div>
 
@@ -72,7 +72,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
         >
           <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent-amber)' }} />
           <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-            You haven't added any crew members yet. Add at least one crew member
+            You haven&apos;t added any crew members yet. Add at least one crew member
             before continuing so FieldStay can assign turnovers automatically.
           </p>
         </div>

@@ -83,7 +83,7 @@ export function AcceptInviteForm({
       </Button>
 
       <p className="text-xs text-center text-muted">
-        You'll be taken directly to the FieldStay crew app after activating.
+        You&apos;ll be taken directly to the FieldStay crew app after activating.
       </p>
     </form>
   )

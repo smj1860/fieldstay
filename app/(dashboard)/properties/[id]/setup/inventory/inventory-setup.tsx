@@ -335,7 +335,7 @@ export function InventorySetup({
                     onChange={() => {
                       setSelectedIdxs((prev) => {
                         const next = new Set(prev)
-                        next.has(idx) ? next.delete(idx) : next.add(idx)
+                        if (next.has(idx)) { next.delete(idx) } else { next.add(idx) }
                         return next
                       })
                     }}
@@ -414,7 +414,7 @@ export function InventorySetup({
                 <button
                   onClick={() => setExpandedCategories((prev) => {
                     const next = new Set(prev)
-                    isOpen ? next.delete(category) : next.add(category)
+                    if (isOpen) { next.delete(category) } else { next.add(category) }
                     return next
                   })}
                   className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-raised-themed transition-colors"
