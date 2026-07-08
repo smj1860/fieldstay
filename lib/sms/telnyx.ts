@@ -60,7 +60,10 @@ interface SendSmsResult {
  */
 export async function sendSMS(toE164: string, body: string): Promise<SendSmsResult> {
   if (process.env.SMS_ENABLED !== 'true') {
-    console.log('[sms:disabled]', { to: toE164, body })
+    // Never log the guest's phone number or message body — bodies can
+    // contain door codes. Redacted to last 4 digits + length only, enough
+    // to confirm a send would have happened without logging PII/credentials.
+    console.log('[sms:disabled]', { to: `***${toE164.slice(-4)}`, bodyLength: body.length })
     return { sent: false, reason: 'SMS_ENABLED is not true' }
   }
 
