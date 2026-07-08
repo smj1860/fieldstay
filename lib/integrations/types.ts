@@ -191,6 +191,11 @@ export interface OwnerRezBooking {
   departure:     string
   status:        string
   is_block?:     boolean
+  // Effective 2026-07-07: 'owner' identifies an owner's own personal-use
+  // stay — a full booking entity (has a guest_id/contact, can carry
+  // charges), NOT a block, so is_block is false for these. Older values
+  // (booking/block/quote_hold/linked_availability) predate this addition.
+  type?:         'booking' | 'block' | 'quote_hold' | 'linked_availability' | 'owner'
   property_id?:  number
   channel_name?: string
   guest?: {

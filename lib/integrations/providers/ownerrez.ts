@@ -374,8 +374,10 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     guest_email: b.guest?.email ?? null,
     source:      mapOwnerRezChannelToSource(b.channel_name),
     is_block:    b.is_block ?? false,
-    // OwnerRez exposes no owner-personal-use concept equivalent to
-    // Hospitable's stay_type — every OwnerRez booking is a guest stay.
-    stay_type:   'guest_stay',
+    // Effective 2026-07-07, OwnerRez's type field can be 'owner' — the
+    // property owner's own personal-use stay. It's a full booking (not a
+    // block; is_block is false), so it flows through the same upsert path
+    // as a guest booking and still gets a turnover — just tagged.
+    stay_type:   b.type === 'owner' ? 'owner_stay' : 'guest_stay',
   }
 }
