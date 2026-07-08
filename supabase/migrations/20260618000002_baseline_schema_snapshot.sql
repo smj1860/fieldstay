@@ -27,6 +27,13 @@
 -- Tables intentionally excluded (already covered by an existing CREATE TABLE
 -- migration elsewhere in this directory): repuguard/team-access tables from
 -- 20260601000000_repuguard.sql and 20260602000000_team_access.sql.
+--
+-- NOT RECORDED IN LIVE MIGRATION HISTORY: verified via Supabase MCP
+-- list_migrations on 2026-07-08 that this file's version is absent from
+-- supabase_migrations.schema_migrations, consistent with every other table/
+-- column/index/function/policy checked from this file existing live already
+-- (as this migration's own idempotent design anticipates) — not a pending
+-- change, just never recorded under this version.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ───────────────────────── Pass 1: CREATE TABLE ─────────────────────────────
