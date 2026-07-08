@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { saveCrewAvailability } from '@/lib/dexie/helpers'
@@ -70,10 +70,13 @@ export function TimeOffRequest({ crewMemberId, orgId }: Props) {
   const [cancelError, setCancelError] = useState<string | null>(null)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
 
-  // Clear unsaved draft changes when navigating to a different week
-  useEffect(() => {
+  // Clear unsaved draft changes when navigating to a different week — compared
+  // during render rather than in a useEffect so it lands in the same render pass.
+  const [prevWeekOffset, setPrevWeekOffset] = useState(weekOffset)
+  if (weekOffset !== prevWeekOffset) {
+    setPrevWeekOffset(weekOffset)
     setDraft({})
-  }, [weekOffset])
+  }
 
   const existingMap = useMemo(() => {
     const m = new Map<string, AvailRow>()

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState, useTransition, useSyncExternalStore } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
 import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff } from 'lucide-react'
@@ -259,25 +259,22 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
   )
 }
 
-function SyncStatus() {
-  // Always render `true` (no banner) on both the server and the initial
-  // client paint — reading navigator.onLine during render would let the
-  // client's real value diverge from the server's, causing a hydration
-  // mismatch. The real value is applied only after mount.
-  const [isOnline, setIsOnline] = useState(true)
-  const [showInfo, setShowInfo] = useState(false)
+function subscribeToOnlineStatus(onChange: () => void): () => void {
+  window.addEventListener('online', onChange)
+  window.addEventListener('offline', onChange)
+  return () => {
+    window.removeEventListener('online', onChange)
+    window.removeEventListener('offline', onChange)
+  }
+}
 
-  useEffect(() => {
-    setIsOnline(navigator.onLine)
-    const on  = () => setIsOnline(true)
-    const off = () => setIsOnline(false)
-    window.addEventListener('online', on)
-    window.addEventListener('offline', off)
-    return () => {
-      window.removeEventListener('online', on)
-      window.removeEventListener('offline', off)
-    }
-  }, [])
+function SyncStatus() {
+  // Render `true` (no banner) on both the server and the initial client
+  // paint — reading navigator.onLine during SSR would diverge from the
+  // client, causing a hydration mismatch. getServerSnapshot below covers
+  // that; the real value is synced in as soon as the client mounts.
+  const isOnline = useSyncExternalStore(subscribeToOnlineStatus, () => navigator.onLine, () => true)
+  const [showInfo, setShowInfo] = useState(false)
 
   if (isOnline) return null
   return (

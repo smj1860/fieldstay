@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo }  from 'react'
+import { useState, useMemo, useSyncExternalStore }  from 'react'
 import { useLiveQuery }   from 'dexie-react-hooks'
 import { useDexieDb }     from '@/lib/dexie/context'
 
@@ -12,6 +12,11 @@ import { distanceMiles }                 from '@/lib/geocoding'
 import type { CrewWorkOrderRow }         from '@/lib/dexie/schema'
 
 const AVG_DRIVE_SPEED_MPH = 30
+
+// Stable identity for the useLiveQuery(...) ?? fallback below — a fresh `[]`
+// literal there would change reference every render while the query is
+// still loading, defeating the assignedPropertyIds useMemo that depends on it.
+const EMPTY_ROWS: never[] = []
 
 type TurnoverRow = {
   id:                string
@@ -198,12 +203,13 @@ function todayAndWeekOutDates(): { today: string; weekOut: string } {
   }
 }
 
+const noopSubscribe = () => () => {}
+
 export default function CrewDashboardPage() {
-  const [isMounted, setIsMounted] = useState(false)
+  // Only true after the client has mounted — gates hydration-sensitive UI
+  // (local Dexie data isn't available during SSR).
+  const isMounted = useSyncExternalStore(noopSubscribe, () => true, () => false)
   const [showFeedback, setShowFeedback] = useState(false)
-  useEffect(() => {
-    setIsMounted(true)
-  }, [])
 
   const { crewName } = useCrewContext()
   const firstName    = crewName.split(' ')[0] ?? crewName
@@ -221,7 +227,7 @@ export default function CrewDashboardPage() {
       )
       .sortBy('checkout_datetime'),
     [today, weekOut]
-  ) ?? []
+  ) ?? EMPTY_ROWS
 
   const allWorkOrders = useLiveQuery(
     () => db.crew_work_orders
@@ -231,7 +237,7 @@ export default function CrewDashboardPage() {
       )
       .toArray(),
     []
-  ) ?? []
+  ) ?? EMPTY_ROWS
 
   const assignedPropertyIds = useMemo(
     () => new Set([
@@ -300,7 +306,7 @@ export default function CrewDashboardPage() {
               className="text-xs font-bold px-4 py-1.5 rounded-full text-white"
               style={{ background: '#0D1F3C' }}
             >
-              Today's Turnovers
+              Today&apos;s Turnovers
             </span>
           </div>
           {todayTurnovers.length > 0 && (

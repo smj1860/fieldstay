@@ -29,8 +29,6 @@ interface Props {
 }
 
 export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) {
-  const supabase = createClient()
-
   const [step,     setStep]     = useState<1 | 2>(1)
   const [catalog,  setCatalog]  = useState<MaintenanceCatalogItem[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -43,6 +41,7 @@ export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) 
 
   useEffect(() => {
     async function loadCatalog() {
+      const supabase = createClient()
       const { data } = await supabase
         .from('maintenance_catalog_items')
         .select('*')

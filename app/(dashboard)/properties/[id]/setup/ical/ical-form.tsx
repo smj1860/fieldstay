@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useActionState, useState } from 'react'
 import { addIcalFeed, deleteIcalFeed, completeIcalStep, triggerSingleFeedSync } from './actions'
 import { Plus, Trash2, RefreshCw, Link as LinkIcon } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -35,10 +35,14 @@ export function IcalManager({
   const [selectedSource, setSelectedSource] = useState('airbnb')
   const [completing, setCompleting] = useState(false)
 
-  // Close form on successful submission
-  useEffect(() => {
+  // Close form on successful submission — compares against the previous
+  // action state during render (rather than a useEffect) so the state
+  // update lands in the same render pass as the state change itself.
+  const [handledState, setHandledState] = useState(state)
+  if (state !== handledState) {
+    setHandledState(state)
     if (state?.success) setShowForm(false)
-  }, [state?.success])
+  }
 
   return (
     <div className="space-y-6">

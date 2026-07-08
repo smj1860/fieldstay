@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { useRouter } from 'next/navigation'
 import { Share, Plus, Check, AlertTriangle, Home } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -126,18 +126,18 @@ function DesktopInstructions() {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+const noopSubscribe = () => () => {}
+
 export function CrewInstallClient() {
   const router = useRouter()
 
-  const [platform, setPlatform]     = useState<Platform>('unknown')
-  const [alreadyPWA, setAlreadyPWA] = useState(false)
+  // Platform/PWA state is only knowable client-side — read via
+  // useSyncExternalStore so the SSR render gets a safe default and the
+  // client's first render already reflects the real value, no extra effect
+  // + setState render needed.
+  const platform = useSyncExternalStore(noopSubscribe, detectPlatform, () => 'unknown' as Platform)
+  const alreadyPWA = useSyncExternalStore(noopSubscribe, isRunningAsPWA, () => false)
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
-
-  // Detect platform and PWA state on mount (client-only)
-  useEffect(() => {
-    setPlatform(detectPlatform())
-    setAlreadyPWA(isRunningAsPWA())
-  }, [])
 
   // If already running as an installed PWA, skip the install page entirely
   useEffect(() => {

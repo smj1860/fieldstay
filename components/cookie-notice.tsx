@@ -1,25 +1,27 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { X } from 'lucide-react'
 
 const STORAGE_KEY = 'fs-cookie-notice-dismissed'
 
+function notDismissed(): boolean {
+  try {
+    return !localStorage.getItem(STORAGE_KEY)
+  } catch {
+    // localStorage unavailable (private mode, etc.) — don't show
+    return false
+  }
+}
+const noopSubscribe = () => () => {}
+
 export function CookieNotice() {
   // Start hidden on server and first client paint — avoids hydration mismatch.
   // Revealed on mount only if the user hasn't dismissed before.
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    try {
-      if (!localStorage.getItem(STORAGE_KEY)) {
-        setVisible(true)
-      }
-    } catch {
-      // localStorage unavailable (private mode, etc.) — don't show
-    }
-  }, [])
+  const notDismissedAtMount = useSyncExternalStore(noopSubscribe, notDismissed, () => false)
+  const [dismissed, setDismissed] = useState(false)
+  const visible = notDismissedAtMount && !dismissed
 
   function dismiss() {
     try {
@@ -27,7 +29,7 @@ export function CookieNotice() {
     } catch {
       // ignore
     }
-    setVisible(false)
+    setDismissed(true)
   }
 
   if (!visible) return null

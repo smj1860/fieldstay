@@ -496,9 +496,14 @@ export function BookingsClient({
   const [justAdded,        setJustAdded]       = useState(false)
   const [calendarPrefill,  setCalendarPrefill] = useState<{ propertyId: string; checkinDate: string } | null>(null)
 
-  useEffect(() => {
+  // Re-sync local (optimistically-mutable) state when the server-provided
+  // `bookings` prop changes (e.g. after router.refresh()) — compared during
+  // render rather than in a useEffect so it lands in the same render pass.
+  const [prevBookings, setPrevBookings] = useState(bookings)
+  if (bookings !== prevBookings) {
+    setPrevBookings(bookings)
     setLocalBookings(bookings)
-  }, [bookings])
+  }
 
   useEffect(() => {
     if (!justAdded) return

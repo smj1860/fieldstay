@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
 import Link                             from 'next/link'
 import { AlertTriangle, Sparkle }       from 'lucide-react'
 
@@ -52,18 +52,18 @@ const MOBILE_SIZING  = { daysAhead: 7,  colW: 36, rowH: 56, labelW: 100, blockH:
 
 const MOBILE_BREAKPOINT = 640 // matches the `sm` breakpoint used elsewhere in the app
 
+function subscribeToMobileBreakpoint(onChange: () => void): () => void {
+  const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+  mql.addEventListener('change', onChange)
+  return () => mql.removeEventListener('change', onChange)
+}
+
+function getIsMobileSnapshot(): boolean {
+  return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches
+}
+
 function useIsMobile(): boolean {
-  const [isMobile, setIsMobile] = useState(false)
-
-  useEffect(() => {
-    const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    setIsMobile(mql.matches)
-    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches)
-    mql.addEventListener('change', onChange)
-    return () => mql.removeEventListener('change', onChange)
-  }, [])
-
-  return isMobile
+  return useSyncExternalStore(subscribeToMobileBreakpoint, getIsMobileSnapshot, () => false)
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

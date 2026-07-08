@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { X, Lightbulb } from 'lucide-react'
 
@@ -11,23 +11,26 @@ interface NudgeBannerProps {
   linkText: string
 }
 
-export function NudgeBanner({ id, message, href, linkText }: NudgeBannerProps) {
-  const [visible, setVisible] = useState(false)
+function notDismissed(id: string): boolean {
+  try {
+    const dismissed = JSON.parse(
+      localStorage.getItem('fieldstay_dismissed_nudges') ?? '[]'
+    ) as string[]
+    return !dismissed.includes(id)
+  } catch {
+    return true
+  }
+}
+const noopSubscribe = () => () => {}
 
-  // Only show after mount (avoids SSR mismatch with localStorage)
-  useEffect(() => {
-    try {
-      const dismissed = JSON.parse(
-        localStorage.getItem('fieldstay_dismissed_nudges') ?? '[]'
-      ) as string[]
-      if (!dismissed.includes(id)) setVisible(true)
-    } catch {
-      setVisible(true)
-    }
-  }, [id])
+export function NudgeBanner({ id, message, href, linkText }: NudgeBannerProps) {
+  // Only the real value after mount (avoids SSR mismatch with localStorage)
+  const notDismissedAtMount = useSyncExternalStore(noopSubscribe, () => notDismissed(id), () => false)
+  const [dismissed, setDismissed] = useState(false)
+  const visible = notDismissedAtMount && !dismissed
 
   const dismiss = () => {
-    setVisible(false)
+    setDismissed(true)
     try {
       const dismissed = JSON.parse(
         localStorage.getItem('fieldstay_dismissed_nudges') ?? '[]'
