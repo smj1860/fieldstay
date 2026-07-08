@@ -2,6 +2,7 @@
 
 import { ShoppingCart, ClipboardList } from 'lucide-react'
 import type { CartBuildResult } from '@/lib/kroger/types'
+import { buttonVariantClass } from '@/components/ui/Button'
 
 interface CartReadyBannerProps {
   cartData: CartBuildResult & {
@@ -57,7 +58,7 @@ export function CartReadyBanner({ cartData }: CartReadyBannerProps) {
             href={cartData.cart_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-primary text-xs px-3 py-1.5 whitespace-nowrap flex-shrink-0"
+            className={buttonVariantClass('primary') + ' text-xs px-3 py-1.5 whitespace-nowrap flex-shrink-0'}
           >
             Open Cart →
           </a>

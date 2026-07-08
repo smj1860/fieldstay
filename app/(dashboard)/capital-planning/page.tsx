@@ -5,6 +5,7 @@ import { TriggerProjectionsButton }  from './trigger-projections-button'
 import { StatusDropdown }            from './status-dropdown'
 import { PropertyFilterSelect }      from './property-filter-select'
 import { Card }                      from '@/components/ui/Card'
+import { buttonVariantClass }        from '@/components/ui/Button'
 import type { Metadata }             from 'next'
 import type {
   CapExProjectionPayload,
@@ -123,7 +124,7 @@ export default async function CapitalPlanningPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/assets" className="btn-ghost text-sm">← Asset Health</Link>
+          <Link href="/assets" className={buttonVariantClass('ghost') + ' text-sm'}>← Asset Health</Link>
         </div>
       </div>
 
@@ -150,7 +151,7 @@ export default async function CapitalPlanningPage({
           </div>
           <div className="flex items-center gap-2">
             {deprValue && (
-              <a href={`/api/assets/cpa-export?tax_year=${priorYear}`} className="btn-ghost text-sm" download>
+              <a href={`/api/assets/cpa-export?tax_year=${priorYear}`} className={buttonVariantClass('ghost') + ' text-sm'} download>
                 Export PDF →
               </a>
             )}
@@ -344,7 +345,7 @@ export default async function CapitalPlanningPage({
           <a
             href={`/api/assets/capex-csv?year=${currentYear}`}
             download={`capex-forecast-${currentYear}.csv`}
-            className="btn-ghost text-sm"
+            className={buttonVariantClass('ghost') + ' text-sm'}
           >
             Export CSV →
           </a>

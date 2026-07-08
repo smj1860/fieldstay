@@ -8,6 +8,7 @@ import { AssetSection } from './asset-section'
 import { PropertyMaintenanceManager } from '@/components/property/PropertyMaintenanceManager'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
+import { buttonVariantClass } from '@/components/ui/Button'
 import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/database'
 import type { Metadata } from 'next'
 
@@ -140,7 +141,7 @@ export default async function PropertyDetailPage({ params }: Props) {
             </p>
           )}
         </div>
-        <Link href={`/properties/${property.id}/setup/details`} className="btn-secondary">
+        <Link href={`/properties/${property.id}/setup/details`} className={buttonVariantClass('secondary')}>
           <Settings className="w-4 h-4" /> Setup
         </Link>
       </div>
@@ -158,7 +159,7 @@ export default async function PropertyDetailPage({ params }: Props) {
               </p>
             </div>
           </div>
-          <Link href={`/properties/${property.id}/setup`} className="btn-primary text-sm flex-shrink-0">
+          <Link href={`/properties/${property.id}/setup`} className={buttonVariantClass('primary') + ' text-sm flex-shrink-0'}>
             Continue Setup
           </Link>
         </div>

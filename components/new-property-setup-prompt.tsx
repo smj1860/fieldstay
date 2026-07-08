@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Home, X } from 'lucide-react'
 import { ClonePropertyModal } from '@/app/(dashboard)/properties/clone-property-modal'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 
 interface OtherProperty {
   id:   string
@@ -55,7 +55,7 @@ export function NewPropertySetupPrompt({
           </Button>
         )}
         {/* Link, not Button — Button only renders a native <button> and can't route */}
-        <Link href={`/properties/${propertyId}/setup/details`} className="btn-cta text-xs px-3 py-1.5">
+        <Link href={`/properties/${propertyId}/setup/details`} className={buttonVariantClass('cta') + ' text-xs px-3 py-1.5'}>
           Set up from scratch
         </Link>
         <button

@@ -9,7 +9,7 @@ import type { VendorComplianceDocument, ComplianceDocType } from '@/types/databa
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -302,7 +302,7 @@ export function ComplianceSection({
                         href={doc.document_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="btn-ghost p-1.5"
+                        className={buttonVariantClass('ghost') + ' p-1.5'}
                         title="View document"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />

@@ -4,7 +4,7 @@ import { useActionState, useState } from 'react'
 import { createOrganization }       from './actions'
 import Link                         from 'next/link'
 import { CheckCircle2, ArrowRight, PlugZap } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
 type Step = 'name-org' | 'connect-pms'
@@ -167,7 +167,7 @@ function ConnectPmsStep() {
             {pms.authType === 'oauth2' ? (
               <a
                 href={pms.connectUrl!}
-                className="btn-secondary text-sm flex-shrink-0 flex items-center gap-1.5"
+                className={buttonVariantClass('secondary') + ' text-sm flex-shrink-0 flex items-center gap-1.5'}
               >
                 <PlugZap className="w-3.5 h-3.5" />
                 Connect
@@ -177,7 +177,7 @@ function ConnectPmsStep() {
               // where the credential modal lives. ?connect=providerId auto-opens it.
               <a
                 href={`/settings/integrations?connect=${pms.id}`}
-                className="btn-secondary text-sm flex-shrink-0 flex items-center gap-1.5"
+                className={buttonVariantClass('secondary') + ' text-sm flex-shrink-0 flex items-center gap-1.5'}
               >
                 <PlugZap className="w-3.5 h-3.5" />
                 Connect

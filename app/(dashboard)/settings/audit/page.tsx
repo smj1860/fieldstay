@@ -3,6 +3,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { Shield, Download } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
+import { buttonVariantClass } from '@/components/ui/Button'
 import type { AuditEvent } from '@/types/database'
 
 const PAGE_SIZE = 50
@@ -53,7 +54,7 @@ export default async function AuditLogPage({
         <a
           href="/api/gdpr/export"
           download
-          className="btn-secondary text-sm flex items-center gap-1.5"
+          className={buttonVariantClass('secondary') + ' text-sm flex items-center gap-1.5'}
         >
           <Download className="w-4 h-4" />
           Export My Data

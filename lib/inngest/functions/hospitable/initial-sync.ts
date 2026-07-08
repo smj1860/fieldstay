@@ -187,6 +187,7 @@ export const hospInitialSync = inngest.createFunction(
               guest_email:     normalized.guest_email,
               source:          normalized.source,
               is_block:        normalized.is_block,
+              stay_type:       normalized.stay_type,
             }
           })
           .filter((row): row is NonNullable<typeof row> => row !== null)

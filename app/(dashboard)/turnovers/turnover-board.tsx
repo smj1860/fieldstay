@@ -13,7 +13,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import {
   assignCrew, assignCrewIndividually, addCrewToTurnover, removeCrewFromTurnover,
@@ -60,6 +60,11 @@ interface TurnoverAssignment {
 interface Turnover {
   id: string
   property_id: string
+  // Resolved server-side from the booking this turnover was generated from
+  // (turnovers.booking_id → bookings.stay_type) — null for manually-created
+  // turnovers with no linked booking, or when the booking fell outside the
+  // page's fetched booking window.
+  stay_type: 'guest_stay' | 'owner_stay' | null
   checkout_datetime: string
   checkin_datetime: string
   window_minutes: number | null
@@ -443,6 +448,9 @@ function TurnoverCard({
                 <AlertTriangle className="w-2.5 h-2.5" /> Overdue
               </Badge>
             )}
+            {turnover.stay_type === 'owner_stay' && (
+              <Badge tone="amber">Owner Stay</Badge>
+            )}
           </div>
 
           {/* Times + window */}
@@ -662,7 +670,7 @@ function TurnoverCard({
               </Button>
               <Link
                 href={`/turnovers/${turnover.id}`}
-                className="btn-ghost text-xs py-1.5 ml-auto"
+                className={buttonVariantClass('ghost') + ' text-xs py-1.5 ml-auto'}
               >
                 View Full Details →
               </Link>

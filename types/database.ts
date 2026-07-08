@@ -230,6 +230,7 @@ export interface Booking {
   raw_ical_data:        Record<string, unknown> | null
   has_overlap_conflict: boolean
   is_block:             boolean
+  stay_type:            'guest_stay' | 'owner_stay'
   guidebook_token:      string | null
   guidebook_pre_arrival_email_sent_at: string | null
   created_at:           string
@@ -894,6 +895,26 @@ export interface OrgInvite {
 export interface StripeProcessedEvent {
   stripe_event_id: string
   processed_at:    string
+}
+
+// ── Hospitable reservation conversation messages ────────────────────────────
+export interface ReservationMessage {
+  id:                      string
+  org_id:                  string
+  booking_id:              string | null
+  external_reservation_id: string
+  external_source:         string
+  conversation_id:         string | null
+  platform:                string | null
+  sender_type:             'host' | 'guest'
+  sender_name:             string | null
+  content_type:            string | null
+  body:                    string
+  attachments:             Record<string, unknown>[] | null
+  source:                  string | null
+  message_created_at:      string
+  dedup_key:               string
+  created_at:              string
 }
 
 // ── RepuGuard ────────────────────────────────────────────────────────────────

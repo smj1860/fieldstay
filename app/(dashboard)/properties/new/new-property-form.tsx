@@ -3,7 +3,7 @@
 import { useActionState } from 'react'
 import { createProperty } from '../actions'
 import Link from 'next/link'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
 const PROPERTY_TYPES = [
@@ -160,7 +160,7 @@ export function NewPropertyForm() {
         <Button type="submit" disabled={pending}>
           {pending ? 'Saving…' : 'Save & Continue →'}
         </Button>
-        <Link href="/properties" className="btn-ghost">
+        <Link href="/properties" className={buttonVariantClass('ghost')}>
           Cancel
         </Link>
       </div>

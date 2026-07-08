@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import {
   addPropertyOwner,
@@ -675,7 +675,7 @@ function MultiPropertyOwnerCard({
                 <Link2 className="w-3 h-3" /> Combined Link Active
               </Badge>
               <CopyButton text={portalUrl} />
-              <a href={portalUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost py-1 px-2 text-xs flex items-center gap-1">
+              <a href={portalUrl} target="_blank" rel="noopener noreferrer" className={buttonVariantClass('ghost') + ' py-1 px-2 text-xs flex items-center gap-1'}>
                 <ExternalLink className="w-3.5 h-3.5" /> View
               </a>
               <GenerateCombinedLinkButton ownerIds={group.ownerIds} />
@@ -769,7 +769,7 @@ function OwnerCard({
                 <Link2 className="w-3 h-3" /> Active Link
               </Badge>
               <CopyButton text={portalUrl} />
-              <a href={portalUrl} target="_blank" rel="noopener noreferrer" className="btn-ghost py-1 px-2 text-xs flex items-center gap-1">
+              <a href={portalUrl} target="_blank" rel="noopener noreferrer" className={buttonVariantClass('ghost') + ' py-1 px-2 text-xs flex items-center gap-1'}>
                 <ExternalLink className="w-3.5 h-3.5" /> View
               </a>
               <GenerateLinkButton ownerId={owner.id} />

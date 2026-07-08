@@ -8,7 +8,7 @@ import { NudgeBanner } from '@/components/nudge-banner'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import type { Vendor, VendorSpecialty } from '@/types/database'
 import {
@@ -742,7 +742,7 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
         <div className="flex items-center gap-1 justify-end">
           <Link
             href={`/vendors/${vendor.id}`}
-            className="btn-secondary py-1 px-2 text-xs"
+            className={buttonVariantClass('secondary') + ' py-1 px-2 text-xs'}
             title="View compliance docs"
           >
             Details

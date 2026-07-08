@@ -8,6 +8,7 @@ import { CopyFromButton } from './property-card-actions'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
+import { buttonVariantClass } from '@/components/ui/Button'
 
 interface PropertyRow {
   id: string
@@ -163,10 +164,10 @@ export function PropertiesGrid({
 
                 {/* Actions */}
                 <div className="flex gap-2 pt-1 border-t border-themed">
-                  <Link href={`/properties/${p.id}`} className="btn-secondary text-xs px-3 py-1.5 flex-1 justify-center">
+                  <Link href={`/properties/${p.id}`} className={buttonVariantClass('secondary') + ' text-xs px-3 py-1.5 flex-1 justify-center'}>
                     View
                   </Link>
-                  <Link href={`/properties/${p.id}/setup/details`} className="btn-ghost text-xs px-3 py-1.5">
+                  <Link href={`/properties/${p.id}/setup/details`} className={buttonVariantClass('ghost') + ' text-xs px-3 py-1.5'}>
                     Setup
                   </Link>
                   <CopyFromButton

@@ -24,7 +24,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -1871,7 +1871,7 @@ function TemplatesSection({
                     {!t.is_system && (
                       <Link
                         href={`/setup/maintenance-template?edit=${t.id}`}
-                        className="btn-ghost text-xs py-1.5 px-3 flex items-center gap-1 flex-shrink-0"
+                        className={buttonVariantClass('ghost') + ' text-xs py-1.5 px-3 flex items-center gap-1 flex-shrink-0'}
                       >
                         <Pencil className="w-3 h-3" />
                         Edit

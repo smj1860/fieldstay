@@ -3,6 +3,7 @@ import Link                    from 'next/link'
 import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { TeamClient }          from './team-client'
+import { buttonVariantClass }  from '@/components/ui/Button'
 
 export const metadata: Metadata = { title: 'Team — FieldStay' }
 
@@ -63,7 +64,7 @@ export default async function TeamPage() {
         {membership.role === 'owner' && (
           <a
             href="#invite"
-            className="btn-primary text-sm flex-shrink-0 flex items-center gap-1.5"
+            className={buttonVariantClass('primary') + ' text-sm flex-shrink-0 flex items-center gap-1.5'}
           >
             Invite Member
           </a>

@@ -18,4 +18,8 @@ export interface NormalizedBooking {
   guest_email:           string | null
   source:                string
   is_block:              boolean
+  // Distinguishes an owner's personal-use stay from a paying guest
+  // reservation. Providers with no equivalent concept (OwnerRez, Uplisting,
+  // iCal) should map to 'guest_stay'.
+  stay_type:             'guest_stay' | 'owner_stay'
 }

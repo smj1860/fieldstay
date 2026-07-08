@@ -3,7 +3,7 @@
 import { useActionState } from 'react'
 import { saveDetails } from './actions'
 import Link from 'next/link'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import type { Property } from '@/types/database'
 
@@ -163,7 +163,7 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
         <Button type="submit" disabled={pending}>
           {pending ? 'Saving…' : 'Save & Continue →'}
         </Button>
-        <Link href="/properties" className="btn-ghost text-sm">Done for now</Link>
+        <Link href="/properties" className={buttonVariantClass('ghost') + ' text-sm'}>Done for now</Link>
       </div>
     </form>
   )

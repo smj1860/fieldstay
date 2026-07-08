@@ -8,7 +8,7 @@ import { formatDate }                          from '@/lib/utils'
 import { Dialog }                              from '@/components/ui/Dialog'
 import { Card }                                from '@/components/ui/Card'
 import { Badge }                               from '@/components/ui/Badge'
-import { Button }                               from '@/components/ui/Button'
+import { Button, buttonVariantClass }           from '@/components/ui/Button'
 import { Input }                               from '@/components/ui/Input'
 
 // ── Provider credential definitions ──────────────────────────────────────────
@@ -468,7 +468,7 @@ function IntegrationCard({
                     ? `/api/integrations/${provider.id}/connect?return_to=${encodeURIComponent('/ops')}`
                     : `/api/integrations/${provider.id}/connect`
                 }
-                className="btn-secondary text-sm flex items-center gap-1.5"
+                className={buttonVariantClass('secondary') + ' text-sm flex items-center gap-1.5'}
               >
                 <PlugZap className="w-3.5 h-3.5" />
                 {isError ? 'Reconnect' : 'Connect'}

@@ -1,0 +1,33 @@
+-- ─────────────────────────────────────────────────────────────────────────
+-- NOT RECORDED IN LIVE MIGRATION HISTORY: verified via Supabase MCP
+-- list_migrations against project vpmznjktllhmmbfnxuvk on 2026-07-08 that
+-- this file's version is absent from supabase_migrations.schema_migrations.
+-- Spot-checking the schema objects it defines (tables, columns, indexes,
+-- functions, policies, enum values, dropped objects) against the live
+-- database confirms they already exist — this SQL was applied previously,
+-- most likely by hand or under a different, already-tracked migration
+-- timestamp, and this file is a historical/duplicate copy rather than a
+-- pending change. Do not assume `supabase db push` needs to run it, and
+-- verify against the live schema before treating it as authoritative —
+-- some statements here (UPDATEs, INSERTs, ALTER TYPE ... ADD VALUE) are
+-- not safely re-runnable if actually executed again.
+-- ─────────────────────────────────────────────────────────────────────────
+-- Correction to claude_61_0_security_hardening: that migration revoked
+-- EXECUTE on replace_master_checklist_items from `authenticated` and granted
+-- only `service_role`. That breaks the function entirely, because its new
+-- internal guard calls is_org_member(p_org_id, ...), which depends on
+-- auth.uid() — populated only when the request carries the calling user's
+-- JWT (the normal requireOrgMember()-scoped client used by
+-- saveMasterChecklistItems in app/(dashboard)/setup/checklist-template/actions.ts).
+-- createServiceClient() uses the service_role key with no forwarded user
+-- token, so auth.uid() is NULL there and the guard would reject every call,
+-- including legitimate ones — routing through the service client is not a
+-- viable fix either.
+--
+-- The internal is_org_member() guard is what actually closes the
+-- vulnerability (a caller can no longer spoof p_org_id to wipe another org's
+-- checklist). Restoring EXECUTE to `authenticated` is required for the
+-- feature to keep working and does not reopen the hole.
+
+GRANT EXECUTE ON FUNCTION public.replace_master_checklist_items(uuid, jsonb)
+  TO authenticated;

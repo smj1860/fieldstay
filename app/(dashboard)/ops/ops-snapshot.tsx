@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
 import { distanceMiles } from '@/lib/geocoding'
 import { StatusDot } from '@/components/ui/StatusDot'
+import { buttonVariantClass } from '@/components/ui/Button'
 
 const AVG_DRIVE_SPEED_MPH = 30
 
@@ -506,7 +507,7 @@ export function OpsSnapshot({
             })}
           </p>
         </div>
-        <Link href="/turnovers" className="btn-secondary text-xs gap-1.5">
+        <Link href="/turnovers" className={buttonVariantClass('secondary') + ' text-xs gap-1.5'}>
           Full board <ChevronDown className="w-3.5 h-3.5 -rotate-90" />
         </Link>
       </div>

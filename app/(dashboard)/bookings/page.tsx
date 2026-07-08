@@ -69,7 +69,7 @@ export default async function BookingsPage() {
         id, property_id, guest_name, guest_email,
         checkin_date, checkout_date, checkin_time, checkout_time,
         source, status, notes, has_overlap_conflict, created_at,
-        ical_feed_id, external_source,
+        ical_feed_id, external_source, stay_type,
         properties ( id, name, city, state ),
         turnovers:turnovers!turnovers_booking_id_fkey ( id, status, checkout_datetime )
       `)
