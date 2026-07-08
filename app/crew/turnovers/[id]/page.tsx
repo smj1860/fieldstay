@@ -2,7 +2,7 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useDexieDb, useDexieUserId, useCrewMemberId } from '@/lib/dexie/context'
 import { useParams, useRouter }            from 'next/navigation'
-import { useState, useRef }                from 'react'
+import { useState, useRef, useEffect }     from 'react'
 import {
   ArrowLeft, Camera, CheckCircle2, Circle,
   Loader2, ImageIcon, AlertCircle, AlertTriangle,
@@ -16,7 +16,10 @@ import { Input } from '@/components/ui/Input'
 import { createClient }       from '@/lib/supabase/client'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
-import { updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitIssueReport } from '@/lib/dexie/helpers'
+import {
+  updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitIssueReport,
+  confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted,
+} from '@/lib/dexie/helpers'
 import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow } from '@/lib/dexie/schema'
 
 export default function CrewTurnoverPage() {
@@ -205,8 +208,36 @@ export default function CrewTurnoverPage() {
   const handleCountChange = async (itemId: string, newQty: number) => {
     const qty = Math.max(0, newQty)
     setCounts((prev) => ({ ...prev, [itemId]: qty }))
+    if (!turnover?.inventory_started_at) {
+      await markInventoryStarted(userId, id)
+    }
     await updateInventoryQuantity(userId, itemId, qty)
   }
+
+  const toggleChecklistConfirm = async () => {
+    if (!instance || !crewMemberId) return
+    await confirmChecklistComplete(userId, instance.id, crewMemberId, !instance.completed_at)
+  }
+
+  const toggleInventoryConfirm = async () => {
+    if (!crewMemberId) return
+    await confirmInventoryComplete(userId, id, crewMemberId, !turnover?.inventory_confirmed_complete_at)
+  }
+
+  // Auto-completes the turnover the moment BOTH confirmations are in —
+  // whichever crew member's device notices second (its own action, or a
+  // Realtime-synced pull revealing the other's) fires this. completeTurnover()
+  // is already idempotent server-side, so both devices racing to notice at
+  // once is harmless. The manual "Mark Complete" button still exists
+  // alongside this for crew who'd find its absence confusing.
+  useEffect(() => {
+    if (!turnover || turnover.status === 'completed') return
+    const checklistConfirmed = !!instance?.completed_at
+    const inventoryConfirmed = !!turnover.inventory_confirmed_complete_at
+    if (checklistConfirmed && inventoryConfirmed) {
+      void completeTurnover(userId, id)
+    }
+  }, [turnover, instance?.completed_at, userId, id])
 
   const getCount = (item: InvRow) =>
     counts[item.id] !== undefined ? counts[item.id] : item.current_quantity
@@ -642,6 +673,46 @@ export default function CrewTurnoverPage() {
               )}
             </div>
           ))}
+
+          {/* Confirm Checklist Complete — a deliberate human assertion,
+              separate from per-item completion. Blocked while required
+              photos are missing (same condition the manual "Mark Complete"
+              button already checks); allows unchecking to correct a
+              premature confirmation, as long as the turnover itself hasn't
+              already fully completed. */}
+          {instance && (
+            <button
+              type="button"
+              onClick={() => void toggleChecklistConfirm()}
+              disabled={
+                (!instance.completed_at && pendingPhotos.length > 0)
+                || turnover.status === 'completed'
+              }
+              className={cn(
+                'w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 mt-2 mb-4 text-left transition-colors',
+                instance.completed_at
+                  ? 'border-green-400 bg-green-50'
+                  : pendingPhotos.length > 0
+                  ? 'border-themed opacity-60 cursor-not-allowed'
+                  : 'border-themed hover:bg-raised-themed',
+                turnover.status === 'completed' && 'cursor-not-allowed'
+              )}
+            >
+              {instance.completed_at
+                ? <CheckCircle2 className="w-6 h-6 text-green-500 flex-shrink-0" />
+                : <Circle className="w-6 h-6 text-muted-themed flex-shrink-0" />}
+              <div className="flex-1">
+                <p className="text-base font-semibold" style={{ color: instance.completed_at ? '#15803d' : 'var(--text-primary)' }}>
+                  Confirm Checklist Complete
+                </p>
+                {!instance.completed_at && pendingPhotos.length > 0 && (
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    {pendingPhotos.length} photo{pendingPhotos.length !== 1 ? 's' : ''} still required
+                  </p>
+                )}
+              </div>
+            </button>
+          )}
         </>
       )}
 
@@ -737,6 +808,30 @@ export default function CrewTurnoverPage() {
           <p className="text-xs text-muted-themed text-center mt-2">Inventory updates save automatically</p>
         </div>
       )}
+
+      {/* Confirm Inventory Complete — no validation condition exists to
+          block this on (unlike the checklist's required-photo check), so
+          it's a pure assertion. Same unchecking/lock-once-completed rules
+          as the checklist confirm box. */}
+      <button
+        type="button"
+        onClick={() => void toggleInventoryConfirm()}
+        disabled={turnover.status === 'completed'}
+        className={cn(
+          'w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 mt-2 mb-4 text-left transition-colors',
+          turnover.inventory_confirmed_complete_at
+            ? 'border-green-400 bg-green-50'
+            : 'border-themed hover:bg-raised-themed',
+          turnover.status === 'completed' && 'cursor-not-allowed'
+        )}
+      >
+        {turnover.inventory_confirmed_complete_at
+          ? <CheckCircle2 className="w-6 h-6 text-green-500 flex-shrink-0" />
+          : <Circle className="w-6 h-6 text-muted-themed flex-shrink-0" />}
+        <p className="text-base font-semibold" style={{ color: turnover.inventory_confirmed_complete_at ? '#15803d' : 'var(--text-primary)' }}>
+          Confirm Inventory Complete
+        </p>
+      </button>
 
         <div className="sticky bottom-0 pt-3 pb-6" style={{ background: 'var(--bg-page)' }}>
           <Button

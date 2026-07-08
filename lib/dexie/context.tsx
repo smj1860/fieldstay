@@ -121,13 +121,22 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       const { data: turnovers, error: tErr } = await supabase
         .from('turnovers')
-        .select('id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes')
+        .select(
+          'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
+          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id'
+        )
         .in('id', turnoverIds)
       if (tErr) {
         console.error('[DexieProvider] turnovers fetch failed:', tErr)
         return
       }
-      if (turnovers?.length) await db.turnovers.bulkPut(turnovers as TurnoverRow[])
+      if (turnovers?.length) {
+        const normalizedTurnovers = turnovers.map((t: Record<string, unknown>) => ({
+          ...t,
+          inventory_confirmed_by_crew_id: t.inventory_confirmed_by_crew_id ?? '',
+        }))
+        await db.turnovers.bulkPut(normalizedTurnovers as TurnoverRow[])
+      }
 
       const propertyIds = [
         ...new Set((turnovers ?? []).map((t: { property_id: string }) => t.property_id)),
@@ -176,13 +185,19 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       const { data: instances, error: ciErr } = await supabase
         .from('checklist_instances')
-        .select('id, turnover_id, org_id, status, section_photo_path')
+        .select('id, turnover_id, org_id, status, section_photo_path, started_at, completed_at, completed_by_crew_id')
         .in('turnover_id', turnoverIds)
       if (ciErr) {
         console.error('[DexieProvider] checklist_instances fetch failed:', ciErr)
         return
       }
-      if (instances?.length) await db.checklist_instances.bulkPut(instances as ChecklistInstanceRow[])
+      if (instances?.length) {
+        const normalizedInstances = instances.map((i: Record<string, unknown>) => ({
+          ...i,
+          completed_by_crew_id: i.completed_by_crew_id ?? '',
+        }))
+        await db.checklist_instances.bulkPut(normalizedInstances as ChecklistInstanceRow[])
+      }
       if (!instances?.length) return
 
       const instanceIds = instances.map((i: { id: string }) => i.id)
@@ -211,11 +226,44 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       }
     }
 
-    // Refreshes the checklist_instance_items Realtime subscription to cover
-    // exactly the crew member's currently-open turnovers. Reads the local
-    // Dexie cache (already kept current by syncAssignedTurnovers) rather
-    // than re-deriving from a possibly-incremental assignment fetch, so it
-    // always reflects the full set, not just newly-added turnovers.
+    // Re-fetches just the turnovers rows themselves (status, inventory
+    // confirmation fields) — separate from pullChecklistsForTurnovers,
+    // which never touches the turnovers table. Needed so one crew member's
+    // "Confirm Inventory Complete" tap (or the resulting auto-completion)
+    // shows up live on the other crew member's device.
+    async function pullTurnoversOnly(turnoverIds: string[]): Promise<void> {
+      if (!turnoverIds.length) return
+      const db = getDexieDb(userId!)
+
+      const { data: turnovers, error } = await supabase
+        .from('turnovers')
+        .select(
+          'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
+          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id'
+        )
+        .in('id', turnoverIds)
+      if (error) {
+        console.error('[DexieProvider] turnovers re-fetch failed:', error)
+        return
+      }
+      if (turnovers?.length) {
+        const normalized = turnovers.map((t: Record<string, unknown>) => ({
+          ...t,
+          inventory_confirmed_by_crew_id: t.inventory_confirmed_by_crew_id ?? '',
+        }))
+        await db.turnovers.bulkPut(normalized as TurnoverRow[])
+      }
+    }
+
+    // Refreshes the Realtime subscription covering checklist_instance_items,
+    // checklist_instances, and turnovers changes to exactly the crew
+    // member's currently-open turnovers — so both crew members see each
+    // other's checklist item ticks, "Confirm Checklist/Inventory Complete"
+    // taps, and the resulting turnover auto-completion live. Reads the
+    // local Dexie cache (already kept current by syncAssignedTurnovers)
+    // rather than re-deriving from a possibly-incremental assignment
+    // fetch, so it always reflects the full set, not just newly-added
+    // turnovers.
     async function refreshChecklistSubscription(thisCrewMemberId: string): Promise<void> {
       const db = getDexieDb(userId!)
       const allTurnovers = await db.turnovers.toArray()
@@ -234,17 +282,24 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       subscribedTurnoverIds = turnoverIds
       if (!turnoverIds.length) return
 
+      const filter = `turnover_id=in.(${turnoverIds.join(',')})`
+
       checklistChannel = supabase
         .channel(`checklist-items-${thisCrewMemberId}`)
         .on(
           'postgres_changes',
-          {
-            event:  '*',
-            schema: 'public',
-            table:  'checklist_instance_items',
-            filter: `turnover_id=in.(${turnoverIds.join(',')})`,
-          },
+          { event: '*', schema: 'public', table: 'checklist_instance_items', filter },
           () => { void pullChecklistsForTurnovers(subscribedTurnoverIds, thisCrewMemberId) }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'checklist_instances', filter },
+          () => { void pullChecklistsForTurnovers(subscribedTurnoverIds, thisCrewMemberId) }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'turnovers', filter: `id=in.(${turnoverIds.join(',')})` },
+          () => { void pullTurnoversOnly(subscribedTurnoverIds) }
         )
         .subscribe()
     }

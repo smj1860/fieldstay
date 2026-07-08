@@ -385,6 +385,13 @@ export interface Turnover {
   completion_notes:      string | null
   started_at:            string | null
   completed_at:          string | null
+  // Inventory has no per-turnover scoping of its own (inventory_items is
+  // persistent, property-level state edited across many turnovers), so
+  // "inventory started/confirmed for THIS turnover" lives here instead —
+  // mirrors checklist_instances.started_at/completed_at/completed_by_crew_id.
+  inventory_started_at:            string | null
+  inventory_confirmed_complete_at: string | null
+  inventory_confirmed_by_crew_id:  string | null
   auto_generated:        boolean
   is_same_day_turnover:  boolean
   suggested_crew_ids:    string[] | null
@@ -424,6 +431,7 @@ export interface ChecklistInstance {
   section_photo_path:  string | null
   started_at:          string | null
   completed_at:        string | null
+  completed_by_crew_id: string | null
   created_at:          string
   updated_at:          string
 }

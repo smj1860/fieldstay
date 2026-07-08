@@ -50,6 +50,75 @@ export async function updateChecklistItem(
 }
 
 /**
+ * Writes the "Confirm Checklist Complete" (or un-confirm) timestamp/author
+ * onto the shared checklist_instances row — a deliberate human assertion
+ * distinct from individual item completion, so it doesn't get recomputed
+ * from item state. Un-confirming clears both fields; it does not attempt
+ * to reopen a turnover that has already fully completed (both checklist
+ * and inventory were confirmed) — that would mean reversing side effects
+ * (cleaning-fee posting, PM notification) already fired by
+ * /api/crew/turnovers/[id]/complete, which is out of scope here.
+ */
+export async function confirmChecklistComplete(
+  userId:       string,
+  instanceId:   string,
+  crewMemberId: string,
+  confirmed:    boolean,
+): Promise<void> {
+  const db = getDexieDb(userId)
+
+  const changes: Record<string, unknown> = {
+    completed_at:         confirmed ? new Date().toISOString() : null,
+    completed_by_crew_id: confirmed ? crewMemberId : '',
+  }
+
+  await db.checklist_instances.update(instanceId, changes)
+  await enqueueMutation(userId, 'checklist_instances', instanceId, 'PATCH', changes)
+}
+
+/**
+ * Writes the "Confirm Inventory Complete" (or un-confirm) timestamp/author
+ * onto the turnover itself — inventory_items has no turnover-scoped table
+ * of its own, so this is the only place it can live. Same one-way-into-
+ * completion semantics as confirmChecklistComplete above.
+ */
+export async function confirmInventoryComplete(
+  userId:       string,
+  turnoverId:   string,
+  crewMemberId: string,
+  confirmed:    boolean,
+): Promise<void> {
+  const db = getDexieDb(userId)
+
+  const changes: Record<string, unknown> = {
+    inventory_confirmed_complete_at: confirmed ? new Date().toISOString() : null,
+    inventory_confirmed_by_crew_id:  confirmed ? crewMemberId : '',
+  }
+
+  await db.turnovers.update(turnoverId, changes)
+  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', changes)
+}
+
+/**
+ * Records the first time this device touches inventory for this turnover.
+ * Callers must guard on the local turnover's inventory_started_at already
+ * being null before calling this — there's no server-side "set only if
+ * null" guard here (unlike the checklist's DB trigger), since this is a
+ * low-stakes bookkeeping field: a rare race between two crew members'
+ * devices could at worst overwrite it with a slightly later timestamp,
+ * not lose or corrupt anything.
+ */
+export async function markInventoryStarted(userId: string, turnoverId: string): Promise<void> {
+  const db = getDexieDb(userId)
+  const startedAt = new Date().toISOString()
+
+  await db.turnovers.update(turnoverId, { inventory_started_at: startedAt })
+  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', {
+    inventory_started_at: startedAt,
+  })
+}
+
+/**
  * Marks a turnover in_progress locally and queues the mutation. SyncEngine
  * routes 'in_progress' through /api/crew/turnovers/[id]/start so started_at
  * is set authoritatively by the server, not the client clock.

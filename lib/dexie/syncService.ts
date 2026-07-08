@@ -110,11 +110,47 @@ export class SyncEngine {
         if (!res.ok) throw new Error(`Failed to start turnover ${targetId}`)
         return
       }
+
+      // Inventory confirmation bookkeeping (markInventoryStarted /
+      // confirmInventoryComplete) — plain field updates, not a status
+      // transition, so no Route Handler / side effects needed here. The
+      // client-side effect that watches for "both checklist and inventory
+      // confirmed" is what calls completeTurnover() (routed above) to
+      // actually finish the turnover.
+      const fieldUpdate: Record<string, unknown> = {}
+      if ('inventory_started_at' in payload) fieldUpdate.inventory_started_at = payload.inventory_started_at
+      if ('inventory_confirmed_complete_at' in payload) fieldUpdate.inventory_confirmed_complete_at = payload.inventory_confirmed_complete_at
+      if ('inventory_confirmed_by_crew_id' in payload) fieldUpdate.inventory_confirmed_by_crew_id = payload.inventory_confirmed_by_crew_id || null
+
+      if (Object.keys(fieldUpdate).length > 0) {
+        const { error } = await this.supabase
+          .from('turnovers')
+          .update(fieldUpdate)
+          .eq('id', targetId)
+        if (error) throw new Error(`turnovers upload failed: ${error.message}`)
+        return
+      }
+
       const { error } = await this.supabase
         .from('turnovers')
         .update({ status: payload.status })
         .eq('id', targetId)
       if (error) throw new Error(`turnovers upload failed: ${error.message}`)
+      return
+    }
+
+    if (table === 'checklist_instances' && (op === 'PUT' || op === 'PATCH')) {
+      // "Confirm Checklist Complete" (or un-confirm) — a deliberate human
+      // assertion on the shared instance row, not derived from item state.
+      const updatePayload: Record<string, unknown> = {}
+      if ('completed_at' in payload)         updatePayload.completed_at = payload.completed_at
+      if ('completed_by_crew_id' in payload) updatePayload.completed_by_crew_id = payload.completed_by_crew_id || null
+
+      const { error } = await this.supabase
+        .from('checklist_instances')
+        .update(updatePayload)
+        .eq('id', targetId)
+      if (error) throw new Error(`checklist_instances upload failed: ${error.message}`)
       return
     }
 
