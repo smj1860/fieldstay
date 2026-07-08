@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, RefreshCw, X, ChevronDown, ChevronUp,
-  Calendar, Users, Home, Clock, AlertTriangle,
+  Calendar, Clock, AlertTriangle,
   CheckCircle2, Ban, HelpCircle, ExternalLink,
   Search, Download, LayoutList,
 } from 'lucide-react'
@@ -58,10 +58,6 @@ function nightCount(checkin: string, checkout: string): number {
   return Math.round(
     (new Date(checkout).getTime() - new Date(checkin).getTime()) / 86_400_000
   )
-}
-
-function isUpcoming(checkin: string): boolean {
-  return new Date(checkin) >= new Date(new Date().toDateString())
 }
 
 function isToday(date: string): boolean {
@@ -525,7 +521,6 @@ export function BookingsClient({
   }, [localBookings, showPast, filterProperty, filterStatus, filterSource, searchQuery, todayStr])
 
   // Stats
-  const upcoming   = localBookings.filter((b) => b.status === 'confirmed' && b.checkin_date >= todayStr)
   const checkinsToday = localBookings.filter((b) => isToday(b.checkin_date) && b.status === 'confirmed')
   const checkoutsToday = localBookings.filter((b) => isToday(b.checkout_date) && b.status === 'confirmed')
 

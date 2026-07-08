@@ -13,7 +13,6 @@ import {
   bulkAddTemplateItems,
   removeTemplateItem,
   updateTemplateItemBrand,
-  applyTemplateToProperty,
   applyTemplateToProperties,
 } from './actions'
 import type { InventoryCategory } from '@/types/database'
@@ -98,12 +97,10 @@ function parseSimpleCsv(text: string) {
 export function TemplateManager({
   template,
   properties,
-  orgId,
   catalogItems = [],
 }: {
   template:     Template | null
   properties:   Property[]
-  orgId:        string
   catalogItems: CatalogItem[]
 }) {
   const [currentTemplate, setCurrentTemplate] = useState<Template | null>(template)

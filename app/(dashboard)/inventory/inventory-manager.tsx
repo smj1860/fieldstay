@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Plus, ClipboardList, ChevronDown, X,
   Package, AlertTriangle, ShoppingCart, Check, History,
-  BarChart2, FileText, Layers, Loader2,
+  BarChart2, Layers, Loader2,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
 import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount, triggerShoppingCart } from './actions'
@@ -1174,7 +1174,6 @@ export function InventoryManager({
   allInventoryItems,
   template,
   pendingDrafts,
-  orgId,
   cartData,
   showKrogerNudge = false,
 }: {
@@ -1186,7 +1185,6 @@ export function InventoryManager({
   allInventoryItems: PortfolioItem[]
   template: Template | null
   pendingDrafts: PendingDraft[]
-  orgId: string
   cartData: (CartBuildResult & { built_at: string; location_name: string }) | null
   showKrogerNudge?: boolean
 }) {
@@ -1358,7 +1356,6 @@ export function InventoryManager({
         <TemplateManager
           template={template}
           properties={properties}
-          orgId={orgId}
           catalogItems={catalogItems}
         />
       )}

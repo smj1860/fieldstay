@@ -120,7 +120,6 @@ export default async function InventoryPage() {
         allInventoryItems={normalizedAllInventoryItems}
         template={template}
         pendingDrafts={pendingDrafts ?? []}
-        orgId={membership.org_id}
         cartData={cartData}
         showKrogerNudge={showKrogerNudge}
       />

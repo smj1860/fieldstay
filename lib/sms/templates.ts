@@ -23,7 +23,6 @@ import {
 } from '@/lib/sms/telnyx'
 import {
   renderTemplate,
-  SMS_TEMPLATE_REGISTRY,
   type SmsTemplateKey,
 } from '@/lib/sms/template-registry'
 

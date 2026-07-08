@@ -139,7 +139,7 @@ export async function triggerResync(
 export async function disconnectIntegration(
   providerId: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership, user: authUser } = await requireOrgMember()
+  const { membership, user: authUser } = await requireOrgMember()
   const user = authUser
   if (!user) return { error: 'Not authenticated' }
 

@@ -25,7 +25,7 @@ export const handleTurnoverCreated = inngest.createFunction(
     retries: 2,
   },
   { event: 'turnover/created' as const },
-  async ({ event, step, logger }) => {
+  async ({ event, step }) => {
     const { turnover_id, property_id, org_id, checkout_datetime } = event.data
 
     // ── Fetch turnover data ──────────────────────────────────────────────────

@@ -4,7 +4,6 @@ import { useState, useTransition, useActionState, useRef, useEffect } from 'reac
 import { Pencil, X, Check, Loader2, Upload, Users2, FileText, CalendarDays, Send } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
-import type { ContactPref } from '@/types/database'
 import { AvailabilityOverviewCalendar } from '@/components/crew/availability-overview-calendar'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
@@ -18,7 +17,6 @@ import {
   inviteCrewMember,
   inviteAllUninvitedCrew,
   bulkImportCrew,
-  type SettingsActionState,
 } from '../settings/actions'
 
 // ── Bulk upload helpers ───────────────────────────────────────────────────────

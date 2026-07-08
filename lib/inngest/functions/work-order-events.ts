@@ -9,7 +9,6 @@ import { getPmEmail } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
-import { parseLocalDate } from '@/lib/utils/date-validation'
 import { randomBytes } from 'crypto'
 import { renderSmsBody } from '@/lib/sms/templates'
 
@@ -727,7 +726,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
   },
   { event: 'work-order/quote-submitted' as const },
   async ({ event, step, logger }) => {
-    const { work_order_id, quote_request_id, org_id, quoted_amount, quote_notes } = event.data
+    const { work_order_id, org_id, quoted_amount, quote_notes } = event.data
 
     await step.run('notify-pm-of-quote', async () => {
       const supabase = createServiceClient()

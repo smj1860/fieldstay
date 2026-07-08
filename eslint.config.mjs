@@ -25,6 +25,19 @@ const eslintConfig = [
       'react-hooks/rules-of-hooks': 'off',
     },
   },
+  {
+    // The codebase already uses a leading underscore to mark a destructured
+    // binding as intentionally discarded (e.g. stripping id/created_at/
+    // updated_at before re-inserting a row) — recognize that convention
+    // instead of flagging it.
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+    },
+  },
 ]
 
 export default eslintConfig

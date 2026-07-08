@@ -3,7 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
-import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
@@ -486,7 +485,7 @@ export async function logActualCost(
 ): Promise<{ error?: string }> {
   const { supabase, membership, user } = await requireOrgMember()
 
-  const { data: wo, error: fetchErr } = await supabase
+  const { data: wo } = await supabase
     .from('work_orders')
     .select('id, status, title, property_id, actual_cost')
     .eq('id', workOrderId)
@@ -554,7 +553,8 @@ export async function recordWorkOrderPhoto(
   workOrderId: string,
   storagePath: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  // org scoping enforced by RLS's WITH CHECK on work_order_photos_insert
+  const { supabase } = await requireOrgMember()
 
   const { data: { user } } = await supabase.auth.getUser()
 

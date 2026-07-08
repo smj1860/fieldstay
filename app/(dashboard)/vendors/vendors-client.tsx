@@ -17,7 +17,6 @@ import {
   updateVendorPortal,
   deactivateVendor,
   bulkImportVendors,
-  type SettingsActionState,
 } from '../settings/actions'
 
 // ── Constants ─────────────────────────────────────────────────────────────────

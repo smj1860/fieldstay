@@ -16,7 +16,6 @@ import {
   type CrewWorkOrderRow,
   type CrewAvailabilityRow,
 } from './schema'
-import { getSyncEngine } from './syncService'
 
 interface DexieContextValue {
   db:     FieldStayDexie | null

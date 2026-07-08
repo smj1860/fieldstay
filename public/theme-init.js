@@ -6,7 +6,7 @@
     if (localStorage.getItem('fs-theme') === 'light') {
       document.documentElement.classList.add('light');
     }
-  } catch (e) {
+  } catch {
     // localStorage may be unavailable in some environments — fail silently
   }
 })();

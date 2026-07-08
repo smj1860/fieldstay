@@ -980,7 +980,6 @@ export function TurnoverBoard({
   properties,
   bookings = [],
   crewAvailability = [],
-  orgId,
   showAutoAssignNudge = false,
 }: {
   turnovers: Turnover[]
@@ -989,7 +988,6 @@ export function TurnoverBoard({
   properties: Property[]
   bookings?: BookingRow[]
   crewAvailability?: CrewAvailabilityRow[]
-  orgId: string
   showAutoAssignNudge?: boolean
 }) {
   const searchParams = useSearchParams()

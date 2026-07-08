@@ -1,6 +1,6 @@
 import {
   Section, Row, Column,
-  Text, Button, Hr, Preview,
+  Text, Button, Hr,
 } from '@react-email/components'
 import { render } from '@react-email/render'
 import { BaseLayout } from './base-layout'

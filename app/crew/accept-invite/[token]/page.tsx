@@ -75,7 +75,6 @@ export default async function AcceptInvitePage({ params }: Props) {
             token={token}
             crewId={crew.id}
             email={crew.email ?? ''}
-            name={crew.name}
           />
         </div>
       </div>

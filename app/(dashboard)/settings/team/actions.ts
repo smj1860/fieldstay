@@ -90,7 +90,7 @@ export async function inviteTeamMember(
       orgName:      membership.org.name,
       inviteToken:  invite.token,
     })
-  } catch (err) {
+  } catch (_err) {
     console.error(`[Team:${user.id}] invite email failed`)
     // Non-fatal — invite record exists, user can resend
   }

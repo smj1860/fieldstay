@@ -83,7 +83,6 @@ export interface WorkOrderDetailData {
 interface Props {
   workOrder:  WorkOrderDetailData
   userRole:   MemberRole
-  onClose?:   () => void
   vendors?:   { id: string; name: string; email: string | null }[]
 }
 
@@ -140,7 +139,7 @@ function fmtDate(iso: string | null) {
 
 // ── Component ─────────────────────────────────────────────────
 
-export function WorkOrderDetail({ workOrder: wo, userRole, onClose, vendors = [] }: Props) {
+export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props) {
   const [isPending, startTransition] = useTransition()
   const [actionError, setActionError] = useState<string | null>(null)
   const [nteOverrideConfirmed, setNteOverrideConfirmed] = useState(false)

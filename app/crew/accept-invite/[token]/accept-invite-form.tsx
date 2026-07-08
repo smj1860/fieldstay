@@ -9,12 +9,10 @@ export function AcceptInviteForm({
   token,
   crewId,
   email,
-  name,
 }: {
   token:  string
   crewId: string
   email:  string
-  name:   string
 }) {
   const [state, formAction, pending] = useActionState(
     async (_prev: { error?: string } | null, formData: FormData) => {
