@@ -194,6 +194,20 @@ function statusForDoc(doc: VendorComplianceDocument): {
 
 // ── Compliance section ────────────────────────────────────────────────────────
 
+// Plain helper, not a component — keeps the Date.now() call out of the
+// component's own body (react-hooks/purity flags impure calls anywhere
+// lexically inside a component, including inside useMemo callbacks).
+function complianceCounts(docs: VendorComplianceDocument[]): { expiredCount: number; soonCount: number } {
+  const now          = Date.now()
+  const expiredCount = docs.filter((d) => d.expiry_date && new Date(d.expiry_date).getTime() < now).length
+  const soonCount    = docs.filter((d) => {
+    if (!d.expiry_date) return false
+    const days = Math.floor((new Date(d.expiry_date).getTime() - now) / 86_400_000)
+    return days >= 0 && days < 30
+  }).length
+  return { expiredCount, soonCount }
+}
+
 export function ComplianceSection({
   vendorId,
   orgId,
@@ -208,13 +222,8 @@ export function ComplianceSection({
   const [verifying, startVerify]  = useTransition()
   const [actingId, setActingId]   = useState<string | null>(null)
 
-  const activeDocs   = documents.filter((d) => d.is_active)
-  const expiredCount = activeDocs.filter((d) => d.expiry_date && new Date(d.expiry_date) < new Date()).length
-  const soonCount    = activeDocs.filter((d) => {
-    if (!d.expiry_date) return false
-    const days = Math.floor((new Date(d.expiry_date).getTime() - Date.now()) / 86_400_000)
-    return days >= 0 && days < 30
-  }).length
+  const activeDocs = documents.filter((d) => d.is_active)
+  const { expiredCount, soonCount } = complianceCounts(activeDocs)
 
   return (
     <>

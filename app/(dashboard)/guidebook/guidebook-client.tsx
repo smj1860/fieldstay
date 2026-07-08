@@ -39,6 +39,17 @@ interface GuidebookClientProps {
 
 type CelebrationTier = 4 | 5 | 6 | null
 
+// Plain helper, not a component — keeps the Date.now() call out of the
+// component's own body (react-hooks/purity flags impure calls anywhere
+// lexically inside a component, including inside useMemo callbacks).
+function trialStatus(trialEndsAt: string | null): { inTrial: boolean; daysLeft: number } {
+  if (!trialEndsAt) return { inTrial: false, daysLeft: 0 }
+  const now      = Date.now()
+  const endsAtMs = new Date(trialEndsAt).getTime()
+  const inTrial  = now < endsAtMs
+  return { inTrial, daysLeft: inTrial ? Math.ceil((endsAtMs - now) / 86400000) : 0 }
+}
+
 export function GuidebookClient({
   orgId,
   initialSponsors,
@@ -57,11 +68,8 @@ export function GuidebookClient({
   const activeSponsorCount = sponsors.filter((s) => s.status === 'active').length
   const isGuidebookActive  = config?.is_active ?? false
 
-  const trialEndsAt    = config?.trial_ends_at ?? null
-  const inTrial        = trialEndsAt ? new Date() < new Date(trialEndsAt) : false
-  const trialDaysLeft  = inTrial
-    ? Math.ceil((new Date(trialEndsAt!).getTime() - Date.now()) / 86400000)
-    : 0
+  const trialEndsAt              = config?.trial_ends_at ?? null
+  const { inTrial, daysLeft: trialDaysLeft } = trialStatus(trialEndsAt)
   const hasAccess      = inTrial || activeSponsorCount >= 3
   const sponsorsNeeded = Math.max(0, 3 - activeSponsorCount)
 

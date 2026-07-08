@@ -3,6 +3,15 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { ReviewsClient } from './reviews-client'
 import { getManualReviewsUsedThisWeek } from './actions'
 
+// Plain helper, not a component — keeps the Date.now() call out of the
+// page component's own body (react-hooks/purity flags impure calls inside
+// anything it identifies as a component/hook; this is a one-shot
+// server-rendered value, not something subject to re-render concerns).
+function daysRemainingToRespond(deadline: Date | null, responseStatus: string): number | null {
+  if (!deadline || responseStatus === 'posted') return null
+  return Math.ceil((deadline.getTime() - Date.now()) / 86_400_000)
+}
+
 interface ReviewRow {
   id: string
   org_id: string
@@ -62,9 +71,7 @@ export default async function ReviewsPage() {
     const deadline   = reviewDate
       ? new Date(reviewDate.getTime() + RESPONSE_WINDOW_DAYS * 86_400_000)
       : null
-    const daysRemaining = (deadline && r.response_status !== 'posted')
-      ? Math.ceil((deadline.getTime() - Date.now()) / 86_400_000)
-      : null
+    const daysRemaining = daysRemainingToRespond(deadline, r.response_status)
 
     return { ...r, days_remaining: daysRemaining }
   })

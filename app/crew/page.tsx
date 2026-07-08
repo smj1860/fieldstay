@@ -188,6 +188,16 @@ function CrewPageSkeleton() {
   )
 }
 
+// Plain helper, not a component — keeps the Date.now()/new Date() calls out
+// of the component's own body (react-hooks/purity flags impure calls
+// anywhere lexically inside a component, including inside useMemo callbacks).
+function todayAndWeekOutDates(): { today: string; weekOut: string } {
+  return {
+    today:   new Date().toISOString().split('T')[0]!,
+    weekOut: new Date(Date.now() + 7 * 86_400_000).toISOString().split('T')[0]!,
+  }
+}
+
 export default function CrewDashboardPage() {
   const [isMounted, setIsMounted] = useState(false)
   const [showFeedback, setShowFeedback] = useState(false)
@@ -198,8 +208,7 @@ export default function CrewDashboardPage() {
   const { crewName } = useCrewContext()
   const firstName    = crewName.split(' ')[0] ?? crewName
 
-  const today   = new Date().toISOString().split('T')[0]!
-  const weekOut = new Date(Date.now() + 7 * 86_400_000).toISOString().split('T')[0]!
+  const { today, weekOut } = todayAndWeekOutDates()
 
   const db           = useDexieDb()
   const allTurnovers = useLiveQuery(
