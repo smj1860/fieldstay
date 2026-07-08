@@ -184,7 +184,7 @@ export function SupportChatWidget() {
           >
             {messages.length === 0 && (
               <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
-                Hi, I'm Finn — FieldStay's support assistant. Ask me about pricing, integrations, turnovers, or anything else.
+                Hi, I&apos;m Finn — FieldStay&apos;s support assistant. Ask me about pricing, integrations, turnovers, or anything else.
               </p>
             )}
             {messages.map((m, i) => (

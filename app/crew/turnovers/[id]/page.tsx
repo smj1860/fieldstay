@@ -823,7 +823,7 @@ function IssueReportModal({
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="label text-primary-themed">What's the issue? *</label>
+              <label className="label text-primary-themed">What&apos;s the issue? *</label>
               <Input
                 type="text"
                 value={title}

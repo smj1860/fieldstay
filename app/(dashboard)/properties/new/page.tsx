@@ -10,7 +10,7 @@ export default function NewPropertyPage() {
       <div className="page-header">
         <h1 className="page-title">Add Property</h1>
         <p className="page-subtitle">
-          Basic details first — you'll set up inventory, checklists, and more in the next steps.
+          Basic details first — you&apos;ll set up inventory, checklists, and more in the next steps.
         </p>
       </div>
       <Card>

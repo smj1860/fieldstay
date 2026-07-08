@@ -21,8 +21,8 @@ export default async function CrewPage({ params }: Props) {
     <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Crew</h2>
       <p className="text-sm text-accent-500 mb-6">
-        Add the cleaning and maintenance crew members you work with. You'll assign
-        specific crew to each turnover when it's created.
+        Add the cleaning and maintenance crew members you work with. You&apos;ll assign
+        specific crew to each turnover when it&apos;s created.
       </p>
       <CrewSetup propertyId={property.id} crew={crew ?? []} />
     </Card>

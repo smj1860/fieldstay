@@ -45,7 +45,7 @@ export function AcceptForm({ token, email, orgName }: Props) {
             </div>
             <h1 className="text-xl font-black tracking-tight mb-1"
                 style={{ color: '#111827', letterSpacing: '-0.5px' }}>
-              You've been invited
+              You&apos;ve been invited
             </h1>
             <p className="text-sm" style={{ color: '#6B7280' }}>
               Join <strong style={{ color: '#111827' }}>{orgName}</strong> on FieldStay

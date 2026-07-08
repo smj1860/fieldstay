@@ -729,7 +729,7 @@ function CreateWorkOrderModal({
                 <div className="border border-themed rounded-xl overflow-hidden">
                   <div className="px-3 py-2 bg-canvas-themed border-b border-themed">
                     <p className="text-xs text-muted-themed">
-                      Select vendors to receive an RFQ — you'll be taken to the work order to review and approve quotes.
+                      Select vendors to receive an RFQ — you&apos;ll be taken to the work order to review and approve quotes.
                     </p>
                   </div>
                   {vendors.map((v) => (
@@ -1104,7 +1104,7 @@ function SchedulesSection({
 
         {open && schedules.length === 0 && (
           <div className="text-center py-8 text-sm text-muted-themed border border-themed rounded-xl">
-            No schedules yet. Click "Add Schedule" to create one.
+            No schedules yet. Click &quot;Add Schedule&quot; to create one.
           </div>
         )}
 
@@ -1556,7 +1556,7 @@ function CreateTemplateModal({
   if (createdTemplateId) {
     return (
       <Dialog open onClose={onClose} title="Apply Template">
-          <p className="text-xs text-muted-themed -mt-3 mb-4">"{createdTemplateName}" was created</p>
+          <p className="text-xs text-muted-themed -mt-3 mb-4">&quot;{createdTemplateName}&quot; was created</p>
 
           {applyError && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{applyError}</div>
@@ -1583,7 +1583,7 @@ function CreateTemplateModal({
             </div>
           ) : (
             <div className="space-y-4">
-              <p className="text-sm text-secondary-themed">Apply this template's schedules now?</p>
+              <p className="text-sm text-secondary-themed">Apply this template&apos;s schedules now?</p>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -1832,7 +1832,7 @@ function TemplatesSection({
 
         {open && templates.length === 0 && (
           <div className="text-center py-8 text-sm text-muted-themed border border-themed rounded-xl">
-            No templates yet. Click "Create Template" to build one.
+            No templates yet. Click &quot;Create Template&quot; to build one.
           </div>
         )}
 

@@ -469,7 +469,7 @@ export function TemplateManager({
         {addTab === 'catalog' && (
           <div className="space-y-3">
             <div className="px-3 py-2.5 rounded-lg text-xs" style={{ background: 'var(--bg-raised)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-              If you always buy a specific brand — Bounty paper towels, Dawn dish soap, Tide pods — enter it in the Brand field. Without it, the cart may pull in a store brand and you'll have to swap it out manually every time.
+              If you always buy a specific brand — Bounty paper towels, Dawn dish soap, Tide pods — enter it in the Brand field. Without it, the cart may pull in a store brand and you&apos;ll have to swap it out manually every time.
             </div>
             <div className="flex gap-1.5 flex-wrap">
               {(['all', ...CATEGORY_ORDER] as const).map(c => (
