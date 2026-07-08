@@ -216,6 +216,12 @@ export const syncIcalFeed = inngest.createFunction(
           status:        (event.status === 'cancelled' ? 'cancelled' :
                           event.status === 'blocked'   ? 'blocked'   :
                           event.status === 'tentative' ? 'tentative' : 'confirmed'),
+          // Reconciles is_block (checked by turnover generation, guidebook
+          // emails, owner portal) with status: 'blocked' (what the bookings
+          // UI actually renders "Blocked / Unavailable" from) — previously
+          // only status was set here, leaving is_block permanently false
+          // for every iCal-sourced block.
+          is_block:      event.status === 'blocked',
           raw_ical_data: { summary: event.guestName, uid: event.uid },
         }))
 

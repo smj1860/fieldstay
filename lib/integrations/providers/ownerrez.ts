@@ -360,6 +360,16 @@ export function buildOwnerRezDetailPatch(
  * table already treats both columns as nullable for this reason.
  */
 export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooking {
+  // block/quote_hold/linked_availability are all "time marked unavailable,
+  // no guest" in OwnerRez's own booking-type taxonomy — treat all three as
+  // a block. This reconciles two previously-disconnected signals:
+  // is_block (checked by turnover generation, guidebook emails, owner
+  // portal) and status: 'blocked' (the only signal the bookings UI
+  // actually renders "Blocked / Unavailable" from) — both must agree on
+  // every block-family booking, so `type` takes precedence over OwnerRez's
+  // own is_block field if the two ever disagree.
+  const isBlockType = b.type === 'block' || b.type === 'quote_hold' || b.type === 'linked_availability'
+
   return {
     external_id: String(b.id),
     property_external_id: b.property_id !== null && b.property_id !== undefined
@@ -369,11 +379,11 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     checkout_date: b.departure,
     checkin_time:  null,
     checkout_time: null,
-    status:      mapOwnerRezBookingStatus(b.status),
+    status:      isBlockType ? 'blocked' : mapOwnerRezBookingStatus(b.status),
     guest_name:  b.guest?.name  ?? null,
     guest_email: b.guest?.email ?? null,
     source:      mapOwnerRezChannelToSource(b.channel_name),
-    is_block:    b.is_block ?? false,
+    is_block:    isBlockType || (b.is_block ?? false),
     // Effective 2026-07-07, OwnerRez's type field can be 'owner' — the
     // property owner's own personal-use stay. It's a full booking (not a
     // block; is_block is false), so it flows through the same upsert path

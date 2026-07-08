@@ -131,6 +131,12 @@ export const hostawayInitialSync = inngest.createFunction(
                 checkout_date:   res.departureDate,
                 status:          mapHostawayStatus(res.status),
                 source:          mapHostawayChannel(res.channelName),
+                // ⚠️ Unconfirmed: HostawayReservation.status ('new' |
+                // 'modified' | 'cancelled' | 'confirmed' | 'inquiry' |
+                // 'tentative') has no documented blocked-time value —
+                // hardcoded false until Hostaway's docs or a live payload
+                // show how manually-blocked calendar time surfaces here (if
+                // it does at all via this endpoint).
                 is_block:        false,
               }
             })
