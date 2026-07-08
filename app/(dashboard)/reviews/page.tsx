@@ -42,7 +42,7 @@ export default async function ReviewsPage() {
   const { membership } = await requireOrgMember()
   const admin = createServiceClient()
 
-  const manualUsedThisWeek = await getManualReviewsUsedThisWeek(membership.org_id)
+  const manualUsedThisWeek = await getManualReviewsUsedThisWeek()
 
   // Fetch reviews with responses
   const { data: reviews } = await admin
