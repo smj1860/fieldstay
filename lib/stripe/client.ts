@@ -1,8 +1,29 @@
 import Stripe from 'stripe'
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
-  apiVersion: '2025-02-24.acacia',
-  typescript: true,
+// Stripe's constructor throws ("Neither apiKey nor config.authenticator
+// provided") on an empty string, not just a missing one — so eagerly
+// constructing this at module load crashed `next build` outright in any
+// environment without STRIPE_SECRET_KEY set, since this file is imported
+// by 11+ routes/Inngest functions that Next.js's page-data-collection pass
+// loads regardless of whether Stripe is ever actually called. A lazy Proxy
+// keeps every existing `stripe.subscriptions.cancel(...)`-style call site
+// unchanged — the real client is only constructed on first actual use.
+let realClient: Stripe | null = null
+
+function getClient(): Stripe {
+  if (!realClient) {
+    realClient = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
+      apiVersion: '2025-02-24.acacia',
+      typescript: true,
+    })
+  }
+  return realClient
+}
+
+export const stripe = new Proxy({} as Stripe, {
+  get(_target, prop, receiver) {
+    return Reflect.get(getClient(), prop, receiver)
+  },
 })
 
 export const PLANS = {

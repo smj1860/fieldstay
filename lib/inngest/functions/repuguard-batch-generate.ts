@@ -15,7 +15,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
   },
   { event: 'repuguard/batch_generate.requested' as const },
   async ({ event, step, logger }) => {
-    const { org_id, requested_by } = event.data
+    const { org_id } = event.data
 
     // ── Step 1: Fetch pending reviews ─────────────────────────────────────────
     const reviews = await step.run('fetch-pending-reviews', async () => {

@@ -1,6 +1,13 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { createServiceClient } from '@/lib/supabase/server'
 
-type DBClient = SupabaseClient<any>
+// Tied to the real factory's return type rather than a literal `any` —
+// createClient()/createServiceClient() both omit the <Database> generic
+// (see the comment in lib/supabase/server.ts: the hand-written Database
+// type doesn't satisfy postgrest-js's GenericSchema constraint), so this
+// stays correct automatically if that's ever fixed, instead of hardcoding
+// the workaround here too. This function is called with either client
+// interchangeably — both factories return the same shape.
+type DBClient = ReturnType<typeof createServiceClient>
 
 export interface FlaggedBooking {
   id:           string

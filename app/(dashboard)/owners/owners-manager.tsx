@@ -17,7 +17,6 @@ import {
   deleteOwnerTransaction,
   toggleTransactionVisibility,
   toggleCapitalPlanSharing,
-  type OwnersActionState,
 } from './actions'
 
 interface Property {

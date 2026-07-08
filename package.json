@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "check:ui-classes": "bash scripts/check-raw-ui-classes.sh",
     "inngest:dev": "npx inngest-cli@latest dev",
     "types:supabase": "supabase gen types typescript --local > types/supabase.ts",

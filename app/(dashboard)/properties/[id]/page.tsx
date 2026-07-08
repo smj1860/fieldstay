@@ -2,7 +2,7 @@ import { requireProperty } from '@/lib/auth'
 import { calcSetupProgress, WIZARD_STEPS } from '@/lib/wizard'
 import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
-import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Clock, DollarSign, AlertTriangle } from 'lucide-react'
+import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Clock, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AssetSection } from './asset-section'
 import { PropertyMaintenanceManager } from '@/components/property/PropertyMaintenanceManager'
@@ -34,6 +34,7 @@ export default async function PropertyDetailPage({ params }: Props) {
     { count: openWO },
     { data: feeds },
     { data: recentWOs },
+    { data: ytdCompletedWOs },
     { data: upcomingSchedules },
     { data: assets },
     { data: standards },
@@ -65,6 +66,14 @@ export default async function PropertyDetailPage({ params }: Props) {
       .not('status', 'eq', 'cancelled')
       .order('created_at', { ascending: false })
       .limit(10),
+
+    // All completed WOs this year (for the YTD Spend stat — not capped like recentWOs above)
+    supabase
+      .from('work_orders')
+      .select('actual_cost, estimated_cost')
+      .eq('property_id', property.id)
+      .eq('status', 'completed')
+      .gte('completed_date', thisYearStart),
 
     // Upcoming scheduled maintenance (for summary widget)
     supabase
@@ -105,8 +114,7 @@ export default async function PropertyDetailPage({ params }: Props) {
   ])
 
   // Calculate YTD maintenance spend
-  const completedWOs = recentWOs?.filter((wo) => wo.status === 'completed') ?? []
-  const ytdSpend = completedWOs.reduce((sum, wo) => {
+  const ytdSpend = (ytdCompletedWOs ?? []).reduce((sum, wo) => {
     const cost = (wo.actual_cost ?? wo.estimated_cost ?? 0)
     return sum + cost
   }, 0)

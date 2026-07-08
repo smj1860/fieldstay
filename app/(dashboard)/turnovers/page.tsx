@@ -99,7 +99,6 @@ export default async function TurnoversPage() {
         properties={properties ?? []}
         bookings={bookings ?? []}
         crewAvailability={crewAvailability ?? []}
-        orgId={membership.org_id}
         showAutoAssignNudge={showAutoAssignNudge}
       />
     </div>

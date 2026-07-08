@@ -140,7 +140,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
           .filter((id): id is number => id !== null)
           .map(String)
 
-        let propertyMap: Map<string, string> = new Map()
+        const propertyMap: Map<string, string> = new Map()
         if (propertyExternalIds.length > 0) {
           const { data: props } = await admin
             .from('properties')

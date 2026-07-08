@@ -6,7 +6,6 @@ import {
   LayoutDashboard, CalendarCheck, Package,
   Wrench, MoreHorizontal,
 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
 
 const BOTTOM_NAV_ITEMS = [

@@ -177,7 +177,7 @@ export const ownerRezProvider: IntegrationProvider = {
   // Handles OwnerRez-specific webhook events beyond the generic revocation.
   // OwnerRez uses generic action names (entity_insert/entity_update/entity_delete)
   // with entity type carried separately in the entity_type field.
-  async handleWebhookEvent({ action, payload, externalUserId, correlationId }) {
+  async handleWebhookEvent({ action, payload, externalUserId: _externalUserId, correlationId }) {
     const data       = payload as Record<string, unknown>
     const entityType = String(data.entity_type ?? '')
     const entityId   = String(data.entity_id ?? '')

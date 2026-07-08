@@ -1,7 +1,7 @@
 import { requireProperty } from '@/lib/auth'
 import { WIZARD_STEPS, calcSetupProgress } from '@/lib/wizard'
 import Link from 'next/link'
-import { CheckCircle2, Circle } from 'lucide-react'
+import { CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface Props {

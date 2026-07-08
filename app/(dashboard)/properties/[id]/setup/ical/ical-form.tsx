@@ -3,7 +3,6 @@
 import { useActionState, useEffect, useState } from 'react'
 import { addIcalFeed, deleteIcalFeed, completeIcalStep, triggerSingleFeedSync } from './actions'
 import { Plus, Trash2, RefreshCw, Link as LinkIcon } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'

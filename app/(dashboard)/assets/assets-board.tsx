@@ -12,14 +12,6 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import type { AssetType } from '@/types/database'
 
-function healthStatus(score: number): 'good' | 'warning' | 'attention' | 'critical' | 'offline' {
-  if (score >= 80) return 'good'
-  if (score >= 60) return 'warning'
-  if (score >= 40) return 'attention'
-  if (score >= 20) return 'critical'
-  return 'offline'
-}
-
 export interface AssetRow {
   id:                      string
   property_id:             string
@@ -101,7 +93,6 @@ export function AssetsBoard({
   // they were explicitly marked as not present at the property.
   const realAssets = filteredAssets.filter((a) => !a.is_na)
   const scored      = realAssets.filter((a) => a.health_score !== null)
-  const unscored     = realAssets.filter((a) => a.health_score === null)
   const urgentAssets = realAssets.filter((a) => a.health_score !== null && a.health_score < 40)
 
   const avgScore = scored.length

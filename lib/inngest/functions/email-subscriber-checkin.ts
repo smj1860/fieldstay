@@ -12,7 +12,6 @@ export const sendSubscriberCheckin = inngest.createFunction(
   { event: 'billing/first-payment-confirmed' },
   async ({ event, step }) => {
     const { user_email, first_name, org_id } = event.data
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL!
 
     // Wait 21 days
     await step.sleep('sleep-21-days', '21 days')

@@ -49,7 +49,6 @@ export default async function OnboardingInventoryTemplatePage() {
       <TemplateManager
         template={template as never}
         properties={properties ?? []}
-        orgId={membership.org_id}
         catalogItems={catalogItems ?? []}
       />
 

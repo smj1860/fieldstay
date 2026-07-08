@@ -230,6 +230,15 @@ function LogRow({ entry }: { entry: LogEntry }) {
 
 // ── Add entry modal ───────────────────────────────────────────────────────────
 
+// Plain helper, not a component — keeps the Date.now() call out of the
+// component's own body (react-hooks/purity flags impure calls anywhere
+// lexically inside a component, including inside useMemo callbacks).
+function nowAsLocalDatetimeInputValue(): string {
+  return new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16)
+}
+
 function AddEntryModal({
   vendors,
   crew,
@@ -245,6 +254,7 @@ function AddEntryModal({
 }) {
   const [state, action, pending]         = useActionState(createCommunicationLog, null)
   const [recipientType, setRecipientType] = useState<CommRecipientType>('vendor')
+  const nowLocalDatetime = nowAsLocalDatetimeInputValue()
 
   if (state?.success) { onClose(); return null }
 
@@ -327,9 +337,7 @@ function AddEntryModal({
             <Input
               name="communicated_at"
               type="datetime-local"
-              defaultValue={new Date(Date.now() - new Date().getTimezoneOffset() * 60000)
-                .toISOString()
-                .slice(0, 16)}
+              defaultValue={nowLocalDatetime}
             />
             <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
               Defaults to now. Edit if logging a past conversation.

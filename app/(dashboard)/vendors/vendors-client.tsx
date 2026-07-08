@@ -17,7 +17,6 @@ import {
   updateVendorPortal,
   deactivateVendor,
   bulkImportVendors,
-  type SettingsActionState,
 } from '../settings/actions'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -73,7 +72,10 @@ function parseCSV(text: string): ParsedVendor[] {
     let contact_name = contactIdx >= 0 ? cols[contactIdx] ?? '' : ''
     let email        = emailIdx   >= 0 ? cols[emailIdx]   ?? '' : ''
     let phone        = phoneIdx   >= 0 ? cols[phoneIdx]   ?? '' : ''
-    let specialty    = specIdx    >= 0 ? cols[specIdx]    ?? '' : ''
+    // No regex fallback for specialty like the fields below — unlike
+    // email/phone, free-text category values have no reliable pattern to
+    // detect from an unlabeled column, so this is header-only.
+    const specialty  = specIdx    >= 0 ? cols[specIdx]    ?? '' : ''
 
     if (!name) {
       const nonContact = cols.filter((c) => c && !EMAIL_RE.test(c) && !PHONE_RE.test(c))

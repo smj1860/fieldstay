@@ -1,5 +1,5 @@
 import {
-  Heading, Text, Button, Row, Column, Hr, Section,
+  Heading, Text, Row, Column, Hr, Section,
 } from '@react-email/components'
 import { render }      from '@react-email/render'
 import { EmailLayout } from '@/emails/components/email-layout'

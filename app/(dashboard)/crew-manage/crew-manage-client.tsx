@@ -4,7 +4,6 @@ import { useState, useTransition, useActionState, useRef, useEffect } from 'reac
 import { Pencil, X, Check, Loader2, Upload, Users2, FileText, CalendarDays, Send } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { CrewMember, CrewRole, CrewAvailabilityEntry } from '@/types/database'
-import type { ContactPref } from '@/types/database'
 import { AvailabilityOverviewCalendar } from '@/components/crew/availability-overview-calendar'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
@@ -18,7 +17,6 @@ import {
   inviteCrewMember,
   inviteAllUninvitedCrew,
   bulkImportCrew,
-  type SettingsActionState,
 } from '../settings/actions'
 
 // ── Bulk upload helpers ───────────────────────────────────────────────────────
@@ -62,7 +60,10 @@ function parseCSV(text: string): ParsedRow[] {
       let name      = nameIdx  >= 0 ? cols[nameIdx]  ?? '' : ''
       let email     = emailIdx >= 0 ? cols[emailIdx] ?? '' : ''
       let phone     = phoneIdx >= 0 ? cols[phoneIdx] ?? '' : ''
-      let specialty = specIdx  >= 0 ? cols[specIdx]  ?? '' : ''
+      // No regex fallback for specialty like the fields below — unlike
+      // email/phone, free-text skill/role values have no reliable pattern
+      // to detect from an unlabeled column, so this is header-only.
+      const specialty = specIdx >= 0 ? cols[specIdx] ?? '' : ''
 
       // Heuristic fallback: scan all columns for email/phone, first non-match = name
       if (!name) {

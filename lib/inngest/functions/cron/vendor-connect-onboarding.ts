@@ -156,7 +156,7 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
               .eq('org_id', vendor.org_id)   // explicit org scope despite service client
 
             batchInvited++
-          } catch (err) {
+          } catch (_err) {
             // Log and continue — don't let one failed vendor abort the whole batch.
             // The next cron run will retry uninvited vendors.
             logger.error('[vendor-connect-cron] failed to onboard vendor', {

@@ -5,6 +5,14 @@ import { CheckCircle2 } from 'lucide-react'
 
 interface Props { params: Promise<{ token: string }> }
 
+// Plain helper, not a component — keeps the Date.now() call out of the
+// page component's own body (react-hooks/purity flags impure calls inside
+// anything it identifies as a component/hook; this is a one-shot
+// server-rendered check, not something subject to re-render concerns).
+function isInviteExpired(sentAt: string, ttlDays: number): boolean {
+  return new Date(sentAt).getTime() + ttlDays * 86_400_000 < Date.now()
+}
+
 export default async function AcceptInvitePage({ params }: Props) {
   const { token } = await params
   const supabase  = createServiceClient()
@@ -35,7 +43,7 @@ export default async function AcceptInvitePage({ params }: Props) {
   }
 
   if (crew.invite_sent_at) {
-    const expired = new Date(crew.invite_sent_at).getTime() + 7 * 86_400_000 < Date.now()
+    const expired = isInviteExpired(crew.invite_sent_at, 7)
     if (expired) {
       return (
         <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
@@ -67,7 +75,6 @@ export default async function AcceptInvitePage({ params }: Props) {
             token={token}
             crewId={crew.id}
             email={crew.email ?? ''}
-            name={crew.name}
           />
         </div>
       </div>

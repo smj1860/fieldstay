@@ -2529,7 +2529,6 @@ export function MaintenanceBoard({
               <WorkOrderDetail
                 workOrder={selectedWO}
                 userRole={role as 'admin' | 'manager' | 'crew' | 'viewer'}
-                onClose={() => setSelectedWO(null)}
                 vendors={vendors.map(v => ({ id: v.id, name: v.name, email: v.email }))}
               />
             </div>

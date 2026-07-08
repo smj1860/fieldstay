@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from 'react'
 import { addCrewMember, completeCrewStep } from './actions'
-import { Plus, User, CheckCircle2, PartyPopper } from 'lucide-react'
+import { Plus, CheckCircle2, PartyPopper } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 

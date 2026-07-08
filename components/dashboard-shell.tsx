@@ -9,6 +9,7 @@ import {
   ChevronRight, Menu, X, Sun, Moon,
   Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
   LifeBuoy, Bell, BookOpen, Inbox, Zap,
+  type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
@@ -100,6 +101,274 @@ interface Props {
   children:                   React.ReactNode
 }
 
+interface NavItem {
+  href:  string
+  label: string
+  icon:  LucideIcon
+  roles: readonly string[]
+  group: 'ops' | 'management'
+}
+
+interface DashboardSidebarProps {
+  mobile?:             boolean
+  pathname:            string
+  collapsed:           boolean
+  onCloseMobile:       () => void
+  unreadMessages:      number
+  onboardingComplete:  boolean
+  onboardingPct:       number
+  opsNav:              NavItem[]
+  mgmtNav:             NavItem[]
+  isStaff:             boolean
+  orgName:             string
+  userName:            string
+  userEmail:           string
+}
+
+// Hoisted to a top-level component rather than defined inline inside
+// DashboardShell's render body — an inline component gets a brand-new
+// component type on every render of the parent, which forces React to
+// unmount and remount the entire sidebar (losing any internal state,
+// re-running effects) instead of just updating it. DashboardShell renders
+// on every route change, so this ran on every single navigation.
+function DashboardSidebar({
+  mobile = false,
+  pathname,
+  collapsed,
+  onCloseMobile,
+  unreadMessages,
+  onboardingComplete,
+  onboardingPct,
+  opsNav,
+  mgmtNav,
+  isStaff,
+  orgName,
+  userName,
+  userEmail,
+}: Readonly<DashboardSidebarProps>) {
+  const renderNavLink = (item: NavItem) => {
+    const Icon   = item.icon
+    const active = pathname === item.href ||
+                   pathname.startsWith(item.href + '/')
+
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        onClick={onCloseMobile}
+        title={collapsed && !mobile ? item.label : undefined}
+        className={cn(
+          'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm',
+          'font-medium transition-all relative'
+        )}
+        style={{
+          background: active ? 'var(--chrome-bg-raised)' : 'transparent',
+          color:      active ? 'var(--chrome-text)' : 'var(--chrome-text-muted)',
+          borderLeft: active ? '2px solid var(--chrome-gold)' : '2px solid transparent',
+        }}
+        onMouseOver={(e) => {
+          if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
+        }}
+        onFocus={(e) => {
+          if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
+        }}
+        onMouseOut={(e) => {
+          if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
+        }}
+        onBlur={(e) => {
+          if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
+        }}
+      >
+        <Icon className="w-4 h-4 flex-shrink-0" />
+        {(!collapsed || mobile) && (
+          <>
+            <span className="truncate">{item.label}</span>
+            {item.href === '/messages' && unreadMessages > 0 && (
+              <span
+                className="ml-auto text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center"
+                style={{ background: '#FCD116', color: '#0a1628' }}
+              >
+                {unreadMessages > 99 ? '99+' : unreadMessages}
+              </span>
+            )}
+          </>
+        )}
+      </Link>
+    )
+  }
+
+  return (
+    <aside
+      className={cn(
+        'flex flex-col h-full transition-all duration-300',
+        mobile ? 'w-[min(256px,85vw)]' : collapsed ? 'w-[68px]' : 'w-60'
+      )}
+      style={{
+        background:  'var(--chrome-bg)',
+        borderRight: '1px solid var(--chrome-border)',
+      }}
+    >
+      {/* Logo row — close button lives here on mobile */}
+      <div
+        className="flex items-center gap-3 px-4 py-5 flex-shrink-0"
+        style={{ borderBottom: '1px solid var(--chrome-border)', minHeight: 72 }}
+      >
+        <div
+          className="w-8 h-8 rounded-lg flex-shrink-0 flex items-center
+                     justify-center font-black text-sm"
+          style={{ background: 'var(--chrome-gold)', color: 'var(--chrome-bg)' }}
+        >
+          FS
+        </div>
+        {(!collapsed || mobile) && (
+          <div className="min-w-0 flex-1">
+            <span className="font-display font-bold text-base leading-none"
+                  style={{ color: 'var(--chrome-text)' }}>
+              FieldStay
+            </span>
+            <p className="text-xs truncate mt-0.5"
+               style={{ color: 'var(--chrome-text-muted)' }}>
+              {orgName}
+            </p>
+          </div>
+        )}
+        {mobile && (
+          <button
+            onClick={onCloseMobile}
+            className="ml-auto p-2 rounded-lg flex-shrink-0"
+            style={{ color: 'var(--chrome-text-muted)' }}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+      </div>
+
+      {/* Nav links */}
+      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
+        {!onboardingComplete && (!collapsed || mobile) && (
+          <Link
+            href="/setup"
+            onClick={onCloseMobile}
+            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all mb-2"
+            style={{
+              background: 'var(--chrome-gold-dim)',
+              color:      'var(--chrome-gold)',
+              border:     '1px solid rgba(252,209,22,0.2)',
+            }}
+          >
+            <Zap className="w-4 h-4" />
+            <span>Complete Setup</span>
+            <span className="ml-auto text-xs opacity-70">{onboardingPct}%</span>
+          </Link>
+        )}
+        {opsNav.map(renderNavLink)}
+
+        {mgmtNav.length > 0 && (
+          <>
+            <div className="mt-3 mb-1 pt-2" style={{ borderTop: '1px solid var(--chrome-border)' }}>
+              {(!collapsed || mobile) && (
+                <span
+                  className="block px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide"
+                  style={{ color: 'var(--chrome-text-muted)', opacity: 0.7 }}
+                >
+                  Management
+                </span>
+              )}
+            </div>
+            {mgmtNav.map(renderNavLink)}
+          </>
+        )}
+      </nav>
+
+      {/* ── Staff-only: Support Inbox ──────────────────── */}
+      {isStaff && (
+        <div className="px-2 pt-1 pb-0 flex-shrink-0" style={{ borderTop: '1px solid var(--chrome-border)' }}>
+          <Link
+            href="/support-inbox"
+            onClick={onCloseMobile}
+            title={collapsed && !mobile ? 'Support Inbox' : undefined}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+            style={{
+              color:      pathname.startsWith('/support-inbox') ? 'var(--chrome-text)' : 'var(--chrome-text-muted)',
+              background: pathname.startsWith('/support-inbox') ? 'var(--chrome-bg-raised)' : 'transparent',
+              borderLeft: pathname.startsWith('/support-inbox') ? '2px solid var(--chrome-gold)' : '2px solid transparent',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.background = 'var(--chrome-bg-raised)'
+              e.currentTarget.style.color = 'var(--chrome-text)'
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.background = 'var(--chrome-bg-raised)'
+              e.currentTarget.style.color = 'var(--chrome-text)'
+            }}
+            onMouseOut={(e) => {
+              if (!pathname.startsWith('/support-inbox')) {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--chrome-text-muted)'
+              }
+            }}
+            onBlur={(e) => {
+              if (!pathname.startsWith('/support-inbox')) {
+                e.currentTarget.style.background = 'transparent'
+                e.currentTarget.style.color = 'var(--chrome-text-muted)'
+              }
+            }}
+          >
+            <Inbox className="w-4 h-4 flex-shrink-0" />
+            {(!collapsed || mobile) && <span className="truncate">Support Inbox</span>}
+          </Link>
+        </div>
+      )}
+
+      {/* ── Help & Support ─────────────────────────────── */}
+      <div
+        className="px-2 pt-1 pb-0 flex-shrink-0"
+        style={{ borderTop: '1px solid var(--chrome-border)' }}
+      >
+        <Link
+          href="/help"
+          onClick={onCloseMobile}
+          title={collapsed && !mobile ? 'Help & Support' : undefined}
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+          style={{ color: 'var(--chrome-text-muted)' }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.background = 'var(--chrome-bg-raised)'
+            e.currentTarget.style.color = 'var(--chrome-text)'
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.background = 'var(--chrome-bg-raised)'
+            e.currentTarget.style.color = 'var(--chrome-text)'
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--chrome-text-muted)'
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--chrome-text-muted)'
+          }}
+        >
+          <LifeBuoy className="w-4 h-4 flex-shrink-0" />
+          {(!collapsed || mobile) && (
+            <span className="truncate">Help &amp; Support</span>
+          )}
+        </Link>
+      </div>
+
+      {/* Bottom user row */}
+      {(!collapsed || mobile) && (
+        <div className="px-2 pb-3 pt-3 flex-shrink-0" style={{ borderTop: '1px solid var(--chrome-border)' }}>
+          <SidebarUserMenu
+            userName={userName}
+            userEmail={userEmail}
+            orgName={orgName}
+          />
+        </div>
+      )}
+    </aside>
+  )
+}
+
 export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, isStaff = false, children }: Props) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
@@ -188,237 +457,26 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
     pathname === path || pathname.startsWith(path + '/')
   )?.[1] ?? ''
 
-  const Sidebar = ({ mobile = false }: { mobile?: boolean }) => {
-    const renderNavLink = (item: typeof filteredNav[number]) => {
-      const Icon   = item.icon
-      const active = pathname === item.href ||
-                     pathname.startsWith(item.href + '/')
-
-      return (
-        <Link
-          key={item.href}
-          href={item.href}
-          onClick={() => setMobileOpen(false)}
-          title={collapsed && !mobile ? item.label : undefined}
-          className={cn(
-            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm',
-            'font-medium transition-all relative'
-          )}
-          style={{
-            background: active ? 'var(--chrome-bg-raised)' : 'transparent',
-            color:      active ? 'var(--chrome-text)' : 'var(--chrome-text-muted)',
-            borderLeft: active ? '2px solid var(--chrome-gold)' : '2px solid transparent',
-          }}
-          onMouseOver={(e) => {
-            if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
-          }}
-          onFocus={(e) => {
-            if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
-          }}
-          onMouseOut={(e) => {
-            if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
-          }}
-          onBlur={(e) => {
-            if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
-          }}
-        >
-          <Icon className="w-4 h-4 flex-shrink-0" />
-          {(!collapsed || mobile) && (
-            <>
-              <span className="truncate">{item.label}</span>
-              {item.href === '/messages' && (unreadMessages ?? 0) > 0 && (
-                <span
-                  className="ml-auto text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center"
-                  style={{ background: '#FCD116', color: '#0a1628' }}
-                >
-                  {(unreadMessages ?? 0) > 99 ? '99+' : unreadMessages}
-                </span>
-              )}
-            </>
-          )}
-        </Link>
-      )
-    }
-
-    return (
-    <aside
-      className={cn(
-        'flex flex-col h-full transition-all duration-300',
-        mobile ? 'w-[min(256px,85vw)]' : collapsed ? 'w-[68px]' : 'w-60'
-      )}
-      style={{
-        background:  'var(--chrome-bg)',
-        borderRight: '1px solid var(--chrome-border)',
-      }}
-    >
-      {/* Logo row — close button lives here on mobile */}
-      <div
-        className="flex items-center gap-3 px-4 py-5 flex-shrink-0"
-        style={{ borderBottom: '1px solid var(--chrome-border)', minHeight: 72 }}
-      >
-        <div
-          className="w-8 h-8 rounded-lg flex-shrink-0 flex items-center
-                     justify-center font-black text-sm"
-          style={{ background: 'var(--chrome-gold)', color: 'var(--chrome-bg)' }}
-        >
-          FS
-        </div>
-        {(!collapsed || mobile) && (
-          <div className="min-w-0 flex-1">
-            <span className="font-display font-bold text-base leading-none"
-                  style={{ color: 'var(--chrome-text)' }}>
-              FieldStay
-            </span>
-            <p className="text-xs truncate mt-0.5"
-               style={{ color: 'var(--chrome-text-muted)' }}>
-              {orgName}
-            </p>
-          </div>
-        )}
-        {mobile && (
-          <button
-            onClick={() => setMobileOpen(false)}
-            className="ml-auto p-2 rounded-lg flex-shrink-0"
-            style={{ color: 'var(--chrome-text-muted)' }}
-          >
-            <X className="w-5 h-5" />
-          </button>
-        )}
-      </div>
-
-      {/* Nav links */}
-      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
-        {!onboardingComplete && (!collapsed || mobile) && (
-          <Link
-            href="/setup"
-            onClick={() => setMobileOpen(false)}
-            className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all mb-2"
-            style={{
-              background: 'var(--chrome-gold-dim)',
-              color:      'var(--chrome-gold)',
-              border:     '1px solid rgba(252,209,22,0.2)',
-            }}
-          >
-            <Zap className="w-4 h-4" />
-            <span>Complete Setup</span>
-            <span className="ml-auto text-xs opacity-70">{onboardingPct}%</span>
-          </Link>
-        )}
-        {opsNav.map(renderNavLink)}
-
-        {mgmtNav.length > 0 && (
-          <>
-            <div className="mt-3 mb-1 pt-2" style={{ borderTop: '1px solid var(--chrome-border)' }}>
-              {(!collapsed || mobile) && (
-                <span
-                  className="block px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide"
-                  style={{ color: 'var(--chrome-text-muted)', opacity: 0.7 }}
-                >
-                  Management
-                </span>
-              )}
-            </div>
-            {mgmtNav.map(renderNavLink)}
-          </>
-        )}
-      </nav>
-
-      {/* ── Staff-only: Support Inbox ──────────────────── */}
-      {isStaff && (
-        <div className="px-2 pt-1 pb-0 flex-shrink-0" style={{ borderTop: '1px solid var(--chrome-border)' }}>
-          <Link
-            href="/support-inbox"
-            onClick={() => setMobileOpen(false)}
-            title={collapsed && !mobile ? 'Support Inbox' : undefined}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
-            style={{
-              color:      pathname.startsWith('/support-inbox') ? 'var(--chrome-text)' : 'var(--chrome-text-muted)',
-              background: pathname.startsWith('/support-inbox') ? 'var(--chrome-bg-raised)' : 'transparent',
-              borderLeft: pathname.startsWith('/support-inbox') ? '2px solid var(--chrome-gold)' : '2px solid transparent',
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.background = 'var(--chrome-bg-raised)'
-              e.currentTarget.style.color = 'var(--chrome-text)'
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.background = 'var(--chrome-bg-raised)'
-              e.currentTarget.style.color = 'var(--chrome-text)'
-            }}
-            onMouseOut={(e) => {
-              if (!pathname.startsWith('/support-inbox')) {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--chrome-text-muted)'
-              }
-            }}
-            onBlur={(e) => {
-              if (!pathname.startsWith('/support-inbox')) {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--chrome-text-muted)'
-              }
-            }}
-          >
-            <Inbox className="w-4 h-4 flex-shrink-0" />
-            {(!collapsed || mobile) && <span className="truncate">Support Inbox</span>}
-          </Link>
-        </div>
-      )}
-
-      {/* ── Help & Support ─────────────────────────────── */}
-      <div
-        className="px-2 pt-1 pb-0 flex-shrink-0"
-        style={{ borderTop: '1px solid var(--chrome-border)' }}
-      >
-        <Link
-          href="/help"
-          onClick={() => setMobileOpen(false)}
-          title={collapsed && !mobile ? 'Help & Support' : undefined}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
-          style={{ color: 'var(--chrome-text-muted)' }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.background = 'var(--chrome-bg-raised)'
-            e.currentTarget.style.color = 'var(--chrome-text)'
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.background = 'var(--chrome-bg-raised)'
-            e.currentTarget.style.color = 'var(--chrome-text)'
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--chrome-text-muted)'
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--chrome-text-muted)'
-          }}
-        >
-          <LifeBuoy className="w-4 h-4 flex-shrink-0" />
-          {(!collapsed || mobile) && (
-            <span className="truncate">Help &amp; Support</span>
-          )}
-        </Link>
-      </div>
-
-      {/* Bottom user row */}
-      {(!collapsed || mobile) && (
-        <div className="px-2 pb-3 pt-3 flex-shrink-0" style={{ borderTop: '1px solid var(--chrome-border)' }}>
-          <SidebarUserMenu
-            userName={userName}
-            userEmail={userEmail}
-            orgName={orgName}
-          />
-        </div>
-      )}
-    </aside>
-    )
-  }
-
   return (
     <div className="flex min-h-screen"
          style={{ background: 'var(--bg-base)' }}>
 
       {/* Desktop sidebar — pinned via sticky positioning while the page scrolls as one unit */}
       <div className="hidden md:flex flex-shrink-0 sticky top-0 h-screen">
-        <Sidebar />
+        <DashboardSidebar
+          pathname={pathname}
+          collapsed={collapsed}
+          onCloseMobile={() => setMobileOpen(false)}
+          unreadMessages={unreadMessages}
+          onboardingComplete={onboardingComplete}
+          onboardingPct={onboardingPct}
+          opsNav={opsNav}
+          mgmtNav={mgmtNav}
+          isStaff={isStaff}
+          orgName={orgName}
+          userName={userName}
+          userEmail={userEmail}
+        />
       </div>
 
       {/* Mobile drawer overlay */}
@@ -434,7 +492,21 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMobileOpen(false) } }}
           />
           <div className="relative z-10 h-full flex-shrink-0">
-            <Sidebar mobile />
+            <DashboardSidebar
+              mobile
+              pathname={pathname}
+              collapsed={collapsed}
+              onCloseMobile={() => setMobileOpen(false)}
+              unreadMessages={unreadMessages}
+              onboardingComplete={onboardingComplete}
+              onboardingPct={onboardingPct}
+              opsNav={opsNav}
+              mgmtNav={mgmtNav}
+              isStaff={isStaff}
+              orgName={orgName}
+              userName={userName}
+              userEmail={userEmail}
+            />
           </div>
         </div>
       )}
