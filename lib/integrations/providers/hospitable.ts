@@ -840,6 +840,55 @@ export function resolveHospitableTeammateName(t: HospitableTeammate): string | n
   return null
 }
 
+export interface HospitableCrewMemberRow {
+  org_id:             string
+  name:               string
+  email:              string | null
+  phone:              string | null
+  role:               CrewRole
+  is_active:          true
+  specialty:          string | null
+  reliability_score:  number
+  capacity_score:     number
+  external_id:        string
+  external_source:    'hospitable'
+}
+
+/**
+ * Maps raw HospitableTeammate records into crew_members upsert rows —
+ * shared by hospitable/initial-sync.ts (first connect) and
+ * hospitable/teammate-sync-handler.ts (daily resync) so both stay in sync
+ * with the same role/specialty/name-resolution rules. Pure function — no
+ * I/O; entries with no resolvable name are dropped (mirrors the original
+ * initial-sync filtering).
+ */
+export function hospitableTeammatesToCrewRows(
+  orgId:      string,
+  teammates:  HospitableTeammate[]
+): HospitableCrewMemberRow[] {
+  return teammates
+    .map((t) => ({ t, name: resolveHospitableTeammateName(t) }))
+    .filter((entry): entry is { t: HospitableTeammate; name: string } =>
+      entry.name !== null && entry.name.trim().length > 0
+    )
+    .map(({ t, name }) => ({
+      org_id:            orgId,
+      name,
+      email:             t.email        ?? null,
+      phone:             t.phone_number ?? null,
+      role:              mapHospitableTeammateRole(t.services),
+      is_active:         true,
+      // reliability_score / capacity_score are 0–1 scale, NOT NULL — 1.0
+      // matches the column DEFAULT and is a neutral starting score for
+      // auto-assign-turnover's scoring algorithm.
+      reliability_score: 1.0,
+      capacity_score:    1.0,
+      specialty:         t.services.length ? t.services.map((s) => s.label).join(', ') : null,
+      external_id:       t.id,
+      external_source:   'hospitable',
+    }))
+}
+
 /**
  * Resolves an IANA timezone identifier for a Hospitable property.
  *

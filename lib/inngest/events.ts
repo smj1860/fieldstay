@@ -604,6 +604,17 @@ export type FieldStayEvents = {
     }
   }
 
+  // Dispatched daily, one per active connection — Hospitable has no
+  // teammate webhook, so this is the only path that picks up added/
+  // updated/removed crew after the initial connect.
+  'integration/hospitable.teammate_sync.requested': {
+    data: {
+      user_id:          string
+      org_id:           string
+      external_user_id: string
+    }
+  }
+
   'integration/hospitable.token.refresh.requested': {
     data: {
       user_id:          string

@@ -37,6 +37,8 @@ import { hospInitialSync }              from '@/lib/inngest/functions/hospitable
 import { sendHospitableConnectedEmail } from '@/lib/inngest/functions/email-hospitable-connected'
 import { hospIncrementalSync }          from '@/lib/inngest/functions/hospitable/incremental-sync'
 import { hospPropertyMerge }            from '@/lib/inngest/functions/hospitable/property-merge'
+import { hospTeammateSyncCron }         from '@/lib/inngest/functions/hospitable/teammate-sync-cron'
+import { hospTeammateSyncHandler }      from '@/lib/inngest/functions/hospitable/teammate-sync-handler'
 import { hospTokenRefreshCron }         from '@/lib/inngest/functions/hospitable/token-refresh-cron'
 import { hospTokenRefreshHandler }      from '@/lib/inngest/functions/hospitable/token-refresh-handler'
 
@@ -178,6 +180,8 @@ export const { GET, POST, PUT } = serve({
     sendHospitableConnectedEmail,
     hospIncrementalSync,
     hospPropertyMerge,
+    hospTeammateSyncCron,
+    hospTeammateSyncHandler,
     hospTokenRefreshCron,
     hospTokenRefreshHandler,
 

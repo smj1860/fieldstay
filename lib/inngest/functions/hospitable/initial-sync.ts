@@ -24,9 +24,7 @@ import {
   hospFetchTeammates,
   hospitablePropertyToNormalized,
   hospitableReservationToNormalized,
-  mapHospitableTeammateRole,
-  resolveHospitableTeammateName,
-  type HospitableTeammate,
+  hospitableTeammatesToCrewRows,
 } from '@/lib/integrations/providers/hospitable'
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
@@ -120,43 +118,15 @@ export const hospInitialSync = inngest.createFunction(
       })
 
       // ── 4. Fetch teammates and upsert as crew members ──────────────────────
+      // Ongoing changes (added/updated/removed teammates) are picked up by
+      // hospTeammateSyncCron's daily resync — Hospitable has no teammate
+      // webhook to react to incrementally.
       const teammateCount = await step.run('fetch-and-upsert-teammates', async () => {
         const teammates = await hospFetchTeammates(token)
         logger.info(`[Hospitable:${user_id}] Fetched ${teammates.length} teammates`)
 
-        if (!teammates.length) return 0
-
-        const resolved = teammates
-          .map((t) => ({ t, name: resolveHospitableTeammateName(t) }))
-          .filter((entry): entry is { t: HospitableTeammate; name: string } =>
-            entry.name !== null && entry.name.trim().length > 0
-          )
-
-        if (!resolved.length) return 0
-
-        const rows = resolved.map(({ t, name }) => {
-          const role      = mapHospitableTeammateRole(t.services)
-          const specialty = t.services.length
-            ? t.services.map((s) => s.label).join(', ')
-            : null
-
-          return {
-            org_id,
-            name,
-            email:            t.email        ?? null,
-            phone:            t.phone_number ?? null,
-            role,
-            is_active:        true,
-            specialty,
-            // reliability_score / capacity_score are 0–1 scale, NOT NULL —
-            // 1.0 matches the column DEFAULT and is a neutral starting score
-            // for auto-assign-turnover's scoring algorithm.
-            reliability_score: 1.0,
-            capacity_score:    1.0,
-            external_id:      t.id,
-            external_source:  PROVIDER,
-          }
-        })
+        const rows = hospitableTeammatesToCrewRows(org_id, teammates)
+        if (!rows.length) return 0
 
         const supabase = createServiceClient()
 

@@ -511,6 +511,8 @@ reservation_uuid: UUID | null
 
 **Token refresh cron:** `integration-token-refresh-cron` runs every 2 hours, refreshes tokens expiring within 60 minutes. Covers Hospitable and Kroger. Located at `lib/inngest/functions/cron/integration-token-refresh.ts`.
 
+**Teammate resync cron:** Hospitable has no `teammate.*` webhook, so `hospTeammateSyncCron` (`lib/inngest/functions/hospitable/teammate-sync-cron.ts`) runs once daily at 09:00 UTC, dispatching one `integration/hospitable.teammate_sync.requested` event per active connection. `hospTeammateSyncHandler` (`teammate-sync-handler.ts`) re-fetches `/teammates`, upserts via the shared `hospitableTeammatesToCrewRows()` mapper (also used by initial sync), and deactivates (`is_active: false`) any previously-synced crew member no longer in the fetch — the only path that catches teammates removed in Hospitable.
+
 ---
 
 ## Confirmed Webhook Payload Structures
