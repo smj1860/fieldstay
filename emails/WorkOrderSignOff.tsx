@@ -1,7 +1,5 @@
-import {
-  Body, Container, Head, Hr,
-  Html, Preview, Section, Text
-} from '@react-email/components'
+import { Hr, Section, Text } from '@react-email/components'
+import { EmailLayout } from './components/email-layout'
 
 interface WorkOrderSignOffEmailProps {
   woNumber:        string
@@ -13,10 +11,6 @@ interface WorkOrderSignOffEmailProps {
   signedOffAt:     string
   pmName:          string
 }
-
-const ORANGE   = '#FF6B00'
-const CHARCOAL = '#1A1A1A'
-const CHROME   = '#C0C0C0'
 
 export default function WorkOrderSignOffEmail({
   woNumber        = 'WO-2025-06-0042',
@@ -35,100 +29,46 @@ export default function WorkOrderSignOffEmail({
   } as Intl.DateTimeFormatOptions)
 
   return (
-    <Html>
-      <Head/>
-      <Preview>
-        ✓ Work Complete — {woNumber} · {propertyName}
-      </Preview>
-      <Body style={{ backgroundColor:'#F5F5F5',
-                     fontFamily:'-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-                     margin:0, padding:0 }}>
+    <EmailLayout preview={`✓ Work Complete — ${woNumber} · ${propertyName}`}>
+      <Text style={{ fontSize: 20, color: '#0a1628', fontWeight: 700, margin: '0 0 4px' }}>
+        Work Order Complete
+      </Text>
+      <Text style={{ fontSize: 13, color: 'var(--accent-green, #16A34A)', margin: '0 0 20px' }}>
+        {formattedDate}
+      </Text>
 
-        <Section style={{ backgroundColor:CHARCOAL, padding:'20px 0' }}>
-          <Container style={{ maxWidth:520, margin:'0 auto', padding:'0 24px' }}>
-            <Text style={{ color:'#E0E0E0', fontSize:13, fontWeight:900,
-                           letterSpacing:'0.07em', margin:0 }}>
-              TRADESUITE{' '}
-              <span style={{ color:ORANGE }}>PRO</span>
-            </Text>
-          </Container>
-        </Section>
-        <Section style={{ backgroundColor:CHROME, height:2, opacity:0.4 }}/>
+      <Text style={{ fontSize: 14, color: '#374151', lineHeight: 1.6, margin: '0 0 20px' }}>
+        Hi {pmName}, your work order has been signed off
+        {vendorName ? ` by ${vendorName}` : ''}.
+      </Text>
 
-        <Container style={{ backgroundColor:'#fff', maxWidth:520,
-                            margin:'0 auto', padding:'28px 28px 24px' }}>
+      <Section style={{ backgroundColor: '#f8fafc', borderRadius: 8, padding: '14px 16px' }}>
+        {[
+          ['Work Order', woNumber],
+          ['Job',        title],
+          ['Property',   propertyName],
+          ['Address',    propertyAddress],
+        ].map(([label, value]) => (
+          <Text key={label} style={{ fontSize: 13, color: '#0a1628', margin: '0 0 8px' }}>
+            <span style={{ color: '#64748b' }}>{label}: </span>
+            <span style={{ fontWeight: 600 }}>{value}</span>
+          </Text>
+        ))}
+      </Section>
 
-          <Section style={{ textAlign:'center', paddingBottom:20 }}>
-            <Text style={{ fontSize:40, margin:'0 0 8px' }}>✅</Text>
-            <Text style={{ color:'#14532D', fontSize:20, fontWeight:800,
-                           margin:'0 0 4px' }}>
-              Work Order Complete
-            </Text>
-            <Text style={{ color:'#16A34A', fontSize:12, margin:0 }}>
-              {formattedDate}
+      {signOffNotes && (
+        <>
+          <Hr style={{ borderColor: '#e2e8f0', margin: '20px 0 16px' }} />
+          <Text style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 6px' }}>
+            Contractor Notes
+          </Text>
+          <Section style={{ backgroundColor: '#f8fafc', borderRadius: 6, padding: '12px 14px' }}>
+            <Text style={{ fontSize: 13, color: '#334155', lineHeight: 1.6, margin: 0 }}>
+              {signOffNotes}
             </Text>
           </Section>
-
-          <Hr style={{ borderColor:'#EBEBEB', margin:'0 0 20px' }}/>
-
-          <Text style={{ color:'#444', fontSize:14, lineHeight:1.6, margin:'0 0 16px' }}>
-            Hi {pmName}, your work order has been signed off
-            {vendorName ? ` by ${vendorName}` : ''}.
-          </Text>
-
-          {[
-            ['Work Order', woNumber],
-            ['Job',        title],
-            ['Property',   propertyName],
-            ['Address',    propertyAddress],
-          ].map(([label, value]) => (
-            <Section key={label} style={{ marginBottom:8 }}>
-              <Text style={{ color:'#999', fontSize:10, fontWeight:700,
-                             letterSpacing:'0.12em', textTransform:'uppercase',
-                             margin:'0 0 2px' }}>
-                {label}
-              </Text>
-              <Text style={{ color:'#111', fontSize:14, fontWeight:600, margin:0 }}>
-                {value}
-              </Text>
-            </Section>
-          ))}
-
-          {signOffNotes && (
-            <>
-              <Hr style={{ borderColor:'#EBEBEB', margin:'16px 0' }}/>
-              <Text style={{ color:'#999', fontSize:10, fontWeight:700,
-                             letterSpacing:'0.12em', textTransform:'uppercase',
-                             margin:'0 0 6px' }}>
-                Contractor Notes
-              </Text>
-              <Section style={{ backgroundColor:'#F9F9F9', border:'1px solid #EBEBEB',
-                                borderRadius:8, padding:'12px 14px' }}>
-                <Text style={{ color:'#333', fontSize:13.5, lineHeight:1.6, margin:0 }}>
-                  {signOffNotes}
-                </Text>
-              </Section>
-            </>
-          )}
-
-        </Container>
-
-        <Section style={{ backgroundColor:CHARCOAL, padding:'18px 0 22px' }}>
-          <Container style={{ maxWidth:520, margin:'0 auto',
-                              padding:'0 24px', textAlign:'center' }}>
-            <Text style={{ color:'#555', fontSize:11, margin:'0 0 4px' }}>
-              Powered by <strong style={{ color:'#E0E0E0' }}>TradeSuite Pro</strong>
-            </Text>
-            <Text style={{ margin:0 }}>
-              <a href="https://tradesuite.com"
-                 style={{ color:ORANGE, fontSize:11, textDecoration:'none' }}>
-                tradesuite.com
-              </a>
-            </Text>
-          </Container>
-        </Section>
-
-      </Body>
-    </Html>
+        </>
+      )}
+    </EmailLayout>
   )
 }

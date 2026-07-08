@@ -101,7 +101,7 @@ export const workOrderSignedOff = inngest.createFunction(
   async ({ event, step }) => {
     const {
       workOrderId, woNumber, title, signOffNotes, signedOffAt,
-      propertyName, propertyAddress, orgId, orgName, vendorEmail
+      propertyName, propertyAddress, orgId, vendorEmail
     } = event.data
 
     // ── Step 1: Find PM email from org admin/manager ─────────────────────

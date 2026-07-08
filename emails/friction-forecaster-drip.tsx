@@ -1,4 +1,4 @@
-import { Text, Section } from '@react-email/components'
+import { Text, Section, Link } from '@react-email/components'
 import { render } from '@react-email/render'
 import { EmailLayout } from './components/email-layout'
 
@@ -39,7 +39,8 @@ export function FrictionForecasterEmail({
 
       <Text style={{ ...body, marginTop: 24 }}>
         Take a look at your <strong>Turnovers</strong> board — it&apos;s already
-        populated with what&apos;s coming this week.{' '}
+        populated with what&apos;s coming this week. Or see everything at a
+        glance from your <Link href={dashboardUrl}>dashboard</Link>.
       </Text>
 
       <Text style={{ ...body, marginTop: 16 }}>
