@@ -4,7 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { markStepComplete }    from '../actions'
 import { Card }                from '@/components/ui/Card'
 import { Badge }                from '@/components/ui/Badge'
-import { Button }               from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 
 // All PMS provider IDs — excludes non-PMS integrations (e.g. kroger, repuguard)
 // 'guesty' is commented out: it's registered as oauth2 in integration_providers but
@@ -117,7 +117,7 @@ export default async function OnboardingPmsPage() {
                 // follows that redirect and hits the provider's domain —
                 // blocked by CSP's connect-src, and the resulting uncaught
                 // rejection was crashing this page's initial hydration.
-                <a href={connectHref} className="btn-secondary text-sm shrink-0">
+                <a href={connectHref} className={buttonVariantClass('secondary') + ' text-sm shrink-0'}>
                   Connect
                 </a>
               )}

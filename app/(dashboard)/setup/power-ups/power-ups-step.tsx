@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useTransition } from 'react'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 
 interface PowerUp {
   title: string
@@ -52,7 +52,7 @@ export function PowerUpsStep({ powerUps, finishAction }: PowerUpsStepProps) {
             ) : (
               <Link
                 href={pu.href}
-                className="btn-secondary text-xs flex-shrink-0"
+                className={buttonVariantClass('secondary') + ' text-xs flex-shrink-0'}
               >
                 Connect
               </Link>

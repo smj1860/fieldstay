@@ -6,7 +6,7 @@ import { cn, formatDateTime } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { sendMessageToCrew, sendGroupMessage, markConversationRead } from './actions'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import type { Message } from '@/types/database'
 
 interface CrewOption {
@@ -401,7 +401,7 @@ export function MessagesClient({ currentUserId, orgId, crew, initialMessages, ha
             <div className="flex justify-center py-4">
               <a
                 href={`/messages?before=${encodeURIComponent(oldestTimestamp)}`}
-                className="btn-secondary text-sm"
+                className={buttonVariantClass('secondary') + ' text-sm'}
               >
                 Load older messages
               </a>

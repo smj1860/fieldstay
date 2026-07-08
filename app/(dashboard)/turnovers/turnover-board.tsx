@@ -13,7 +13,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import {
   assignCrew, assignCrewIndividually, addCrewToTurnover, removeCrewFromTurnover,
@@ -662,7 +662,7 @@ function TurnoverCard({
               </Button>
               <Link
                 href={`/turnovers/${turnover.id}`}
-                className="btn-ghost text-xs py-1.5 ml-auto"
+                className={buttonVariantClass('ghost') + ' text-xs py-1.5 ml-auto'}
               >
                 View Full Details →
               </Link>

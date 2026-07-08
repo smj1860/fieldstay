@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import { AcceptInviteForm } from './accept-invite-form'
 import { CheckCircle2 } from 'lucide-react'
+import { buttonVariantClass } from '@/components/ui/Button'
 
 interface Props { params: Promise<{ token: string }> }
 
@@ -34,7 +35,7 @@ export default async function AcceptInvitePage({ params }: Props) {
           <p className="text-sm text-muted-themed mb-6">
             Your FieldStay account is set up. Log in to see your assignments.
           </p>
-          <a href="/login" className="btn-primary w-full block text-center py-2.5">
+          <a href="/login" className={buttonVariantClass('primary') + ' w-full block text-center py-2.5'}>
             Go to Login →
           </a>
         </div>

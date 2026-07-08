@@ -1,5 +1,6 @@
 import { redirect }     from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
+import { buttonVariantClass } from '@/components/ui/Button'
 
 export default async function BillingWallPage() {
   const supabase = await createClient()
@@ -71,7 +72,7 @@ export default async function BillingWallPage() {
         <div className="flex flex-col gap-3">
           <a
             href="/settings?tab=Billing"
-            className="btn-primary py-3 text-base text-center block rounded-xl"
+            className={buttonVariantClass('primary') + ' py-3 text-base text-center block rounded-xl'}
             style={{ background: 'var(--accent-gold)', color: '#0a1628', fontWeight: 700 }}
           >
             {trialExpired ? 'Subscribe Now' : 'Reactivate Subscription'}

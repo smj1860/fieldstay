@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { Button } from '@/components/ui/Button'
+import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import type { Organization } from '@/types/database'
 import {
@@ -194,7 +194,7 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
           Connect OwnerRez, Hostaway, and other platforms to sync
           bookings and properties automatically.
         </p>
-        <a href="/settings/integrations" className="btn-secondary text-sm inline-flex items-center gap-1.5">
+        <a href="/settings/integrations" className={buttonVariantClass('secondary') + ' text-sm inline-flex items-center gap-1.5'}>
           Manage Integrations →
         </a>
       </Card>
@@ -230,12 +230,12 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
                 </p>
               )}
             </div>
-            <a href="/api/integrations/kroger/connect" className="btn-secondary text-sm flex-shrink-0">Reconnect</a>
+            <a href="/api/integrations/kroger/connect" className={buttonVariantClass('secondary') + ' text-sm flex-shrink-0'}>Reconnect</a>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Not connected</p>
-            <a href="/api/integrations/kroger/connect" className="btn-primary text-sm flex-shrink-0">Connect Kroger Account</a>
+            <a href="/api/integrations/kroger/connect" className={buttonVariantClass('primary') + ' text-sm flex-shrink-0'}>Connect Kroger Account</a>
           </div>
         )}
       </Card>
@@ -987,7 +987,7 @@ function LegalTab() {
             href={doc.href}
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-secondary text-sm flex-shrink-0"
+            className={buttonVariantClass('secondary') + ' text-sm flex-shrink-0'}
           >
             View →
           </a>
@@ -1203,7 +1203,7 @@ function BillingTab({ org }: { org: Organization }) {
                 <span className="font-semibold text-primary-themed">Enterprise</span>
                 <p className="text-sm text-muted-themed mt-0.5">100+ properties — custom pricing</p>
               </div>
-              <a href="mailto:hello@fieldstay.app" className="btn-secondary text-sm">
+              <a href="mailto:hello@fieldstay.app" className={buttonVariantClass('secondary') + ' text-sm'}>
                 Contact Us →
               </a>
             </div>

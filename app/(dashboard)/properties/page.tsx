@@ -4,6 +4,7 @@ import { Plus } from 'lucide-react'
 import { NudgeBanner } from '@/components/nudge-banner'
 import { PropertiesGrid } from './properties-grid'
 import { Card } from '@/components/ui/Card'
+import { buttonVariantClass } from '@/components/ui/Button'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Properties' }
@@ -80,11 +81,11 @@ export default async function PropertiesPage() {
           </p>
         </div>
         {atLimit ? (
-          <span className="btn-secondary opacity-60 cursor-not-allowed text-xs">
+          <span className={buttonVariantClass('secondary') + ' opacity-60 cursor-not-allowed text-xs'}>
             Upgrade to add more
           </span>
         ) : (
-          <Link href="/properties/new" className="btn-primary">
+          <Link href="/properties/new" className={buttonVariantClass('primary')}>
             <Plus className="w-4 h-4" />
             Add Property
           </Link>
@@ -110,7 +111,7 @@ function EmptyState() {
       <p className="text-sm text-muted-themed mb-6">
         Connect your Airbnb or VRBO calendar and FieldStay handles the rest.
       </p>
-      <Link href="/properties/new" className="btn-primary">
+      <Link href="/properties/new" className={buttonVariantClass('primary')}>
         Add Property
       </Link>
     </Card>
