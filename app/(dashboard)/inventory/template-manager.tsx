@@ -191,7 +191,7 @@ export function TemplateManager({
   const toggleSelected = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) { next.delete(id) } else { next.add(id) }
       return next
     })
   }
@@ -543,7 +543,7 @@ export function TemplateManager({
                               if (alreadyInTemplate) return
                               setCatalogSelected(prev => {
                                 const next = new Set(prev)
-                                next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                                if (next.has(c.id)) { next.delete(c.id) } else { next.add(c.id) }
                                 return next
                               })
                             }}
@@ -553,7 +553,7 @@ export function TemplateManager({
                                 e.preventDefault()
                                 setCatalogSelected(prev => {
                                   const next = new Set(prev)
-                                  next.has(c.id) ? next.delete(c.id) : next.add(c.id)
+                                  if (next.has(c.id)) { next.delete(c.id) } else { next.add(c.id) }
                                   return next
                                 })
                               }

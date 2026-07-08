@@ -131,7 +131,7 @@ export function MasterMaintenanceBuilder({
                     if (alreadyAdded) return
                     setSelectedSuggestions((prev) => {
                       const next = new Set(prev)
-                      next.has(s.title) ? next.delete(s.title) : next.add(s.title)
+                      if (next.has(s.title)) { next.delete(s.title) } else { next.add(s.title) }
                       return next
                     })
                   }}
@@ -140,7 +140,7 @@ export function MasterMaintenanceBuilder({
                       e.preventDefault()
                       setSelectedSuggestions((prev) => {
                         const next = new Set(prev)
-                        next.has(s.title) ? next.delete(s.title) : next.add(s.title)
+                        if (next.has(s.title)) { next.delete(s.title) } else { next.add(s.title) }
                         return next
                       })
                     }
