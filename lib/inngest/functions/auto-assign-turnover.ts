@@ -265,7 +265,11 @@ export const autoAssignTurnover = inngest.createFunction(
           turnover_id,
           org_id,
           crew_member_id:  top.crew_member_id,
-          suggested_score: top.score,
+          // suggested_score is SMALLINT — a 0-100 score, per its column
+          // comment. top.score is the raw 0-1 composite from proximityScore()
+          // et al.; inserting it unconverted always failed with "invalid
+          // input syntax for type smallint" and this row was never written.
+          suggested_score: Math.round(top.score * 100),
           score_breakdown: top.breakdown,
           was_accepted:    wasAutopilotAssigned ? true : null,
         },

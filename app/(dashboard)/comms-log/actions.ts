@@ -2,7 +2,6 @@
 
 import { revalidatePath }     from 'next/cache'
 import { requireOrgMember }   from '@/lib/auth'
-import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }      from '@/lib/audit'
 import type { CommChannel, CommRecipientType } from '@/types/database'
 
@@ -102,36 +101,4 @@ export async function deleteCommunicationLog(
 
   revalidatePath('/comms-log')
   return {}
-}
-
-// ── System log (called by Inngest when sending vendor/crew emails) ────────────
-// Uses service client since Inngest has no user session.
-
-export async function logSystemCommunication(data: {
-  org_id:          string
-  recipient_type:  CommRecipientType
-  vendor_id?:      string | null
-  crew_member_id?: string | null
-  channel:         CommChannel
-  subject:         string
-  body?:           string | null
-  property_id?:    string | null
-  work_order_id?:  string | null
-}): Promise<void> {
-  const admin = createServiceClient()
-
-  await admin.from('communication_logs').insert({
-    org_id:            data.org_id,
-    recipient_type:    data.recipient_type,
-    vendor_id:         data.vendor_id         ?? null,
-    crew_member_id:    data.crew_member_id     ?? null,
-    channel:           data.channel,
-    subject:           data.subject,
-    body:              data.body               ?? null,
-    property_id:       data.property_id        ?? null,
-    work_order_id:     data.work_order_id       ?? null,
-    source:            'system',
-    logged_by_user_id: null,
-    communicated_at:   new Date().toISOString(),
-  })
 }

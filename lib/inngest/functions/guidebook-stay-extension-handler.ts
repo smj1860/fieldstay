@@ -40,7 +40,21 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
     // ── SMS to guest (if opted in) ────────────────────────────────────
     if (guestPhoneE164 && portalUrl) {
       await step.run('send-guest-sms', async () => {
-        const supabase     = createServiceClient()
+        const supabase = createServiceClient()
+
+        // Re-check consent at send time, not just when the triggering cron
+        // computed eligibility — this handler runs off a queued event and
+        // can execute an arbitrary amount of time later, wide enough for a
+        // guest to have texted STOP in between. Every other guest SMS path
+        // re-checks immediately before sending; this one didn't.
+        const { data: optin } = await supabase
+          .from('guidebook_guest_sms_optins')
+          .select('is_active')
+          .eq('booking_id', bookingId)
+          .maybeSingle()
+
+        if (!optin?.is_active) return
+
         const discountLine = discountPct
           ? ` We're offering ${discountPct}% off to extend your stay.`
           : ''

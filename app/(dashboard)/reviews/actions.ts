@@ -108,14 +108,15 @@ export async function submitManualReview(input: {
   return { reviewId: review.id }
 }
 
-export async function getManualReviewsUsedThisWeek(orgId: string): Promise<number> {
-  const supabase = createServiceClient()
-  const monday   = startOfWeekMonday(new Date())
+export async function getManualReviewsUsedThisWeek(): Promise<number> {
+  const { membership } = await requireOrgMember()
+  const supabase        = createServiceClient()
+  const monday          = startOfWeekMonday(new Date())
 
   const { count } = await supabase
     .from('reviews')
     .select('id', { count: 'exact', head: true })
-    .eq('org_id', orgId)
+    .eq('org_id', membership.org_id)
     .eq('external_source', 'manual')
     .gte('created_at', monday.toISOString())
 

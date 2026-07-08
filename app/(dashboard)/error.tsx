@@ -1,0 +1,29 @@
+'use client'
+
+import { useEffect } from 'react'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+
+export default function DashboardError({
+  error,
+  reset,
+}: Readonly<{
+  error: Error & { digest?: string }
+  reset: () => void
+}>) {
+  useEffect(() => {
+    console.error('[dashboard-error]', error.digest, error.message)
+  }, [error])
+
+  return (
+    <div className="max-w-3xl mx-auto py-8 px-4">
+      <Card className="text-center py-12">
+        <p className="text-primary-themed font-semibold mb-1">Something went wrong loading this page.</p>
+        <p className="text-muted-themed text-sm mb-4">
+          This has been logged. Try again, or contact support if it keeps happening.
+        </p>
+        <Button onClick={reset} variant="secondary">Try again</Button>
+      </Card>
+    </div>
+  )
+}
