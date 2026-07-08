@@ -1,4 +1,3 @@
-import Link                    from 'next/link'
 import { Check }                from 'lucide-react'
 import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
@@ -111,9 +110,16 @@ export default async function OnboardingPmsPage() {
               </div>
 
               {!isConnected && (
-                <Link href={connectHref} className="btn-secondary text-sm shrink-0">
+                // Plain <a>, not next/link's <Link> — connectHref for oauth2
+                // providers is a Route Handler that immediately 302s to the
+                // provider's OAuth authorize URL, not a real internal page.
+                // Link prefetches visible hrefs via fetch() on mount, which
+                // follows that redirect and hits the provider's domain —
+                // blocked by CSP's connect-src, and the resulting uncaught
+                // rejection was crashing this page's initial hydration.
+                <a href={connectHref} className="btn-secondary text-sm shrink-0">
                   Connect
-                </Link>
+                </a>
               )}
             </Card>
           )

@@ -321,12 +321,16 @@ export default async function OwnerRezPage() {
 
           {isLoggedIn ? (
             <div className="flex flex-col items-center gap-3">
-              <Link
+              {/* Plain <a>, not <Link> — this route 302s straight to OwnerRez's
+                  OAuth authorize URL. Link prefetches visible hrefs via
+                  fetch() on mount, which follows the redirect into a
+                  connect-src CSP violation and crashes the page on load. */}
+              <a
                 href="/api/integrations/ownerrez/connect"
                 className="inline-block bg-[#102246] text-white font-bold px-10 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg"
               >
                 Connect OwnerRez →
-              </Link>
+              </a>
               <p className="text-sm text-[#0a1628]/60">
                 You&apos;re already signed in. One click to connect.
               </p>
