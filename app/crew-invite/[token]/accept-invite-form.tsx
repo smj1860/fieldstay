@@ -33,14 +33,32 @@ export function AcceptInviteForm({
       )}
 
       <div>
-        <label htmlFor="email" className="label">Email</label>
-        <Input
-          id="email"
-          type="email"
-          value={email}
-          disabled
-          className="bg-accent-50 text-accent-500 cursor-not-allowed"
-        />
+        <label htmlFor="email" className="label">
+          Email{!email && <span className="text-red-500"> *</span>}
+        </label>
+        {email ? (
+          <Input
+            id="email"
+            type="email"
+            value={email}
+            disabled
+            className="bg-accent-50 text-accent-500 cursor-not-allowed"
+          />
+        ) : (
+          <>
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              required
+              placeholder="you@example.com"
+              autoComplete="email"
+            />
+            <p className="text-xs text-muted mt-1">
+              We don&apos;t have an email on file for you yet — enter one to finish setting up your account.
+            </p>
+          </>
+        )}
       </div>
 
       <div>
