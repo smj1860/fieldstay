@@ -54,20 +54,23 @@ export const handleWorkOrderInvoicePaid = inngest.createFunction(
         .eq('id', org_id)
         .single()
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      vendor.email,
-        subject: `💸 You've been paid ${invoice.total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} — ${wo.title}`,
-        html: await renderVendorInvoicePaidEmail({
-          vendorName:    vendor.name ?? null,
-          orgName:       org?.name ?? 'Your property manager',
-          woTitle:       wo.title,
-          woNumber:      wo.wo_number ?? null,
-          propertyName:  property?.name ?? null,
-          invoiceNumber: invoice.invoice_number,
-          amountPaid:    invoice.total,
-        }),
-      })
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      vendor.email,
+          subject: `💸 You've been paid ${invoice.total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} — ${wo.title}`,
+          html: await renderVendorInvoicePaidEmail({
+            vendorName:    vendor.name ?? null,
+            orgName:       org?.name ?? 'Your property manager',
+            woTitle:       wo.title,
+            woNumber:      wo.wo_number ?? null,
+            propertyName:  property?.name ?? null,
+            invoiceNumber: invoice.invoice_number,
+            amountPaid:    invoice.total,
+          }),
+        },
+        { idempotencyKey: `work-order-invoice-paid-${invoice_id}` }
+      )
     })
 
     return { work_order_id, invoice_id, notified: true }
