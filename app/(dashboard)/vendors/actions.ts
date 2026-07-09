@@ -110,7 +110,7 @@ export async function resendVendorConnectInvite(
 
     const { data: vendor } = await supabase
       .from('vendors')
-      .select('id, name, email, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_token')
+      .select('id, name, email, stripe_connect_charges_enabled, stripe_connect_token')
       .eq('id', vendorId)
       .eq('org_id', membership.org_id)
       .single()
@@ -128,13 +128,12 @@ export async function resendVendorConnectInvite(
       .single()
 
     await sendResendConnectInvite({
-      vendorId:                vendor.id,
-      orgId:                   membership.org_id,
-      vendorEmail:             vendor.email,
-      vendorName:              vendor.name,
-      vendorConnectToken:      vendor.stripe_connect_token,
-      existingStripeAccountId: vendor.stripe_connect_account_id,
-      orgName:                 org?.name ?? 'Your property manager',
+      vendorId:           vendor.id,
+      orgId:              membership.org_id,
+      vendorEmail:        vendor.email,
+      vendorName:         vendor.name,
+      vendorConnectToken: vendor.stripe_connect_token,
+      orgName:            org?.name ?? 'Your property manager',
     })
 
     revalidatePath(`/vendors/${vendorId}`)
