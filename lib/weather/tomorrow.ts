@@ -1,6 +1,15 @@
 import { Redis } from '@upstash/redis'
 
-const redis = Redis.fromEnv()
+// Redis.fromEnv() reads the standard UPSTASH_REDIS_REST_URL/_TOKEN names,
+// which this project doesn't use — see lib/rate-limit.ts's matching
+// upstash_fieldstay_KV_REST_API_* vars. fromEnv() logged "unable to find
+// environment variable" warnings on every /api/inngest request that
+// imports this module even though the actual credentials were present
+// under the real names.
+const redis = new Redis({
+  url:   process.env.upstash_fieldstay_KV_REST_API_URL!,
+  token: process.env.upstash_fieldstay_KV_REST_API_TOKEN!,
+})
 
 export type SlotType =
   | 'morning_brew'
