@@ -403,12 +403,22 @@ reviews/actions.ts (PM requests AI review responses)
                                                 after a review sync)
 ```
 
-`vendor-compliance/expiry-warning` is defined in `events.ts` with no
-producer or consumer found in this pass — `cron/vendor-connect-onboarding.ts`
-(07:00 daily) appears to handle compliance-adjacent nudges directly
-rather than through this event; worth confirming in a later pass.
+**Resolved (was previously flagged unmatched):** `vendor-compliance/expiry-warning`
+is now wired end-to-end. `cron/vendor-compliance-expiry-check.ts` (6am CT
+daily) scans `vendor_compliance_documents` for active docs whose
+`expiry_date` falls within the next 30 days and haven't been warned yet
+(`first_warned_at IS NULL`), flips that gate atomically per document, and
+emits this event once per newly-entering document.
+`notify-vendor-compliance-expiring.ts` consumes it and sends two emails:
+an informational `renderPmAlert` to the PM, and a polite renewal nudge
+(`lib/resend/emails/vendor-compliance-nudge.tsx`) to the vendor. This
+finally realizes what the `first_warned_at` column comment always said it
+was for ("trigger the Inngest ... escalation reminder") — before this,
+the column was written nowhere and the reminder never existed.
 
-`repuguard/activated` (events.ts) — no producer/consumer matched either.
+`repuguard/activated` — left alone for now. No producer or consumer;
+`organizations.repuguard_status` is still set directly by the Stripe
+webhook with no automation firing on activation.
 
 ---
 
@@ -421,12 +431,15 @@ allow-list of revenue-critical function IDs (`ownerrez-initial-sync`,
 `ownerrez-incremental-sync`, `work-order-created`) it also emails
 `stephen@fieldstay.app` via `renderPmAlert`.
 
-⚠️ Note for a future pass: this call site passes `renderPmAlert({ heading,
-body, details, ctaLabel, ctaUrl })` — but CLAUDE.md's canonical signature
-for `renderPmAlert` is `{ ctaLabel, ctaUrl, details }` only (no `heading`/
-`body`). This is the one call site in the whole event graph that doesn't
-match the documented signature — flagging for verification, not fixing
-here since Pass 2's scope is mapping, not remediation.
+**Correction:** an earlier version of this doc flagged this call site's
+`renderPmAlert({ heading, body, details, ctaLabel, ctaUrl })` as not
+matching CLAUDE.md's documented signature (`{ ctaLabel, ctaUrl, details }`
+only). Verified against the actual source
+(`lib/resend/emails/pm-alert.tsx`): `heading` and `body` are required
+props on the real `PmAlertProps` interface, and every call site across
+the event graph (this one, `cron/maintenance-schedules.ts`, etc.) passes
+them. CLAUDE.md's own reference is the stale one here, not this code —
+no fix needed at this call site.
 
 ---
 
