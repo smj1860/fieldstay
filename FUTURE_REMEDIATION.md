@@ -7,44 +7,7 @@ pick back up without re-deriving the finding from scratch.
 
 ---
 
-## 1. `ensureVendorConnectInvited` has a TOCTOU race across its three callers
-
-**File:** `lib/stripe/vendor-connect-invite.ts`
-
-> **Update:** the single-invocation partial-failure case (a Resend failure
-> orphaning the just-created Stripe account, because `stripe_connect_account_id`
-> was only persisted *after* the email send, in a combined update with
-> `stripe_connect_invite_sent_at`) has been fixed — the account id is now
-> persisted immediately after creation, and the completion check is based
-> solely on `stripe_connect_invite_sent_at`, so a retry reuses the existing
-> account instead of creating a second one. The **concurrent-invocation**
-> race described below is still open.
-
-Re-reads the vendor row fresh before acting, but there's no lock between
-that read and the `stripe.accounts.create()` + email send + `UPDATE`. It's
-now called from three independent triggers:
-- the nightly cron (`lib/inngest/functions/cron/vendor-connect-onboarding.ts`)
-- work order dispatch (`lib/inngest/functions/work-order-dispatch.ts`)
-- indirectly, the "Resend Payment Setup Email" button
-  (`resendVendorConnectInvite` in `app/(dashboard)/vendors/actions.ts`,
-  which shares the same read-then-act shape without the guard at all)
-
-A vendor added and immediately dispatched a work order in the same window
-the cron also picks them up — or a PM clicking "Resend" right as dispatch's
-auto-invite fires — can create two Stripe Express accounts and send two
-invite emails, with one account silently orphaned (last `UPDATE` wins on
-`stripe_connect_account_id`).
-
-**Suggested fix:** a partial unique index on `vendors` (e.g. on
-`stripe_connect_account_id` where not null) won't prevent the double
-`accounts.create()` call itself — better to serialize via
-`SELECT ... FOR UPDATE` inside a transaction, or a Postgres advisory lock
-keyed on `vendor_id`, wrapping the check-and-act in `ensureVendorConnectInvited`
-and `resendVendorConnectInvite` both.
-
----
-
-## 2. `DexieProvider`'s `useEffect` closure is doing too much (structural)
+## 1. `DexieProvider`'s `useEffect` closure is doing too much (structural)
 
 **File:** `lib/dexie/context.tsx`
 
@@ -63,7 +26,7 @@ unit-testable without mounting the provider.
 
 ---
 
-## 3. `SyncEngine.uploadOne()` growing via flat if-chains
+## 2. `SyncEngine.uploadOne()` growing via flat if-chains
 
 **File:** `lib/dexie/syncService.ts`
 
@@ -76,7 +39,7 @@ worth doing the next time a 7th table is added.
 
 ---
 
-## 4. Hospitable: `reservation_messages` is collected but has no UI
+## 3. Hospitable: `reservation_messages` is collected but has no UI
 
 **Files:** `lib/inngest/functions/hospitable/incremental-sync.ts` (message branch),
 `supabase/migrations/20260708194732_reservation_messages.sql`
@@ -92,7 +55,7 @@ turnover detail page — the data is already flowing, this is a UI-only gap.
 
 ---
 
-## 5. Hospitable: crew sync visibility and doc accuracy gaps
+## 4. Hospitable: crew sync visibility and doc accuracy gaps
 
 **Files:** `docs/support/25-connecting-hospitable.md`,
 `app/(dashboard)/crew-manage/crew-manage-client.tsx`,
@@ -132,7 +95,7 @@ yet acted on:
 
 ---
 
-## 6. OwnerRez: webhook delivery payload shape never verified against a real event
+## 5. OwnerRez: webhook delivery payload shape never verified against a real event
 
 **File:** `lib/integrations/providers/ownerrez.ts` (`handleWebhookEvent`,
 `~line 185-231`), `lib/integrations/providers/ownerrez-api.ts`
@@ -165,7 +128,7 @@ adapter once verified.
 
 ---
 
-## 7. OwnerRez: no reconciliation for hard-deleted bookings/holds
+## 6. OwnerRez: no reconciliation for hard-deleted bookings/holds
 
 **File:** `lib/inngest/functions/ownerrez/incremental-sync.ts`
 
@@ -189,7 +152,7 @@ of holds/blocks are actually possible before treating this as live risk.
 
 ---
 
-## 8. OwnerRez: unconfirmed property detail field names
+## 7. OwnerRez: unconfirmed property detail field names
 
 **File:** `lib/integrations/types.ts:143-145`, consumed by
 `buildOwnerRezDetailPatch()` in `lib/integrations/providers/ownerrez.ts`
@@ -219,7 +182,7 @@ throughout Hospitable's adapter.
 
 ---
 
-## 9. OwnerRez: orphaned marketplace-install artifacts are never cleaned up
+## 8. OwnerRez: orphaned marketplace-install artifacts are never cleaned up
 
 **Files:** `lib/integrations/vault.ts` (`cleanup_expired_pending_integration_links`
 DB function), `supabase/migrations/20260707152648_marketplace_pending_integration_links.sql`
@@ -243,7 +206,7 @@ existing `cleanup_webhook_dedup()` pattern.
 
 ---
 
-## 10. `repuguard/activated` event is defined but never wired to anything
+## 9. `repuguard/activated` event is defined but never wired to anything
 
 **File:** `lib/inngest/events.ts`
 
@@ -268,7 +231,7 @@ onboarding step RepuGuard activation should kick off).
 
 ---
 
-## 11. `billing/subscription-updated` is sent but has zero consumers
+## 10. `billing/subscription-updated` is sent but has zero consumers
 
 **File:** `app/api/webhooks/stripe/route.ts` (send site), `lib/inngest/events.ts`
 
@@ -291,7 +254,7 @@ notification was ever actually wanted here.
 
 ---
 
-## 12. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
+## 11. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
 
 **Files:** `app/(dashboard)/layout.tsx`, `lib/auth.ts`
 
