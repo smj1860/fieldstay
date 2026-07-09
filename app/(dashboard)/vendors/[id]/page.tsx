@@ -1,6 +1,9 @@
 import { requireOrgMember } from '@/lib/auth'
 import Link from 'next/link'
 import { ComplianceSection } from './compliance-section'
+import { ConnectStatus } from './connect-status'
+import { VendorInvoiceHistory } from '@/components/work-orders/vendor-invoice-history'
+import type { InvoiceHistoryRow } from '@/components/work-orders/vendor-invoice-history'
 import { formatDate } from '@/lib/utils'
 import type { Metadata } from 'next'
 import { CheckCircle2, AlertTriangle, Ban, Star } from 'lucide-react'
@@ -19,6 +22,7 @@ export default async function VendorDetailPage({ params }: Props) {
     { data: docs },
     { data: complianceStatus },
     { data: recentWOs },
+    { data: invoiceRows },
   ] = await Promise.all([
     supabase
       .from('vendors')
@@ -49,6 +53,13 @@ export default async function VendorDetailPage({ params }: Props) {
       .eq('org_id', membership.org_id)
       .order('created_at', { ascending: false })
       .limit(10),
+
+    supabase
+      .from('work_order_invoices')
+      .select('id, work_order_id, invoice_number, status, total, submitted_at, paid_at, work_orders(title, wo_number, properties(name))')
+      .eq('vendor_id', id)
+      .eq('org_id', membership.org_id)
+      .order('submitted_at', { ascending: false }),
   ])
 
   if (!vendor) {
@@ -87,6 +98,23 @@ export default async function VendorDetailPage({ params }: Props) {
   const completedWOs = (recentWOs ?? []).filter((w) => w.status === 'completed')
   const totalSpend   = completedWOs.reduce((s, w) => s + (w.actual_cost ?? 0), 0)
 
+  const invoiceHistory: InvoiceHistoryRow[] = (invoiceRows ?? []).map((inv) => {
+    const wo       = Array.isArray(inv.work_orders) ? inv.work_orders[0] : inv.work_orders
+    const property = wo ? (Array.isArray(wo.properties) ? wo.properties[0] : wo.properties) : null
+    return {
+      id:            inv.id,
+      workOrderId:   inv.work_order_id,
+      woTitle:       wo?.title ?? 'Work Order',
+      woNumber:      wo?.wo_number ?? null,
+      invoiceNumber: inv.invoice_number,
+      status:        inv.status,
+      total:         inv.total,
+      submittedAt:   inv.submitted_at,
+      paidAt:        inv.paid_at,
+      contextLabel:  property?.name ?? null,
+    }
+  })
+
   return (
     <div className="max-w-3xl">
       {/* Breadcrumb */}
@@ -104,13 +132,20 @@ export default async function VendorDetailPage({ params }: Props) {
             {vendor.specialty.replace(/_/g, ' ')}
           </p>
         </div>
-        <span
-          className="px-3 py-1 rounded-full text-sm font-semibold inline-flex items-center gap-1.5"
-          style={{ color: statusColor, background: `${statusColor}1a`, border: `1px solid ${statusColor}44` }}
-        >
-          {StatusIcon && <StatusIcon className="w-4 h-4" />}
-          {statusLabel}
-        </span>
+        <div className="flex flex-col items-end gap-2">
+          <span
+            className="px-3 py-1 rounded-full text-sm font-semibold inline-flex items-center gap-1.5"
+            style={{ color: statusColor, background: `${statusColor}1a`, border: `1px solid ${statusColor}44` }}
+          >
+            {StatusIcon && <StatusIcon className="w-4 h-4" />}
+            {statusLabel}
+          </span>
+          <ConnectStatus
+            vendorId={vendor.id}
+            chargesEnabled={vendor.stripe_connect_charges_enabled}
+            accountId={vendor.stripe_connect_account_id}
+          />
+        </div>
       </div>
 
       {/* Vendor info */}
@@ -214,6 +249,9 @@ export default async function VendorDetailPage({ params }: Props) {
           </div>
         </Card>
       )}
+
+      {/* Work order history + invoices paid */}
+      <VendorInvoiceHistory invoices={invoiceHistory} title="Work Order Invoices" />
 
       {/* Compliance documents */}
       <div id="compliance">

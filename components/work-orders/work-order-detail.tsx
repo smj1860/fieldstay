@@ -592,15 +592,23 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
               </label>
             )}
 
-            {/* PM verified */}
+            {/* PM verified — vendor-assigned work orders are completed through
+                the vendor's own portal (line items → invoice → Stripe payout),
+                not verified here, so this action is unavailable once a vendor
+                is assigned. */}
             <SignOffRow
               label="Work Verified Complete"
               timestamp={wo.completion_verified_at}
-              canAction={canEdit && !wo.completion_verified_at && !!wo.vendor_acknowledged_at && (!nteExceeded || nteOverrideConfirmed)}
+              canAction={canEdit && !wo.vendors && !wo.completion_verified_at && !!wo.vendor_acknowledged_at && (!nteExceeded || nteOverrideConfirmed)}
               isPending={isPending}
               onAction={handleVerify}
               actionLabel="Mark Verified"
             />
+            {!!wo.vendors && !wo.completion_verified_at && (
+              <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
+                Assigned to a vendor — completed through their portal, which generates the invoice and Stripe payout automatically.
+              </p>
+            )}
 
             {/* Completion notes */}
             {wo.completion_notes && (

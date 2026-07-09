@@ -6,6 +6,8 @@ import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Cl
 import { cn } from '@/lib/utils'
 import { AssetSection } from './asset-section'
 import { PropertyMaintenanceManager } from '@/components/property/PropertyMaintenanceManager'
+import { VendorInvoiceHistory } from '@/components/work-orders/vendor-invoice-history'
+import type { InvoiceHistoryRow } from '@/components/work-orders/vendor-invoice-history'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { buttonVariantClass } from '@/components/ui/Button'
@@ -41,6 +43,7 @@ export default async function PropertyDetailPage({ params }: Props) {
     { data: standards },
     { data: allSchedules },
     { data: catalogItems },
+    { data: invoiceRows },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -112,6 +115,14 @@ export default async function PropertyDetailPage({ params }: Props) {
       .eq('is_active', true)
       .order('category')
       .order('sort_order'),
+
+    // Invoices paid to vendors for work orders at this property
+    supabase
+      .from('work_order_invoices')
+      .select('id, work_order_id, invoice_number, status, total, submitted_at, paid_at, work_orders(title, wo_number, vendors(name))')
+      .eq('property_id', property.id)
+      .eq('org_id', property.org_id)
+      .order('submitted_at', { ascending: false }),
   ])
 
   // Calculate YTD maintenance spend
@@ -121,6 +132,23 @@ export default async function PropertyDetailPage({ params }: Props) {
   }, 0)
   const openWOs      = recentWOs?.filter((wo) => wo.status !== 'completed') ?? []
   const completedLog = recentWOs?.filter((wo) => wo.status === 'completed') ?? []
+
+  const invoiceHistory: InvoiceHistoryRow[] = (invoiceRows ?? []).map((inv) => {
+    const wo     = Array.isArray(inv.work_orders) ? inv.work_orders[0] : inv.work_orders
+    const vendor = wo ? (Array.isArray(wo.vendors) ? wo.vendors[0] : wo.vendors) : null
+    return {
+      id:            inv.id,
+      workOrderId:   inv.work_order_id,
+      woTitle:       wo?.title ?? 'Work Order',
+      woNumber:      wo?.wo_number ?? null,
+      invoiceNumber: inv.invoice_number,
+      status:        inv.status,
+      total:         inv.total,
+      submittedAt:   inv.submitted_at,
+      paidAt:        inv.paid_at,
+      contextLabel:  vendor?.name ?? null,
+    }
+  })
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -341,6 +369,9 @@ export default async function PropertyDetailPage({ params }: Props) {
           <p className="text-sm text-muted-themed text-center py-4">No maintenance history yet.</p>
         )}
       </Card>
+
+      {/* Vendor invoices paid for this property's work orders */}
+      <VendorInvoiceHistory invoices={invoiceHistory} title="Vendor Invoices" />
 
       {/* Calendar feeds */}
       {feeds && feeds.length > 0 && (

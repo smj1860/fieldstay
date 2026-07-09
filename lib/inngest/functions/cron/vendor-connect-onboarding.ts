@@ -24,9 +24,7 @@
 
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { stripe }              from '@/lib/stripe/client'
-import { resend, FROM }        from '@/lib/resend/client'
-import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
+import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
 
 const BATCH_SIZE = 25
 
@@ -90,72 +88,25 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
       const batch = batches[batchIdx]!
 
       const batchResult = await step.run(`process-batch-${batchIdx}`, async () => {
-        const supabase = createServiceClient()
         let batchInvited = 0
 
         for (const vendor of batch) {
-          // Fresh DB read — the outer vendors array is stale on step retry.
-          // This is the only reliable guard against double-inviting on retry.
-          const { data: fresh } = await supabase
-            .from('vendors')
-            .select('id, stripe_connect_account_id, stripe_connect_invite_sent_at')
-            .eq('id', vendor.id)
-            .eq('org_id', vendor.org_id)
-            .single()
-
-          if (fresh?.stripe_connect_invite_sent_at || fresh?.stripe_connect_account_id) {
-            continue
-          }
-
           try {
             const org = Array.isArray(vendor.organizations)
               ? vendor.organizations[0]
               : vendor.organizations
             const orgName = (org as { name?: string | null } | null)?.name ?? 'Your property manager'
 
-            // Create Stripe Express account
-            const account = await stripe.accounts.create({
-              type:  'express',
-              email: vendor.email!,
-              metadata: {
-                vendor_id: vendor.id,
-                org_id:    vendor.org_id,
-              },
-              capabilities: {
-                card_payments:  { requested: true },
-                transfers:      { requested: true },
-              },
+            const { invited } = await ensureVendorConnectInvited({
+              vendorId:           vendor.id,
+              orgId:              vendor.org_id,
+              vendorEmail:        vendor.email!,
+              vendorName:         vendor.name,
+              vendorConnectToken: vendor.stripe_connect_token!,
+              orgName,
             })
 
-            // Build the onboarding URL via our redirect page
-            const onboardingUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${vendor.stripe_connect_token}/onboard`
-
-            // Send invite email
-            await resend.emails.send({
-              from:    FROM,
-              to:      vendor.email!,
-              subject: `${orgName} pays invoices via Stripe Connect — set up your payout account`,
-              html:    await renderVendorConnectInviteEmail({
-                vendorName:    vendor.name,
-                orgName,
-                pmName:        null,
-                woNumber:      null,
-                onboardingUrl,
-              }),
-            })
-
-            // Persist — two separate updates so a Resend failure
-            // doesn't orphan an account without recording it.
-            await supabase
-              .from('vendors')
-              .update({
-                stripe_connect_account_id:    account.id,
-                stripe_connect_invite_sent_at: new Date().toISOString(),
-              })
-              .eq('id', vendor.id)
-              .eq('org_id', vendor.org_id)   // explicit org scope despite service client
-
-            batchInvited++
+            if (invited) batchInvited++
           } catch (_err) {
             // Log and continue — don't let one failed vendor abort the whole batch.
             // The next cron run will retry uninvited vendors.

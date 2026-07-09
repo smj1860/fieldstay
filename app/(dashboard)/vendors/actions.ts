@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
+import { resendVendorConnectInvite as sendResendConnectInvite } from '@/lib/stripe/vendor-connect-invite'
 import type { ComplianceDocType } from '@/types/database'
 
 export type ComplianceDocActionState = { error?: string; success?: boolean }
@@ -98,5 +99,48 @@ export async function verifyComplianceDocument(
   } catch (err) {
     console.error('[verifyComplianceDocument]', err)
     return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+export async function resendVendorConnectInvite(
+  vendorId: string
+): Promise<{ error?: string; success?: boolean }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const { data: vendor } = await supabase
+      .from('vendors')
+      .select('id, name, email, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_token')
+      .eq('id', vendorId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!vendor) return { error: 'Vendor not found' }
+    if (!vendor.email) return { error: 'This vendor has no email address on file.' }
+    if (vendor.stripe_connect_charges_enabled) {
+      return { error: 'This vendor is already connected — no need to resend.' }
+    }
+
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', membership.org_id)
+      .single()
+
+    await sendResendConnectInvite({
+      vendorId:                vendor.id,
+      orgId:                   membership.org_id,
+      vendorEmail:             vendor.email,
+      vendorName:              vendor.name,
+      vendorConnectToken:      vendor.stripe_connect_token,
+      existingStripeAccountId: vendor.stripe_connect_account_id,
+      orgName:                 org?.name ?? 'Your property manager',
+    })
+
+    revalidatePath(`/vendors/${vendorId}`)
+    return { success: true }
+  } catch (err) {
+    console.error('[resendVendorConnectInvite]', err)
+    return { error: 'Failed to resend invite. Please try again.' }
   }
 }

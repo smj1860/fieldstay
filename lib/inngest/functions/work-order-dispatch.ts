@@ -4,6 +4,7 @@ import { render }              from '@react-email/render'
 import WorkOrderDispatchEmail  from '@/emails/WorkOrderDispatch'
 import WorkOrderSignOffEmail   from '@/emails/WorkOrderSignOff'
 import { createServiceClient } from '@/lib/supabase/server'
+import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
 
 export const workOrderDispatch = inngest.createFunction(
   {
@@ -84,6 +85,46 @@ export const workOrderDispatch = inngest.createFunction(
       }
 
       return { logged: true }
+    })
+
+    // ── Step 3: Bundle the Stripe Connect invite with dispatch, not just the
+    // nightly cron (CLAUDE_62_0) — a vendor dispatched a work order the same
+    // day they were added would otherwise wait for the next 07:00 UTC cron
+    // run before getting a payout setup link at all.
+    await step.run('invite-vendor-to-connect-if-needed', async () => {
+      const supabase = createServiceClient()
+
+      const { data: wo } = await supabase
+        .from('work_orders')
+        .select('org_id, vendor_id, wo_number')
+        .eq('id', workOrderId)
+        .single()
+
+      if (!wo?.vendor_id) return { skipped: 'no vendor on work order' }
+
+      const { data: vendor } = await supabase
+        .from('vendors')
+        .select('id, name, email, stripe_connect_account_id, stripe_connect_invite_sent_at, stripe_connect_token')
+        .eq('id', wo.vendor_id)
+        .eq('org_id', wo.org_id)
+        .single()
+
+      if (!vendor?.email || vendor.stripe_connect_account_id || vendor.stripe_connect_invite_sent_at) {
+        return { skipped: 'already invited or no email' }
+      }
+
+      const { invited } = await ensureVendorConnectInvited({
+        vendorId:           vendor.id,
+        orgId:              wo.org_id,
+        vendorEmail:        vendor.email,
+        vendorName:         vendor.name,
+        vendorConnectToken: vendor.stripe_connect_token!,
+        orgName:            dispatcherOrg,
+        pmName:             dispatcherName,
+        woNumber:           wo.wo_number,
+      })
+
+      return { invited }
     })
 
     return { dispatched: true, vendorEmail, woNumber }
