@@ -10,8 +10,12 @@ Go to **Settings → Integrations**, find the OwnerRez card, and click **Disconn
 
 This immediately:
 - Stops all future property and booking syncs
-- Removes FieldStay's webhook subscriptions from OwnerRez
 - Revokes FieldStay's access token
+
+Note: disconnecting does not remove FieldStay's webhook subscriptions on
+OwnerRez's side — any webhooks OwnerRez still sends after a disconnect are
+simply ignored, since FieldStay no longer has an active connection to
+process them against.
 
 This does not delete:
 - Properties already in FieldStay

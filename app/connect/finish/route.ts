@@ -51,10 +51,16 @@ export async function GET(request: NextRequest) {
 
   const { providerId, externalUserId, orgId } = claimed
 
-  if (providerId === 'ownerrez') {
+  // Gated on orgId: the initial-sync functions write org-scoped rows
+  // (properties.org_id is NOT NULL) and fail outright without a real
+  // org_id — previously flipping a brand-new marketplace-claimed connection
+  // to status='error' seconds after a successful claim, for any user who
+  // hadn't finished creating/joining an org yet. Mirrors the identical fix
+  // already applied to app/api/integrations/[provider]/callback/route.ts.
+  if (providerId === 'ownerrez' && orgId) {
     await inngest.send({
       name: 'integration/ownerrez.connected',
-      data: { user_id: user.id, org_id: orgId ?? '', external_user_id: externalUserId },
+      data: { user_id: user.id, org_id: orgId, external_user_id: externalUserId },
     })
   }
   if (providerId === 'kroger' && orgId) {
@@ -63,10 +69,10 @@ export async function GET(request: NextRequest) {
       data: { org_id: orgId, user_id: user.id },
     })
   }
-  if (providerId === 'hospitable') {
+  if (providerId === 'hospitable' && orgId) {
     await inngest.send({
       name: 'integration/hospitable.connected',
-      data: { user_id: user.id, org_id: orgId ?? '', external_user_id: externalUserId },
+      data: { user_id: user.id, org_id: orgId, external_user_id: externalUserId },
     })
   }
 
