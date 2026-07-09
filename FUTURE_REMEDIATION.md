@@ -36,6 +36,15 @@ protected columns when the acting role is a crew member and not a PM.
 
 **File:** `lib/stripe/vendor-connect-invite.ts`
 
+> **Update:** the single-invocation partial-failure case (a Resend failure
+> orphaning the just-created Stripe account, because `stripe_connect_account_id`
+> was only persisted *after* the email send, in a combined update with
+> `stripe_connect_invite_sent_at`) has been fixed — the account id is now
+> persisted immediately after creation, and the completion check is based
+> solely on `stripe_connect_invite_sent_at`, so a retry reuses the existing
+> account instead of creating a second one. The **concurrent-invocation**
+> race described below is still open.
+
 Re-reads the vendor row fresh before acting, but there's no lock between
 that read and the `stripe.accounts.create()` + email send + `UPDATE`. It's
 now called from three independent triggers:

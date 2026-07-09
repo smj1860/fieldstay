@@ -107,12 +107,13 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
             })
 
             if (invited) batchInvited++
-          } catch (_err) {
+          } catch (err) {
             // Log and continue — don't let one failed vendor abort the whole batch.
             // The next cron run will retry uninvited vendors.
             logger.error('[vendor-connect-cron] failed to onboard vendor', {
               vendorId: vendor.id,
               orgId:    vendor.org_id,
+              error:    err instanceof Error ? err.message : String(err),
               // No email logged — PII rule
             })
           }

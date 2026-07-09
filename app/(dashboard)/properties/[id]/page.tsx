@@ -43,7 +43,7 @@ export default async function PropertyDetailPage({ params }: Props) {
     { data: standards },
     { data: allSchedules },
     { data: catalogItems },
-    { data: invoiceRows },
+    { data: invoiceRows, error: invoiceError },
   ] = await Promise.all([
     supabase
       .from('turnovers')
@@ -124,6 +124,10 @@ export default async function PropertyDetailPage({ params }: Props) {
       .eq('org_id', property.org_id)
       .order('submitted_at', { ascending: false }),
   ])
+
+  if (invoiceError) {
+    console.error('[PropertyDetailPage] invoice history fetch failed:', invoiceError.message)
+  }
 
   // Calculate YTD maintenance spend
   const ytdSpend = (ytdCompletedWOs ?? []).reduce((sum, wo) => {
@@ -371,7 +375,7 @@ export default async function PropertyDetailPage({ params }: Props) {
       </Card>
 
       {/* Vendor invoices paid for this property's work orders */}
-      <VendorInvoiceHistory invoices={invoiceHistory} title="Vendor Invoices" />
+      <VendorInvoiceHistory invoices={invoiceHistory} title="Vendor Invoices" loadError={!!invoiceError} />
 
       {/* Calendar feeds */}
       {feeds && feeds.length > 0 && (
