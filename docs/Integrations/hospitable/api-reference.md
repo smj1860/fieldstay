@@ -37,6 +37,7 @@
 | `listing:read` | ✅ Live | Channel listing details |
 | `reviews:read` | ✅ Live | Guest reviews and responses |
 | `teammate:read` | ✅ Live | Crew/teammate sync |
+| `message:read` | ✅ Live | Guest/host reservation conversation sync — confirmed 2026-07-09 that this has been granted all along; the earlier "not yet granted" flag on this scope below was stale, not the actual account status. Was simply unused until reservation_messages sync was built. |
 
 ## Scopes to Request from Patrick
 
@@ -45,7 +46,6 @@
 | `task:read` + `task:write` | Friction Forecaster | Read Hospitable task state nightly; push corrected task assignments when Forecaster detects same-day flip risk |
 | `devices:read` | Crew app access codes, guidebook door codes | Surface smart lock codes to crew at checkout time without PM copy-paste |
 | `devices:write` | Future: remote crew unlock | Provision operation smartlock codes for arriving crew |
-| `message:read` | RepuGuard | Read guest message history before drafting review response |
 | `financials:read` | Owner ledger / revenue reporting | Pull platform booking payouts into FieldStay revenue dashboard |
 | `knowledge_hub:read` + `knowledge_hub:write` | Guidebook sync | Bidirectional sync with Hospitable Knowledge Hub to eliminate duplicate data entry |
 
@@ -421,13 +421,13 @@ reservation_uuid: UUID | null
 ### Messaging
 
 #### `GET /reservations/{identifier}/messages`
-**Scope:** `message:read` *(⏳ not yet granted)*
+**Scope:** `message:read` ✅ Live
 **Rate limit:** 2 req/min per reservation
-**Used by:** RepuGuard — read conversation history before drafting response
+**Used by:** `hospIncrementalSync`'s `message` entity branch (`lib/inngest/functions/hospitable/incremental-sync.ts`) — fetches and upserts into `reservation_messages` on `message.created`/`message.updated` webhooks. Not yet used by RepuGuard, which is a plausible future consumer of the same data.
 
 #### `GET /reservations/{identifier}/scheduled-messages`
-**Scope:** `message:read` *(⏳ not yet granted)*
-**Used by:** RepuGuard — understand what automated messages already sent
+**Scope:** `message:read` ✅ Live
+**Used by:** Not yet called anywhere in the codebase — potential future use for RepuGuard to understand what automated messages already sent, but no code path exists today.
 
 ---
 

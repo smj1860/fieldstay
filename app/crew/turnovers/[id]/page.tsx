@@ -18,7 +18,7 @@ import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import {
   updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitIssueReport,
-  confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted,
+  confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted, retryFailedMutation,
 } from '@/lib/dexie/helpers'
 import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow } from '@/lib/dexie/schema'
 
@@ -54,6 +54,29 @@ export default function CrewTurnoverPage() {
 
   const instance = useLiveQuery(
     () => db.checklist_instances.where('turnover_id').equals(id).first(),
+    [id]
+  )
+
+  // Surfaces a dead-lettered "Confirm Checklist/Inventory Complete" write —
+  // without this, a mutation that exhausted its sync retries would just
+  // vanish from the outbox, and the crew member would have no way to tell
+  // their confirmation never actually reached the server.
+  const checklistConfirmSyncFailed = useLiveQuery(
+    () => instance
+      ? db.mutations.where('targetId').equals(instance.id)
+          .filter((m) => m.table === 'checklist_instances' && !!m.failed)
+          .first()
+      : undefined,
+    [instance?.id]
+  )
+  // 'turnovers' mutations are also used by markInventoryStarted/startTurnover/
+  // completeTurnover, so disambiguate by payload shape rather than just
+  // table+targetId — otherwise this banner could fire for an unrelated
+  // failed write against the same turnover row.
+  const inventoryConfirmSyncFailed = useLiveQuery(
+    () => db.mutations.where('targetId').equals(id)
+      .filter((m) => m.table === 'turnovers' && !!m.failed && 'inventory_confirmed_complete_at' in m.payload)
+      .first(),
     [id]
   )
 
@@ -713,6 +736,22 @@ export default function CrewTurnoverPage() {
               </div>
             </button>
           )}
+
+          {checklistConfirmSyncFailed && (
+            <div
+              className="flex items-center justify-between gap-2 -mt-3 mb-4 px-4 py-2 rounded-lg text-xs"
+              style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+            >
+              <span>Confirmation didn&rsquo;t sync — check your connection.</span>
+              <button
+                type="button"
+                className="font-semibold underline flex-shrink-0"
+                onClick={() => void retryFailedMutation(userId, 'checklist_instances', instance!.id)}
+              >
+                Retry
+              </button>
+            </div>
+          )}
         </>
       )}
 
@@ -832,6 +871,22 @@ export default function CrewTurnoverPage() {
           Confirm Inventory Complete
         </p>
       </button>
+
+      {inventoryConfirmSyncFailed && (
+        <div
+          className="flex items-center justify-between gap-2 -mt-3 mb-4 px-4 py-2 rounded-lg text-xs"
+          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+        >
+          <span>Confirmation didn&rsquo;t sync — check your connection.</span>
+          <button
+            type="button"
+            className="font-semibold underline flex-shrink-0"
+            onClick={() => void retryFailedMutation(userId, 'turnovers', id)}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
         <div className="sticky bottom-0 pt-3 pb-6" style={{ background: 'var(--bg-page)' }}>
           <Button

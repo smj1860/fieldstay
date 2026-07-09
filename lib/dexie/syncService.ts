@@ -16,7 +16,10 @@ export class SyncEngine {
    * Drains the local `mutations` outbox in chronological (insertion) order.
    * Each mutation is removed from the outbox only after it is successfully
    * pushed upstream — a failed mutation is left in place and retried on the
-   * next call, mirroring PowerSync's per-record retry behavior.
+   * next call, mirroring PowerSync's per-record retry behavior. Rows already
+   * marked `failed` (dead-lettered on a prior run) are excluded rather than
+   * retried forever — retryFailedMutation() in helpers.ts is the only way
+   * back into the queue for those.
    */
   async processOutbox(): Promise<void> {
     if (this.isProcessing) return
@@ -24,7 +27,7 @@ export class SyncEngine {
 
     try {
       const db = getDexieDb(this.userId)
-      const pending = await db.mutations.orderBy('id').toArray()
+      const pending = (await db.mutations.orderBy('id').toArray()).filter((m) => !m.failed)
 
       for (const mutation of pending) {
         // Auto-incrementing key — always populated once read back from the table.
@@ -41,15 +44,16 @@ export class SyncEngine {
 
           const MAX_RETRIES = 5
           if (newRetryCount >= MAX_RETRIES) {
-            // Dead-letter: remove from queue after exhausting retries
-            // so it doesn't permanently block everything behind it.
-            // The mutation's data is lost — log clearly for investigation.
+            // Dead-letter: keep the row (marked failed) rather than deleting
+            // it, so a write that never reached the server leaves a durable,
+            // queryable trace instead of vanishing — callers like the crew
+            // turnover page surface this via useLiveQuery and offer a retry.
             console.error(
               `[SyncEngine] mutation ${id} (${mutation.table}) exceeded ` +
-              `${MAX_RETRIES} retries — removing from outbox. ` +
+              `${MAX_RETRIES} retries — marking failed. ` +
               `Payload:`, JSON.stringify({ table: mutation.table, op: mutation.op, targetId: mutation.targetId })
             )
-            await db.mutations.delete(id)
+            await db.mutations.update(id, { retryCount: newRetryCount, failed: true })
           } else {
             await db.mutations.update(id, { retryCount: newRetryCount })
             // Only block the queue on transient failures, not permanent ones.

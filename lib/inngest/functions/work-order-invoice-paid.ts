@@ -20,7 +20,7 @@ export const handleWorkOrderInvoicePaid = inngest.createFunction(
     await step.run('notify-vendor-of-payment', async () => {
       const supabase = createServiceClient()
 
-      const [{ data: wo }, { data: invoice }] = await Promise.all([
+      const [woResult, invoiceResult] = await Promise.all([
         supabase
           .from('work_orders')
           .select('id, title, wo_number, vendors ( name, email ), properties ( name )')
@@ -34,6 +34,19 @@ export const handleWorkOrderInvoicePaid = inngest.createFunction(
           .eq('org_id', org_id)
           .single(),
       ])
+
+      // PGRST116 = no matching row, a genuine "not found" — anything else is
+      // a real query failure and should be retried, not silently treated the
+      // same as "not found" and logged at warn.
+      if (woResult.error && woResult.error.code !== 'PGRST116') {
+        throw new Error(`work_orders query failed: ${woResult.error.message}`)
+      }
+      if (invoiceResult.error && invoiceResult.error.code !== 'PGRST116') {
+        throw new Error(`work_order_invoices query failed: ${invoiceResult.error.message}`)
+      }
+
+      const wo      = woResult.data
+      const invoice = invoiceResult.data
 
       if (!wo || !invoice) {
         logger.warn(`[invoice-paid] WO or invoice not found`, { work_order_id, invoice_id })
@@ -54,20 +67,23 @@ export const handleWorkOrderInvoicePaid = inngest.createFunction(
         .eq('id', org_id)
         .single()
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      vendor.email,
-        subject: `💸 You've been paid ${invoice.total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} — ${wo.title}`,
-        html: await renderVendorInvoicePaidEmail({
-          vendorName:    vendor.name ?? null,
-          orgName:       org?.name ?? 'Your property manager',
-          woTitle:       wo.title,
-          woNumber:      wo.wo_number ?? null,
-          propertyName:  property?.name ?? null,
-          invoiceNumber: invoice.invoice_number,
-          amountPaid:    invoice.total,
-        }),
-      })
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      vendor.email,
+          subject: `💸 You've been paid ${invoice.total.toLocaleString('en-US', { style: 'currency', currency: 'USD' })} — ${wo.title}`,
+          html: await renderVendorInvoicePaidEmail({
+            vendorName:    vendor.name ?? null,
+            orgName:       org?.name ?? 'Your property manager',
+            woTitle:       wo.title,
+            woNumber:      wo.wo_number ?? null,
+            propertyName:  property?.name ?? null,
+            invoiceNumber: invoice.invoice_number,
+            amountPaid:    invoice.total,
+          }),
+        },
+        { idempotencyKey: `work-order-invoice-paid-${invoice_id}` }
+      )
     })
 
     return { work_order_id, invoice_id, notified: true }

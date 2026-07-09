@@ -16,6 +16,34 @@ export const ownerRezReviewsSync = inngest.createFunction(
     { event: 'integration/ownerrez.connected' },
   ],
   async ({ step, logger }) => {
+    // Isolates a per-connection failure (not rate-limit, not revocation) so
+    // it can't abort the whole run — logs it and records it on this
+    // connection's own metadata for visibility. The next 6-hour cron tick
+    // retries this connection; other connections in this same tick are
+    // unaffected, matching how incremental-sync.ts isolates failures.
+    async function recordReviewsSyncError(
+      userId: string,
+      meta:   Record<string, unknown>,
+      err:    unknown,
+    ): Promise<void> {
+      const humanError = translateSyncError(err)
+      logger.error(`[OwnerRez:${userId}] Reviews fetch failed: ${err instanceof Error ? err.message : String(err)}`)
+      await step.run(`record-reviews-sync-error-${userId}`, async () => {
+        const admin = createServiceClient()
+        await admin
+          .from('integration_connections')
+          .update({
+            metadata: {
+              ...meta,
+              last_reviews_sync_status: 'error',
+              last_reviews_sync_error:  humanError,
+            },
+          })
+          .eq('user_id', userId)
+          .eq('provider_id', 'ownerrez')
+      })
+    }
+
     const connections = await step.run('fetch-connections', async () => {
       const admin = createServiceClient()
       const { data, error } = await admin
@@ -42,6 +70,12 @@ export const ownerRezReviewsSync = inngest.createFunction(
       // re-fetched on the next sync rather than skipped.
       const fetchStartedAt = new Date().toISOString()
 
+      // Set when the rate-limit retry below itself fails, so the shared
+      // generic-error handling further down (which both this and the
+      // outer catch route into) applies to it too instead of the retry's
+      // own failure propagating uncaught out of this connection's turn.
+      let retryFailed: unknown = null
+
       try {
         reviews = await step.run(`fetch-reviews-${userId}`, async () => {
           return new OwnerRezApiClient(userId).getReviews({ sinceUtc: cursor })
@@ -49,9 +83,13 @@ export const ownerRezReviewsSync = inngest.createFunction(
       } catch (err) {
         if (err instanceof RateLimitError) {
           await step.sleep(`rate-limit-sleep-${userId}`, `${err.retryAfter}s`)
-          reviews = await step.run(`fetch-reviews-retry-${userId}`, async () => {
-            return new OwnerRezApiClient(userId).getReviews({ sinceUtc: cursor })
-          })
+          try {
+            reviews = await step.run(`fetch-reviews-retry-${userId}`, async () => {
+              return new OwnerRezApiClient(userId).getReviews({ sinceUtc: cursor })
+            })
+          } catch (retryErr) {
+            retryFailed = retryErr
+          }
         } else if (err instanceof TokenRevokedError) {
           const humanError = translateSyncError(err)
           await step.run(`mark-revoked-${userId}`, async () => {
@@ -124,77 +162,97 @@ export const ownerRezReviewsSync = inngest.createFunction(
           })
           continue
         } else {
-          // Not a rate-limit or revocation — re-throw so Inngest's retry
-          // mechanism fires instead of silently skipping this connection.
-          logger.error(`[OwnerRez:${userId}] Reviews fetch failed: ${err instanceof Error ? err.message : String(err)}`)
-          throw err
+          // Not a rate-limit or revocation — isolate this connection's
+          // failure rather than re-throwing. Re-throwing here previously
+          // aborted the whole function on Inngest's retry mechanism, which
+          // meant one tenant's transient error (network blip, 500) could
+          // block every other tenant's review sync for this tick — later
+          // connections in this loop never got processed if the retries
+          // were exhausted.
+          await recordReviewsSyncError(userId, meta, err)
+          continue
         }
       }
 
-      await step.run(`upsert-reviews-${userId}`, async () => {
-        const admin = createServiceClient()
-        if (reviews.length === 0) return
+      if (retryFailed) {
+        // The rate-limit retry itself failed — same isolation treatment,
+        // otherwise this would propagate uncaught out of this connection's
+        // turn and abort the whole run.
+        await recordReviewsSyncError(userId, meta, retryFailed)
+        continue
+      }
 
-        const propertyExternalIds = reviews
-          .map(r => r.property_id)
-          .filter((id): id is number => id !== null)
-          .map(String)
+      try {
+        await step.run(`upsert-reviews-${userId}`, async () => {
+          const admin = createServiceClient()
+          if (reviews.length === 0) return
 
-        const propertyMap: Map<string, string> = new Map()
-        if (propertyExternalIds.length > 0) {
-          const { data: props } = await admin
-            .from('properties')
-            .select('id, external_id')
-            .eq('org_id', orgId)
-            .in('external_id', propertyExternalIds)
+          const propertyExternalIds = reviews
+            .map(r => r.property_id)
+            .filter((id): id is number => id !== null)
+            .map(String)
 
-          for (const p of props ?? []) {
-            if (p.external_id) propertyMap.set(p.external_id, p.id as string)
+          const propertyMap: Map<string, string> = new Map()
+          if (propertyExternalIds.length > 0) {
+            const { data: props } = await admin
+              .from('properties')
+              .select('id, external_id')
+              .eq('org_id', orgId)
+              .in('external_id', propertyExternalIds)
+
+            for (const p of props ?? []) {
+              if (p.external_id) propertyMap.set(p.external_id, p.id as string)
+            }
           }
-        }
 
-        const rows = reviews.map(review => ({
-          external_id:     String(review.id),
-          external_source: 'ownerrez',
-          external_url:    `https://app.ownerrez.com/reviews/${review.id}`,
-          org_id:          orgId,
-          property_id:     review.property_id
-            ? (propertyMap.get(String(review.property_id)) ?? null)
-            : null,
-          guest_name:  review.guest_name ?? review.guest?.name ?? null,
-          rating:      review.rating,
-          review_text: review.comments ?? review.body ?? review.review_text ?? '',
-          review_date: review.created_at ?? review.submitted_at ?? null,
-        }))
+          const rows = reviews.map(review => ({
+            external_id:     String(review.id),
+            external_source: 'ownerrez',
+            external_url:    `https://app.ownerrez.com/reviews/${review.id}`,
+            org_id:          orgId,
+            property_id:     review.property_id
+              ? (propertyMap.get(String(review.property_id)) ?? null)
+              : null,
+            guest_name:  review.guest_name ?? review.guest?.name ?? null,
+            rating:      review.rating,
+            review_text: review.comments ?? review.body ?? review.review_text ?? '',
+            review_date: review.created_at ?? review.submitted_at ?? null,
+          }))
 
-        const { error: upsertErr } = await admin
-          .from('reviews')
-          .upsert(rows, {
-            onConflict: 'external_id,external_source',
-            ignoreDuplicates: false,
-          })
+          const { error: upsertErr } = await admin
+            .from('reviews')
+            .upsert(rows, {
+              onConflict: 'external_id,external_source',
+              ignoreDuplicates: false,
+            })
 
-        if (upsertErr) {
-          throw new Error(`[OwnerRez:${userId}] Reviews upsert failed: ${upsertErr.message}`)
-        }
-      })
+          if (upsertErr) {
+            throw new Error(`[OwnerRez:${userId}] Reviews upsert failed: ${upsertErr.message}`)
+          }
+        })
 
-      await step.run(`update-reviews-cursor-${userId}`, async () => {
-        const admin = createServiceClient()
-        const newMeta = { ...meta, reviews_sync_cursor: fetchStartedAt }
+        await step.run(`update-reviews-cursor-${userId}`, async () => {
+          const admin = createServiceClient()
+          const newMeta = { ...meta, reviews_sync_cursor: fetchStartedAt }
 
-        const { error: updateErr } = await admin
-          .from('integration_connections')
-          .update({ metadata: newMeta })
-          .eq('user_id', userId)
-          .eq('provider_id', 'ownerrez')
+          const { error: updateErr } = await admin
+            .from('integration_connections')
+            .update({ metadata: newMeta })
+            .eq('user_id', userId)
+            .eq('provider_id', 'ownerrez')
 
-        if (updateErr) {
-          throw new Error(
-            `[OwnerRez:${userId}] Failed to update reviews cursor: ${updateErr.message}`
-          )
-        }
-      })
+          if (updateErr) {
+            throw new Error(
+              `[OwnerRez:${userId}] Failed to update reviews cursor: ${updateErr.message}`
+            )
+          }
+        })
+      } catch (err) {
+        // Same isolation as the fetch failures above — an upsert or
+        // cursor-update failure for this connection shouldn't stop the
+        // rest of the loop from running.
+        await recordReviewsSyncError(userId, meta, err)
+      }
     }
   }
 )

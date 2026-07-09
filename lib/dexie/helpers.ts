@@ -1,5 +1,5 @@
 import { getDexieDb } from './schema'
-import { enqueueMutation } from './syncService'
+import { enqueueMutation, getSyncEngine } from './syncService'
 
 export interface UpdateChecklistItemInput {
   isCompleted:       boolean
@@ -97,6 +97,34 @@ export async function confirmInventoryComplete(
 
   await db.turnovers.update(turnoverId, changes)
   await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', changes)
+}
+
+/**
+ * Re-queues a mutation that syncService.processOutbox() gave up on after
+ * exhausting its retries (marked `failed` rather than deleted — see
+ * lib/dexie/syncService.ts). Resets `failed`/`retryCount` on the existing
+ * outbox row and kicks processOutbox() again, replaying the same payload
+ * that was already queued rather than re-deriving one from current local
+ * state — important for confirm actions, where the current local value is
+ * already the target state, so re-calling confirmChecklistComplete() with
+ * "toggle" semantics would flip it the wrong way instead of retrying.
+ */
+export async function retryFailedMutation(
+  userId: string,
+  table:  string,
+  targetId: string,
+): Promise<void> {
+  const db = getDexieDb(userId)
+  const failed = await db.mutations
+    .where('targetId').equals(targetId)
+    .filter((m) => m.table === table && !!m.failed)
+    .toArray()
+
+  for (const mutation of failed) {
+    await db.mutations.update(mutation.id!, { failed: false, retryCount: 0 })
+  }
+
+  void getSyncEngine(userId).processOutbox()
 }
 
 /**

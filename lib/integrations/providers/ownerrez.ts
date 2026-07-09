@@ -156,7 +156,14 @@ export const ownerRezProvider: IntegrationProvider = {
     if (!authHeader?.startsWith('Basic ')) return fail('missing or malformed Authorization header')
 
     const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8')
-    const [user, pass] = decoded.split(':', 2)   // split on first colon only
+    // String.split(':', 2) does NOT split on the first colon only — it splits
+    // on every colon, then truncates the resulting array to 2 entries, so a
+    // password containing a colon gets silently cut off after its own first
+    // colon. Split on the first colon by index instead, matching HTTP Basic
+    // Auth's actual "user:pass, only the first colon is a delimiter" spec.
+    const sepIndex = decoded.indexOf(':')
+    const user = sepIndex === -1 ? decoded : decoded.slice(0, sepIndex)
+    const pass = sepIndex === -1 ? ''      : decoded.slice(sepIndex + 1)
 
     const expectedUser = process.env.OWNERREZ_WEBHOOK_USER
     const expectedPass = process.env.OWNERREZ_WEBHOOK_PASSWORD

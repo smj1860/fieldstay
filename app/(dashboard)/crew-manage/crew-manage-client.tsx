@@ -127,7 +127,7 @@ export function CrewManageClient({ crew, availabilityMap }: Props) {
   const [inviteResult,   setInviteResult]   = useState<string | null>(null)
 
   const uninvitedCount = crew.filter(
-    c => c.is_active && !c.user_id && !c.invite_sent_at && c.email
+    c => c.is_active && !c.user_id && !c.invite_sent_at && (c.email || c.phone)
   ).length
 
   useEffect(() => {
@@ -883,9 +883,8 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
             {inviting ? 'Sending…' : 'Resend invite'}
           </button>
         ) : (
-          <Button variant="secondary" onClick={handleInvite} disabled={inviting || !member.email}
-                  className="text-xs px-2.5 py-1 disabled:opacity-50"
-                  title={!member.email ? 'Add an email address first' : undefined}>
+          <Button variant="secondary" onClick={handleInvite} disabled={inviting}
+                  className="text-xs px-2.5 py-1 disabled:opacity-50">
             {inviting ? 'Sending…' : 'Invite to app'}
           </Button>
         )}

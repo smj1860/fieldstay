@@ -22,7 +22,7 @@ export default async function VendorDetailPage({ params }: Props) {
     { data: docs },
     { data: complianceStatus },
     { data: recentWOs },
-    { data: invoiceRows },
+    { data: invoiceRows, error: invoiceError },
   ] = await Promise.all([
     supabase
       .from('vendors')
@@ -61,6 +61,10 @@ export default async function VendorDetailPage({ params }: Props) {
       .eq('org_id', membership.org_id)
       .order('submitted_at', { ascending: false }),
   ])
+
+  if (invoiceError) {
+    console.error('[VendorDetailPage] invoice history fetch failed:', invoiceError.message)
+  }
 
   if (!vendor) {
     return (
@@ -251,7 +255,7 @@ export default async function VendorDetailPage({ params }: Props) {
       )}
 
       {/* Work order history + invoices paid */}
-      <VendorInvoiceHistory invoices={invoiceHistory} title="Work Order Invoices" />
+      <VendorInvoiceHistory invoices={invoiceHistory} title="Work Order Invoices" loadError={!!invoiceError} />
 
       {/* Compliance documents */}
       <div id="compliance">

@@ -17,8 +17,11 @@ automatically — no manual data entry required.
 ## What Gets Synced
 - Properties: name, address, bedrooms, bathrooms, WiFi credentials, check-in
   instructions, amenity flags, house manual
-- Bookings: check-in/checkout dates, guest name/email, booking source, status
-- Reviews: from connection date forward only (no historical import)
+- Bookings: check-in/checkout dates, guest name/email, booking source, status —
+  including owner blocks and tentative/unconfirmed bookings, which sync in and
+  are tagged accordingly rather than being left out
+- Reviews: your full review history imports on first connect, not just reviews
+  from the connection date forward
 
 FieldStay does not write any data back to OwnerRez.
 
@@ -31,4 +34,5 @@ configuration for each property.
 - Properties didn't appear: wait 2–3 minutes and refresh, or click Sync on the
   Turnovers dashboard to trigger a manual re-sync
 - Error during authorization: make sure you're logged into the correct OwnerRez account
-- Bookings not showing: only confirmed, non-block bookings are imported
+- Bookings not showing: check the date filter on your FieldStay bookings
+  page — the default view shows upcoming bookings only

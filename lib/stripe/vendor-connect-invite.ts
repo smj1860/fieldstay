@@ -39,22 +39,41 @@ export async function ensureVendorConnectInvited(
     .eq('org_id', params.orgId)
     .single()
 
-  if (!fresh || fresh.stripe_connect_account_id || fresh.stripe_connect_invite_sent_at) {
+  // stripe_connect_invite_sent_at is the only true "done" signal.
+  // stripe_connect_account_id can be set WITHOUT it if a prior call created
+  // the Stripe account but failed before the email send below completed —
+  // in that case we reuse the existing account rather than creating (and
+  // orphaning) a second one.
+  if (!fresh || fresh.stripe_connect_invite_sent_at) {
     return { invited: false }
   }
 
-  const account = await stripe.accounts.create({
-    type:  'express',
-    email: params.vendorEmail,
-    metadata: {
-      vendor_id: params.vendorId,
-      org_id:    params.orgId,
-    },
-    capabilities: {
-      card_payments: { requested: true },
-      transfers:     { requested: true },
-    },
-  })
+  let accountId = fresh.stripe_connect_account_id
+
+  if (!accountId) {
+    const account = await stripe.accounts.create({
+      type:  'express',
+      email: params.vendorEmail,
+      metadata: {
+        vendor_id: params.vendorId,
+        org_id:    params.orgId,
+      },
+      capabilities: {
+        card_payments: { requested: true },
+        transfers:     { requested: true },
+      },
+    })
+    accountId = account.id
+
+    // Persisted immediately — independent of whether the email send below
+    // succeeds — so a retry after a Resend failure reuses this account
+    // instead of creating a second, untracked one.
+    await supabase
+      .from('vendors')
+      .update({ stripe_connect_account_id: accountId })
+      .eq('id', params.vendorId)
+      .eq('org_id', params.orgId)
+  }
 
   const onboardingUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/vendor-connect/${params.vendorConnectToken}/onboard`
 
@@ -71,14 +90,9 @@ export async function ensureVendorConnectInvited(
     }),
   })
 
-  // Two separate updates so a Resend failure doesn't orphan an account
-  // without recording it — matches the existing cron's rationale.
   await supabase
     .from('vendors')
-    .update({
-      stripe_connect_account_id:     account.id,
-      stripe_connect_invite_sent_at: new Date().toISOString(),
-    })
+    .update({ stripe_connect_invite_sent_at: new Date().toISOString() })
     .eq('id', params.vendorId)
     .eq('org_id', params.orgId)
 

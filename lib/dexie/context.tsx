@@ -264,9 +264,22 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // rather than re-deriving from a possibly-incremental assignment
     // fetch, so it always reflects the full set, not just newly-added
     // turnovers.
+    //
+    // Guarded by a generation token: this can be invoked concurrently by
+    // rapid-fire turnover_assignments change events, each awaiting its own
+    // db.turnovers.toArray() before touching the shared checklistChannel /
+    // subscribedTurnoverIds vars. Without the token, an older call whose
+    // await happens to resolve after a newer call's could overwrite the
+    // newer (correct) subscription with its own stale turnover set — the
+    // token lets a call detect it's been superseded and bail before
+    // touching shared state, so only the most recently STARTED call's
+    // result is ever committed.
     async function refreshChecklistSubscription(thisCrewMemberId: string): Promise<void> {
+      const myGeneration = ++checklistRefreshGeneration
       const db = getDexieDb(userId!)
       const allTurnovers = await db.turnovers.toArray()
+      if (myGeneration !== checklistRefreshGeneration) return // superseded by a newer call while awaiting
+
       const turnoverIds = allTurnovers
         .filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
         .map((t) => t.id)
@@ -388,6 +401,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     let channel: ReturnType<typeof supabase.channel> | null = null
     let checklistChannel: ReturnType<typeof supabase.channel> | null = null
     let subscribedTurnoverIds: string[] = []
+    let checklistRefreshGeneration = 0
 
     async function run() {
       const { data: crewMember } = await supabase

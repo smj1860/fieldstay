@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Receipt } from 'lucide-react'
+import { Receipt, AlertTriangle } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { formatDate } from '@/lib/utils'
@@ -36,9 +36,14 @@ const STATUS_LABEL: Record<InvoiceStatus, string> = {
 export function VendorInvoiceHistory({
   invoices,
   title = 'Invoices',
+  loadError = false,
 }: Readonly<{
-  invoices: InvoiceHistoryRow[]
-  title?:   string
+  invoices:   InvoiceHistoryRow[]
+  title?:     string
+  // Set when the invoice query itself failed — rendered distinctly from
+  // "zero invoices" so a query failure doesn't silently read as "vendor has
+  // no payment history."
+  loadError?: boolean
 }>) {
   const paidInvoices = invoices.filter((inv) => inv.status === 'paid')
   const totalPaid    = paidInvoices.reduce((sum, inv) => sum + inv.total, 0)
@@ -52,7 +57,12 @@ export function VendorInvoiceHistory({
         </h3>
       </div>
 
-      {invoices.length === 0 ? (
+      {loadError ? (
+        <p className="text-sm text-center py-6 flex items-center justify-center gap-1.5" style={{ color: 'var(--accent-red)' }}>
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          Couldn&rsquo;t load invoice history. Try refreshing the page.
+        </p>
+      ) : invoices.length === 0 ? (
         <p className="text-sm text-muted-themed text-center py-6">
           No invoices yet. Invoices are generated once a vendor submits line items through their portal.
         </p>

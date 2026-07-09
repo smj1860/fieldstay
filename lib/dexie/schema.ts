@@ -152,6 +152,12 @@ export interface MutationRow {
   payload:    Record<string, unknown>
   createdAt:  string
   retryCount: number
+  // Set once retryCount exceeds processOutbox()'s MAX_RETRIES. Dead-lettered
+  // mutations used to be deleted outright — losing any record that a write
+  // never made it to the server. Keeping the row (excluded from the pending
+  // queue) lets the UI surface "this didn't sync" instead of silently
+  // discarding it.
+  failed?:    boolean
 }
 
 export class FieldStayDexie extends Dexie {

@@ -666,12 +666,12 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
 
   const { data: uninvited, error: queryError } = await supabase
     .from('crew_members')
-    .select('id, name, email, invite_token')
+    .select('id, name, email, phone, invite_token')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .is('user_id', null)
     .is('invite_sent_at', null)
-    .not('email', 'is', null)
+    .or('email.not.is.null,phone.not.is.null')
 
   if (queryError) {
     console.error('[inviteAllUninvitedCrew] query failed')
@@ -690,7 +690,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
 
   let sent = 0
   for (const crew of uninvited) {
-    if (!crew.email) continue
+    if (!crew.email && !crew.phone) continue
 
     // Atomically claim this crew member before sending — closes the race
     // where a double-click fires two concurrent invocations that both query
@@ -707,19 +707,45 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
     if (!claimed) continue
 
     const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
-    const html = await renderCrewInviteEmail({
-      crewName:  crew.name,
-      orgName:   org?.name ?? 'Your property manager',
-      inviteUrl,
-    })
-    const { error: emailError } = await resendClient.emails.send({
-      from:    from,
-      to:      crew.email,
-      replyTo: 'help@fieldstay.app',
-      subject: `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
-      html,
-    })
-    if (!emailError) {
+    let delivered = false
+
+    if (crew.email) {
+      const html = await renderCrewInviteEmail({
+        crewName:  crew.name,
+        orgName:   org?.name ?? 'Your property manager',
+        inviteUrl,
+      })
+      const { error: emailError } = await resendClient.emails.send({
+        from:    from,
+        to:      crew.email,
+        replyTo: 'help@fieldstay.app',
+        subject: `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
+        html,
+      })
+      if (!emailError) delivered = true
+    }
+
+    // No email on file but a phone number exists — send via SMS instead.
+    // Non-fatal on failure, mirroring inviteCrewMember()'s single-invite path.
+    if (crew.phone) {
+      const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
+      const e164 = normalizePhoneToE164(crew.phone)
+      if (e164) {
+        const smsBody = await renderSmsBody(membership.org_id, 'crew_invite', {
+          crew_name:  crew.name,
+          org_name:   org?.name ?? 'Your property manager',
+          invite_url: inviteUrl,
+        })
+        try {
+          const result = await sendSMS(e164, smsBody)
+          if (result.sent) delivered = true
+        } catch (smsErr) {
+          console.error('[inviteAllUninvitedCrew] SMS failed (non-fatal):', smsErr)
+        }
+      }
+    }
+
+    if (delivered) {
       sent++
     } else {
       // Release the claim so a future bulk run or manual resend can retry
