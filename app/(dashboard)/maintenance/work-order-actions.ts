@@ -1,6 +1,6 @@
 'use server'
 
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgRole } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 
 // ── Line Items ────────────────────────────────────────────────
@@ -16,7 +16,7 @@ export async function addWorkOrderLineItem(
     sort_order?: number
   }
 ) {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('work_order_line_items')
@@ -34,7 +34,7 @@ export async function addWorkOrderLineItem(
 }
 
 export async function deleteWorkOrderLineItem(lineItemId: string) {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('work_order_line_items')
@@ -52,7 +52,7 @@ export async function deleteWorkOrderLineItem(lineItemId: string) {
 export async function reorderWorkOrderLineItems(
   updates: Array<{ id: string; sort_order: number }>
 ) {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const promises = updates.map(({ id, sort_order }) =>
     supabase
@@ -71,7 +71,7 @@ export async function reorderWorkOrderLineItems(
 // ── Sign-Off ──────────────────────────────────────────────────
 
 export async function markVendorAcknowledged(workOrderId: string) {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('work_orders')
@@ -87,7 +87,7 @@ export async function markVendorAcknowledged(workOrderId: string) {
 }
 
 export async function markWorkVerified(workOrderId: string) {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: wo } = await supabase
     .from('work_orders')
@@ -130,7 +130,7 @@ export async function updatePropertyAccessInstructions(
   propertyId: string,
   instructions: string
 ) {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('properties')

@@ -337,6 +337,7 @@ export interface Vendor {
   stripe_connect_charges_enabled: boolean
   stripe_connect_onboarded_at:    string | null
   stripe_connect_invite_sent_at:  string | null
+  stripe_connect_invite_claimed_at: string | null
 }
 
 export interface ChecklistTemplate {

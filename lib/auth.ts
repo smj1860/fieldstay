@@ -70,6 +70,25 @@ export async function requireOrgMember(): Promise<
 }
 
 /**
+ * Verify the current user is an org member with one of the given roles.
+ * Mirrors the DB-layer is_org_member() semantics: 'owner' always passes,
+ * regardless of the allowedRoles array. Throws (rather than redirecting)
+ * on a role mismatch, since a Server Action has no page to redirect to —
+ * existing try/catch blocks in mutating actions already convert this into
+ * a generic { error } result the same way they handle any other failure.
+ */
+export async function requireOrgRole(allowedRoles: MemberRole[]) {
+  const result = await requireOrgMember()
+  const { role } = result.membership
+
+  if (role !== 'owner' && !allowedRoles.includes(role)) {
+    throw new Error('You do not have permission to perform this action.')
+  }
+
+  return result
+}
+
+/**
  * Return the current user's role in their org.
  * Used to gate owner-only UI in settings pages.
  */

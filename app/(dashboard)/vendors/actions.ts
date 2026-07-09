@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgRole } from '@/lib/auth'
 import { resendVendorConnectInvite as sendResendConnectInvite } from '@/lib/stripe/vendor-connect-invite'
 import type { ComplianceDocType } from '@/types/database'
 
@@ -13,7 +13,7 @@ export async function createComplianceDocument(
   formData: FormData
 ): Promise<ComplianceDocActionState> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     // Confirm vendor belongs to this org
     const { data: vendor } = await supabase
@@ -73,7 +73,7 @@ export async function deleteComplianceDocument(
   docId: string,
   vendorId: string
 ): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
   await supabase
     .from('vendor_compliance_documents')
     .update({ is_active: false })
@@ -88,7 +88,7 @@ export async function verifyComplianceDocument(
   vendorId: string
 ): Promise<{ error?: string }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
     await supabase
       .from('vendor_compliance_documents')
       .update({ is_verified: true })
@@ -106,11 +106,11 @@ export async function resendVendorConnectInvite(
   vendorId: string
 ): Promise<{ error?: string; success?: boolean }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     const { data: vendor } = await supabase
       .from('vendors')
-      .select('id, name, email, stripe_connect_account_id, stripe_connect_charges_enabled, stripe_connect_token')
+      .select('id, name, email, stripe_connect_charges_enabled, stripe_connect_token')
       .eq('id', vendorId)
       .eq('org_id', membership.org_id)
       .single()
@@ -128,13 +128,12 @@ export async function resendVendorConnectInvite(
       .single()
 
     await sendResendConnectInvite({
-      vendorId:                vendor.id,
-      orgId:                   membership.org_id,
-      vendorEmail:             vendor.email,
-      vendorName:              vendor.name,
-      vendorConnectToken:      vendor.stripe_connect_token,
-      existingStripeAccountId: vendor.stripe_connect_account_id,
-      orgName:                 org?.name ?? 'Your property manager',
+      vendorId:           vendor.id,
+      orgId:              membership.org_id,
+      vendorEmail:        vendor.email,
+      vendorName:         vendor.name,
+      vendorConnectToken: vendor.stripe_connect_token,
+      orgName:            org?.name ?? 'Your property manager',
     })
 
     revalidatePath(`/vendors/${vendorId}`)
