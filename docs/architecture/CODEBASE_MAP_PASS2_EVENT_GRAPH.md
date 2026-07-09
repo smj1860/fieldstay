@@ -216,9 +216,12 @@ connection-error path.
 
 ```
 app/connect/finish, app/api/integrations/[provider]/callback (OAuth done)
-  └─ emits integration/ownerrez.connected ► ownerrez/initial-sync.ts
-                                             AND ownerrez-reviews-sync.ts
-                                             (both listen to the same event)
+  └─ emits integration/ownerrez.connected ► ownerrez/initial-sync.ts,
+                                             ownerrez-reviews-sync.ts, AND
+                                             email-ownerrez-connected.tsx
+                                             (three listeners on one event
+                                             — the .tsx one only emails
+                                             the PM a confirmation)
                                              └─ initial-sync backfills
                                                 properties/bookings, emits
                                                 turnover/created per booking
@@ -227,6 +230,11 @@ app/connect/finish, app/api/integrations/[provider]/callback (OAuth done)
                                                 (→ notify-integration-error.ts)
 
   └─ emits integration/hospitable.connected ► hospitable/initial-sync.ts
+                                             AND email-hospitable-connected.tsx
+                                             (two consumers on one event —
+                                             the .tsx one only emails the
+                                             PM a "you're connected"
+                                             confirmation)
                                              └─ same shape, emits
                                                 turnover/created
 
@@ -293,27 +301,43 @@ booking emits `booking/detected` → `booking-events.ts` → emits
 
 ## 6. Billing / Stripe
 
+**Correction (verified in a follow-up pass):** the original version of
+this section missed `lib/inngest/functions/*.tsx` files — the initial
+Glob only matched `*.ts`. Four `.tsx` functions exist:
+`email-hospitable-connected.tsx`, `email-ownerrez-connected.tsx`,
+`email-trial-lifecycle.tsx`, `onboarding-drip.tsx`. Two of the three
+"unmatched" billing/onboarding events below were actually wired the
+whole time.
+
 ```
-Stripe webhook (subscription updated)
-  └─ emits billing/subscription-updated   (no dedicated Inngest listener
-                                            found — likely handled inline
-                                            in the webhook route itself;
-                                            confirm before assuming dead)
+Stripe webhook (subscription.created/updated)
+  └─ updates organizations.plan/plan_status/max_properties INLINE,
+     synchronously, in the same webhook handler (not event-driven)
+  └─ ALSO emits billing/subscription-updated — genuinely orphaned, see
+     "Confirmed Dead / Orphaned" below. The org-state write already
+     happened above; this send reaches no listener.
+
+Stripe webhook (subscription.created while trialing)
+  └─ emits billing/trial-lifecycle-start ─► email-trial-lifecycle.tsx
+                                             (WIRED — corrects the
+                                             original unmatched flag)
+                                             └─ emails the org admin the
+                                                trial welcome sequence
 
 Stripe webhook (org's first successful payment)
-  └─ emits billing/trial-lifecycle-start ► (no dedicated listener found)
   └─ emits billing/first-payment-confirmed ► email-subscriber-checkin.ts
                                              └─ fires a founder check-in
                                                 email sequence
-```
 
-`user/onboarding.drip.started` (from `app/onboarding/actions.ts`) has
-the same shape — defined and sent, but no consumer function currently
-subscribes to it in the function list. These three (`billing/subscription-
-updated`, `billing/trial-lifecycle-start`, `user/onboarding.drip.started`)
-are candidates to verify as dead sends or as still-inline-handled before
-a later cleanup pass — not confirmed dead here, just unmatched by this
-grep pass.
+app/onboarding/actions.ts
+  └─ emits user/onboarding.drip.started ──► onboarding-drip.tsx
+                                             (WIRED — corrects the
+                                             original unmatched flag;
+                                             registered in
+                                             app/api/inngest/route.ts)
+                                             └─ sends the onboarding
+                                                email drip sequence
+```
 
 ---
 
@@ -436,15 +460,24 @@ guidebook-pre-arrival-email-cron.ts 14:00 UTC daily
 | Work Orders | Up to 5 hops (created → dispatch → invoice → paid) | One route (`work-orders/[token]/complete`) fires 3 separate event chains at once |
 | Integrations | 2-3 hops per provider | 3 independent trigger paths (cron + webhook + manual) converge on one incremental-sync handler for OwnerRez |
 | Guidebook | 2 hops | Stripe is the origin for 5 of its 7 events |
-| Billing | 1 hop, mostly unmatched | 2 of 3 billing events have no found consumer — verify before assuming dead |
+| Billing | 1 hop | All 3 billing events fully wired — `billing/subscription-updated` is the one exception, see below |
 | Standalone crons | 0 hops | 12 crons never touch the event graph — pure scheduled sweeps |
 
-**Unmatched events worth a follow-up grep in a later pass** (defined in
-`events.ts`, no producer or consumer found by this pass's search):
-`inventory/below-par`, `vendor-compliance/expiry-warning`,
-`repuguard/activated`, `billing/subscription-updated`,
-`billing/trial-lifecycle-start`, `user/onboarding.drip.started`,
-`maintenance/daily-check`. These may be handled inline elsewhere (webhook
-routes, cron bodies) rather than through the event bus, or may be dead —
-this pass didn't do a full-text read of every candidate file to confirm
-either way.
+### Resolved: the 7 originally-unmatched events
+
+A follow-up pass (grepping `.tsx` function files too, which the first
+pass's Glob excluded, plus a full-text search for each event's data
+across the repo) resolved all 7:
+
+**Wired all along — Pass 2's original doc was wrong:**
+- `billing/trial-lifecycle-start` → `lib/inngest/functions/email-trial-lifecycle.tsx`
+- `user/onboarding.drip.started` → `lib/inngest/functions/onboarding-drip.tsx` (registered in `app/api/inngest/route.ts`)
+
+**Confirmed dead — defined in `events.ts`, never sent, never consumed anywhere in `.ts`/`.tsx`:**
+- `maintenance/daily-check` — no trace outside its own type definition.
+- `repuguard/activated` — `organizations.repuguard_status` is written directly by the Stripe webhook (`app/api/webhooks/stripe/route.ts`); nothing ever emits or listens for this event.
+- `inventory/below-par` — the automation this name implies is real, it just doesn't go through this event: `inventory-events.ts`'s `inventory/count-submitted` handler computes below-par items in-memory and creates the draft PO directly in the same step. This event type was superseded, not wired to anything.
+- `vendor-compliance/expiry-warning` — compliance expiry is surfaced instead via a pull-based in-app notification bell (`lib/notifications.ts` queries the `vendor_compliance_status` view on page load for `hard_blocked`/`expiring_soon`/`grace_period` rows). No proactive email/SMS push exists for this — a PM only sees it if they open the dashboard.
+
+**Sent but genuinely orphaned — real gap, not a false positive:**
+- `billing/subscription-updated` — `app/api/webhooks/stripe/route.ts` sends this on every `customer.subscription.created/updated`, but no function anywhere subscribes to it. Not a functional break: `organizations.plan`/`plan_status`/`max_properties` are updated synchronously in the same webhook handler, before the send. But the event itself reaches no listener — it looks like a hook for a planned "notify PM their plan changed" email that was never built.
