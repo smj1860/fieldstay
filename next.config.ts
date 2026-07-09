@@ -12,6 +12,13 @@ const nextConfig: NextConfig = {
   },
 
   async headers() {
+    // Turbopack's dev-mode hydration relies on inline <script> tags and
+    // eval()-based module wrapping — a strict script-src blocks React from
+    // ever mounting under `next dev` (self.__next_r invariant, page never
+    // hydrates). Production builds don't need either, so this only relaxes
+    // the dev server, never a deployed build.
+    const isDev = process.env.NODE_ENV !== 'production'
+
     return [
       {
         // Apply these headers to all routes in the application
@@ -23,9 +30,13 @@ const nextConfig: NextConfig = {
               // Locked-down default — no blanket https: source
               "default-src 'self'",
 
-              // Scripts: no 'unsafe-inline' — inline theme script is now
-              // a static file; wasm-unsafe-eval required by Supabase JS client
-              "script-src 'self' 'wasm-unsafe-eval'",
+              // Scripts: no 'unsafe-inline'/'unsafe-eval' in production —
+              // inline theme script is a static file; wasm-unsafe-eval
+              // required by Supabase JS client. Dev mode needs both relaxed
+              // for Turbopack's hydration script and HMR to work at all.
+              isDev
+                ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
+                : "script-src 'self' 'wasm-unsafe-eval'",
 
               // Styles: 'unsafe-inline' required for the codebase's established
               // style={{ ... }} convention with CSS variables. Inline styles
