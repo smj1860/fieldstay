@@ -89,6 +89,26 @@ export async function markVendorAcknowledged(workOrderId: string) {
 export async function markWorkVerified(workOrderId: string) {
   const { supabase, membership } = await requireOrgMember()
 
+  const { data: wo } = await supabase
+    .from('work_orders')
+    .select('vendor_id')
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!wo) throw new Error('Work order not found')
+
+  // Vendor-assigned work orders must be completed through the vendor's own
+  // portal (with line items), which is what actually generates the invoice
+  // and Stripe Connect payout — a PM manually verifying it here would mark
+  // it complete with no invoice ever created and no path to pay the vendor.
+  if (wo.vendor_id) {
+    throw new Error(
+      'This work order is assigned to a vendor. It must be completed through the vendor\'s ' +
+      'portal so the invoice and Stripe payment can be generated — not marked complete here.'
+    )
+  }
+
   const { error } = await supabase
     .from('work_orders')
     .update({

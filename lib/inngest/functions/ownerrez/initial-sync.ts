@@ -479,6 +479,7 @@ export const ownerRezInitialSync = inngest.createFunction(
               guest_email:     normalized.guest_email,
               source:          normalized.source,
               is_block:        normalized.is_block,
+              stay_type:       normalized.stay_type,
             }
           })
 

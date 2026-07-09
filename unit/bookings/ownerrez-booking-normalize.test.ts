@@ -74,4 +74,35 @@ describe('ownerRezBookingToNormalized', () => {
     expect(result.checkin_time).toBeNull()
     expect(result.checkout_time).toBeNull()
   })
+
+  it('maps type: owner to stay_type: owner_stay', () => {
+    const result = ownerRezBookingToNormalized(baseBooking({ type: 'owner' }))
+    expect(result.stay_type).toBe('owner_stay')
+    expect(result.is_block).toBe(false)
+  })
+
+  it('defaults stay_type to guest_stay when type is absent or a plain booking', () => {
+    expect(ownerRezBookingToNormalized(baseBooking({ type: undefined })).stay_type).toBe('guest_stay')
+    expect(ownerRezBookingToNormalized(baseBooking({ type: 'booking' })).stay_type).toBe('guest_stay')
+  })
+
+  it.each(['block', 'quote_hold', 'linked_availability'] as const)(
+    'treats type: %s as a block regardless of the raw is_block/status fields',
+    (blockType) => {
+      const result = ownerRezBookingToNormalized(
+        baseBooking({ type: blockType, is_block: false, status: 'Confirmed' })
+      )
+      expect(result.is_block).toBe(true)
+      expect(result.status).toBe('blocked')
+    }
+  )
+
+  it('still honors a raw is_block: true even when type is a plain booking', () => {
+    const result = ownerRezBookingToNormalized(baseBooking({ type: 'booking', is_block: true }))
+    expect(result.is_block).toBe(true)
+    // type takes precedence for `status` only when type itself signals a
+    // block — a plain 'booking' type with is_block: true (unexpected, but
+    // not impossible) still maps status via mapOwnerRezBookingStatus.
+    expect(result.status).toBe('confirmed')
+  })
 })

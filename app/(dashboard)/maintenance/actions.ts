@@ -373,7 +373,7 @@ export async function updateWorkOrderStatus(
 
   const { data: current } = await supabase
     .from('work_orders')
-    .select('status, source_schedule_id, source, actual_cost, estimated_cost, title, property_id')
+    .select('status, source_schedule_id, source, actual_cost, estimated_cost, title, property_id, vendor_id')
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
     .single()
@@ -383,6 +383,13 @@ export async function updateWorkOrderStatus(
   // Already completed (e.g. double-click or retried request) — no-op rather
   // than re-firing work-order/completed and double-advancing its schedule.
   if (current.status === 'completed') return { success: true }
+
+  // Vendor-assigned work orders must be completed through the vendor's own
+  // portal (line items → invoice → Stripe Connect payout) — completing it
+  // here would leave no invoice and no payment path.
+  if (status === 'completed' && current.vendor_id) {
+    return { error: 'This work order is assigned to a vendor — it must be completed through the vendor portal so the invoice and payment can be generated.' }
+  }
 
   const update: Record<string, unknown> = { status }
   if (status === 'completed') {
@@ -971,13 +978,38 @@ export async function bulkAssignVendor(
 export async function bulkUpdateWorkOrderStatus(
   workOrderIds: string[],
   status: WoStatus
-): Promise<{ error?: string }> {
+): Promise<{ error?: string; warning?: string }> {
   const { supabase, membership, user } = await requireOrgMember()
+
+  // Vendor-assigned work orders must be completed through the vendor's own
+  // portal (line items → invoice → Stripe Connect payout) — bulk-completing
+  // them here would leave no invoice and no payment path. Split the target
+  // set instead of failing the whole batch, so any crew/unassigned WOs in
+  // the same selection still go through.
+  let targetIds = workOrderIds
+  let skippedCount = 0
+  if (status === 'completed') {
+    const { data: rows } = await supabase
+      .from('work_orders')
+      .select('id, vendor_id')
+      .in('id', workOrderIds)
+      .eq('org_id', membership.org_id)
+
+    const vendorAssignedIds = new Set((rows ?? []).filter((r) => r.vendor_id).map((r) => r.id))
+    targetIds    = workOrderIds.filter((id) => !vendorAssignedIds.has(id))
+    skippedCount = vendorAssignedIds.size
+  }
+
+  if (targetIds.length === 0) {
+    return skippedCount > 0
+      ? { error: `${skippedCount} work order${skippedCount !== 1 ? 's are' : ' is'} assigned to a vendor — complete ${skippedCount !== 1 ? 'them' : 'it'} through the vendor portal instead.` }
+      : {}
+  }
 
   const { error } = await supabase
     .from('work_orders')
     .update({ status })
-    .in('id', workOrderIds)
+    .in('id', targetIds)
     .eq('org_id', membership.org_id)
 
   if (error) {
@@ -990,11 +1022,13 @@ export async function bulkUpdateWorkOrderStatus(
     actorId:    user.id,
     action:     'work_order.bulk_status_changed',
     targetType: 'work_order',
-    metadata:   { workOrderIds, status },
+    metadata:   { workOrderIds: targetIds, status },
   })
 
   revalidatePath('/maintenance')
-  return {}
+  return skippedCount > 0
+    ? { warning: `${skippedCount} vendor-assigned work order${skippedCount !== 1 ? 's were' : ' was'} skipped — complete ${skippedCount !== 1 ? 'them' : 'it'} through the vendor portal instead.` }
+    : {}
 }
 
 // ── Maintenance Schedule CRUD ────────────────────────────────────────────────

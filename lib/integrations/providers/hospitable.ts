@@ -934,6 +934,15 @@ export function hospitableReservationToNormalized(
     checkin_time:  extractHospitableTime(res.check_in,  '15:00'),
     checkout_time: extractHospitableTime(res.check_out, '11:00'),
 
+    // ⚠️ Unconfirmed: Hospitable's reservation_status.current.category enum
+    // (request/accepted/cancelled/not accepted/unknown/checkpoint) has no
+    // documented "blocked" value, and the /reservations endpoint's response
+    // shape gives no other signal a manually-blocked calendar date would
+    // set — property-level unavailability may not surface through this
+    // endpoint as a reservation at all. Hardcoded false until Hospitable's
+    // docs or a live payload confirm otherwise; do not assume this means
+    // Hospitable blocks are unsupported, only that this mapper has never
+    // seen one.
     status:      mapHospitableStatus(res.reservation_status.current.category),
     guest_name:  guestName,
     guest_email: guest?.email ?? null,

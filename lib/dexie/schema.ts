@@ -14,14 +14,24 @@ export interface TurnoverRow {
   status:            string
   priority:          string
   notes:             string
+  // Inventory has no turnover-scoped table of its own — these live on the
+  // turnover directly. Nullable, matching completed_at's own convention on
+  // ChecklistInstanceItemRow below (empty timestamp columns use '' per the
+  // is_completed/completed_by_crew_id convention elsewhere in this file).
+  inventory_started_at:            string | null
+  inventory_confirmed_complete_at: string | null
+  inventory_confirmed_by_crew_id:  string
 }
 
 export interface ChecklistInstanceRow {
-  id:                  string
-  turnover_id:         string
-  org_id:              string
-  status:              string
-  section_photo_path:  string
+  id:                   string
+  turnover_id:          string
+  org_id:               string
+  status:               string
+  section_photo_path:   string
+  started_at:           string | null
+  completed_at:         string | null
+  completed_by_crew_id: string
 }
 
 export interface ChecklistInstanceItemRow {

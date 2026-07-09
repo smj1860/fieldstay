@@ -116,6 +116,7 @@ import { vendorConnectOnboardingCron } from '@/lib/inngest/functions/cron/vendor
 
 // Work order invoices
 import { handleWorkOrderInvoiceSubmitted } from '@/lib/inngest/functions/work-order-invoice'
+import { handleWorkOrderInvoicePaid }      from '@/lib/inngest/functions/work-order-invoice-paid'
 
 // Self-Funding Guidebook — sponsor lifecycle + billing credits
 import { guidebookSponsorActivated }      from '@/lib/inngest/functions/guidebook-sponsor-activated'
@@ -246,6 +247,7 @@ export const { GET, POST, PUT } = serve({
 
     // Work order invoices
     handleWorkOrderInvoiceSubmitted,
+    handleWorkOrderInvoicePaid,
 
     // Self-Funding Guidebook
     guidebookSponsorActivated,

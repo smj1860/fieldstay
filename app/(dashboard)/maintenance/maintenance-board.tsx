@@ -2473,7 +2473,9 @@ export function MaintenanceBoard({
                 const status = e.target.value as WoStatus
                 e.target.value = ''
                 startBulkAction(async () => {
-                  await bulkUpdateWorkOrderStatus([...selectedIds], status)
+                  const result = await bulkUpdateWorkOrderStatus([...selectedIds], status)
+                  if (result.error) setWarning(result.error)
+                  else if (result.warning) setWarning(result.warning)
                   clearSelection()
                 })
               }}

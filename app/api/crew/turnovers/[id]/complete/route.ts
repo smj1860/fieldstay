@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
+import { resolveTurnoverCompletedAt } from '@/lib/turnovers/completion'
 
 /**
  * POST /api/crew/turnovers/[id]/complete
@@ -32,7 +33,7 @@ export async function POST(
 
   const { data: turnover } = await supabase
     .from('turnovers')
-    .select('id, property_id, org_id, status')
+    .select('id, property_id, org_id, status, inventory_confirmed_complete_at')
     .eq('id', turnover_id)
     .eq('org_id', crew.org_id)
     .single()
@@ -44,7 +45,22 @@ export async function POST(
     return NextResponse.json({ success: true })
   }
 
-  const completedAt = new Date().toISOString()
+  const { data: checklistInstance } = await supabase
+    .from('checklist_instances')
+    .select('completed_at')
+    .eq('turnover_id', turnover_id)
+    .maybeSingle()
+
+  // When completion was driven by both the "Confirm Checklist Complete"
+  // and "Confirm Inventory Complete" checkboxes, completed_at should
+  // reflect whichever of those two was confirmed LAST — not the wall-clock
+  // moment this route happened to run, which lags behind by however long
+  // it took a device to notice the second confirmation (network latency,
+  // or the crew tapping the still-present manual button afterward).
+  const completedAt = resolveTurnoverCompletedAt(
+    checklistInstance?.completed_at ?? null,
+    turnover.inventory_confirmed_complete_at ?? null,
+  )
 
   const { error } = await supabase
     .from('turnovers')

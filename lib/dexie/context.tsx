@@ -18,11 +18,12 @@ import {
 } from './schema'
 
 interface DexieContextValue {
-  db:     FieldStayDexie | null
-  userId: string | null
+  db:           FieldStayDexie | null
+  userId:       string | null
+  crewMemberId: string | null
 }
 
-const DexieContext = createContext<DexieContextValue>({ db: null, userId: null })
+const DexieContext = createContext<DexieContextValue>({ db: null, userId: null, crewMemberId: null })
 
 /**
  * Mirrors PowerSyncContext.Provider in app/crew/crew-shell.tsx: resolves the
@@ -39,6 +40,7 @@ const DexieContext = createContext<DexieContextValue>({ db: null, userId: null }
  */
 export function DexieProvider({ userId: userIdProp, children }: { userId?: string; children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(userIdProp ?? null)
+  const [crewMemberId, setCrewMemberId] = useState<string | null>(null)
 
   // Sync a userIdProp change into state during render rather than in an
   // effect, so the update lands in the same render pass as the prop change.
@@ -104,8 +106,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         return
       }
 
-      const turnoverIds = [
-        ...new Set((assignments ?? []).map((a: { turnover_id: string }) => a.turnover_id)),
+      const turnoverIds: string[] = [
+        ...new Set<string>((assignments ?? []).map((a: { turnover_id: string }) => a.turnover_id)),
       ]
 
       if (!turnoverIds.length) {
@@ -119,13 +121,22 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       const { data: turnovers, error: tErr } = await supabase
         .from('turnovers')
-        .select('id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes')
+        .select(
+          'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
+          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id'
+        )
         .in('id', turnoverIds)
       if (tErr) {
         console.error('[DexieProvider] turnovers fetch failed:', tErr)
         return
       }
-      if (turnovers?.length) await db.turnovers.bulkPut(turnovers as TurnoverRow[])
+      if (turnovers?.length) {
+        const normalizedTurnovers = turnovers.map((t: Record<string, unknown>) => ({
+          ...t,
+          inventory_confirmed_by_crew_id: t.inventory_confirmed_by_crew_id ?? '',
+        }))
+        await db.turnovers.bulkPut(normalizedTurnovers as TurnoverRow[])
+      }
 
       const propertyIds = [
         ...new Set((turnovers ?? []).map((t: { property_id: string }) => t.property_id)),
@@ -153,45 +164,144 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         if (inventory?.length) await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
       }
 
+      await pullChecklistsForTurnovers(turnoverIds, crewMemberId)
+
+      // Only advance watermark after everything landed successfully
+      await db.sync_meta.put({ key: 'turnover_assignments_synced_at', value: syncStartedAt })
+    }
+
+    // Pulls checklist_instances + checklist_instance_items for a given set
+    // of turnover ids. Always a full re-pull (no watermark) — called both
+    // from the assignment-driven sync above and from the checklist
+    // Realtime subscription below, since a checklist item completing
+    // doesn't touch turnover_assignments at all, so the assignment
+    // watermark has nothing to key off of for that case.
+    async function pullChecklistsForTurnovers(
+      turnoverIds: string[],
+      thisCrewMemberId: string,
+    ): Promise<void> {
+      if (!turnoverIds.length) return
+      const db = getDexieDb(userId!)
+
       const { data: instances, error: ciErr } = await supabase
         .from('checklist_instances')
-        .select('id, turnover_id, org_id, status, section_photo_path')
+        .select('id, turnover_id, org_id, status, section_photo_path, started_at, completed_at, completed_by_crew_id')
         .in('turnover_id', turnoverIds)
       if (ciErr) {
         console.error('[DexieProvider] checklist_instances fetch failed:', ciErr)
         return
       }
-      if (instances?.length) await db.checklist_instances.bulkPut(instances as ChecklistInstanceRow[])
-
       if (instances?.length) {
-        const instanceIds = instances.map((i: { id: string }) => i.id)
-        const { data: items, error: itemErr } = await supabase
-          .from('checklist_instance_items')
-          .select('id, instance_id, turnover_id, section_name, task, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item')
-          .in('instance_id', instanceIds)
-        if (itemErr) {
-          console.error('[DexieProvider] checklist_instance_items fetch failed:', itemErr)
-          return
-        }
-        if (items?.length) {
-          const normalized = items.map((item: Record<string, unknown>) => ({
-            ...item,
-            is_completed:          Number(item.is_completed ?? 0),
-            requires_photo:        Number(item.requires_photo ?? 0),
-            is_section_final_item: item.is_section_final_item !== null ? Number(item.is_section_final_item) : 0,
-            completed_by_crew_id:  item.completed_by_crew_id ?? '',
-            // Only retain crew_notes if this crew member authored them —
-            // nullify notes from other crew members on multi-crew turnovers
-            // before they land in this device's local cache.
-            crew_notes:            item.completed_by_crew_id === crewMemberId ? (item.crew_notes ?? '') : '',
-            photo_reason:          item.photo_reason ?? '',
-          }))
-          await db.checklist_instance_items.bulkPut(normalized as ChecklistInstanceItemRow[])
-        }
+        const normalizedInstances = instances.map((i: Record<string, unknown>) => ({
+          ...i,
+          completed_by_crew_id: i.completed_by_crew_id ?? '',
+        }))
+        await db.checklist_instances.bulkPut(normalizedInstances as ChecklistInstanceRow[])
       }
+      if (!instances?.length) return
 
-      // Only advance watermark after everything landed successfully
-      await db.sync_meta.put({ key: 'turnover_assignments_synced_at', value: syncStartedAt })
+      const instanceIds = instances.map((i: { id: string }) => i.id)
+      const { data: items, error: itemErr } = await supabase
+        .from('checklist_instance_items')
+        .select('id, instance_id, turnover_id, section_name, task, is_completed, completed_at, completed_by_crew_id, requires_photo, photo_reason, photo_storage_path, crew_notes, sort_order, is_section_final_item')
+        .in('instance_id', instanceIds)
+      if (itemErr) {
+        console.error('[DexieProvider] checklist_instance_items fetch failed:', itemErr)
+        return
+      }
+      if (items?.length) {
+        const normalized = items.map((item: Record<string, unknown>) => ({
+          ...item,
+          is_completed:          Number(item.is_completed ?? 0),
+          requires_photo:        Number(item.requires_photo ?? 0),
+          is_section_final_item: item.is_section_final_item !== null ? Number(item.is_section_final_item) : 0,
+          completed_by_crew_id:  item.completed_by_crew_id ?? '',
+          // Only retain crew_notes if this crew member authored them —
+          // nullify notes from other crew members on multi-crew turnovers
+          // before they land in this device's local cache.
+          crew_notes:            item.completed_by_crew_id === thisCrewMemberId ? (item.crew_notes ?? '') : '',
+          photo_reason:          item.photo_reason ?? '',
+        }))
+        await db.checklist_instance_items.bulkPut(normalized as ChecklistInstanceItemRow[])
+      }
+    }
+
+    // Re-fetches just the turnovers rows themselves (status, inventory
+    // confirmation fields) — separate from pullChecklistsForTurnovers,
+    // which never touches the turnovers table. Needed so one crew member's
+    // "Confirm Inventory Complete" tap (or the resulting auto-completion)
+    // shows up live on the other crew member's device.
+    async function pullTurnoversOnly(turnoverIds: string[]): Promise<void> {
+      if (!turnoverIds.length) return
+      const db = getDexieDb(userId!)
+
+      const { data: turnovers, error } = await supabase
+        .from('turnovers')
+        .select(
+          'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
+          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id'
+        )
+        .in('id', turnoverIds)
+      if (error) {
+        console.error('[DexieProvider] turnovers re-fetch failed:', error)
+        return
+      }
+      if (turnovers?.length) {
+        const normalized = turnovers.map((t: Record<string, unknown>) => ({
+          ...t,
+          inventory_confirmed_by_crew_id: t.inventory_confirmed_by_crew_id ?? '',
+        }))
+        await db.turnovers.bulkPut(normalized as TurnoverRow[])
+      }
+    }
+
+    // Refreshes the Realtime subscription covering checklist_instance_items,
+    // checklist_instances, and turnovers changes to exactly the crew
+    // member's currently-open turnovers — so both crew members see each
+    // other's checklist item ticks, "Confirm Checklist/Inventory Complete"
+    // taps, and the resulting turnover auto-completion live. Reads the
+    // local Dexie cache (already kept current by syncAssignedTurnovers)
+    // rather than re-deriving from a possibly-incremental assignment
+    // fetch, so it always reflects the full set, not just newly-added
+    // turnovers.
+    async function refreshChecklistSubscription(thisCrewMemberId: string): Promise<void> {
+      const db = getDexieDb(userId!)
+      const allTurnovers = await db.turnovers.toArray()
+      const turnoverIds = allTurnovers
+        .filter((t) => t.status !== 'completed' && t.status !== 'cancelled')
+        .map((t) => t.id)
+
+      const sameSet = turnoverIds.length === subscribedTurnoverIds.length
+        && turnoverIds.every((id) => subscribedTurnoverIds.includes(id))
+      if (sameSet) return
+
+      if (checklistChannel) {
+        supabase.removeChannel(checklistChannel)
+        checklistChannel = null
+      }
+      subscribedTurnoverIds = turnoverIds
+      if (!turnoverIds.length) return
+
+      const filter = `turnover_id=in.(${turnoverIds.join(',')})`
+
+      checklistChannel = supabase
+        .channel(`checklist-items-${thisCrewMemberId}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'checklist_instance_items', filter },
+          () => { void pullChecklistsForTurnovers(subscribedTurnoverIds, thisCrewMemberId) }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'checklist_instances', filter },
+          () => { void pullChecklistsForTurnovers(subscribedTurnoverIds, thisCrewMemberId) }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'turnovers', filter: `id=in.(${turnoverIds.join(',')})` },
+          () => { void pullTurnoversOnly(subscribedTurnoverIds) }
+        )
+        .subscribe()
     }
 
     async function syncWorkOrders(crewMemberId: string): Promise<void> {
@@ -276,6 +386,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     }
 
     let channel: ReturnType<typeof supabase.channel> | null = null
+    let checklistChannel: ReturnType<typeof supabase.channel> | null = null
+    let subscribedTurnoverIds: string[] = []
 
     async function run() {
       const { data: crewMember } = await supabase
@@ -286,6 +398,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .maybeSingle()
       if (!crewMember || cancelled) return
 
+      setCrewMemberId(crewMember.id as string)
+
       // force=true: full pull on mount, bypasses any stale watermark
       await Promise.all([
         syncAssignedTurnovers(crewMember.id, true),
@@ -295,12 +409,17 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       ])
       if (cancelled) return
 
+      await refreshChecklistSubscription(crewMember.id)
+
       channel = supabase
         .channel(`turnover-assignments-${crewMember.id}`)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${crewMember.id}` },
-          () => { void syncAssignedTurnovers(crewMember.id, false) }
+          async () => {
+            await syncAssignedTurnovers(crewMember.id, false)
+            if (!cancelled) await refreshChecklistSubscription(crewMember.id)
+          }
         )
         .on(
           'postgres_changes',
@@ -315,13 +434,14 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     return () => {
       cancelled = true
       if (channel) supabase.removeChannel(channel)
+      if (checklistChannel) supabase.removeChannel(checklistChannel)
     }
   }, [userId])
 
   const db = userId ? getDexieDb(userId) : null
 
   return (
-    <DexieContext.Provider value={{ db, userId }}>
+    <DexieContext.Provider value={{ db, userId, crewMemberId }}>
       {children}
     </DexieContext.Provider>
   )
@@ -343,4 +463,17 @@ export function useDexieUserId(): string {
     throw new Error('useDexieUserId must be used within a DexieProvider, with an active session')
   }
   return userId
+}
+
+/**
+ * The active crew_members.id (not the auth user id) as resolved by the
+ * nearest DexieProvider. Resolves asynchronously after userId (an extra
+ * crew_members lookup), so unlike useDexieDb/useDexieUserId this returns
+ * null rather than throwing during that brief window — callers that need
+ * it for a write (e.g. completed_by_crew_id) should guard on it being
+ * non-null rather than assume it's always ready synchronously.
+ */
+export function useCrewMemberId(): string | null {
+  const { crewMemberId } = useContext(DexieContext)
+  return crewMemberId
 }
