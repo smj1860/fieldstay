@@ -124,14 +124,6 @@ export type FieldStayEvents = {
     }
   }
 
-  'inventory/below-par': {
-    data: {
-      property_id: string
-      org_id: string
-      item_ids: string[]
-    }
-  }
-
   'inventory/cart_requested': {
     data: {
       org_id:        string
@@ -224,10 +216,6 @@ export type FieldStayEvents = {
   // ----------------------------------------------------------
   // Maintenance Schedules
   // ----------------------------------------------------------
-
-  'maintenance/daily-check': {
-    data: Record<string, never>
-  }
 
   'maintenance/schedule-due': {
     data: {

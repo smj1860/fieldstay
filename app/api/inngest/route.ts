@@ -87,6 +87,10 @@ import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-mas
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
 import { notifyAssignmentGap }     from '@/lib/inngest/functions/notify-assignment-gap'
 
+// Vendor compliance expiry warnings
+import { vendorComplianceExpiryCheck }      from '@/lib/inngest/functions/cron/vendor-compliance-expiry-check'
+import { notifyVendorComplianceExpiring }   from '@/lib/inngest/functions/notify-vendor-compliance-expiring'
+
 // Work order public dispatch + sign-off
 import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
 
@@ -225,6 +229,10 @@ export const { GET, POST, PUT } = serve({
     // Integration error notifications
     notifyIntegrationError,
     notifyAssignmentGap,
+
+    // Vendor compliance expiry warnings
+    vendorComplianceExpiryCheck,
+    notifyVendorComplianceExpiring,
 
     // Work order public dispatch
     workOrderDispatch,

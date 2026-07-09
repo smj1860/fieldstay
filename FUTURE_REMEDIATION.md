@@ -310,3 +310,74 @@ connection and has been resolved.
 **Suggested fix:** call `cleanup_expired_pending_integration_links()`
 probabilistically from `app/connect/finish/route.ts`, mirroring the
 existing `cleanup_webhook_dedup()` pattern.
+
+---
+
+## 13. `repuguard/activated` event is defined but never wired to anything
+
+**File:** `lib/inngest/events.ts`
+
+Found while mapping the Inngest event graph (`docs/architecture/CODEBASE_MAP_PASS2_EVENT_GRAPH.md`).
+`organizations.repuguard_status` is set directly by
+`app/api/webhooks/stripe/route.ts` on the RepuGuard-specific subscription
+branch — a plain DB update, no event fired. This event type has zero
+producers and zero consumers anywhere in the codebase. Left as-is
+(deliberately, at the repo owner's request) rather than deleted, because
+it's plausible something was meant to fire on activation — a welcome
+email, an auto-generated first batch of review responses — that was
+never built, as opposed to the two events removed alongside it
+(`inventory/below-par`, `maintenance/daily-check`) which were confirmed
+superseded by other mechanisms.
+
+**Suggested fix:** decide once and for all — either delete the unused
+event type (if activation genuinely needs no follow-on automation), or
+wire it up the same way `guidebook/sponsor.checkout.completed` triggers
+`guidebookSponsorActivated` (fire it from the same Stripe webhook branch
+that already sets `repuguard_status`, add a consumer that does whatever
+onboarding step RepuGuard activation should kick off).
+
+---
+
+## 14. `billing/subscription-updated` is sent but has zero consumers
+
+**File:** `app/api/webhooks/stripe/route.ts` (send site), `lib/inngest/events.ts`
+
+Also found during the event-graph pass. Fired on every
+`customer.subscription.created`/`.updated` webhook, but no Inngest
+function anywhere subscribes to it. Not a functional break —
+`organizations.plan`/`plan_status`/`max_properties` are updated
+synchronously in the same webhook handler, before the send — but the
+event itself reaches no listener. Looks like a stub for a "notify PM
+their plan changed" email that was scoped but never implemented,
+unlike `billing/trial-lifecycle-start` and `user/onboarding.drip.started`
+(initially miscategorized as unmatched by the same pass, later confirmed
+fully wired via `email-trial-lifecycle.tsx`/`onboarding-drip.tsx` once
+the `.tsx` function files were included in the search).
+
+**Suggested fix:** either build the missing PM-facing "plan changed"
+notification consumer (mirroring `notifyIntegrationError`'s shape), or
+remove the dead `inngest.send()` call and the event type if no
+notification was ever actually wanted here.
+
+---
+
+## 15. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
+
+**Files:** `app/(dashboard)/layout.tsx`, `lib/auth.ts`
+
+Found while mapping UI surfaces (`docs/architecture/CODEBASE_MAP_PASS4_UI_SURFACES.md`).
+`app/(dashboard)/layout.tsx` does not call `requireOrgMember()` — it
+inlines its own `organization_members`/`organizations` query, extended
+with fields (`repuguard_status`, `onboarding_steps_completed`) that the
+shared `OrgMembership` type in `lib/auth.ts` doesn't carry, plus its own
+onboarding/billing-gate redirect logic that doesn't match
+`requireOrgMember()`'s behavior. Not a bug today, but a maintenance seam:
+a future change to the org-membership query (e.g. a new column another
+feature needs inside `requireOrgMember()`) has no reason to also touch
+the layout's copy, and the two can silently drift apart.
+
+**Suggested fix:** extend `OrgMembership`/`requireOrgMember()` to
+optionally carry the extra fields the layout needs (or add a second
+shared helper it can call for the same base query), so there's one
+canonical implementation of "look up the current user's org membership"
+instead of two.
