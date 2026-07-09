@@ -1,0 +1,450 @@
+# Codebase Map — Pass 2: The Internal Event / Automation Graph
+
+Pass 1 mapped where data *enters* FieldStay. This pass maps what happens
+next: the ~70-event Inngest graph (`lib/inngest/events.ts`) that turns a
+boundary event into the automations CLAUDE.md calls "the core promise" —
+turnover completes → expense posts, inventory drops → cart builds, WO is
+created → vendor is notified.
+
+Format per chain: **origin → event → consumer function(s) → events it
+re-emits (if any) → terminal effect** (DB write / email / SMS / Stripe call).
+"Origin" is either a boundary route/Server Action (Pass 1) or a cron.
+
+---
+
+## 1. Bookings → Turnovers (the core turnover pipeline)
+
+```
+OwnerRez/Hospitable/Hostaway/iCal sync functions (see §6)
+  └─ emit turnover/created  ──────────────► turnover-events.ts (turnover-created)
+                                             └─ builds checklist_instance, computes
+                                                is_same_day_turnover
+     also triggers               ──────────► auto-assign-turnover.ts
+                                             └─ scores crew, sets suggested_crew_ids
+                                                / suggestion_reasoning
+                                             └─ if no viable crew found, emits
+                                                crew/assignment-gap
+                                                  └─ notify-assignment-gap.ts
+                                                     → PM email (renderPmAlert)
+
+turnovers/actions.ts (PM assigns crew manually)
+  └─ emits turnover/crew-assigned ────────► crew-assignment.ts
+                                             └─ writes turnover_assignments,
+                                                notifies crew (push/SMS)
+
+turnovers/actions.ts, app/api/crew/turnovers/[id]/complete
+  └─ emits turnover/completed ────────────► turnover-events.ts (turnover-completed)
+                                             └─ posts owner_transactions
+                                                (source: wo_completion — actually
+                                                cleaning_fee/turnover cost),
+                                                idempotent on source_reference_id
+
+turnovers/actions.ts
+  └─ emits turnover/flagged ──────────────► flagged-turnover-wo.ts
+                                             └─ auto-creates a work_order
+                                                (wo_source: crew_flag)
+
+app/api/crew/turnovers/[id]/start
+  └─ emits turnover/started               (no dedicated consumer function —
+                                            logged for analytics/future use)
+```
+
+**Standalone crons in this domain (no incoming event, time-driven only):**
+`cron/turnover-priority-decay.ts` (09:00 CT) — decays aging turnover
+priority scores. No event in, no event out.
+
+---
+
+## 2. Work Orders (creation → dispatch → completion → invoice → payment)
+
+This is the deepest chain in the graph.
+
+```
+maintenance/actions.ts (manual create), cron/maintenance-schedules.ts,
+cron/work-order-ops.ts (aging/repeat-issue detection)
+  └─ emit work-order/created ─────────────► work-order-events.ts (work-order-created)
+                                             └─ selects vendor if auto-assign,
+                                                writes wo_number via
+                                                wo_number_counters
+
+maintenance/actions.ts (vendor dispatch)
+  └─ emits work-order/dispatched ─────────► work-order-dispatch.ts
+                                             └─ emails vendor a public
+                                                completion-token link
+                                                (Resend)
+
+maintenance/actions.ts (vendor assigned/reassigned)
+  └─ emits work-order/vendor.assigned ────► work-order-vendor-assigned.ts
+                                             └─ vendor compliance check,
+                                                notifies vendor
+
+maintenance/actions.ts (internal crew assigned, no vendor)
+  └─ emits work-order/crew.assigned ──────► work-order-crew-assigned.ts
+                                             └─ surfaces WO in crew PWA via
+                                                Dexie sync
+
+app/api/crew/work-orders/[id]/complete
+  └─ emits work-order/crew.completed ─────► work-order-crew-completed.ts
+                                             └─ marks wo_status: completed
+
+maintenance/actions.ts (quote request), also actions.ts line 672
+  └─ emits work-order/quote-requested ────► work-order-events.ts
+                                             (work-order-quote-requested)
+                                             └─ emails vendor a quote-token link
+
+app/api/work-orders/[token]/quote (vendor submits quote, no session)
+  └─ emits work-order/quote-submitted ────► work-order-events.ts
+                                             (work-order-quote-submitted)
+                                             └─ notifies PM
+
+maintenance/actions.ts (PM marks complete)
+  └─ emits work-order/completed ──────────► work-order-events.ts (work-order-completed)
+                                             └─ posts owner_transactions
+                                                (idempotent on
+                                                source_reference_id)
+
+app/api/work-orders/[token]/complete (vendor completes via public portal)
+  └─ emits work-order/completed-via-portal ► work-order-events.ts
+                                             └─ same posting path as above
+  └─ ALSO emits work-order/invoice-submitted (line 193) and, once signed
+     off, turnover/completed (line 226) — one route firing three chains.
+
+app/actions/work-order-public.ts (vendor invoice submit)
+  └─ emits work-order/invoice-submitted ──► work-order-invoice.ts
+                                             └─ creates invoice record,
+                                                notifies PM
+
+app/actions/work-order-public.ts (PM signs off on invoice)
+  └─ emits work-order/signed-off ─────────► work-order-dispatch.ts
+                                             (work-order-signed-off)
+                                             └─ emails vendor sign-off
+                                                confirmation
+
+Stripe webhook (invoice payment captured)
+  └─ emits work-order/invoice-paid ───────► work-order-invoice-paid.ts
+                                             └─ marks invoice paid, emails
+                                                vendor "you've been paid"
+
+cron/work-order-ops.ts (13:00 UTC daily)
+  └─ scans for aging/overdue WOs, emits work-order/aging-escalated
+     (no dedicated listener found — priority bump handled inline in the
+     same cron) and work-order/overdue ─────► work-order-events.ts
+                                                (work-order-overdue)
+                                                └─ notifies PM
+  └─ also emits maintenance/repeat-issue-detected (no dedicated listener —
+     recorded for analytics inline)
+  └─ can itself emit work-order/created when repeat-issue detection
+     decides a new WO is warranted
+```
+
+---
+
+## 3. Maintenance Schedules & Asset Health
+
+```
+cron/maintenance-schedules.ts (08:00 CT daily)
+  └─ walks maintenance_schedules where next_due_date is near,
+     emits work-order/created when auto_create_wo is true
+     (feeds into §2's work-order-created chain)
+  └─ emails PM (renderPmAlert) for schedules needing manual attention
+
+app/(dashboard)/properties/.../checklist/actions.ts
+  └─ emits checklist/template-broadcast ──► checklist-broadcast.ts
+                                             └─ fans a checklist template out
+                                                to target properties
+
+setup/checklist-template/actions.ts
+  └─ emits checklist/master-template.apply.requested
+                                          ──► apply-master-checklist.ts
+                                             └─ seeds org_master_checklist_items
+                                                onto selected properties
+
+capital-planning/actions.ts
+  └─ emits asset/depreciation-ledger-requested ► depreciation-ledger.ts
+                                             └─ writes asset_depreciation_entries
+                                                (MACRS), UNIQUE(asset_id, tax_year)
+  └─ emits asset/capex-projection-requested ► capex-projection-trigger.ts
+                                             └─ triggers capex-projections.ts logic
+```
+
+**Standalone crons (no event in/out — pure scheduled sweeps):**
+`cron/asset-health.ts` (08:00 CT) recomputes `property_assets.health_score`.
+`cron/checklist-signals.ts` (23:00 CT, before asset-health) feeds signals
+asset-health consumes. `capex-projections.ts` also runs standalone on
+`0 0 1 * *` (monthly) independent of the requested-event path.
+`depreciation-ledger.ts` also has a standalone `0 0 1 1 *` (Jan 1) cron leg.
+
+---
+
+## 4. Inventory & Purchase Orders
+
+```
+app/api/crew/inventory-count, inventory/actions.ts
+  └─ emits inventory/count-submitted ─────► inventory-events.ts
+                                             (inventory-count-submitted)
+                                             └─ recomputes current_quantity,
+                                                may trigger below-par detection
+                                                (in-JS filter — no supabase.raw())
+
+inventory/actions.ts (PM approves a PO)
+  └─ emits purchase-order/approved ───────► inventory-events.ts
+                                             (purchase-order-approved)
+                                             └─ posts owner_transactions
+                                                (source: inventory_purchase)
+
+inventory/actions.ts (cart build request)
+  └─ emits inventory/cart_requested ──────► build-shopping-cart.ts
+                                             └─ calls Kroger API, builds cart,
+                                                emails/notifies PM
+```
+
+`inventory/below-par` is defined in `events.ts` but no producer or
+consumer currently references it by name — likely superseded by the
+inline below-par check inside `inventory-events.ts`'s count-submitted
+handler. Worth confirming if it's dead before a future cleanup pass.
+
+`inventory-order-email-cron.ts` (18:00 CT) is a standalone daily digest —
+no event in or out.
+
+---
+
+## 5. Integrations — Connect & Sync Lifecycles
+
+Each PMS provider follows the same shape: **connect → initial sync →
+recurring incremental sync**, plus a shared token-refresh and
+connection-error path.
+
+```
+app/connect/finish, app/api/integrations/[provider]/callback (OAuth done)
+  └─ emits integration/ownerrez.connected ► ownerrez/initial-sync.ts
+                                             AND ownerrez-reviews-sync.ts
+                                             (both listen to the same event)
+                                             └─ initial-sync backfills
+                                                properties/bookings, emits
+                                                turnover/created per booking
+                                                (→ §1) and integration/
+                                                connection.error on failure
+                                                (→ notify-integration-error.ts)
+
+  └─ emits integration/hospitable.connected ► hospitable/initial-sync.ts
+                                             └─ same shape, emits
+                                                turnover/created
+
+  └─ emits integration/kroger.connected ──► kroger-connected.ts
+                                             └─ auto-configures store prefs
+
+  └─ emits integration/hostaway.sync.requested ► hostaway/initial-sync.ts
+                                             └─ emits turnover/created
+
+settings/integrations/actions.ts (manual "sync now")
+  └─ emits ownerrez/sync.now.requested ───► ownerrez/incremental-sync.ts
+                                             (shared handler, see below)
+
+lib/integrations/providers/ownerrez.ts, ownerrez-api.ts (internal callers)
+  └─ emit integration/ownerrez.sync.requested ► ownerrez/incremental-sync.ts
+       (cron '0/15 * * * *' ALSO triggers this same function — three
+       trigger paths converge on one handler: cron, webhook-relay, and
+       manual "sync now")
+                                             └─ emits turnover/created,
+                                                integration/connection.error
+
+app/api/webhooks/[provider]/route.ts (Hospitable webhook)
+  └─ calls lib/integrations/providers/hospitable.ts, which emits
+     integration/hospitable.sync.requested ► hospitable/incremental-sync.ts
+                                             └─ emits turnover/created,
+                                                repuguard/batch_generate.requested
+     integration/hospitable.property_merged ► hospitable/property-merge.ts
+                                             └─ repoints property FKs from
+                                                previous_external_id to
+                                                new_external_id
+
+hospitable/teammate-sync-cron.ts (09:00 daily, standalone)
+  └─ emits integration/hospitable.teammate_sync.requested
+                                          ──► hospitable/teammate-sync-handler.ts
+                                             └─ reconciles crew_members
+                                                (Hospitable has no teammate
+                                                webhook — this is the only
+                                                path that picks up changes)
+
+cron/integration-token-refresh.ts (every 2h, standalone)
+  └─ emits integration/token.proactive.refresh.requested
+                                          ──► cron/integration-token-refresh-handler.ts
+                                             └─ refreshes OAuth tokens for
+                                                all providers
+
+Any provider's sync failure
+  └─ emits integration/connection.error ──► notify-integration-error.ts
+                                             └─ emails PM, throttled once
+                                                per 4h per connection
+```
+
+`ical-sync.ts` runs both as an hourly cron (`0 * * * *`) and as a
+listener on `ical/sync.all.requested` (fired manually from
+`bookings/actions.ts` and `turnovers/actions.ts`) — same handler, two
+trigger paths, matching the OwnerRez incremental-sync pattern above. It
+fans out per-feed to `ical/sync.requested`, and on detecting a new
+booking emits `booking/detected` → `booking-events.ts` → emits
+`turnover/created` (→ §1).
+
+`geocoding-backfill.ts` is a one-time manual-trigger utility
+(`geocoding/backfill-requested`) — not part of any recurring chain.
+
+---
+
+## 6. Billing / Stripe
+
+```
+Stripe webhook (subscription updated)
+  └─ emits billing/subscription-updated   (no dedicated Inngest listener
+                                            found — likely handled inline
+                                            in the webhook route itself;
+                                            confirm before assuming dead)
+
+Stripe webhook (org's first successful payment)
+  └─ emits billing/trial-lifecycle-start ► (no dedicated listener found)
+  └─ emits billing/first-payment-confirmed ► email-subscriber-checkin.ts
+                                             └─ fires a founder check-in
+                                                email sequence
+```
+
+`user/onboarding.drip.started` (from `app/onboarding/actions.ts`) has
+the same shape — defined and sent, but no consumer function currently
+subscribes to it in the function list. These three (`billing/subscription-
+updated`, `billing/trial-lifecycle-start`, `user/onboarding.drip.started`)
+are candidates to verify as dead sends or as still-inline-handled before
+a later cleanup pass — not confirmed dead here, just unmatched by this
+grep pass.
+
+---
+
+## 7. Self-Funding Guidebook (sponsor + guest SMS lifecycle)
+
+```
+Stripe webhook (sponsor checkout completes)
+  └─ emits guidebook/sponsor.checkout.completed ► guidebook-sponsor-activated.ts
+                                             └─ activates sponsor slot
+
+Stripe webhook (sponsor subscription cancelled / payment failed)
+  └─ emits guidebook/sponsor.subscription.cancelled
+     emits guidebook/sponsor.payment.failed ► guidebook-sponsor-deactivated.ts
+                                             (single function listens to both)
+
+Stripe webhook (recovered payment)
+  └─ emits guidebook/sponsor.payment.recovered ► guidebook-sponsor-payment-recovered.ts
+
+guidebook-daily-monitor.ts (13:00 UTC / 8am CT, standalone cron)
+  └─ emits guidebook/billing.credit.evaluate ► guidebook-billing-credit-handler.ts
+  └─ emits guidebook/grace.period.expired ─► guidebook-grace-expired-handler.ts
+                                             └─ deactivates guidebook after
+                                                trial/grace window lapses
+
+app/actions/guidebook.ts (guest SMS opt-in page)
+  └─ emits guidebook/guest.opted.in ──────► guidebook-guest-opted-in.ts
+                                             └─ writes guidebook_guest_sms_optins,
+                                                sends confirmation SMS
+                                                (gated on SMS_ENABLED)
+
+guidebook-stay-extension-cron.ts (11am ET daily, standalone)
+  └─ finds gap-night opportunities, emits guidebook/stay.extension.request
+                                          ──► guidebook-stay-extension-handler.ts
+                                             └─ notifies guest via
+                                                ownerrez_url / email / sms
+                                                depending on contactMethod
+```
+
+**Standalone crons, no event in/out:** `guidebook-sms-morning-cron.ts`
+(noon UTC), `guidebook-sms-evening-cron.ts` (22:00 UTC), and
+`guidebook-pre-arrival-email-cron.ts` (14:00 UTC) each independently
+query bookings/configs and send guest SMS/email directly — they don't
+participate in the event graph at all.
+
+---
+
+## 8. Support, Messaging, Vendor Compliance — small independent chains
+
+```
+app/api/support/chat/route.ts (bot escalates to human)
+  └─ emits support/conversation.escalated ► support-conversation-escalated.ts
+                                             └─ emails support inbox
+
+messages/actions.ts (in-app crew↔PM message sent)
+  └─ emits message/sent ───────────────────► log-message-comm.ts
+                                             └─ writes communication_logs
+
+reviews/actions.ts (PM requests AI review responses)
+  └─ emits repuguard/batch_generate.requested ► repuguard-batch-generate.ts
+                                             └─ generates review_responses
+                                                (also triggered by
+                                                hospitable/incremental-sync.ts
+                                                after a review sync)
+```
+
+`vendor-compliance/expiry-warning` is defined in `events.ts` with no
+producer or consumer found in this pass — `cron/vendor-connect-onboarding.ts`
+(07:00 daily) appears to handle compliance-adjacent nudges directly
+rather than through this event; worth confirming in a later pass.
+
+`repuguard/activated` (events.ts) — no producer/consumer matched either.
+
+---
+
+## 9. Cross-Cutting: the Dead-Letter Handler
+
+`on-failure.ts` listens to Inngest's own built-in `inngest/function.failed`
+system event (not a `FieldStayEvents` entry) — it fires whenever **any**
+function above exhausts its retries. It always logs; for a small
+allow-list of revenue-critical function IDs (`ownerrez-initial-sync`,
+`ownerrez-incremental-sync`, `work-order-created`) it also emails
+`stephen@fieldstay.app` via `renderPmAlert`.
+
+⚠️ Note for a future pass: this call site passes `renderPmAlert({ heading,
+body, details, ctaLabel, ctaUrl })` — but CLAUDE.md's canonical signature
+for `renderPmAlert` is `{ ctaLabel, ctaUrl, details }` only (no `heading`/
+`body`). This is the one call site in the whole event graph that doesn't
+match the documented signature — flagging for verification, not fixing
+here since Pass 2's scope is mapping, not remediation.
+
+---
+
+## Standalone Crons With No Event Participation
+
+These run on a schedule and never appear as either a producer or consumer
+elsewhere in the graph — pure background sweeps:
+
+```
+cron/comms-retention.ts            14:00 UTC daily — purges old communication_logs
+cron/audit-retention.ts            03:00 UTC, 1st of month — purges old audit_events
+cron/stale-feed-alert.ts           15:00 UTC daily — flags dead iCal feeds
+cron/turnover-priority-decay.ts    14:00 UTC daily — decays turnover priority scores
+cron/checklist-signals.ts          23:00 UTC daily — feeds asset-health's next run
+cron/asset-health.ts               13:00 UTC daily — recomputes health_score
+cron/vendor-connect-onboarding.ts  07:00 UTC daily — vendor Connect onboarding nudges
+capex-projections.ts               monthly (0 0 1 * *) standalone leg
+depreciation-ledger.ts             annual (0 0 1 1 *) standalone leg
+guidebook-sms-morning-cron.ts      noon UTC daily
+guidebook-sms-evening-cron.ts      22:00 UTC daily
+guidebook-pre-arrival-email-cron.ts 14:00 UTC daily
+```
+
+---
+
+## Summary
+
+| Domain | Chain depth | Notable pattern |
+|---|---|---|
+| Turnovers | 3 hops (sync → created → assign/complete) | Fan-in from 4 PMS providers + iCal all converge on `turnover/created` |
+| Work Orders | Up to 5 hops (created → dispatch → invoice → paid) | One route (`work-orders/[token]/complete`) fires 3 separate event chains at once |
+| Integrations | 2-3 hops per provider | 3 independent trigger paths (cron + webhook + manual) converge on one incremental-sync handler for OwnerRez |
+| Guidebook | 2 hops | Stripe is the origin for 5 of its 7 events |
+| Billing | 1 hop, mostly unmatched | 2 of 3 billing events have no found consumer — verify before assuming dead |
+| Standalone crons | 0 hops | 12 crons never touch the event graph — pure scheduled sweeps |
+
+**Unmatched events worth a follow-up grep in a later pass** (defined in
+`events.ts`, no producer or consumer found by this pass's search):
+`inventory/below-par`, `vendor-compliance/expiry-warning`,
+`repuguard/activated`, `billing/subscription-updated`,
+`billing/trial-lifecycle-start`, `user/onboarding.drip.started`,
+`maintenance/daily-check`. These may be handled inline elsewhere (webhook
+routes, cron bodies) rather than through the event bus, or may be dead —
+this pass didn't do a full-text read of every candidate file to confirm
+either way.
