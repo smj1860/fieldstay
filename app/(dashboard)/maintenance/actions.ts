@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
@@ -22,7 +22,7 @@ export async function createWorkOrder(
   _prev: MaintenanceActionState | null,
   formData: FormData
 ): Promise<MaintenanceActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
   const title                  = (formData.get('title') as string)?.trim()
   const property_id            = formData.get('property_id') as string
@@ -208,7 +208,7 @@ export async function rateWorkOrderVendor(
   rating: 1 | 2 | 3 | 4 | 5,
   ratingNotes: string | null
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('work_orders')
@@ -234,7 +234,7 @@ export async function assignCrewToWorkOrder(
   workOrderId: string,
   crewMemberId: string | null
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('work_orders')
@@ -268,7 +268,7 @@ export async function updateWorkOrder(
     portal_enabled:  boolean
   }
 ): Promise<{ error?: string }> {
-  const { supabase, membership, user } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
   const priority = PriorityLevelSchema.safeParse(data.priority).data ?? 'medium'
 
@@ -335,7 +335,7 @@ export async function addWorkOrderNote(
   workOrderId: string,
   note: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: wo } = await supabase
     .from('work_orders')
@@ -369,7 +369,7 @@ export async function updateWorkOrderStatus(
   status: WoStatus,
   notes?: string
 ): Promise<MaintenanceActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: current } = await supabase
     .from('work_orders')
@@ -490,7 +490,7 @@ export async function logActualCost(
   workOrderId: string,
   data: { actual_cost: number; invoice_reference?: string }
 ): Promise<{ error?: string }> {
-  const { supabase, membership, user } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
   const { data: wo } = await supabase
     .from('work_orders')
@@ -561,7 +561,7 @@ export async function recordWorkOrderPhoto(
   storagePath: string
 ): Promise<{ error?: string }> {
   // org scoping enforced by RLS's WITH CHECK on work_order_photos_insert
-  const { supabase } = await requireOrgMember()
+  const { supabase } = await requireOrgRole(['admin', 'manager'])
 
   const { data: { user } } = await supabase.auth.getUser()
 
@@ -581,7 +581,7 @@ export async function recordWorkOrderPhoto(
 }
 
 export async function deleteWorkOrderPhoto(photoId: string): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: photo } = await supabase
     .from('work_order_photos')
@@ -617,7 +617,7 @@ export async function sendQuoteRequests(
   workOrderId: string,
   vendorIds: string[]
 ): Promise<{ error?: string; sent: number }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   if (!vendorIds.length) return { error: 'Select at least one vendor', sent: 0 }
 
@@ -693,7 +693,7 @@ export async function sendQuoteRequests(
 export async function approveQuoteRequest(
   quoteRequestId: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: qr } = await supabase
     .from('quote_requests')
@@ -774,7 +774,7 @@ export async function approveQuoteRequest(
 export async function declineQuoteRequest(
   quoteRequestId: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: qr } = await supabase
     .from('quote_requests')
@@ -797,7 +797,7 @@ export async function declineQuoteRequest(
 // ── Delete (cancel) Work Order ───────────────────────────────────────────────
 
 export async function deleteWorkOrder(workOrderId: string): Promise<void> {
-  const { supabase, membership, user } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
   const { data: current } = await supabase
     .from('work_orders')
@@ -840,7 +840,7 @@ export async function deleteWorkOrder(workOrderId: string): Promise<void> {
 export async function createWorkOrderFromSchedule(
   scheduleId: string
 ): Promise<MaintenanceActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: schedule } = await supabase
     .from('maintenance_schedules')
@@ -926,7 +926,7 @@ export async function bulkAssignVendor(
   workOrderIds: string[],
   vendorId: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership, user } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
   const { data: vendor } = await supabase
     .from('vendors')
@@ -979,7 +979,7 @@ export async function bulkUpdateWorkOrderStatus(
   workOrderIds: string[],
   status: WoStatus
 ): Promise<{ error?: string; warning?: string }> {
-  const { supabase, membership, user } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
   // Vendor-assigned work orders must be completed through the vendor's own
   // portal (line items → invoice → Stripe Connect payout) — bulk-completing
@@ -1048,7 +1048,7 @@ export async function createMaintenanceSchedule(
     instructions:      string | null
   }
 ): Promise<MaintenanceActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: property } = await supabase
     .from('properties')
@@ -1099,7 +1099,7 @@ export async function updateMaintenanceSchedule(
     instructions:      string | null
   }
 ): Promise<MaintenanceActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('maintenance_schedules')
@@ -1130,7 +1130,7 @@ export async function updateMaintenanceSchedule(
 export async function deleteMaintenanceSchedule(
   scheduleId: string
 ): Promise<MaintenanceActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('maintenance_schedules')
@@ -1161,7 +1161,7 @@ export async function createMaintenanceScheduleTemplate(data: {
     sort_order:            number
   }>
 }): Promise<MaintenanceActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   if (!data.name.trim()) return { error: 'Template name is required' }
   if (!data.items.length) return { error: 'Add at least one item to the template' }
@@ -1222,7 +1222,7 @@ export async function broadcastMaintenanceTemplate(
   nextDueDates:       Record<string, string>          = {},
   recurrenceOverrides: Record<string, ScheduleFrequency> = {},
 ): Promise<BroadcastResult> {
-  const { supabase, user, membership } = await requireOrgMember()
+  const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
 
   if (propertyIds.length === 0) return { error: 'Select at least one property' }
 
@@ -1338,7 +1338,7 @@ export async function updateMaintenanceTemplate(
   templateId: string,
   updates: { name: string; description: string | null }
 ): Promise<{ error?: string }> {
-  const { supabase, membership, user } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
   if (!['owner', 'admin', 'manager'].includes(membership.role)) {
     return { error: 'Permission denied' }
@@ -1400,7 +1400,7 @@ export async function updateMaintenanceScheduleItem(
   }
 ): Promise<{ error?: string; success?: boolean }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     const { error } = await supabase
       .from('maintenance_schedules')
@@ -1428,7 +1428,7 @@ export async function duplicateMaintenanceScheduleItem(
   nextDueDate: string,
 ): Promise<{ error?: string; success?: boolean }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     const { data: original, error: fetchErr } = await supabase
       .from('maintenance_schedules')
@@ -1471,7 +1471,7 @@ export async function removeMaintenanceScheduleItem(
   propertyId: string,
 ): Promise<{ error?: string; success?: boolean }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     const { error } = await supabase
       .from('maintenance_schedules')
@@ -1502,7 +1502,7 @@ export async function addCatalogItemToProperty(
   recurrence:    ScheduleFrequency,
 ): Promise<{ error?: string; success?: boolean }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     const { data: catalogItem, error: catErr } = await supabase
       .from('maintenance_catalog_items')
@@ -1558,7 +1558,7 @@ export async function addCustomMaintenanceItem(
   },
 ): Promise<{ error?: string; success?: boolean }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     const { error } = await supabase
       .from('maintenance_schedules')
@@ -1592,7 +1592,7 @@ export async function recordMaintenanceCompletion(
   input: { notes?: string; work_order_id?: string },
 ): Promise<{ error?: string; success?: boolean; nextDueDate?: string }> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
     const { data: item, error: fetchErr } = await supabase
       .from('maintenance_schedules')
@@ -1658,6 +1658,9 @@ export async function recordMaintenanceCompletion(
 // "Show completed" toggle in the client board — same select shape as the
 // page's initial query.
 
+// Read-only — intentionally left on requireOrgMember() rather than
+// requireOrgRole(), since a viewer should still be able to see archived
+// work orders even though they can't mutate them.
 export async function fetchArchivedWorkOrders() {
   const { supabase, membership } = await requireOrgMember()
 
