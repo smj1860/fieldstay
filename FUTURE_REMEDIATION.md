@@ -235,27 +235,7 @@ adapter once verified.
 
 ---
 
-## 10. OwnerRez: reviews sync has no per-connection error isolation
-
-**File:** `lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts`
-
-Unlike `incremental-sync.ts` (which wraps each connection's work so one
-tenant's failure doesn't affect others), the reviews-sync loop re-throws
-any error that isn't a `RateLimitError` (already retried once) or
-`TokenRevokedError` — uncaught, out of the `for (const conn of connections)`
-loop. A single connection hitting a transient error aborts the whole run;
-connections later in the array that tick simply wait for the next 6-hour
-cron rather than being processed. Cursor integrity for the affected
-connections is fine (never advanced on error) — this is an availability
-gap for *other* tenants sharing that cron tick, not a data-corruption risk.
-
-**Suggested fix:** wrap each connection's body in its own try/catch and
-`continue` on any error (logging it), matching the isolation
-`incremental-sync.ts` already has.
-
----
-
-## 11. OwnerRez: no reconciliation for hard-deleted bookings/holds
+## 10. OwnerRez: no reconciliation for hard-deleted bookings/holds
 
 **File:** `lib/inngest/functions/ownerrez/incremental-sync.ts`
 
@@ -279,7 +259,7 @@ of holds/blocks are actually possible before treating this as live risk.
 
 ---
 
-## 12. OwnerRez: unconfirmed property detail field names
+## 11. OwnerRez: unconfirmed property detail field names
 
 **File:** `lib/integrations/types.ts:143-145`, consumed by
 `buildOwnerRezDetailPatch()` in `lib/integrations/providers/ownerrez.ts`
@@ -289,8 +269,19 @@ on `OwnerRezProperty` are marked with an explicit TODO: "verify these field
 names with Paul or via propertysearch filter... presence on the detail
 endpoint is unconfirmed." If the field names are wrong, the sync silently
 never populates those property columns (guarded by null/undefined checks —
-not a crash, just permanently-empty data) — house-rule fields a PM might
-reasonably expect to sync from OwnerRez could simply never show up.
+not a crash, just permanently-empty data).
+
+> **Update:** the consumer gap is now fixed — `lib/guidebook/sync.ts`'s
+> `syncGuidebookConfigsFromProperty()` now turns these three booleans into
+> readable lines (`buildRulesSummaryLines()`, unit-tested in
+> `unit/properties/guidebook-rules-summary.test.ts`) and folds them into the
+> guidebook's `house_rules` field on first fill, alongside `house_manual`.
+> Confirmed live: all 3 currently-synced OwnerRez properties have `null` for
+> all three fields today, which is consistent with either (a) the field
+> names being wrong, or (b) these test listings genuinely having no rules
+> configured in OwnerRez — this doc's original open question. The mapping
+> is now real and ready the moment the field names are confirmed correct
+> (or already are, and the test properties just have no rules set).
 
 **Suggested fix:** confirm the real field names against a live OwnerRez
 property detail response, same verification pattern already used
@@ -298,7 +289,7 @@ throughout Hospitable's adapter.
 
 ---
 
-## 13. OwnerRez: orphaned marketplace-install artifacts are never cleaned up
+## 12. OwnerRez: orphaned marketplace-install artifacts are never cleaned up
 
 **Files:** `lib/integrations/vault.ts` (`cleanup_expired_pending_integration_links`
 DB function), `supabase/migrations/20260707152648_marketplace_pending_integration_links.sql`
