@@ -29,7 +29,7 @@ export const guidebookSponsorPaymentRecovered = inngest.createFunction(
     })
 
     await step.run('evaluate-guidebook-lock', async () => {
-      if (activeSponsorCount < 4) return
+      if (activeSponsorCount < 3) return
 
       const supabase = createServiceClient()
       await supabase
@@ -51,7 +51,7 @@ export const guidebookSponsorPaymentRecovered = inngest.createFunction(
         action:     'guidebook.sponsor.payment_recovered',
         targetType: 'guidebook_sponsor',
         targetId:   sponsorId,
-        metadata:   { activeSponsorCount, guidebookUnlocked: activeSponsorCount >= 4 },
+        metadata:   { activeSponsorCount, guidebookUnlocked: activeSponsorCount >= 3 },
       })
     })
 

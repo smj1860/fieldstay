@@ -206,7 +206,7 @@ export function GuidebookFeatureAnnouncementEmail({
               You never touch a dollar.
             </Text>
             <Text style={styles.body1}>
-              When you have <strong>4 active sponsors</strong>, your guidebook
+              When you have <strong>3 active sponsors</strong>, your guidebook
               unlocks and goes live for every one of your properties —
               completely free, for as long as those sponsors stay active.
               No monthly fee. No trial. No catch.
@@ -238,9 +238,9 @@ export function GuidebookFeatureAnnouncementEmail({
             </Section>
 
             <Text style={styles.body1}>
-              At six sponsors you&apos;re earning $90 a month in local business
-              revenue, getting $25 back off your FieldStay plan, and delivering
-              a guest experience that no PDF or Google Doc can come close to.
+              At six sponsors you&apos;re getting $25 back off your FieldStay
+              plan, and delivering a guest experience that no PDF or Google
+              Doc can come close to.
             </Text>
 
             <Hr style={styles.divider} />
@@ -276,9 +276,9 @@ export function GuidebookFeatureAnnouncementEmail({
               <Row style={styles.stepRow}>
                 <Column style={styles.stepNumber}><Text style={styles.stepNum}>3</Text></Column>
                 <Column style={styles.stepBody}>
-                  <Text style={styles.stepTitle}>Hit 4 sponsors — your guidebook goes live</Text>
+                  <Text style={styles.stepTitle}>Hit 3 sponsors — your guidebook goes live</Text>
                   <Text style={styles.stepDesc}>
-                    The moment your fourth sponsor activates, every one of your
+                    The moment your third sponsor activates, every one of your
                     properties gets a live, weather-aware, time-aware guidebook.
                     Your guests see it. Your sponsors see results. You see it in
                     five minutes of work.

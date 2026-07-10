@@ -39,7 +39,7 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
     // sponsor, or the sponsor time to resolve a failed payment, without
     // losing guidebook access. guidebook-grace-expired-handler resolves it.
     const gracePeriodEndsAt = await step.run('evaluate-guidebook-lock', async () => {
-      if (activeSponsorCount >= 4) return null
+      if (activeSponsorCount >= 3) return null
 
       const supabase = createServiceClient()
       const { data: existingConfig } = await supabase
