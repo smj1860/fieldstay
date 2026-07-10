@@ -724,8 +724,21 @@ export async function hospFetchReservations(
   const PER_PAGE  = 100
   const MAX_PAGES = 200
 
+  // TEMPORARY DIAGNOSTIC (2026-07-10): was `today - 90 days`. Our own doc
+  // notes start_date "defaults to next 2 weeks if omitted" — phrasing that
+  // suggests this endpoint applies a forward-looking window sized relative
+  // to start_date, not an open-ended "everything since start_date" range.
+  // A 90-day-in-the-past start_date would then put the entire query window
+  // in deep history, which would explain meta.total: 0 on every test so
+  // far regardless of status[], real in-window dates, or listing status —
+  // one consistent root cause instead of three separate coincidences.
+  // Shrinking to 7 days to test whether this actually reaches a real,
+  // dated, listed reservation (checkin 2026-07-15). If this resolves it,
+  // 90 days needs to become two separate calls (a short forward-looking
+  // one for active/upcoming sync, a separate historical one if needed for
+  // revenue backfill) rather than one window trying to do both.
   const startDate = since
-    ?? new Date(Date.now() - 90 * 86_400_000).toISOString().split('T')[0]
+    ?? new Date(Date.now() - 7 * 86_400_000).toISOString().split('T')[0]
 
   let page      = 1
   let lastPage  = 1
