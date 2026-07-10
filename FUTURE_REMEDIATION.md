@@ -88,7 +88,13 @@ yet acted on:
   no confirmed way to detect a manually-blocked calendar date via
   Hospitable's API, so a PM's manual block won't suppress a turnover or show
   as blocked in FieldStay. Honestly documented in code, never mentioned to
-  customers.
+  customers. Candidate fix identified: `GET /properties/{uuid}/calendar`,
+  which needs a new `calendar:read` scope we haven't requested yet and only
+  gives us one example `status.reason` value with no enum — see
+  `docs/Integrations/hospitable/api-reference.md`'s "Calendar / Availability"
+  section for the full design writeup and the open questions blocking
+  implementation. Unlike the `cleaning_cost`/`actual_total_amount` work,
+  this one isn't safe to guess-and-wire ahead of the scope grant.
 - Zero automated test coverage on anything I/O-bearing (sync orchestration,
   webhook handling, token refresh) — only the pure property/reservation
   mapping functions are unit-tested.
