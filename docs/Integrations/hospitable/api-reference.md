@@ -38,6 +38,7 @@
 | `reviews:read` | ✅ Live | Guest reviews and responses |
 | `teammate:read` | ✅ Live | Crew/teammate sync |
 | `message:read` | ✅ Live | Guest/host reservation conversation sync — confirmed 2026-07-09 that this has been granted all along; the earlier "not yet granted" flag on this scope below was stale, not the actual account status. Was simply unused until reservation_messages sync was built. |
+| `financials:read` | ✅ Live | Per-reservation revenue (`financials.host.revenue`) — confirmed live 2026-07-10 against a real test reservation; `bookings.actual_total_amount` populated with the exact correct dollar amount and flowed through to `owner_transactions`. Previously listed below as "to request" — that was stale, not the actual account status, same pattern as `message:read` above. |
 
 ## Scopes to Request from Patrick
 
@@ -46,7 +47,6 @@
 | `task:read` + `task:write` | Friction Forecaster | Read Hospitable task state nightly; push corrected task assignments when Forecaster detects same-day flip risk |
 | `devices:read` | Crew app access codes, guidebook door codes | Surface smart lock codes to crew at checkout time without PM copy-paste |
 | `devices:write` | Future: remote crew unlock | Provision operation smartlock codes for arriving crew |
-| `financials:read` | Owner ledger / revenue reporting | Pull platform booking payouts into FieldStay revenue dashboard |
 | `knowledge_hub:read` + `knowledge_hub:write` | Guidebook sync | Bidirectional sync with Hospitable Knowledge Hub to eliminate duplicate data entry |
 
 ---

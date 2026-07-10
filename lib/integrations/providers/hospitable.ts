@@ -724,19 +724,16 @@ export async function hospFetchReservations(
   const PER_PAGE  = 100
   const MAX_PAGES = 200
 
-  // TEMPORARY DIAGNOSTIC (2026-07-10): was `today - 90 days`. Our own doc
-  // notes start_date "defaults to next 2 weeks if omitted" — phrasing that
-  // suggests this endpoint applies a forward-looking window sized relative
-  // to start_date, not an open-ended "everything since start_date" range.
-  // A 90-day-in-the-past start_date would then put the entire query window
-  // in deep history, which would explain meta.total: 0 on every test so
-  // far regardless of status[], real in-window dates, or listing status —
-  // one consistent root cause instead of three separate coincidences.
-  // Shrinking to 7 days to test whether this actually reaches a real,
-  // dated, listed reservation (checkin 2026-07-15). If this resolves it,
-  // 90 days needs to become two separate calls (a short forward-looking
-  // one for active/upcoming sync, a separate historical one if needed for
-  // revenue backfill) rather than one window trying to do both.
+  // Confirmed live 2026-07-10: was `today - 90 days`, which returned
+  // meta.total: 0 for a real, listed, in-window test reservation on every
+  // attempt — this endpoint applies a forward-looking window sized
+  // relative to start_date (per our doc's "defaults to next 2 weeks if
+  // omitted" note), not an open "everything since start_date" range, so a
+  // 90-day-in-the-past start_date put the entire query window in deep
+  // history. 7 days immediately fixed it (4/4 real reservations synced
+  // with correct financials.host.revenue data). Still a stopgap, not a
+  // final design — see FUTURE_REMEDIATION.md #11 for the two-window
+  // (forward-looking sync vs. historical backfill) follow-up this needs.
   const startDate = since
     ?? new Date(Date.now() - 7 * 86_400_000).toISOString().split('T')[0]
 
@@ -799,17 +796,6 @@ export async function hospFetchReservations(
 
     const data = await res.json() as HospitablePagedReservations
     reservations.push(...(data.data ?? []))
-
-    // Temporary diagnostic (2026-07-10): a real, dated, listed test
-    // reservation returned zero rows from this endpoint with no clear
-    // cause from params/date-window/listing-status alone — logging the
-    // server's own reported meta (no PII, just counts) to see whether
-    // Hospitable's query genuinely matches 0 server-side or something
-    // else is going on. Remove once the cause is confirmed.
-    console.log(
-      `[Hospitable] reservations page ${page} meta:`,
-      JSON.stringify(data.meta ?? null)
-    )
 
     lastPage = data.meta?.last_page ?? page
     page++
