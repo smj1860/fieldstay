@@ -36,9 +36,9 @@ const PLANS = [
   {
     name: "Growth",
     description: "For expanding operations that need more scale.",
-    monthly: 379,
-    annual: 3790,        // 2 months free: $379 × 10
-    annualSavings: 758,  // $379 × 2
+    monthly: 479,
+    annual: 4790,        // 2 months free: $479 × 10
+    annualSavings: 958,  // $479 × 2
     properties: "16–50 properties",
     highlight: true,
     features: [
@@ -51,9 +51,9 @@ const PLANS = [
   {
     name: "Portfolio",
     description: "For professional managers running a full operation.",
-    monthly: 599,
-    annual: 5990,         // 2 months free: $599 × 10
-    annualSavings: 1198,  // $599 × 2
+    monthly: 799,
+    annual: 7990,         // 2 months free: $799 × 10
+    annualSavings: 1598,  // $799 × 2
     properties: "51–100 properties",
     highlight: false,
     features: [

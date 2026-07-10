@@ -41,8 +41,8 @@ export const PLANS = {
     monthlyPriceId: process.env.STRIPE_PRICE_GROWTH_MONTHLY!,
     annualPriceId:  process.env.STRIPE_PRICE_GROWTH_ANNUAL!,
     maxProperties:  50,
-    monthlyPrice:   379,
-    annualPrice:    3790,
+    monthlyPrice:   479,
+    annualPrice:    4790,
     description:    '16–50 properties',
   },
   portfolio: {
@@ -50,8 +50,8 @@ export const PLANS = {
     monthlyPriceId: process.env.STRIPE_PRICE_PORTFOLIO_MONTHLY!,
     annualPriceId:  process.env.STRIPE_PRICE_PORTFOLIO_ANNUAL!,
     maxProperties:  100,
-    monthlyPrice:   599,
-    annualPrice:    5990,
+    monthlyPrice:   799,
+    annualPrice:    7990,
     description:    '51–100 properties',
   },
   enterprise: {

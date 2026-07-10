@@ -177,7 +177,7 @@ export default async function OwnerRezPage() {
           SECTION 2 — WHITE
           Pricing
           NOTE: Update PricingSection component separately with new
-          price IDs: Starter $199, Growth $379, Portfolio $599.
+          price IDs: Starter $199, Growth $479, Portfolio $799.
           RepuGuard should appear as a checkmark in ALL tier feature
           lists — not as an add-on line item.
       ══════════════════════════════════════════ */}

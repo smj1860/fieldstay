@@ -1027,17 +1027,17 @@ const DISPLAY_PLANS = [
     key:     'growth' as const,
     name:    'Growth',
     props:   '16–50 properties',
-    monthly: 379,
-    annual:  3790,
-    savings: '$758',
+    monthly: 479,
+    annual:  4790,
+    savings: '$958',
   },
   {
     key:     'portfolio' as const,
     name:    'Portfolio',
     props:   '51–100 properties',
-    monthly: 599,
-    annual:  5990,
-    savings: '$1,198',
+    monthly: 799,
+    annual:  7990,
+    savings: '$1,598',
   },
 ]
 

@@ -207,7 +207,7 @@ export default function LandingPage() {
               <p className="text-sm leading-relaxed" style={{ color: '#6B7280' }}>
                 Every FieldStay plan includes the full platform — no feature gating, no
                 per-property fees that punish growth. Starter covers 1–15 properties at $199/month.
-                Growth covers 16–50 at $379/month. Portfolio covers 51–100 at $599/month. Scale
+                Growth covers 16–50 at $479/month. Portfolio covers 51–100 at $799/month. Scale
                 your portfolio without watching your software bill scale with it.
               </p>
             </div>
@@ -369,7 +369,7 @@ export default function LandingPage() {
                 name: 'Growth',
                 description: 'For expanding operations that need more scale.',
                 props: '16–50 properties',
-                monthly: 379, annual: 3790,
+                monthly: 479, annual: 4790,
                 highlight: true,
                 badge: 'Most Popular',
                 features: [
@@ -384,7 +384,7 @@ export default function LandingPage() {
                 name: 'Portfolio',
                 description: 'For professional managers running a full operation.',
                 props: '51–100 properties',
-                monthly: 599, annual: 5990,
+                monthly: 799, annual: 7990,
                 highlight: false,
                 features: [
                   'Everything in Growth',
