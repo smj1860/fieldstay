@@ -39,6 +39,8 @@ import { hospIncrementalSync }          from '@/lib/inngest/functions/hospitable
 import { hospPropertyMerge }            from '@/lib/inngest/functions/hospitable/property-merge'
 import { hospTeammateSyncCron }         from '@/lib/inngest/functions/hospitable/teammate-sync-cron'
 import { hospTeammateSyncHandler }      from '@/lib/inngest/functions/hospitable/teammate-sync-handler'
+import { hospCalendarSyncCron }         from '@/lib/inngest/functions/hospitable/calendar-sync-cron'
+import { hospCalendarSyncHandler }      from '@/lib/inngest/functions/hospitable/calendar-sync-handler'
 
 // Proactive token refresh — unified cron covering all OAuth providers
 // (Hospitable, Kroger)
@@ -185,6 +187,8 @@ export const { GET, POST, PUT } = serve({
     hospPropertyMerge,
     hospTeammateSyncCron,
     hospTeammateSyncHandler,
+    hospCalendarSyncCron,
+    hospCalendarSyncHandler,
 
     // Proactive token refresh — all OAuth providers
     integrationTokenRefreshCron,

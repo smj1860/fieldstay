@@ -829,6 +829,104 @@ async function fetchReservationsWindow(
   return reservations
 }
 
+export interface HospitableCalendarDayStatus {
+  reason:      string
+  source:      string | null
+  source_type: string | null
+  available:   boolean
+}
+
+export interface HospitableCalendarDay {
+  date:                string
+  day:                 string
+  min_stay:            number
+  note:                string | null
+  closed_for_checkin:  boolean
+  closed_for_checkout: boolean
+  status:              HospitableCalendarDayStatus
+  price:               { amount: number; currency: string; formatted: string }
+}
+
+interface HospitablePagedCalendar {
+  data: {
+    start_date: string
+    end_date:   string
+    days:       HospitableCalendarDay[]
+  }
+}
+
+// GET /properties/{uuid}/calendar — needs calendar:read, confirmed live
+// 2026-07-10 against a real payload (see api-reference.md's "Calendar /
+// Availability" section). Day-level, no pagination — start_date/end_date
+// bound the whole response in one call.
+export async function hospFetchCalendar(
+  token:      string,
+  propertyId: string,
+  startDate:  string,
+  endDate:    string
+): Promise<HospitableCalendarDay[]> {
+  const url = `${HOSPITABLE_API_BASE}/properties/${propertyId}/calendar?start_date=${startDate}&end_date=${endDate}`
+  const res = await hospitableFetch(url, token)
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Hospitable /properties/${propertyId}/calendar failed (${res.status}): ${text.slice(0, 200)}`)
+  }
+
+  const data = await res.json() as HospitablePagedCalendar
+  return data.data?.days ?? []
+}
+
+export interface HospitableBlockRange {
+  checkin_date:  string
+  checkout_date: string
+}
+
+// A manually-blocked day is unavailable AND set by the PM, not a channel —
+// confirmed live 2026-07-10 against a real block: {reason: "BLOCKED",
+// source: null, source_type: "USER", available: false}. A real reservation
+// covering the same property instead reports source_type: "RESERVATION",
+// so the two are never confused without needing to cross-reference the
+// bookings table at all. Consecutive blocked days are merged into a single
+// range; checkout_date is the day after the last blocked night, matching
+// every other provider's checkin/checkout semantics in this codebase.
+export function consolidateHospitableBlocks(
+  days: HospitableCalendarDay[]
+): HospitableBlockRange[] {
+  const ranges: HospitableBlockRange[] = []
+  let rangeStart: string | null = null
+  let lastBlockedDate: string | null = null
+
+  const isManualBlock = (day: HospitableCalendarDay) =>
+    !day.status.available && day.status.source_type === 'USER'
+
+  const closeRange = () => {
+    if (rangeStart && lastBlockedDate) {
+      ranges.push({ checkin_date: rangeStart, checkout_date: addOneDay(lastBlockedDate) })
+    }
+    rangeStart = null
+    lastBlockedDate = null
+  }
+
+  for (const day of days) {
+    if (isManualBlock(day)) {
+      if (!rangeStart) rangeStart = day.date
+      lastBlockedDate = day.date
+      continue
+    }
+    closeRange()
+  }
+  closeRange()
+
+  return ranges
+}
+
+function addOneDay(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + 1)
+  return d.toISOString().split('T')[0]!
+}
+
 // GET /reservations/{uuid}/messages — rate-limited by Hospitable to 2
 // requests/minute PER RESERVATION, much tighter than the general API budget
 // hospitableApiLimiter enforces. Deliberately not given its own proactive
@@ -1062,24 +1160,19 @@ export function hospitableReservationToNormalized(
     checkin_time:  extractHospitableTime(res.check_in,  '15:00'),
     checkout_time: extractHospitableTime(res.check_out, '11:00'),
 
-    // ⚠️ Unconfirmed: Hospitable's reservation_status.current.category enum
-    // (request/accepted/cancelled/not accepted/unknown/checkpoint) has no
-    // documented "blocked" value, and the /reservations endpoint's response
-    // shape gives no other signal a manually-blocked calendar date would
-    // set — property-level unavailability may not surface through this
-    // endpoint as a reservation at all. Hardcoded false until Hospitable's
-    // docs or a live payload confirm otherwise; do not assume this means
-    // Hospitable blocks are unsupported, only that this mapper has never
-    // seen one.
-    //
-    // The only path found so far that carries day-level "why is this date
-    // unavailable" data is `GET /properties/{uuid}/calendar`, which needs
-    // a `calendar:read` scope we don't have yet — see
+    // Confirmed 2026-07-10: a manual block never appears through this
+    // endpoint at all — Hospitable's reservation_status.current.category
+    // enum (request/accepted/cancelled/not accepted/unknown/checkpoint) has
+    // no "blocked" value, and a real manually-blocked date range simply
+    // never produces a reservation object here. is_block is correctly
+    // false for every real /reservations response; the only place a block
+    // ever surfaces is GET /properties/{uuid}/calendar (day-level, separate
+    // from reservations entirely), handled by
+    // lib/inngest/functions/hospitable/calendar-sync-handler.ts — see
+    // consolidateHospitableBlocks() and
     // docs/Integrations/hospitable/api-reference.md's "Calendar /
-    // Availability" section for the full writeup, including why it wasn't
-    // safe to guess-and-wire the way `cleaning_cost`/`actual_total_amount`
-    // were. Do not wire this up until that scope is granted and a real
-    // payload confirms what a manual block actually looks like.
+    // Availability" section for the confirmed status.reason/source_type
+    // signal it detects blocks from.
     status:      mapHospitableStatus(res.reservation_status.current.category),
     guest_name:  guestName,
     guest_email: guest?.email ?? null,
