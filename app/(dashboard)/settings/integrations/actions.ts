@@ -72,16 +72,47 @@ export async function triggerResync(
   const { inngest } = await import('@/lib/inngest/client')
 
   switch (providerId) {
-    case 'hospitable':
+    case 'hospitable': {
+      const resolvedOrgId = connection.org_id ?? membership.org_id
+
       await inngest.send({
         name: 'integration/hospitable.connected',
         data: {
           user_id:          connection.user_id,
-          org_id:            connection.org_id ?? membership.org_id,
+          org_id:            resolvedOrgId,
           external_user_id:  connection.external_user_id ?? '',
         },
       })
+
+      // integration/hospitable.connected's initial sync doesn't touch
+      // calendar blocks (that's the daily hospCalendarSyncCron's job) — fan
+      // out a calendar re-check for every active Hospitable property too, so
+      // "Trigger Resync" means everything resyncs, not "everything except
+      // blocks, wait for tomorrow's cron."
+      const { data: hospProperties } = await supabase
+        .from('properties')
+        .select('id, external_id')
+        .eq('org_id', resolvedOrgId)
+        .eq('external_source', 'hospitable')
+        .eq('is_active', true)
+        .not('external_id', 'is', null)
+
+      if (hospProperties?.length) {
+        await inngest.send(
+          hospProperties.map((p) => ({
+            name: 'integration/hospitable.calendar_sync.requested' as const,
+            data: {
+              property_id:            p.id,
+              org_id:                 resolvedOrgId,
+              user_id:                connection.user_id,
+              hospitable_property_id: p.external_id!,
+            },
+          }))
+        )
+      }
+
       break
+    }
 
     case 'ownerrez':
       await inngest.send({

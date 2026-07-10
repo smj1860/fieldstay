@@ -612,6 +612,20 @@ export type FieldStayEvents = {
     }
   }
 
+  // Dispatched daily, one per active Hospitable-sourced property —
+  // Hospitable's /reservations endpoint has no concept of a manual block at
+  // all (confirmed 2026-07-10), so calendar/properties/{uuid}/calendar is
+  // the only path that ever surfaces one. See
+  // lib/inngest/functions/hospitable/calendar-sync-handler.ts.
+  'integration/hospitable.calendar_sync.requested': {
+    data: {
+      property_id:             string
+      org_id:                  string
+      user_id:                 string
+      hospitable_property_id:  string
+    }
+  }
+
   // ----------------------------------------------------------
   // Proactive token refresh (all OAuth providers)
   // ----------------------------------------------------------
