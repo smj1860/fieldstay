@@ -777,6 +777,17 @@ export async function hospFetchReservations(
     const data = await res.json() as HospitablePagedReservations
     reservations.push(...(data.data ?? []))
 
+    // Temporary diagnostic (2026-07-10): a real, dated, listed test
+    // reservation returned zero rows from this endpoint with no clear
+    // cause from params/date-window/listing-status alone — logging the
+    // server's own reported meta (no PII, just counts) to see whether
+    // Hospitable's query genuinely matches 0 server-side or something
+    // else is going on. Remove once the cause is confirmed.
+    console.log(
+      `[Hospitable] reservations page ${page} meta:`,
+      JSON.stringify(data.meta ?? null)
+    )
+
     lastPage = data.meta?.last_page ?? page
     page++
   }
