@@ -498,19 +498,33 @@ function PropertyGuidebookForm({
   const [saving, setSaving] = useState(false)
   const [saved, setSaved]   = useState(false)
   const [error, setError]   = useState<string | null>(null)
+  // Separate from `error` above (which is for save failures) — this is
+  // specifically for the initial load, so a save error never gets
+  // clobbered by a load-retry and vice versa.
+  const [loadError, setLoadError] = useState<string | null>(null)
+  // Bumping this re-runs the load effect — the only way to retry after a
+  // failure, since there's otherwise no path back from an errored load.
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   useEffect(() => {
+    let cancelled = false
+
     const load = async () => {
+      setLoadError(null)
       const { data, error } = await supabase
         .from('guidebook_property_configs')
         .select('*')
         .eq('property_id', property.id)
         .maybeSingle()
 
+      if (cancelled) return
+
       if (error) {
         console.error('[guidebook] Failed to load config:', error)
         // Do NOT fall through to the blank default on error — that would risk
-        // overwriting an existing config on the next save.
+        // overwriting an existing config on the next save. Surface it
+        // instead of leaving config permanently null with no explanation.
+        setLoadError('Failed to load this property’s guidebook settings.')
         return
       }
 
@@ -536,7 +550,27 @@ function PropertyGuidebookForm({
     }
 
     load()
-  }, [property.id, property.name, supabase])
+    return () => { cancelled = true }
+  }, [property.id, property.name, supabase, loadAttempt])
+
+  if (loadError) {
+    return (
+      <div style={{ padding: '20px', fontSize: '14px' }}>
+        <div style={{ color: 'var(--accent-red)', marginBottom: '8px' }}>{loadError}</div>
+        <button
+          type="button"
+          onClick={() => setLoadAttempt((n) => n + 1)}
+          style={{
+            background: 'var(--bg-raised)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)', padding: '6px 14px', fontSize: '13px',
+            color: 'var(--text-primary)', cursor: 'pointer',
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
 
   if (!config) {
     return <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '14px' }}>Loading…</div>
