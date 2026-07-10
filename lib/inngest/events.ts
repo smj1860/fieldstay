@@ -257,6 +257,18 @@ export type FieldStayEvents = {
     }
   }
 
+  // Dispatched daily, one per active OwnerRez connection —
+  // incremental-sync.ts's since_utc-filtered fetch only ever upserts what
+  // OwnerRez currently returns, so a booking/hold that's hard-deleted
+  // (rather than status-changed to cancelled) upstream would otherwise
+  // never be noticed. See ownerrez/reconciliation-handler.ts.
+  'integration/ownerrez.reconcile.requested': {
+    data: {
+      user_id: string
+      org_id:  string
+    }
+  }
+
   'integration/connection.error': {
     data: {
       user_id:     string

@@ -104,6 +104,21 @@ const SOURCE_COLORS: Record<BookingSource, BadgeTone> = {
   other:       'slate',
 }
 
+// `source` (above) is the OTA/channel the guest booked through — this is a
+// separate signal: which system synced the row into FieldStay at all.
+// Distinct from `source` because a single channel (e.g. Airbnb) can arrive
+// via more than one path (a direct Hospitable/OwnerRez connection, or a
+// plain iCal feed) with different implications for whether FieldStay can
+// safely edit the booking. Returns null for a booking FieldStay itself
+// owns (no external_source, no ical_feed_id) — nothing to badge there,
+// the channel badge above already reads "Manual" in that case.
+function getSyncOriginLabel(booking: Pick<BookingRow, 'external_source' | 'ical_feed_id'>): string | null {
+  if (booking.external_source === 'hospitable') return 'Hospitable'
+  if (booking.external_source === 'ownerrez')   return 'OwnerRez'
+  if (booking.ical_feed_id !== null)            return 'iCal'
+  return null
+}
+
 // ── Status display ────────────────────────────────────────────────────────────
 
 const STATUS_ICON: Record<BookingStatus, React.ReactNode> = {
@@ -141,10 +156,11 @@ function BookingCard({
   const [confirm,  setConfirm]      = useState(false)
   const [cancelling, startCancel]   = useTransition()
 
-  const property  = booking.properties
-  const turnover  = getTurnover(booking)
-  const nights    = nightCount(booking.checkin_date, booking.checkout_date)
-  const checkin   = getDateLabel(booking.checkin_date)
+  const property    = booking.properties
+  const turnover    = getTurnover(booking)
+  const nights      = nightCount(booking.checkin_date, booking.checkout_date)
+  const checkin     = getDateLabel(booking.checkin_date)
+  const originLabel = getSyncOriginLabel(booking)
   const isBlocked = booking.status === 'blocked'
   const isCancelled = booking.status === 'cancelled'
 
@@ -203,6 +219,15 @@ function BookingCard({
                 {!isBlocked && (
                   <Badge tone={SOURCE_COLORS[booking.source]} className="text-xs">
                     {SOURCE_LABELS[booking.source]}
+                  </Badge>
+                )}
+
+                {/* Sync origin badge — which system synced this booking in
+                    (Hospitable / OwnerRez / iCal), distinct from the channel
+                    badge above. Omitted for a booking FieldStay owns directly. */}
+                {originLabel && (
+                  <Badge tone="slate" className="text-xs" title="Synced via this integration">
+                    {originLabel}
                   </Badge>
                 )}
 

@@ -37,7 +37,7 @@ interface GuidebookClientProps {
   appUrl:                    string
 }
 
-type CelebrationTier = 4 | 5 | 6 | null
+type CelebrationTier = 3 | 5 | 6 | null
 
 // Plain helper, not a component — keeps the Date.now() call out of the
 // component's own body (react-hooks/purity flags impure calls anywhere
@@ -78,7 +78,7 @@ export function GuidebookClient({
       const storageKey = 'guidebook_celebration_shown'
       const shown      = JSON.parse(localStorage.getItem(storageKey) ?? '[]') as number[]
 
-      for (const tier of [4, 5, 6] as const) {
+      for (const tier of [3, 5, 6] as const) {
         if (newCount >= tier && prevCount < tier && !shown.includes(tier)) {
           setCelebration(tier)
           localStorage.setItem(storageKey, JSON.stringify([...shown, tier]))

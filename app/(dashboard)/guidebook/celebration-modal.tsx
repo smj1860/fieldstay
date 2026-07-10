@@ -1,9 +1,9 @@
 'use client'
 
-const TIER_COPY: Record<4 | 5 | 6, { title: string; body: string }> = {
-  4: {
+const TIER_COPY: Record<3 | 5 | 6, { title: string; body: string }> = {
+  3: {
     title: 'Guidebook Unlocked! 🎉',
-    body:  'You\'ve filled 4 sponsor slots — your guest guidebook is now live and self-funding.',
+    body:  'You\'ve filled 3 sponsor slots — your guest guidebook is now live and self-funding.',
   },
   5: {
     title: 'Almost There! 🌟',
@@ -16,7 +16,7 @@ const TIER_COPY: Record<4 | 5 | 6, { title: string; body: string }> = {
 }
 
 interface CelebrationModalProps {
-  tier:    4 | 5 | 6
+  tier:    3 | 5 | 6
   onClose: () => void
 }
 

@@ -48,6 +48,17 @@ function isManualBooking(b: BookingRow): boolean {
   return b.ical_feed_id === null && b.external_source === null
 }
 
+// Which system synced this booking in (Hospitable / OwnerRez / iCal) —
+// distinct from `source` above, which is the OTA/channel the guest booked
+// through. Mirrors bookings-client.tsx's getSyncOriginLabel(). Returns
+// null for a booking FieldStay owns directly (isManualBooking(b) === true).
+function getSyncOriginLabel(b: Pick<BookingRow, 'external_source' | 'ical_feed_id'>): string | null {
+  if (b.external_source === 'hospitable') return 'Hospitable'
+  if (b.external_source === 'ownerrez')   return 'OwnerRez'
+  if (b.ical_feed_id !== null)            return 'iCal'
+  return null
+}
+
 interface PropertyOption { id: string; name: string }
 
 // ── Source / status styling ──────────────────────────────────────────────────
@@ -125,6 +136,7 @@ function BookingDetailPanel({
     (new Date(booking.checkout_date).getTime() - new Date(booking.checkin_date).getTime()) / 86_400_000
   )
   const sourceStyle = SOURCE_STYLE[booking.source] ?? SOURCE_STYLE.other
+  const originLabel  = getSyncOriginLabel(booking)
 
   return (
     <Dialog open onClose={onClose} title={bookingTitle(booking)} maxWidthClassName="max-w-md">
@@ -141,6 +153,15 @@ function BookingDetailPanel({
         >
           {booking.status}
         </span>
+        {originLabel && (
+          <span
+            className="text-xs font-medium px-2 py-0.5 rounded-full"
+            style={{ background: 'var(--bg-raised)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+            title="Synced via this integration"
+          >
+            {originLabel}
+          </span>
+        )}
       </div>
 
       <div className="space-y-2.5 text-sm">
