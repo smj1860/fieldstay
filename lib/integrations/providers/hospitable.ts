@@ -715,27 +715,64 @@ export async function hospFetchProperties(token: string): Promise<HospitableProp
   return properties
 }
 
+// Confirmed live 2026-07-10: GET /reservations applies a forward-looking
+// window sized relative to start_date (per our doc's "defaults to next 2
+// weeks if omitted" note), not an open "everything since start_date"
+// range — a 90-day-in-the-past start_date returned meta.total: 0 for a
+// real, listed, in-window test reservation on every attempt; 7 days
+// immediately fixed it. Since the exact window size Hospitable applies
+// isn't documented, hospFetchReservations() below chunks the desired
+// range into WINDOW_DAYS-sized start_date steps and merges + dedupes the
+// results by reservation id — this is safe regardless of what the true
+// window size actually is, as long as it's >= WINDOW_DAYS (confirmed).
+const RESERVATION_WINDOW_DAYS = 7
+
+// How far forward to look on a full sync. New/changed reservations
+// further out than this still arrive via the incremental webhook path
+// (which fetches a single reservation by id, unaffected by this windowing
+// issue at all), so this only bounds how far ahead a fresh initial
+// sync/full resync backfills — not a hard ceiling on what FieldStay will
+// ever know about.
+const RESERVATION_LOOKAHEAD_MONTHS = 6
+
 export async function hospFetchReservations(
   token: string,
   since?: string,
   propertyIds?: string[]
 ): Promise<HospitableReservation[]> {
+  const rangeStart = since
+    ? new Date(`${since}T00:00:00Z`)
+    : new Date(Date.now() - RESERVATION_WINDOW_DAYS * 86_400_000)
+
+  const rangeEnd = new Date(rangeStart)
+  rangeEnd.setUTCMonth(rangeEnd.getUTCMonth() + RESERVATION_LOOKAHEAD_MONTHS)
+
+  const byId = new Map<string, HospitableReservation>()
+
+  for (
+    let windowStart = rangeStart;
+    windowStart < rangeEnd;
+    windowStart = new Date(windowStart.getTime() + RESERVATION_WINDOW_DAYS * 86_400_000)
+  ) {
+    const startDateStr = windowStart.toISOString().split('T')[0]!
+    const windowReservations = await fetchReservationsWindow(token, startDateStr, propertyIds)
+    for (const r of windowReservations) byId.set(r.id, r)
+  }
+
+  return Array.from(byId.values())
+}
+
+// Single start_date window, fully paginated. See RESERVATION_WINDOW_DAYS'
+// doc comment above for why hospFetchReservations() calls this in a loop
+// rather than once with one big range.
+async function fetchReservationsWindow(
+  token: string,
+  startDate: string,
+  propertyIds?: string[]
+): Promise<HospitableReservation[]> {
   const reservations: HospitableReservation[] = []
   const PER_PAGE  = 100
   const MAX_PAGES = 200
-
-  // Confirmed live 2026-07-10: was `today - 90 days`, which returned
-  // meta.total: 0 for a real, listed, in-window test reservation on every
-  // attempt — this endpoint applies a forward-looking window sized
-  // relative to start_date (per our doc's "defaults to next 2 weeks if
-  // omitted" note), not an open "everything since start_date" range, so a
-  // 90-day-in-the-past start_date put the entire query window in deep
-  // history. 7 days immediately fixed it (4/4 real reservations synced
-  // with correct financials.host.revenue data). Still a stopgap, not a
-  // final design — see FUTURE_REMEDIATION.md #11 for the two-window
-  // (forward-looking sync vs. historical backfill) follow-up this needs.
-  const startDate = since
-    ?? new Date(Date.now() - 7 * 86_400_000).toISOString().split('T')[0]
 
   let page      = 1
   let lastPage  = 1
@@ -749,11 +786,7 @@ export async function hospFetchReservations(
     }
 
     // Build base params via URLSearchParams (handles encoding for all standard params)
-    // financials is gated on the not-yet-granted financials:read scope —
-    // requesting it now is deliberately speculative (see
-    // HospitableReservation.financials' doc comment); harmless to include
-    // ahead of the grant and is what turns on real revenue data the moment
-    // it lands.
+    // financials requires financials:read — confirmed live 2026-07-10.
     const params = new URLSearchParams({
       page:       String(page),
       per_page:   String(PER_PAGE),
@@ -770,20 +803,12 @@ export async function hospFetchReservations(
       .map((id) => `properties[]=${encodeURIComponent(id)}`)
       .join('&')
 
-    // TEMPORARY DIAGNOSTIC (2026-07-10): status[] previously sent every
-    // filter value the API accepts (request/accepted/cancelled/
-    // not_accepted/checkpoint) explicitly, to avoid missing manually-created
-    // reservations. But "unknown" is a valid response category with NO
-    // corresponding valid filter value — meaning a reservation in that
-    // category was structurally unreachable no matter what we sent, and a
-    // real test reservation (confirmed listed, in-window dates) returned
-    // meta.total: 0 from Hospitable's own server, ruling out a parsing bug.
-    // Dropping the filter entirely here to test whether Hospitable's
-    // undocumented default is actually MORE permissive than our explicit
-    // list (plausible — many list APIs default to "all" absent a filter).
-    // If this resolves it, replace the always-explicit statusQuery with
-    // omitting status[] permanently; if not, revert this and investigate
-    // date_query/properties[] next.
+    // status[] intentionally omitted — confirmed live 2026-07-10 that
+    // Hospitable's undocumented default already includes a manually-created
+    // test reservation; explicitly listing every accepted filter value
+    // (request/accepted/cancelled/not_accepted/checkpoint) would still
+    // structurally exclude the "unknown" response category, since it has
+    // no corresponding valid filter value.
     const url = `${HOSPITABLE_API_BASE}/reservations?${params.toString()}`
       + (propertiesQuery ? `&${propertiesQuery}` : '')
 

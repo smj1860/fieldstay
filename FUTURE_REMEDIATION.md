@@ -254,56 +254,7 @@ notification was ever actually wanted here.
 
 ---
 
-## 11. Hospitable reservations sync window is a diagnostic stopgap, not a real design
-
-**File:** `lib/integrations/providers/hospitable.ts` (`hospFetchReservations()`)
-
-Found and partially fixed live on 2026-07-10: `GET /reservations` with
-`start_date = today − 90 days` and no `end_date` returned `meta.total: 0`
-for a real, listed, in-window (checkin 5 days out) test reservation —
-consistently, regardless of the `status[]` filter. Our own doc's note
-that `start_date` "defaults to next 2 weeks if omitted" was the tell —
-this endpoint applies a forward-looking window sized relative to
-`start_date`, not an open "everything since `start_date`" range, so a
-90-day-in-the-past `start_date` put the entire query window in deep
-history. Shrinking the lookback to 7 days immediately fixed it — the
-same reservation, and 3 others, synced correctly with real
-`financials.host.revenue` data on the very next attempt.
-
-**This is a real, customer-impacting bug that predates today** — every
-existing Hospitable-connected org's *initial* sync (first connect, or
-"resync everything") would have missed essentially all upcoming/current
-reservations, only ever surfacing ones from roughly 76–90 days in the
-past. Ongoing bookings that received any qualifying webhook update after
-connection would still have synced correctly via the incremental path
-(which fetches a single reservation by ID with no date filter at all,
-unaffected by this bug) — so the practical damage is bounded to bookings
-that existed at connection time and never changed since, not a total
-loss, but still a real gap for any org that connected and relied on
-initial sync alone.
-
-**The 7-day lookback is a diagnostic fix, not a considered design** — it
-unblocked testing but:
-- Caps how far *forward* upcoming reservations sync (fine today since
-  each new/changed reservation still arrives via webhook regardless, but
-  worth confirming there's no forward cap symmetrically biting the same
-  way the backward one did).
-- Removes any deep-history coverage entirely — if revenue backfill for
-  older stays ever matters, this needs a second, explicit
-  historical-range call, not folded into the same window.
-
-**Suggested fix:** decide the real requirements (how far forward does
-initial sync need to reach for upcoming turnovers to generate correctly?
-does historical revenue backfill matter, and if so how far back?) and
-implement as two explicit calls if both are needed, rather than one
-window trying to serve both purposes. Also worth confirming with
-Hospitable/Patrick whether there's a documented maximum window size
-`start_date` implies, since our own docs' "next 2 weeks" phrasing is the
-only hint we have and hasn't been directly confirmed as an exact rule.
-
----
-
-## 12. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
+## 11. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
 
 **Files:** `app/(dashboard)/layout.tsx`, `lib/auth.ts`
 
