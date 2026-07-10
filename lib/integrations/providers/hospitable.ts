@@ -192,20 +192,32 @@ export interface HospitableReservation {
   stay_type?: 'guest_stay' | 'owner_stay'
   owner_stay?: { schedule_cleaning: boolean } | null
 
-  // 📄 Spec only — gated on financials:read, which is NOT yet granted (see
-  // "Scopes to Request from Patrick" in api-reference.md), so this has
-  // never been observed in a real response. Field names below are a best
-  // guess based on Hospitable's own money-value convention seen elsewhere
-  // (integer cents + a formatted string) — do not trust until verified.
-  // extractHospitableActualTotal() below tries several plausible key names
-  // and returns null on anything that doesn't match, specifically so a
-  // wrong guess degrades to "no real total available" (falls back to the
-  // avg_nightly_rate estimate) rather than posting a wrong revenue figure.
+  // 📄 Spec — gated on financials:read, which is NOT yet granted (see
+  // "Scopes to Request from Patrick" in api-reference.md). Shape below is
+  // from Hospitable's own published "Update Reservation" example response
+  // (2026-07-10) — a real documented structure, not a guess like the
+  // previous version of this type — but still unconfirmed against our own
+  // live GET /reservations?include=financials response, so treat the
+  // exact field presence/nesting as provisional until verified.
   financials?: {
-    host_payout?: { amount: number; formatted: string }
-    payout?:      { amount: number; formatted: string }
-    total?:       { amount: number; formatted: string }
+    host?: {
+      revenue?: HospitableMoneyValue   // label "Gross Revenue" — the figure that matters for owner_transactions
+    }
+    guest?: {
+      total_price?: HospitableMoneyValue   // what the guest paid in total — includes fees/taxes the host doesn't keep
+    }
+    currency?: string
   } | null
+}
+
+// Common money-value shape used throughout Hospitable's API — integer
+// cents + a pre-formatted display string, plus (on financials line items
+// specifically) a label/category pair we don't currently use.
+interface HospitableMoneyValue {
+  amount:    number
+  formatted: string
+  label?:    string
+  category?: string
 }
 
 export interface HospitableTeammate {
@@ -899,7 +911,12 @@ function extractHospitableActualTotal(
 ): number | null {
   if (!financials) return null
 
-  for (const value of [financials.host_payout, financials.payout, financials.total]) {
+  // host.revenue ("Gross Revenue") is what actually matters for
+  // owner_transactions; guest.total_price is a fallback only — it's what
+  // the guest paid overall, which can include host-passthrough fees/taxes
+  // that don't belong in a revenue figure, but is still a real number
+  // rather than nothing if revenue itself is ever absent.
+  for (const value of [financials.host?.revenue, financials.guest?.total_price]) {
     if (!value || typeof value.amount !== 'number') continue
     if (!Number.isFinite(value.amount) || value.amount <= 0) continue
     return Math.round(value.amount) / 100
