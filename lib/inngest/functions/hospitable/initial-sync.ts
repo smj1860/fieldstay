@@ -147,15 +147,16 @@ export const hospInitialSync = inngest.createFunction(
       })
 
       // ── 5. Fetch reservations and upsert bookings ─────────────────────────
-      const reservationCount = await step.run('fetch-and-upsert-reservations', async () => {
+      const { reservationCount, revenueEligibleExternalIds } = await step.run('fetch-and-upsert-reservations', async () => {
         const hospPropertyIds = Object.keys(propertyIdMap)
-        if (!hospPropertyIds.length) return 0
+        if (!hospPropertyIds.length) return { reservationCount: 0, revenueEligibleExternalIds: [] as string[] }
         const reservations = await hospFetchReservations(token, undefined, hospPropertyIds)
 
         logger.info(`[Hospitable:${user_id}] Fetched ${reservations.length} reservations`)
 
         const supabase = createServiceClient()
         let count = 0
+        const revenueEligibleExternalIds: string[] = []
 
         const bookingRows = reservations
           .map((res) => {
@@ -173,21 +174,28 @@ export const hospInitialSync = inngest.createFunction(
               return null
             }
 
+            // Only a confirmed, paying-guest stay should post revenue — not
+            // a tentative request, a cancellation, or the owner's own stay.
+            if (normalized.status === 'confirmed' && normalized.stay_type === 'guest_stay') {
+              revenueEligibleExternalIds.push(normalized.external_id)
+            }
+
             return {
               org_id,
-              property_id:     propertyId,
-              external_source: PROVIDER,
-              external_id:     normalized.external_id,
-              checkin_date:    normalized.checkin_date,
-              checkout_date:   normalized.checkout_date,
-              checkin_time:    normalized.checkin_time,
-              checkout_time:   normalized.checkout_time,
-              status:          normalized.status,
-              guest_name:      normalized.guest_name,
-              guest_email:     normalized.guest_email,
-              source:          normalized.source,
-              is_block:        normalized.is_block,
-              stay_type:       normalized.stay_type,
+              property_id:          propertyId,
+              external_source:      PROVIDER,
+              external_id:          normalized.external_id,
+              checkin_date:         normalized.checkin_date,
+              checkout_date:        normalized.checkout_date,
+              checkin_time:         normalized.checkin_time,
+              checkout_time:        normalized.checkout_time,
+              status:               normalized.status,
+              guest_name:           normalized.guest_name,
+              guest_email:          normalized.guest_email,
+              source:               normalized.source,
+              is_block:             normalized.is_block,
+              stay_type:            normalized.stay_type,
+              actual_total_amount:  normalized.actual_total_amount,
             }
           })
           .filter((row): row is NonNullable<typeof row> => row !== null)
@@ -204,8 +212,41 @@ export const hospInitialSync = inngest.createFunction(
           count = bookingRows.length
         }
 
-        return count
+        return { reservationCount: count, revenueEligibleExternalIds }
       })
+
+      // ── 5b. Post revenue for confirmed guest stays ────────────────────────
+      // The first producer booking/confirmed has ever had — see
+      // lib/inngest/functions/booking-events.ts. handleBookingConfirmed's
+      // own upsert (onConflict source_reference_id,source DO NOTHING)
+      // makes a repeat post for the same booking a no-op, so re-running
+      // initial sync can't double-post.
+      if (revenueEligibleExternalIds.length > 0) {
+        const revenueEvents = await step.run('fetch-bookings-for-revenue', async () => {
+          const supabase = createServiceClient()
+          const { data: rows } = await supabase
+            .from('bookings')
+            .select('id, property_id, actual_total_amount')
+            .eq('org_id', org_id)
+            .eq('external_source', PROVIDER)
+            .in('external_id', revenueEligibleExternalIds)
+
+          return (rows ?? []).map((b) => ({
+            name: 'booking/confirmed' as const,
+            data: {
+              booking_id:          b.id as string,
+              property_id:         b.property_id as string,
+              org_id,
+              source:              'hospitable' as const,
+              actual_total_amount: b.actual_total_amount as number | null,
+            },
+          }))
+        })
+
+        if (revenueEvents.length > 0) {
+          await step.sendEvent('fire-booking-confirmed-events', revenueEvents)
+        }
+      }
 
       // ── 6. Generate turnovers for each property that received bookings ─────
       const affectedPropertyIds = [...new Set(Object.values(propertyIdMap as Record<string, string>))]

@@ -43,6 +43,17 @@ export interface NormalizedPropertyContent {
 
 export type NormalizedProperty = NormalizedPropertyFacts & NormalizedPropertyContent & {
   external_id: string
+  // Only known when the PMS's own fee/pricing data is directly readable —
+  // currently Hospitable's GET /properties `bookings.fees` (📄 spec,
+  // unconfirmed against a live response — see
+  // docs/Integrations/hospitable/api-reference.md). Deliberately NOT part
+  // of the always-overwrite Facts/Content fields above: a PM's own
+  // cleaning_cost entry (what FieldStay actually pays a cleaner) can
+  // legitimately differ from what the PMS charges guests for cleaning, so
+  // this is only ever used to backfill a currently-null value, never to
+  // replace an existing one — see backfillCleaningCost() in
+  // upsert-normalized.ts.
+  cleaning_cost?: number | null
 }
 
 // Field names in NormalizedPropertyContent that logContentOverwrites()

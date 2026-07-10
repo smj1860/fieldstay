@@ -138,8 +138,10 @@ export const hospIncrementalSync = inngest.createFunction(
       })
 
       const reservation = await step.run('fetch-reservation', async () => {
+        // financials is speculative — gated on the not-yet-granted
+        // financials:read scope, see HospitableReservation.financials.
         const res = await hospitableFetch(
-          `${HOSPITABLE_API_BASE}/reservations/${entity_id}?include=guest,properties`,
+          `${HOSPITABLE_API_BASE}/reservations/${entity_id}?include=guest,properties,financials`,
           token
         )
 
@@ -210,32 +212,62 @@ export const hospIncrementalSync = inngest.createFunction(
           || existing.checkin_date  !== normalized.checkin_date
           || existing.checkout_date !== normalized.checkout_date
 
-        const { error } = await supabase
+        const { data: upserted, error } = await supabase
           .from('bookings')
           .upsert(
             {
-              org_id:          orgId,
-              property_id:     property.id,
-              external_source: PROVIDER,
-              external_id:     normalized.external_id,
-              checkin_date:    normalized.checkin_date,
-              checkout_date:   normalized.checkout_date,
-              checkin_time:    normalized.checkin_time,
-              checkout_time:   normalized.checkout_time,
-              status:          normalized.status,
-              guest_name:      normalized.guest_name,
-              guest_email:     normalized.guest_email,
-              source:          normalized.source,
-              is_block:        normalized.is_block,
-              stay_type:       normalized.stay_type,
+              org_id:               orgId,
+              property_id:          property.id,
+              external_source:      PROVIDER,
+              external_id:          normalized.external_id,
+              checkin_date:         normalized.checkin_date,
+              checkout_date:        normalized.checkout_date,
+              checkin_time:         normalized.checkin_time,
+              checkout_time:        normalized.checkout_time,
+              status:               normalized.status,
+              guest_name:           normalized.guest_name,
+              guest_email:          normalized.guest_email,
+              source:               normalized.source,
+              is_block:             normalized.is_block,
+              stay_type:            normalized.stay_type,
+              actual_total_amount:  normalized.actual_total_amount,
             },
             { onConflict: 'external_id,external_source' }
           )
+          .select('id')
+          .single()
 
         if (error) throw new Error(`Booking upsert failed: ${error.message}`)
 
-        return { datesChanged, propertyId: property.id }
+        return {
+          datesChanged,
+          propertyId:  property.id,
+          bookingId:   upserted.id as string,
+          actualTotalAmount: normalized.actual_total_amount,
+          // Only a confirmed, paying-guest stay should post revenue — not
+          // a tentative request, a cancellation, or the owner's own stay.
+          shouldPostRevenue: normalized.status === 'confirmed' && normalized.stay_type === 'guest_stay',
+        }
       })
+
+      // Post revenue for confirmed guest stays — the first producer
+      // booking/confirmed has ever had; see
+      // lib/inngest/functions/booking-events.ts. Fires on every qualifying
+      // upsert (not just new ones) — handleBookingConfirmed's own upsert
+      // onConflict (source_reference_id, source) DO NOTHING already makes
+      // a repeat post for the same booking a no-op.
+      if (upsertResult.shouldPostRevenue) {
+        await step.sendEvent('post-booking-revenue', {
+          name: 'booking/confirmed' as const,
+          data: {
+            booking_id:          upsertResult.bookingId,
+            property_id:         upsertResult.propertyId,
+            org_id:              orgId,
+            source:              'hospitable' as const,
+            actual_total_amount: upsertResult.actualTotalAmount,
+          },
+        })
+      }
 
       // Regenerate turnovers only when dates changed.
       // generateTurnoversForProperty returns string[] (new turnover IDs) —
@@ -337,8 +369,9 @@ export const hospIncrementalSync = inngest.createFunction(
       })
 
       const fetchAndUpsertResult = await step.run('fetch-and-upsert-property', async () => {
+        // bookings is speculative — see HospitableProperty.bookings.
         const res = await hospitableFetch(
-          `${HOSPITABLE_API_BASE}/properties/${entity_id}?include=details`,
+          `${HOSPITABLE_API_BASE}/properties/${entity_id}?include=details,bookings`,
           token
         )
 

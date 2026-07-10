@@ -396,5 +396,8 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     // block; is_block is false), so it flows through the same upsert path
     // as a guest booking and still gets a turnover — just tagged.
     stay_type:   b.type === 'owner' ? 'owner_stay' : 'guest_stay',
+    // OwnerRez has no per-booking real-total field today — revenue posting
+    // for OwnerRez bookings still relies on the avg_nightly_rate estimate.
+    actual_total_amount: null,
   }
 }

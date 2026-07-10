@@ -22,4 +22,9 @@ export interface NormalizedBooking {
   // reservation. Providers with no equivalent concept (OwnerRez, Uplisting,
   // iCal) should map to 'guest_stay'.
   stay_type:             'guest_stay' | 'owner_stay'
+  // Real total booking revenue reported by the PMS itself, when known —
+  // preferred over the nights * avg_nightly_rate estimate that
+  // booking-events.ts otherwise falls back to. Providers with no such
+  // field (everything except Hospitable, currently) should map to null.
+  actual_total_amount:   number | null
 }
