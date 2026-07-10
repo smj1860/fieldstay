@@ -29,11 +29,14 @@ export async function generateTurnoversForProperty(
     .order('checkin_date', { ascending: true })
   if (!bookings?.length) return []
   // Use maybeSingle() — .single() errors when 0 rows, causing the step to throw
-  const { data: property } = await supabase
+  const { data: property, error: propertyError } = await supabase
     .from('properties')
-    .select('checkin_time, checkout_time, checklist_template_id, timezone')
+    .select('checkin_time, checkout_time, timezone')
     .eq('id', propertyId)
     .maybeSingle()
+  if (propertyError) {
+    console.error('[generator] property fetch failed', { propertyId, error: propertyError.message })
+  }
   const tz = property?.timezone ?? 'America/New_York'
   const { data: defaultTemplate } = await supabase
     .from('checklist_templates')
@@ -235,6 +238,16 @@ export async function snapshotChecklist(
         requires_photo: item.requires_photo || dynamicRequired,
         photo_reason: !item.requires_photo && dynamicRequired ? signal!.reason : null,
         notes: item.notes, sort_order: item.sort_order, is_completed: false,
+        // Explicit (not omitted) so this object's key set exactly matches
+        // buildAssetDiscoveryItems' below — PostgREST's bulk insert derives
+        // its column list from the union of keys across every object in
+        // the array, and any object missing a key another object supplies
+        // gets NULL for it (not the column's DEFAULT). Omitting these here
+        // previously meant every regular item's is_mandatory/non_deletable
+        // was inserted as NULL — violating their NOT NULL constraint and
+        // failing the whole batch insert — whenever the same turnover also
+        // had at least one asset-discovery item mixed into the same array.
+        is_mandatory: false, non_deletable: false, asset_discovery_type: null as string | null,
       }
     })
   )
