@@ -106,7 +106,38 @@ export async function upsertNormalizedProperties(
     await logContentOverwrites(orgId, row.id as string, provider, existing, incoming)
   }
 
+  await backfillCleaningCost(supabase, normalized, idMap)
+
   return idMap
+}
+
+/**
+ * Fills properties.cleaning_cost from PMS fee data, but ONLY when the
+ * column is currently null — a PM's own entry (what FieldStay actually
+ * pays a cleaner) is never overwritten, unlike the always-overwrite
+ * Facts/Content fields above. See NormalizedProperty.cleaning_cost's
+ * doc comment for why this field gets different treatment.
+ */
+async function backfillCleaningCost(
+  supabase:   ReturnType<typeof createServiceClient>,
+  normalized: NormalizedProperty[],
+  idMap:      Record<string, string>
+): Promise<void> {
+  for (const n of normalized) {
+    if (n.cleaning_cost == null || n.cleaning_cost <= 0) continue
+    const propertyId = idMap[n.external_id]
+    if (!propertyId) continue
+
+    const { error } = await supabase
+      .from('properties')
+      .update({ cleaning_cost: n.cleaning_cost })
+      .eq('id', propertyId)
+      .is('cleaning_cost', null)
+
+    if (error) {
+      console.error(`[backfillCleaningCost] update failed for property ${propertyId}: ${error.message}`)
+    }
+  }
 }
 
 /**

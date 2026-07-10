@@ -147,6 +147,24 @@ Never duplicates or overwrites an existing active `property_assets` row for the 
 - `prop.timezone` is a UTC offset string like `-0500`. Node's `Intl` API requires IANA identifiers. Derive timezone from `addr.state` using `resolveHospitableTimezone()` in `lib/integrations/providers/hospitable.ts`.
 - `details.addresses` is an array — find `is_default: true` or use index 0.
 
+**📄 Spec only — `bookings` (pricing rules/policies), wired ahead of verification (2026-07-10).** Per Hospitable's own published example response, `bookings` sits at the top level of the property object alongside `details`/`house_rules`:
+```
+bookings.booking_policies.cancellation      string[]
+bookings.booking_policies.payment_terms     { status, description[], grace_period }
+bookings.listing_markups                    [{ platform, type, value }]
+bookings.security_deposits                  [{ name, type, value: { amount, formatted } }]
+bookings.occupancy_based_rules              { guests_included, extra_guest_fee, pet_fee }
+bookings.fees                               [{ name, type, value }]   — e.g. name: "cleaning_fee"
+bookings.discounts                          [{ name, type, value }]
+bookings.site_urls                          string[]
+```
+**Not yet confirmed:**
+- Whether a bare `include=details` call returns this object, or whether it needs its own `include=bookings` — the published example bundles every field group together for illustration, and this exact endpoint already fooled us once before on `check-in`/`check-out` (spec says hyphenated; live reality is `checkin`/`checkout`, no hyphen — see above). `hospFetchProperties()`/the single-property fetch now request `include=details,bookings` speculatively; harmless if Hospitable ignores the unrecognized include.
+- Whether `fees[].name` is really the literal string `"cleaning_fee"` for every account, or a per-account slug.
+- Money values are assumed integer cents (`12345` → `"$123.45"`) per Hospitable's convention elsewhere — unconfirmed for this specific field.
+
+**FieldStay mapping (📄 speculative — not yet verified live):** `bookings.fees[name=cleaning_fee].value.amount` → `properties.cleaning_cost`, via `extractHospitableCleaningFee()` in `hospitable.ts`. Deliberately NOT part of the always-overwrite property sync — only backfills a currently-`null` `cleaning_cost`, since a PM's own entry (what FieldStay actually pays a cleaner) can legitimately differ from what the PMS charges guests. See `backfillCleaningCost()` in `lib/properties/upsert-normalized.ts`.
+
 ---
 
 #### `GET /properties/{uuid}`
@@ -231,6 +249,16 @@ include:      "guest,properties"
 | `financials` | `financials` | `financials:read` ⏳ | Revenue data |
 | `review` | `review` | `reviews:read` | |
 | `tasks` | `tasks` | `task:read` ⏳ | |
+
+**📄 Spec only — `financials`, wired ahead of the scope grant (2026-07-10).** No real payload has ever been observed — `financials:read` was not yet granted as of this writing. Field names below are a best guess based on Hospitable's own money-value convention seen elsewhere (`{amount, formatted}`, integer cents), **not confirmed**:
+```
+financials.host_payout   { amount, formatted }   — guessed primary field: what the PM/owner receives
+financials.payout        { amount, formatted }   — guessed fallback
+financials.total         { amount, formatted }   — guessed fallback (likely guest-paid total, not payout)
+```
+`hospFetchReservations()` and the single-reservation fetch now request `include=guest,properties,financials` speculatively. `extractHospitableActualTotal()` in `hospitable.ts` tries each key in the priority order above and returns `null` if none match a well-formed `{amount: number}` shape — a wrong guess degrades to "no real total available" (falls back to the existing `nights * avg_nightly_rate` estimate), never a fabricated revenue figure.
+
+**FieldStay mapping (📄 speculative):** the extracted amount → `bookings.actual_total_amount`, then flows into `booking/confirmed`'s `actual_total_amount` field (`lib/inngest/events.ts`), which `handleBookingConfirmed` (`lib/inngest/functions/booking-events.ts`) now prefers over the `avg_nightly_rate` estimate when posting to `owner_transactions`. This is also the first time `booking/confirmed` has ever had a producer — Hospitable's initial and incremental sync now emit it for confirmed, non-block, guest-stay reservations; OwnerRez/Uplisting still don't emit this event today (a separate, pre-existing gap, not addressed here). **Verify against a real payload before trusting the posted revenue figure** — this entire block is unconfirmed guesswork until then.
 
 **`guest` include fields:**
 ```

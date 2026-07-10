@@ -9,7 +9,7 @@ export const handleBookingConfirmed = inngest.createFunction(
   { id: 'booking-confirmed', name: 'Booking Confirmed — Post Revenue', retries: 3 },
   { event: 'booking/confirmed' as const },
   async ({ event, step }) => {
-    const { booking_id, property_id, org_id, source } = event.data
+    const { booking_id, property_id, org_id, source, actual_total_amount } = event.data
 
     await step.run('post-booking-revenue', async () => {
       const supabase  = createServiceClient()
@@ -20,7 +20,7 @@ export const handleBookingConfirmed = inngest.createFunction(
         supabase.from('properties').select('avg_nightly_rate').eq('id', property_id).single(),
       ])
 
-      if (!booking || !property?.avg_nightly_rate) return { skipped: true }
+      if (!booking) return { skipped: true }
 
       let checkin: Date, checkout: Date
       try {
@@ -39,7 +39,19 @@ export const handleBookingConfirmed = inngest.createFunction(
       const nights = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
       if (nights <= 0) return { skipped: true, reason: 'non_positive_nights' }
 
-      const amount     = parseFloat((nights * property.avg_nightly_rate).toFixed(2))
+      // Prefer the PMS's own reported total (currently only Hospitable,
+      // once financials:read is granted) over the avg_nightly_rate
+      // estimate — a real per-booking figure beats a guess whenever we
+      // have one.
+      let amount: number
+      if (actual_total_amount != null && actual_total_amount > 0) {
+        amount = actual_total_amount
+      } else if (property?.avg_nightly_rate) {
+        amount = parseFloat((nights * property.avg_nightly_rate).toFixed(2))
+      } else {
+        return { skipped: true, reason: 'no_rate' }
+      }
+
       const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
 
       // Atomic upsert — ON CONFLICT (source_reference_id, source) DO NOTHING

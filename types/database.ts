@@ -233,6 +233,7 @@ export interface Booking {
   stay_type:            'guest_stay' | 'owner_stay'
   guidebook_token:      string | null
   guidebook_pre_arrival_email_sent_at: string | null
+  actual_total_amount:  number | null
   created_at:           string
   updated_at:           string
 }

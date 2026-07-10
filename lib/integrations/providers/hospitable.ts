@@ -115,6 +115,22 @@ export interface HospitableProperty {
     wifi_name:                 string | null
     wifi_password:             string | null
   } | null
+
+  // 📄 Spec only — NOT yet confirmed against a live response, and not
+  // confirmed to require any include beyond what property:read already
+  // grants (Hospitable's published example bundles every field group
+  // together, which this codebase has already found to be misleading once
+  // for this same endpoint — see the check-in/checkin correction above).
+  // Verify against a real synced property before trusting this shape.
+  // Money values are integer cents (e.g. 12345 → "$123.45"), matching
+  // every other monetary field Hospitable documents.
+  bookings?: {
+    fees?: Array<{
+      name:  string   // e.g. 'cleaning_fee', 'managment_fee' (sic, per spec)
+      type:  'fixed' | 'percent'
+      value: number | { amount: number; formatted: string }
+    }>
+  } | null
 }
 
 export interface HospitableReservationStatus {
@@ -175,6 +191,21 @@ export interface HospitableReservation {
   // meaningful) when stay_type is 'owner_stay'.
   stay_type?: 'guest_stay' | 'owner_stay'
   owner_stay?: { schedule_cleaning: boolean } | null
+
+  // 📄 Spec only — gated on financials:read, which is NOT yet granted (see
+  // "Scopes to Request from Patrick" in api-reference.md), so this has
+  // never been observed in a real response. Field names below are a best
+  // guess based on Hospitable's own money-value convention seen elsewhere
+  // (integer cents + a formatted string) — do not trust until verified.
+  // extractHospitableActualTotal() below tries several plausible key names
+  // and returns null on anything that doesn't match, specifically so a
+  // wrong guess degrades to "no real total available" (falls back to the
+  // avg_nightly_rate estimate) rather than posting a wrong revenue figure.
+  financials?: {
+    host_payout?: { amount: number; formatted: string }
+    payout?:      { amount: number; formatted: string }
+    total?:       { amount: number; formatted: string }
+  } | null
 }
 
 export interface HospitableTeammate {
@@ -643,7 +674,11 @@ export async function hospFetchProperties(token: string): Promise<HospitableProp
   const PER_PAGE  = 100
   const MAX_PAGES = 200
 
-  let url: string | null = `${HOSPITABLE_API_BASE}/properties?per_page=${PER_PAGE}&include=details`
+  // 📄 bookings is speculative — see HospitableProperty.bookings' doc
+  // comment. Appending it here costs nothing if Hospitable ignores an
+  // include it doesn't recognize, and is what actually turns on the
+  // cleaning-fee data once/if it's confirmed live.
+  let url: string | null = `${HOSPITABLE_API_BASE}/properties?per_page=${PER_PAGE}&include=details,bookings`
   let pageCount = 0
 
   while (url) {
@@ -692,11 +727,16 @@ export async function hospFetchReservations(
     }
 
     // Build base params via URLSearchParams (handles encoding for all standard params)
+    // financials is gated on the not-yet-granted financials:read scope —
+    // requesting it now is deliberately speculative (see
+    // HospitableReservation.financials' doc comment); harmless to include
+    // ahead of the grant and is what turns on real revenue data the moment
+    // it lands.
     const params = new URLSearchParams({
       page:       String(page),
       per_page:   String(PER_PAGE),
       start_date: startDate,
-      include:    'guest,properties',
+      include:    'guest,properties,financials',
       date_query: 'checkin',
     })
 
@@ -821,6 +861,42 @@ export function normalizeHospitableAmenities(
   return Object.fromEntries(amenities.map((a) => [a, true]))
 }
 
+// 📄 Spec only — see HospitableProperty.bookings' doc comment. Returns
+// dollars (converts from integer cents), or null if the fee is absent or
+// malformed in any way — never guesses a value from a partial match.
+function extractHospitableCleaningFee(
+  bookings: HospitableProperty['bookings']
+): number | null {
+  const fee = bookings?.fees?.find((f) => f.name === 'cleaning_fee')
+  if (!fee || typeof fee.value !== 'object' || fee.value === null) return null
+
+  const amount = fee.value.amount
+  if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) return null
+
+  return Math.round(amount) / 100
+}
+
+// 📄 Spec only — see HospitableReservation.financials' doc comment. Tries
+// each plausible key in priority order (host_payout is what a PM/owner
+// actually receives, which is the more useful and more likely-present
+// figure for owner_transactions than a raw "total" the guest paid) and
+// returns dollars for the first one that's present and well-formed, or
+// null if none match — a wrong/absent guess falls back to the existing
+// avg_nightly_rate estimate in booking-events.ts, never a fabricated number.
+function extractHospitableActualTotal(
+  financials: HospitableReservation['financials']
+): number | null {
+  if (!financials) return null
+
+  for (const value of [financials.host_payout, financials.payout, financials.total]) {
+    if (!value || typeof value.amount !== 'number') continue
+    if (!Number.isFinite(value.amount) || value.amount <= 0) continue
+    return Math.round(value.amount) / 100
+  }
+
+  return null
+}
+
 /**
  * Maps a raw HospitableProperty into the shared NormalizedProperty shape
  * (see lib/properties/normalize.ts) for lib/properties/upsert-normalized.ts
@@ -869,6 +945,8 @@ export function hospitablePropertyToNormalized(
     wifi_password:       prop.details?.wifi_password || null,
     access_instructions: prop.details?.guest_access  || null,
     house_manual:        prop.details?.house_manual  || null,
+
+    cleaning_cost: extractHospitableCleaningFee(prop.bookings),
   }
 }
 
@@ -949,6 +1027,8 @@ export function hospitableReservationToNormalized(
     source:      mapHospitableChannel(res.platform),
     is_block:    false,
     stay_type:   res.stay_type === 'owner_stay' ? 'owner_stay' : 'guest_stay',
+
+    actual_total_amount: extractHospitableActualTotal(res.financials),
   }
 }
 
