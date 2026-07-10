@@ -123,31 +123,7 @@ adapter once verified.
 
 ---
 
-## 6. OwnerRez: no reconciliation for hard-deleted bookings/holds
-
-**File:** `lib/inngest/functions/ownerrez/incremental-sync.ts`
-
-`handleWebhookEvent` treats `entity_delete` as distinct from
-`entity_insert`/`entity_update`, implying OwnerRez can hard-delete a
-booking or quote-hold record — but `incremental-sync.ts` has no code path
-that ever detects or reconciles a record disappearing from OwnerRez; it
-only upserts whatever `getBookings(since_utc)` currently returns.
-Cancellation (the common case) is handled correctly as a status change and
-excluded from turnover generation. But if OwnerRez ever truly hard-deletes
-a quote-hold/block rather than cancelling it, and the `since_utc`-filtered
-list endpoint omits deleted records (typical REST behavior), the stale
-`status:'blocked'` row would persist in FieldStay indefinitely — showing
-the property as unavailable on the calendar/owner portal with nothing to
-ever clear it.
-
-**Suggested fix:** periodically reconcile FieldStay's `blocked` bookings
-against a fresh `properties[]`-scoped fetch and mark ones no longer present
-upstream as resolved, or confirm with OwnerRez support whether hard deletes
-of holds/blocks are actually possible before treating this as live risk.
-
----
-
-## 7. OwnerRez: unconfirmed property detail field names
+## 6. OwnerRez: unconfirmed property detail field names
 
 **File:** `lib/integrations/types.ts:143-145`, consumed by
 `buildOwnerRezDetailPatch()` in `lib/integrations/providers/ownerrez.ts`
@@ -177,7 +153,7 @@ throughout Hospitable's adapter.
 
 ---
 
-## 8. OwnerRez: orphaned marketplace-install artifacts are never cleaned up
+## 7. OwnerRez: orphaned marketplace-install artifacts are never cleaned up
 
 **Files:** `lib/integrations/vault.ts` (`cleanup_expired_pending_integration_links`
 DB function), `supabase/migrations/20260707152648_marketplace_pending_integration_links.sql`
@@ -201,7 +177,7 @@ existing `cleanup_webhook_dedup()` pattern.
 
 ---
 
-## 9. `repuguard/activated` event is defined but never wired to anything
+## 8. `repuguard/activated` event is defined but never wired to anything
 
 **File:** `lib/inngest/events.ts`
 
@@ -226,7 +202,7 @@ onboarding step RepuGuard activation should kick off).
 
 ---
 
-## 10. `billing/subscription-updated` is sent but has zero consumers
+## 9. `billing/subscription-updated` is sent but has zero consumers
 
 **File:** `app/api/webhooks/stripe/route.ts` (send site), `lib/inngest/events.ts`
 
@@ -249,7 +225,7 @@ notification was ever actually wanted here.
 
 ---
 
-## 11. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
+## 10. Dashboard layout and `requireOrgMember()` are two independent implementations of the same lookup
 
 **Files:** `app/(dashboard)/layout.tsx`, `lib/auth.ts`
 

@@ -28,6 +28,8 @@ import { inventoryOrderEmailCron } from '@/lib/inngest/functions/inventory-order
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
 import { ownerRezIncrementalSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
 import { ownerRezReviewsSync }     from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
+import { ownerRezReconciliationCron }    from '@/lib/inngest/functions/ownerrez/reconciliation-cron'
+import { ownerRezReconciliationHandler } from '@/lib/inngest/functions/ownerrez/reconciliation-handler'
 
 // Hostaway integration
 import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sync'
@@ -176,6 +178,8 @@ export const { GET, POST, PUT } = serve({
     ownerRezInitialSync,
     ownerRezIncrementalSync,
     ownerRezReviewsSync,
+    ownerRezReconciliationCron,
+    ownerRezReconciliationHandler,
 
     // Hostaway sync
     hostawayInitialSync,
