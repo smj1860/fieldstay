@@ -250,7 +250,7 @@ include:      "guest,properties"
 | `review` | `review` | `reviews:read` | |
 | `tasks` | `tasks` | `task:read` ⏳ | |
 
-**📄 Spec — `financials`, wired ahead of the scope grant.** `financials:read` was not yet granted as of this writing, so this has never been observed in a real *GET* response for our own account. Updated 2026-07-10 with the real documented shape from Hospitable's own **"Update Reservation" (`PUT /reservations/{id}`)** published example response — a real structure, not a guess (the original version of this section guessed top-level `host_payout`/`payout`/`total` keys, which are wrong; corrected below):
+**📄 Spec — `financials`, wired ahead of the scope grant.** `financials:read` was not yet granted as of this writing, so this has never been observed in a real response for our own account. Updated 2026-07-10 with the real documented shape from Hospitable's own published spec — confirmed identical across **both** `GET /reservations/{id}` (Get Reservation — the actual read endpoint our single-reservation fetch calls) **and** `PUT /reservations/{id}` (Update Reservation)'s example responses, which is stronger evidence than a write-endpoint example alone (the original version of this section guessed top-level `host_payout`/`payout`/`total` keys with no reference material at all — wrong, corrected below). Still not directly confirmed: whether the bulk list endpoint (`GET /reservations`, used by `hospFetchReservations()` for sync) returns the identical shape — very likely given API consistency, but not the same doc page:
 ```
 financials.host.revenue        { amount, formatted, label: "Gross Revenue", category }   — primary field
 financials.host.accommodation  { amount, formatted, label, category }
