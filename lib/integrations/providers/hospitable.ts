@@ -760,24 +760,22 @@ export async function hospFetchReservations(
       .map((id) => `properties[]=${encodeURIComponent(id)}`)
       .join('&')
 
-    // status[] is optional per the API docs, but leaving it off relies on an
-    // undocumented server-side default. Reservations entered manually in the
-    // Hospitable UI (rather than synced from a channel like Airbnb) land in
-    // reservation_status categories other than "accepted" (e.g. "checkpoint")
-    // — pass every value the API accepts as a status[] filter explicitly so
-    // manual bookings aren't silently dropped by whatever the default turns
-    // out to be. Confirmed accepted values via live 400 response:
-    // "must be one of: not_accepted, request, accepted, cancelled or checkpoint"
-    // — note the underscore in not_accepted (the response category field uses
-    // a space, "not accepted", but the filter value does not), and "unknown"
-    // is a valid response category but not a valid filter value.
-    const statusQuery = [
-      'request', 'accepted', 'cancelled', 'not_accepted', 'checkpoint',
-    ].map((s) => `status[]=${encodeURIComponent(s)}`).join('&')
-
+    // TEMPORARY DIAGNOSTIC (2026-07-10): status[] previously sent every
+    // filter value the API accepts (request/accepted/cancelled/
+    // not_accepted/checkpoint) explicitly, to avoid missing manually-created
+    // reservations. But "unknown" is a valid response category with NO
+    // corresponding valid filter value — meaning a reservation in that
+    // category was structurally unreachable no matter what we sent, and a
+    // real test reservation (confirmed listed, in-window dates) returned
+    // meta.total: 0 from Hospitable's own server, ruling out a parsing bug.
+    // Dropping the filter entirely here to test whether Hospitable's
+    // undocumented default is actually MORE permissive than our explicit
+    // list (plausible — many list APIs default to "all" absent a filter).
+    // If this resolves it, replace the always-explicit statusQuery with
+    // omitting status[] permanently; if not, revert this and investigate
+    // date_query/properties[] next.
     const url = `${HOSPITABLE_API_BASE}/reservations?${params.toString()}`
       + (propertiesQuery ? `&${propertiesQuery}` : '')
-      + `&${statusQuery}`
 
     const res = await hospitableFetch(url, token)
 
