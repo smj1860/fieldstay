@@ -48,6 +48,7 @@
 | `devices:read` | Crew app access codes, guidebook door codes | Surface smart lock codes to crew at checkout time without PM copy-paste |
 | `devices:write` | Future: remote crew unlock | Provision operation smartlock codes for arriving crew |
 | `knowledge_hub:read` + `knowledge_hub:write` | Guidebook sync | Bidirectional sync with Hospitable Knowledge Hub to eliminate duplicate data entry |
+| `calendar:read` | Manually-blocked calendar dates | Only confirmed path to detect a PM's manual block in Hospitable — `is_block` is currently hardcoded `false` on every synced reservation because the `/reservations` payload has no signal for this (see `hospitableReservationToNormalized()`'s doc comment). See the dedicated section below. |
 
 ---
 
@@ -329,6 +330,51 @@ const propertyExternalId =
 **Scope:** `reservation:read`
 **Used by:** Incremental sync — fetch single reservation after webhook fires.
 `identifier` = UUID or reservation code.
+
+---
+
+### Calendar / Availability — 📄 Spec, scope not yet granted
+
+#### `GET /properties/{uuid}/calendar`
+**Scopes:** `property:read` + `calendar:read` ⏳ *(not yet granted — see "Scopes to Request from Patrick")*
+**Rate limit:** 1000 req/min per vendor/PAT user (much higher than the general ~60/min limit)
+**Query params:** `start_date`, `end_date` (both `YYYY-MM-DD`)
+**Not yet used anywhere in the codebase** — no code exists for this endpoint. Documented here ahead of the scope grant, same pattern as `financials`/`bookings` earlier, but **not implemented speculatively** like those were — this endpoint is a fundamentally different shape (day-by-day calendar, not a reservation object) and we only have one example `status.reason` value (`"RESERVED"`) with no enum of what a manual block actually looks like. Guessing the block-detection logic blind here carries the same risk the financials guess did, except we can't verify it against a live response the way we could there, since we don't have the scope at all.
+
+**Response shape** (per Hospitable's published example):
+```
+data.listing_id            string (deprecated)
+data.provider               string (deprecated)
+data.start_date / end_date  string (YYYY-MM-DD)
+data.days[]:
+  date                  string (YYYY-MM-DD)
+  day                   string — e.g. "SUNDAY"
+  min_stay              number
+  note                  string | null — e.g. "Blocked for maintenance"
+  status.reason         string — only confirmed value so far: "RESERVED"
+  status.source_type    string — e.g. "USER" (plausibly the signal for "PM manually set this," vs. a channel-driven value — unconfirmed)
+  status.source         string — e.g. "Airbnb"
+  status.available      boolean
+  price.amount / currency / formatted
+  closed_for_checkin    boolean
+  closed_for_checkout   boolean
+```
+
+**This is genuinely a different design problem, not just a new field to map:**
+- Day-level granularity, not a stable reservation-like object with a checkin/checkout pair and an ID — turning a contiguous run of blocked days into a single "block" row requires new range-consolidation logic, not just extending `hospitableReservationToNormalized()`.
+- No enum of possible `status.reason`/`status.source_type` values beyond the one example — need a real payload with an actual manual block in it (or Hospitable's dev docs, if they enumerate the possible values anywhere) before writing any detection logic.
+- Unconfirmed whether a manually-blocked date *also* shows up as a `not accepted`/`unknown`-category reservation via `/reservations` (in which case this calendar endpoint might be redundant with a signal we already have, just better-labeled), or whether blocks *only* ever appear here and never as a reservation object at all.
+
+**Suggested fix, once `calendar:read` is granted:** fetch the calendar for a reasonable forward window per property, group consecutive `available: false` days whose `status.reason` indicates a manual block (once we know what that value actually is) into synthetic block records, and reconcile against existing `bookings` rows for the same property/date-range so a real guest reservation covering the same dates is never misclassified as a block.
+
+#### Alternative considered: `GET /properties/search` — 📄 Spec, likely not a fit
+A second endpoint surfaces an `availability` object per property (`available: boolean`, `details[]` with `notAvailableReason` + `date`), which on the surface looks like it could sidestep the `calendar:read` wait. Ruled out as the primary path for now:
+- It's built for guest-facing direct-booking-site search — `adults` and `location.{latitude,longitude}` are **required** params, `children`/`infants`/`pets`/`site_url` are supported, and the doc's own framing ("search up to 3 years in the future... restrict to a specific direct booking site") describes a booking-widget search, not an admin introspection call.
+- The one documented `notAvailableReason` example, `maximum_number_of_guests_exceeded`, is a guest-search-criteria mismatch (property too small for the party size), not a calendar-state reason — no evidence yet that a PM's manual block would even appear in this enum, let alone under a distinguishable value.
+- The doc doesn't state what scope gates the endpoint itself (only that the `listings` include needs `listing:read`), so it's unconfirmed whether this even avoids a new scope request.
+- Would need a `location` value per call despite the doc claiming "always returns all properties in the account" regardless of location — workable with each property's already-geocoded lat/lng, but adds an odd dependency (a guest-search endpoint standing in for a block-detection query) for logic this central to turnover suppression.
+
+Worth asking Patrick directly whether this endpoint can return `notAvailableReason: something-like-"blocked"` before either endpoint is picked — could save requesting `calendar:read` at all if this one already covers it under scopes we hold.
 
 ---
 

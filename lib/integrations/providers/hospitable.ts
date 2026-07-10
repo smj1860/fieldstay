@@ -1071,6 +1071,15 @@ export function hospitableReservationToNormalized(
     // docs or a live payload confirm otherwise; do not assume this means
     // Hospitable blocks are unsupported, only that this mapper has never
     // seen one.
+    //
+    // The only path found so far that carries day-level "why is this date
+    // unavailable" data is `GET /properties/{uuid}/calendar`, which needs
+    // a `calendar:read` scope we don't have yet — see
+    // docs/Integrations/hospitable/api-reference.md's "Calendar /
+    // Availability" section for the full writeup, including why it wasn't
+    // safe to guess-and-wire the way `cleaning_cost`/`actual_total_amount`
+    // were. Do not wire this up until that scope is granted and a real
+    // payload confirms what a manual block actually looks like.
     status:      mapHospitableStatus(res.reservation_status.current.category),
     guest_name:  guestName,
     guest_email: guest?.email ?? null,
