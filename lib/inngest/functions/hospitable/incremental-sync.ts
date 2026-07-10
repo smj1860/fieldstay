@@ -44,16 +44,21 @@ const PROVIDER            = 'hospitable'
 // NormalizedBooking/the `bookings` table stores:
 //   guests_changed        → guest counts, we don't store these (only guest name/email)
 //   notes_changed         → internal conversation notes, not synced
-//   financials_changed    → not synced (financials:read not granted)
 //   guest_issue_detected  → issue_alert field, not synced
 // Deliberately NOT included (so they still trigger a re-fetch): status_changed,
 // dates_changed, checkin_changed, checkout_changed (all map directly to
-// columns we write), and listing_changed (could mean the reservation moved
-// to a different property — safer to re-fetch and re-resolve than assume).
+// columns we write), listing_changed (could mean the reservation moved
+// to a different property — safer to re-fetch and re-resolve than assume),
+// and financials_changed — REMOVED from this set 2026-07-10: it used to be
+// genuinely irrelevant (financials:read wasn't granted, nothing consumed
+// it), but bookings.actual_total_amount now depends on it. A live webhook
+// caught by this exact skip during initial testing (a reservation.created
+// event carrying only financials_changed) confirmed keeping it here would
+// silently defeat the whole feature — every financials update would be
+// skipped before ever reaching the fetch that reads it.
 const IRRELEVANT_RESERVATION_TRIGGERS = new Set([
   'guests_changed',
   'notes_changed',
-  'financials_changed',
   'guest_issue_detected',
 ])
 
