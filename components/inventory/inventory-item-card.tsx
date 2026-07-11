@@ -205,7 +205,7 @@ export function InventoryItemCard({
             onChange={handleNoteChange}
             rows={2}
             placeholder="Note about this item (unit wrong, reorder from different supplier, etc.)"
-            className="w-full text-xs rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1"
+            className="w-full text-xs rounded-lg px-3 py-2 resize-none focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
             style={{
               background: 'var(--bg-raised)',
               color:      'var(--text-primary)',

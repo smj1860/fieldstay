@@ -408,7 +408,7 @@ function TurnoverCard({
           checked={isSelected}
           onChange={onToggle}
           onClick={e => e.stopPropagation()}
-          className="w-4 h-4 rounded border-themed text-brand-600 focus:ring-brand-500 mt-0.5 flex-shrink-0 cursor-pointer"
+          className="w-4 h-4 rounded border-themed text-brand-600 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] mt-0.5 flex-shrink-0 cursor-pointer"
           aria-label="Select turnover"
         />
 

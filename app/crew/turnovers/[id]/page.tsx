@@ -828,7 +828,7 @@ export default function CrewTurnoverPage() {
                               inputs[idx + 1]?.focus()
                             }}
                             data-inv-count-input
-                            className="w-12 text-center text-sm font-semibold text-primary-themed border border-themed rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-brand-400"
+                            className="w-12 text-center text-sm font-semibold text-primary-themed border border-themed rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                           />
                           <button
                             onClick={() => handleCountChange(item.id, qty + 1)}

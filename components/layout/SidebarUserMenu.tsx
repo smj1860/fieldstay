@@ -99,7 +99,7 @@ export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
               <button
                 onClick={handleSignOut}
                 disabled={loading}
-                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors disabled:opacity-50"
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)]"
                 style={{ color: '#ef4444' }}
                 onMouseOver={(e) => { e.currentTarget.style.background = 'var(--bg-card)' }}
                 onFocus={(e)     => { e.currentTarget.style.background = 'var(--bg-card)' }}
