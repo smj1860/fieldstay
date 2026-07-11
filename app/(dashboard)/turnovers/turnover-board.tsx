@@ -15,6 +15,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Checkbox } from '@/components/ui/Checkbox'
 import {
   assignCrew, assignCrewIndividually, addCrewToTurnover, removeCrewFromTurnover,
   updateTurnoverStatus, createManualTurnover, triggerManualSync,
@@ -1255,12 +1256,7 @@ export function TurnoverBoard({
         <div className="flex items-center gap-3 mb-2">
           <label className="flex items-center gap-2 text-xs cursor-pointer"
                  style={{ color: 'var(--text-muted)' }}>
-            <input
-              type="checkbox"
-              checked={allVisibleSelected}
-              onChange={toggleSelectAll}
-              className="w-4 h-4 rounded border-themed text-brand-600"
-            />
+            <Checkbox checked={allVisibleSelected} onChange={toggleSelectAll} />
             {allVisibleSelected
               ? `Deselect all (${filtered.length})`
               : `Select all visible (${filtered.length})`}
