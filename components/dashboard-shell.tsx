@@ -4,22 +4,20 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Building2, CalendarCheck, Package,
-  Wrench, Mail, BarChart3, Settings, ChevronLeft,
-  ChevronRight, Menu, X, Sun, Moon,
-  Users2, Briefcase, MessageSquareDot, MessageSquare, ShieldCheck, TrendingUp,
-  LifeBuoy, Bell, BookOpen, Inbox, Zap,
-  type LucideIcon,
+  ChevronLeft, ChevronRight, Menu, X, Sun, Moon,
+  LifeBuoy, Bell, Inbox, Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MemberRole } from '@/types/database'
 import type { NotificationItem } from '@/lib/notifications'
 import { BottomNav } from '@/components/bottom-nav'
 import { PmMoreDrawer } from '@/components/pm-more-drawer'
+import { CommandPalette } from '@/components/command-palette'
 import { NotificationBell } from '@/components/notification-bell'
 import { SidebarUserMenu } from '@/components/layout/SidebarUserMenu'
 import { InstallBanner } from '@/components/pwa/install-banner'
 import { useTheme } from '@/lib/hooks/use-theme'
+import { getVisibleNavItems, type NavItem } from '@/lib/navigation'
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
@@ -45,26 +43,6 @@ async function subscribeToDashboardPush(reg: ServiceWorkerRegistration) {
     }),
   })
 }
-
-// Ops tier (daily use) first, then Management tier (weekly use) — split
-// below into opsNav/mgmtNav and rendered as two groups with a divider.
-const NAV_ITEMS = [
-  { href: '/ops',          label: 'Ops Snapshot', icon: LayoutDashboard, roles: ['admin','manager','viewer'], group: 'ops' as const        },
-  { href: '/bookings',    label: 'Bookings',      icon: CalendarCheck,   roles: ['admin','manager','viewer'], group: 'ops' as const        },
-  { href: '/turnovers',   label: 'Turnovers',    icon: CalendarCheck,   roles: ['admin','manager','viewer'], group: 'ops' as const        },
-  { href: '/maintenance', label: 'Maintenance',  icon: Wrench,          roles: ['admin','manager'],          group: 'ops' as const        },
-  { href: '/inventory',   label: 'Inventory',    icon: Package,         roles: ['admin','manager'],          group: 'ops' as const        },
-  { href: '/properties',  label: 'Properties',   icon: Building2,       roles: ['admin','manager','viewer'], group: 'management' as const },
-  { href: '/assets',            label: 'Asset Health',     icon: ShieldCheck, roles: ['admin','manager'], group: 'management' as const },
-  { href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin','manager'], group: 'management' as const },
-  { href: '/crew-manage', label: 'Crew',         icon: Users2,          roles: ['admin','manager'],          group: 'management' as const },
-  { href: '/messages', label: 'Messages', icon: MessageSquare, roles: ['admin','manager'], group: 'management' as const },
-  { href: '/vendors',     label: 'Vendors',      icon: Briefcase,       roles: ['admin','manager'],          group: 'management' as const },
-  { href: '/comms-log',   label: 'Comms Log',    icon: Mail,            roles: ['admin','manager'],          group: 'management' as const },
-  { href: '/owners',      label: 'Owner Portal', icon: BarChart3,       roles: ['admin','manager'],          group: 'management' as const },
-  { href: '/guidebook',   label: 'Guidebook',    icon: BookOpen,        roles: ['admin','manager'],          group: 'management' as const },
-  { href: '/settings',    label: 'Settings',     icon: Settings,        roles: ['admin'],                    group: 'management' as const },
-] as const
 
 const PAGE_TITLES: Record<string, string> = {
   '/ops':          'Ops Snapshot',
@@ -99,14 +77,6 @@ interface Props {
   unreadMessages?:            number
   isStaff?:                   boolean
   children:                   React.ReactNode
-}
-
-interface NavItem {
-  href:  string
-  label: string
-  icon:  LucideIcon
-  roles: readonly string[]
-  group: 'ops' | 'management'
 }
 
 interface DashboardSidebarProps {
@@ -383,27 +353,16 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
     }
   }
 
-  // Task 1: map 'owner' to 'admin' so owners see the full nav
-  const effectiveRole = role === 'owner' ? 'admin' : role
-
-  const REPUGUARD_NAV = repuguardActive
-    ? [{ href: '/reviews', label: 'Reviews', icon: MessageSquareDot, roles: ['admin', 'manager'] as const, group: 'management' as const }]
-    : []
-
-  const baseNav   = NAV_ITEMS.filter((item) => item.roles.includes(effectiveRole as never))
-  const reviewsNav = REPUGUARD_NAV.filter(item => item.roles.includes(effectiveRole as 'admin' | 'manager'))
-
-  // Splice Reviews in directly after Properties rather than appending at the
-  // end, so it sits where PMs expect it instead of trailing after Settings.
-  const propertiesIdx = baseNav.findIndex((item) => item.href === '/properties')
-  const filteredNav = propertiesIdx === -1
-    ? [...baseNav, ...reviewsNav]
-    : [...baseNav.slice(0, propertiesIdx + 1), ...reviewsNav, ...baseNav.slice(propertiesIdx + 1)]
+  const visibleItems = getVisibleNavItems(role, { repuguardActive, isStaff })
 
   // Split into Ops (daily-use) and Management (weekly-use) tiers, rendered
-  // as two groups with a divider to keep the sidebar scannable.
-  const opsNav  = filteredNav.filter((item) => item.group === 'ops')
-  const mgmtNav = filteredNav.filter((item) => item.group === 'management')
+  // as two groups with a divider to keep the sidebar scannable. help and
+  // support-inbox are excluded — DashboardSidebar renders those as their
+  // own hardcoded blocks below the scrollable nav list.
+  const opsNav  = visibleItems.filter((item) => item.tier === 'ops')
+  const mgmtNav = visibleItems.filter((item) =>
+    item.tier === 'management' && item.id !== 'help' && item.id !== 'support-inbox'
+  )
 
   // Derive page title for mobile header
   const pageTitle = Object.entries(PAGE_TITLES).find(([path]) =>
@@ -495,6 +454,8 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
                 : <ChevronLeft  className="w-4 h-4" />
               }
             </button>
+
+            <CommandPalette role={role} repuguardActive={repuguardActive} isStaff={isStaff} />
           </div>
 
           {/* Mobile page title — centered absolutely */}
