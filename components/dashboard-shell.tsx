@@ -159,24 +159,13 @@ function DashboardSidebar({
         title={collapsed && !mobile ? item.label : undefined}
         className={cn(
           'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm',
-          'font-medium transition-all relative'
+          'font-medium transition-all relative',
+          !active && 'hover:text-[var(--chrome-text)] focus-visible:text-[var(--chrome-text)]'
         )}
         style={{
           background: active ? 'var(--chrome-bg-raised)' : 'transparent',
           color:      active ? 'var(--chrome-text)' : 'var(--chrome-text-muted)',
           borderLeft: active ? '2px solid var(--chrome-gold)' : '2px solid transparent',
-        }}
-        onMouseOver={(e) => {
-          if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
-        }}
-        onFocus={(e) => {
-          if (!active) e.currentTarget.style.color = 'var(--chrome-text)'
-        }}
-        onMouseOut={(e) => {
-          if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
-        }}
-        onBlur={(e) => {
-          if (!active) e.currentTarget.style.color = 'var(--chrome-text-muted)'
         }}
       >
         <Icon className="w-4 h-4 flex-shrink-0" />
@@ -287,31 +276,11 @@ function DashboardSidebar({
             href="/support-inbox"
             onClick={onCloseMobile}
             title={collapsed && !mobile ? 'Support Inbox' : undefined}
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all hover:bg-[var(--chrome-bg-raised)] hover:text-[var(--chrome-text)] focus-visible:bg-[var(--chrome-bg-raised)] focus-visible:text-[var(--chrome-text)]"
             style={{
               color:      pathname.startsWith('/support-inbox') ? 'var(--chrome-text)' : 'var(--chrome-text-muted)',
               background: pathname.startsWith('/support-inbox') ? 'var(--chrome-bg-raised)' : 'transparent',
               borderLeft: pathname.startsWith('/support-inbox') ? '2px solid var(--chrome-gold)' : '2px solid transparent',
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.background = 'var(--chrome-bg-raised)'
-              e.currentTarget.style.color = 'var(--chrome-text)'
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.background = 'var(--chrome-bg-raised)'
-              e.currentTarget.style.color = 'var(--chrome-text)'
-            }}
-            onMouseOut={(e) => {
-              if (!pathname.startsWith('/support-inbox')) {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--chrome-text-muted)'
-              }
-            }}
-            onBlur={(e) => {
-              if (!pathname.startsWith('/support-inbox')) {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--chrome-text-muted)'
-              }
             }}
           >
             <Inbox className="w-4 h-4 flex-shrink-0" />
@@ -329,24 +298,8 @@ function DashboardSidebar({
           href="/help"
           onClick={onCloseMobile}
           title={collapsed && !mobile ? 'Help & Support' : undefined}
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all hover:bg-[var(--chrome-bg-raised)] hover:text-[var(--chrome-text)] focus-visible:bg-[var(--chrome-bg-raised)] focus-visible:text-[var(--chrome-text)]"
           style={{ color: 'var(--chrome-text-muted)' }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.background = 'var(--chrome-bg-raised)'
-            e.currentTarget.style.color = 'var(--chrome-text)'
-          }}
-          onFocus={(e) => {
-            e.currentTarget.style.background = 'var(--chrome-bg-raised)'
-            e.currentTarget.style.color = 'var(--chrome-text)'
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--chrome-text-muted)'
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--chrome-text-muted)'
-          }}
         >
           <LifeBuoy className="w-4 h-4 flex-shrink-0" />
           {(!collapsed || mobile) && (
@@ -534,24 +487,8 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
 
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="hidden md:flex p-2.5 rounded-lg transition-all"
+              className="hidden md:flex p-2.5 rounded-lg transition-all hover:bg-[var(--border)] hover:text-[var(--text-primary)] focus-visible:bg-[var(--border)] focus-visible:text-[var(--text-primary)]"
               style={{ color: 'var(--text-muted)' }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.background = 'var(--border)'
-                e.currentTarget.style.color = 'var(--text-primary)'
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.background = 'var(--border)'
-                e.currentTarget.style.color = 'var(--text-primary)'
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--text-muted)'
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--text-muted)'
-              }}
             >
               {collapsed
                 ? <ChevronRight className="w-4 h-4" />
@@ -587,24 +524,8 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
 
             <button
               onClick={toggleTheme}
-              className="w-11 h-11 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all"
+              className="w-11 h-11 md:w-8 md:h-8 rounded-lg flex items-center justify-center transition-all hover:bg-[var(--border)] hover:text-[var(--text-primary)] focus-visible:bg-[var(--border)] focus-visible:text-[var(--text-primary)]"
               style={{ color: 'var(--text-muted)' }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.background = 'var(--border)'
-                e.currentTarget.style.color = 'var(--text-primary)'
-              }}
-              onFocus={(e) => {
-                e.currentTarget.style.background = 'var(--border)'
-                e.currentTarget.style.color = 'var(--text-primary)'
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--text-muted)'
-              }}
-              onBlur={(e) => {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = 'var(--text-muted)'
-              }}
               title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
             >
               {theme === 'dark'
@@ -617,12 +538,8 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
               <button
                 onClick={enableDashboardNotifications}
                 title="Enable push notifications"
-                className="w-8 h-8 rounded-lg flex items-center justify-center transition-all relative"
+                className="w-8 h-8 rounded-lg flex items-center justify-center transition-all relative hover:bg-[var(--border)] focus-visible:bg-[var(--border)]"
                 style={{ color: 'var(--accent-amber, #f59e0b)' }}
-                onMouseOver={(e) => { e.currentTarget.style.background = 'var(--border)' }}
-                onFocus={(e)     => { e.currentTarget.style.background = 'var(--border)' }}
-                onMouseOut={(e)  => { e.currentTarget.style.background = 'transparent' }}
-                onBlur={(e)      => { e.currentTarget.style.background = 'transparent' }}
               >
                 <Bell className="w-4 h-4" />
                 <span
