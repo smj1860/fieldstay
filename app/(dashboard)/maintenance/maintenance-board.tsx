@@ -25,6 +25,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -305,12 +306,11 @@ function WorkOrderCard({
       )}
     >
       <div className="flex items-start gap-3">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={isSelected}
           onChange={onToggle}
           onClick={(e) => e.stopPropagation()}
-          className="w-4 h-4 rounded border-themed text-brand-600 mt-0.5 flex-shrink-0 cursor-pointer"
+          className="mt-0.5 flex-shrink-0"
           aria-label="Select work order"
         />
         <div className="flex-1 min-w-0">
@@ -903,7 +903,7 @@ function ScheduleFormFields({
       </div>
 
       <label className="flex items-center gap-2 text-sm text-secondary-themed cursor-pointer">
-        <input type="checkbox" name="auto_create_wo" defaultChecked={defaults?.auto_create_wo ?? true} className="w-4 h-4 rounded" />
+        <Checkbox name="auto_create_wo" defaultChecked={defaults?.auto_create_wo ?? true} />
         Auto-create work order when due
       </label>
     </>

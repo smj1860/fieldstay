@@ -55,8 +55,8 @@ function StarRating({ rating }: { rating: number }) {
         <Star
           key={i}
           className="w-3.5 h-3.5"
-          fill={i < rating ? '#FCD116' : 'none'}
-          style={{ color: i < rating ? '#FCD116' : 'var(--border)' }}
+          fill={i < rating ? 'var(--accent-gold)' : 'none'}
+          style={{ color: i < rating ? 'var(--accent-gold)' : 'var(--border)' }}
         />
       ))}
     </span>
@@ -73,7 +73,7 @@ function DeadlineBadge({
   if (status === 'posted' || daysRemaining === null) return null
 
   const [bg, color, text]: [string, string, string] =
-    daysRemaining < 0  ? ['rgba(127,29,29,0.15)',    '#991b1b',              'Overdue']                  :
+    daysRemaining < 0  ? ['var(--accent-red-dim)',   'var(--accent-red)',   'Overdue']                  :
     daysRemaining <= 3 ? ['var(--accent-red-dim)',   'var(--accent-red)',    `${daysRemaining}d left`]   :
     daysRemaining <= 7 ? ['var(--accent-amber-dim)', 'var(--accent-amber)', `${daysRemaining}d left`]   :
                          ['var(--accent-green-dim)', 'var(--accent-green)', `${daysRemaining}d left`]
@@ -666,9 +666,9 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                   key={n}
                   onClick={() => setManualForm(f => ({ ...f, starRating: n }))}
                   className="transition-transform active:scale-90"
-                  style={{ color: n <= manualForm.starRating ? '#FCD116' : 'var(--border)' }}
+                  style={{ color: n <= manualForm.starRating ? 'var(--accent-gold)' : 'var(--border)' }}
                 >
-                  <Star className="w-6 h-6" fill={n <= manualForm.starRating ? '#FCD116' : 'none'} />
+                  <Star className="w-6 h-6" fill={n <= manualForm.starRating ? 'var(--accent-gold)' : 'none'} />
                 </button>
               ))}
             </div>
