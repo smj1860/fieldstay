@@ -25,6 +25,7 @@ import { Dialog } from '@/components/ui/Dialog'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Checkbox } from '@/components/ui/Checkbox'
 
 // ── Due date badge ────────────────────────────────────────────────────────────
 
@@ -167,8 +168,7 @@ function EditModal({
 
         <div>
           <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)}
-                   className="rounded" style={{ accentColor: 'var(--accent-gold)' }} />
+            <Checkbox checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)} />
             <span className="text-sm text-primary-themed">Seasonal item (restrict to specific months)</span>
           </label>
         </div>
@@ -452,8 +452,7 @@ function CustomItemModal({
         </div>
 
         <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)}
-                 className="rounded" style={{ accentColor: 'var(--accent-gold)' }} />
+          <Checkbox checked={seasonal} onChange={(e) => setSeasonal(e.target.checked)} />
           <span className="text-sm text-primary-themed">Seasonal (restrict to specific months)</span>
         </label>
 

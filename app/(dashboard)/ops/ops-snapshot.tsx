@@ -203,7 +203,10 @@ function TurnoverCard({
   const checkout    = new Date(turnover.checkout_datetime)
 
   return (
-    <Link href={`/turnovers/${turnover.id}`}>
+    <Link
+      href={`/turnovers/${turnover.id}`}
+      className="block rounded-xl focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)] focus:ring-offset-1 focus:ring-offset-[var(--bg-canvas)]"
+    >
       <div
         className="rounded-xl p-4 mb-2.5 transition-all cursor-pointer"
         style={{
@@ -681,9 +684,17 @@ export function OpsSnapshot({
               </div>
               <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
                 {openWorkOrders.slice(0, 5).map((wo, i) => (
-                  <Link key={wo.id} href={`/maintenance/${wo.id}`}>
+                  <Link
+                    key={wo.id}
+                    href={`/maintenance/${wo.id}`}
+                    className="group block focus:outline-none"
+                  >
                     <div
-                      className={cn('flex items-center gap-3 px-4 py-3 transition-colors', i > 0 && 'border-t')}
+                      className={cn(
+                        'flex items-center gap-3 px-4 py-3 transition-colors',
+                        'group-focus:ring-2 group-focus:ring-inset group-focus:ring-[var(--accent-gold)]',
+                        i > 0 && 'border-t'
+                      )}
                       style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
                       onMouseOver={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)' }}
                       onFocus={(e)     => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-raised)' }}

@@ -118,7 +118,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Describe what was done, any issues found..."
               rows={3}
-              className="w-full rounded-lg border border-themed px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="w-full rounded-lg border border-themed px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
             />
             <button
               onClick={handleComplete}

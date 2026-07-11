@@ -78,7 +78,8 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              'px-3 py-2.5 text-xs sm:text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap flex-shrink-0'
+              'px-3 py-2.5 text-xs sm:text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap flex-shrink-0',
+              'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)] rounded-t'
             )}
             style={
               activeTab === tab

@@ -583,7 +583,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
                   type="checkbox"
                   checked={nteOverrideConfirmed}
                   onChange={e => setNteOverrideConfirmed(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded text-red-600 focus:ring-red-500"
+                  className="mt-0.5 w-4 h-4 rounded text-red-600 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
                 />
                 <span style={{ color: '#991b1b', fontWeight: 500 }}>
                   I authorize this work order to exceed the NTE amount and confirm the additional cost of{' '}

@@ -719,7 +719,7 @@ function CreateWorkOrderModal({
                         type="checkbox"
                         name="portal_enabled"
                         defaultChecked
-                        className="w-4 h-4 rounded border-themed text-brand-600 focus:ring-brand-500"
+                        className="w-4 h-4 rounded border-themed text-brand-600 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
                       />
                       Send vendor portal link (vendor can mark complete via link)
                     </label>
@@ -741,7 +741,7 @@ function CreateWorkOrderModal({
                         type="checkbox"
                         checked={selectedQuoteVendors.includes(v.id)}
                         onChange={() => toggleQuoteVendor(v.id)}
-                        className="w-4 h-4 rounded border-themed text-brand-600 focus:ring-brand-500"
+                        className="w-4 h-4 rounded border-themed text-brand-600 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
                       />
                       <span className="flex-1 text-sm font-medium text-primary-themed">{v.name}</span>
                       <span className="text-xs text-muted-themed capitalize">{v.specialty.replace('_', ' ')}</span>
