@@ -18,7 +18,7 @@ export const workOrderDispatch = inngest.createFunction(
     const {
       workOrderId, woNumber, publicUrl, vendorEmail, vendorName,
       propertyName, propertyAddress, title, description,
-      nteAmount, dispatcherName, dispatcherOrg, dispatcherPhone,
+      nteAmount, dispatcherName, dispatcherOrg, dispatcherPhone, manualUrl,
     } = event.data
 
     // ── Step 1: Send email to vendor ────────────────────────────────────
@@ -35,6 +35,7 @@ export const workOrderDispatch = inngest.createFunction(
         dispatcherName,
         dispatcherOrg,
         dispatcherPhone,
+        manualUrl,
       }))
       const { error } = await resend.emails.send(
         {

@@ -7,6 +7,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { revalidatePath }      from 'next/cache'
 import { logAuditEvent }       from '@/lib/audit'
 import { renderSmsBody }       from '@/lib/sms/templates'
+import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
@@ -27,7 +28,7 @@ export async function dispatchWorkOrderToVendor(input: {
     const { data: wo, error: fetchErr } = await supabase
       .from('work_orders')
       .select(`
-        id, wo_number, status, org_id, property_id, title,
+        id, wo_number, status, org_id, property_id, asset_id, title,
         description, nte_amount, access_notes, lockbox_code, parking_notes,
         properties ( name, address ),
         vendors ( name, email )
@@ -74,6 +75,8 @@ export async function dispatchWorkOrderToVendor(input: {
 
     const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
+    const manualUrl = await getManualUrlForAsset(supabase, membership.org_id, wo.asset_id ?? null)
+
     await inngest.send({
       name: 'work-order/dispatched' as const,
       data: {
@@ -91,6 +94,7 @@ export async function dispatchWorkOrderToVendor(input: {
         dispatcherName:   profile?.full_name ?? 'Your Property Manager',
         dispatcherOrg:    org?.name ?? 'FieldStay Property Management',
         dispatcherPhone:  profile?.phone ?? null,
+        manualUrl,
       },
     })
 

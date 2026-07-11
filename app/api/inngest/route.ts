@@ -79,6 +79,7 @@ import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover
 import { generateCapexProjections }      from '@/lib/inngest/functions/capex-projections'
 import { triggerCapexProjectionForOrg }  from '@/lib/inngest/functions/capex-projection-trigger'
 import { generateDepreciationLedger }    from '@/lib/inngest/functions/depreciation-ledger'
+import { assetManualLookup }             from '@/lib/inngest/functions/asset-manual-lookup'
 
 // In-app messaging
 import { logMessageCommunication } from '@/lib/inngest/functions/log-message-comm'
@@ -226,6 +227,7 @@ export const { GET, POST, PUT } = serve({
     generateCapexProjections,
     triggerCapexProjectionForOrg,
     generateDepreciationLedger,
+    assetManualLookup,
 
     // In-app messaging
     logMessageCommunication,

@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { VendorPortal } from './vendor-portal'
+import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 
 export const metadata: Metadata = { title: 'Complete Work Order — FieldStay' }
 
@@ -18,7 +19,7 @@ export default async function VendorPortalPage({
   const { data: workOrder } = await supabase
     .from('work_orders')
     .select(`
-      id, title, description, status, portal_enabled,
+      id, org_id, asset_id, title, description, status, portal_enabled,
       scheduled_date, estimated_cost, completion_token_expires_at,
       wo_number, category, priority, nte_amount,
       properties ( name, address, city, state, zip ),
@@ -34,6 +35,12 @@ export default async function VendorPortalPage({
     .single()
 
   if (!workOrder) notFound()
+
+  const manualUrl = await getManualUrlForAsset(
+    supabase,
+    workOrder.org_id,
+    (workOrder as { asset_id?: string | null }).asset_id ?? null
+  )
 
   // Check expiry
   const expired =
@@ -62,6 +69,7 @@ export default async function VendorPortalPage({
         category:       workOrder.category ?? null,
         priority:       workOrder.priority ?? null,
         nte_amount:     (workOrder as { nte_amount?: number | null }).nte_amount ?? null,
+        manual_url:     manualUrl,
       }}
       property={property ?? null}
       expired={!!expired}
