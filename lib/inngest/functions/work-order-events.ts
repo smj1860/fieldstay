@@ -11,6 +11,7 @@ import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
 import { randomBytes } from 'crypto'
 import { renderSmsBody } from '@/lib/sms/templates'
+import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
           .from('work_orders')
           .select(`
             id, title, description, wo_number, nte_amount,
-            completion_token,
+            completion_token, asset_id,
             vendor_id,
             scheduled_date, scheduled_time,
             vendors ( name, email, phone ),
@@ -138,6 +139,8 @@ export const handleWorkOrderCreated = inngest.createFunction(
           .single()
         if (orgRow?.name) orgName = orgRow.name
 
+        const manualUrl = await getManualUrlForAsset(supabase, org_id, wo.asset_id ?? null)
+
         // Send vendor email directly — no secondary event hop
         const html = await render(WorkOrderDispatchEmail({
           woNumber:        wo.wo_number ?? '',
@@ -151,6 +154,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
           dispatcherName,
           dispatcherOrg:   orgName,
           dispatcherPhone,
+          manualUrl,
         }))
 
         const { error: emailErr } = await resend.emails.send(

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap } from 'lucide-react'
+import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap, BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
@@ -16,6 +16,7 @@ interface WorkOrderInfo {
   category:       string | null
   priority:       string | null
   nte_amount:     number | null
+  manual_url?:    string | null
 }
 
 interface PropertyInfo {
@@ -155,6 +156,20 @@ function WOInfo({ workOrder, property }: { workOrder: WorkOrderInfo; property: P
             <p className="text-xs font-semibold text-accent-400 uppercase tracking-wider mb-1.5">Scope of Work</p>
             <p className="text-xs text-accent-600 leading-relaxed whitespace-pre-wrap">{workOrder.description}</p>
           </div>
+        )}
+
+        {/* Manufacturer's manual for this asset, if one's on file */}
+        {workOrder.manual_url && (
+          <a
+            href={workOrder.manual_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 pt-1 border-t border-accent-100 text-xs font-semibold"
+            style={{ color: 'var(--accent-blue)' }}
+          >
+            <BookOpen className="w-3.5 h-3.5 flex-shrink-0" />
+            View manufacturer&apos;s service manual
+          </a>
         )}
       </div>
     </div>

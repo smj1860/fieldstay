@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient }       from '@/lib/supabase/server'
 import { stripe }                    from '@/lib/stripe/client'
+import { vendorConnectRatelimit }    from '@/lib/rate-limit'
+import { extractClientIp }           from '@/lib/integrations/webhook-verification'
 
 /**
  * GET /api/vendor-connect/[token]/onboard
@@ -12,13 +14,28 @@ import { stripe }                    from '@/lib/stripe/client'
  * Account links expire quickly — always generate fresh on each visit.
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
 
   if (!token || token.length < 10) {
     return NextResponse.json({ error: 'Invalid link' }, { status: 400 })
+  }
+
+  // Public, unauthenticated route that does two real Stripe API calls per
+  // hit (account creation + account link) — rate limit by IP, not the
+  // token, so a leaked/enumerated link can't drive unbounded Stripe cost.
+  // Fail open on a Redis outage — a degraded rate limiter must never block
+  // a vendor's legitimate onboarding.
+  try {
+    const ip = extractClientIp(request) ?? 'unknown'
+    const { success } = await vendorConnectRatelimit.limit(`vendor-connect-onboard:${ip}`)
+    if (!success) {
+      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
+    }
+  } catch (rlErr) {
+    console.error('[vendor-connect/onboard] rate limit check failed', rlErr)
   }
 
   const supabase = createServiceClient()

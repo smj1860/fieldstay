@@ -4,7 +4,9 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { createClient }        from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
 import { redirect }            from 'next/navigation'
+import { headers }             from 'next/headers'
 import { z }                   from 'zod'
+import { inviteAcceptRatelimit } from '@/lib/rate-limit'
 
 const ActivateSchema = z.object({
   token:    z.string().uuid('Invite link is invalid or expired'),
@@ -33,6 +35,21 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
   const parsed = ActivateSchema.safeParse(raw)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
+  }
+
+  // Real account creation (supabase.auth.admin.createUser below) from a
+  // public route gated only by a UUID token — rate limit by IP. Fails open
+  // on a Redis outage; a degraded limiter must never block a legitimate
+  // crew member finishing setup.
+  try {
+    const hdrs = await headers()
+    const ip   = hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+    const { success } = await inviteAcceptRatelimit.limit(`crew-invite:${ip}`)
+    if (!success) {
+      return { error: 'Too many attempts. Please try again in a few minutes.' }
+    }
+  } catch (rlErr) {
+    console.error('[activateCrewAccount] rate limit check failed', rlErr)
   }
 
   const { token, crewId, password } = parsed.data

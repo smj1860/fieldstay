@@ -15,6 +15,7 @@ interface WorkOrderDispatchEmailProps {
   dispatcherName:  string
   dispatcherOrg:   string
   dispatcherPhone: string | null
+  manualUrl:       string | null
 }
 
 const ORANGE   = '#FF6B00'
@@ -33,6 +34,7 @@ export default function WorkOrderDispatchEmail({
   dispatcherName  = 'Sarah Martinez',
   dispatcherOrg   = 'Mountain View Property Management',
   dispatcherPhone = '(512) 847-2930',
+  manualUrl       = null,
 }: WorkOrderDispatchEmailProps) {
 
   const formattedNte = new Intl.NumberFormat('en-US', {
@@ -95,6 +97,19 @@ export default function WorkOrderDispatchEmail({
           </Section>
 
           <Hr style={divider}/>
+
+          {manualUrl && (
+            <>
+              <Section>
+                <Text style={sectionLabel}>MANUAL</Text>
+                <a href={manualUrl} style={manualLink}>
+                  View manufacturer&apos;s service manual →
+                </a>
+              </Section>
+
+              <Hr style={divider}/>
+            </>
+          )}
 
           <Section style={authBox}>
             <Text style={authLabel}>AUTHORIZED UP TO</Text>
@@ -273,6 +288,12 @@ const scopeBody: React.CSSProperties = {
   fontSize: 13.5,
   lineHeight: 1.6,
   margin: 0,
+}
+const manualLink: React.CSSProperties = {
+  color: ORANGE,
+  fontSize: 14,
+  fontWeight: 700,
+  textDecoration: 'none',
 }
 const authBox: React.CSSProperties = {
   backgroundColor: '#FFF4EE',

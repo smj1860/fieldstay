@@ -245,3 +245,48 @@ optionally carry the extra fields the layout needs (or add a second
 shared helper it can call for the same base query), so there's one
 canonical implementation of "look up the current user's org membership"
 instead of two.
+
+---
+
+## 11. Login/signup/password-reset have no FieldStay-side rate limiting
+
+**Status: undecided** — open question is whether Supabase Auth's built-in
+limiting is sufficient as-is, or whether FieldStay should add its own
+app-level throttling on top. Not yet resolved either way; no code change
+made pending that decision.
+
+**Files:** `app/(auth)/login/login-form.tsx`, `app/(auth)/signup/signup-form.tsx`,
+`app/(auth)/forgot-password/forgot-password-form.tsx`,
+`app/(auth)/reset-password/reset-password-form.tsx`
+
+Found during an incoming-endpoints rate-limiting/fan-out audit. All four of
+these call `supabase.auth.*` (`signInWithPassword`, `signUp`,
+`resetPasswordForEmail`, `updateUser`) directly from the client — there is
+no FieldStay route handler or Server Action in between, so nothing in
+`lib/rate-limit.ts` can apply to them even in principle. Whatever
+throttling exists today is entirely Supabase Auth's own internal behavior,
+invisible to and unmanaged by this repo. This corrects an earlier assumption
+in this project's history that rate limiting had been "added" to these
+routes — that isn't true of the current code.
+
+**Suggested fix (pending the decision above):** if Supabase's built-in
+limits are judged insufficient, add an app-level pre-check — e.g. a Server
+Action wrapper that rate-limits by IP/email before calling the Supabase
+client — for tighter, FieldStay-controlled throttling.
+
+---
+
+## 12. `crew/feedback` sends its notification email outside Inngest, un-awaited
+
+**File:** `app/api/crew/feedback/route.ts`
+
+Found during the same audit. `notifyPlatformStaff()` is fired with `void
+... .catch()` (fire-and-forget) rather than `await`ed or queued through
+Inngest — every other email-sending code path in this codebase either
+awaits inline or fans out to Inngest for durability/retries. If the
+serverless function instance is torn down before the promise settles, the
+notification is silently lost with no retry.
+
+**Suggested fix:** fire an Inngest event instead (e.g.
+`crew/feedback.submitted`) and send the notification email from a handler,
+matching the pattern used everywhere else in this codebase.

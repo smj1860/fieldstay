@@ -241,6 +241,32 @@ export async function markStepComplete(
 
 export type AssetActionState = { error?: string; success?: boolean }
 
+// Fires a manual-lookup event whenever an asset is saved with both make
+// and model set — the Inngest handler is idempotent (skips if a row
+// already exists for this org/asset_type/make/model), so calling this on
+// every save is safe, not just on the first one.
+//
+// Never throws: this is a non-critical side effect of a successful asset
+// save. A dispatch failure here must not turn into a user-facing "Failed
+// to save asset" error for a save that actually succeeded.
+async function fireManualLookup(
+  orgId:     string,
+  assetType: string,
+  make:      string | null,
+  model:     string | null
+): Promise<void> {
+  if (!make || !model) return
+  try {
+    const { inngest } = await import('@/lib/inngest/client')
+    await inngest.send({
+      name: 'asset/manual_lookup.requested',
+      data: { org_id: orgId, asset_type: assetType, make, model },
+    })
+  } catch (err) {
+    console.error('[fireManualLookup]', err)
+  }
+}
+
 export async function createAsset(
   propertyId: string,
   _prev: AssetActionState | null,
@@ -339,6 +365,8 @@ export async function createAsset(
       metadata:   { property_id: propertyId, asset_type },
     })
 
+    await fireManualLookup(membership.org_id, asset_type, make, model)
+
     revalidatePath(`/properties/${propertyId}`)
     return { success: true }
   } catch (err) {
@@ -373,7 +401,7 @@ export async function updateAsset(
 
     if (!name) return { error: 'Asset name is required' }
 
-    const { error } = await supabase
+    const { data: updated, error } = await supabase
       .from('property_assets')
       .update({
         name, make, model, serial_number,
@@ -383,6 +411,8 @@ export async function updateAsset(
       })
       .eq('id', assetId)
       .eq('org_id', membership.org_id)
+      .select('asset_type')
+      .single()
 
     if (error) {
       console.error('[updateAsset]', error)
@@ -397,6 +427,8 @@ export async function updateAsset(
       targetId:   assetId,
       metadata:   { property_id: propertyId },
     })
+
+    await fireManualLookup(membership.org_id, updated.asset_type, make, model)
 
     revalidatePath(`/properties/${propertyId}`)
     return { success: true }
@@ -493,6 +525,22 @@ export async function bulkImportAssets(
       targetId:   propertyId,
       metadata:   { count: rows.length, property_id: propertyId },
     })
+
+    // Non-critical side effect of a successful import — a dispatch failure
+    // here must not turn `rows.length` genuinely-imported assets into a
+    // user-facing "Import failed" result.
+    try {
+      const { inngest } = await import('@/lib/inngest/client')
+      const lookupEvents = insertRows
+        .filter((r) => r.make && r.model)
+        .map((r) => ({
+          name: 'asset/manual_lookup.requested' as const,
+          data: { org_id: r.org_id, asset_type: r.asset_type, make: r.make!, model: r.model! },
+        }))
+      if (lookupEvents.length > 0) await inngest.send(lookupEvents)
+    } catch (err) {
+      console.error('[bulkImportAssets] manual lookup dispatch failed', err)
+    }
 
     revalidatePath(`/properties/${propertyId}`)
     return { imported: rows.length }

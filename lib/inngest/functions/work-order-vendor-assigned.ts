@@ -8,6 +8,7 @@ import { getPmEmail }           from '@/lib/inngest/helpers'
 import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
 import { renderSmsBody }        from '@/lib/sms/templates'
 import { randomBytes }          from 'crypto'
+import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 
 export const handleWorkOrderVendorAssigned = inngest.createFunction(
   { id: 'work-order-vendor-assigned', name: 'Work Order: Vendor Assigned', retries: 2 },
@@ -24,7 +25,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           .select(`
             id, wo_number, title, description, nte_amount, scheduled_date,
             scheduled_time, completion_token, completion_token_expires_at, portal_enabled,
-            status, org_id, property_id, vendor_id
+            status, org_id, property_id, vendor_id, asset_id
           `)
           .eq('id', workOrderId)
           .eq('org_id', orgId)
@@ -158,6 +159,9 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     const propertyAddress = property?.address ?? ''
 
     await step.run('send-vendor-email', async () => {
+      const supabase = createServiceClient()
+      const manualUrl = await getManualUrlForAsset(supabase, orgId, wo.asset_id ?? null)
+
       const html = await render(WorkOrderDispatchEmail({
         woNumber:        wo.wo_number ?? '',
         publicUrl,
@@ -170,6 +174,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
         dispatcherName:  dispatcher.name,
         dispatcherOrg:   org?.name ?? 'FieldStay Property Management',
         dispatcherPhone: dispatcher.phone,
+        manualUrl,
       }))
 
       const { error } = await resend.emails.send(

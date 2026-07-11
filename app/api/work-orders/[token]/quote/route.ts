@@ -1,11 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient }       from '@/lib/supabase/server'
 import { inngest }                   from '@/lib/inngest/client'
+import { workOrderRatelimit }        from '@/lib/rate-limit'
+import { extractClientIp }           from '@/lib/integrations/webhook-verification'
+
+// Public, unauthenticated, token-gated route — rate limit by IP so a
+// leaked/enumerated token can't drive unbounded repeated lookups or
+// submissions. Fails open on a Redis outage.
+async function checkRateLimit(request: NextRequest, key: string): Promise<NextResponse | null> {
+  try {
+    const ip = extractClientIp(request) ?? 'unknown'
+    const { success } = await workOrderRatelimit.limit(`${key}:${ip}`)
+    if (!success) {
+      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
+    }
+  } catch (rlErr) {
+    console.error(`[work-orders/quote] rate limit check failed (${key})`, rlErr)
+  }
+  return null
+}
 
 export async function GET(
-  _req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const rateLimited = await checkRateLimit(request, 'wo-quote-get')
+  if (rateLimited) return rateLimited
+
   const { token }  = await params
   const supabase   = createServiceClient()
 
@@ -43,6 +64,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const rateLimited = await checkRateLimit(request, 'wo-quote-post')
+  if (rateLimited) return rateLimited
+
   const { token }  = await params
   const supabase   = createServiceClient()
 

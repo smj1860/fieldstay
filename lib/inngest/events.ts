@@ -374,6 +374,7 @@ export type FieldStayEvents = {
       dispatcherName:  string
       dispatcherOrg:   string
       dispatcherPhone: string | null
+      manualUrl:       string | null
     }
   }
 
@@ -475,6 +476,19 @@ export type FieldStayEvents = {
     data: {
       org_id:   string
       tax_year: number
+    }
+  }
+
+  // Fired after an asset is created/updated (or CSV-imported) with both
+  // make and model set. Idempotent on the handler side — a row already
+  // existing for (org_id, asset_type, make, model), found or not, means the
+  // lookup is skipped rather than repeated on every subsequent save.
+  'asset/manual_lookup.requested': {
+    data: {
+      org_id:     string
+      asset_type: string
+      make:       string
+      model:      string
     }
   }
 

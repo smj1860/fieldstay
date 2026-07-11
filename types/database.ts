@@ -1289,6 +1289,21 @@ export interface PropertyAsset {
   updated_at:                 string
 }
 
+export interface AssetManual {
+  id:          string
+  org_id:      string
+  asset_type:  AssetType
+  make:        string
+  model:       string
+  // NULL means a lookup was attempted and found nothing — still recorded so
+  // repeated asset saves with the same make/model don't re-trigger a lookup.
+  source_url:  string | null
+  found_via:   'search' | null
+  verified_at: string | null
+  created_at:  string
+  updated_at:  string
+}
+
 export interface AssetTypeStandard {
   asset_type:                AssetType
   display_name:              string
@@ -1453,6 +1468,7 @@ export interface Database {
       property_assets:             { Row: PropertyAsset;            Insert: Partial<PropertyAsset>;            Update: Partial<PropertyAsset>;            Relationships: [] }
       asset_type_standards:        { Row: AssetTypeStandard;        Insert: Partial<AssetTypeStandard>;        Update: Partial<AssetTypeStandard>;        Relationships: [] }
       asset_depreciation_entries:  { Row: AssetDepreciationEntry;   Insert: Partial<AssetDepreciationEntry>;   Update: Partial<AssetDepreciationEntry>;   Relationships: [] }
+      asset_manuals:               { Row: AssetManual;              Insert: Partial<AssetManual>;              Update: Partial<AssetManual>;              Relationships: [] }
 
       // ── Vendor Compliance ──────────────────────────────────
       vendor_compliance_documents: { Row: VendorComplianceDocument; Insert: Partial<VendorComplianceDocument>; Update: Partial<VendorComplianceDocument>; Relationships: [] }
