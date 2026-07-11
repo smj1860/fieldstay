@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
+import { workOrderRatelimit } from '@/lib/rate-limit'
+import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import type { WoStatus } from '@/types/database'
 
 /**
@@ -16,6 +18,20 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
+
+  // Public, unauthenticated route — rate limit by IP before touching the
+  // DB. Fails open on a Redis outage; a degraded limiter must never block
+  // a legitimate contractor's submission.
+  try {
+    const ip = extractClientIp(request) ?? 'unknown'
+    const { success } = await workOrderRatelimit.limit(`wo-complete:${ip}`)
+    if (!success) {
+      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
+    }
+  } catch (rlErr) {
+    console.error('[work-orders/complete] rate limit check failed', rlErr)
+  }
+
   const supabase = createServiceClient()
 
   // Validate token

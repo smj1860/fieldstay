@@ -5,6 +5,8 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { createClient }        from '@/lib/supabase/server'
 import { acceptOrgInvite }     from '@/lib/auth/invites'
 import { redirect }            from 'next/navigation'
+import { headers }             from 'next/headers'
+import { inviteAcceptRatelimit } from '@/lib/rate-limit'
 
 const AcceptSchema = z.object({
   token:    z.string().uuid('Invite link is invalid or expired'),
@@ -25,6 +27,21 @@ export async function acceptTeamInvite(formData: FormData): Promise<{ error?: st
   })
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
+  }
+
+  // Real account creation (admin.auth.admin.createUser below) from a
+  // public route gated only by a UUID token — rate limit by IP. Fails open
+  // on a Redis outage; a degraded limiter must never block a legitimate
+  // new team member finishing setup.
+  try {
+    const hdrs = await headers()
+    const ip   = hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+    const { success } = await inviteAcceptRatelimit.limit(`accept-invite:${ip}`)
+    if (!success) {
+      return { error: 'Too many attempts. Please try again in a few minutes.' }
+    }
+  } catch (rlErr) {
+    console.error('[acceptTeamInvite] rate limit check failed', rlErr)
   }
 
   const { token, fullName, password } = parsed.data

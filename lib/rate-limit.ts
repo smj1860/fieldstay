@@ -77,6 +77,18 @@ export const signOffRatelimit = new Ratelimit({
   prefix:    'rl:signoff',
 })
 
+// Invite-acceptance account creation (crew-invite, accept-invite) — both
+// call supabase.auth.admin.createUser(), a real account-creation operation,
+// from a public unauthenticated route gated only by a UUID token. Keyed by
+// IP rather than token so repeated attempts against different tokens from
+// the same source still get throttled.
+export const inviteAcceptRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(10, '5 m'),
+  analytics: false,
+  prefix:    'rl:invite-accept',
+})
+
 // Support chat — 20 messages per minute per user, plus a 100/day cap
 export const supportChatLimiter = new Ratelimit({
   redis,
