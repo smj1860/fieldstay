@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  ChevronLeft, ChevronRight, Menu, X, Sun, Moon,
+  ChevronLeft, ChevronRight, ChevronDown, Menu, X, Sun, Moon,
   LifeBuoy, Bell, Inbox, Zap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -79,6 +79,50 @@ interface Props {
   children:                   React.ReactNode
 }
 
+const CLUSTER_STORAGE_KEY = 'fs-nav-clusters'
+const CLUSTER_ORDER = ['Portfolio', 'Team & Vendors', 'Guest & Comms'] as const
+
+// Same useSyncExternalStore + module-level-listeners pattern as
+// lib/hooks/use-theme.ts — the correct way to sync a localStorage-backed
+// preference into render without a hydration mismatch (React uses
+// getServerSnapshot during SSR and the initial client render, then swaps to
+// the real client snapshot post-hydration) or an effect+setState cascade.
+const clusterListeners = new Set<() => void>()
+let clusterSnapshot: Record<string, boolean> = readClusterStateFromStorage()
+
+function readClusterStateFromStorage(): Record<string, boolean> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = window.localStorage.getItem(CLUSTER_STORAGE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function getClusterSnapshot(): Record<string, boolean> {
+  return clusterSnapshot
+}
+
+function getClusterServerSnapshot(): Record<string, boolean> {
+  return {}
+}
+
+function subscribeToClusters(onChange: () => void): () => void {
+  clusterListeners.add(onChange)
+  return () => clusterListeners.delete(onChange)
+}
+
+function writeClusterState(next: Record<string, boolean>) {
+  clusterSnapshot = next
+  try {
+    window.localStorage.setItem(CLUSTER_STORAGE_KEY, JSON.stringify(next))
+  } catch {
+    // localStorage unavailable — collapse preference just won't persist
+  }
+  clusterListeners.forEach((l) => l())
+}
+
 interface DashboardSidebarProps {
   mobile?:             boolean
   pathname:            string
@@ -116,6 +160,28 @@ function DashboardSidebar({
   userName,
   userEmail,
 }: Readonly<DashboardSidebarProps>) {
+  // getServerSnapshot ({}) covers SSR and the initial client render so
+  // there's no hydration mismatch; useSyncExternalStore swaps to the real
+  // localStorage-backed snapshot right after. isClusterExpanded's `?? true`
+  // fallback keeps everything expanded until then, which is also the
+  // correct default for a first-ever visit.
+  const expandedClusters = useSyncExternalStore(
+    subscribeToClusters, getClusterSnapshot, getClusterServerSnapshot
+  )
+
+  function isClusterExpanded(category: string): boolean {
+    const hasActiveItem = mgmtNav.some(
+      (item) => item.category === category && (pathname === item.href || pathname.startsWith(item.href + '/'))
+    )
+    if (hasActiveItem) return true
+    return expandedClusters[category] ?? true
+  }
+
+  function toggleCluster(category: string) {
+    const next = { ...expandedClusters, [category]: !isClusterExpanded(category) }
+    writeClusterState(next)
+  }
+
   const renderNavLink = (item: NavItem) => {
     const Icon   = item.icon
     const active = pathname === item.href ||
@@ -234,7 +300,49 @@ function DashboardSidebar({
                 </span>
               )}
             </div>
-            {mgmtNav.map(renderNavLink)}
+            {collapsed && !mobile ? (
+              mgmtNav.map(renderNavLink)
+            ) : (
+              <>
+                {CLUSTER_ORDER.map((category) => {
+                  const clusterItems = mgmtNav.filter((item) => item.category === category)
+                  if (clusterItems.length === 0) return null
+                  const expanded = mobile ? true : isClusterExpanded(category)
+
+                  return (
+                    <div key={category} className="mb-0.5">
+                      {mobile ? (
+                        <span
+                          className="block px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide"
+                          style={{ color: 'var(--chrome-text-muted)', opacity: 0.6 }}
+                        >
+                          {category}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => toggleCluster(category)}
+                          aria-expanded={expanded}
+                          className="w-full flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px]
+                                     font-semibold uppercase tracking-wide transition-colors
+                                     hover:text-[var(--chrome-text)]
+                                     focus:outline-none focus:ring-2 focus:ring-[var(--chrome-gold)]
+                                     focus:ring-offset-1 focus:ring-offset-[var(--chrome-bg)] rounded"
+                          style={{ color: 'var(--chrome-text-muted)', opacity: 0.6 }}
+                        >
+                          {expanded
+                            ? <ChevronDown className="w-3 h-3 flex-shrink-0" />
+                            : <ChevronRight className="w-3 h-3 flex-shrink-0" />}
+                          {category}
+                        </button>
+                      )}
+                      {expanded && clusterItems.map(renderNavLink)}
+                    </div>
+                  )
+                })}
+                {mgmtNav.filter((item) => item.category === 'Settings').map(renderNavLink)}
+              </>
+            )}
           </>
         )}
       </nav>
