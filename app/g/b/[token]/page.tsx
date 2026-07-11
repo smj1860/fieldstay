@@ -1,10 +1,55 @@
+import { cache } from 'react'
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { GuestGuidebookView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
+
+const getGuidebookData = cache(async (token: string) => {
+  const supabase = createServiceClient()
+
+  const { data: booking } = await supabase
+    .from('bookings')
+    .select('id, org_id, property_id, checkin_date, checkout_date, guidebook_token')
+    .eq('guidebook_token', token)
+    .maybeSingle()
+
+  if (!booking) return null
+
+  const { data: config } = await supabase
+    .from('guidebook_property_configs')
+    .select(`
+      id, slug, wifi_network, wifi_password, check_in_instructions,
+      check_out_instructions, house_rules, is_published, org_id,
+      properties(id, name, address, lat, lng, checkin_time, checkout_time)
+    `)
+    .eq('property_id', booking.property_id)
+    .maybeSingle()
+
+  return { booking, config }
+})
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>
+}): Promise<Metadata> {
+  const { token } = await params
+  const data = await getGuidebookData(token)
+  const property = data?.config?.properties as unknown as Property | undefined
+
+  if (!property) {
+    return { title: 'Guidebook' }
+  }
+
+  return {
+    title: `${property.name} — Guidebook`,
+    description: `Check-in instructions, wifi, house rules, and local recommendations for ${property.name}.`,
+  }
+}
 
 export default async function GuestBookingGuidebookPage({
   params,
@@ -14,24 +59,10 @@ export default async function GuestBookingGuidebookPage({
   const { token } = await params
   const supabase = createServiceClient()
 
-  const { data: booking } = await supabase
-    .from('bookings')
-    .select('id, org_id, property_id, checkin_date, checkout_date, guidebook_token')
-    .eq('guidebook_token', token)
-    .maybeSingle()
+  const data = await getGuidebookData(token)
+  if (!data) notFound()
 
-  if (!booking) notFound()
-
-  const { data: config } = await supabase
-    .from('guidebook_property_configs')
-    .select(`
-      id, slug, wifi_network, wifi_password, check_in_instructions,
-      check_out_instructions, house_rules, is_published, org_id,
-      properties(id, name, address, lat, lng)
-    `)
-    .eq('property_id', booking.property_id)
-    .maybeSingle()
-
+  const { booking, config } = data
   if (!config) notFound()
 
   const property = config.properties as unknown as Property

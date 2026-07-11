@@ -1,7 +1,10 @@
+import { Key, LogOut, Wifi, ClipboardList } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 import type { WeatherContext } from '@/lib/weather/tomorrow'
 import { getActiveSlotTypes, getTimeOfDay } from '@/lib/weather/tomorrow'
 import { formatOffer } from '@/lib/sms/telnyx'
+import { CopyButton } from './copy-button'
 
 const CHARCOAL = '#0E0E0E'
 const CARD     = '#17171A'
@@ -9,6 +12,17 @@ const BORDER   = '#2A2A2E'
 const TEXT     = '#F4F4F5'
 const MUTED    = '#9A9AA2'
 const GOLD     = '#D4A537'
+
+function formatTime12h(time: string | null | undefined): string | null {
+  if (!time) return null
+  const [hourStr, minuteStr] = time.split(':')
+  const hour = Number(hourStr)
+  const minute = Number(minuteStr)
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null
+  const period = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = hour % 12 === 0 ? 12 : hour % 12
+  return `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`
+}
 
 interface ExtensionRequestProp {
   id:                   string
@@ -68,6 +82,21 @@ export function GuestGuidebookView({
     .filter((s) => s.status === 'active')
     .filter((s) => activeSlots.has(s.slot_type))
 
+  const weatherLabel = weather
+    ? weather.isSnowy
+      ? 'Snowy'
+      : weather.isRainy
+        ? 'Rainy'
+        : weather.isCold
+          ? 'Cold'
+          : weather.isHot
+            ? 'Hot'
+            : 'Mild weather'
+    : ''
+
+  const checkInTime = formatTime12h(property.checkin_time)
+  const checkOutTime = formatTime12h(property.checkout_time)
+
   return (
     <div style={{ minHeight: '100vh', background: CHARCOAL, color: TEXT, padding: '24px 16px' }}>
       <div style={{ maxWidth: '560px', margin: '0 auto' }}>
@@ -78,7 +107,7 @@ export function GuestGuidebookView({
 
         {weather && (
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', backgroundColor: '#1e293b', borderRadius: '999px', padding: '6px 14px', marginBottom: '24px' }}>
-            <span style={{ fontSize: '16px' }}>
+            <span role="img" aria-label={weatherLabel} style={{ fontSize: '16px' }}>
               {weather.isSnowy ? '❄️' : weather.isRainy ? '🌧️' : weather.isCold ? '🧥' : weather.isHot ? '☀️' : '🌤️'}
             </span>
             <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '500' }}>
@@ -88,31 +117,50 @@ export function GuestGuidebookView({
           </div>
         )}
 
-        <Section title="Check-In">
-          <p style={{ fontSize: '14px', lineHeight: 1.6, color: TEXT, whiteSpace: 'pre-wrap' }}>
-            {config.check_in_instructions ?? 'Check-in details coming soon.'}
-          </p>
-        </Section>
-
-        <Section title="Wifi">
-          <p style={{ fontSize: '14px', lineHeight: 1.6, color: TEXT }}>
-            Network: {config.wifi_network ?? 'See welcome book'}<br />
-            Password: {config.wifi_password ?? 'See welcome book'}
-          </p>
-        </Section>
-
-        {config.house_rules && (
-          <Section title="House Rules">
-            <p style={{ fontSize: '14px', lineHeight: 1.6, color: TEXT, whiteSpace: 'pre-wrap' }}>
-              {config.house_rules}
-            </p>
-          </Section>
+        {(checkInTime || checkOutTime) && (
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
+            {checkInTime && (
+              <div style={{ flex: 1, background: CARD, border: `1px solid ${BORDER}`, borderRadius: '10px', padding: '10px 14px' }}>
+                <p style={{ fontSize: '10px', color: MUTED, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 2px' }}>
+                  Check-In
+                </p>
+                <p style={{ fontSize: '15px', fontWeight: 700, color: TEXT, margin: 0 }}>{checkInTime}</p>
+              </div>
+            )}
+            {checkOutTime && (
+              <div style={{ flex: 1, background: CARD, border: `1px solid ${BORDER}`, borderRadius: '10px', padding: '10px 14px' }}>
+                <p style={{ fontSize: '10px', color: MUTED, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 2px' }}>
+                  Check-Out
+                </p>
+                <p style={{ fontSize: '15px', fontWeight: 700, color: TEXT, margin: 0 }}>{checkOutTime}</p>
+              </div>
+            )}
+          </div>
         )}
 
-        <Section title="Check-Out">
-          <p style={{ fontSize: '14px', lineHeight: 1.6, color: TEXT, whiteSpace: 'pre-wrap' }}>
-            {config.check_out_instructions ?? 'Check-out details coming soon.'}
-          </p>
+        <Section title="Check-In" icon={Key}>
+          <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', padding: '14px' }}>
+            <p style={{ fontSize: '14px', lineHeight: 1.6, color: TEXT, whiteSpace: 'pre-wrap', margin: 0 }}>
+              {config.check_in_instructions ?? 'Check-in details coming soon.'}
+            </p>
+          </div>
+        </Section>
+
+        <Section title="Wifi" icon={Wifi}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <p style={{ fontSize: '14px', color: TEXT, margin: 0 }}>
+                Network: {config.wifi_network ?? 'See welcome book'}
+              </p>
+              {config.wifi_network && <CopyButton value={config.wifi_network} label="wifi network" />}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <p style={{ fontSize: '14px', color: TEXT, margin: 0 }}>
+                Password: {config.wifi_password ?? 'See welcome book'}
+              </p>
+              {config.wifi_password && <CopyButton value={config.wifi_password} label="wifi password" />}
+            </div>
+          </div>
         </Section>
 
         {visibleSponsors.length > 0 && (
@@ -161,19 +209,35 @@ export function GuestGuidebookView({
           </Section>
         )}
 
+        {config.house_rules && (
+          <Section title="House Rules" icon={ClipboardList}>
+            <p style={{ fontSize: '14px', lineHeight: 1.6, color: TEXT, whiteSpace: 'pre-wrap' }}>
+              {config.house_rules}
+            </p>
+          </Section>
+        )}
+
+        <Section title="Check-Out" icon={LogOut}>
+          <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', padding: '14px' }}>
+            <p style={{ fontSize: '14px', lineHeight: 1.6, color: TEXT, whiteSpace: 'pre-wrap', margin: 0 }}>
+              {config.check_out_instructions ?? 'Check-out details coming soon.'}
+            </p>
+          </div>
+        </Section>
+
         {extensionRequest && extensionConfig && (
           <div style={{
             margin: '16px 0',
-            border: '1.5px solid #FCD116',
+            border: `1.5px solid ${GOLD}`,
             borderRadius: 12,
             padding: '16px',
-            background: '#0f172a',
+            background: CARD,
           }}>
-            <p style={{ color: '#FCD116', fontSize: 11, fontWeight: 700,
+            <p style={{ color: GOLD, fontSize: 11, fontWeight: 700,
                         letterSpacing: 1.5, textTransform: 'uppercase', margin: '0 0 6px' }}>
               Extend Your Stay
             </p>
-            <p style={{ color: '#e2e8f0', fontSize: 14, margin: '0 0 12px', lineHeight: 1.5 }}>
+            <p style={{ color: TEXT, fontSize: 14, margin: '0 0 12px', lineHeight: 1.5 }}>
               {extensionRequest.gap_days} night{extensionRequest.gap_days !== 1 ? 's' : ''} available
               after your checkout{extensionRequest.discount_pct
                 ? ` — ${extensionRequest.discount_pct}% off if you book now`
@@ -185,17 +249,18 @@ export function GuestGuidebookView({
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{
-                  display: 'inline-block',
-                  background: '#FCD116', color: '#0f172a',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  minHeight: '44px',
+                  background: GOLD, color: CHARCOAL,
                   fontWeight: 700, fontSize: 14,
-                  padding: '10px 20px', borderRadius: 8,
+                  padding: '0 20px', borderRadius: 8,
                   textDecoration: 'none',
                 }}
               >
                 Check Availability →
               </a>
             ) : (
-              <p style={{ color: '#94a3b8', fontSize: 13, margin: 0 }}>
+              <p style={{ color: MUTED, fontSize: 13, margin: 0 }}>
                 Reply to our text message or contact your host directly to extend.
               </p>
             )}
@@ -206,10 +271,11 @@ export function GuestGuidebookView({
   )
 }
 
-function Section({ title, children }: Readonly<{ title: string; children: React.ReactNode }>) {
+function Section({ title, icon: Icon, children }: Readonly<{ title: string; icon?: LucideIcon; children: React.ReactNode }>) {
   return (
     <div style={{ marginBottom: '24px' }}>
-      <h2 style={{ fontSize: '12px', fontWeight: 700, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 8px' }}>
+      <h2 style={{ fontSize: '12px', fontWeight: 700, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {Icon && <Icon className="w-3.5 h-3.5" />}
         {title}
       </h2>
       {children}
