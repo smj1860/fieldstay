@@ -197,7 +197,7 @@ export function SupportInboxClient({
                 {orgName(c.organizations)}
               </span>
               {c.needs_human && (
-                <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 6px', borderRadius: '99px', background: 'rgba(220,38,38,0.12)', color: '#dc2626', flexShrink: 0 }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 6px', borderRadius: '99px', background: 'var(--accent-red-dim)', color: 'var(--accent-red)', flexShrink: 0 }}>
                   Flagged
                 </span>
               )}
@@ -222,7 +222,7 @@ export function SupportInboxClient({
               <div>
                 <h2 style={{ fontWeight: 700, fontSize: '13px', margin: 0 }}>{orgName(selected.organizations)}</h2>
                 {selected.needs_human && (
-                  <p style={{ fontSize: '12px', color: '#dc2626', margin: '2px 0 0' }}>
+                  <p style={{ fontSize: '12px', color: 'var(--accent-red)', margin: '2px 0 0' }}>
                     Escalated — {selected.escalation_reason}
                   </p>
                 )}

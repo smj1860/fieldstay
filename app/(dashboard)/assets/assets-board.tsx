@@ -160,7 +160,7 @@ export function AssetsBoard({
           {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)'  }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
           {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
           {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)'  }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
-          {criticalCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(107,114,128,0.1)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.2)' }}><StatusDot status="offline" label="Critical" /> {criticalCount} Critical</span>}
+          {criticalCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'var(--border)', color: 'var(--text-muted)', border: '1px solid var(--border-strong)' }}><StatusDot status="offline" label="Critical" /> {criticalCount} Critical</span>}
         </div>
       )}
 
@@ -203,8 +203,8 @@ export function AssetsBoard({
                     ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
                     : null
                   const score  = asset.health_score
-                  const color  = score !== null ? healthColor(score) : '#6b7280'
-                  const bg     = score !== null ? healthBgStyle(score) : 'rgba(107,114,128,0.1)'
+                  const color  = score !== null ? healthColor(score) : 'var(--text-muted)'
+                  const bg     = score !== null ? healthBgStyle(score) : 'var(--border)'
                   const dot    = score !== null ? healthDot(score) : 'unknown'
                   const label  = score !== null ? healthLabel(score) : 'Unknown'
 

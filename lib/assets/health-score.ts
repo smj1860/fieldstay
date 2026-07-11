@@ -72,7 +72,7 @@ export function healthColor(score: number): string {
   if (score >= 60) return 'var(--accent-gold)'
   if (score >= 40) return 'var(--accent-amber)'
   if (score >= 20) return 'var(--accent-red)'
-  return '#6b7280'
+  return 'var(--text-muted)'
 }
 
 export function healthDot(score: number): StatusDotStatus {
@@ -88,5 +88,5 @@ export function healthBgStyle(score: number): string {
   if (score >= 60) return 'var(--accent-gold-dim,  rgba(250,189,0,0.1))'
   if (score >= 40) return 'var(--accent-amber-dim, rgba(245,158,11,0.1))'
   if (score >= 20) return 'var(--accent-red-dim,   rgba(240,84,84,0.1))'
-  return 'rgba(107,114,128,0.1)'
+  return 'var(--border)'
 }

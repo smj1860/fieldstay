@@ -90,10 +90,10 @@ function DeadlineBadge({
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; bg: string; color: string }> = {
-    pending: { label: 'No Response',  bg: 'rgba(107,114,128,0.15)', color: 'var(--text-muted)' },
-    draft:   { label: 'Draft',        bg: 'rgba(251,191,36,0.15)',  color: '#D97706' },
-    ready:   { label: 'Ready',        bg: 'rgba(16,185,129,0.15)',  color: '#059669' },
-    posted:  { label: 'Posted',       bg: 'rgba(59,130,246,0.15)',  color: '#2563EB' },
+    pending: { label: 'No Response',  bg: 'var(--border)',           color: 'var(--text-muted)' },
+    draft:   { label: 'Draft',        bg: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' },
+    ready:   { label: 'Ready',        bg: 'var(--accent-green-dim)', color: 'var(--accent-green)' },
+    posted:  { label: 'Posted',       bg: 'var(--accent-blue-dim)',  color: 'var(--accent-blue)' },
   }
   const s = map[status] ?? map['pending']!
   return (
@@ -307,7 +307,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
           )}
           <span
             className="text-xs font-semibold px-3 py-1 rounded-full"
-            style={{ background: 'rgba(252,209,22,0.15)', color: '#D97706' }}
+            style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold-text)' }}
           >
             Powered by RepuGuard
           </span>
@@ -386,7 +386,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                     {flagged && (
                       <span
                         className="text-xs font-semibold px-2 py-0.5 rounded-full inline-flex items-center gap-1"
-                        style={{ background: 'rgba(239,68,68,0.15)', color: '#DC2626' }}
+                        style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
                       >
                         <Flag className="w-3 h-3" /> Flagged
                       </span>
@@ -468,7 +468,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
               {(selected.review_responses?.flags?.length ?? 0) > 0 && (
                 <div
                   className="rounded-xl px-4 py-3 text-sm"
-                  style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#DC2626' }}
+                  style={{ background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)', color: 'var(--accent-red)' }}
                 >
                   <strong className="inline-flex items-center gap-1"><Flag className="w-3.5 h-3.5" /> Flagged:</strong>{' '}
                   {selected.review_responses?.flags.join(', ')}
@@ -530,7 +530,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                     <button
                       onClick={markReady}
                       className="flex-1 rounded-xl font-bold text-sm py-3 transition-opacity hover:opacity-90"
-                      style={{ background: '#059669', color: '#fff', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
+                      style={{ background: 'var(--accent-green)', color: 'var(--text-inverse)', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
                     >
                       {savingStatus === 'saving'
                         ? 'Saving…'
@@ -594,7 +594,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                             <button
                               onClick={confirmPosted}
                               className="flex-1 rounded-lg font-bold text-sm py-2.5"
-                              style={{ background: '#059669', color: '#fff', border: 'none', cursor: 'pointer' }}
+                              style={{ background: 'var(--accent-green)', color: 'var(--text-inverse)', border: 'none', cursor: 'pointer' }}
                             >
                               Yes, mark as posted
                             </button>
@@ -612,7 +612,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                   )}
 
                   {selected.response_status === 'posted' && (
-                    <p className="mt-3 text-center text-sm font-semibold inline-flex items-center justify-center gap-1 w-full" style={{ color: '#2563EB' }}>
+                    <p className="mt-3 text-center text-sm font-semibold inline-flex items-center justify-center gap-1 w-full" style={{ color: 'var(--accent-blue)' }}>
                       <Check className="w-4 h-4" /> Posted to OwnerRez
                     </p>
                   )}
