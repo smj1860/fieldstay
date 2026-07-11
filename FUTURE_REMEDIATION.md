@@ -250,6 +250,11 @@ instead of two.
 
 ## 11. Login/signup/password-reset have no FieldStay-side rate limiting
 
+**Status: undecided** — open question is whether Supabase Auth's built-in
+limiting is sufficient as-is, or whether FieldStay should add its own
+app-level throttling on top. Not yet resolved either way; no code change
+made pending that decision.
+
 **Files:** `app/(auth)/login/login-form.tsx`, `app/(auth)/signup/signup-form.tsx`,
 `app/(auth)/forgot-password/forgot-password-form.tsx`,
 `app/(auth)/reset-password/reset-password-form.tsx`
@@ -264,10 +269,10 @@ invisible to and unmanaged by this repo. This corrects an earlier assumption
 in this project's history that rate limiting had been "added" to these
 routes — that isn't true of the current code.
 
-**Suggested fix:** decide explicitly whether Supabase Auth's built-in
-limits are sufficient, or add an app-level pre-check (e.g. a Server Action
-wrapper that rate-limits by IP/email before calling the Supabase client)
-if tighter control is wanted.
+**Suggested fix (pending the decision above):** if Supabase's built-in
+limits are judged insufficient, add an app-level pre-check — e.g. a Server
+Action wrapper that rate-limits by IP/email before calling the Supabase
+client — for tighter, FieldStay-controlled throttling.
 
 ---
 
