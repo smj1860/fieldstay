@@ -14,6 +14,14 @@
 // below and treated the same as "nothing found," never as a crash. Confirm
 // this returns real results before treating an empty asset_manuals table
 // as "no manuals exist" rather than "the lookup itself isn't working."
+//
+// Model: Haiku, deliberately — this is a bounded lookup-and-filter task
+// (invoke web_search, pick the one URL that's the manufacturer's own
+// manual/support page, reject resellers/forums), not something that needs
+// Sonnet-level reasoning. Same "unconfirmed until a live run proves it"
+// caveat applies doubly here: if Haiku's picks turn out unreliable (wrong
+// domain, picks a reseller despite the instruction), bump MODEL back to a
+// Sonnet tier — this is a single-line change, not a redesign.
 // ============================================================
 
 import Anthropic from '@anthropic-ai/sdk'
@@ -23,7 +31,7 @@ import type { AssetType } from '@/types/database'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DBClient = SupabaseClient<any>
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = 'claude-haiku-4-5-20251001'
 
 export interface ManualLookupResult {
   sourceUrl: string | null
