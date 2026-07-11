@@ -4,7 +4,9 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { X } from 'lucide-react'
 import type { MemberRole } from '@/types/database'
-import { getVisibleNavItems } from '@/lib/navigation'
+import { getVisibleNavItems, type NavItem } from '@/lib/navigation'
+
+const CLUSTER_ORDER = ['Portfolio', 'Team & Vendors', 'Guest & Comms'] as const
 
 interface PmMoreDrawerProps {
   open:    boolean
@@ -27,6 +29,27 @@ export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: P
   )
 
   if (!open) return null
+
+  const renderItem = (item: NavItem) => {
+    const Icon   = item.icon
+    const active = pathname === item.href || pathname.startsWith(item.href + '/')
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        onClick={onClose}
+        className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
+        style={{
+          background: active ? 'var(--bg-raised)' : 'transparent',
+          color:      active ? 'var(--text-primary)' : 'var(--text-muted)',
+          borderLeft: active ? '2px solid var(--accent-gold)' : '2px solid transparent',
+        }}
+      >
+        <Icon className="w-5 h-5 flex-shrink-0" />
+        <span>{item.label}</span>
+      </Link>
+    )
+  }
 
   return (
     <>
@@ -68,28 +91,31 @@ export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: P
           </button>
         </div>
 
-        {/* Nav items — single column list, same order as desktop sidebar */}
+        {/* Nav items — Bookings and Settings stay flat (same as today);
+            the three management categories get a header each, always
+            expanded — this is a bottom sheet opened on demand, not
+            something sitting permanently on screen, so headers alone
+            solve scanability without an extra tap-to-expand. */}
         <div className="flex flex-col gap-0.5 px-3 py-2">
-          {items.map((item) => {
-            const Icon   = item.icon
-            const active = pathname === item.href || pathname.startsWith(item.href + '/')
+          {items.filter((item) => item.id === 'bookings').map(renderItem)}
+
+          {CLUSTER_ORDER.map((category) => {
+            const clusterItems = items.filter((item) => item.category === category)
+            if (clusterItems.length === 0) return null
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all"
-                style={{
-                  background: active ? 'var(--bg-raised)' : 'transparent',
-                  color:      active ? 'var(--text-primary)' : 'var(--text-muted)',
-                  borderLeft: active ? '2px solid var(--accent-gold)' : '2px solid transparent',
-                }}
-              >
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                <span>{item.label}</span>
-              </Link>
+              <div key={category}>
+                <span
+                  className="block px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wide first:pt-1"
+                  style={{ color: 'var(--text-muted)', opacity: 0.6 }}
+                >
+                  {category}
+                </span>
+                {clusterItems.map(renderItem)}
+              </div>
             )
           })}
+
+          {items.filter((item) => item.category === 'Settings').map(renderItem)}
         </div>
       </div>
     </>
