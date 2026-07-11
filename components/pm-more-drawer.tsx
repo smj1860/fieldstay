@@ -2,27 +2,9 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import {
-  X, Building2, ShieldCheck, TrendingUp, Users2,
-  Briefcase, Mail, BarChart3, Settings, Star, CalendarCheck, MessageSquare,
-} from 'lucide-react'
+import { X } from 'lucide-react'
 import type { MemberRole } from '@/types/database'
-
-// Order mirrors the desktop sidebar's combined nav (dashboard-shell.tsx):
-// Reviews is spliced in directly after Properties there, so it must be here too.
-const MORE_ITEMS = [
-  { href: '/bookings',        label: 'Bookings',        icon: CalendarCheck, roles: ['admin','manager','viewer'] },
-  { href: '/properties',      label: 'Properties',      icon: Building2,     roles: ['admin','manager','viewer'] },
-  { href: '/reviews',         label: 'Reviews',         icon: Star,          roles: ['admin','manager']          },
-  { href: '/assets',          label: 'Asset Health',    icon: ShieldCheck,   roles: ['admin','manager']          },
-  { href: '/capital-planning',label: 'Capital Planning',icon: TrendingUp,    roles: ['admin','manager']          },
-  { href: '/crew-manage',     label: 'Crew',            icon: Users2,        roles: ['admin','manager']          },
-  { href: '/messages',        label: 'Messages',        icon: MessageSquare, roles: ['admin','manager']          },
-  { href: '/vendors',         label: 'Vendors',         icon: Briefcase,     roles: ['admin','manager']          },
-  { href: '/comms-log',       label: 'Comms Log',       icon: Mail,          roles: ['admin','manager']          },
-  { href: '/owners',          label: 'Owner Portal',    icon: BarChart3,     roles: ['admin','manager']          },
-  { href: '/settings',        label: 'Settings',        icon: Settings,      roles: ['admin']                    },
-] as const
+import { getVisibleNavItems } from '@/lib/navigation'
 
 interface PmMoreDrawerProps {
   open:    boolean
@@ -32,13 +14,17 @@ interface PmMoreDrawerProps {
 }
 
 export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: PmMoreDrawerProps) {
-  const pathname      = usePathname()
-  const effectiveRole = role === 'owner' ? 'admin' : role
+  const pathname = usePathname()
 
-  const items = MORE_ITEMS.filter((item) => {
-    if (item.href === '/reviews' && !repuguardActive) return false
-    return (item.roles as readonly string[]).includes(effectiveRole)
-  })
+  // Ops Snapshot, Turnovers, Inventory, and Maintenance are persistent tabs
+  // in BottomNav already — everything else management-tier, plus Bookings
+  // (the one ops-tier item with no persistent tab of its own), shows up
+  // here. help/support-inbox aren't reachable from mobile today, so they
+  // stay excluded.
+  const items = getVisibleNavItems(role, { repuguardActive }).filter(
+    (item) => (item.tier === 'management' || item.id === 'bookings') &&
+      item.id !== 'help' && item.id !== 'support-inbox'
+  )
 
   if (!open) return null
 
