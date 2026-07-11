@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useActionState, useRef } from 'react'
+import { Fragment, useState, useTransition, useActionState, useRef } from 'react'
 import Link from 'next/link'
 import { X, Loader2, Upload, Briefcase, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -163,39 +163,7 @@ export function VendorsClient({ vendors, showComplianceNudge }: Props) {
             <p className="text-xs text-muted-themed mt-1">Add one manually or bulk-upload a CSV.</p>
           </div>
         ) : view === 'list' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-themed">
-                  {['Name','Specialty','Contact','Portal',''].map((h) => (
-                    <th key={h}
-                        className={cn('py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide',
-                                      h ? 'text-left' : 'text-right')}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(
-                  vendors.reduce<Record<string, (typeof vendors)>>((acc, v) => {
-                    const key = v.specialty ?? 'other'
-                    ;(acc[key] ??= []).push(v)
-                    return acc
-                  }, {})
-                ).map(([specialty, group]) => (
-                  <>
-                    <tr key={`hdr-${specialty}`} style={{ background: 'var(--bg-raised)' }}>
-                      <td colSpan={5} className="py-1.5 pr-4 pl-1 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
-                        {VENDOR_SPECIALTY_LABELS[specialty as VendorSpecialty] ?? specialty}
-                      </td>
-                    </tr>
-                    {group.map((v) => <VendorRow key={v.id} vendor={v} onSelect={setSelectedVendor} />)}
-                  </>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <VendorList vendors={vendors} onSelect={setSelectedVendor} />
         )}
       </Card>
       {selectedVendor && (
@@ -661,9 +629,82 @@ function StarRating({ rating, count }: { rating: number | null; count: number })
   )
 }
 
-// ── Vendor row ────────────────────────────────────────────────────────────────
+// ── Vendor list ───────────────────────────────────────────────────────────────
+// Desktop table + mobile card list, grouped by specialty in both. The
+// desktop table is unchanged; the mobile layout is new.
 
-function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Array<{ vendor_rating: number | null }>; on_time_pct?: number | null; on_time_sample_size?: number }; onSelect?: (v: Vendor) => void }) {
+type VendorWithStats = Vendor & {
+  work_orders?: Array<{ vendor_rating: number | null }>
+  on_time_pct?: number | null
+  on_time_sample_size?: number
+}
+
+function VendorList({
+  vendors,
+  onSelect,
+}: Readonly<{ vendors: VendorWithStats[]; onSelect: (v: Vendor) => void }>) {
+  const grouped = Object.entries(
+    vendors.reduce<Record<string, VendorWithStats[]>>((acc, v) => {
+      const key = v.specialty ?? 'other'
+      ;(acc[key] ??= []).push(v)
+      return acc
+    }, {})
+  )
+
+  return (
+    <>
+      {/* Mobile card layout */}
+      <div className="md:hidden divide-y divide-themed">
+        {grouped.map(([specialty, group]) => (
+          <div key={`hdr-${specialty}`}>
+            <div
+              className="py-1.5 px-4 text-xs font-semibold uppercase tracking-wider"
+              style={{ background: 'var(--bg-raised)', color: 'var(--accent-gold)' }}
+            >
+              {VENDOR_SPECIALTY_LABELS[specialty as VendorSpecialty] ?? specialty}
+            </div>
+            <div className="divide-y divide-themed">
+              {group.map((v) => <VendorCard key={v.id} vendor={v} onSelect={onSelect} />)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table — unchanged */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-themed">
+              {['Name','Specialty','Contact','Portal',''].map((h) => (
+                <th key={h}
+                    className={cn('py-2 pr-4 font-medium text-muted-themed text-xs uppercase tracking-wide',
+                                  h ? 'text-left' : 'text-right')}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {grouped.map(([specialty, group]) => (
+              <Fragment key={specialty}>
+                <tr style={{ background: 'var(--bg-raised)' }}>
+                  <td colSpan={5} className="py-1.5 pr-4 pl-1 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--accent-gold)' }}>
+                    {VENDOR_SPECIALTY_LABELS[specialty as VendorSpecialty] ?? specialty}
+                  </td>
+                </tr>
+                {group.map((v) => <VendorRow key={v.id} vendor={v} onSelect={onSelect} />)}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+// Shared between VendorRow (desktop table) and VendorCard (mobile) — both
+// need the same portal-toggle/deactivate state and server-action calls.
+function useVendorRowActions(vendor: VendorWithStats) {
   const [portalEnabled, setPortalEnabled] = useState(vendor.portal_enabled)
   const [togglingPortal, startToggle]     = useTransition()
   const [deactivating,   startDeact]      = useTransition()
@@ -677,6 +718,38 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
   function handleDeactivate() {
     startDeact(async () => { await deactivateVendor(vendor.id) })
   }
+
+  return { portalEnabled, togglingPortal, handleTogglePortal, deactivating, handleDeactivate }
+}
+
+function PortalToggle({
+  enabled,
+  disabled,
+  onToggle,
+}: Readonly<{ enabled: boolean; disabled: boolean; onToggle: () => void }>) {
+  return (
+    <button
+      onClick={onToggle}
+      disabled={disabled}
+      className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50"
+      style={{ background: enabled ? 'var(--accent-gold)' : 'var(--bg-raised)' }}
+      role="switch"
+      aria-checked={enabled}
+      title={enabled ? 'Disable vendor portal' : 'Enable vendor portal'}
+    >
+      <span
+        className="inline-block h-3.5 w-3.5 rounded-full shadow transition-transform"
+        style={{
+          background:  'white',
+          transform:   enabled ? 'translateX(1.125rem)' : 'translateX(0.125rem)',
+        }}
+      />
+    </button>
+  )
+}
+
+function VendorRow({ vendor, onSelect }: { vendor: VendorWithStats; onSelect?: (v: Vendor) => void }) {
+  const { portalEnabled, togglingPortal, handleTogglePortal, deactivating, handleDeactivate } = useVendorRowActions(vendor)
 
   return (
     <tr className="hover:bg-raised-themed transition-colors cursor-pointer"
@@ -720,23 +793,7 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
         </div>
       </td>
       <td className="py-2.5 pr-4" onClick={e => e.stopPropagation()}>
-        <button
-          onClick={handleTogglePortal}
-          disabled={togglingPortal}
-          className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50"
-          style={{ background: portalEnabled ? 'var(--accent-gold)' : 'var(--bg-raised)' }}
-          role="switch"
-          aria-checked={portalEnabled}
-          title={portalEnabled ? 'Disable vendor portal' : 'Enable vendor portal'}
-        >
-          <span
-            className="inline-block h-3.5 w-3.5 rounded-full shadow transition-transform"
-            style={{
-              background:  'white',
-              transform:   portalEnabled ? 'translateX(1.125rem)' : 'translateX(0.125rem)',
-            }}
-          />
-        </button>
+        <PortalToggle enabled={portalEnabled} disabled={togglingPortal} onToggle={handleTogglePortal} />
       </td>
       <td className="py-2.5 text-right" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-1 justify-end">
@@ -753,5 +810,73 @@ function VendorRow({ vendor, onSelect }: { vendor: Vendor & { work_orders?: Arra
         </div>
       </td>
     </tr>
+  )
+}
+
+function VendorCard({ vendor, onSelect }: { vendor: VendorWithStats; onSelect?: (v: Vendor) => void }) {
+  const { portalEnabled, togglingPortal, handleTogglePortal, deactivating, handleDeactivate } = useVendorRowActions(vendor)
+
+  return (
+    <div
+      className="px-4 py-3 cursor-pointer"
+      onClick={() => onSelect?.(vendor)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect?.(vendor) } }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-medium text-primary-themed">{vendor.name}</div>
+          {vendor.contact_name && <div className="text-xs text-muted-themed">{vendor.contact_name}</div>}
+        </div>
+        <Badge tone="blue" className="flex-shrink-0">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</Badge>
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+        <StarRating rating={vendor.avg_rating ?? null} count={vendor.rating_count ?? 0} />
+        {vendor.on_time_pct !== null && vendor.on_time_pct !== undefined ? (
+          <span className="text-xs text-muted-themed">
+            {vendor.on_time_pct}% on-time ({vendor.on_time_sample_size})
+          </span>
+        ) : (
+          <span className="text-xs text-muted-themed">Not enough data yet</span>
+        )}
+      </div>
+
+      {(vendor.email || vendor.phone) && (
+        <div className="mt-1.5 text-sm text-secondary-themed space-y-0.5">
+          {vendor.email && <div className="truncate">{vendor.email}</div>}
+          {vendor.phone && <div>{vendor.phone}</div>}
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center gap-2">
+        {vendor.phone && (
+          <Badge tone="green" style={{ fontSize: 10, padding: '2px 7px' }}>SMS Active</Badge>
+        )}
+        {!vendor.phone && vendor.email && (
+          <Badge tone="slate" style={{ fontSize: 10, padding: '2px 7px' }}>Email only</Badge>
+        )}
+      </div>
+
+      <div
+        className="mt-3 pt-3 flex items-center justify-between border-t border-themed"
+        onClick={e => e.stopPropagation()}
+      >
+        <PortalToggle enabled={portalEnabled} disabled={togglingPortal} onToggle={handleTogglePortal} />
+        <div className="flex items-center gap-1">
+          <Link
+            href={`/vendors/${vendor.id}`}
+            className={buttonVariantClass('secondary') + ' py-1 px-2 text-xs'}
+            title="View compliance docs"
+          >
+            Details
+          </Link>
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor">
+            {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }

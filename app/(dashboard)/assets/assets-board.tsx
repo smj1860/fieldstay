@@ -185,28 +185,42 @@ export function AssetsBoard({
           </p>
         </Card>
       ) : (
-        <Card>
-          <div className="overflow-x-auto">
+        <Card className="p-0 overflow-hidden">
+          {/* Mobile card layout */}
+          <div className="md:hidden divide-y divide-themed">
+            {realAssets.map((asset) => (
+              <AssetCard
+                key={asset.id}
+                asset={asset}
+                typeLabel={typeLabel(asset.asset_type)}
+                propertyName={propertyMap[asset.property_id] ?? '—'}
+              />
+            ))}
+            {placeholderTypes.map((assetType) => (
+              <PlaceholderAssetCard
+                key={`placeholder-${assetType}`}
+                label={typeLabel(assetType)}
+                propertyName={selectedPropertyName}
+              />
+            ))}
+          </div>
+
+          {/* Desktop table — unchanged */}
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-themed">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Asset</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Property</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide hidden sm:table-cell">Make / Model</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide hidden sm:table-cell">Age</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Make / Model</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Age</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase tracking-wide">Health</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-themed">
                 {realAssets.map((asset) => {
-                  const ageYears = asset.installation_date
-                    ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
-                    : null
-                  const score  = asset.health_score
-                  const color  = score !== null ? healthColor(score) : 'var(--text-muted)'
-                  const bg     = score !== null ? healthBgStyle(score) : 'var(--border)'
-                  const dot    = score !== null ? healthDot(score) : 'unknown'
-                  const label  = score !== null ? healthLabel(score) : 'Unknown'
+                  const ageYears = assetAgeYears(asset)
+                  const { color, bg, dot, label, score } = assetHealthDisplay(asset)
 
                   return (
                     <tr key={asset.id} className="hover:bg-raised-themed transition-colors">
@@ -224,10 +238,10 @@ export function AssetsBoard({
                           {propertyMap[asset.property_id] ?? '—'}
                         </Link>
                       </td>
-                      <td className="px-4 py-3 text-muted-themed hidden sm:table-cell">
+                      <td className="px-4 py-3 text-muted-themed">
                         {[asset.make, asset.model].filter(Boolean).join(' · ') || '—'}
                       </td>
-                      <td className="px-4 py-3 text-muted-themed hidden sm:table-cell">
+                      <td className="px-4 py-3 text-muted-themed">
                         {ageYears !== null ? `${ageYears}y` : '—'}
                       </td>
                       <td className="px-4 py-3">
@@ -253,8 +267,8 @@ export function AssetsBoard({
                       <Badge tone="slate" className="text-xs ml-2">Awaiting Discovery</Badge>
                     </td>
                     <td className="px-4 py-3 text-secondary-themed">{selectedPropertyName}</td>
-                    <td className="px-4 py-3 text-muted-themed hidden sm:table-cell">—</td>
-                    <td className="px-4 py-3 text-muted-themed hidden sm:table-cell">—</td>
+                    <td className="px-4 py-3 text-muted-themed">—</td>
+                    <td className="px-4 py-3 text-muted-themed">—</td>
                     <td className="px-4 py-3">
                       <span className="text-xs text-muted-themed">Pending Crew Capture</span>
                     </td>
@@ -265,6 +279,91 @@ export function AssetsBoard({
           </div>
         </Card>
       )}
+    </div>
+  )
+}
+
+function assetAgeYears(asset: Pick<AssetRow, 'installation_date'>): number | null {
+  return asset.installation_date
+    ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
+    : null
+}
+
+function assetHealthDisplay(asset: Pick<AssetRow, 'health_score'>) {
+  const score = asset.health_score
+  return {
+    score,
+    color: score !== null ? healthColor(score) : 'var(--text-muted)',
+    bg:    score !== null ? healthBgStyle(score) : 'var(--border)',
+    dot:   score !== null ? healthDot(score) : 'unknown',
+    label: score !== null ? healthLabel(score) : 'Unknown',
+  }
+}
+
+function AssetCard({
+  asset,
+  typeLabel,
+  propertyName,
+}: Readonly<{
+  asset:        AssetRow
+  typeLabel:    string
+  propertyName: string
+}>) {
+  const ageYears = assetAgeYears(asset)
+  const { color, bg, dot, label, score } = assetHealthDisplay(asset)
+  const makeModel = [asset.make, asset.model].filter(Boolean).join(' · ')
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <Link
+            href={`/properties/${asset.property_id}`}
+            className="font-medium text-primary-themed hover:underline"
+          >
+            {asset.name}
+          </Link>
+          <p className="text-xs text-muted-themed mt-0.5">{typeLabel}</p>
+        </div>
+        {score !== null ? (
+          <span
+            className="flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+            style={{ color, background: bg, border: `1px solid ${color}44` }}
+          >
+            <StatusDot status={dot} label={label} /> {score}/100
+          </span>
+        ) : (
+          <Badge tone="slate" className="flex-shrink-0">Unknown</Badge>
+        )}
+      </div>
+      <div className="flex items-center gap-1.5 flex-wrap mt-2 text-xs text-muted-themed">
+        <Link href={`/properties/${asset.property_id}`} className="hover:underline">
+          {propertyName}
+        </Link>
+        {makeModel && <><span>·</span><span>{makeModel}</span></>}
+        {ageYears !== null && <><span>·</span><span>{ageYears}y old</span></>}
+      </div>
+    </div>
+  )
+}
+
+function PlaceholderAssetCard({
+  label,
+  propertyName,
+}: Readonly<{
+  label:        string
+  propertyName: string | null
+}>) {
+  return (
+    <div className="px-4 py-3 opacity-70">
+      <div className="flex items-start justify-between gap-2">
+        <span className="font-medium text-primary-themed">{label}</span>
+        <Badge tone="slate" className="flex-shrink-0 text-xs">Awaiting Discovery</Badge>
+      </div>
+      <div className="flex items-center gap-1.5 flex-wrap mt-2 text-xs text-muted-themed">
+        {propertyName && <span>{propertyName}</span>}
+        <span>Pending Crew Capture</span>
+      </div>
     </div>
   )
 }
