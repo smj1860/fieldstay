@@ -805,7 +805,7 @@ function PropertyInventoryDetail({
               </div>
             ) : (
               <div className="overflow-x-auto">
-              <div className="divide-y divide-themed min-w-[480px]">
+              <div className="divide-y divide-themed md:min-w-[480px]">
                 <div className="hidden md:grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2 bg-canvas-themed text-xs font-medium text-muted-themed uppercase tracking-wide">
                   <span>Item</span>
                   <span className="text-right">Current</span>

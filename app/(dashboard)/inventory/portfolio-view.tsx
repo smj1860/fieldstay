@@ -50,6 +50,7 @@ export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioIte
   const critical  = counted.filter(i => i.current_quantity <= i.par_level)
   const low       = counted.filter(i => i.current_quantity > i.par_level && i.current_quantity <= i.par_level * 1.2)
   const healthy   = counted.filter(i => i.current_quantity > i.par_level * 1.2)
+  const sorted    = [...critical, ...low, ...healthy, ...uncounted]
 
   const propName = (item: PortfolioItem) => item.property?.name
 
@@ -166,62 +167,122 @@ export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioIte
         </Dialog>
       )}
 
-      {/* Portfolio table */}
-      <div className="overflow-x-auto rounded-xl border border-themed">
-        <table className="w-full text-sm min-w-[600px]">
-          <thead>
-            <tr className="border-b border-themed bg-canvas-themed">
-              <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Item</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Property</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Category</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Brand</th>
-              <th className="text-right px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Stock</th>
-              <th className="text-right px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Par</th>
-              <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-themed">
-            {[...critical, ...low, ...healthy, ...uncounted].map(item => {
-              const isUncounted = !item.first_count_recorded_at
-              const isCritical  = !isUncounted && item.current_quantity <= item.par_level
-              const isLow       = !isUncounted && !isCritical && item.current_quantity <= item.par_level * 1.2
-              return (
-                <tr key={item.id} className="hover:bg-canvas-themed transition-colors">
-                  <td className="px-4 py-2.5 font-medium text-primary-themed">{item.name}</td>
-                  <td className="px-4 py-2.5 text-secondary-themed">{propName(item) ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-secondary-themed capitalize">
-                    {INVENTORY_CATEGORY_LABELS[item.category] ?? item.category.replace(/_/g, ' ')}
-                  </td>
-                  <td className="px-4 py-2.5 text-sm">
-                    {item.preferred_brand
-                      ? <span style={{ color: 'var(--text-secondary)' }}>{item.preferred_brand}</span>
-                      : <span style={{ color: 'var(--text-muted)' }}>Any</span>}
-                  </td>
-                  <td
-                    className="px-4 py-2.5 text-right font-mono font-semibold"
-                    style={{ color: isCritical ? 'var(--accent-red)' : isLow ? 'var(--accent-amber)' : 'var(--text-primary)' }}
-                  >
-                    {isUncounted ? '—' : item.current_quantity}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-mono text-secondary-themed">{item.par_level}</td>
-                  <td className="px-4 py-2.5">
-                    {isUncounted ? <Badge tone="slate">Needs Count</Badge>
-                     : isCritical ? <Badge tone="red">At/Below Par</Badge>
-                     : isLow      ? <Badge tone="amber">Low</Badge>
-                                  : <Badge tone="green">Healthy</Badge>}
+      {/* Portfolio list */}
+      <div className="rounded-xl border border-themed overflow-hidden">
+        {/* Mobile card layout */}
+        <div className="md:hidden divide-y divide-themed">
+          {sorted.map(item => <PortfolioItemCard key={item.id} item={item} propName={propName} />)}
+          {items.length === 0 && (
+            <p className="px-4 py-10 text-center text-muted-themed text-sm">
+              No inventory items found across all properties.
+            </p>
+          )}
+        </div>
+
+        {/* Desktop table — unchanged */}
+        <div className="hidden md:block overflow-x-auto">
+          <table className="w-full text-sm min-w-[600px]">
+            <thead>
+              <tr className="border-b border-themed bg-canvas-themed">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Item</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Property</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Category</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Brand</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Stock</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Par</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-themed uppercase">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-themed">
+              {sorted.map(item => {
+                const { isUncounted, isCritical, isLow } = itemStockStatus(item)
+                return (
+                  <tr key={item.id} className="hover:bg-canvas-themed transition-colors">
+                    <td className="px-4 py-2.5 font-medium text-primary-themed">{item.name}</td>
+                    <td className="px-4 py-2.5 text-secondary-themed">{propName(item) ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-secondary-themed capitalize">
+                      {INVENTORY_CATEGORY_LABELS[item.category] ?? item.category.replace(/_/g, ' ')}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm">
+                      {item.preferred_brand
+                        ? <span style={{ color: 'var(--text-secondary)' }}>{item.preferred_brand}</span>
+                        : <span style={{ color: 'var(--text-muted)' }}>Any</span>}
+                    </td>
+                    <td
+                      className="px-4 py-2.5 text-right font-mono font-semibold"
+                      style={{ color: isCritical ? 'var(--accent-red)' : isLow ? 'var(--accent-amber)' : 'var(--text-primary)' }}
+                    >
+                      {isUncounted ? '—' : item.current_quantity}
+                    </td>
+                    <td className="px-4 py-2.5 text-right font-mono text-secondary-themed">{item.par_level}</td>
+                    <td className="px-4 py-2.5">
+                      <StockStatusBadge isUncounted={isUncounted} isCritical={isCritical} isLow={isLow} />
+                    </td>
+                  </tr>
+                )
+              })}
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-10 text-center text-muted-themed text-sm">
+                    No inventory items found across all properties.
                   </td>
                 </tr>
-              )
-            })}
-            {items.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-muted-themed text-sm">
-                  No inventory items found across all properties.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function itemStockStatus(item: Pick<PortfolioItem, 'first_count_recorded_at' | 'current_quantity' | 'par_level'>) {
+  const isUncounted = !item.first_count_recorded_at
+  const isCritical  = !isUncounted && item.current_quantity <= item.par_level
+  const isLow       = !isUncounted && !isCritical && item.current_quantity <= item.par_level * 1.2
+  return { isUncounted, isCritical, isLow }
+}
+
+function StockStatusBadge({
+  isUncounted,
+  isCritical,
+  isLow,
+}: Readonly<{ isUncounted: boolean; isCritical: boolean; isLow: boolean }>) {
+  if (isUncounted) return <Badge tone="slate">Needs Count</Badge>
+  if (isCritical)  return <Badge tone="red">At/Below Par</Badge>
+  if (isLow)       return <Badge tone="amber">Low</Badge>
+  return <Badge tone="green">Healthy</Badge>
+}
+
+function PortfolioItemCard({
+  item,
+  propName,
+}: Readonly<{ item: PortfolioItem; propName: (item: PortfolioItem) => string | undefined }>) {
+  const { isUncounted, isCritical, isLow } = itemStockStatus(item)
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-start justify-between gap-2">
+        <span className="font-medium text-primary-themed">{item.name}</span>
+        <div className="flex-shrink-0">
+          <StockStatusBadge isUncounted={isUncounted} isCritical={isCritical} isLow={isLow} />
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 flex-wrap mt-1 text-xs text-muted-themed">
+        <span>{propName(item) ?? '—'}</span>
+        <span>·</span>
+        <span className="capitalize">{INVENTORY_CATEGORY_LABELS[item.category] ?? item.category.replace(/_/g, ' ')}</span>
+        <span>·</span>
+        <span>{item.preferred_brand ?? 'Any brand'}</span>
+      </div>
+      <div className="mt-1.5 text-sm">
+        <span
+          className="font-mono font-semibold"
+          style={{ color: isCritical ? 'var(--accent-red)' : isLow ? 'var(--accent-amber)' : 'var(--text-primary)' }}
+        >
+          {isUncounted ? '—' : item.current_quantity}
+        </span>
+        <span className="text-muted-themed"> / {item.par_level} par</span>
       </div>
     </div>
   )
