@@ -114,7 +114,7 @@ export default async function OwnerRezPage() {
               </div>
             </div>
 
-            {/* Right — RepuGuard: bundled exclusive, no add-on pricing */}
+            {/* Right — RepuGuard: bundled feature, no add-on pricing */}
             <div className="bg-brand-panel border border-brand-panelBorder rounded-2xl p-8">
 
               {/* Header row */}
@@ -164,18 +164,18 @@ export default async function OwnerRezPage() {
                 ))}
               </div>
 
-              {/* OwnerRez-exclusive callout — replaces old pricing rows */}
+              {/* Bundled-feature callout — RepuGuard is included in every FieldStay
+                  plan for every customer, not an OwnerRez-only or paid add-on feature */}
               <div className="flex items-center gap-3 bg-brand-800 border border-brand-panelBorder rounded-xl px-4 py-3">
-                <span
-                  className="text-white text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
-                  style={{ background: '#3D8B4F' }}
-                >
-                  OR
+                <span className="w-5 h-5 bg-gold-300 rounded-full flex items-center justify-center flex-shrink-0">
+                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                    <path d="M1 4l3 3 5-6" stroke="#0a1628" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                 </span>
                 <p className="text-sm text-white/52">
                   RepuGuard is{' '}
-                  <span className="text-white font-semibold">exclusive to OwnerRez users</span>
-                  {' '}— included in your FieldStay subscription at no extra cost.
+                  <span className="text-white font-semibold">included in every FieldStay plan</span>
+                  {' '}— no add-on, no extra cost.
                 </p>
               </div>
             </div>
@@ -259,8 +259,8 @@ export default async function OwnerRezPage() {
               {
                 num: '04',
                 title: 'RepuGuard — Reputation Management',
-                body: 'AI-generated review responses tuned to each guest\'s tone and context. Urgency scoring surfaces overdue responses before they cost you your rating. Included in every FieldStay plan — exclusive to OwnerRez users.',
-                // Visual distinction: highlight this card subtly to signal it's exclusive/bonus
+                body: 'AI-generated review responses tuned to each guest\'s tone and context. Urgency scoring surfaces overdue responses before they cost you your rating. Included in every FieldStay plan — no add-on, no extra cost.',
+                // Visual distinction: highlight this card subtly as a headline feature
                 highlight: true,
               },
             ].map(f => (
@@ -297,13 +297,12 @@ export default async function OwnerRezPage() {
                 </p>
                 {f.highlight && (
                   <div className="mt-4 flex items-center gap-2">
-                    <span
-                      className="text-white text-xs font-bold px-2 py-0.5 rounded"
-                      style={{ background: '#3D8B4F' }}
-                    >
-                      OR
+                    <span className="w-4 h-4 bg-gold-300 rounded-full flex items-center justify-center flex-shrink-0">
+                      <svg width="8" height="6" viewBox="0 0 10 8" fill="none">
+                        <path d="M1 4l3 3 5-6" stroke="#0a1628" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
                     </span>
-                    <span className="text-xs text-white/46">OwnerRez exclusive · included free</span>
+                    <span className="text-xs text-white/46">Included in every plan · no add-on</span>
                   </div>
                 )}
               </div>

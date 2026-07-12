@@ -30,8 +30,8 @@ const PLANS = [
       "Maintenance + vendor portal",
       "Owner P&L portal",
       "Crew email invites",
+      "RepuGuard reputation management",
     ],
-    repuguard: true,
   },
   {
     name: "Growth",
@@ -46,7 +46,6 @@ const PLANS = [
       "Up to 50 properties",
       "Priority support",
     ],
-    repuguard: true,
   },
   {
     name: "Portfolio",
@@ -62,7 +61,6 @@ const PLANS = [
       "Custom onboarding",
       "Dedicated account support",
     ],
-    repuguard: true,
   },
   {
     name: "Enterprise",
@@ -78,41 +76,8 @@ const PLANS = [
       "SLA-backed uptime",
       "Volume pricing",
     ],
-    repuguard: true,
   },
 ];
-
-// Shared RepuGuard feature row — rendered identically across all plan cards
-function RepuGuardFeatureRow({ highlight }: Readonly<{ highlight: boolean }>) {
-  return (
-    <li className="flex items-center gap-2 text-sm">
-      {/* Swap the standard yellow checkmark for a green one to visually
-          distinguish RepuGuard from core platform features */}
-      <svg
-        width="12"
-        height="10"
-        viewBox="0 0 12 10"
-        fill="none"
-        className="flex-shrink-0"
-      >
-        <path
-          d="M1 5l4 4 6-8"
-          stroke="#4ade80"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-      <span className={highlight ? "text-white/58" : "text-gray-500"}>
-        RepuGuard
-      </span>
-      {/* Inline exclusive badge */}
-      <span className="ml-auto bg-gold-300 text-[#0a1628] text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide leading-none flex-shrink-0">
-        OR EXCLUSIVE
-      </span>
-    </li>
-  );
-}
 
 export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
   const [annual, setAnnual] = useState(false);
@@ -270,11 +235,6 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
                   {f}
                 </li>
               ))}
-
-              {/* RepuGuard always last — visually distinct from platform features */}
-              {plan.repuguard && (
-                <RepuGuardFeatureRow highlight={plan.highlight} />
-              )}
             </ul>
 
             {/* CTA */}
@@ -299,23 +259,6 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
             )}
           </div>
         ))}
-      </div>
-
-      {/* Footer note — bundled confirmation, zero add-on language */}
-      <div className="flex items-center justify-center gap-2.5">
-        <span
-          className="text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
-          style={{ background: '#3D8B4F' }}
-        >
-          OR
-        </span>
-        <p className="text-sm text-gray-400 text-center">
-          RepuGuard reputation management is{" "}
-          <span className="text-[#0a1628] font-semibold">
-            included in every plan
-          </span>{" "}
-          — an exclusive feature for OwnerRez users.
-        </p>
       </div>
     </div>
   );
