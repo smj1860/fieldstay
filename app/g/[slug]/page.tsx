@@ -1,10 +1,47 @@
+import { cache } from 'react'
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { GuestGuidebookView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
+
+const getGuidebookConfig = cache(async (slug: string) => {
+  const supabase = createServiceClient()
+
+  const { data: config } = await supabase
+    .from('guidebook_property_configs')
+    .select(`
+      id, slug, wifi_network, wifi_password, check_in_instructions,
+      check_out_instructions, house_rules, is_published, org_id,
+      properties(id, name, address, lat, lng, checkin_time, checkout_time)
+    `)
+    .eq('slug', slug)
+    .maybeSingle()
+
+  return config
+})
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}): Promise<Metadata> {
+  const { slug } = await params
+  const config = await getGuidebookConfig(slug)
+  const property = config?.properties as unknown as Property | undefined
+
+  if (!property) {
+    return { title: 'Guidebook' }
+  }
+
+  return {
+    title: `${property.name} — Guidebook`,
+    description: `Check-in instructions, wifi, house rules, and local recommendations for ${property.name}.`,
+  }
+}
 
 export default async function GuestGuidebookPage({
   params,
@@ -14,16 +51,7 @@ export default async function GuestGuidebookPage({
   const { slug } = await params
   const supabase = createServiceClient()
 
-  const { data: config } = await supabase
-    .from('guidebook_property_configs')
-    .select(`
-      id, slug, wifi_network, wifi_password, check_in_instructions,
-      check_out_instructions, house_rules, is_published, org_id,
-      properties(id, name, address, lat, lng)
-    `)
-    .eq('slug', slug)
-    .maybeSingle()
-
+  const config = await getGuidebookConfig(slug)
   if (!config) notFound()
 
   const property = config.properties as unknown as Property

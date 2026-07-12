@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Plus, ClipboardList, ChevronDown, X,
   Package, AlertTriangle, ShoppingCart, Check, History,
-  BarChart2, Layers, Loader2,
+  BarChart2, Layers, Loader2, Save,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
 import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount, triggerShoppingCart } from './actions'
@@ -659,7 +659,17 @@ function RunCountModal({
 
 // ── Category rows (used in the detail modal) ──────────────────────────────────
 
-function CategoryRows({ category, items }: { category: InventoryCategory; items: InventoryItem[] }) {
+function CategoryRows({
+  category,
+  items,
+  pendingCounts,
+  onQuantityEdit,
+}: {
+  category: InventoryCategory
+  items: InventoryItem[]
+  pendingCounts: Record<string, number>
+  onQuantityEdit: (id: string, qty: number) => void
+}) {
   return (
     <>
       <div className="px-5 py-1.5 bg-canvas-themed">
@@ -672,20 +682,21 @@ function CategoryRows({ category, items }: { category: InventoryCategory; items:
       <div className="md:hidden p-3 space-y-2">
         {items.map((item) => (
           <InventoryItemCard
-            key={item.id}
+            key={`${item.id}-${item.current_quantity}`}
             id={item.id}
             name={item.name}
             category={item.category}
             unit={item.unit}
             parLevel={item.par_level}
-            currentQuantity={item.current_quantity}
+            currentQuantity={pendingCounts[item.id] ?? item.current_quantity}
             uncounted={!item.first_count_recorded_at}
             variant="pm"
+            onQuantityChange={onQuantityEdit}
           />
         ))}
       </div>
 
-      {/* Desktop table rows — unchanged */}
+      {/* Desktop table rows */}
       <div className="hidden md:contents">
         {items.map((item) => (
           <div
@@ -702,8 +713,15 @@ function CategoryRows({ category, items }: { category: InventoryCategory; items:
                 <span className="text-xs text-muted-themed truncate block">{item.notes}</span>
               )}
             </div>
-            <div className="text-right tabular-nums font-medium text-primary-themed">
-              {item.current_quantity}
+            <div className="text-right">
+              <Input
+                type="number"
+                min={0}
+                value={pendingCounts[item.id] ?? item.current_quantity}
+                onChange={(e) => onQuantityEdit(item.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
+                aria-label={`${item.name} current count`}
+                className="py-0.5 px-1.5 w-14 text-sm text-right tabular-nums font-medium"
+              />
             </div>
             <div className="text-right">
               <ParLevelEditor item={item} />
@@ -746,6 +764,35 @@ function PropertyInventoryDetail({
   const [showPOs,      setShowPOs]      = useState(false)
   const [expandedPO,   setExpandedPO]   = useState<string | null>(null)
 
+  const [pendingCounts, setPendingCounts] = useState<Record<string, number>>({})
+  const [isSaving, startSaveTransition]   = useTransition()
+  const [saveError, setSaveError]         = useState<string | null>(null)
+  const [justSaved, setJustSaved]         = useState(false)
+
+  const handleQuantityEdit = (id: string, qty: number) => {
+    setJustSaved(false)
+    setPendingCounts((prev) => ({ ...prev, [id]: qty }))
+  }
+
+  const handleSaveCount = () => {
+    setSaveError(null)
+    const formData = new FormData()
+    formData.set('property_id', property.id)
+    for (const item of items) {
+      formData.set(`item_${item.id}`, String(pendingCounts[item.id] ?? item.current_quantity))
+    }
+    startSaveTransition(async () => {
+      const result = await submitInventoryCount(null, formData)
+      if (result.error) {
+        setSaveError(result.error)
+        return
+      }
+      setPendingCounts({})
+      setJustSaved(true)
+      onRefresh()
+    })
+  }
+
   const byCategory = CATEGORY_ORDER
     .map((cat) => ({ cat, catItems: items.filter((i) => i.category === cat) }))
     .filter(({ catItems }) => catItems.length > 0)
@@ -765,6 +812,15 @@ function PropertyInventoryDetail({
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <Button
+            onClick={handleSaveCount}
+            disabled={items.length === 0 || isSaving}
+            className="text-xs px-3 py-1.5 disabled:opacity-50"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {isSaving ? 'Saving…' : justSaved ? 'Saved' : 'Save Count'}
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => setShowRunCount(true)}
             disabled={items.length === 0}
             className="text-xs px-3 py-1.5 disabled:opacity-50"
@@ -785,6 +841,12 @@ function PropertyInventoryDetail({
           </Button>
         </div>
       </div>
+
+      {saveError && (
+        <div className="mx-6 mt-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 flex-shrink-0">
+          {saveError}
+        </div>
+      )}
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
@@ -814,7 +876,13 @@ function PropertyInventoryDetail({
                   <span className="text-right">Status</span>
                 </div>
                 {byCategory.map(({ cat, catItems }) => (
-                  <CategoryRows key={cat} category={cat} items={catItems} />
+                  <CategoryRows
+                    key={cat}
+                    category={cat}
+                    items={catItems}
+                    pendingCounts={pendingCounts}
+                    onQuantityEdit={handleQuantityEdit}
+                  />
                 ))}
               </div>
               </div>
