@@ -1,97 +1,63 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { AlertTriangle } from 'lucide-react'
 import { healthLabel, healthColor, healthBgStyle, healthDot } from '@/lib/assets/health-score'
 import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discovery/config'
-import { createClient } from '@/lib/supabase/client'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import type { AssetType } from '@/types/database'
+import type { AssetType, AssetTypeStandard, PropertyAsset } from '@/types/database'
 
-export interface AssetRow {
-  id:                      string
-  property_id:             string
-  name:                    string
-  asset_type:              string
-  health_score:            number | null
-  installation_date:       string | null
-  make:                    string | null
-  model:                   string | null
-  health_score_updated_at: string | null
-  is_na:                   boolean
+interface Property { id: string; name: string; city: string | null; state: string | null }
+
+function isDiscovered(asset: Pick<PropertyAsset, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
+  return asset.is_na === true || asset.make !== null || asset.model !== null || asset.photo_url !== null
 }
 
-export interface PropertyOption {
-  id:   string
-  name: string
-}
-
-export interface StandardOption {
-  asset_type:   string
-  display_name: string
-}
-
-function isDiscovered(asset: Pick<AssetRow, 'make' | 'model' | 'is_na'> & { photo_url?: string | null }): boolean {
-  return asset.is_na === true || asset.make !== null || asset.model !== null || (asset as { photo_url?: string | null }).photo_url !== null
-}
-
-function missingTypesForProperty(propertyId: string, assets: AssetRow[]): AssetType[] {
+function missingTypesForProperty(propertyId: string, assets: PropertyAsset[]): AssetType[] {
   const discoveredTypes = new Set(
     assets
       .filter((a) => a.property_id === propertyId && REQUIRED_ASSET_TYPES.includes(a.asset_type as AssetType))
-      .filter((a) => isDiscovered(a))
+      .filter(isDiscovered)
       .map((a) => a.asset_type as AssetType)
   )
   return REQUIRED_ASSET_TYPES.filter((t) => !discoveredTypes.has(t))
 }
 
-export function AssetsBoard({
-  orgId,
+function assetAgeYears(asset: Pick<PropertyAsset, 'installation_date'>): number | null {
+  return asset.installation_date
+    ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
+    : null
+}
+
+function assetHealthDisplay(asset: Pick<PropertyAsset, 'health_score'>) {
+  const score = asset.health_score
+  return {
+    score,
+    color: score !== null ? healthColor(score) : 'var(--text-muted)',
+    bg:    score !== null ? healthBgStyle(score) : 'var(--border)',
+    dot:   score !== null ? healthDot(score) : 'unknown',
+    label: score !== null ? healthLabel(score) : 'Unknown',
+  }
+}
+
+export function PortfolioAssetView({
   assets,
   properties,
   standards,
 }: Readonly<{
-  orgId:      string
-  assets:     AssetRow[]
-  properties: PropertyOption[]
-  standards:  StandardOption[]
+  assets:     PropertyAsset[]
+  properties: Property[]
+  standards:  AssetTypeStandard[]
 }>) {
-  const router = useRouter()
-  const [filterProperty, setFilterProperty] = useState('all')
-
-  // Live-refresh the dashboard when a turnover finishes and writes new
-  // property_assets rows, without a hard page reload.
-  useEffect(() => {
-    const supabase = createClient()
-    const channel = supabase
-      .channel(`asset-health-${orgId}`)
-      .on('postgres_changes', {
-        event: '*', schema: 'public', table: 'property_assets',
-        filter: `org_id=eq.${orgId}`,
-      }, () => router.refresh())
-      .subscribe()
-
-    return () => { supabase.removeChannel(channel) }
-  }, [orgId, router])
-
-  const propertyMap = useMemo(
-    () => Object.fromEntries(properties.map((p) => [p.id, p.name])),
-    [properties]
-  )
+  const propertyMap = Object.fromEntries(properties.map((p) => [p.id, p.name]))
   const typeLabel = (t: string) =>
     standards.find((s) => s.asset_type === t)?.display_name ?? assetTypeDisplayName(t as AssetType)
 
-  const filteredAssets = filterProperty === 'all'
-    ? assets
-    : assets.filter((a) => a.property_id === filterProperty)
-
   // N/A assets are excluded from totals, averages, and attention counts —
   // they were explicitly marked as not present at the property.
-  const realAssets = filteredAssets.filter((a) => !a.is_na)
+  const realAssets  = assets.filter((a) => !a.is_na)
   const scored      = realAssets.filter((a) => a.health_score !== null)
   const urgentAssets = realAssets.filter((a) => a.health_score !== null && a.health_score < 40)
 
@@ -105,44 +71,15 @@ export function AssetsBoard({
   const poorCount     = scored.filter((a) => { const s = a.health_score!; return s >= 20 && s < 40 }).length
   const criticalCount = scored.filter((a) => a.health_score! < 20).length
 
-  // Pending Discovery — system-mandated master list assets not yet captured.
-  // Scoped to the selected property, or summed across the whole portfolio.
-  const pendingDiscoveryCount = filterProperty === 'all'
-    ? properties.reduce((sum, p) => sum + missingTypesForProperty(p.id, assets).length, 0)
-    : missingTypesForProperty(filterProperty, assets).length
-
-  const placeholderTypes = filterProperty === 'all'
-    ? []
-    : missingTypesForProperty(filterProperty, assets)
-
-  const selectedPropertyName = filterProperty !== 'all' ? propertyMap[filterProperty] ?? '—' : null
+  // Pending Discovery — system-mandated master list assets not yet captured,
+  // summed across the whole portfolio.
+  const pendingDiscoveryCount = properties.reduce(
+    (sum, p) => sum + missingTypesForProperty(p.id, assets).length,
+    0
+  )
 
   return (
-    <div className="max-w-4xl">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Asset Health</h1>
-          <p className="page-subtitle">
-            {realAssets.length} asset{realAssets.length !== 1 ? 's' : ''} tracked across {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'}
-          </p>
-        </div>
-      </div>
-
-      {properties.length > 1 && (
-        <div className="mb-4">
-          <select
-            value={filterProperty}
-            onChange={(e) => setFilterProperty(e.target.value)}
-            className="input text-sm py-1.5 w-auto"
-          >
-            <option value="all">All Properties</option>
-            {properties.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
+    <div>
       {/* Portfolio summary */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <SummaryCard label="Total Assets"  value={realAssets.length} />
@@ -173,15 +110,10 @@ export function AssetsBoard({
         </div>
       )}
 
-      {realAssets.length === 0 && placeholderTypes.length === 0 ? (
+      {realAssets.length === 0 && pendingDiscoveryCount === 0 ? (
         <Card className="text-center py-16">
-          <p className="text-muted-themed text-sm mb-4">No assets tracked yet.</p>
           <p className="text-muted-themed text-sm">
-            Go to a{' '}
-            <Link href="/properties" className="underline" style={{ color: 'var(--accent-blue)' }}>
-              property page
-            </Link>{' '}
-            and add appliances, HVAC, roofing, and more.
+            No assets tracked yet. Switch to the <strong>By Property</strong> tab to add appliances, HVAC, roofing, and more.
           </p>
         </Card>
       ) : (
@@ -196,16 +128,9 @@ export function AssetsBoard({
                 propertyName={propertyMap[asset.property_id] ?? '—'}
               />
             ))}
-            {placeholderTypes.map((assetType) => (
-              <PlaceholderAssetCard
-                key={`placeholder-${assetType}`}
-                label={typeLabel(assetType)}
-                propertyName={selectedPropertyName}
-              />
-            ))}
           </div>
 
-          {/* Desktop table — unchanged */}
+          {/* Desktop table */}
           <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -225,18 +150,11 @@ export function AssetsBoard({
                   return (
                     <tr key={asset.id} className="hover:bg-raised-themed transition-colors">
                       <td className="px-4 py-3">
-                        <Link
-                          href={`/properties/${asset.property_id}`}
-                          className="font-medium text-primary-themed hover:underline"
-                        >
-                          {asset.name}
-                        </Link>
+                        <span className="font-medium text-primary-themed">{asset.name}</span>
                         <p className="text-xs text-muted-themed mt-0.5">{typeLabel(asset.asset_type)}</p>
                       </td>
                       <td className="px-4 py-3 text-secondary-themed">
-                        <Link href={`/properties/${asset.property_id}`} className="hover:underline">
-                          {propertyMap[asset.property_id] ?? '—'}
-                        </Link>
+                        {propertyMap[asset.property_id] ?? '—'}
                       </td>
                       <td className="px-4 py-3 text-muted-themed">
                         {[asset.make, asset.model].filter(Boolean).join(' · ') || '—'}
@@ -260,44 +178,32 @@ export function AssetsBoard({
                   )
                 })}
 
-                {placeholderTypes.map((assetType) => (
-                  <tr key={`placeholder-${assetType}`} className="opacity-70">
+                {properties.flatMap((p) => missingTypesForProperty(p.id, assets).map((assetType) => (
+                  <tr key={`placeholder-${p.id}-${assetType}`} className="opacity-70">
                     <td className="px-4 py-3">
                       <span className="font-medium text-primary-themed">{typeLabel(assetType)}</span>
                       <Badge tone="slate" className="text-xs ml-2">Awaiting Discovery</Badge>
                     </td>
-                    <td className="px-4 py-3 text-secondary-themed">{selectedPropertyName}</td>
+                    <td className="px-4 py-3 text-secondary-themed">{propertyMap[p.id] ?? '—'}</td>
                     <td className="px-4 py-3 text-muted-themed">—</td>
                     <td className="px-4 py-3 text-muted-themed">—</td>
                     <td className="px-4 py-3">
                       <span className="text-xs text-muted-themed">Pending Crew Capture</span>
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
         </Card>
       )}
+
+      <p className="text-xs text-muted-themed mt-4">
+        Assets link to their property page for edits —{' '}
+        <Link href="/assets" className="underline">switch to By Property</Link> to add, edit, or import.
+      </p>
     </div>
   )
-}
-
-function assetAgeYears(asset: Pick<AssetRow, 'installation_date'>): number | null {
-  return asset.installation_date
-    ? new Date().getFullYear() - new Date(asset.installation_date).getFullYear()
-    : null
-}
-
-function assetHealthDisplay(asset: Pick<AssetRow, 'health_score'>) {
-  const score = asset.health_score
-  return {
-    score,
-    color: score !== null ? healthColor(score) : 'var(--text-muted)',
-    bg:    score !== null ? healthBgStyle(score) : 'var(--border)',
-    dot:   score !== null ? healthDot(score) : 'unknown',
-    label: score !== null ? healthLabel(score) : 'Unknown',
-  }
 }
 
 function AssetCard({
@@ -305,7 +211,7 @@ function AssetCard({
   typeLabel,
   propertyName,
 }: Readonly<{
-  asset:        AssetRow
+  asset:        PropertyAsset
   typeLabel:    string
   propertyName: string
 }>) {
@@ -317,12 +223,7 @@ function AssetCard({
     <div className="px-4 py-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <Link
-            href={`/properties/${asset.property_id}`}
-            className="font-medium text-primary-themed hover:underline"
-          >
-            {asset.name}
-          </Link>
+          <span className="font-medium text-primary-themed">{asset.name}</span>
           <p className="text-xs text-muted-themed mt-0.5">{typeLabel}</p>
         </div>
         {score !== null ? (
@@ -337,32 +238,9 @@ function AssetCard({
         )}
       </div>
       <div className="flex items-center gap-1.5 flex-wrap mt-2 text-xs text-muted-themed">
-        <Link href={`/properties/${asset.property_id}`} className="hover:underline">
-          {propertyName}
-        </Link>
+        <span>{propertyName}</span>
         {makeModel && <><span>·</span><span>{makeModel}</span></>}
         {ageYears !== null && <><span>·</span><span>{ageYears}y old</span></>}
-      </div>
-    </div>
-  )
-}
-
-function PlaceholderAssetCard({
-  label,
-  propertyName,
-}: Readonly<{
-  label:        string
-  propertyName: string | null
-}>) {
-  return (
-    <div className="px-4 py-3 opacity-70">
-      <div className="flex items-start justify-between gap-2">
-        <span className="font-medium text-primary-themed">{label}</span>
-        <Badge tone="slate" className="flex-shrink-0 text-xs">Awaiting Discovery</Badge>
-      </div>
-      <div className="flex items-center gap-1.5 flex-wrap mt-2 text-xs text-muted-themed">
-        {propertyName && <span>{propertyName}</span>}
-        <span>Pending Crew Capture</span>
       </div>
     </div>
   )

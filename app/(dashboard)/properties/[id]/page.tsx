@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { formatDate } from '@/lib/utils'
 import { Settings, CalendarCheck, Package, Wrench, CheckCircle2, AlertCircle, Clock, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { AssetSection } from './asset-section'
 import { PropertyMaintenanceManager } from '@/components/property/PropertyMaintenanceManager'
 import { VendorInvoiceHistory } from '@/components/work-orders/vendor-invoice-history'
 import type { InvoiceHistoryRow } from '@/components/work-orders/vendor-invoice-history'
@@ -39,8 +38,6 @@ export default async function PropertyDetailPage({ params }: Props) {
     { data: recentWOs },
     { data: ytdCompletedWOs },
     { data: upcomingSchedules },
-    { data: assets },
-    { data: standards },
     { data: allSchedules },
     { data: catalogItems },
     { data: invoiceRows, error: invoiceError },
@@ -87,18 +84,6 @@ export default async function PropertyDetailPage({ params }: Props) {
       .eq('is_active', true)
       .order('next_due_date', { ascending: true })
       .limit(5),
-
-    supabase
-      .from('property_assets')
-      .select('*')
-      .eq('property_id', property.id)
-      .eq('is_active', true)
-      .order('created_at', { ascending: false }),
-
-    supabase
-      .from('asset_type_standards')
-      .select('*')
-      .order('display_name'),
 
     // Full schedule list for management UI
     supabase
@@ -234,12 +219,6 @@ export default async function PropertyDetailPage({ params }: Props) {
           )}
         </div>
       </Card>
-
-      <AssetSection
-        assets={assets ?? []}
-        standards={standards ?? []}
-        propertyId={property.id}
-      />
 
       {/* ── Maintenance Schedule Manager ────────────────────────────────── */}
       <Card className="mb-4">

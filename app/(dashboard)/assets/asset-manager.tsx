@@ -1,19 +1,31 @@
 'use client'
 
-import { useState, useTransition, useActionState, useRef } from 'react'
-import { Plus, X, Pencil, Loader2, ChevronDown, Camera, Upload, Info, AlertTriangle, Check } from 'lucide-react'
+import { useState, useTransition, useActionState, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import {
+  Plus, X, Pencil, Loader2, Camera, Upload, Info, AlertTriangle, Check,
+  Package, BarChart2,
+} from 'lucide-react'
 import {
   createAsset, updateAsset, deactivateAsset, bulkImportAssets,
   type AssetActionState, type CsvAssetRow,
-} from '../actions'
+} from '../properties/actions'
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
+import { REQUIRED_ASSET_TYPES } from '@/lib/asset-discovery/config'
+import { PortfolioAssetView } from './portfolio-view'
+import { createClient } from '@/lib/supabase/client'
 import { Dialog } from '@/components/ui/Dialog'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
+import { cn } from '@/lib/utils'
 import type { PropertyAsset, AssetTypeStandard, AssetType } from '@/types/database'
+
+// ── Local types ───────────────────────────────────────────────────────────────
+
+interface Property { id: string; name: string; city: string | null; state: string | null }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -616,13 +628,11 @@ function CsvImportModal({
 function AssetRow({
   asset,
   standards,
-  propertyId,
   onEdit,
 }: {
-  asset:      PropertyAsset
-  standards:  AssetTypeStandard[]
-  propertyId: string
-  onEdit:     (a: PropertyAsset) => void
+  asset:     PropertyAsset
+  standards: AssetTypeStandard[]
+  onEdit:    (a: PropertyAsset) => void
 }) {
   const [removing, startRemove] = useTransition()
 
@@ -671,7 +681,7 @@ function AssetRow({
         <Button
           variant="ghost"
           onClick={() => startRemove(async () => {
-            const result = await deactivateAsset(asset.id, propertyId)
+            const result = await deactivateAsset(asset.id)
             if (result?.error) throw new Error(result.error)
           })}
           disabled={removing}
@@ -685,21 +695,24 @@ function AssetRow({
   )
 }
 
-// ── Asset section ─────────────────────────────────────────────────────────────
+// ── Property Asset Detail (full-screen modal) ─────────────────────────────────
+// Opened by clicking "View Assets" on the compact PropertyAssetCard below.
+// Matches the structure of Inventory's PropertyInventoryDetail.
 
-export function AssetSection({
+function PropertyAssetDetail({
+  property,
   assets,
   standards,
-  propertyId,
+  onClose,
 }: {
-  assets:     PropertyAsset[]
-  standards:  AssetTypeStandard[]
-  propertyId: string
+  property:  Property
+  assets:    PropertyAsset[]
+  standards: AssetTypeStandard[]
+  onClose:   () => void
 }) {
   const [showAdd,    setShowAdd]    = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [editing,    setEditing]    = useState<PropertyAsset | null>(null)
-  const [expanded,   setExpanded]   = useState(true)
 
   const goodCount     = assets.filter((a) => (a.health_score ?? 0) >= 80).length
   const fairCount     = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 60 && s < 80 }).length
@@ -709,84 +722,285 @@ export function AssetSection({
   const urgentAssets  = assets.filter((a) => a.health_score != null && a.health_score < 40)
 
   return (
-    <>
-      <Card className="mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            className="flex items-center gap-2 text-left"
-          >
-            <h3 className="font-semibold text-primary-themed">Asset Health</h3>
-            {assets.length > 0 && <Badge tone="slate">{assets.length}</Badge>}
-            <ChevronDown
-              className="w-4 h-4 text-muted-themed transition-transform"
-              style={{ transform: expanded ? 'rotate(0deg)' : 'rotate(-90deg)' }}
-            />
-          </button>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              onClick={() => setShowImport(true)}
-              className="text-sm flex items-center gap-1"
-              title="Import from CSV"
-            >
-              <Upload className="w-3.5 h-3.5" /> Import
-            </Button>
-            <Button onClick={() => setShowAdd(true)} className="text-sm">
-              <Plus className="w-4 h-4" /> Add Asset
-            </Button>
-          </div>
+    <div className="fixed inset-0 z-50 flex flex-col bg-canvas-themed overflow-hidden">
+
+      {/* Sticky header */}
+      <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-themed bg-card-themed flex-shrink-0">
+        <div className="min-w-0">
+          <h2 className="font-semibold text-primary-themed truncate">{property.name}</h2>
+          {(property.city || property.state) && (
+            <p className="text-xs text-muted-themed mt-0.5">
+              {[property.city, property.state].filter(Boolean).join(', ')}
+            </p>
+          )}
         </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Button
+            variant="ghost"
+            onClick={() => setShowImport(true)}
+            className="text-xs px-3 py-1.5 flex items-center gap-1"
+            title="Import from CSV"
+          >
+            <Upload className="w-3.5 h-3.5" /> Import
+          </Button>
+          <Button onClick={() => setShowAdd(true)} className="text-xs px-3 py-1.5">
+            <Plus className="w-3.5 h-3.5" /> Add Asset
+          </Button>
+          <Button variant="ghost" onClick={onClose} className="p-2 ml-1">
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
 
-        {expanded && (
-          <>
-            {assets.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-4">
-                {goodCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.1)',  color: 'var(--accent-green)', border: '1px solid rgba(34,197,94,0.2)' }}><StatusDot status="good" label="Good" /> {goodCount} Good</span>}
-                {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)' }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
-                {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
-                {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)' }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
-                {criticalCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(107,114,128,0.1)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.2)' }}><StatusDot status="offline" label="Critical" /> {criticalCount} Critical</span>}
-              </div>
-            )}
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="max-w-4xl mx-auto px-6 py-6">
+          <Card className="p-0 overflow-hidden">
+            <div className="p-5">
+              {assets.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {goodCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.1)',  color: 'var(--accent-green)', border: '1px solid rgba(34,197,94,0.2)' }}><StatusDot status="good" label="Good" /> {goodCount} Good</span>}
+                  {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)' }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
+                  {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
+                  {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)' }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
+                  {criticalCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(107,114,128,0.1)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.2)' }}><StatusDot status="offline" label="Critical" /> {criticalCount} Critical</span>}
+                </div>
+              )}
 
-            {urgentAssets.length > 0 && (
-              <div className="rounded-lg px-3 py-2 mb-3 text-sm flex items-center gap-1.5"
-                   style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
-                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or Critical condition — budget for replacement.
-              </div>
-            )}
+              {urgentAssets.length > 0 && (
+                <div className="rounded-lg px-3 py-2 mb-3 text-sm flex items-center gap-1.5"
+                     style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or Critical condition — budget for replacement.
+                </div>
+              )}
 
-            {assets.length === 0 ? (
-              <p className="text-sm text-muted-themed py-4 text-center">
-                No assets tracked yet. Add appliances, HVAC, roofing, etc. to monitor their health.
-              </p>
-            ) : (
-              <div className="divide-y divide-themed">
-                {assets.map((a) => (
-                  <AssetRow
-                    key={a.id}
-                    asset={a}
-                    standards={standards}
-                    propertyId={propertyId}
-                    onEdit={setEditing}
-                  />
-                ))}
-              </div>
-            )}
-          </>
-        )}
-      </Card>
+              {assets.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-muted-themed gap-3">
+                  <Package className="w-8 h-8" />
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-secondary-themed">No assets tracked yet</p>
+                    <p className="text-xs text-muted-themed mt-0.5">Add appliances, HVAC, roofing, etc. to monitor their health.</p>
+                  </div>
+                  <Button onClick={() => setShowAdd(true)} className="text-xs px-3 py-1.5">
+                    <Plus className="w-3.5 h-3.5" /> Add First Asset
+                  </Button>
+                </div>
+              ) : (
+                <div className="divide-y divide-themed">
+                  {assets.map((a) => (
+                    <AssetRow
+                      key={a.id}
+                      asset={a}
+                      standards={standards}
+                      onEdit={setEditing}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
 
+      {/* Sub-modals rendered at z-[60] above this z-50 modal */}
       {showAdd && (
-        <AssetForm propertyId={propertyId} standards={standards} onClose={() => setShowAdd(false)} />
+        <AssetForm propertyId={property.id} standards={standards} onClose={() => setShowAdd(false)} />
       )}
       {editing && (
-        <AssetForm propertyId={propertyId} standards={standards} asset={editing} onClose={() => setEditing(null)} />
+        <AssetForm propertyId={property.id} standards={standards} asset={editing} onClose={() => setEditing(null)} />
       )}
       {showImport && (
-        <CsvImportModal propertyId={propertyId} standards={standards} onClose={() => setShowImport(false)} />
+        <CsvImportModal propertyId={property.id} standards={standards} onClose={() => setShowImport(false)} />
+      )}
+    </div>
+  )
+}
+
+// ── Compact Property Asset Card ──────────────────────────────────────────────
+// Matches the visual size/layout of PropertyInventoryCard on the Inventory page.
+
+function isDiscovered(asset: Pick<PropertyAsset, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
+  return asset.is_na === true || asset.make !== null || asset.model !== null || asset.photo_url !== null
+}
+
+function missingTypesCount(propertyId: string, assets: PropertyAsset[]): number {
+  const discoveredTypes = new Set(
+    assets
+      .filter((a) => a.property_id === propertyId && REQUIRED_ASSET_TYPES.includes(a.asset_type as AssetType))
+      .filter(isDiscovered)
+      .map((a) => a.asset_type)
+  )
+  return REQUIRED_ASSET_TYPES.filter((t) => !discoveredTypes.has(t)).length
+}
+
+function PropertyAssetCard({
+  property,
+  assets,
+  onSelect,
+}: {
+  property: Property
+  assets:   PropertyAsset[]
+  onSelect: () => void
+}) {
+  const criticalCount = assets.filter((a) => (a.health_score ?? 100) < 40).length
+  const pendingCount   = missingTypesCount(property.id, assets)
+
+  return (
+    <Card className="flex flex-col gap-4 hover:shadow-card-md transition-shadow">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="font-semibold text-primary-themed truncate">{property.name}</h3>
+          {(property.city || property.state) && (
+            <p className="text-sm text-muted-themed mt-0.5">
+              {[property.city, property.state].filter(Boolean).join(', ')}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <Badge tone="slate">{assets.length} asset{assets.length !== 1 ? 's' : ''}</Badge>
+        {criticalCount > 0 && (
+          <Badge tone="red" className="flex items-center gap-0.5">
+            <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
+          </Badge>
+        )}
+        {pendingCount > 0 && (
+          <Badge tone="amber">{pendingCount} pending discovery</Badge>
+        )}
+        {criticalCount === 0 && pendingCount === 0 && assets.length > 0 && (
+          <Badge tone="green">All healthy</Badge>
+        )}
+        {assets.length === 0 && pendingCount === 0 && (
+          <span className="text-xs text-muted-themed">No assets yet</span>
+        )}
+      </div>
+
+      <div className="flex gap-2 pt-1 border-t border-themed">
+        <Button
+          variant="secondary"
+          onClick={onSelect}
+          className="text-xs px-3 py-1.5 flex-1 justify-center"
+        >
+          View Assets
+        </Button>
+      </div>
+    </Card>
+  )
+}
+
+// ── Main AssetManager ─────────────────────────────────────────────────────────
+
+type AssetTab = 'property' | 'portfolio'
+
+export function AssetManager({
+  orgId,
+  properties,
+  assets,
+  standards,
+}: {
+  orgId:      string
+  properties: Property[]
+  assets:     PropertyAsset[]
+  standards:  AssetTypeStandard[]
+}) {
+  const router = useRouter()
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<AssetTab>('property')
+
+  // Live-refresh the page when a turnover finishes and writes new
+  // property_assets rows, without a hard page reload.
+  useEffect(() => {
+    const supabase = createClient()
+    const channel = supabase
+      .channel(`asset-health-${orgId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'property_assets',
+        filter: `org_id=eq.${orgId}`,
+      }, () => router.refresh())
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [orgId, router])
+
+  const totalAssets   = assets.length
+  const totalCritical = assets.filter((a) => (a.health_score ?? 100) < 40).length
+
+  const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
+
+  const tabs: Array<{ id: AssetTab; label: string; icon: React.ReactNode }> = [
+    { id: 'property',  label: 'By Property', icon: <Package className="w-3.5 h-3.5" /> },
+    { id: 'portfolio', label: 'Portfolio',   icon: <BarChart2 className="w-3.5 h-3.5" /> },
+  ]
+
+  return (
+    <>
+      <div className="page-header flex items-start justify-between">
+        <div>
+          <h1 className="page-title">Assets</h1>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <p className="page-subtitle">{totalAssets} asset{totalAssets !== 1 ? 's' : ''} across {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'}</p>
+            {totalCritical > 0 && (
+              <Badge tone="red" className="flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3" /> {totalCritical} critical
+              </Badge>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 mb-5 border-b border-themed">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={cn(
+              'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
+              activeTab !== tab.id && 'border-transparent text-muted-themed hover:text-secondary-themed'
+            )}
+            style={activeTab === tab.id ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'property' && (
+        properties.length === 0 ? (
+          <Card className="text-center py-16 max-w-md mx-auto mt-4">
+            <Package className="w-10 h-10 text-muted-themed mx-auto mb-3" />
+            <h3 className="font-semibold text-secondary-themed mb-1">No properties yet</h3>
+            <p className="text-sm text-muted-themed">Add a property to start tracking assets.</p>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {properties.map((p) => (
+              <PropertyAssetCard
+                key={p.id}
+                property={p}
+                assets={assets.filter((a) => a.property_id === p.id)}
+                onSelect={() => setSelectedPropertyId(p.id)}
+              />
+            ))}
+          </div>
+        )
+      )}
+
+      {activeTab === 'portfolio' && (
+        <PortfolioAssetView assets={assets} properties={properties} standards={standards} />
+      )}
+
+      {/* Full-screen detail modal for the selected property */}
+      {selectedProperty && (
+        <PropertyAssetDetail
+          property={selectedProperty}
+          assets={assets.filter((a) => a.property_id === selectedProperty.id)}
+          standards={standards}
+          onClose={() => setSelectedPropertyId(null)}
+        />
       )}
     </>
   )

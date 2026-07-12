@@ -124,7 +124,7 @@ export default async function CapitalPlanningPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Link href="/assets" className={buttonVariantClass('ghost') + ' text-sm'}>← Asset Health</Link>
+          <Link href="/assets" className={buttonVariantClass('ghost') + ' text-sm'}>← Assets</Link>
         </div>
       </div>
 

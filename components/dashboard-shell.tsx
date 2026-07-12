@@ -51,7 +51,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/turnovers':    'Turnovers',
   '/inventory':    'Inventory',
   '/maintenance':  'Maintenance',
-  '/assets':            'Asset Health',
+  '/assets':            'Assets',
   '/capital-planning':  'Capital Planning',
   '/crew-manage':  'Crew',
   '/messages':     'Messages',
