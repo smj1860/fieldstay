@@ -479,18 +479,20 @@ function CreateWorkOrderModal({
 
   return (
     <Dialog open onClose={onClose} title="New Work Order" maxWidthClassName="max-w-3xl">
-        {state?.error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
-            {state.error}
-          </div>
-        )}
-
-        <form action={action} className="space-y-4">
+        <form action={action} className="flex flex-col max-h-[85vh] -m-6">
           {/* Hidden fields for mode */}
           <input type="hidden" name="request_quotes" value={assignMode === 'quotes' ? 'true' : 'false'} />
           {assignMode === 'quotes' && selectedQuoteVendors.map((id) => (
             <input key={id} type="hidden" name="quote_vendor_ids" value={id} />
           ))}
+
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+
+          {state?.error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">
+              {state.error}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Left column */}
@@ -791,7 +793,9 @@ function CreateWorkOrderModal({
             </div>
           </div>
 
-          <div className="flex gap-3 pt-2 border-t border-themed">
+          </div>{/* /scrollable content */}
+
+          <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
             <Button
               type="submit"
               disabled={pending || selectedCompliance === 'hard_blocked'}
