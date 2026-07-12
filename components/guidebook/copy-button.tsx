@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Copy, Check } from 'lucide-react'
+import styles from './copy-button.module.css'
 
 const BORDER = '#2A2A2E'
 const MUTED  = '#9A9AA2'
@@ -26,12 +27,11 @@ export function CopyButton({ value, label }: Readonly<{ value: string; label: st
       type="button"
       onClick={handleCopy}
       aria-label={`Copy ${label}`}
+      className={styles.copyBtn}
       style={{
-        display: 'inline-flex', alignItems: 'center', gap: '4px',
-        background: 'transparent', border: `1px solid ${BORDER}`,
-        borderRadius: '6px', padding: '4px 10px', minHeight: '28px',
-        color: copied ? GOLD : MUTED, fontSize: '11px', fontWeight: 600,
-        cursor: 'pointer', flexShrink: 0,
+        border: `1px solid ${BORDER}`,
+        color: copied ? GOLD : MUTED,
+        ...({ '--gold': GOLD } as React.CSSProperties),
       }}
     >
       {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
