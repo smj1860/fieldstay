@@ -10,12 +10,13 @@ import type { AssetType } from '@/types/database'
 export const REQUIRED_ASSET_TYPES: AssetType[] = [
   // Utilities & mechanical
   'hvac', 'water_heater', 'electrical_panel', 'water_shutoff_valve',
-  'well_pump', 'solar_inverter', 'whole_home_water_filter',
+  'well_pump', 'solar_inverter', 'whole_home_water_filter', 'generator',
   // Luxury & amenities
   'pool_pump', 'hot_tub', 'heated_tile_system',
   // Kitchen & appliances
   'refrigerator', 'oven_range', 'dishwasher', 'microwave',
   'range_hood_vent', 'coffee_station', 'toaster_oven',
+  'ice_maker', 'garbage_disposal', 'trash_compactor',
   // Laundry & operational / smart home
   'washer', 'dryer', 'wifi_router', 'smart_lock', 'fire_extinguisher',
   'thermostat',
@@ -29,6 +30,7 @@ export const ASSET_TYPE_DISPLAY_NAMES: Partial<Record<AssetType, string>> = {
   well_pump:                'Well Pump & Bladder Tank',
   solar_inverter:           'Solar Inverter',
   whole_home_water_filter:  'Whole Home Water Filter',
+  generator:                'Generator',
   pool_pump:                'Pool Pump',
   hot_tub:                  'Hot Tub Equipment',
   heated_tile_system:       'Heated Tile System',
@@ -39,6 +41,9 @@ export const ASSET_TYPE_DISPLAY_NAMES: Partial<Record<AssetType, string>> = {
   range_hood_vent:          'Range Hood Vent',
   coffee_station:           'Coffee & Nespresso Station',
   toaster_oven:             'Countertop Toaster Oven',
+  ice_maker:                'Ice Maker',
+  garbage_disposal:         'Garbage Disposal',
+  trash_compactor:          'Trash Compactor',
   washer:                   'Washer',
   dryer:                    'Dryer',
   wifi_router:              'Wi-Fi Router',

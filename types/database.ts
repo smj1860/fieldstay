@@ -57,6 +57,7 @@ export type AssetType =
   | 'water_shutoff_valve' | 'solar_inverter' | 'whole_home_water_filter'
   | 'heated_tile_system' | 'range_hood_vent' | 'coffee_station'
   | 'toaster_oven' | 'wifi_router' | 'fire_extinguisher' | 'thermostat'
+  | 'ice_maker' | 'garbage_disposal' | 'trash_compactor'
 export type MacrsClass        = '5_year' | '15_year' | '27_5_year' | '39_year' | 'section_179'
 export type ComplianceDocType = 'coi' | 'workers_comp' | 'business_license' | 'contractor_license' | 'bonding' | 'other'
 export type ComplianceStatus  = 'compliant' | 'expiring_soon' | 'grace_period' | 'hard_blocked' | 'no_documents'
