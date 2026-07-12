@@ -30,8 +30,8 @@ const PLANS = [
       "Maintenance + vendor portal",
       "Owner P&L portal",
       "Crew email invites",
+      "RepuGuard reputation management",
     ],
-    repuguard: true,
   },
   {
     name: "Growth",
@@ -46,7 +46,6 @@ const PLANS = [
       "Up to 50 properties",
       "Priority support",
     ],
-    repuguard: true,
   },
   {
     name: "Portfolio",
@@ -62,7 +61,6 @@ const PLANS = [
       "Custom onboarding",
       "Dedicated account support",
     ],
-    repuguard: true,
   },
   {
     name: "Enterprise",
@@ -78,41 +76,8 @@ const PLANS = [
       "SLA-backed uptime",
       "Volume pricing",
     ],
-    repuguard: true,
   },
 ];
-
-// Shared RepuGuard feature row — rendered identically across all plan cards
-function RepuGuardFeatureRow({ highlight }: Readonly<{ highlight: boolean }>) {
-  return (
-    <li className="flex items-center gap-2 text-sm">
-      {/* Swap the standard yellow checkmark for a green one to visually
-          distinguish RepuGuard from core platform features */}
-      <svg
-        width="12"
-        height="10"
-        viewBox="0 0 12 10"
-        fill="none"
-        className="flex-shrink-0"
-      >
-        <path
-          d="M1 5l4 4 6-8"
-          stroke="#4ade80"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-      <span className={highlight ? "text-[#a0b4cc]" : "text-[#5a6a7a]"}>
-        RepuGuard
-      </span>
-      {/* Inline exclusive badge */}
-      <span className="ml-auto bg-[#FCD116] text-[#0a1628] text-[10px] font-bold px-1.5 py-0.5 rounded tracking-wide leading-none flex-shrink-0">
-        OR EXCLUSIVE
-      </span>
-    </li>
-  );
-}
 
 export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
   const [annual, setAnnual] = useState(false);
@@ -127,7 +92,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
         <h2 className="text-3xl font-bold mb-3 text-[#0a1628] font-display">
           Simple, transparent pricing
         </h2>
-        <p className="text-[#5a6a7a] mb-6">
+        <p className="text-gray-500 mb-6">
           Full platform on every plan. 14-day free trial. No credit card required.
         </p>
 
@@ -135,24 +100,26 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
         <div className="inline-flex items-center gap-1 bg-[#f1f5f9] border border-[#e2e8f0] rounded-full p-1">
           <button
             onClick={() => setAnnual(false)}
+            aria-pressed={!annual}
             className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${
               !annual
-                ? "bg-[#102246] text-white shadow-sm"
-                : "text-[#5a6a7a] hover:text-[#0a1628]"
+                ? "bg-brand-800 text-white shadow-sm"
+                : "text-gray-500 hover:text-[#0a1628]"
             }`}
           >
             Monthly
           </button>
           <button
             onClick={() => setAnnual(true)}
+            aria-pressed={annual}
             className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all flex items-center gap-2 ${
               annual
-                ? "bg-[#102246] text-white shadow-sm"
-                : "text-[#5a6a7a] hover:text-[#0a1628]"
+                ? "bg-brand-800 text-white shadow-sm"
+                : "text-gray-500 hover:text-[#0a1628]"
             }`}
           >
             Annual
-            <span className="text-xs bg-[#FCD116] text-[#0a1628] px-2 py-0.5 rounded-full font-bold">
+            <span className="text-xs bg-gold-300 text-[#0a1628] px-2 py-0.5 rounded-full font-bold">
               Save 2 months
             </span>
           </button>
@@ -166,12 +133,12 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
             key={plan.name}
             className={`rounded-2xl p-6 border relative flex flex-col ${
               plan.highlight
-                ? "bg-[#102246] border-[#FCD116]"
+                ? "bg-brand-800 border-gold-300"
                 : "bg-[#f8fafc] border-[#e2e8f0]"
             }`}
           >
             {plan.highlight && (
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#FCD116] text-[#0a1628] text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gold-300 text-[#0a1628] text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                 Most Popular
               </div>
             )}
@@ -198,7 +165,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
                     </span>
                     <span
                       className={`mb-1 text-sm ${
-                        plan.highlight ? "text-[#8a9bb0]" : "text-[#5a6a7a]"
+                        plan.highlight ? "text-white/52" : "text-gray-500"
                       }`}
                     >
                       /mo
@@ -210,7 +177,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
                     )}
                   </>
                 ) : (
-                  <span className="text-3xl font-bold text-[#FCD116]">
+                  <span className="text-3xl font-bold text-gold-300">
                     Custom
                   </span>
                 )}
@@ -224,7 +191,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
 
               <p
                 className={`text-sm ${
-                  plan.highlight ? "text-[#8a9bb0]" : "text-[#5a6a7a]"
+                  plan.highlight ? "text-white/52" : "text-gray-500"
                 }`}
               >
                 {plan.description}
@@ -233,7 +200,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
               <div
                 className={`text-xs font-semibold mt-2 rounded-lg px-3 py-1.5 inline-block ${
                   plan.highlight
-                    ? "bg-[#0e2a52] text-[#a0b4cc]"
+                    ? "bg-brand-panel text-white/58"
                     : "bg-white border border-[#e2e8f0] text-[#0a1628]"
                 }`}
               >
@@ -247,7 +214,7 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
                 <li
                   key={f}
                   className={`flex items-center gap-2 text-sm ${
-                    plan.highlight ? "text-[#a0b4cc]" : "text-[#5a6a7a]"
+                    plan.highlight ? "text-white/58" : "text-gray-500"
                   }`}
                 >
                   <svg
@@ -268,11 +235,6 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
                   {f}
                 </li>
               ))}
-
-              {/* RepuGuard always last — visually distinct from platform features */}
-              {plan.repuguard && (
-                <RepuGuardFeatureRow highlight={plan.highlight} />
-              )}
             </ul>
 
             {/* CTA */}
@@ -281,8 +243,8 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
                 href={ctaHref}
                 className={`block text-center py-3 rounded-xl text-sm font-bold transition-colors ${
                   plan.highlight
-                    ? "bg-[#FCD116] text-[#0a1628] hover:bg-[#EAB800]"
-                    : "bg-[#102246] text-white hover:bg-[#162a4a]"
+                    ? "bg-gold-300 text-[#0a1628] hover:bg-[#EAB800]"
+                    : "bg-brand-800 text-white hover:bg-[#162a4a]"
                 }`}
               >
                 Start Free Trial
@@ -290,30 +252,13 @@ export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
             ) : (
               <a
                 href="mailto:hello@fieldstay.app"
-                className="block text-center py-3 rounded-xl text-sm font-bold transition-colors bg-[#102246] text-white hover:bg-[#162a4a]"
+                className="block text-center py-3 rounded-xl text-sm font-bold transition-colors bg-brand-800 text-white hover:bg-[#162a4a]"
               >
                 Contact Us
               </a>
             )}
           </div>
         ))}
-      </div>
-
-      {/* Footer note — bundled confirmation, zero add-on language */}
-      <div className="flex items-center justify-center gap-2.5">
-        <span
-          className="text-white text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0"
-          style={{ background: '#3D8B4F' }}
-        >
-          OR
-        </span>
-        <p className="text-sm text-[#8a9bb0] text-center">
-          RepuGuard reputation management is{" "}
-          <span className="text-[#0a1628] font-semibold">
-            included in every plan
-          </span>{" "}
-          — an exclusive feature for OwnerRez users.
-        </p>
       </div>
     </div>
   );

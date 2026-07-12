@@ -40,7 +40,7 @@ export default function FaqSection() {
         <h2 className="text-3xl font-bold text-center text-[#0a1628] mb-2 font-display">
           Common questions
         </h2>
-        <p className="text-center text-[#5a6a7a] mb-12">
+        <p className="text-center text-gray-500 mb-12">
           Quick answers before you connect.
         </p>
 
@@ -60,15 +60,14 @@ export default function FaqSection() {
                     {faq.q}
                   </span>
                   <ChevronDown
-                    className="w-4 h-4 flex-shrink-0 mt-0.5 transition-transform duration-200"
+                    className="w-4 h-4 flex-shrink-0 mt-0.5 transition-transform duration-200 text-gray-400"
                     style={{
-                      color:     '#8a9bb0',
                       transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                     }}
                   />
                 </button>
                 {isOpen && (
-                  <p className="px-6 pb-5 text-sm text-[#5a6a7a] leading-relaxed">
+                  <p className="px-6 pb-5 text-sm text-gray-500 leading-relaxed">
                     {faq.a}
                   </p>
                 )}
@@ -77,11 +76,11 @@ export default function FaqSection() {
           })}
         </div>
 
-        <p className="text-center text-sm text-[#8a9bb0] mt-8">
+        <p className="text-center text-sm text-gray-400 mt-8">
           Something else?{' '}
           <a
             href="mailto:support@fieldstay.app"
-            className="text-[#102246] underline font-medium hover:opacity-70
+            className="text-brand-800 underline font-medium hover:opacity-70
                        transition-opacity"
           >
             Email us

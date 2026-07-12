@@ -3,9 +3,20 @@
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 import Link from 'next/link'
+import type { Metadata } from 'next'
 import RepuGuardWrapper from '@/components/repuguard/RepuGuardWrapper'
 import PricingSection from '@/components/ownerrez/PricingSection'
 import FaqSection from '@/components/ownerrez/faq-section'
+
+export const metadata: Metadata = {
+  title: 'FieldStay for OwnerRez',
+  description: 'Connect your OwnerRez account for automated turnovers, crew management, inventory, and maintenance — free 14-day trial, no credit card required.',
+  openGraph: {
+    title: 'FieldStay for OwnerRez',
+    description: 'The operations layer your OwnerRez account is missing.',
+    images: ['/logo.png'],
+  },
+}
 
 export default async function OwnerRezPage() {
   const cookieStore = await cookies()
@@ -25,23 +36,23 @@ export default async function OwnerRezPage() {
           SECTION 1 — DARK NAVY
           Nav · Badge · Hero
       ══════════════════════════════════════════ */}
-      <div className="bg-[#102246] text-white">
+      <div className="bg-brand-800 text-white">
         <div className="max-w-6xl mx-auto px-6">
 
           {/* Nav */}
           <nav className="flex items-center justify-between py-5">
             <span className="text-xl font-bold">
               <span className="text-white">Field</span>
-              <span className="text-[#FCD116]">Stay</span>
+              <span className="text-gold-300">Stay</span>
             </span>
             {isLoggedIn ? (
-              <Link href="/dashboard" className="text-sm text-[#a0b4cc] hover:text-white transition-colors">
+              <Link href="/dashboard" className="text-sm text-white/58 hover:text-white transition-colors">
                 Dashboard
               </Link>
             ) : (
               <Link
                 href="/login?next=/api/integrations/ownerrez/connect"
-                className="text-sm text-[#a0b4cc] hover:text-white transition-colors"
+                className="text-sm text-white/58 hover:text-white transition-colors"
               >
                 Log In
               </Link>
@@ -50,14 +61,14 @@ export default async function OwnerRezPage() {
 
           {/* OwnerRez Partner Badge */}
           <div className="flex justify-center mt-6 mb-10">
-            <div className="flex items-center gap-2 bg-[#0e2a52] border border-[#1e3a72] rounded-full px-4 py-2">
+            <div className="flex items-center gap-2 bg-brand-panel border border-brand-panelBorder rounded-full px-4 py-2">
               <span
                 className="text-white text-xs font-bold px-2 py-0.5 rounded"
                 style={{ background: '#3D8B4F' }}
               >
                 OR
               </span>
-              <span className="text-xs font-semibold tracking-widest text-[#a0b4cc] uppercase">
+              <span className="text-xs font-semibold tracking-widest text-white/58 uppercase">
                 OwnerRez Integration Partner
               </span>
             </div>
@@ -70,10 +81,10 @@ export default async function OwnerRezPage() {
             <div>
               <h1 className="text-4xl lg:text-5xl font-bold leading-tight mb-6 font-display">
                 The operations layer your{' '}
-                <span className="text-[#FCD116]">OwnerRez account</span>{' '}
+                <span className="text-gold-300">OwnerRez account</span>{' '}
                 is missing.
               </h1>
-              <p className="text-[#8a9bb0] text-lg leading-relaxed mb-8">
+              <p className="text-white/52 text-lg leading-relaxed mb-8">
                 FieldStay connects directly to your OwnerRez bookings to automate
                 everything your team handles on the ground — offline-ready turnover
                 management, crew checklists, asset inventory with par-level alerts,
@@ -86,7 +97,7 @@ export default async function OwnerRezPage() {
                   'Connects in minutes',
                 ].map(item => (
                   <div key={item} className="flex items-center gap-2">
-                    <div className="w-5 h-5 bg-[#FCD116] rounded-full flex items-center justify-center flex-shrink-0">
+                    <div className="w-5 h-5 bg-gold-300 rounded-full flex items-center justify-center flex-shrink-0">
                       <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
                         <path
                           d="M1 4l3 3 5-6"
@@ -97,19 +108,19 @@ export default async function OwnerRezPage() {
                         />
                       </svg>
                     </div>
-                    <span className="text-sm font-medium text-[#c8d8e8]">{item}</span>
+                    <span className="text-sm font-medium text-white/65">{item}</span>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Right — RepuGuard: bundled exclusive, no add-on pricing */}
-            <div className="bg-[#0e2a52] border border-[#1e3a72] rounded-2xl p-8">
+            {/* Right — RepuGuard: bundled feature, no add-on pricing */}
+            <div className="bg-brand-panel border border-brand-panelBorder rounded-2xl p-8">
 
               {/* Header row */}
               <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center gap-3">
-                  <div className="bg-[#FCD116] text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
+                  <div className="bg-gold-300 text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
                     REPUGUARD
                   </div>
                   {/* "Included" pill — replaces the old trial/price framing */}
@@ -122,7 +133,7 @@ export default async function OwnerRezPage() {
               <h2 className="text-2xl font-bold text-white mb-3 leading-snug">
                 RepuGuard Reputation Engine
               </h2>
-              <p className="text-[#8a9bb0] leading-relaxed mb-6">
+              <p className="text-white/52 leading-relaxed mb-6">
                 Every review deserves a response. RepuGuard reads the context of each
                 guest review and generates calm, professional replies that protect your
                 reputation without ever sounding defensive. Review every response before
@@ -137,7 +148,7 @@ export default async function OwnerRezPage() {
                   'You approve before anything posts — always',
                 ].map(feat => (
                   <div key={feat} className="flex items-start gap-3">
-                    <div className="w-5 h-5 bg-[#FCD116] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <div className="w-5 h-5 bg-gold-300 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                       <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
                         <path
                           d="M1 4l3 3 5-6"
@@ -148,23 +159,23 @@ export default async function OwnerRezPage() {
                         />
                       </svg>
                     </div>
-                    <span className="text-sm text-[#c8d8e8] leading-snug">{feat}</span>
+                    <span className="text-sm text-white/65 leading-snug">{feat}</span>
                   </div>
                 ))}
               </div>
 
-              {/* OwnerRez-exclusive callout — replaces old pricing rows */}
-              <div className="flex items-center gap-3 bg-[#102246] border border-[#1e3a72] rounded-xl px-4 py-3">
-                <span
-                  className="text-white text-xs font-bold px-2 py-0.5 rounded flex-shrink-0"
-                  style={{ background: '#3D8B4F' }}
-                >
-                  OR
+              {/* Bundled-feature callout — RepuGuard is included in every FieldStay
+                  plan for every customer, not an OwnerRez-only or paid add-on feature */}
+              <div className="flex items-center gap-3 bg-brand-800 border border-brand-panelBorder rounded-xl px-4 py-3">
+                <span className="w-5 h-5 bg-gold-300 rounded-full flex items-center justify-center flex-shrink-0">
+                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                    <path d="M1 4l3 3 5-6" stroke="#0a1628" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                 </span>
-                <p className="text-sm text-[#8a9bb0]">
+                <p className="text-sm text-white/52">
                   RepuGuard is{' '}
-                  <span className="text-white font-semibold">exclusive to OwnerRez users</span>
-                  {' '}— included in your FieldStay subscription at no extra cost.
+                  <span className="text-white font-semibold">included in every FieldStay plan</span>
+                  {' '}— no add-on, no extra cost.
                 </p>
               </div>
             </div>
@@ -192,20 +203,20 @@ export default async function OwnerRezPage() {
           RepuGuard Live Demo
           Reframed: "see what's built in" not "try before you buy"
       ══════════════════════════════════════════ */}
-      <div className="bg-[#102246] text-white">
+      <div className="bg-brand-800 text-white">
         <div className="max-w-6xl mx-auto px-6 py-20">
           <div className="text-center mb-10">
             {/* Section label */}
             <div className="inline-flex items-center gap-2 mb-4">
-              <div className="bg-[#FCD116] text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
+              <div className="bg-gold-300 text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
                 REPUGUARD
               </div>
-              <span className="text-[#6a8aaa] text-sm">Included with every plan</span>
+              <span className="text-white/46 text-sm">Included with every plan</span>
             </div>
             <h2 className="text-3xl font-bold mb-3 font-display">
               See RepuGuard in Action
             </h2>
-            <p className="text-[#6a8aaa] text-lg max-w-xl mx-auto">
+            <p className="text-white/46 text-lg max-w-xl mx-auto">
               Choose a review scenario below and watch your built-in reputation
               engine generate a response in real time.
             </p>
@@ -223,7 +234,7 @@ export default async function OwnerRezPage() {
           <h2 className="text-3xl font-bold mb-2 text-center text-[#0a1628] font-display">
             Everything OwnerRez doesn&apos;t handle.
           </h2>
-          <p className="text-[#5a6a7a] text-center mb-12">
+          <p className="text-gray-500 text-center mb-12">
             Built specifically for the field operations side of short-term rentals.
           </p>
 
@@ -248,8 +259,8 @@ export default async function OwnerRezPage() {
               {
                 num: '04',
                 title: 'RepuGuard — Reputation Management',
-                body: 'AI-generated review responses tuned to each guest\'s tone and context. Urgency scoring surfaces overdue responses before they cost you your rating. Included in every FieldStay plan — exclusive to OwnerRez users.',
-                // Visual distinction: highlight this card subtly to signal it's exclusive/bonus
+                body: 'AI-generated review responses tuned to each guest\'s tone and context. Urgency scoring surfaces overdue responses before they cost you your rating. Included in every FieldStay plan — no add-on, no extra cost.',
+                // Visual distinction: highlight this card subtly as a headline feature
                 highlight: true,
               },
             ].map(f => (
@@ -257,15 +268,15 @@ export default async function OwnerRezPage() {
                 key={f.num}
                 className={
                   f.highlight
-                    ? 'bg-[#0e2a52] border border-[#1e3a72] rounded-2xl p-6'
+                    ? 'bg-brand-panel border border-brand-panelBorder rounded-2xl p-6'
                     : 'bg-[#f8fafc] border border-[#e2e8f0] rounded-2xl p-6'
                 }
               >
                 <div
                   className={`text-xs font-bold mb-3 inline-block px-2 py-0.5 rounded ${
                     f.highlight
-                      ? 'bg-[#FCD116] text-[#0a1628]'
-                      : 'bg-[#102246] text-[#FCD116]'
+                      ? 'bg-gold-300 text-[#0a1628]'
+                      : 'bg-brand-800 text-gold-300'
                   }`}
                 >
                   {f.num}
@@ -279,20 +290,19 @@ export default async function OwnerRezPage() {
                 </h3>
                 <p
                   className={`text-sm leading-relaxed ${
-                    f.highlight ? 'text-[#8a9bb0]' : 'text-[#5a6a7a]'
+                    f.highlight ? 'text-white/52' : 'text-gray-500'
                   }`}
                 >
                   {f.body}
                 </p>
                 {f.highlight && (
                   <div className="mt-4 flex items-center gap-2">
-                    <span
-                      className="text-white text-xs font-bold px-2 py-0.5 rounded"
-                      style={{ background: '#3D8B4F' }}
-                    >
-                      OR
+                    <span className="w-4 h-4 bg-gold-300 rounded-full flex items-center justify-center flex-shrink-0">
+                      <svg width="8" height="6" viewBox="0 0 10 8" fill="none">
+                        <path d="M1 4l3 3 5-6" stroke="#0a1628" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
                     </span>
-                    <span className="text-xs text-[#6a8aaa]">OwnerRez exclusive · included free</span>
+                    <span className="text-xs text-white/46">Included in every plan · no add-on</span>
                   </div>
                 )}
               </div>
@@ -310,7 +320,7 @@ export default async function OwnerRezPage() {
           SECTION 5 — YELLOW
           CTA
       ══════════════════════════════════════════ */}
-      <div className="bg-[#FCD116]">
+      <div className="bg-gold-300">
         <div className="max-w-6xl mx-auto px-6 py-20 text-center">
           <h2 className="text-3xl font-bold mb-3 text-[#0a1628] font-display">
             Ready to connect?
@@ -327,7 +337,7 @@ export default async function OwnerRezPage() {
                   connect-src CSP violation and crashes the page on load. */}
               <a
                 href="/api/integrations/ownerrez/connect"
-                className="inline-block bg-[#102246] text-white font-bold px-10 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg"
+                className="inline-block bg-brand-800 text-white font-bold px-10 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg"
               >
                 Connect OwnerRez →
               </a>
@@ -339,7 +349,7 @@ export default async function OwnerRezPage() {
             <div className="max-w-sm mx-auto">
               <Link
                 href="/signup?provider=ownerrez&next=/api/integrations/ownerrez/connect"
-                className="block w-full bg-[#102246] text-white font-bold px-8 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg text-center mb-4"
+                className="block w-full bg-brand-800 text-white font-bold px-8 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg text-center mb-4"
               >
                 Create your FieldStay account
               </Link>

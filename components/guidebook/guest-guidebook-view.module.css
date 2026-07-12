@@ -1,0 +1,59 @@
+.eyebrowRow { display: flex; align-items: center; justify-content: space-between; margin: 0 0 12px; }
+.weatherChip { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+.weatherChip svg { width: 13px; height: 13px; }
+
+.ticketWrap { padding: 4px 0 0; }
+.ticket {
+  position: relative;
+  border-radius: 20px;
+  overflow: visible;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+
+.ticketTop { position: relative; overflow: hidden; border-radius: 20px 20px 0 0; }
+.glow { position: absolute; inset: 0; pointer-events: none; }
+.glow::before {
+  content: '';
+  position: absolute; top: -40%; left: 50%; transform: translateX(-50%);
+  width: 340px; height: 220px;
+  background: radial-gradient(
+    ellipse,
+    var(--glow, rgba(212, 165, 55, 0.24)),
+    var(--glow2, rgba(212, 165, 55, 0.10)) 55%,
+    transparent 75%
+  );
+}
+.grain::after {
+  content: '';
+  position: absolute; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+.ticketTopContent { position: relative; padding: 30px 22px 22px; animation: rise 700ms ease-out both; }
+@media (prefers-reduced-motion: reduce) { .ticketTopContent { animation: none; } }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.seam { position: relative; height: 0; }
+.seam::before { content: ''; position: absolute; left: 0; right: 0; top: -1px; border-top: 2px dashed var(--border); }
+.notch { position: absolute; top: -11px; width: 22px; height: 22px; border-radius: 50%; background: var(--charcoal); }
+.notch::after { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(212, 165, 55, 0.38); }
+.notchLeft { left: -11px; }
+.notchLeft::after { clip-path: inset(0 0 0 50%); }
+.notchRight { right: -11px; }
+.notchRight::after { clip-path: inset(0 50% 0 0); }
+
+.ticketBottom { position: relative; display: flex; }
+.stub { flex: 1; padding: 20px 22px 22px; position: relative; }
+.stub + .stub::before { content: ''; position: absolute; left: 0; top: 20px; bottom: 20px; border-left: 1px dashed var(--border); }
+.stubLabel { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 5px; }
+.stubLabel svg { width: 12px; height: 12px; }
+.stubValue { font-family: var(--font-syne); font-size: 22px; font-weight: 700; margin: 0; }
+
+.sectionHead { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+.iconBadge { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; }
+.iconBadge svg { width: 12px; height: 12px; }
+.headLine { flex: 1; height: 1px; }
+
+.sponsorCard { border-radius: 14px; padding: 16px; }
+.sponsorName { font-family: var(--font-syne); font-size: 16px; font-weight: 700; margin: 0 0 5px; }
+.offerBadge { display: inline-block; border-radius: 9px; padding: 7px 11px; margin: 0 0 10px; }

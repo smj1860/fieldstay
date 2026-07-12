@@ -21,6 +21,8 @@ const config: Config = {
           700: '#152C5C',
           800: '#102246',
           900: '#0B1830',
+          panel:       '#0e2a52',
+          panelBorder: '#1e3a72',
         },
         gold: {
           50:  '#FFFDE7',

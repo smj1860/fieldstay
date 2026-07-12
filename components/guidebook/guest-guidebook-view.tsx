@@ -1,10 +1,11 @@
-import { Key, LogOut, Wifi, ClipboardList } from 'lucide-react'
+import { Key, LogOut, Wifi, ClipboardList, Sun, CloudRain, Snowflake, Thermometer, CloudSun } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 import type { WeatherContext } from '@/lib/weather/tomorrow'
 import { getActiveSlotTypes, getTimeOfDay } from '@/lib/weather/tomorrow'
 import { formatOffer } from '@/lib/sms/telnyx'
 import { CopyButton } from './copy-button'
+import styles from './guest-guidebook-view.module.css'
 
 const CHARCOAL = '#0E0E0E'
 const CARD     = '#17171A'
@@ -12,6 +13,12 @@ const BORDER   = '#2A2A2E'
 const TEXT     = '#F4F4F5'
 const MUTED    = '#9A9AA2'
 const GOLD     = '#D4A537'
+
+const TIME_OF_DAY_GLOW: Record<'morning' | 'daytime' | 'evening', { glow: string; glow2: string }> = {
+  morning: { glow: 'rgba(212,165,55,0.20)', glow2: 'rgba(212,165,55,0.06)' },
+  daytime: { glow: 'rgba(212,165,55,0.30)', glow2: 'rgba(212,165,55,0.12)' },
+  evening: { glow: 'rgba(212,165,55,0.24)', glow2: 'rgba(212,165,55,0.10)' },
+}
 
 function formatTime12h(time: string | null | undefined): string | null {
   if (!time) return null
@@ -22,6 +29,14 @@ function formatTime12h(time: string | null | undefined): string | null {
   const period = hour >= 12 ? 'PM' : 'AM'
   const displayHour = hour % 12 === 0 ? 12 : hour % 12
   return `${displayHour}:${minute.toString().padStart(2, '0')} ${period}`
+}
+
+function WeatherIcon({ weather }: Readonly<{ weather: WeatherContext }>) {
+  if (weather.isSnowy) return <Snowflake className="w-3.5 h-3.5" />
+  if (weather.isRainy) return <CloudRain className="w-3.5 h-3.5" />
+  if (weather.isCold)  return <Thermometer className="w-3.5 h-3.5" />
+  if (weather.isHot)   return <Sun className="w-3.5 h-3.5" />
+  return <CloudSun className="w-3.5 h-3.5" />
 }
 
 interface ExtensionRequestProp {
@@ -100,43 +115,72 @@ export function GuestGuidebookView({
   return (
     <div style={{ minHeight: '100vh', background: CHARCOAL, color: TEXT, padding: '24px 16px' }}>
       <div style={{ maxWidth: '560px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: '22px', fontWeight: 700, margin: '0 0 4px' }}>{property.name}</h1>
-        <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 12px', textTransform: 'capitalize' }}>
-          Good {timeOfDay}
-        </p>
-
-        {weather && (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', backgroundColor: '#1e293b', borderRadius: '999px', padding: '6px 14px', marginBottom: '24px' }}>
-            <span role="img" aria-label={weatherLabel} style={{ fontSize: '16px' }}>
-              {weather.isSnowy ? '❄️' : weather.isRainy ? '🌧️' : weather.isCold ? '🧥' : weather.isHot ? '☀️' : '🌤️'}
-            </span>
-            <span style={{ color: '#94a3b8', fontSize: '13px', fontWeight: '500' }}>
-              {Math.round(weather.temperature)}°F · Feels {Math.round(weather.temperatureApparent)}°F
-              {weather.isSnowy ? ' · Snow' : weather.isRainy ? ' · Rain likely' : ''}
-            </span>
-          </div>
-        )}
-
-        {(checkInTime || checkOutTime) && (
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-            {checkInTime && (
-              <div style={{ flex: 1, background: CARD, border: `1px solid ${BORDER}`, borderRadius: '10px', padding: '10px 14px' }}>
-                <p style={{ fontSize: '10px', color: MUTED, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 2px' }}>
-                  Check-In
+        <div
+          className={styles.ticketWrap}
+          style={{ '--gold': GOLD, '--border': BORDER, '--charcoal': CHARCOAL } as React.CSSProperties}
+        >
+          <div
+            className={styles.ticket}
+            style={{
+              background: CARD,
+              border: '1px solid rgba(212,165,55,0.38)',
+              ...({ '--glow': TIME_OF_DAY_GLOW[timeOfDay].glow, '--glow2': TIME_OF_DAY_GLOW[timeOfDay].glow2 } as React.CSSProperties),
+            }}
+          >
+            <div className={`${styles.ticketTop} ${styles.grain}`}>
+              <div className={styles.glow} />
+              <div className={styles.ticketTopContent}>
+                <div className={styles.eyebrowRow}>
+                  <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.16em', textTransform: 'uppercase', color: GOLD, margin: 0 }}>
+                    Your stay at
+                  </p>
+                  {weather && (
+                    <div className={styles.weatherChip} style={{ color: MUTED }}>
+                      <span style={{ color: GOLD }} role="img" aria-label={weatherLabel}><WeatherIcon weather={weather} /></span>
+                      <span>
+                        {Math.round(weather.temperature)}°F
+                        {weather.isSnowy ? ', snow' : weather.isRainy ? ', rain likely' : ''}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <h1 style={{ fontFamily: 'var(--font-syne)', fontWeight: 800, fontSize: '30px', lineHeight: 1.08, letterSpacing: '-0.01em', margin: '0 0 4px', textShadow: '0 2px 16px rgba(0,0,0,0.5)' }}>
+                  {property.name}
+                </h1>
+                <p style={{ fontSize: '13px', color: MUTED, margin: 0, textTransform: 'capitalize' }}>
+                  Good {timeOfDay}
                 </p>
-                <p style={{ fontSize: '15px', fontWeight: 700, color: TEXT, margin: 0 }}>{checkInTime}</p>
               </div>
-            )}
-            {checkOutTime && (
-              <div style={{ flex: 1, background: CARD, border: `1px solid ${BORDER}`, borderRadius: '10px', padding: '10px 14px' }}>
-                <p style={{ fontSize: '10px', color: MUTED, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 2px' }}>
-                  Check-Out
-                </p>
-                <p style={{ fontSize: '15px', fontWeight: 700, color: TEXT, margin: 0 }}>{checkOutTime}</p>
-              </div>
-            )}
+            </div>
+
+            <div className={styles.seam}>
+              <span className={`${styles.notch} ${styles.notchLeft}`} />
+              <span className={`${styles.notch} ${styles.notchRight}`} />
+            </div>
+
+            <div className={styles.ticketBottom}>
+              {checkInTime && (
+                <div className={styles.stub}>
+                  <p className={styles.stubLabel} style={{ color: MUTED }}>
+                    <Key style={{ color: GOLD }} /> Check-in
+                  </p>
+                  <p className={styles.stubValue} style={{ color: TEXT }}>{checkInTime}</p>
+                </div>
+              )}
+              {checkOutTime && (
+                <div className={styles.stub}>
+                  <p className={styles.stubLabel} style={{ color: MUTED }}>
+                    <LogOut style={{ color: GOLD }} /> Check-out
+                  </p>
+                  <p className={styles.stubValue} style={{ color: TEXT }}>{checkOutTime}</p>
+                </div>
+              )}
+            </div>
           </div>
-        )}
+        </div>
+        {/* Phase 2 (not yet built): once a property hero image exists, it renders
+            as the background of .ticketTop in place of the CARD color set above,
+            with .glow dimmed rather than removed. */}
 
         <Section title="Check-In" icon={Key}>
           <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', padding: '14px' }}>
@@ -147,7 +191,7 @@ export function GuestGuidebookView({
         </Section>
 
         <Section title="Wifi" icon={Wifi}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
               <p style={{ fontSize: '14px', color: TEXT, margin: 0 }}>
                 Network: {config.wifi_network ?? 'See welcome book'}
@@ -177,10 +221,11 @@ export function GuestGuidebookView({
                 return (
                   <div
                     key={sponsor.id}
-                    style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px', overflow: 'hidden' }}
+                    className={styles.sponsorCard}
+                    style={{ background: CARD, border: `1px solid ${BORDER}`, overflow: 'hidden' }}
                   >
                     <div style={{ padding: '14px' }}>
-                      <h3 style={{ fontSize: '15px', fontWeight: 600, margin: '0 0 4px' }}>
+                      <h3 className={styles.sponsorName}>
                         {sponsor.business_name}
                       </h3>
                       {sponsor.business_description && (
@@ -189,7 +234,7 @@ export function GuestGuidebookView({
                         </p>
                       )}
                       {offerLine && (
-                        <div style={{ display: 'inline-block', background: 'rgba(212,165,55,0.12)', border: `1px solid ${GOLD}`, borderRadius: '8px', padding: '6px 10px', margin: '0 0 8px' }}>
+                        <div className={styles.offerBadge} style={{ background: 'rgba(212,165,55,0.14)', border: '1px solid rgba(212,165,55,0.4)' }}>
                           <p style={{ fontSize: '10px', color: GOLD, fontWeight: 700, letterSpacing: '0.06em', margin: '0 0 2px' }}>
                             GUIDEBOOK EXCLUSIVE
                           </p>
@@ -274,10 +319,17 @@ export function GuestGuidebookView({
 function Section({ title, icon: Icon, children }: Readonly<{ title: string; icon?: LucideIcon; children: React.ReactNode }>) {
   return (
     <div style={{ marginBottom: '24px' }}>
-      <h2 style={{ fontSize: '12px', fontWeight: 700, color: MUTED, textTransform: 'uppercase', letterSpacing: '0.04em', margin: '0 0 8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        {Icon && <Icon className="w-3.5 h-3.5" />}
-        {title}
-      </h2>
+      <div className={styles.sectionHead}>
+        {Icon && (
+          <span className={styles.iconBadge} style={{ background: 'rgba(212,165,55,0.14)', border: `1px solid ${BORDER}` }}>
+            <Icon style={{ color: GOLD }} />
+          </span>
+        )}
+        <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: TEXT, margin: 0, whiteSpace: 'nowrap' }}>
+          {title}
+        </p>
+        <span className={styles.headLine} style={{ background: `linear-gradient(to right, ${BORDER}, transparent)` }} />
+      </div>
       {children}
     </div>
   )
