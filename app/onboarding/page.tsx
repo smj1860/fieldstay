@@ -35,5 +35,32 @@ export default async function OnboardingPage() {
   }
   // ── End crew-member guard ──────────────────────────────────────────────────
 
+  // ── Resume-in-progress guard ────────────────────────────────────────────────
+  // If this user already has an org (step 1 already completed — e.g. they
+  // refreshed or navigated away mid-flow), don't make them re-submit the
+  // name form. Skip straight to whichever step is actually still pending.
+  const { data: membership } = await admin
+    .from('organization_members')
+    .select('org_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (membership) {
+    const { data: connection } = await admin
+      .from('integration_connections')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    // Org exists and a PMS is already connected — onboarding is fully
+    // done, nothing left for this page to do.
+    if (connection) redirect('/ops')
+
+    // Org exists but no PMS connected yet — resume at step 2 directly.
+    return <OnboardingForm userEmail={user.email ?? ''} initialStep="connect-pms" />
+  }
+  // ── End resume-in-progress guard ────────────────────────────────────────────
+
   return <OnboardingForm userEmail={user.email ?? ''} />
 }

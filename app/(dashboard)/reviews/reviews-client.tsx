@@ -48,6 +48,21 @@ interface Props {
   manualUsedThisWeek: number
 }
 
+const REVIEW_SOURCE_LABELS: Record<string, string> = {
+  ownerrez:   'OwnerRez',
+  hospitable: 'Hospitable',
+}
+
+// Only OwnerRez has a confirmed working fallback URL when the sync didn't
+// populate external_url. Don't fabricate one for other sources.
+function getReviewPostUrl(review: Pick<ReviewRow, 'external_url' | 'external_source' | 'external_id'>): string | null {
+  if (review.external_url) return review.external_url
+  if (review.external_source === 'ownerrez') {
+    return `https://app.ownerrez.com/reviews/${review.external_id}`
+  }
+  return null
+}
+
 function StarRating({ rating }: { rating: number }) {
   return (
     <span className="inline-flex items-center gap-0.5" aria-label={`${rating} out of 5 stars`}>
@@ -255,6 +270,10 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
   const regenLeft  = MAX_REGENS - regenCount
   const canRegen   = !isManual && regenLeft > 0
 
+  // Post-to-PMS state for the selected review
+  const postUrl     = selected ? getReviewPostUrl(selected) : null
+  const sourceLabel = selected ? REVIEW_SOURCE_LABELS[selected.external_source] ?? null : null
+
   return (
     <div className="relative">
       {/* Header */}
@@ -336,7 +355,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
             No reviews yet
           </h2>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-            Reviews sync automatically from OwnerRez every 6 hours. They&apos;ll appear
+            Reviews sync automatically from your connected PMS every 6 hours. They&apos;ll appear
             here once your first review lands — or use <strong>+ Add Review</strong> above
             to paste one from another platform.
           </p>
@@ -568,27 +587,42 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                     )}
                   </div>
 
-                  {/* Post to OwnerRez */}
+                  {/* Post to PMS */}
                   {selected.response_status !== 'posted' && (
                     <div className="mt-4">
                       {!postConfirm ? (
-                        <a
-                          href={selected.external_url ?? `https://app.ownerrez.com/reviews/${selected.external_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={() => setTimeout(() => setPostConfirm(true), 500)}
-                          className="block w-full text-center rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
-                          style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
-                        >
-                          Post to OwnerRez →
-                        </a>
+                        postUrl ? (
+                          <a
+                            href={postUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => setTimeout(() => setPostConfirm(true), 500)}
+                            className="block w-full text-center rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
+                            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', border: '1px solid var(--border)' }}
+                          >
+                            Post to {sourceLabel ?? 'your PMS'} →
+                          </a>
+                        ) : (
+                          // Manual entries, or a source with no confirmed reply URL — no
+                          // link to give, just let them confirm once they've replied
+                          // wherever the review actually lives.
+                          <button
+                            onClick={() => setPostConfirm(true)}
+                            className="block w-full text-center rounded-xl font-semibold text-sm py-3 transition-opacity hover:opacity-80"
+                            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)', border: '1px solid var(--border)', cursor: 'pointer' }}
+                          >
+                            Mark as Posted
+                          </button>
+                        )
                       ) : (
                         <div
                           className="rounded-xl p-4 text-center"
                           style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)' }}
                         >
                           <p className="text-sm font-medium mb-3" style={{ color: 'var(--text-primary)' }}>
-                            Did you post your response on OwnerRez?
+                            {postUrl
+                              ? `Did you post your response on ${sourceLabel ?? 'your PMS'}?`
+                              : 'Did you post your response?'}
                           </p>
                           <div className="flex gap-3">
                             <button
@@ -613,7 +647,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
                   {selected.response_status === 'posted' && (
                     <p className="mt-3 text-center text-sm font-semibold inline-flex items-center justify-center gap-1 w-full" style={{ color: 'var(--accent-blue)' }}>
-                      <Check className="w-4 h-4" /> Posted to OwnerRez
+                      <Check className="w-4 h-4" /> {sourceLabel ? `Posted to ${sourceLabel}` : 'Response posted'}
                     </p>
                   )}
                 </div>
