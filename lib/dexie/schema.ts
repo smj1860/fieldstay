@@ -21,6 +21,7 @@ export interface TurnoverRow {
   inventory_started_at:            string | null
   inventory_confirmed_complete_at: string | null
   inventory_confirmed_by_crew_id:  string
+  completion_notes:                string
 }
 
 export interface ChecklistInstanceRow {
@@ -96,15 +97,18 @@ export interface MessageRow {
   created_at:   string
 }
 
-// insertOnly in PowerSync — locally we only ever create rows, never update/delete.
-export interface TurnoverIssueReportRow {
+// Progressive Asset Discovery cache — synced read-only for properties the
+// crew member is currently assigned to (see lib/asset-discovery/config.ts
+// for the REQUIRED_ASSET_TYPES list this is checked against).
+export interface PropertyAssetRow {
   id:          string
-  turnover_id: string
   org_id:      string
   property_id: string
-  title:       string
-  description: string
-  priority:    string
+  asset_type:  string
+  make:        string
+  model:       string
+  is_na:       number
+  photo_url:   string
 }
 
 // localOnly in PowerSync — never synced as its own table, purely a local queue.
@@ -168,11 +172,11 @@ export class FieldStayDexie extends Dexie {
   properties!:               Table<PropertyRow, string>
   crew_availability!:        Table<CrewAvailabilityRow, string>
   messages!:                 Table<MessageRow, string>
-  turnover_issue_reports!:   Table<TurnoverIssueReportRow, string>
   pending_photo_uploads!:    Table<PendingPhotoUploadRow, string>
   mutations!:                Table<MutationRow, number>
   sync_meta!:                Table<SyncMetaRow, string>
   crew_work_orders!:         Table<CrewWorkOrderRow, string>
+  property_assets!:          Table<PropertyAssetRow, string>
 
   constructor(userId: string) {
     super(`fieldstay-crew-${userId}`)
@@ -249,6 +253,15 @@ export class FieldStayDexie extends Dexie {
     // Only the new store is declared — Dexie carries forward all prior stores.
     this.version(5).stores({
       crew_work_orders: 'id, property_id, org_id, status, scheduled_date',
+    })
+
+    // turnover_issue_reports was insert-only local staging for the old
+    // "Report an Issue" flow, dropped in favor of turnovers.completion_notes
+    // (a plain field update, no local queue table needed). property_assets
+    // backs the crew Assets & Maintenance page's missing-items list.
+    this.version(6).stores({
+      turnover_issue_reports: null,
+      property_assets:        'id, property_id, org_id, asset_type',
     })
   }
 }

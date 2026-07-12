@@ -2,7 +2,7 @@
 import { useEffect, useState, useTransition, useSyncExternalStore } from 'react'
 import Link                         from 'next/link'
 import { usePathname, useRouter }   from 'next/navigation'
-import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff } from 'lucide-react'
+import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle, WifiOff, Wrench } from 'lucide-react'
 import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
@@ -217,6 +217,7 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
 
   const tabs = [
     { href: '/crew',              label: 'Assignments',  icon: CalendarCheck },
+    { href: '/crew/assets',       label: 'Assets',        icon: Wrench },
     { href: '/crew/availability', label: 'Time Off',     icon: CalendarDays },
     { href: '/crew/messages',     label: 'Messages',     icon: MessageSquare, badge: unreadCount },
   ]

@@ -619,6 +619,7 @@ export interface WorkOrder {
   org_id:                      string
   vendor_id:                   string | null
   assigned_crew_member_id:     string | null
+  reported_by_crew_member_id:  string | null
   wo_number:                   string | null
   title:                       string
   description:                 string | null

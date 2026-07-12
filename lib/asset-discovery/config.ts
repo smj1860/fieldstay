@@ -1,4 +1,4 @@
-import type { AssetType } from '@/types/database'
+import type { AssetType, WoCategory } from '@/types/database'
 
 /**
  * Master Asset List for Progressive Asset Discovery. Crews are prompted to
@@ -60,4 +60,47 @@ export function assetTypeDisplayName(assetType: AssetType): string {
 
 export function discoveryTaskLabel(assetType: AssetType): string {
   return `Capture asset details: ${assetTypeDisplayName(assetType)}`
+}
+
+/**
+ * Auto-derives a work order category from the asset a crew member selects
+ * when placing a work order from the Assets & Maintenance page — crew never
+ * pick a category themselves. Types not listed here (and "Other"/no asset)
+ * fall back to 'general'.
+ */
+const ASSET_TYPE_TO_WO_CATEGORY: Partial<Record<AssetType, WoCategory>> = {
+  hvac:                     'hvac',
+  thermostat:               'hvac',
+  water_heater:             'plumbing',
+  plumbing_system:          'plumbing',
+  septic_system:            'plumbing',
+  well_pump:                'plumbing',
+  water_shutoff_valve:      'plumbing',
+  whole_home_water_filter:  'plumbing',
+  roof:                     'roofing',
+  refrigerator:             'appliance',
+  washer:                   'appliance',
+  dryer:                    'appliance',
+  dishwasher:               'appliance',
+  microwave:                'appliance',
+  oven_range:               'appliance',
+  range_hood_vent:          'appliance',
+  coffee_station:           'appliance',
+  toaster_oven:             'appliance',
+  ice_maker:                'appliance',
+  garbage_disposal:         'appliance',
+  trash_compactor:          'appliance',
+  pool_pump:                'pool',
+  hot_tub:                  'pool',
+  electrical_panel:         'electrical',
+  generator:                'electrical',
+  solar_system:             'electrical',
+  solar_inverter:           'electrical',
+  heated_tile_system:       'electrical',
+  deck_structure:           'structural',
+}
+
+export function categoryForAssetType(assetType: AssetType | null): WoCategory {
+  if (!assetType) return 'general'
+  return ASSET_TYPE_TO_WO_CATEGORY[assetType] ?? 'general'
 }
