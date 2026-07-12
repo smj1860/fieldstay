@@ -21,7 +21,8 @@ const ASSET_TYPES: AssetType[] = [
   'hvac','water_heater','roof','refrigerator','washer','dryer','dishwasher',
   'microwave','oven_range','pool_pump','hot_tub','garage_door','smart_lock',
   'deck_structure','electrical_panel','plumbing_system','septic_system',
-  'well_pump','generator','solar_system','other',
+  'well_pump','generator','solar_system','ice_maker','garbage_disposal',
+  'trash_compactor','other',
 ]
 
 const ASSET_TYPE_ALIASES: Record<string, AssetType> = {
@@ -59,6 +60,12 @@ const ASSET_TYPE_ALIASES: Record<string, AssetType> = {
   'generator':       'generator',
   'solar':           'solar_system',
   'solar system':    'solar_system',
+  'ice maker':       'ice_maker',
+  'icemaker':        'ice_maker',
+  'garbage disposal':'garbage_disposal',
+  'disposal':        'garbage_disposal',
+  'trash compactor': 'trash_compactor',
+  'compactor':       'trash_compactor',
   'other':           'other',
 }
 
