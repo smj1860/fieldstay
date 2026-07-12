@@ -10,7 +10,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     key:         'pms',
     label:       'Connect PMS',
     href:        'pms',
-    description: 'Import your properties from OwnerRez',
+    description: 'Import your properties from your PMS',
   },
   {
     key:         'crew',

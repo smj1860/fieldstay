@@ -10,7 +10,8 @@ import { Input } from '@/components/ui/Input'
 type Step = 'name-org' | 'connect-pms'
 
 interface OnboardingFormProps {
-  userEmail: string
+  userEmail:    string
+  initialStep?: Step
 }
 
 const PMS_OPTIONS = [
@@ -22,11 +23,11 @@ const PMS_OPTIONS = [
     authType:    'oauth2' as const,
   },
   {
-    id:          'hostaway',
-    name:        'Hostaway',
-    description: 'Bookings, listings, channels',
-    connectUrl:  null,  // uses credential modal
-    authType:    'api_key' as const,
+    id:          'hospitable',
+    name:        'Hospitable',
+    description: 'Bookings, properties, crew, guest reviews',
+    connectUrl:  '/api/integrations/hospitable/connect',
+    authType:    'oauth2' as const,
   },
   // Guesty is not yet wired — hidden until the integration is live.
   // {
@@ -38,9 +39,9 @@ const PMS_OPTIONS = [
   // },
 ]
 
-export function OnboardingForm({ userEmail }: OnboardingFormProps) {
+export function OnboardingForm({ userEmail, initialStep = 'name-org' }: OnboardingFormProps) {
   const [state, action, pending] = useActionState(createOrganization, null)
-  const [step, setStep]           = useState<Step>('name-org')
+  const [step, setStep]           = useState<Step>(initialStep)
 
   // When org is created successfully, advance to step 2
   if (state?.success && step === 'name-org') {
@@ -85,7 +86,10 @@ export function OnboardingForm({ userEmail }: OnboardingFormProps) {
 
       <form action={action} className="space-y-4">
         {state?.error && (
-          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3">
+          <div
+            className="text-sm rounded-lg px-4 py-3 border"
+            style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}
+          >
             {state.error}
           </div>
         )}

@@ -221,8 +221,8 @@ export function HomepageContent() {
               </h3>
               <p className="text-sm leading-relaxed text-gray-500">
                 RepuGuard generates a tailored draft response for every guest review synced from
-                OwnerRez — ready before you&apos;ve had your morning coffee. Review it, edit it if you
-                want, and post directly back to OwnerRez in one click. Bundled into every plan.
+                your PMS — ready before you&apos;ve had your morning coffee. Review it, edit it if you
+                want, and post directly back to your PMS in one click. Bundled into every plan.
               </p>
             </div>
           </div>
