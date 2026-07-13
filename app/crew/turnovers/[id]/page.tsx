@@ -19,7 +19,13 @@ import {
   updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitTurnoverSummaryNotes,
   confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted, retryFailedMutation,
 } from '@/lib/dexie/helpers'
-import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow } from '@/lib/dexie/schema'
+import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow, PropertyAssetRow } from '@/lib/dexie/schema'
+import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
+import type { AssetType } from '@/types/database'
+
+function isAssetDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
+  return asset.is_na === 1 || asset.make !== '' || asset.model !== '' || asset.photo_url !== ''
+}
 
 export default function CrewTurnoverPage() {
   const { id }   = useParams<{ id: string }>()
@@ -104,6 +110,16 @@ export default function CrewTurnoverPage() {
   const completedCount = items?.filter((i) => i.is_completed).length ?? 0
   const totalCount     = items?.length ?? 0
   const pendingPhotos  = items?.filter((i) => i.requires_photo && !i.photo_storage_path) ?? []
+
+  const propertyAssets = useLiveQuery(
+    () => turnover
+      ? db.property_assets.where('property_id').equals(turnover.property_id).toArray()
+      : [],
+    [turnover?.property_id]
+  ) ?? []
+  const missingAssetTypes = missingAssetTypesFromDiscoveredSet(
+    new Set(propertyAssets.filter(isAssetDiscovered).map((a) => a.asset_type as AssetType))
+  )
 
   const sections = (items ?? []).reduce<Record<string, ChecklistItem[]>>(
     (acc, item) => {
@@ -238,7 +254,15 @@ export default function CrewTurnoverPage() {
 
   const toggleChecklistConfirm = async () => {
     if (!instance || !crewMemberId) return
-    await confirmChecklistComplete(userId, instance.id, crewMemberId, !instance.completed_at)
+    const confirming = !instance.completed_at
+    if (confirming && missingAssetTypes.length > 0) {
+      const ok = confirm(
+        `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
+        `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')}). Confirm checklist complete anyway?`
+      )
+      if (!ok) return
+    }
+    await confirmChecklistComplete(userId, instance.id, crewMemberId, confirming)
   }
 
   const toggleInventoryConfirm = async () => {
@@ -275,10 +299,18 @@ export default function CrewTurnoverPage() {
   }
 
   const markComplete = async () => {
+    const warnings: string[] = []
     if (pendingPhotos.length > 0) {
-      const ok = confirm(
-        `${pendingPhotos.length} item${pendingPhotos.length !== 1 ? 's' : ''} still need photos. Mark complete anyway?`
+      warnings.push(`${pendingPhotos.length} item${pendingPhotos.length !== 1 ? 's' : ''} still need photos`)
+    }
+    if (missingAssetTypes.length > 0) {
+      warnings.push(
+        `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
+        `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')})`
       )
+    }
+    if (warnings.length > 0) {
+      const ok = confirm(`${warnings.join('. ')}. Mark complete anyway?`)
       if (!ok) return
     }
     setCompleting(true)

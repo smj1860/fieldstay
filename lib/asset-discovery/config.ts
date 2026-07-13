@@ -104,3 +104,15 @@ export function categoryForAssetType(assetType: AssetType | null): WoCategory {
   if (!assetType) return 'general'
   return ASSET_TYPE_TO_WO_CATEGORY[assetType] ?? 'general'
 }
+
+/**
+ * REQUIRED_ASSET_TYPES not yet present in a discovered-types set. Callers
+ * build that set themselves (server and Dexie rows use different null
+ * conventions for make/model/photo_url/is_na) and pass it in here so the
+ * "which types are still missing" logic itself isn't duplicated at every
+ * call site (PM Assets page, crew Assets page, turnover soft-enforcement
+ * checks, the completion Inngest step).
+ */
+export function missingAssetTypesFromDiscoveredSet(discoveredTypes: Set<AssetType>): AssetType[] {
+  return REQUIRED_ASSET_TYPES.filter((t) => !discoveredTypes.has(t))
+}
