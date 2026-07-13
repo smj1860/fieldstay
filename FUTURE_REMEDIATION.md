@@ -290,3 +290,51 @@ notification is silently lost with no retry.
 **Suggested fix:** fire an Inngest event instead (e.g.
 `crew/feedback.submitted`) and send the notification email from a handler,
 matching the pattern used everywhere else in this codebase.
+
+---
+
+## 13. Migration filename timestamps vs. recorded applied versions have drifted
+
+**Files:** `supabase/migrations/*.sql` (local) vs. Supabase's migration
+history table for project `vpmznjktllhmmbfnxuvk` (remote)
+
+Found while checking the restock-email ticket's migration-drift prerequisite.
+`ls supabase/migrations/*.sql` lists 270 local files; `list_migrations`
+against the live project returns only 213 recorded versions — on the
+surface, ~57 local-only entries with no matching remote version.
+
+**Root cause, confirmed, not just suspected:** this environment has no
+Supabase CLI, so every migration in this repo's history has been applied via
+the `apply_migration` MCP tool (direct SQL execution) rather than
+`supabase db push`. `apply_migration` stamps the applied row with its own
+execution-time version, not the timestamp in the local `.sql` filename. For
+the overwhelming majority of the ~57 discrepant entries, the *name* has an
+exact match in the remote list under a *different, later* timestamp — e.g.
+locally `20260712140000_work_orders_reported_by_crew.sql` recorded remotely
+as `20260712233741_work_orders_reported_by_crew`; `20260713000000_asset_scan_status.sql`
+recorded as `20260713022506_asset_scan_status`. This is mechanical and
+systemic, not schema drift — the content is live, just filed under a
+different version number than the local filename implies. Confirmed
+directly: every migration applied earlier in *this same session* shows the
+identical pattern.
+
+**Genuine exceptions worth a closer look**, rather than just a relabeling:
+`20260618000002_baseline_schema_snapshot.sql` has no obviously-named remote
+counterpart at all (and a second copy of the same filename exists under
+`supabase/migrations/_unshipped/`, per earlier session notes — unclear
+whether either was ever actually applied as its own discrete migration, or
+whether its content arrived piecemeal via earlier ad hoc applies and this
+file is a documentation-only consolidation). A handful of others in the
+diff may be similar — this list wasn't individually verified past the
+name-matching pass described above.
+
+**Suggested fix:** either (a) rename each local `.sql` file's timestamp
+prefix to match its actual recorded remote version, so `git log` and the
+Supabase dashboard agree on what a migration is called, or (b) if the
+Supabase CLI ever becomes available in this environment, run a proper
+`supabase db push`/`db pull` reconciliation pass once, then keep it as the
+apply mechanism going forward instead of ad hoc `apply_migration` calls.
+Either way, don't treat local filenames as authoritative for "what version
+is this schema change" until this is resolved — the live database is
+always the source of truth in the meantime, per this repo's own existing
+schema-reference guidance.

@@ -574,6 +574,7 @@ export interface PurchaseOrderItem {
   par_level:           number
   quantity_to_buy:     number
   estimated_unit_cost: number | null
+  unit:                string | null
   notes:               string | null
   created_at:          string
 }
