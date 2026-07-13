@@ -1,6 +1,6 @@
 import { Section, Text, Hr } from '@react-email/components'
 import { render }             from '@react-email/render'
-import { BaseLayout }         from './base-layout'
+import { EmailLayout }        from '@/emails/components/email-layout'
 
 export interface VendorInvoicePaidProps {
   vendorName:     string | null
@@ -25,10 +25,10 @@ export function VendorInvoicePaidEmail({
   const amount   = amountPaid.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
 
   return (
-    <BaseLayout
-      previewText={`You've been paid ${amount} for ${woTitle}`}
+    <EmailLayout
+      preview={`You've been paid ${amount} for ${woTitle}`}
       headerSub="Vendor Payments"
-      footerLine="You were added as a vendor by one of our property management customers. FieldStay processes payments on their behalf — we do not manage job bookings directly."
+      footerNote="You were added as a vendor by one of our property management customers. FieldStay processes payments on their behalf — we do not manage job bookings directly."
     >
       <Text style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: '0 0 16px' }}>
         {greeting}
@@ -71,7 +71,7 @@ export function VendorInvoicePaidEmail({
         Questions about this payment? Reply to this email. For questions about the
         work itself, contact {orgName} directly.
       </Text>
-    </BaseLayout>
+    </EmailLayout>
   )
 }
 

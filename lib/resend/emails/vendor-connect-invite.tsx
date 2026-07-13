@@ -1,6 +1,6 @@
-import { Section, Text, Button, Hr } from '@react-email/components'
-import { render }                     from '@react-email/render'
-import { BaseLayout }                 from './base-layout'
+import { Text, Hr }          from '@react-email/components'
+import { render }            from '@react-email/render'
+import { EmailLayout }       from '@/emails/components/email-layout'
 
 export interface VendorConnectInviteProps {
   vendorName:    string | null
@@ -26,10 +26,12 @@ export function VendorConnectInviteEmail({
     : `uses FieldStay to manage their property operations and has added you as a vendor`
 
   return (
-    <BaseLayout
-      previewText={`${senderLine} — set up your Stripe payout account to get paid`}
+    <EmailLayout
+      preview={`${senderLine} — set up your Stripe payout account to get paid`}
       headerSub="Vendor Payments"
-      footerLine="You were added as a vendor by one of our property management customers. FieldStay processes payments on their behalf — we do not manage job bookings directly."
+      footerNote="You were added as a vendor by one of our property management customers. FieldStay processes payments on their behalf — we do not manage job bookings directly."
+      ctaLabel="Set Up My Payout Account →"
+      ctaUrl={onboardingUrl}
     >
       <Text style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: '0 0 16px' }}>
         {greeting}
@@ -51,24 +53,6 @@ export function VendorConnectInviteEmail({
         worldwide. You&apos;ll need your bank account and routing numbers handy.
       </Text>
 
-      <Section style={{ textAlign: 'center', margin: '0 0 24px' }}>
-        <Button
-          href={onboardingUrl}
-          style={{
-            backgroundColor: '#FF6B00',
-            color:           '#ffffff',
-            borderRadius:    8,
-            padding:         '13px 32px',
-            fontWeight:      700,
-            fontSize:        15,
-            textDecoration:  'none',
-            display:         'inline-block',
-          }}
-        >
-          Set Up My Payout Account →
-        </Button>
-      </Section>
-
       <Hr style={{ borderColor: '#e2e8f0', margin: '0 0 16px' }} />
 
       <Text style={{ fontSize: 13, color: '#64748b', lineHeight: 1.55, margin: '0 0 8px' }}>
@@ -82,7 +66,7 @@ export function VendorConnectInviteEmail({
         setup, reply to this email. For questions about the work order itself,
         contact {senderLine} directly.
       </Text>
-    </BaseLayout>
+    </EmailLayout>
   )
 }
 

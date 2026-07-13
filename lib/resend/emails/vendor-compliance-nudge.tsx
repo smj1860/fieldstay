@@ -1,6 +1,6 @@
 import { Section, Text, Hr } from '@react-email/components'
 import { render }             from '@react-email/render'
-import { BaseLayout }         from './base-layout'
+import { EmailLayout }        from '@/emails/components/email-layout'
 
 export interface VendorComplianceNudgeProps {
   vendorName: string
@@ -23,10 +23,10 @@ export function VendorComplianceNudgeEmail({
   const dayWord = daysUntil !== 1 ? 'days' : 'day'
 
   return (
-    <BaseLayout
-      previewText={`Your ${docLabel} expires in ${daysUntil} ${dayWord}`}
+    <EmailLayout
+      preview={`Your ${docLabel} expires in ${daysUntil} ${dayWord}`}
       headerSub="Vendor Compliance"
-      footerLine="You're receiving this because you're listed as a vendor with one of our property management customers."
+      footerNote="You're receiving this because you're listed as a vendor with one of our property management customers."
     >
       <Text style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: '0 0 16px' }}>
         Hi {vendorName},
@@ -66,7 +66,7 @@ export function VendorComplianceNudgeEmail({
         Questions about this document requirement? Reply to this email or contact{' '}
         {orgName} directly.
       </Text>
-    </BaseLayout>
+    </EmailLayout>
   )
 }
 
