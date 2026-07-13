@@ -29,6 +29,7 @@ export default async function MaintenancePage() {
         vendor_acknowledged_at, vendor_acknowledged_by,
         completion_verified_at, completion_verified_by,
         vendor_dispatch_email,
+        suggested_vendor_ids, suggestion_reasoning, suggestion_status,
         created_at, updated_at,
         properties ( name, address, city, state, access_instructions ),
         vendors ( id, name, specialty, phone ),

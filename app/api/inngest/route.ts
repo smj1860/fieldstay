@@ -76,6 +76,10 @@ import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
 import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
 import { crewScoreRecompute } from '@/lib/inngest/functions/cron/crew-score-recompute'
 
+// Vendor auto-suggestion
+import { autoAssignVendor } from '@/lib/inngest/functions/auto-assign-vendor'
+import { vendorScoreRecompute } from '@/lib/inngest/functions/cron/vendor-score-recompute'
+
 // Asset Health — CapEx & Depreciation
 import { generateCapexProjections }      from '@/lib/inngest/functions/capex-projections'
 import { triggerCapexProjectionForOrg }  from '@/lib/inngest/functions/capex-projection-trigger'
@@ -225,6 +229,10 @@ export const { GET, POST, PUT } = serve({
     // Crew auto-assignment
     autoAssignTurnover,
     crewScoreRecompute,
+
+    // Vendor auto-suggestion
+    autoAssignVendor,
+    vendorScoreRecompute,
 
     // Asset Health — CapEx projections + depreciation ledger
     generateCapexProjections,

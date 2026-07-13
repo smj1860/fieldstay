@@ -7,7 +7,7 @@ import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
   Pencil, Trash2, Camera, List, BarChart2, Send, LayoutGrid, Loader2,
-  ShieldOff, Check, Info,
+  ShieldOff, Check, Info, Sparkles,
 } from 'lucide-react'
 import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
 import {
@@ -15,6 +15,7 @@ import {
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
   broadcastMaintenanceTemplate, createMaintenanceScheduleTemplate, updateMaintenanceTemplate, type BroadcastResult,
   bulkAssignVendor, bulkUpdateWorkOrderStatus, fetchArchivedWorkOrders,
+  acceptVendorSuggestion, dismissVendorSuggestion,
 } from './actions'
 import type { WoStatus, PriorityLevel, VendorSpecialty, ScheduleType, ScheduleFrequency, ComplianceStatus } from '@/types/database'
 import { distanceMiles } from '@/lib/geocoding'
@@ -55,6 +56,9 @@ interface WorkOrderRow {
   completion_verified_at: string | null
   completion_verified_by: string | null
   vendor_dispatch_email: string | null
+  suggested_vendor_ids: string[] | null
+  suggestion_reasoning: string | null
+  suggestion_status: 'pending' | 'accepted' | 'overridden' | 'dismissed' | null
   created_at: string
   updated_at: string
   properties: { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null } | { name: string; address: string | null; city: string | null; state: string | null; access_instructions: string | null }[] | null
@@ -280,17 +284,36 @@ const STATUS_TABS = [
 
 function WorkOrderCard({
   wo,
+  vendors,
   onClick,
   isSelected,
   onToggle,
 }: {
   wo: WorkOrderRow
+  vendors: VendorOptionWithCoords[]
   onClick: () => void
   isSelected: boolean
   onToggle: () => void
 }) {
   const property = getJoined(wo.properties)
   const vendor   = getJoined(wo.vendors)
+
+  const [accepting,  startAccept]  = useTransition()
+  const [dismissing, startDismiss] = useTransition()
+
+  const suggestedVendorName = (wo.suggested_vendor_ids ?? [])
+    .map((id) => vendors.find((v) => v.id === id)?.name)
+    .filter(Boolean)[0] as string | undefined
+
+  const handleAcceptSuggestion = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    startAccept(async () => { await acceptVendorSuggestion(wo.id) })
+  }
+
+  const handleDismissSuggestion = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    startDismiss(async () => { await dismissVendorSuggestion(wo.id) })
+  }
 
   return (
     <div
@@ -362,6 +385,43 @@ function WorkOrderCard({
               </span>
             )}
           </div>
+
+          {/* Auto-suggestion banner */}
+          {wo.suggestion_status === 'pending' && suggestedVendorName && (
+            <div
+              className="mt-2 flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg"
+              style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+                <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+                Suggested: <strong style={{ color: 'var(--text-primary)' }}>{suggestedVendorName}</strong>
+              </span>
+              {wo.suggestion_reasoning && (
+                <span className="text-xs hidden sm:inline" style={{ color: 'var(--text-muted)' }}>
+                  — {wo.suggestion_reasoning}
+                </span>
+              )}
+              <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                <button
+                  onClick={handleAcceptSuggestion}
+                  disabled={accepting || dismissing}
+                  className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-50 transition-colors inline-flex items-center gap-1"
+                  style={{ background: 'var(--accent-green)', color: '#fff' }}
+                >
+                  {accepting ? '…' : <><Check className="w-3.5 h-3.5" /> Accept</>}
+                </button>
+                <button
+                  onClick={handleDismissSuggestion}
+                  disabled={accepting || dismissing}
+                  className="text-xs px-2 py-1 rounded-lg transition-colors disabled:opacity-50"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  {dismissing ? '…' : 'Dismiss'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <ChevronRight className="w-4 h-4 text-muted-themed flex-shrink-0 mt-0.5" />
@@ -561,15 +621,42 @@ function CreateWorkOrderModal({
 
             {/* Right column */}
             <div className="space-y-4">
-              {/* Priority */}
-              <div>
-                <label htmlFor="wo-priority" className="label">Priority</label>
-                <select id="wo-priority" name="priority" defaultValue="medium" className="input">
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
+              {/* Priority + Category */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="wo-priority" className="label">Priority</label>
+                  <select id="wo-priority" name="priority" defaultValue="medium" className="input">
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="wo-category" className="label">
+                    Category
+                    <span className="ml-1 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>
+                      Needed for vendor suggestions
+                    </span>
+                  </label>
+                  <select id="wo-category" name="category" defaultValue="" className="input">
+                    <option value="">Uncategorized</option>
+                    <option value="hvac">HVAC</option>
+                    <option value="plumbing">Plumbing</option>
+                    <option value="electrical">Electrical</option>
+                    <option value="appliance">Appliance</option>
+                    <option value="cleaning">Cleaning</option>
+                    <option value="landscaping">Landscaping</option>
+                    <option value="roofing">Roofing</option>
+                    <option value="flooring">Flooring</option>
+                    <option value="windows_doors">Windows/Doors</option>
+                    <option value="pest_control">Pest Control</option>
+                    <option value="pool">Pool</option>
+                    <option value="structural">Structural</option>
+                    <option value="general">General</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
               </div>
 
               {/* Scheduled date + NTE */}
@@ -2322,6 +2409,7 @@ export function MaintenanceBoard({
               <WorkOrderCard
                 key={wo.id}
                 wo={wo}
+                vendors={vendors}
                 onClick={() => setSelectedWO(toWorkOrderDetailData(wo))}
                 isSelected={selectedIds.has(wo.id)}
                 onToggle={() => toggleSelect(wo.id)}

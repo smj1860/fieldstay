@@ -12,7 +12,7 @@ export default async function SettingsPage() {
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('id, name, billing_email, plan, plan_status, trial_ends_at, max_properties, stripe_customer_id, auto_assign_mode, comms_log_retention_days, slack_webhook_url')
+    .select('id, name, billing_email, plan, plan_status, trial_ends_at, max_properties, stripe_customer_id, auto_assign_mode, vendor_auto_assign_mode, comms_log_retention_days, slack_webhook_url')
     .eq('id', membership.org_id)
     .single()
 

@@ -17,6 +17,7 @@ import {
   openBillingPortal,
   createCheckoutSession,
   updateAutoAssignMode,
+  updateVendorAutoAssignMode,
   updateCommsRetention,
   updateSlackWebhook,
 } from './actions'
@@ -250,6 +251,17 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
         <AutoAssignToggle mode={org.auto_assign_mode ?? 'disabled'} />
       </Card>
 
+      {/* Vendor Auto-Suggestion */}
+      <Card>
+        <h2 className="text-base font-semibold text-primary-themed mb-1">Vendor Suggestions</h2>
+        <p className="text-xs text-muted-themed mb-4">
+          Score vendors for new work orders based on proximity, specialty match,
+          familiarity with the property, workload, and rating history — you
+          accept or pick someone else.
+        </p>
+        <VendorAutoAssignToggle mode={org.vendor_auto_assign_mode ?? 'disabled'} />
+      </Card>
+
       {/* Communications Log */}
       <Card>
         <h2 className="text-base font-semibold text-primary-themed mb-1">Communications Log</h2>
@@ -377,6 +389,78 @@ function AutoAssignToggle({ mode }: { mode: string }) {
 
       <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
         {AUTO_ASSIGN_OPTIONS.find((o) => o.value === current)?.desc}
+      </p>
+    </div>
+  )
+}
+
+// ── Vendor auto-suggestion mode toggle ───────────────────────────────────────
+//
+// No 'autopilot' option here — vendor assignment carries more real-world
+// risk (external party, real cost) than crew scheduling, so this stays
+// suggest-or-off only until there's evidence the suggestions are good.
+
+const VENDOR_AUTO_ASSIGN_OPTIONS = [
+  {
+    value: 'disabled' as const,
+    label: 'Off',
+    desc:  'No automatic vendor suggestions.',
+  },
+  {
+    value: 'suggest' as const,
+    label: 'Suggest',
+    desc:  'Shows the best-matched vendor on new work orders — you accept or pick someone else.',
+  },
+]
+
+function VendorAutoAssignToggle({ mode }: { mode: string }) {
+  const [current,   setCurrent]   = useState(mode)
+  const [saving,    startSave]    = useTransition()
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const handleChange = (value: 'disabled' | 'suggest') => {
+    setCurrent(value)
+    setSaveError(null)
+    startSave(async () => {
+      const result = await updateVendorAutoAssignMode(value)
+      if (result.error) setSaveError(result.error)
+    })
+  }
+
+  return (
+    <div>
+      {saveError && (
+        <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-3 py-2 mb-3">
+          {saveError}
+        </div>
+      )}
+
+      <div className="flex gap-2 flex-wrap">
+        {VENDOR_AUTO_ASSIGN_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => handleChange(opt.value)}
+            disabled={saving}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
+              current === opt.value
+                ? ''
+                : 'border-themed hover:border-themed',
+              saving && 'opacity-60 cursor-not-allowed'
+            )}
+            style={
+              current === opt.value
+                ? { background: 'var(--bg-raised)', color: 'var(--text-primary)', borderColor: 'var(--accent-gold)' }
+                : { color: 'var(--text-muted)' }
+            }
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <p className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+        {VENDOR_AUTO_ASSIGN_OPTIONS.find((o) => o.value === current)?.desc}
       </p>
     </div>
   )

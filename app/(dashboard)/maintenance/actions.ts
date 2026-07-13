@@ -7,7 +7,7 @@ import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
 import type { WoStatus, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
-import { PriorityLevelSchema, WoStatusSchema } from '@/lib/schemas/work-order'
+import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string; warning?: string }
@@ -15,6 +15,68 @@ export type MaintenanceActionState = { error?: string; success?: boolean; workOr
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isoDate() { return new Date().toISOString().split('T')[0] }
+
+// ── Suggestion-override tracking for bulkAssignVendor ───────────────────────
+//
+// Mirrors app/(dashboard)/turnovers/actions.ts's trackAssignmentAgainstSuggestions,
+// built with the override-handling that feature was originally missing
+// rather than reproducing the same gap: if a work order had a pending vendor
+// suggestion, assigning a different vendor here flips it to 'overridden'
+// instead of leaving suggestion_status stuck at 'pending' forever.
+async function trackVendorAssignmentAgainstSuggestions(
+  orgId:     string,
+  vendorId:  string,
+  vendorName: string,
+  workOrders: { id: string; suggestion_status?: string | null; suggested_vendor_ids?: string[] | null }[]
+): Promise<void> {
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const service = createServiceClient()
+
+    const overridden = workOrders.filter(wo =>
+      wo.suggestion_status === 'pending' &&
+      !(wo.suggested_vendor_ids ?? []).includes(vendorId)
+    )
+
+    if (overridden.length > 0) {
+      await service.from('work_orders')
+        .update({ suggestion_status: 'overridden' })
+        .in('id', overridden.map(wo => wo.id))
+
+      const priorSuggestionRows = overridden.flatMap(wo =>
+        (wo.suggested_vendor_ids ?? []).map(suggestedVendorId => ({
+          work_order_id:    wo.id,
+          org_id:           orgId,
+          vendor_id:        suggestedVendorId,
+          was_accepted:     false,
+          override_reason:  `${vendorName} assigned instead of the suggestion`,
+        }))
+      )
+      if (priorSuggestionRows.length > 0) {
+        await service.from('vendor_assignment_outcomes').upsert(priorSuggestionRows, {
+          onConflict:       'work_order_id,vendor_id',
+          ignoreDuplicates: false,
+        })
+      }
+    }
+
+    // Ensure an outcome row exists for whoever is actually assigned, whether
+    // or not they were the suggestion.
+    const ensureRows = workOrders.map(wo => ({
+      work_order_id:  wo.id,
+      org_id:         orgId,
+      vendor_id:      vendorId,
+      was_suggestion: (wo.suggested_vendor_ids ?? []).includes(vendorId),
+    }))
+    await service.from('vendor_assignment_outcomes').upsert(ensureRows, {
+      onConflict:       'work_order_id,vendor_id',
+      ignoreDuplicates: true,  // don't clobber a row the suggestion algorithm already scored
+    })
+  } catch (err) {
+    // Suggestion-state/outcome tracking must never break the actual assignment
+    console.error('[trackVendorAssignmentAgainstSuggestions]', err)
+  }
+}
 
 // ── Create Work Order ────────────────────────────────────────────────────────
 
@@ -29,7 +91,9 @@ export async function createWorkOrder(
   const description            = (formData.get('description') as string)?.trim() || null
   const priorityInput          = (formData.get('priority') as string) || 'medium'
   const priority               = PriorityLevelSchema.safeParse(priorityInput).data ?? 'medium'
-  const vendor_id              = (formData.get('vendor_id') as string) || null
+  const categoryInput          = (formData.get('category') as string) || null
+  const category               = categoryInput ? (WoCategorySchema.safeParse(categoryInput).data ?? null) : null
+  const vendor_id               = (formData.get('vendor_id') as string) || null
   const assigned_crew_member_id = (formData.get('assigned_crew_member_id') as string) || null
   const scheduled_date         = (formData.get('scheduled_date') as string) || null
   const scheduled_time         = (formData.get('scheduled_time') as string) || null
@@ -80,6 +144,7 @@ export async function createWorkOrder(
       asset_id:                asset_id || null,
       title,
       description,
+      category,
       priority,
       status:                  woStatus,
       source:                  'manual',
@@ -146,6 +211,23 @@ export async function createWorkOrder(
         org_id:         membership.org_id,
         vendor_id:      vendor_id ?? null,
         portal_enabled: true,
+      },
+    })
+  }
+
+  // Vendor suggestion — only when the PM left this to be figured out later:
+  // no vendor picked yet, and not already in quote-request mode (that's an
+  // explicit "let the market decide" flow, not a single top-pick recommendation).
+  // The Inngest function itself checks vendor_auto_assign_mode and no-ops if
+  // vendor suggestions are disabled for this org.
+  if (!request_quotes && !vendor_id && category) {
+    await inngest.send({
+      name: 'work-order/vendor-suggestion.requested',
+      data: {
+        work_order_id: wo.id,
+        property_id,
+        org_id:        membership.org_id,
+        category,
       },
     })
   }
@@ -930,12 +1012,18 @@ export async function bulkAssignVendor(
 
   const { data: vendor } = await supabase
     .from('vendors')
-    .select('id')
+    .select('id, name')
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
     .single()
 
   if (!vendor) return { error: 'Vendor not found' }
+
+  const { data: workOrders } = await supabase
+    .from('work_orders')
+    .select('id, suggestion_status, suggested_vendor_ids')
+    .in('id', workOrderIds)
+    .eq('org_id', membership.org_id)
 
   const { error } = await supabase
     .from('work_orders')
@@ -946,6 +1034,10 @@ export async function bulkAssignVendor(
   if (error) {
     console.error('[bulkAssignVendor]', error)
     return { error: 'Operation failed. Please try again.' }
+  }
+
+  if (workOrders?.length) {
+    await trackVendorAssignmentAgainstSuggestions(membership.org_id, vendorId, vendor.name, workOrders)
   }
 
   await logAuditEvent({
@@ -970,6 +1062,116 @@ export async function bulkAssignVendor(
       }))
     )
   }
+
+  revalidatePath('/maintenance')
+  return {}
+}
+
+// ── Accept auto-suggested vendor ─────────────────────────────────────────────
+
+export async function acceptVendorSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
+
+  const { data: wo } = await supabase
+    .from('work_orders')
+    .select('id, suggested_vendor_ids')
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!wo) return { error: 'Work order not found' }
+
+  const vendorId = (wo.suggested_vendor_ids as string[] | null)?.[0]
+  if (!vendorId) return { error: 'No suggestion to accept' }
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({ vendor_id: vendorId, status: 'assigned', suggestion_status: 'accepted' })
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+
+  if (error) {
+    console.error('[acceptVendorSuggestion]', error)
+    return { error: 'Failed to accept suggestion. Please try again.' }
+  }
+
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const service = createServiceClient()
+    await service.from('vendor_assignment_outcomes').upsert(
+      { work_order_id: workOrderId, org_id: membership.org_id, vendor_id: vendorId, was_accepted: true, was_suggestion: true },
+      { onConflict: 'work_order_id,vendor_id', ignoreDuplicates: false }
+    )
+  } catch {
+    // Outcome recording must not break the acceptance flow
+  }
+
+  // Dispatch is gated inside this handler on the WO's own portal_enabled
+  // flag — the PM's per-WO decision, unaffected by whether a vendor was
+  // suggested or manually picked.
+  await inngest.send({
+    name: 'work-order/vendor.assigned',
+    data: { workOrderId, orgId: membership.org_id, vendorId, previousVendorId: null },
+  })
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.suggestion.accepted',
+    targetType: 'work_order',
+    targetId:   workOrderId,
+    metadata:   { vendor_id: vendorId },
+  })
+
+  revalidatePath('/maintenance')
+  return {}
+}
+
+// ── Dismiss auto-suggested vendor ────────────────────────────────────────────
+
+export async function dismissVendorSuggestion(workOrderId: string): Promise<{ error?: string }> {
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
+
+  const { data: wo } = await supabase
+    .from('work_orders')
+    .select('suggested_vendor_ids')
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  const { error } = await supabase
+    .from('work_orders')
+    .update({ suggestion_status: 'dismissed' })
+    .eq('id', workOrderId)
+    .eq('org_id', membership.org_id)
+
+  if (error) {
+    console.error('[dismissVendorSuggestion]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
+
+  const vendorId = (wo?.suggested_vendor_ids as string[] | null)?.[0]
+  if (vendorId) {
+    try {
+      const { createServiceClient } = await import('@/lib/supabase/server')
+      const service = createServiceClient()
+      await service.from('vendor_assignment_outcomes').upsert(
+        { work_order_id: workOrderId, org_id: membership.org_id, vendor_id: vendorId, was_accepted: false, was_suggestion: true },
+        { onConflict: 'work_order_id,vendor_id', ignoreDuplicates: false }
+      )
+    } catch {
+      // Outcome recording must not break the dismissal flow
+    }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.suggestion.dismissed',
+    targetType: 'work_order',
+    targetId:   workOrderId,
+    metadata:   { vendor_id: vendorId ?? null },
+  })
 
   revalidatePath('/maintenance')
   return {}
