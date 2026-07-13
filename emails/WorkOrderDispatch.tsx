@@ -18,9 +18,11 @@ interface WorkOrderDispatchEmailProps {
   manualUrl:       string | null
 }
 
-const ORANGE   = '#FF6B00'
-const CHARCOAL = '#1A1A1A'
-const CHROME   = '#C0C0C0'
+const GOLD      = '#FCD116'
+const NAVY      = '#0a1628'
+const GOLD_LINE = '#FCD116'   // the divider — was CHROME, now the same
+                              // gold hairline used throughout the rest
+                              // of FieldStay's design system
 
 export default function WorkOrderDispatchEmail({
   woNumber        = 'WO-2025-06-0042',
@@ -54,8 +56,7 @@ export default function WorkOrderDispatchEmail({
           <Container style={headerInner}>
             <Row>
               <Column>
-                <Text style={brandName}>TRADESUITE</Text>
-                <Text style={brandPro}>PRO</Text>
+                <Text style={brandName}>FieldStay</Text>
               </Column>
               <Column align="right">
                 <Text style={woBadge}>Work Order</Text>
@@ -159,16 +160,9 @@ export default function WorkOrderDispatchEmail({
         {/* ── Footer ── */}
         <Section style={footer}>
           <Container style={footerInner}>
-            <Text style={footerBrand}>
-              TRADESUITE <span style={{ color:ORANGE }}>PRO</span>
-            </Text>
+            <Text style={footerBrand}>FieldStay</Text>
             <Text style={footerTagline}>
-              Professional work orders & invoicing for skilled trades
-            </Text>
-            <Text style={footerLink}>
-              <a href="https://tradesuite.com" style={{ color:ORANGE, textDecoration:'none' }}>
-                Get TradeSuite Pro for your business →
-              </a>
+              Work order tools · powered by TradeSuite
             </Text>
             <Hr style={{ borderColor:'#333', marginTop:16 }}/>
             <Text style={footerMeta}>
@@ -191,7 +185,7 @@ const body: React.CSSProperties = {
   padding: 0,
 }
 const header: React.CSSProperties = {
-  backgroundColor: CHARCOAL,
+  backgroundColor: NAVY,
   padding: '24px 0 20px',
 }
 const headerInner: React.CSSProperties = {
@@ -200,19 +194,12 @@ const headerInner: React.CSSProperties = {
   padding: '0 24px',
 }
 const brandName: React.CSSProperties = {
-  color: '#E0E0E0',
+  color: GOLD,
   fontSize: 16,
-  fontWeight: 900,
+  fontWeight: 800,
   letterSpacing: '0.08em',
   margin: 0,
   lineHeight: 1.1,
-}
-const brandPro: React.CSSProperties = {
-  color: ORANGE,
-  fontSize: 11,
-  fontWeight: 900,
-  letterSpacing: '0.22em',
-  margin: '2px 0 0',
 }
 const woBadge: React.CSSProperties = {
   color: '#666',
@@ -231,9 +218,9 @@ const woNum: React.CSSProperties = {
   margin: '2px 0 0',
 }
 const chromeDivider: React.CSSProperties = {
-  backgroundColor: CHROME,
+  backgroundColor: GOLD_LINE,
   height: 2,
-  opacity: 0.4,
+  opacity: 1,
 }
 const container: React.CSSProperties = {
   backgroundColor: '#FFFFFF',
@@ -290,19 +277,19 @@ const scopeBody: React.CSSProperties = {
   margin: 0,
 }
 const manualLink: React.CSSProperties = {
-  color: ORANGE,
+  color: NAVY,
   fontSize: 14,
   fontWeight: 700,
   textDecoration: 'none',
 }
 const authBox: React.CSSProperties = {
-  backgroundColor: '#FFF4EE',
-  border: `2px solid ${ORANGE}`,
+  backgroundColor: 'rgba(252,209,22,0.10)',
+  border: `2px solid ${GOLD}`,
   borderRadius: 12,
   padding: '20px 22px',
 }
 const authLabel: React.CSSProperties = {
-  color: '#CC4A00',
+  color: NAVY,
   fontSize: 10,
   fontWeight: 800,
   letterSpacing: '0.16em',
@@ -310,7 +297,7 @@ const authLabel: React.CSSProperties = {
   margin: '0 0 4px',
 }
 const authAmount: React.CSSProperties = {
-  color: ORANGE,
+  color: NAVY,
   fontSize: 52,
   fontWeight: 900,
   letterSpacing: '-0.04em',
@@ -318,20 +305,19 @@ const authAmount: React.CSSProperties = {
   margin: '0 0 10px',
 }
 const authNote: React.CSSProperties = {
-  color: '#CC4A00',
+  color: NAVY,
   fontSize: 12,
   lineHeight: 1.5,
   margin: 0,
 }
 const ctaButton: React.CSSProperties = {
-  backgroundColor: CHARCOAL,
-  color: '#F0F0F0',
+  backgroundColor: GOLD,
+  color: NAVY,
   fontSize: 15,
-  fontWeight: 800,
+  fontWeight: 700,
   letterSpacing: '0.01em',
   padding: '16px 32px',
   borderRadius: 12,
-  border: `2px solid ${ORANGE}`,
   textDecoration: 'none',
   display: 'inline-block',
 }
@@ -367,7 +353,7 @@ const accessNote: React.CSSProperties = {
   margin: 0,
 }
 const footer: React.CSSProperties = {
-  backgroundColor: CHARCOAL,
+  backgroundColor: NAVY,
   padding: '24px 0 28px',
   marginTop: 0,
 }
@@ -378,7 +364,7 @@ const footerInner: React.CSSProperties = {
   textAlign: 'center',
 }
 const footerBrand: React.CSSProperties = {
-  color: '#E0E0E0',
+  color: GOLD,
   fontSize: 13,
   fontWeight: 900,
   letterSpacing: '0.07em',
@@ -388,10 +374,6 @@ const footerTagline: React.CSSProperties = {
   color: '#555',
   fontSize: 11,
   margin: '0 0 6px',
-}
-const footerLink: React.CSSProperties = {
-  margin: '0 0 0',
-  fontSize: 11,
 }
 const footerMeta: React.CSSProperties = {
   color: '#444',

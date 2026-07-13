@@ -1,10 +1,11 @@
 import {
   Html, Head, Body, Container, Section,
-  Text, Button, Hr, Link, Preview, Row, Column,
+  Text, Button, Link, Preview, Row, Column,
 } from '@react-email/components'
 
 interface EmailLayoutProps {
   preview:     string
+  headerSub?:  string
   children:    React.ReactNode
   ctaLabel?:   string
   ctaUrl?:     string
@@ -13,11 +14,12 @@ interface EmailLayoutProps {
 
 export function EmailLayout({
   preview,
+  headerSub,
   children,
   ctaLabel,
   ctaUrl,
   footerNote,
-}: EmailLayoutProps) {
+}: Readonly<EmailLayoutProps>) {
   return (
     <Html lang="en">
       <Head>
@@ -26,31 +28,35 @@ export function EmailLayout({
       </Head>
       <Preview>{preview}</Preview>
       <Body style={body}>
+        <Container style={outerContainer}>
 
-        {/* Header */}
-        <Section style={header}>
-          <Container style={headerInner}>
+          {/* Header */}
+          <Section style={header}>
             <Text style={logoText}>FieldStay</Text>
-            <Text style={taglineText}>Field Operations Platform</Text>
+            {headerSub ? (
+              <Text style={headerSubText}>{headerSub}</Text>
+            ) : (
+              <Text style={taglineText}>Field Operations Platform</Text>
+            )}
+          </Section>
+
+          {/* Content card */}
+          <Container style={card}>
+            {children}
+
+            {ctaLabel && ctaUrl && (
+              <Section style={{ textAlign: 'center', marginTop: 32 }}>
+                <Button href={ctaUrl} style={ctaButton}>
+                  {ctaLabel}
+                </Button>
+              </Section>
+            )}
           </Container>
-        </Section>
 
-        {/* Content card */}
-        <Container style={card}>
-          {children}
-
-          {ctaLabel && ctaUrl && (
-            <Section style={{ textAlign: 'center', marginTop: 32 }}>
-              <Button href={ctaUrl} style={ctaButton}>
-                {ctaLabel}
-              </Button>
-            </Section>
-          )}
         </Container>
 
-        {/* Footer */}
+        {/* Footer — intentionally outside/below the card, unboxed */}
         <Container style={footer}>
-          <Hr style={footerHr} />
           {footerNote && (
             <Text style={footerSmall}>{footerNote}</Text>
           )}
@@ -92,42 +98,50 @@ const body: React.CSSProperties = {
   padding:         0,
 }
 
-const header: React.CSSProperties = {
-  backgroundColor: '#0a1628',
-  padding:         '32px 0 28px',
+const outerContainer: React.CSSProperties = {
+  maxWidth:     600,
+  margin:       '32px auto 0',
+  borderRadius: 16,
+  overflow:     'hidden',
+  boxShadow:    '0 1px 3px rgba(10,22,40,0.08), 0 8px 24px rgba(10,22,40,0.06)',
 }
 
-const headerInner: React.CSSProperties = {
-  maxWidth:  600,
-  margin:    '0 auto',
-  padding:   '0 32px',
-  textAlign: 'center',
+const header: React.CSSProperties = {
+  backgroundColor: '#0a1628',
+  padding:         '32px 32px 26px',
+  textAlign:       'center',
 }
 
 const logoText: React.CSSProperties = {
   color:         '#FCD116',
-  fontSize:      28,
-  fontWeight:    700,
+  fontSize:      26,
+  fontWeight:    800,
   margin:        0,
-  lineHeight:    '1.2',
+  lineHeight:    1.2,
   letterSpacing: '-0.5px',
 }
 
 const taglineText: React.CSSProperties = {
-  color:         '#ffffff',
-  fontSize:      12,
-  fontWeight:    500,
-  margin:        '4px 0 0',
-  letterSpacing: '0.08em',
+  color:         '#94a3b8',
+  fontSize:      11,
+  fontWeight:    600,
+  margin:        '6px 0 0',
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+}
+
+const headerSubText: React.CSSProperties = {
+  color:         '#94a3b8',
+  fontSize:      11,
+  fontWeight:    600,
+  margin:        '6px 0 0',
+  letterSpacing: '0.12em',
   textTransform: 'uppercase',
 }
 
 const card: React.CSSProperties = {
   backgroundColor: '#ffffff',
-  maxWidth:        600,
-  margin:          '0 auto',
-  padding:         '40px 48px 48px',
-  borderRadius:    '0 0 16px 16px',
+  padding:         '40px 40px 44px',
 }
 
 const ctaButton: React.CSSProperties = {
@@ -143,23 +157,19 @@ const ctaButton: React.CSSProperties = {
 
 const footer: React.CSSProperties = {
   maxWidth: 600,
-  margin:   '24px auto 0',
-  padding:  '0 32px 48px',
-}
-
-const footerHr: React.CSSProperties = {
-  borderColor: '#e2e8f0',
-  margin:      '0 0 20px',
+  margin:   '20px auto 0',
+  padding:  '0 32px 40px',
 }
 
 const footerSmall: React.CSSProperties = {
-  color:    '#94a3b8',
-  fontSize: 12,
-  margin:   '0 0 4px',
+  fontSize:  12,
+  color:     '#94a3b8',
+  margin:    '0 0 4px',
+  textAlign: 'center',
 }
 
 const footerLink: React.CSSProperties = {
-  color:          '#94a3b8',
-  fontSize:       12,
-  textDecoration: 'none',
+  fontSize:  12,
+  color:     '#94a3b8',
+  textDecoration: 'underline',
 }

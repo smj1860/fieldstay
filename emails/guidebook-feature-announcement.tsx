@@ -27,7 +27,10 @@ export function GuidebookFeatureAnnouncementEmail({
 }: GuidebookFeatureAnnouncementEmailProps) {
   return (
     <Html>
-      <Head />
+      <Head>
+        <meta name="color-scheme" content="light" />
+        <meta name="supported-color-schemes" content="light" />
+      </Head>
       <Preview>
         Meet the guidebook your guests will actually use — and the local businesses that pay for it.
       </Preview>

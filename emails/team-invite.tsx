@@ -18,8 +18,8 @@ export function TeamInviteEmail({ inviterEmail, orgName, acceptUrl }: Props) {
     >
       <Text style={heading}>You&apos;re invited to FieldStay</Text>
       <Text style={body}>
-        <strong>{inviterEmail}</strong> has invited you to join{' '}
-        <strong>{orgName}</strong> on FieldStay as a team administrator.
+        <strong>{inviterEmail}</strong>{' '}has invited you to join{' '}
+        <strong>{orgName}</strong>{' '}on FieldStay as a team administrator.
       </Text>
       <Text style={body}>
         FieldStay is a property operations platform for short-term rental

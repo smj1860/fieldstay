@@ -28,11 +28,11 @@ export function GuidebookGracePeriodEmail({
     >
       <Text style={heading}>Your Guidebook Is at Risk</Text>
       <Text style={body}>
-        {orgName} currently has <strong>{activeSponsors} of 4</strong> active
+        {orgName} currently has <strong>{activeSponsors} of 4</strong>{' '}active
         sponsors needed to keep your free digital guidebook running.
       </Text>
       <Text style={body}>
-        You have until <strong>{deadline}</strong> to add more sponsors before
+        You have until <strong>{deadline}</strong>{' '}to add more sponsors before
         the guidebook locks for your guests. Add sponsors now to keep it active
         at no cost to you.
       </Text>

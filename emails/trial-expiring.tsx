@@ -38,7 +38,7 @@ export function TrialExpiringEmail({
       {ownerRezConnected && propertyCount > 0 ? (
         <Section style={highlightBox}>
           <Text style={highlightText}>
-            You have <strong>{propertyCount} {propertyCount === 1 ? 'property' : 'properties'}</strong> syncing
+            You have <strong>{propertyCount}{' '}{propertyCount === 1 ? 'property' : 'properties'}</strong>{' '}syncing
             from OwnerRez and your turnovers are running. Subscribe to keep
             everything working without interruption.
           </Text>

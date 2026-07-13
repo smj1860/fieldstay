@@ -38,7 +38,7 @@ export function FrictionForecasterEmail({
       </Section>
 
       <Text style={{ ...body, marginTop: 24 }}>
-        Take a look at your <strong>Turnovers</strong> board — it&apos;s already
+        Take a look at your <strong>Turnovers</strong>{' '}board — it&apos;s already
         populated with what&apos;s coming this week. Or see everything at a
         glance from your <Link href={dashboardUrl}>dashboard</Link>.
       </Text>

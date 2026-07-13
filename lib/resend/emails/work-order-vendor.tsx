@@ -1,9 +1,9 @@
 import {
   Section, Row, Column,
-  Text, Button, Hr,
+  Text, Hr,
 } from '@react-email/components'
-import { render } from '@react-email/render'
-import { BaseLayout } from './base-layout'
+import { render }      from '@react-email/render'
+import { EmailLayout } from '@/emails/components/email-layout'
 
 export interface WorkOrderEmailProps {
   wo_number:        string | null
@@ -94,10 +94,12 @@ export function WorkOrderVendorEmail({
   ].filter(Boolean).join(' ')
 
   return (
-    <BaseLayout
-      previewText={previewText}
+    <EmailLayout
+      preview={previewText}
       headerSub={wo_number ? `Work Order · WO-${wo_number}` : 'Work Order'}
-      footerLine={footerLine}
+      footerNote={footerLine}
+      ctaLabel={portal_type === 'quote' ? 'Submit Quote →' : 'Mark as Complete →'}
+      ctaUrl={portal_url}
     >
       {/* Property block */}
       <Section style={{ backgroundColor: '#f8fafc', borderRadius: 8, padding: '14px 16px', marginBottom: 24, borderLeft: '3px solid #FCD116' }}>
@@ -184,26 +186,7 @@ export function WorkOrderVendorEmail({
           </Section>
         </>
       )}
-
-      <Hr style={{ borderColor: '#e2e8f0', margin: '4px 0 24px' }} />
-
-      <Button
-        href={portal_url}
-        style={{
-          backgroundColor: '#FCD116',
-          color: '#0a1628',
-          fontWeight: 700,
-          fontSize: 15,
-          padding: '14px 32px',
-          borderRadius: 8,
-          textDecoration: 'none',
-          display: 'block',
-          textAlign: 'center',
-        }}
-      >
-        {portal_type === 'quote' ? 'Submit Quote →' : 'Mark as Complete →'}
-      </Button>
-    </BaseLayout>
+    </EmailLayout>
   )
 }
 
