@@ -5,6 +5,7 @@ import { formatDateTime, formatWindow, TURNOVER_STATUS_LABELS, PRIORITY_COLORS }
 import { CheckCircle2, Clock, User, ArrowLeft, Camera } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
+import { TurnoverRating } from './turnover-rating'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Turnover Detail' }
@@ -44,6 +45,17 @@ export default async function TurnoverDetailPage({ params }: Props) {
     .single()
 
   const assignments = turnover.turnover_assignments ?? []
+
+  let existingRating: number | null = null
+  if (turnover.status === 'completed') {
+    const { data: outcomes } = await supabase
+      .from('assignment_outcomes')
+      .select('pm_rating')
+      .eq('turnover_id', id)
+      .not('pm_rating', 'is', null)
+      .limit(1)
+    existingRating = outcomes?.[0]?.pm_rating ?? null
+  }
 
   const checklistInstance = Array.isArray(turnover.checklist_instances)
     ? turnover.checklist_instances[0]
@@ -173,6 +185,13 @@ export default async function TurnoverDetailPage({ params }: Props) {
               <p className="text-sm text-secondary-themed">{turnover.completion_notes}</p>
             </div>
           )}
+        </Card>
+      )}
+
+      {/* PM rating — feeds crew reliability scoring */}
+      {turnover.status === 'completed' && (
+        <Card className="mb-4">
+          <TurnoverRating turnoverId={turnover.id} initialRating={existingRating} />
         </Card>
       )}
 

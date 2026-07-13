@@ -7,6 +7,72 @@ import { logAuditEvent } from '@/lib/audit'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
+// ── Suggestion-override tracking shared by assignCrew/addCrewToTurnover ─────
+//
+// Neither crew-assignment path previously looked at a turnover's suggestion
+// state at all. This closes that gap: if a turnover had a pending suggestion
+// for different crew, flip it to 'overridden' instead of leaving it stuck at
+// 'pending' forever, and make sure whoever actually gets assigned has an
+// assignment_outcomes row — even if they were never suggested — so
+// duration/rating scoring has something to update later.
+async function trackAssignmentAgainstSuggestions(
+  orgId:        string,
+  crewMemberId: string,
+  crewName:     string,
+  turnovers:    { id: string; property_id: string; suggestion_status?: string | null; suggested_crew_ids?: string[] | null }[],
+  propertyBedrooms: Record<string, number | null>
+): Promise<void> {
+  try {
+    const { createServiceClient } = await import('@/lib/supabase/server')
+    const service = createServiceClient()
+
+    const overridden = turnovers.filter(t =>
+      t.suggestion_status === 'pending' &&
+      !(t.suggested_crew_ids ?? []).includes(crewMemberId)
+    )
+
+    if (overridden.length > 0) {
+      await service.from('turnovers')
+        .update({ suggestion_status: 'overridden' })
+        .in('id', overridden.map(t => t.id))
+
+      const priorSuggestionRows = overridden.flatMap(t =>
+        (t.suggested_crew_ids ?? []).map(suggestedCrewId => ({
+          turnover_id:      t.id,
+          org_id:           orgId,
+          crew_member_id:   suggestedCrewId,
+          was_accepted:     false,
+          override_reason:  `${crewName} assigned instead of the suggestion`,
+        }))
+      )
+      if (priorSuggestionRows.length > 0) {
+        await service.from('assignment_outcomes').upsert(priorSuggestionRows, {
+          onConflict:       'turnover_id,crew_member_id',
+          ignoreDuplicates: false,
+        })
+      }
+    }
+
+    const ensureRows = turnovers.map(t => ({
+      turnover_id:        t.id,
+      org_id:             orgId,
+      crew_member_id:     crewMemberId,
+      was_suggestion:     (t.suggested_crew_ids ?? []).includes(crewMemberId),
+      property_bedrooms:  propertyBedrooms[t.property_id] ?? null,
+    }))
+    // ignoreDuplicates — don't clobber a row the suggestion algorithm already
+    // scored (suggested_score/score_breakdown) just because it's being
+    // touched again here.
+    await service.from('assignment_outcomes').upsert(ensureRows, {
+      onConflict:       'turnover_id,crew_member_id',
+      ignoreDuplicates: true,
+    })
+  } catch (err) {
+    // Suggestion-state/outcome tracking must never break the actual assignment
+    console.error('[trackAssignmentAgainstSuggestions]', err)
+  }
+}
+
 // ── Crew assignment ──────────────────────────────────────────────────────────
 
 export async function assignCrew(
@@ -18,7 +84,7 @@ export async function assignCrew(
   // Verify all turnovers belong to this org
   const { data: turnovers } = await supabase
     .from('turnovers')
-    .select('id, checkout_datetime')
+    .select('id, property_id, checkout_datetime, suggestion_status, suggested_crew_ids')
     .in('id', turnoverIds)
     .eq('org_id', membership.org_id)
 
@@ -71,6 +137,16 @@ export async function assignCrew(
     .update({ status: 'assigned' })
     .in('id', ids)
     .eq('status', 'pending_assignment')
+
+  const propertyIds = [...new Set(turnovers.map(t => t.property_id))]
+  const { data: propertyRows } = await supabase
+    .from('properties')
+    .select('id, bedrooms')
+    .in('id', propertyIds)
+  const propertyBedrooms = Object.fromEntries(
+    (propertyRows ?? []).map(p => [p.id, p.bedrooms as number | null])
+  )
+  await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
   await inngest.send({
     name: 'turnover/crew-assigned',
@@ -349,7 +425,7 @@ export async function addCrewToTurnover(
 
   const { data: turnovers } = await supabase
     .from('turnovers')
-    .select('id, status, checkout_datetime, checkin_datetime')
+    .select('id, property_id, status, checkout_datetime, checkin_datetime, suggestion_status, suggested_crew_ids')
     .in('id', turnoverIds)
     .eq('org_id', membership.org_id)
 
@@ -398,6 +474,16 @@ export async function addCrewToTurnover(
   if (pendingIds.length > 0) {
     await supabase.from('turnovers').update({ status: 'assigned' }).in('id', pendingIds)
   }
+
+  const propertyIds = [...new Set(turnovers.map(t => t.property_id))]
+  const { data: propertyRows } = await supabase
+    .from('properties')
+    .select('id, bedrooms')
+    .in('id', propertyIds)
+  const propertyBedrooms = Object.fromEntries(
+    (propertyRows ?? []).map(p => [p.id, p.bedrooms as number | null])
+  )
+  await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
   await inngest.send({
     name: 'turnover/crew-assigned',
@@ -640,7 +726,7 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
 
   const { data: turnover } = await supabase
     .from('turnovers')
-    .select('id, status, suggested_crew_ids')
+    .select('id, property_id, status, suggested_crew_ids')
     .eq('id', turnoverId)
     .eq('org_id', membership.org_id)
     .single()
@@ -665,10 +751,23 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
     .eq('id', turnoverId)
 
   try {
+    const { data: property } = await supabase
+      .from('properties')
+      .select('bedrooms')
+      .eq('id', turnover.property_id)
+      .single()
+
     const { createServiceClient } = await import('@/lib/supabase/server')
     const service = createServiceClient()
     await service.from('assignment_outcomes').upsert(
-      crewIds.map(crewId => ({ turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: true })),
+      crewIds.map(crewId => ({
+        turnover_id:        turnoverId,
+        org_id:             membership.org_id,
+        crew_member_id:     crewId,
+        was_accepted:       true,
+        was_suggestion:     true,
+        property_bedrooms:  property?.bedrooms ?? null,
+      })),
       { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
     )
   } catch {
@@ -695,7 +794,7 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
 
   const { data: turnover } = await supabase
     .from('turnovers')
-    .select('suggested_crew_ids')
+    .select('property_id, suggested_crew_ids')
     .eq('id', turnoverId)
     .eq('org_id', membership.org_id)
     .single()
@@ -714,10 +813,21 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
   const crewIds = (turnover?.suggested_crew_ids as string[] | null) ?? []
   if (crewIds.length) {
     try {
+      const { data: property } = turnover?.property_id
+        ? await supabase.from('properties').select('bedrooms').eq('id', turnover.property_id).single()
+        : { data: null }
+
       const { createServiceClient } = await import('@/lib/supabase/server')
       const service = createServiceClient()
       await service.from('assignment_outcomes').upsert(
-        crewIds.map(crewId => ({ turnover_id: turnoverId, org_id: membership.org_id, crew_member_id: crewId, was_accepted: false })),
+        crewIds.map(crewId => ({
+          turnover_id:        turnoverId,
+          org_id:             membership.org_id,
+          crew_member_id:     crewId,
+          was_accepted:       false,
+          was_suggestion:     true,
+          property_bedrooms:  property?.bedrooms ?? null,
+        })),
         { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
       )
     } catch {
@@ -735,5 +845,66 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
   })
 
   revalidatePath('/turnovers')
+  return { success: true }
+}
+
+// ── PM rating for a completed turnover ───────────────────────────────────────
+//
+// Feeds assignment_outcomes.pm_rating, which the nightly crew-score-recompute
+// cron reads to adjust reliability_score. One rating per turnover, applied to
+// every crew member assigned to it — simpler than a per-crew-member rating
+// UI, and most turnovers have exactly one assignee anyway.
+
+export async function rateTurnoverCompletion(
+  turnoverId: string,
+  rating: number
+): Promise<TurnoverActionState> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return { error: 'Rating must be between 1 and 5' }
+  }
+
+  const { data: turnover } = await supabase
+    .from('turnovers')
+    .select('id, status, turnover_assignments(crew_member_id)')
+    .eq('id', turnoverId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!turnover) return { error: 'Turnover not found' }
+  if (turnover.status !== 'completed') return { error: 'Only completed turnovers can be rated' }
+
+  const crewIds = (turnover.turnover_assignments ?? []).map(a => a.crew_member_id)
+  if (!crewIds.length) return { error: 'No crew assigned to rate' }
+
+  const { createServiceClient } = await import('@/lib/supabase/server')
+  const service = createServiceClient()
+
+  const { error } = await service.from('assignment_outcomes').upsert(
+    crewIds.map(crewMemberId => ({
+      turnover_id:    turnoverId,
+      org_id:         membership.org_id,
+      crew_member_id: crewMemberId,
+      pm_rating:      rating,
+    })),
+    { onConflict: 'turnover_id,crew_member_id', ignoreDuplicates: false }
+  )
+
+  if (error) {
+    console.error('[rateTurnoverCompletion]', error)
+    return { error: 'Failed to save rating. Please try again.' }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'turnover.pm_rating.submitted',
+    targetType: 'turnover',
+    targetId:   turnoverId,
+    metadata:   { rating },
+  })
+
+  revalidatePath(`/turnovers/${turnoverId}`)
   return { success: true }
 }

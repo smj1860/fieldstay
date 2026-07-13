@@ -44,8 +44,9 @@ export type TxnType             = 'revenue' | 'expense'
 export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintenance' | 'restock' | 'utility' | 'insurance' | 'supplies' | 'other'
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 export type CrewRole            = 'cleaning' | 'landscaping' | 'maintenance' | 'general'
-export type AutoAssignMode     = 'suggest' | 'autopilot' | 'disabled'
-export type SuggestionStatus   = 'pending' | 'accepted' | 'dismissed'
+export type AutoAssignMode       = 'suggest' | 'autopilot' | 'disabled'
+export type VendorAutoAssignMode = 'suggest' | 'disabled'
+export type SuggestionStatus     = 'pending' | 'accepted' | 'overridden' | 'dismissed'
 
 // Asset Health
 export type AssetType =
@@ -104,6 +105,7 @@ export interface Organization {
   preferred_retailer:           string | null
   kroger_location_name:         string | null
   auto_assign_mode:             AutoAssignMode
+  vendor_auto_assign_mode:      VendorAutoAssignMode
   comms_log_retention_days:     number
   slack_webhook_url:            string | null
   repuguard_status:             'inactive' | 'trial' | 'active' | 'cancelled'
@@ -307,6 +309,9 @@ export interface AssignmentOutcome {
   duration_minutes:   number | null
   pm_rating:          number | null
   property_bedrooms:  number | null
+  was_late:           boolean | null
+  was_missed:         boolean
+  scored_at:          string | null
   created_at:         string
 }
 
@@ -660,8 +665,27 @@ export interface WorkOrder {
   vendor_dispatch_email:       string | null
   lockbox_code:                string | null
   parking_notes:               string | null
+  vendor_rating:               number | null
+  vendor_rating_notes:         string | null
+  suggested_vendor_ids:        string[] | null
+  suggestion_reasoning:        string | null
+  suggestion_status:           SuggestionStatus | null
   created_at:                  string
   updated_at:                  string
+}
+
+export interface VendorAssignmentOutcome {
+  id:              string
+  org_id:          string
+  work_order_id:   string
+  vendor_id:       string
+  property_id:     string | null
+  suggested_score: number | null
+  score_breakdown: Record<string, unknown> | null
+  was_suggestion:  boolean
+  was_accepted:    boolean | null
+  override_reason: string | null
+  created_at:      string
 }
 
 // ─── Work Order Public Dispatch ───────────────────────────────────────────

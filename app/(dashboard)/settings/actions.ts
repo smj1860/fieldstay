@@ -789,6 +789,34 @@ export async function updateAutoAssignMode(
   return { success: true }
 }
 
+export async function updateVendorAutoAssignMode(
+  mode: 'suggest' | 'disabled'
+): Promise<SettingsActionState> {
+  const { supabase, membership, user } = await requireOrgMember()
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({ vendor_auto_assign_mode: mode })
+    .eq('id', membership.org_id)
+
+  if (error) {
+    console.error('[updateVendorAutoAssignMode]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'org.vendor_auto_assign_mode.updated',
+    targetType: 'organization',
+    targetId:   membership.org_id,
+    metadata:   { mode },
+  })
+
+  revalidatePath('/settings')
+  return { success: true }
+}
+
 export async function updateCommsRetention(days: number): Promise<SettingsActionState> {
   const { supabase, membership } = await requireOrgMember()
 

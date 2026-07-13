@@ -78,7 +78,7 @@ interface Turnover {
   is_same_day_turnover: boolean | null
   suggested_crew_ids: string[] | null
   suggestion_reasoning: string | null
-  suggestion_status: 'pending' | 'accepted' | 'dismissed' | null
+  suggestion_status: 'pending' | 'accepted' | 'overridden' | 'dismissed' | null
   is_archived: boolean
   turnover_assignments: TurnoverAssignment[]
 }
@@ -694,12 +694,18 @@ function TurnoverCard({
                   ⏱ {duration}
                 </span>
               )}
+              <Link
+                href={`/turnovers/${turnover.id}`}
+                className={buttonVariantClass('ghost') + ' text-xs py-1.5 ml-auto'}
+              >
+                View Full Details →
+              </Link>
               {turnover.is_archived ? (
                 <Button
                   onClick={() => startArchive(async () => { await unarchiveTurnover([turnover.id]) })}
                   disabled={archiving}
                   variant="ghost"
-                  className="text-xs py-1.5 ml-auto disabled:opacity-50"
+                  className="text-xs py-1.5 disabled:opacity-50"
                   style={{ color: 'var(--accent-gold)' }}
                 >
                   {archiving ? 'Restoring…' : 'Unarchive'}
@@ -709,7 +715,7 @@ function TurnoverCard({
                   onClick={() => startArchive(async () => { await archiveTurnover([turnover.id]) })}
                   disabled={archiving}
                   variant="ghost"
-                  className="text-xs py-1.5 ml-auto text-muted-themed disabled:opacity-50"
+                  className="text-xs py-1.5 text-muted-themed disabled:opacity-50"
                 >
                   {archiving ? 'Archiving…' : 'Archive'}
                 </Button>

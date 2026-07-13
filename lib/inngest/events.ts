@@ -169,6 +169,15 @@ export type FieldStayEvents = {
     }
   }
 
+  'work-order/vendor-suggestion.requested': {
+    data: {
+      work_order_id: string
+      property_id:   string
+      org_id:        string
+      category:      string
+    }
+  }
+
   'work-order/completed': {
     data: {
       work_order_id: string
