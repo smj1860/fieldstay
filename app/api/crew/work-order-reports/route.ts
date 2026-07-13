@@ -7,11 +7,13 @@ import type { AssetType, PriorityLevel } from '@/types/database'
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
 
-  const property_id = typeof body?.property_id === 'string' ? body.property_id : null
+  const report_id    = typeof body?.report_id === 'string' ? body.report_id : null
+  const property_id  = typeof body?.property_id === 'string' ? body.property_id : null
   const asset_id     = typeof body?.asset_id === 'string' ? body.asset_id : null
   const title        = typeof body?.title === 'string' ? body.title.trim() : ''
   const is_emergency = body?.is_emergency === true
 
+  if (!report_id)   return NextResponse.json({ error: 'Missing report_id' }, { status: 400 })
   if (!property_id) return NextResponse.json({ error: 'Missing property_id' }, { status: 400 })
   if (!title)       return NextResponse.json({ error: 'Missing title' }, { status: 400 })
 
@@ -57,22 +59,6 @@ export async function POST(request: NextRequest) {
   const category = categoryForAssetType(assetType)
   const priority: PriorityLevel = is_emergency ? 'urgent' : 'medium'
 
-  // Idempotency — the Dexie SyncEngine outbox may retry this POST after a
-  // connectivity blip. Treat a matching report submitted in the last 10
-  // minutes as already processed instead of creating a duplicate work order.
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString()
-  const { data: existing } = await supabase
-    .from('work_orders')
-    .select('id')
-    .eq('property_id', property_id)
-    .eq('source', 'crew_flag')
-    .eq('reported_by_crew_member_id', crew.id)
-    .eq('title', title)
-    .gte('created_at', tenMinutesAgo)
-    .maybeSingle()
-
-  if (existing) return NextResponse.json({ success: true })
-
   const { error } = await supabase.from('work_orders').insert({
     org_id:                     property.org_id,
     property_id,
@@ -83,9 +69,15 @@ export async function POST(request: NextRequest) {
     status: 'pending',
     source: 'crew_flag',
     reported_by_crew_member_id: crew.id,
+    client_report_id:           report_id,
   })
 
   if (error) {
+    // 23505 = unique_violation on work_orders_client_report_id_unique — the
+    // Dexie outbox retried this exact report (e.g. after a dropped
+    // response, however long that retry was delayed). Same report_id means
+    // it already landed; treat as success rather than a duplicate.
+    if (error.code === '23505') return NextResponse.json({ success: true, duplicate: true })
     console.error('[CrewWorkOrderReport]', error)
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
   }

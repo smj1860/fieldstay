@@ -33,7 +33,8 @@ export default async function WorkOrderPage({ params }: Props) {
         vendor_dispatch_email,
         created_at, updated_at,
         properties ( name, address, city, state, access_instructions ),
-        vendors ( id, name, specialty, phone )
+        vendors ( id, name, specialty, phone ),
+        reported_by_crew:reported_by_crew_member_id ( name )
       `)
       .eq('id', id)
       .eq('org_id', membership.org_id)
@@ -68,8 +69,9 @@ export default async function WorkOrderPage({ params }: Props) {
 
   if (!wo) notFound()
 
-  const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
-  const vendor   = Array.isArray(wo.vendors)    ? wo.vendors[0]    : wo.vendors
+  const property        = Array.isArray(wo.properties)        ? wo.properties[0]        : wo.properties
+  const vendor           = Array.isArray(wo.vendors)           ? wo.vendors[0]           : wo.vendors
+  const reportedByCrew   = Array.isArray(wo.reported_by_crew)  ? wo.reported_by_crew[0]  : wo.reported_by_crew
 
   const workOrderData: WorkOrderDetailData = {
     id:                     wo.id,
@@ -96,6 +98,7 @@ export default async function WorkOrderPage({ params }: Props) {
     completion_verified_at: wo.completion_verified_at,
     vendor_rating:          wo.vendor_rating,
     vendor_rating_notes:    wo.vendor_rating_notes,
+    reported_by_crew_name:  reportedByCrew?.name ?? null,
     created_at:             wo.created_at,
     properties: {
       name:                property?.name ?? '',

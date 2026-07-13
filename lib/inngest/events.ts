@@ -492,6 +492,18 @@ export type FieldStayEvents = {
     }
   }
 
+  // Fired when a crew member attaches a data-plate photo during asset
+  // discovery — runs the Claude vision scan in the background instead of
+  // blocking the crew's device on a synchronous ~60s call.
+  'asset/scan_requested': {
+    data: {
+      org_id:       string
+      asset_id:     string
+      storage_path: string
+      media_type:   string
+    }
+  }
+
   // ----------------------------------------------------------
   // Uplisting Integration
   // ----------------------------------------------------------

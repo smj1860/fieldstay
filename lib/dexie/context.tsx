@@ -408,8 +408,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     async function computeAssignedPropertyIds(): Promise<string[]> {
       const db = getDexieDb(userId!)
       const [turnoverRows, woRows] = await Promise.all([
-        db.turnovers.toArray(),
-        db.crew_work_orders.toArray(),
+        db.turnovers.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').toArray(),
+        db.crew_work_orders.filter((wo) => wo.status !== 'completed' && wo.status !== 'cancelled').toArray(),
       ])
       const ids = new Set<string>([
         ...turnoverRows.map((t) => t.property_id),
@@ -457,12 +457,18 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         && propertyIds.every((id) => subscribedAssetPropertyIds.includes(id))
       if (sameSet) return
 
+      subscribedAssetPropertyIds = propertyIds
+      await syncPropertyAssets(propertyIds)
+      if (myGeneration !== assetsRefreshGeneration) return // superseded while syncing
+
+      // Only remove the old channel once we're committed to installing this
+      // call's replacement — removing it earlier (before the second await)
+      // let an older, still-in-flight call win the race and orphan whichever
+      // channel a newer call had already created.
       if (assetsChannel) {
         supabase.removeChannel(assetsChannel)
         assetsChannel = null
       }
-      subscribedAssetPropertyIds = propertyIds
-      await syncPropertyAssets(propertyIds)
       if (!propertyIds.length) return
 
       assetsChannel = supabase

@@ -225,6 +225,7 @@ export async function submitWorkOrderReport(
   const id = crypto.randomUUID()
 
   await enqueueMutation(userId, 'work_order_reports', id, 'PUT', {
+    report_id:    id,
     property_id:  report.propertyId,
     asset_id:     report.assetId,
     title:        report.title,
