@@ -5,22 +5,27 @@ import { useParams, useRouter }            from 'next/navigation'
 import { useState, useRef, useEffect }     from 'react'
 import {
   ArrowLeft, Camera, CheckCircle2, Circle,
-  Loader2, ImageIcon, AlertCircle, AlertTriangle,
+  Loader2, ImageIcon, AlertCircle,
   Minus, Plus, MapPin, CheckSquare, ChevronRight, Package,
   StickyNote, Check,
 } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { createClient }       from '@/lib/supabase/client'
 import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import {
-  updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitIssueReport,
+  updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitTurnoverSummaryNotes,
   confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted, retryFailedMutation,
 } from '@/lib/dexie/helpers'
-import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow } from '@/lib/dexie/schema'
+import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow, PropertyAssetRow } from '@/lib/dexie/schema'
+import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
+import type { AssetType } from '@/types/database'
+
+function isAssetDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
+  return asset.is_na === 1 || asset.make !== '' || asset.model !== '' || asset.photo_url !== ''
+}
 
 export default function CrewTurnoverPage() {
   const { id }   = useParams<{ id: string }>()
@@ -105,6 +110,16 @@ export default function CrewTurnoverPage() {
   const completedCount = items?.filter((i) => i.is_completed).length ?? 0
   const totalCount     = items?.length ?? 0
   const pendingPhotos  = items?.filter((i) => i.requires_photo && !i.photo_storage_path) ?? []
+
+  const propertyAssets = useLiveQuery(
+    () => turnover
+      ? db.property_assets.where('property_id').equals(turnover.property_id).toArray()
+      : [],
+    [turnover?.property_id]
+  ) ?? []
+  const missingAssetTypes = missingAssetTypesFromDiscoveredSet(
+    new Set(propertyAssets.filter(isAssetDiscovered).map((a) => a.asset_type as AssetType))
+  )
 
   const sections = (items ?? []).reduce<Record<string, ChecklistItem[]>>(
     (acc, item) => {
@@ -239,7 +254,15 @@ export default function CrewTurnoverPage() {
 
   const toggleChecklistConfirm = async () => {
     if (!instance || !crewMemberId) return
-    await confirmChecklistComplete(userId, instance.id, crewMemberId, !instance.completed_at)
+    const confirming = !instance.completed_at
+    if (confirming && missingAssetTypes.length > 0) {
+      const ok = confirm(
+        `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
+        `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')}). Confirm checklist complete anyway?`
+      )
+      if (!ok) return
+    }
+    await confirmChecklistComplete(userId, instance.id, crewMemberId, confirming)
   }
 
   const toggleInventoryConfirm = async () => {
@@ -276,10 +299,18 @@ export default function CrewTurnoverPage() {
   }
 
   const markComplete = async () => {
+    const warnings: string[] = []
     if (pendingPhotos.length > 0) {
-      const ok = confirm(
-        `${pendingPhotos.length} item${pendingPhotos.length !== 1 ? 's' : ''} still need photos. Mark complete anyway?`
+      warnings.push(`${pendingPhotos.length} item${pendingPhotos.length !== 1 ? 's' : ''} still need photos`)
+    }
+    if (missingAssetTypes.length > 0) {
+      warnings.push(
+        `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
+        `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')})`
       )
+    }
+    if (warnings.length > 0) {
+      const ok = confirm(`${warnings.join('. ')}. Mark complete anyway?`)
       if (!ok) return
     }
     setCompleting(true)
@@ -462,15 +493,15 @@ export default function CrewTurnoverPage() {
               : 'Mark as Complete'}
           </Button>
 
-          {/* Report an Issue — secondary, at the bottom */}
+          {/* Turnover Summary & Additional Notes — secondary, at the bottom */}
           <button
             onClick={() => setShowFlagModal(true)}
             className="w-full py-3 rounded-xl text-sm font-medium flex items-center
                        justify-center gap-2 border border-amber-300 bg-amber-50
                        text-amber-700 hover:bg-amber-100 transition-colors"
           >
-            <AlertTriangle className="w-4 h-4" />
-            Report an Issue
+            <StickyNote className="w-4 h-4" />
+            Turnover Summary & Additional Notes
           </button>
         </div>
       )}
@@ -900,10 +931,11 @@ export default function CrewTurnoverPage() {
       </div>
       )}
 
-      {/* Flag modal — always available regardless of view */}
+      {/* Turnover summary notes modal — always available regardless of view */}
       {showFlagModal && (
-        <IssueReportModal
-          turnover={turnover}
+        <TurnoverSummaryModal
+          turnoverId={turnover.id}
+          initialNotes={turnover.completion_notes}
           userId={userId}
           onClose={() => setShowFlagModal(false)}
         />
@@ -912,39 +944,32 @@ export default function CrewTurnoverPage() {
   )
 }
 
-// ── Issue Report Modal ────────────────────────────────────────────────────────
+// ── Turnover Summary & Additional Notes Modal ─────────────────────────────────
 
-function IssueReportModal({
-  turnover,
+function TurnoverSummaryModal({
+  turnoverId,
+  initialNotes,
   userId,
   onClose,
 }: {
-  turnover: { id: string; org_id: string; property_id: string }
-  userId:   string
-  onClose:  () => void
+  turnoverId:   string
+  initialNotes: string
+  userId:       string
+  onClose:      () => void
 }) {
-  const [title,      setTitle]      = useState('')
-  const [details,    setDetails]    = useState('')
-  const [priority,   setPriority]   = useState<'medium' | 'high' | 'urgent'>('medium')
+  const [notes,      setNotes]      = useState(initialNotes)
   const [submitting, setSubmitting] = useState(false)
   const [success,    setSuccess]    = useState(false)
   const [error,      setError]      = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!title.trim()) { setError('Please describe the issue.'); return }
+    if (!notes.trim()) { setError('Please add a note for the property manager.'); return }
     setSubmitting(true)
     setError(null)
 
     try {
-      await submitIssueReport(userId, {
-        turnoverId:  turnover.id,
-        orgId:       turnover.org_id,
-        propertyId:  turnover.property_id,
-        title:       title.trim(),
-        description: details.trim() || null,
-        priority,
-      })
+      await submitTurnoverSummaryNotes(userId, turnoverId, notes.trim())
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message)
@@ -954,13 +979,13 @@ function IssueReportModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title={success ? 'Issue Reported' : 'Report an Issue'} maxWidthClassName="max-w-sm" mobileSheet>
+    <Dialog open onClose={onClose} title={success ? 'Notes Saved' : 'Turnover Summary & Additional Notes'} maxWidthClassName="max-w-sm" mobileSheet>
       {success ? (
         <div className="text-center py-4">
           <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
           <p className="text-sm text-muted-themed mb-4">
-            Saved. The property manager will be notified and a work order created as
-            soon as your phone has a connection.
+            Saved. The property manager will see this on the turnover as soon as
+            your phone has a connection.
           </p>
           <Button onClick={onClose} className="w-full">Done</Button>
         </div>
@@ -974,46 +999,15 @@ function IssueReportModal({
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="label text-primary-themed">What&apos;s the issue? *</label>
-              <Input
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Leaking faucet in master bath"
+              <label className="label text-primary-themed">Anything the PM should know? *</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
+                className="input resize-none"
+                placeholder="A summary of the turnover, anything unusual, or additional notes for the property manager…"
                 required
               />
-            </div>
-            <div>
-              <label className="label text-primary-themed">Details (optional)</label>
-              <textarea
-                value={details}
-                onChange={(e) => setDetails(e.target.value)}
-                rows={2}
-                className="input resize-none"
-                placeholder="Location, severity, anything else the PM should know…"
-              />
-            </div>
-            <div>
-              <label className="label text-primary-themed">Urgency</label>
-              <div className="flex gap-2">
-                {(['medium', 'high', 'urgent'] as const).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setPriority(p)}
-                    className={cn(
-                      'flex-1 py-2 rounded-lg text-sm font-medium border transition-colors capitalize',
-                      priority === p
-                        ? p === 'urgent' ? 'bg-red-500 text-white border-red-500'
-                          : p === 'high' ? 'bg-amber-500 text-white border-amber-500'
-                          : 'bg-blue-500 text-white border-blue-500'
-                        : 'bg-card-themed text-secondary-themed border-themed hover:border-themed'
-                    )}
-                  >
-                    {p}
-                  </button>
-                ))}
-              </div>
             </div>
             <button
               type="submit"
@@ -1021,8 +1015,8 @@ function IssueReportModal({
               className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {submitting
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</>
-                : <><AlertTriangle className="w-4 h-4" /> Submit Report</>
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+                : <><StickyNote className="w-4 h-4" /> Save Notes</>
               }
             </button>
           </form>

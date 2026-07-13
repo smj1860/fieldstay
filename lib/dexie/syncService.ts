@@ -125,6 +125,7 @@ export class SyncEngine {
       if ('inventory_started_at' in payload) fieldUpdate.inventory_started_at = payload.inventory_started_at
       if ('inventory_confirmed_complete_at' in payload) fieldUpdate.inventory_confirmed_complete_at = payload.inventory_confirmed_complete_at
       if ('inventory_confirmed_by_crew_id' in payload) fieldUpdate.inventory_confirmed_by_crew_id = payload.inventory_confirmed_by_crew_id || null
+      if ('completion_notes' in payload) fieldUpdate.completion_notes = payload.completion_notes
 
       if (Object.keys(fieldUpdate).length > 0) {
         const { error } = await this.supabase
@@ -158,18 +159,18 @@ export class SyncEngine {
       return
     }
 
-    if (table === 'turnover_issue_reports' && op === 'PUT') {
-      const res = await fetch('/api/crew/issue-reports', {
+    if (table === 'work_order_reports' && op === 'PUT') {
+      const res = await fetch('/api/crew/work-order-reports', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          turnover_id: payload.turnover_id,
-          title:       payload.title,
-          description: payload.description,
-          priority:    payload.priority,
+          property_id:  payload.property_id,
+          asset_id:     payload.asset_id,
+          title:        payload.title,
+          is_emergency: payload.is_emergency,
         }),
       })
-      if (!res.ok) throw new Error(`Failed to submit issue report ${targetId}`)
+      if (!res.ok) throw new Error(`Failed to place work order ${targetId}`)
       return
     }
 

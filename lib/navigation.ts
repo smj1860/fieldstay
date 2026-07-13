@@ -40,7 +40,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   // ── Management tier — matches today's exact order ────────────
   { id: 'properties',       href: '/properties',       label: 'Properties',       icon: Building2,   roles: ['admin', 'manager', 'viewer'], tier: 'management', category: 'Portfolio' },
   { id: 'reviews',          href: '/reviews',          label: 'Reviews',          icon: Star,         roles: ['admin', 'manager'],           tier: 'management', category: 'Guest & Comms', condition: 'repuguard' },
-  { id: 'assets',           href: '/assets',           label: 'Asset Health',     icon: ShieldCheck, roles: ['admin', 'manager'],           tier: 'management', category: 'Portfolio' },
+  { id: 'assets',           href: '/assets',           label: 'Assets',           icon: ShieldCheck, roles: ['admin', 'manager'],           tier: 'management', category: 'Portfolio' },
   { id: 'capital-planning', href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin', 'manager'],           tier: 'management', category: 'Portfolio', keywords: ['capex', 'budget'] },
   { id: 'crew-manage',      href: '/crew-manage',      label: 'Crew',             icon: Users2,      roles: ['admin', 'manager'],           tier: 'management', category: 'Team & Vendors' },
   { id: 'messages',         href: '/messages',         label: 'Messages',         icon: MessageSquare, roles: ['admin', 'manager'],         tier: 'management', category: 'Guest & Comms' },

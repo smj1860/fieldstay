@@ -367,7 +367,7 @@ export async function createAsset(
 
     await fireManualLookup(membership.org_id, asset_type, make, model)
 
-    revalidatePath(`/properties/${propertyId}`)
+    revalidatePath('/assets')
     return { success: true }
   } catch (err) {
     console.error('[createAsset]', err)
@@ -430,7 +430,7 @@ export async function updateAsset(
 
     await fireManualLookup(membership.org_id, updated.asset_type, make, model)
 
-    revalidatePath(`/properties/${propertyId}`)
+    revalidatePath('/assets')
     return { success: true }
   } catch (err) {
     console.error('[updateAsset]', err)
@@ -438,7 +438,7 @@ export async function updateAsset(
   }
 }
 
-export async function deactivateAsset(assetId: string, propertyId: string): Promise<{ error?: string }> {
+export async function deactivateAsset(assetId: string): Promise<{ error?: string }> {
   try {
     const { supabase, membership } = await requireOrgMember()
     await supabase
@@ -446,7 +446,7 @@ export async function deactivateAsset(assetId: string, propertyId: string): Prom
       .update({ is_active: false })
       .eq('id', assetId)
       .eq('org_id', membership.org_id)
-    revalidatePath(`/properties/${propertyId}`)
+    revalidatePath('/assets')
     return {}
   } catch (err) {
     console.error('[deactivateAsset]', err)
@@ -542,7 +542,7 @@ export async function bulkImportAssets(
       console.error('[bulkImportAssets] manual lookup dispatch failed', err)
     }
 
-    revalidatePath(`/properties/${propertyId}`)
+    revalidatePath('/assets')
     return { imported: rows.length }
   } catch (err) {
     console.error('[bulkImportAssets]', err)

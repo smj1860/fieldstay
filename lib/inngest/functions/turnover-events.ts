@@ -4,6 +4,8 @@ import { resend, FROM } from '@/lib/resend/client'
 import { getPmEmail } from '@/lib/inngest/helpers'
 import { formatDateTime } from '@/lib/utils'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
+import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
+import type { AssetType } from '@/types/database'
 
 // Durations beyond this are treated as tracking errors (e.g. a checklist item
 // completed a day late) and excluded from the auto-assignment learning loop.
@@ -193,6 +195,47 @@ export const handleTurnoverCompleted = inngest.createFunction(
           ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers/${turnover_id}`,
         }),
       }, { idempotencyKey: `turnover-completed-pm-${turnover_id}` })
+    })
+
+    await step.run('notify-pm-of-open-mandatory-items', async () => {
+      const supabase = createServiceClient()
+
+      const { data: assets } = await supabase
+        .from('property_assets')
+        .select('asset_type, make, model, photo_url, is_na')
+        .eq('property_id', property_id)
+        .eq('is_active', true)
+
+      const discoveredTypes = new Set(
+        (assets ?? [])
+          .filter((a) => a.is_na === true || a.make !== null || a.model !== null || a.photo_url !== null)
+          .map((a) => a.asset_type as AssetType)
+      )
+      const missingTypes = missingAssetTypesFromDiscoveredSet(discoveredTypes)
+
+      if (!missingTypes.length) return { skipped: 'none_missing' }
+
+      const [{ data: property }, pmEmail] = await Promise.all([
+        supabase.from('properties').select('name').eq('id', property_id).single(),
+        getPmEmail(supabase, org_id),
+      ])
+
+      if (!pmEmail) return { skipped: 'no_pm_email' }
+
+      await resend.emails.send({
+        from:    FROM,
+        to:      pmEmail,
+        subject: `⚠️ ${missingTypes.length} asset${missingTypes.length !== 1 ? 's' : ''} still need discovery — ${property?.name}`,
+        html: await renderPmAlert({
+          heading:  'Asset discovery still incomplete',
+          body:     `The crew marked this turnover complete, but ${missingTypes.length} required asset${missingTypes.length !== 1 ? 's haven\'t' : ' hasn\'t'} been discovered yet at ${property?.name}.`,
+          details:  missingTypes.map((t) => ({ label: assetTypeDisplayName(t), value: 'Not yet captured' })),
+          ctaLabel: 'View Property Assets →',
+          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/assets`,
+        }),
+      }, { idempotencyKey: `turnover-completed-mandatory-open-${turnover_id}` })
+
+      return { notified: true, missing_count: missingTypes.length }
     })
 
     await step.run('record-completion-milestones', async () => {

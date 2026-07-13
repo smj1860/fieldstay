@@ -15,6 +15,7 @@ import {
   type MessageRow,
   type CrewWorkOrderRow,
   type CrewAvailabilityRow,
+  type PropertyAssetRow,
 } from './schema'
 
 interface DexieContextValue {
@@ -123,7 +124,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .from('turnovers')
         .select(
           'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
-          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id'
+          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes'
         )
         .in('id', turnoverIds)
       if (tErr) {
@@ -134,6 +135,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         const normalizedTurnovers = turnovers.map((t: Record<string, unknown>) => ({
           ...t,
           inventory_confirmed_by_crew_id: t.inventory_confirmed_by_crew_id ?? '',
+          completion_notes:               t.completion_notes ?? '',
         }))
         await db.turnovers.bulkPut(normalizedTurnovers as TurnoverRow[])
       }
@@ -239,7 +241,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .from('turnovers')
         .select(
           'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
-          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id'
+          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes'
         )
         .in('id', turnoverIds)
       if (error) {
@@ -250,6 +252,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         const normalized = turnovers.map((t: Record<string, unknown>) => ({
           ...t,
           inventory_confirmed_by_crew_id: t.inventory_confirmed_by_crew_id ?? '',
+          completion_notes:               t.completion_notes ?? '',
         }))
         await db.turnovers.bulkPut(normalized as TurnoverRow[])
       }
@@ -398,10 +401,87 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       }
     }
 
+    // Properties this crew member currently has a stake in — same derivation
+    // as assignedPropertyIds in app/crew/page.tsx (active turnovers ∪
+    // assigned work orders) — backs the Assets & Maintenance page's
+    // per-property missing-items list.
+    async function computeAssignedPropertyIds(): Promise<string[]> {
+      const db = getDexieDb(userId!)
+      const [turnoverRows, woRows] = await Promise.all([
+        db.turnovers.toArray(),
+        db.crew_work_orders.toArray(),
+      ])
+      const ids = new Set<string>([
+        ...turnoverRows.map((t) => t.property_id),
+        ...woRows.map((w) => w.property_id),
+      ])
+      return [...ids]
+    }
+
+    async function syncPropertyAssets(propertyIds: string[]): Promise<void> {
+      if (!propertyIds.length) return
+      const db = getDexieDb(userId!)
+
+      const { data: assets, error } = await supabase
+        .from('property_assets')
+        .select('id, org_id, property_id, asset_type, make, model, is_na, photo_url')
+        .in('property_id', propertyIds)
+        .eq('is_active', true)
+      if (error) {
+        console.error('[DexieProvider] property_assets fetch failed:', error)
+        return
+      }
+
+      if (assets?.length) {
+        const normalized = assets.map((a: Record<string, unknown>) => ({
+          ...a,
+          make:      a.make ?? '',
+          model:     a.model ?? '',
+          is_na:     a.is_na ? 1 : 0,
+          photo_url: a.photo_url ?? '',
+        }))
+        await db.property_assets.bulkPut(normalized as PropertyAssetRow[])
+      }
+    }
+
+    // Refreshes the Realtime subscription covering property_assets changes to
+    // exactly this crew member's currently-assigned properties — mirrors
+    // refreshChecklistSubscription's generation-token guard against
+    // out-of-order concurrent calls.
+    async function refreshAssetsSubscription(): Promise<void> {
+      const myGeneration = ++assetsRefreshGeneration
+      const propertyIds = await computeAssignedPropertyIds()
+      if (myGeneration !== assetsRefreshGeneration) return // superseded
+
+      const sameSet = propertyIds.length === subscribedAssetPropertyIds.length
+        && propertyIds.every((id) => subscribedAssetPropertyIds.includes(id))
+      if (sameSet) return
+
+      if (assetsChannel) {
+        supabase.removeChannel(assetsChannel)
+        assetsChannel = null
+      }
+      subscribedAssetPropertyIds = propertyIds
+      await syncPropertyAssets(propertyIds)
+      if (!propertyIds.length) return
+
+      assetsChannel = supabase
+        .channel(`property-assets-${userId}`)
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'property_assets', filter: `property_id=in.(${propertyIds.join(',')})` },
+          () => { void syncPropertyAssets(subscribedAssetPropertyIds) }
+        )
+        .subscribe()
+    }
+
     let channel: ReturnType<typeof supabase.channel> | null = null
     let checklistChannel: ReturnType<typeof supabase.channel> | null = null
+    let assetsChannel: ReturnType<typeof supabase.channel> | null = null
     let subscribedTurnoverIds: string[] = []
+    let subscribedAssetPropertyIds: string[] = []
     let checklistRefreshGeneration = 0
+    let assetsRefreshGeneration = 0
 
     async function run() {
       const { data: crewMember } = await supabase
@@ -424,6 +504,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (cancelled) return
 
       await refreshChecklistSubscription(crewMember.id)
+      await refreshAssetsSubscription()
 
       channel = supabase
         .channel(`turnover-assignments-${crewMember.id}`)
@@ -433,12 +514,17 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
           async () => {
             await syncAssignedTurnovers(crewMember.id, false)
             if (!cancelled) await refreshChecklistSubscription(crewMember.id)
+            if (!cancelled) await refreshAssetsSubscription()
           }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'work_orders', filter: `assigned_crew_member_id=eq.${crewMember.id}` },
-          () => { void syncWorkOrders(crewMember.id) }
+          () => {
+            void syncWorkOrders(crewMember.id).then(() => {
+              if (!cancelled) return refreshAssetsSubscription()
+            })
+          }
         )
         .subscribe()
     }
@@ -449,6 +535,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       cancelled = true
       if (channel) supabase.removeChannel(channel)
       if (checklistChannel) supabase.removeChannel(checklistChannel)
+      if (assetsChannel) supabase.removeChannel(assetsChannel)
     }
   }, [userId])
 

@@ -1258,7 +1258,7 @@ export function InventoryManager({
 }) {
   const router = useRouter()
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<InventoryTab>('portfolio')
+  const [activeTab, setActiveTab] = useState<InventoryTab>('property')
   const [cartPending, startCartTransition] = useTransition()
   const [cartTriggered, setCartTriggered]  = useState(false)
 

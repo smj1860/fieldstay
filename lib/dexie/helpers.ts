@@ -192,38 +192,43 @@ export async function updateInventoryQuantity(
   })
 }
 
-/** Submits a crew-reported issue: written insert-only, then queued via the outbox. */
-export async function submitIssueReport(
+/**
+ * Saves a crew member's free-text turnover summary/notes for the PM —
+ * written straight to turnovers.completion_notes (already rendered on the
+ * PM's turnover detail page), not a work order.
+ */
+export async function submitTurnoverSummaryNotes(
   userId: string,
-  report: {
-    turnoverId: string
-    orgId:      string
-    propertyId: string
-    title:      string
-    description: string | null
-    priority:   string
-  },
+  turnoverId: string,
+  notes: string,
 ): Promise<void> {
   const db = getDexieDb(userId)
+  await db.turnovers.update(turnoverId, { completion_notes: notes })
+  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', { completion_notes: notes })
+}
+
+/**
+ * Places a work order from the crew Assets & Maintenance page: written
+ * insert-only, then queued via the outbox. The server derives category from
+ * the selected asset and priority from isEmergency — the crew form never
+ * asks for either directly.
+ */
+export async function submitWorkOrderReport(
+  userId: string,
+  report: {
+    propertyId:  string
+    assetId:     string | null
+    title:       string
+    isEmergency: boolean
+  },
+): Promise<void> {
   const id = crypto.randomUUID()
 
-  await db.turnover_issue_reports.add({
-    id,
-    turnover_id: report.turnoverId,
-    org_id:      report.orgId,
-    property_id: report.propertyId,
-    title:       report.title,
-    description: report.description ?? '',
-    priority:    report.priority,
-  })
-
-  await enqueueMutation(userId, 'turnover_issue_reports', id, 'PUT', {
-    turnover_id: report.turnoverId,
-    org_id:      report.orgId,
-    property_id: report.propertyId,
-    title:       report.title,
-    description: report.description,
-    priority:    report.priority,
+  await enqueueMutation(userId, 'work_order_reports', id, 'PUT', {
+    property_id:  report.propertyId,
+    asset_id:     report.assetId,
+    title:        report.title,
+    is_emergency: report.isEmergency,
   })
 }
 
