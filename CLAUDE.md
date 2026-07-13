@@ -569,11 +569,27 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
   hand-rolled tab bar on the Assets page shipped without a focus state simply
   because nothing forced consistency with the one other tab bar in the app.
   Before building a new instance of a common pattern (tabs, dialogs, badges,
-  status dots), check `components/ui/` first.
-  - **Tab bars** → `components/ui/Tabs.tsx` (`role="tablist"`/`role="tab"`,
-    `aria-selected`, built-in focus ring). Don't hand-roll a new tab bar's
-    markup/styling — extend `Tabs` if it's missing something. Migrating an
-    *existing* hand-rolled tab bar to it is a judgment call, not automatic —
+  status dots), check `components/ui/` first. `scripts/check-raw-ui-classes.sh`
+  (run via `npm run check:ui-classes`, part of the standard verification pass)
+  greps for hand-written `btn-*`/`badge-*`/`card` class strings outside this
+  directory specifically to catch call sites that bypassed these primitives —
+  a hand-rolled equivalent that reaches the same visual result via raw
+  Tailwind utilities instead will slip past that check, so reuse is the real
+  guardrail, not just the lint step.
+
+  | Component | Use for | Notes |
+  |---|---|---|
+  | `Button` | Any clickable button | `variant`: `primary`\|`cta`\|`secondary`\|`danger`\|`ghost`. For an element that must render button *styling* but can't be a `<Button>` itself (a `<Link>` styled as a button, a disabled-look `<span>`) — call `buttonVariantClass(variant)`, never hand-write `"btn-primary"` etc. as a literal string |
+  | `Card` | Any card-style container | Thin wrapper around the `.card` class |
+  | `Badge` | Small status/count pill | `tone`: `green`\|`amber`\|`red`\|`blue`\|`gold`\|`slate` |
+  | `Dialog` | Any modal | Built-in focus trap, Escape-to-close, body-scroll lock, portal render, mobile bottom-sheet mode via `mobileSheet`. Don't hand-roll a new modal's overlay/focus-trap logic |
+  | `Input` | Any text input | Plain `forwardRef` wrapper — spreads all native input props |
+  | `Checkbox` | Any checkbox | Gold accent color + focus ring baked in — don't hand-roll a bare `<input type="checkbox">` |
+  | `StatusDot` | Colored status indicator dot + screen-reader label | `status` is an internal lookup key (`good`\|`warning`\|`critical`\|`attention`\|`offline`\|`unknown`), not display text — see the note below on not renaming these |
+  | `Tabs` | Any tab bar | `role="tablist"`/`role="tab"`, `aria-selected`, built-in focus ring |
+
+  - **Migrating an *existing* hand-rolled tab bar** onto `Tabs` is a judgment
+    call, not automatic —
     a tab bar with its own established, intentionally different visual
     treatment (e.g. `settings-tabs.tsx`'s gold-underline-with-primary-text
     style vs. `Tabs`'s gold-underline-with-gold-text) is a design decision,
