@@ -164,6 +164,7 @@ export class SyncEngine {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          report_id:    payload.report_id ?? targetId,
           property_id:  payload.property_id,
           asset_id:     payload.asset_id,
           title:        payload.title,

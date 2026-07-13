@@ -14,6 +14,24 @@ import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { scanLimiter } from '@/lib/rate-limit'
 
+const PHOTO_BUCKET = 'turnover-photos'
+
+// The client sends the storage_path it uploaded to, but that's untrusted
+// input — without checking it, a caller could point the scan at any object
+// in this shared bucket (another org's checklist/section photo included),
+// which the Inngest function then downloads with a service-role client
+// that bypasses RLS entirely. Deriving the expected path from the asset's
+// own already-org-verified photo_url and requiring an exact match closes
+// that off — the caller can only ever trigger a scan of the photo actually
+// attached to the asset they're authorized to see.
+function expectedStoragePath(photoUrl: string | null): string | null {
+  if (!photoUrl) return null
+  const marker = `/object/public/${PHOTO_BUCKET}/`
+  const idx = photoUrl.indexOf(marker)
+  if (idx === -1) return null
+  return decodeURIComponent(photoUrl.slice(idx + marker.length))
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null)
 
@@ -46,12 +64,22 @@ export async function POST(request: NextRequest) {
 
   const { data: asset } = await supabase
     .from('property_assets')
-    .select('id')
+    .select('id, photo_url, scan_status')
     .eq('id', asset_id)
     .eq('org_id', orgId)
     .single()
 
   if (!asset) return NextResponse.json({ error: 'Asset not found' }, { status: 404 })
+
+  if (storage_path !== expectedStoragePath(asset.photo_url)) {
+    return NextResponse.json({ error: 'Storage path does not match this asset\'s photo' }, { status: 400 })
+  }
+
+  // A scan is already in flight for this asset — skip rather than burn a
+  // second Claude vision call on a double-tap or retried request.
+  if (asset.scan_status === 'pending' || asset.scan_status === 'processing') {
+    return NextResponse.json({ success: true, alreadyQueued: true })
+  }
 
   await inngest.send({
     name: 'asset/scan_requested',

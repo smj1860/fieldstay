@@ -52,6 +52,7 @@ export interface WorkOrderDetailData {
   invoiceId?:              string | null
   vendor_acknowledged_at:  string | null
   completion_verified_at:  string | null
+  reported_by_crew_name?:  string | null
   created_at:              string
   // Relations
   properties: {
@@ -278,6 +279,11 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
               Issued {fmtDate(wo.created_at)}
             </p>
+            {wo.reported_by_crew_name && (
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Reported by {wo.reported_by_crew_name}
+              </p>
+            )}
           </div>
 
           {/* Send to Vendor button */}

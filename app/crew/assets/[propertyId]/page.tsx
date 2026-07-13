@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { ArrowLeft, Camera, CheckCircle2, Loader2, Wrench, ClipboardCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { submitWorkOrderReport } from '@/lib/dexie/helpers'
-import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discovery/config'
+import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -39,7 +39,7 @@ export default function CrewPropertyAssetsPage() {
   ) ?? []
 
   const discoveredTypes = new Set(assets.filter(isDiscovered).map((a) => a.asset_type as AssetType))
-  const missingTypes = REQUIRED_ASSET_TYPES.filter((t) => !discoveredTypes.has(t))
+  const missingTypes = missingAssetTypesFromDiscoveredSet(discoveredTypes)
 
   if (!property) {
     return (
@@ -174,7 +174,15 @@ function DiscoveryCaptureModal({
       .select('id, org_id, property_id, asset_type, make, model, is_na, photo_url')
       .single()
 
-    if (insertError) throw new Error(insertError.message)
+    if (insertError) {
+      // 23505 = unique_violation on property_assets_property_active_type_idx
+      // — another crew member captured this same asset type moments ago.
+      // Surface a friendly message rather than the raw Postgres error.
+      if (insertError.code === '23505') {
+        throw new Error('Someone else just captured this asset — refresh to see their entry.')
+      }
+      throw new Error(insertError.message)
+    }
     if (data) {
       await db.property_assets.put({
         ...data,

@@ -64,7 +64,7 @@ export const assetDataPlateScan = inngest.createFunction(
 
       const { data: asset } = await supabase
         .from('property_assets')
-        .select('make, model, serial_number, manufacture_date, notes')
+        .select('make, model, serial_number, manufacture_date, notes, scan_status')
         .eq('id', asset_id)
         .eq('org_id', org_id)
         .single()
@@ -72,8 +72,13 @@ export const assetDataPlateScan = inngest.createFunction(
       if (!asset) return
 
       const found = Boolean(result.make || result.model || result.serial_number)
-      const updates: Record<string, unknown> = {
-        scan_status: found ? 'completed' : 'failed',
+      const updates: Record<string, unknown> = {}
+
+      // Never downgrade an already-completed scan — a duplicate/retried run
+      // disagreeing on `found` (LLM output isn't perfectly deterministic)
+      // shouldn't flip a good result back to 'failed'.
+      if (asset.scan_status !== 'completed') {
+        updates.scan_status = found ? 'completed' : 'failed'
       }
 
       // Only fill in fields the asset doesn't already have — never
@@ -84,7 +89,9 @@ export const assetDataPlateScan = inngest.createFunction(
       if (!asset.manufacture_date && result.manufacture_year) {
         updates.manufacture_date = `${result.manufacture_year}-01-01`
       }
-      if (result.capacity) {
+      // Guard against appending the same capacity line twice on a retried
+      // or duplicate run.
+      if (result.capacity && !asset.notes?.includes(`Capacity: ${result.capacity}`)) {
         updates.notes = asset.notes ? `${asset.notes}\nCapacity: ${result.capacity}` : `Capacity: ${result.capacity}`
       }
 

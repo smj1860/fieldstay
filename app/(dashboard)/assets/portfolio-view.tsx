@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { AlertTriangle } from 'lucide-react'
 import { healthLabel, healthColor, healthBgStyle, healthDot } from '@/lib/assets/health-score'
-import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discovery/config'
+import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -18,11 +18,11 @@ function isDiscovered(asset: Pick<PropertyAsset, 'make' | 'model' | 'is_na' | 'p
 function missingTypesForProperty(propertyId: string, assets: PropertyAsset[]): AssetType[] {
   const discoveredTypes = new Set(
     assets
-      .filter((a) => a.property_id === propertyId && REQUIRED_ASSET_TYPES.includes(a.asset_type as AssetType))
+      .filter((a) => a.property_id === propertyId)
       .filter(isDiscovered)
       .map((a) => a.asset_type as AssetType)
   )
-  return REQUIRED_ASSET_TYPES.filter((t) => !discoveredTypes.has(t))
+  return missingAssetTypesFromDiscoveredSet(discoveredTypes)
 }
 
 function assetAgeYears(asset: Pick<PropertyAsset, 'installation_date'>): number | null {

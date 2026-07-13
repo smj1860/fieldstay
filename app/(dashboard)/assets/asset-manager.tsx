@@ -11,7 +11,7 @@ import {
   type AssetActionState, type CsvAssetRow,
 } from '../properties/actions'
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
-import { REQUIRED_ASSET_TYPES } from '@/lib/asset-discovery/config'
+import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { PortfolioAssetView } from './portfolio-view'
 import { createClient } from '@/lib/supabase/client'
 import { Dialog } from '@/components/ui/Dialog'
@@ -827,11 +827,11 @@ function isDiscovered(asset: Pick<PropertyAsset, 'make' | 'model' | 'is_na' | 'p
 function missingTypesCount(propertyId: string, assets: PropertyAsset[]): number {
   const discoveredTypes = new Set(
     assets
-      .filter((a) => a.property_id === propertyId && REQUIRED_ASSET_TYPES.includes(a.asset_type as AssetType))
+      .filter((a) => a.property_id === propertyId)
       .filter(isDiscovered)
       .map((a) => a.asset_type)
   )
-  return REQUIRED_ASSET_TYPES.filter((t) => !discoveredTypes.has(t)).length
+  return missingAssetTypesFromDiscoveredSet(discoveredTypes).length
 }
 
 function PropertyAssetCard({

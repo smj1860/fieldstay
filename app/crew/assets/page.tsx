@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useDexieDb } from '@/lib/dexie/context'
 import Link from 'next/link'
 import { ClipboardList, ChevronRight } from 'lucide-react'
-import { REQUIRED_ASSET_TYPES } from '@/lib/asset-discovery/config'
+import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import type { PropertyAssetRow, PropertyRow } from '@/lib/dexie/schema'
 import type { AssetType } from '@/types/database'
 
@@ -21,7 +21,7 @@ function missingCount(propertyId: string, assets: PropertyAssetRow[]): number {
       .filter((a) => a.property_id === propertyId && isDiscovered(a))
       .map((a) => a.asset_type as AssetType)
   )
-  return REQUIRED_ASSET_TYPES.filter((t) => !discoveredTypes.has(t)).length
+  return missingAssetTypesFromDiscoveredSet(discoveredTypes).length
 }
 
 export default function CrewAssetsPage() {
