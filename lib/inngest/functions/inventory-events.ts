@@ -170,6 +170,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
           current_quantity:  item.current_quantity,
           par_level:         item.par_level,
           quantity_to_buy:   item.quantity_to_buy,
+          unit:              item.unit,
         }))
       )
 

@@ -19,7 +19,7 @@ export function GuestPreArrivalEmail({ guestName, propertyName, optInUrl, guideb
     >
       <Text style={heading}>Almost there, {guestName}!</Text>
       <Text style={body}>
-        Your stay at <strong>{propertyName}</strong> is coming up. The fastest way
+        Your stay at <strong>{propertyName}</strong>{' '}is coming up. The fastest way
         to get your door code is by text — tap the button below to opt in and
         we&apos;ll send it straight to your phone before check-in.
       </Text>

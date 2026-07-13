@@ -20,7 +20,10 @@ export function EmailLayout({
 }: EmailLayoutProps) {
   return (
     <Html lang="en">
-      <Head />
+      <Head>
+        <meta name="color-scheme" content="light" />
+        <meta name="supported-color-schemes" content="light" />
+      </Head>
       <Preview>{preview}</Preview>
       <Body style={body}>
 

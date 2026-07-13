@@ -10,6 +10,7 @@ type PoItemRow = {
   par_level:         number
   quantity_to_buy:   number
   inventory_item_id: string | null
+  unit:              string | null
 }
 
 export const inventoryOrderEmailCron = inngest.createFunction(
@@ -30,7 +31,7 @@ export const inventoryOrderEmailCron = inngest.createFunction(
           id, org_id, property_id, created_at,
           purchase_order_items (
             item_name, current_quantity, par_level, quantity_to_buy,
-            inventory_item_id
+            inventory_item_id, unit
           ),
           properties (
             name
@@ -68,16 +69,15 @@ export const inventoryOrderEmailCron = inngest.createFunction(
 
         // ── Aggregate all items across all properties ─────────────────────────
         type AggItem = {
-          name:           string
-          total_to_buy:   number
-          unit:           string
-          property_names: string[]
+          name:         string
+          total_to_buy: number
+          unit:         string
         }
 
         const aggregateMap = new Map<string, AggItem>()
         const propertyBreakdowns: Array<{
           propertyName: string
-          items: Array<{ name: string; inStock: string; par: string; toBuy: string }>
+          items: Array<{ name: string; toBuy: string; unit: string }>
         }> = []
 
         for (const po of orgPOs) {
@@ -90,10 +90,9 @@ export const inventoryOrderEmailCron = inngest.createFunction(
           propertyBreakdowns.push({
             propertyName,
             items: poItems.map((item) => ({
-              name:    item.item_name,
-              inStock: String(item.current_quantity),
-              par:     String(item.par_level),
-              toBuy:   String(item.quantity_to_buy),
+              name:  item.item_name,
+              toBuy: String(item.quantity_to_buy),
+              unit:  item.unit ?? '',
             })),
           })
 
@@ -103,15 +102,11 @@ export const inventoryOrderEmailCron = inngest.createFunction(
             const existing = aggregateMap.get(key)
             if (existing) {
               existing.total_to_buy += item.quantity_to_buy
-              if (!existing.property_names.includes(propertyName)) {
-                existing.property_names.push(propertyName)
-              }
             } else {
               aggregateMap.set(key, {
-                name:           item.item_name,
-                total_to_buy:   item.quantity_to_buy,
-                unit:           '',           // units not stored on PO items currently
-                property_names: [propertyName],
+                name:         item.item_name,
+                total_to_buy: item.quantity_to_buy,
+                unit:         item.unit ?? '',
               })
             }
           }
@@ -122,21 +117,20 @@ export const inventoryOrderEmailCron = inngest.createFunction(
           .map((item) => [
             item.name,
             String(item.total_to_buy),
-            item.property_names.join(', '),
+            item.unit,
           ])
 
-        // ── Build per-property breakdown text ──────────────────────────────────
-        // renderPmAlert supports one table — render the aggregate as the primary
-        // table and append per-property breakdowns as plain text in the note.
-        const breakdownText = propertyBreakdowns
-          .map((pb) =>
-            `${pb.propertyName}:\n` +
-            pb.items.map((i) => `  ${i.name} — need ${i.toBuy} (have ${i.inStock})`).join('\n')
-          )
-          .join('\n\n')
+        const propertySections = propertyBreakdowns.map((pb) => ({
+          heading: pb.propertyName,
+          table: {
+            headers: ['Item', 'Quantity', 'Units'],
+            rows: pb.items.map((i) => [i.name, i.toBuy, i.unit]),
+          },
+        }))
 
         const propertyCount = orgPOs.length
         const itemCount     = aggregateRows.length
+        const isSingleProperty = propertyCount === 1
 
         await resend.emails.send({
           from:    FROM,
@@ -144,12 +138,17 @@ export const inventoryOrderEmailCron = inngest.createFunction(
           subject: `📦 Daily Restock Summary — ${itemCount} item${itemCount !== 1 ? 's' : ''} needed across ${propertyCount} propert${propertyCount !== 1 ? 'ies' : 'y'}`,
           html: await renderPmAlert({
             heading:  'Daily Restock Order',
-            body:     `Today's inventory counts identified items below par across ${propertyCount} propert${propertyCount !== 1 ? 'ies' : 'y'}. Combined order list:`,
-            table: {
-              headers: ['Item', 'Total Needed', 'Properties'],
+            body: isSingleProperty
+              ? `Today's inventory count for ${propertyBreakdowns[0]!.propertyName} identified ${itemCount} item${itemCount !== 1 ? 's' : ''} below par.`
+              : `Today's inventory counts identified items below par across ${propertyCount} properties. Combined order list below, with a breakdown for each property.`,
+            // Skip the aggregate rollup for a single property — with the
+            // "Properties" column gone, it would now be functionally identical
+            // to the one per-property section below.
+            table: isSingleProperty ? undefined : {
+              headers: ['Items to Restock', 'Quantity', 'Units'],
               rows: aggregateRows,
             },
-            note:     `Per-property breakdown:\n\n${breakdownText}`,
+            sections: propertySections,
             ctaLabel: 'View Inventory Dashboard →',
             ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/inventory`,
           }),
