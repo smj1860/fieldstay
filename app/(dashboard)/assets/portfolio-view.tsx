@@ -69,7 +69,7 @@ export function PortfolioAssetView({
   const fairCount     = scored.filter((a) => { const s = a.health_score!; return s >= 60 && s < 80 }).length
   const agingCount    = scored.filter((a) => { const s = a.health_score!; return s >= 40 && s < 60 }).length
   const poorCount     = scored.filter((a) => { const s = a.health_score!; return s >= 20 && s < 40 }).length
-  const criticalCount = scored.filter((a) => a.health_score! < 20).length
+  const endOfLifeCount = scored.filter((a) => a.health_score! < 20).length
 
   // Pending Discovery — system-mandated master list assets not yet captured,
   // summed across the whole portfolio.
@@ -97,7 +97,7 @@ export function PortfolioAssetView({
           {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)'  }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
           {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
           {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)'  }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
-          {criticalCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'var(--border)', color: 'var(--text-muted)', border: '1px solid var(--border-strong)' }}><StatusDot status="offline" label="Critical" /> {criticalCount} Critical</span>}
+          {endOfLifeCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'var(--border)', color: 'var(--text-muted)', border: '1px solid var(--border-strong)' }}><StatusDot status="offline" label="End of Life" /> {endOfLifeCount} End of Life</span>}
         </div>
       )}
 
@@ -106,7 +106,7 @@ export function PortfolioAssetView({
         <div className="rounded-lg px-4 py-3 mb-6 text-sm flex items-center gap-2"
              style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or Critical condition — budget for replacement.
+          {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or End of Life condition — budget for replacement.
         </div>
       )}
 

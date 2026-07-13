@@ -549,7 +549,13 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 
 ## Styling Conventions
 
-- **CSS variables** for all colors — never hardcode hex in components
+- **CSS variables** for all colors — never hardcode hex in components, and
+  that includes Tailwind's own color utilities (`text-red-500`, `bg-blue-500`,
+  `hover:text-red-600`, etc.) — those are just hardcoded hex under a Tailwind
+  name, not an exception to the rule. Use `style={{ color: 'var(--accent-red)' }}`
+  for static cases, or the arbitrary-value bracket syntax for variants/pseudo-
+  states that need to stay in `className` (`hover:text-[var(--accent-red)]`,
+  `focus:ring-[var(--accent-gold)]`).
   ```tsx
   style={{ color: 'var(--text-primary)' }}
   style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
@@ -559,6 +565,53 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 - **Tailwind core utilities** for layout, spacing, flex/grid — no custom compiler
 - **No `@apply` in component files** — inline styles or className for variants
 - Dark navy aesthetic. The app looks like serious professional tooling, not a pastel SaaS.
+- **Reuse shared `components/ui/*` primitives instead of hand-rolling** — a
+  hand-rolled tab bar on the Assets page shipped without a focus state simply
+  because nothing forced consistency with the one other tab bar in the app.
+  Before building a new instance of a common pattern (tabs, dialogs, badges,
+  status dots), check `components/ui/` first. `scripts/check-raw-ui-classes.sh`
+  (run via `npm run check:ui-classes`, part of the standard verification pass)
+  greps for hand-written `btn-*`/`badge-*`/`card` class strings outside this
+  directory specifically to catch call sites that bypassed these primitives —
+  a hand-rolled equivalent that reaches the same visual result via raw
+  Tailwind utilities instead will slip past that check, so reuse is the real
+  guardrail, not just the lint step.
+
+  | Component | Use for | Notes |
+  |---|---|---|
+  | `Button` | Any clickable button | `variant`: `primary`\|`cta`\|`secondary`\|`danger`\|`ghost`. For an element that must render button *styling* but can't be a `<Button>` itself (a `<Link>` styled as a button, a disabled-look `<span>`) — call `buttonVariantClass(variant)`, never hand-write `"btn-primary"` etc. as a literal string |
+  | `Card` | Any card-style container | Thin wrapper around the `.card` class |
+  | `Badge` | Small status/count pill | `tone`: `green`\|`amber`\|`red`\|`blue`\|`gold`\|`slate` |
+  | `Dialog` | Any modal | Built-in focus trap, Escape-to-close, body-scroll lock, portal render, mobile bottom-sheet mode via `mobileSheet`. Don't hand-roll a new modal's overlay/focus-trap logic |
+  | `Input` | Any text input | Plain `forwardRef` wrapper — spreads all native input props |
+  | `Checkbox` | Any checkbox | Gold accent color + focus ring baked in — don't hand-roll a bare `<input type="checkbox">` |
+  | `StatusDot` | Colored status indicator dot + screen-reader label | `status` is an internal lookup key (`good`\|`warning`\|`critical`\|`attention`\|`offline`\|`unknown`), not display text — see the note below on not renaming these |
+  | `Tabs` | Any tab bar | `role="tablist"`/`role="tab"`, `aria-selected`, built-in focus ring |
+
+  - **Migrating an *existing* hand-rolled tab bar** onto `Tabs` is a judgment
+    call, not automatic —
+    a tab bar with its own established, intentionally different visual
+    treatment (e.g. `settings-tabs.tsx`'s gold-underline-with-primary-text
+    style vs. `Tabs`'s gold-underline-with-gold-text) is a design decision,
+    not a bug, and forcing it onto the shared component would mean changing
+    its look or bolting on props just to preserve behavior. Only migrate
+    when the existing implementation is a plain miss (no focus state, no
+    `role`/`aria-selected`) rather than a deliberate variant.
+  - **Focus rings on elements flush against a neighbor** (tab bars, sidebar
+    cluster headers) → `focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)]`.
+    `ring-inset` keeps the ring inside the element's own bounds; a default
+    outset ring with an offset visually collides with the adjacent element
+    in these flush horizontal/vertical layouts.
+- **Internal lookup/status keys are not display strings — don't rename them
+  together.** Some helpers return a short internal key used to select a
+  color/icon/variant (e.g. `healthDot()`'s `'critical'`/`'offline'` return
+  values, which are `StatusDot` status keys, not text) alongside a separate
+  helper that returns the actual user-facing label (`healthLabel()`). A copy
+  change ("Critical" → "End of Life") only ever touches the label helper and
+  any hardcoded JSX string literals — never the internal key, since other
+  code branches on that key's exact value and renaming it silently breaks
+  the color mapping for no visible symptom until someone notices the wrong
+  dot color.
 
 ---
 
@@ -575,7 +628,9 @@ async function geocodeZip(zip: string): Promise<{ lat: number; lng: number } | n
 | `.modify(q => ...)` on a Supabase query | Not a real method. Build the query conditionally with `if` blocks before awaiting it |
 | Direct Supabase reads in crew PWA client components (`app/crew/*`) | Dexie (`getDexieDb` / `useLiveQuery`) reading the local IndexedDB cache |
 | Service role key in client code | Server Actions and Inngest steps only |
-| Hardcoded colors in components | CSS variables (`var(--text-primary)` etc.) |
+| Hardcoded colors in components, incl. Tailwind color utilities (`text-red-500`, `hover:text-red-600`) | CSS variables (`var(--text-primary)` etc.) — use the arbitrary-value bracket syntax (`hover:text-[var(--accent-red)]`) if it needs to stay in `className` |
+| Hand-rolling a new tab bar | `components/ui/Tabs.tsx` |
+| Renaming an internal status/lookup key (e.g. `healthDot()`'s `'critical'`/`'offline'` return values) during a copy change | Only rename the display-string helper (`healthLabel()`) and hardcoded JSX text — internal keys are branched on elsewhere and renaming them silently breaks color/variant mapping |
 | Creating a table without RLS | Always `ENABLE ROW LEVEL SECURITY` + policies |
 | Multiple Inngest steps creating same record | Check `source_reference_id` first |
 | `any` type | Explicit interface or generic |
@@ -780,3 +835,5 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 - Mouse hover events → paired focus events
 - Form labels → `htmlFor` on every `<label>`
 - Inputs without a visible label → `aria-label` attribute required
+- Tab bars → `components/ui/Tabs.tsx`, not hand-rolled — it already has
+  `role="tablist"`/`role="tab"`, `aria-selected`, and a visible focus ring

@@ -64,7 +64,7 @@ export function healthLabel(score: number): string {
   if (score >= 60) return 'Fair'
   if (score >= 40) return 'Aging'
   if (score >= 20) return 'Poor'
-  return 'Critical'
+  return 'End of Life'
 }
 
 export function healthColor(score: number): string {

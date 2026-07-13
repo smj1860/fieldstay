@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, useActionState, useRef, useEffect } from 'react'
+import { useState, useTransition, useActionState, useRef, useEffect, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus, X, Pencil, Loader2, Camera, Upload, Info, AlertTriangle, Check,
@@ -13,6 +13,7 @@ import {
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { PortfolioAssetView } from './portfolio-view'
+import { Tabs } from '@/components/ui/Tabs'
 import { createClient } from '@/lib/supabase/client'
 import { Dialog } from '@/components/ui/Dialog'
 import { StatusDot } from '@/components/ui/StatusDot'
@@ -20,7 +21,6 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
-import { cn } from '@/lib/utils'
 import type { PropertyAsset, AssetTypeStandard, AssetType } from '@/types/database'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -293,7 +293,7 @@ function AssetForm({
             {/* Asset Type — only on create */}
             {!isEdit && (
               <div className="sm:col-span-2">
-                <label htmlFor="asset-type" className="label">Asset Type <span className="text-red-500">*</span></label>
+                <label htmlFor="asset-type" className="label">Asset Type <span style={{ color: 'var(--accent-red)' }}>*</span></label>
                 <select
                   id="asset-type"
                   name="asset_type"
@@ -312,7 +312,7 @@ function AssetForm({
 
             {/* Name */}
             <div className="sm:col-span-2">
-              <label htmlFor="asset-name" className="label">Name <span className="text-red-500">*</span></label>
+              <label htmlFor="asset-name" className="label">Name <span style={{ color: 'var(--accent-red)' }}>*</span></label>
               <Input
                 id="asset-name"
                 name="name"
@@ -461,6 +461,35 @@ function CsvImportModal({
   const labelFor = (type: string) =>
     standards.find((s) => s.asset_type === type)?.display_name ?? type.replace(/_/g, ' ')
 
+  // Naive comma-split breaks on any field with a comma inside quotes
+  // (most likely `notes`, e.g. `"Replaced 3,500 sq ft of ductwork"`).
+  // This is a minimal state-machine parser — correct for quoted fields
+  // and escaped ("") quotes, without pulling in a new dependency for one
+  // import modal.
+  function parseCsvLine(line: string): string[] {
+    const cells: string[] = []
+    let current  = ''
+    let inQuotes = false
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i]
+      if (inQuotes) {
+        if (char === '"') {
+          if (line[i + 1] === '"') { current += '"'; i++ }
+          else inQuotes = false
+        } else {
+          current += char
+        }
+      } else {
+        if (char === '"') inQuotes = true
+        else if (char === ',') { cells.push(current); current = '' }
+        else current += char
+      }
+    }
+    cells.push(current)
+    return cells.map((c) => c.trim())
+  }
+
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -471,11 +500,11 @@ function CsvImportModal({
       const lines = text.split(/\r?\n/).filter((l) => l.trim())
       if (lines.length < 2) { setError('CSV must have a header row and at least one data row.'); return }
 
-      const header = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/['"]/g, ''))
+      const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase())
       const parsed: ParsedRow[] = []
 
       for (let i = 1; i < lines.length; i++) {
-        const cells = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''))
+        const cells = parseCsvLine(lines[i])
         const get   = (key: string) => cells[header.indexOf(key)] ?? ''
 
         const rawType    = get('asset_type')
@@ -568,7 +597,7 @@ function CsvImportModal({
                 <tbody className="divide-y divide-themed">
                   {rows.map((row, idx) => (
                     <tr key={idx} className={row._valid ? '' : 'opacity-60'}>
-                      <td className="px-2 py-2 text-primary-themed">{row.name || <span className="text-red-500">Missing</span>}</td>
+                      <td className="px-2 py-2 text-primary-themed">{row.name || <span style={{ color: 'var(--accent-red)' }}>Missing</span>}</td>
                       <td className="px-2 py-2">
                         {row._typeResolved ? (
                           <Badge tone="slate">{labelFor(row._typeResolved)}</Badge>
@@ -685,7 +714,7 @@ function AssetRow({
             if (result?.error) throw new Error(result.error)
           })}
           disabled={removing}
-          className="p-1.5 text-muted-themed hover:text-red-500"
+          className="p-1.5 text-muted-themed hover:text-[var(--accent-red)]"
           title="Deactivate asset"
         >
           {removing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
@@ -718,7 +747,7 @@ function PropertyAssetDetail({
   const fairCount     = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 60 && s < 80 }).length
   const agingCount    = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 40 && s < 60 }).length
   const poorCount     = assets.filter((a) => { const s = a.health_score ?? 0; return s >= 20 && s < 40 }).length
-  const criticalCount = assets.filter((a) => (a.health_score ?? 100) < 20).length
+  const endOfLifeCount = assets.filter((a) => (a.health_score ?? 100) < 20).length
   const urgentAssets  = assets.filter((a) => a.health_score != null && a.health_score < 40)
 
   return (
@@ -763,7 +792,7 @@ function PropertyAssetDetail({
                   {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)' }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
                   {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
                   {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)' }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
-                  {criticalCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(107,114,128,0.1)', color: '#6b7280', border: '1px solid rgba(107,114,128,0.2)' }}><StatusDot status="offline" label="Critical" /> {criticalCount} Critical</span>}
+                  {endOfLifeCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'var(--border)', color: 'var(--text-muted)', border: '1px solid var(--border-strong)' }}><StatusDot status="offline" label="End of Life" /> {endOfLifeCount} End of Life</span>}
                 </div>
               )}
 
@@ -771,7 +800,7 @@ function PropertyAssetDetail({
                 <div className="rounded-lg px-3 py-2 mb-3 text-sm flex items-center gap-1.5"
                      style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
                   <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                  {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or Critical condition — budget for replacement.
+                  {urgentAssets.length} asset{urgentAssets.length > 1 ? 's' : ''} in Poor or End of Life condition — budget for replacement.
                 </div>
               )}
 
@@ -843,7 +872,7 @@ function PropertyAssetCard({
   assets:   PropertyAsset[]
   onSelect: () => void
 }) {
-  const criticalCount = assets.filter((a) => (a.health_score ?? 100) < 40).length
+  const needsAttentionCount = assets.filter((a) => (a.health_score ?? 100) < 40).length
   const pendingCount   = missingTypesCount(property.id, assets)
 
   return (
@@ -861,15 +890,15 @@ function PropertyAssetCard({
 
       <div className="flex items-center gap-2 flex-wrap">
         <Badge tone="slate">{assets.length} asset{assets.length !== 1 ? 's' : ''}</Badge>
-        {criticalCount > 0 && (
+        {needsAttentionCount > 0 && (
           <Badge tone="red" className="flex items-center gap-0.5">
-            <AlertTriangle className="w-3 h-3" /> {criticalCount} critical
+            <AlertTriangle className="w-3 h-3" /> {needsAttentionCount} needs attention
           </Badge>
         )}
         {pendingCount > 0 && (
           <Badge tone="amber">{pendingCount} pending discovery</Badge>
         )}
-        {criticalCount === 0 && pendingCount === 0 && assets.length > 0 && (
+        {needsAttentionCount === 0 && pendingCount === 0 && assets.length > 0 && (
           <Badge tone="green">All healthy</Badge>
         )}
         {assets.length === 0 && pendingCount === 0 && (
@@ -925,11 +954,11 @@ export function AssetManager({
   }, [orgId, router])
 
   const totalAssets   = assets.length
-  const totalCritical = assets.filter((a) => (a.health_score ?? 100) < 40).length
+  const totalNeedingAttention = assets.filter((a) => (a.health_score ?? 100) < 40).length
 
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
 
-  const tabs: Array<{ id: AssetTab; label: string; icon: React.ReactNode }> = [
+  const tabs: Array<{ id: AssetTab; label: string; icon: ReactNode }> = [
     { id: 'property',  label: 'By Property', icon: <Package className="w-3.5 h-3.5" /> },
     { id: 'portfolio', label: 'Portfolio',   icon: <BarChart2 className="w-3.5 h-3.5" /> },
   ]
@@ -941,31 +970,17 @@ export function AssetManager({
           <h1 className="page-title">Assets</h1>
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <p className="page-subtitle">{totalAssets} asset{totalAssets !== 1 ? 's' : ''} across {properties.length} propert{properties.length !== 1 ? 'ies' : 'y'}</p>
-            {totalCritical > 0 && (
+            {totalNeedingAttention > 0 && (
               <Badge tone="red" className="flex items-center gap-1">
-                <AlertTriangle className="w-3 h-3" /> {totalCritical} critical
+                <AlertTriangle className="w-3 h-3" /> {totalNeedingAttention} needs attention
               </Badge>
             )}
           </div>
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 mb-5 border-b border-themed">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
-              activeTab !== tab.id && 'border-transparent text-muted-themed hover:text-secondary-themed'
-            )}
-            style={activeTab === tab.id ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
+      <div className="mb-5">
+        <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
       </div>
 
       {activeTab === 'property' && (
