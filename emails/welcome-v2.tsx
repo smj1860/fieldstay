@@ -28,7 +28,7 @@ export function WelcomeEmailV2({
       <Text style={subheading}>Here&apos;s where to start.</Text>
 
       <Text style={body}>
-        <strong>{orgName}</strong> is live on FieldStay. Your 14-day trial has full
+        <strong>{orgName}</strong>{' '}is live on FieldStay. Your 14-day trial has full
         access — turnovers, crew scheduling, inventory, maintenance, and owner
         reporting, all running without you having to remember any of it.
       </Text>

@@ -38,7 +38,7 @@ export function VendorConnectInviteEmail({
       </Text>
 
       <Text style={{ fontSize: 14, color: '#334155', lineHeight: 1.65, margin: '0 0 14px' }}>
-        <strong>{senderLine}</strong> {contextLine}.
+        <strong>{senderLine}</strong>{' '}{contextLine}.
       </Text>
 
       <Text style={{ fontSize: 14, color: '#334155', lineHeight: 1.65, margin: '0 0 14px' }}>
@@ -48,7 +48,7 @@ export function VendorConnectInviteEmail({
       </Text>
 
       <Text style={{ fontSize: 14, color: '#334155', lineHeight: 1.65, margin: '0 0 24px' }}>
-        It takes <strong>3–5 minutes</strong> and is powered by{' '}
+        It takes <strong>3–5 minutes</strong>{' '}and is powered by{' '}
         <strong>Stripe</strong> — the same platform used by millions of businesses
         worldwide. You&apos;ll need your bank account and routing numbers handy.
       </Text>
@@ -56,7 +56,7 @@ export function VendorConnectInviteEmail({
       <Hr style={{ borderColor: '#e2e8f0', margin: '0 0 16px' }} />
 
       <Text style={{ fontSize: 13, color: '#64748b', lineHeight: 1.55, margin: '0 0 8px' }}>
-        <strong>Why Stripe?</strong> Stripe is PCI-compliant and the industry
+        <strong>Why Stripe?</strong>{' '}Stripe is PCI-compliant and the industry
         standard for contractor payouts. FieldStay never holds your funds —
         money moves directly from the property manager&apos;s account to yours.
       </Text>

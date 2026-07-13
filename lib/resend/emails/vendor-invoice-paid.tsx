@@ -35,7 +35,7 @@ export function VendorInvoicePaidEmail({
       </Text>
 
       <Text style={{ fontSize: 14, color: '#334155', lineHeight: 1.65, margin: '0 0 14px' }}>
-        You&apos;ve been paid <strong>{amount}</strong> by <strong>{orgName}</strong> for{' '}
+        You&apos;ve been paid <strong>{amount}</strong>{' '}by <strong>{orgName}</strong> for{' '}
         {woNumber ? <>work order <strong>{woNumber}</strong></> : 'the following work order'}
         {propertyName ? <> at <strong>{propertyName}</strong></> : ''}.
       </Text>

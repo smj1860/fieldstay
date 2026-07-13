@@ -34,7 +34,7 @@ export function ReengagementEmail({
 
         <Text style={body}>
           Since you connected your PMS, FieldStay has been watching for new
-          reviews across your properties. <strong>{reviewCount}</strong> came
+          reviews across your properties. <strong>{reviewCount}</strong>{' '}came
           in this week — RepuGuard already has draft responses ready for your
           approval.
         </Text>
@@ -67,7 +67,7 @@ export function ReengagementEmail({
       <Text style={subheading}>Here&apos;s what you&apos;re missing.</Text>
 
       <Text style={body}>
-        <strong>{orgName}</strong> is set up on FieldStay, but your PMS isn&apos;t
+        <strong>{orgName}</strong>{' '}is set up on FieldStay, but your PMS isn&apos;t
         connected yet — which means turnovers, bookings, and same-day flags
         are still something you have to track by hand.
       </Text>
