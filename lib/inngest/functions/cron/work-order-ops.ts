@@ -263,12 +263,19 @@ export const dailyWorkOrderOps = inngest.createFunction(
           vendorId = hintVendor?.id ?? null
         }
 
+        // vendor_specialty_hint values are a subset of WoCategory — the
+        // closest thing a maintenance schedule has to a WO category, and
+        // needed for vendor suggestions to have anything to match a
+        // vendor's specialty against when this chain doesn't resolve one.
+        const category = schedule.vendor_specialty_hint ?? null
+
         const { data: wo } = await supabase
           .from('work_orders')
           .insert({
             property_id:        schedule.property_id,
             org_id:             schedule.org_id,
             vendor_id:          vendorId,
+            category,
             title:              schedule.name,
             description:        schedule.instructions,
             priority:           'medium',
@@ -320,6 +327,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
           org_id:         schedule.org_id,
           vendor_id:      vendorId,
           portal_enabled: false,
+          category,
         }
       })
 
@@ -328,6 +336,18 @@ export const dailyWorkOrderOps = inngest.createFunction(
           name: 'work-order/created' as const,
           data: autoCreateEventData,
         })
+
+        if (!autoCreateEventData.vendor_id && autoCreateEventData.category) {
+          await step.sendEvent(`send-vendor-suggestion-event-${schedule.id}`, {
+            name: 'work-order/vendor-suggestion.requested' as const,
+            data: {
+              work_order_id: autoCreateEventData.work_order_id,
+              property_id:   autoCreateEventData.property_id,
+              org_id:        autoCreateEventData.org_id,
+              category:      autoCreateEventData.category,
+            },
+          })
+        }
       }
     }
 

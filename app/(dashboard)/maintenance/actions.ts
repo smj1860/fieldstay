@@ -6,7 +6,7 @@ import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
-import type { WoStatus, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
+import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -947,6 +947,30 @@ export async function createWorkOrderFromSchedule(
 
   if (existingWO) return { success: true }
 
+  // Vendor selection chain: assigned → specialty hint → null. Mirrors the
+  // cron's auto-create-wo step (lib/inngest/functions/cron/work-order-ops.ts)
+  // so the manual "Create Work Order Now" button resolves a vendor the same
+  // way the nightly automation does.
+  let vendorId: string | null = schedule.assigned_vendor_id ?? null
+  if (!vendorId && schedule.vendor_specialty_hint) {
+    const { data: hintVendor } = await supabase
+      .from('vendors')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .eq('specialty', schedule.vendor_specialty_hint)
+      .eq('is_active', true)
+      .order('avg_rating', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    vendorId = hintVendor?.id ?? null
+  }
+
+  // vendor_specialty_hint values are a subset of WoCategory, so this is a
+  // safe direct cast — the closest thing a maintenance schedule has to a
+  // WO category, and needed for vendor suggestions to have anything to
+  // match a vendor's specialty against.
+  const category = (schedule.vendor_specialty_hint as WoCategory | null) ?? null
+
   const completion_token = crypto.randomUUID()
   const completion_token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -955,18 +979,19 @@ export async function createWorkOrderFromSchedule(
     .insert({
       property_id:        schedule.property_id,
       org_id:             membership.org_id,
-      vendor_id:          schedule.assigned_vendor_id,
+      vendor_id:          vendorId,
+      category,
       title:              schedule.name,
       description:        schedule.description,
       priority:           PriorityLevelSchema.parse('medium'),
-      status:             WoStatusSchema.parse(schedule.assigned_vendor_id ? 'assigned' : 'pending'),
+      status:             WoStatusSchema.parse(vendorId ? 'assigned' : 'pending'),
       source:             'maintenance_schedule',
       source_schedule_id: schedule.id,
       scheduled_date:     schedule.next_due_date,
       estimated_cost:     schedule.estimated_cost,
-      portal_enabled:     !!schedule.assigned_vendor_id,
-      completion_token:   schedule.assigned_vendor_id ? completion_token : null,
-      completion_token_expires_at: schedule.assigned_vendor_id ? completion_token_expires_at : null,
+      portal_enabled:     !!vendorId,
+      completion_token:   vendorId ? completion_token : null,
+      completion_token_expires_at: vendorId ? completion_token_expires_at : null,
     })
     .select('id')
     .single()
@@ -985,15 +1010,25 @@ export async function createWorkOrderFromSchedule(
       .eq('id', scheduleId)
   }
 
-  if (schedule.assigned_vendor_id) {
+  if (vendorId) {
     await inngest.send({
       name: 'work-order/created',
       data: {
         work_order_id:  wo.id,
         property_id:    schedule.property_id,
         org_id:         membership.org_id,
-        vendor_id:      schedule.assigned_vendor_id,
+        vendor_id:      vendorId,
         portal_enabled: true,
+      },
+    })
+  } else if (category) {
+    await inngest.send({
+      name: 'work-order/vendor-suggestion.requested',
+      data: {
+        work_order_id: wo.id,
+        property_id:   schedule.property_id,
+        org_id:        membership.org_id,
+        category,
       },
     })
   }
