@@ -1287,9 +1287,12 @@ export interface PropertyAsset {
   photo_url:                  string | null
   is_na:                      boolean
   verified_at:                string | null
+  scan_status:                AssetScanStatus | null
   created_at:                 string
   updated_at:                 string
 }
+
+export type AssetScanStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
 export interface AssetManual {
   id:          string

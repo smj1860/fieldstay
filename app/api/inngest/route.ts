@@ -80,6 +80,7 @@ import { generateCapexProjections }      from '@/lib/inngest/functions/capex-pro
 import { triggerCapexProjectionForOrg }  from '@/lib/inngest/functions/capex-projection-trigger'
 import { generateDepreciationLedger }    from '@/lib/inngest/functions/depreciation-ledger'
 import { assetManualLookup }             from '@/lib/inngest/functions/asset-manual-lookup'
+import { assetDataPlateScan }            from '@/lib/inngest/functions/asset-scan'
 
 // In-app messaging
 import { logMessageCommunication } from '@/lib/inngest/functions/log-message-comm'
@@ -228,6 +229,7 @@ export const { GET, POST, PUT } = serve({
     triggerCapexProjectionForOrg,
     generateDepreciationLedger,
     assetManualLookup,
+    assetDataPlateScan,
 
     // In-app messaging
     logMessageCommunication,

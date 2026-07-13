@@ -144,9 +144,16 @@ function DiscoveryCaptureModal({
   const [photoFile,  setPhotoFile]  = useState<File | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [success,    setSuccess]    = useState(false)
+  const [scanQueued, setScanQueued] = useState(false)
   const [error,      setError]      = useState<string | null>(null)
 
-  async function saveAsset(fields: { make: string | null; model: string | null; photoUrl: string | null; isNa: boolean }) {
+  async function saveAsset(fields: {
+    make:       string | null
+    model:      string | null
+    photoUrl:   string | null
+    isNa:       boolean
+    scanStatus: 'pending' | null
+  }): Promise<string | null> {
     const supabase = createClient()
     const { data, error: insertError } = await supabase
       .from('property_assets')
@@ -159,6 +166,7 @@ function DiscoveryCaptureModal({
         model:                fields.model,
         photo_url:            fields.photoUrl,
         is_na:                fields.isNa,
+        scan_status:          fields.scanStatus,
         macrs_class:          '5_year',
         depreciation_method:  'macrs',
         salvage_value:        0,
@@ -176,13 +184,14 @@ function DiscoveryCaptureModal({
         photo_url: data.photo_url ?? '',
       })
     }
+    return data?.id ?? null
   }
 
   async function handleMarkNa() {
     setSubmitting(true)
     setError(null)
     try {
-      await saveAsset({ make: null, model: null, photoUrl: null, isNa: true })
+      await saveAsset({ make: null, model: null, photoUrl: null, isNa: true, scanStatus: null })
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message || 'Could not save. Check your connection and try again.')
@@ -202,6 +211,8 @@ function DiscoveryCaptureModal({
 
     try {
       let photoUrl: string | null = null
+      let scanRequest: { storagePath: string; mediaType: string } | null = null
+
       if (photoFile) {
         const supabase = createClient()
         const ext  = photoFile.name.split('.').pop() || 'jpg'
@@ -211,14 +222,33 @@ function DiscoveryCaptureModal({
           .upload(path, photoFile, { contentType: photoFile.type, upsert: true })
         if (uploadError) throw new Error(uploadError.message)
         photoUrl = supabase.storage.from('turnover-photos').getPublicUrl(path).data.publicUrl
+        scanRequest = { storagePath: path, mediaType: photoFile.type }
       }
 
-      await saveAsset({
-        make:     make.trim() || null,
-        model:    model.trim() || null,
+      const assetId = await saveAsset({
+        make:       make.trim() || null,
+        model:      model.trim() || null,
         photoUrl,
-        isNa:     false,
+        isNa:       false,
+        scanStatus: scanRequest ? 'pending' : null,
       })
+
+      // Fire-and-forget: the crew member doesn't wait on the vision call —
+      // make/model fill in via the realtime sync already watching this
+      // property's assets once the background scan completes.
+      if (assetId && scanRequest) {
+        setScanQueued(true)
+        fetch('/api/assets/request-scan', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            asset_id:     assetId,
+            storage_path: scanRequest.storagePath,
+            media_type:   scanRequest.mediaType,
+          }),
+        }).catch((err) => console.error('[DiscoveryCapture] scan request failed:', err))
+      }
+
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message || 'Could not save. Check your connection and try again.')
@@ -238,7 +268,11 @@ function DiscoveryCaptureModal({
       {success ? (
         <div className="text-center py-4">
           <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
-          <p className="text-sm text-muted-themed mb-4">Asset details saved.</p>
+          <p className="text-sm text-muted-themed mb-4">
+            {scanQueued
+              ? "Asset saved. We're reading the photo now — make and model will fill in automatically in a moment."
+              : 'Asset details saved.'}
+          </p>
           <Button onClick={onClose} className="w-full">Done</Button>
         </div>
       ) : (
