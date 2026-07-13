@@ -40,31 +40,32 @@ export function HomepageContent() {
         {/* Eyebrow */}
         <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold
                         uppercase tracking-widest mb-7 bg-gold-300/12 border border-gold-300/25 text-gold-300">
-          Built for STR Property Managers
+          For STR Property Managers Running 10–100 Properties
         </div>
 
         {/* Headline */}
         <h1 className="font-display mx-auto mb-5 font-bold leading-[1.08] tracking-tight text-white"
             style={{ fontSize: 'clamp(36px, 5vw, 54px)', maxWidth: 720, letterSpacing: '-1.5px' }}>
-          Built for the work that happens{' '}
-          <span className="text-gold-300">between checkouts.</span>
+          The operations platform for{' '}
+          <span className="text-gold-300">10–100 property STR portfolios.</span>
         </h1>
 
         {/* Subhead */}
         <p className="mx-auto mb-9 text-white/62" style={{ fontSize: 18, maxWidth: 580, lineHeight: 1.65 }}>
-          FieldStay handles crew scheduling, turnovers, maintenance, inventory,
-          vendor work orders, and guest communications — so the gap between
-          checkout and check-in runs itself.
+          FieldStay runs your turnovers, crew, vendor work orders, and asset
+          health from one system — including a crew app that works with zero
+          cell signal.
         </p>
 
         {/* CTA */}
         <Link href="/signup"
               className="inline-flex items-center gap-2 rounded-lg font-black text-base transition-all bg-gold-300 text-brand-800"
               style={{ padding: '16px 36px' }}>
-          Start Free Trial <span style={{ fontSize: 20 }}>→</span>
+          Start Your Free 14-Day Trial <span style={{ fontSize: 20 }}>→</span>
         </Link>
         <p className="mt-4 text-sm text-white/38">
-          14-day free trial · No credit card required · Cancel anytime
+          No credit card. No sales call. No spreadsheet migration — add your
+          first property in under 15 minutes.
         </p>
       </section>
 
@@ -191,21 +192,40 @@ export function HomepageContent() {
               </p>
             </div>
 
-            {/* Feature 3 — Flat Pricing */}
+            {/* Feature 3 — No-Login Vendor Portal */}
             <div className="rounded-2xl p-7 relative overflow-hidden border border-gray-200">
               <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl bg-brand-800" />
               <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
-                Pricing
+                Vendor Portal
               </span>
               <h3 className="font-display font-bold mb-3 tracking-tight text-gray-900"
                   style={{ fontSize: 20, letterSpacing: '-0.3px' }}>
-                Gates are for fences. Not features.
+                Dispatch a work order. Get an invoice back — no login required.
               </h3>
               <p className="text-sm leading-relaxed text-gray-500">
-                Every FieldStay plan includes the full platform — no feature gating, no
-                per-property fees that punish growth. Starter covers 1–15 properties at $199/month.
-                Growth covers 16–50 at $479/month. Portfolio covers 51–100 at $799/month. Scale
-                your portfolio without watching your software bill scale with it.
+                Send a vendor a link, not a login. They submit their line-item invoice
+                from their phone, you approve it in one click, and payment lands in
+                their bank account automatically. No app to install, no password to
+                reset, no more &ldquo;still working on it&rdquo; texts.
+              </p>
+            </div>
+
+            {/* Feature 4 — Asset Health & CapEx */}
+            <div className="rounded-2xl p-7 relative overflow-hidden border border-gray-200">
+              <div className="absolute top-0 left-0 right-0 h-[3px] rounded-t-2xl bg-brand-800" />
+              <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
+                Asset Health
+              </span>
+              <h3 className="font-display font-bold mb-3 tracking-tight text-gray-900"
+                  style={{ fontSize: 20, letterSpacing: '-0.3px' }}>
+                Know which water heater fails next — before it does.
+              </h3>
+              <p className="text-sm leading-relaxed text-gray-500">
+                Every appliance and system on every property gets a health score
+                that updates daily based on age and expected lifespan. FieldStay
+                rolls that into a 10-year capital forecast automatically —
+                replacement budgets become a report you pull, not a guess you
+                defend to an owner.
               </p>
             </div>
 
@@ -490,15 +510,18 @@ export function HomepageContent() {
       <section className="px-8 py-20 text-center bg-gold-300">
         <h2 className="font-display font-bold mb-3 tracking-tight text-brand-800"
             style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
-          Ready to stop firefighting?
+          See your first turnover automate itself today.
         </h2>
         <p className="text-base mb-9 mx-auto text-brand-800/62" style={{ maxWidth: 440 }}>
-          Join property managers who replaced their texts and spreadsheets with one platform that actually works.
+          Connect your booking platform, add your first property, and watch
+          FieldStay generate the turnover, assign the crew, and queue the
+          checklist — automatically. Cancel with one click if it doesn&apos;t
+          save your team real time in the first week.
         </p>
         <Link href="/signup"
               className="inline-flex items-center gap-2 rounded-lg font-black text-base transition-opacity bg-brand-800 text-white"
               style={{ padding: '16px 36px' }}>
-          Start Free — 14 Days Free <span style={{ fontSize: 20 }}>→</span>
+          Start Your Free 14-Day Trial <span style={{ fontSize: 20 }}>→</span>
         </Link>
       </section>
 
