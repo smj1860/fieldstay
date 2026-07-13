@@ -72,6 +72,7 @@ export type AuditAction =
   | 'turnover.archived'
   | 'turnover.unarchived'
   | 'turnover.autopilot.assigned'
+  | 'turnover.pm_rating.submitted'
   | 'work_order.vendor_signoff'
   | 'property.rates.updated'
   | 'asset.capex_projection.triggered'

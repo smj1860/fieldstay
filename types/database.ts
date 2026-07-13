@@ -45,7 +45,7 @@ export type TxnCategory         = 'booking_revenue' | 'cleaning_fee' | 'maintena
 export type QuoteRequestStatus  = 'pending' | 'submitted' | 'approved' | 'declined' | 'expired'
 export type CrewRole            = 'cleaning' | 'landscaping' | 'maintenance' | 'general'
 export type AutoAssignMode     = 'suggest' | 'autopilot' | 'disabled'
-export type SuggestionStatus   = 'pending' | 'accepted' | 'dismissed'
+export type SuggestionStatus   = 'pending' | 'accepted' | 'overridden' | 'dismissed'
 
 // Asset Health
 export type AssetType =
@@ -307,6 +307,9 @@ export interface AssignmentOutcome {
   duration_minutes:   number | null
   pm_rating:          number | null
   property_bedrooms:  number | null
+  was_late:           boolean | null
+  was_missed:         boolean
+  scored_at:          string | null
   created_at:         string
 }
 

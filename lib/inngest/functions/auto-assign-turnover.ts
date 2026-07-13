@@ -39,7 +39,7 @@ export const autoAssignTurnover = inngest.createFunction(
       ] = await Promise.all([
         supabase.from('organizations').select('auto_assign_mode').eq('id', org_id).single(),
         supabase.from('turnovers').select('id, status, is_same_day_turnover').eq('id', turnover_id).single(),
-        supabase.from('properties').select('id, lat, lng').eq('id', property_id).single(),
+        supabase.from('properties').select('id, lat, lng, bedrooms').eq('id', property_id).single(),
         supabase
           .from('crew_members')
           .select('id, name, home_lat, home_lng, reliability_score, capacity_score')
@@ -108,7 +108,7 @@ export const autoAssignTurnover = inngest.createFunction(
       return {
         mode,
         isSameDay:       turnover.is_same_day_turnover ?? false,
-        property:        { lat: property?.lat ?? null, lng: property?.lng ?? null },
+        property:        { lat: property?.lat ?? null, lng: property?.lng ?? null, bedrooms: property?.bedrooms ?? null },
         crew:            availableCrew,
         familiarCrewIds,
         workloadMap,
@@ -269,9 +269,11 @@ export const autoAssignTurnover = inngest.createFunction(
           // comment. top.score is the raw 0-1 composite from proximityScore()
           // et al.; inserting it unconverted always failed with "invalid
           // input syntax for type smallint" and this row was never written.
-          suggested_score: Math.round(top.score * 100),
-          score_breakdown: top.breakdown,
-          was_accepted:    wasAutopilotAssigned ? true : null,
+          suggested_score:    Math.round(top.score * 100),
+          score_breakdown:    top.breakdown,
+          was_accepted:       wasAutopilotAssigned ? true : null,
+          was_suggestion:     true,
+          property_bedrooms:  context.property.bedrooms,
         },
         { onConflict: 'turnover_id,crew_member_id' }
       )

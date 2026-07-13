@@ -74,6 +74,7 @@ import { geocodingBackfill } from '@/lib/inngest/functions/geocoding-backfill'
 
 // Crew auto-assignment
 import { autoAssignTurnover } from '@/lib/inngest/functions/auto-assign-turnover'
+import { crewScoreRecompute } from '@/lib/inngest/functions/cron/crew-score-recompute'
 
 // Asset Health — CapEx & Depreciation
 import { generateCapexProjections }      from '@/lib/inngest/functions/capex-projections'
@@ -223,6 +224,7 @@ export const { GET, POST, PUT } = serve({
 
     // Crew auto-assignment
     autoAssignTurnover,
+    crewScoreRecompute,
 
     // Asset Health — CapEx projections + depreciation ledger
     generateCapexProjections,
