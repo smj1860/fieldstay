@@ -114,40 +114,34 @@ export default async function OwnerRezPage() {
               </div>
             </div>
 
-            {/* Right — RepuGuard: bundled feature, no add-on pricing */}
+            {/* Right — What syncs automatically (trust panel).
+                Deliberately not a RepuGuard panel — see Task 4 note in
+                CLAUDE_LANDING_ANGLE_A_1.md. RepuGuard's own demo section
+                lives further down this page, untouched. */}
             <div className="bg-brand-panel border border-brand-panelBorder rounded-2xl p-8">
 
-              {/* Header row */}
               <div className="flex items-center justify-between mb-5">
-                <div className="flex items-center gap-3">
-                  <div className="bg-gold-300 text-[#0a1628] text-xs font-bold px-2.5 py-1 rounded-md tracking-wider">
-                    REPUGUARD
-                  </div>
-                  {/* "Included" pill — replaces the old trial/price framing */}
-                  <span className="bg-[#1a3a2a] border border-[#2a5a3a] text-[#4ade80] text-xs font-semibold px-2.5 py-1 rounded-full">
-                    Included in every plan
-                  </span>
-                </div>
+                <h2 className="text-2xl font-bold text-white leading-snug">
+                  What happens the moment you connect
+                </h2>
               </div>
 
-              <h2 className="text-2xl font-bold text-white mb-3 leading-snug">
-                RepuGuard Reputation Engine
-              </h2>
-              <p className="text-white/52 leading-relaxed mb-6">
-                Every review deserves a response. RepuGuard reads the context of each
-                guest review and generates calm, professional replies that protect your
-                reputation without ever sounding defensive. Review every response before
-                it posts — you stay in control.
-              </p>
-
-              {/* Feature bullets — replaces old trial/price boxes */}
-              <div className="space-y-2.5 mb-6">
+              <div className="space-y-4 mb-6">
                 {[
-                  'AI-generated responses tuned to review tone & context',
-                  'Urgency scoring with response-deadline badges',
-                  'You approve before anything posts — always',
-                ].map(feat => (
-                  <div key={feat} className="flex items-start gap-3">
+                  {
+                    label: 'Properties & Bookings',
+                    body: 'Sync in immediately, with real-time updates via webhook as bookings change.',
+                  },
+                  {
+                    label: 'Guest Details',
+                    body: 'Guest name and contact info sync automatically the moment a booking is created or updated — no manual entry per stay.',
+                  },
+                  {
+                    label: 'Turnovers',
+                    body: 'Generated automatically between consecutive bookings, with crew assignments and offline-ready checklists.',
+                  },
+                ].map(row => (
+                  <div key={row.label} className="flex items-start gap-3">
                     <div className="w-5 h-5 bg-gold-300 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                       <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
                         <path
@@ -159,13 +153,19 @@ export default async function OwnerRezPage() {
                         />
                       </svg>
                     </div>
-                    <span className="text-sm text-white/65 leading-snug">{feat}</span>
+                    <p className="text-sm text-white/65 leading-snug">
+                      <span className="text-white font-semibold">{row.label}</span>
+                      {' — '}{row.body}
+                    </p>
                   </div>
                 ))}
               </div>
 
-              {/* Bundled-feature callout — RepuGuard is included in every FieldStay
-                  plan for every customer, not an OwnerRez-only or paid add-on feature */}
+              {/* Trust callout — reworded to match the real mechanism: RepuGuard
+                  never calls the OwnerRez API to post a response. It drafts the
+                  reply and links straight to the review on OwnerRez; you submit
+                  it yourself. Do not restore "posts when you approve" language —
+                  that implies an automated write-back that doesn't exist. */}
               <div className="flex items-center gap-3 bg-brand-800 border border-brand-panelBorder rounded-xl px-4 py-3">
                 <span className="w-5 h-5 bg-gold-300 rounded-full flex items-center justify-center flex-shrink-0">
                   <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
@@ -173,9 +173,10 @@ export default async function OwnerRezPage() {
                   </svg>
                 </span>
                 <p className="text-sm text-white/52">
-                  RepuGuard is{' '}
-                  <span className="text-white font-semibold">included in every FieldStay plan</span>
-                  {' '}— no add-on, no extra cost.
+                  <span className="text-white font-semibold">You post it, on your terms.</span>
+                  {' '}FieldStay drafts the response and links you straight to
+                  your OwnerRez review — nothing goes out until you submit it
+                  yourself.
                 </p>
               </div>
             </div>
@@ -248,16 +249,26 @@ export default async function OwnerRezPage() {
               },
               {
                 num: '02',
+                title: 'No-Login Vendor Portal & Work Order Invoicing',
+                body: 'Dispatch a work order and your vendor gets a link — no login, no app to install. They submit their line-item invoice from their phone, you approve it with one click, and payment goes straight to their bank.',
+              },
+              {
+                num: '03',
+                title: 'Asset Health Scores & CapEx Forecasting',
+                body: 'Every water heater, HVAC unit, and appliance gets a health score that updates daily based on age and expected lifespan. FieldStay rolls those scores into a 10-year capital plan automatically.',
+              },
+              {
+                num: '04',
                 title: 'Inventory & Maintenance',
                 body: 'Set par levels for every property. Low-stock alerts trigger purchase orders automatically. Schedule recurring maintenance — seasonal or routine — with vendor assignments built in.',
               },
               {
-                num: '03',
+                num: '05',
                 title: 'Owner Reporting Portal',
                 body: 'Property owners get a secure, tokenized P&L portal showing revenue, expenses, and net returns by period. You share one link. They check it themselves.',
               },
               {
-                num: '04',
+                num: '06',
                 title: 'RepuGuard — Reputation Management',
                 body: 'AI-generated review responses tuned to each guest\'s tone and context. Urgency scoring surfaces overdue responses before they cost you your rating. Included in every FieldStay plan — no add-on, no extra cost.',
                 // Visual distinction: highlight this card subtly as a headline feature
@@ -323,10 +334,13 @@ export default async function OwnerRezPage() {
       <div className="bg-gold-300">
         <div className="max-w-6xl mx-auto px-6 py-20 text-center">
           <h2 className="text-3xl font-bold mb-3 text-[#0a1628] font-display">
-            Ready to connect?
+            See your first turnover automate itself today.
           </h2>
           <p className="text-[#0a1628]/70 text-lg mb-10">
-            It takes less than 5 minutes to be fully set up.
+            Connect your OwnerRez account and watch FieldStay generate the
+            turnover, assign the crew, and queue the checklist automatically.
+            Cancel with one click if it doesn&apos;t save your team real time
+            in the first week.
           </p>
 
           {isLoggedIn ? (
