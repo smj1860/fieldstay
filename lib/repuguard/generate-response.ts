@@ -97,8 +97,9 @@ export async function generateReviewResponse(input: ReviewInput): Promise<Genera
   if (internalNotes) userMessageParts.push(`internal_notes: ${internalNotes}`)
 
   const client = new Anthropic()
+  const model  = process.env.REPUGUARD_MODEL ?? 'claude-sonnet-5'
   const message = await client.messages.create({
-    model:      'claude-sonnet-4-20250514',
+    model,
     max_tokens: 1000,
     system:     REPUGUARD_SYSTEM_PROMPT,
     messages:   [{ role: 'user', content: userMessageParts.join('\n') }],
@@ -109,6 +110,12 @@ export async function generateReviewResponse(input: ReviewInput): Promise<Genera
     .map(block => (block as { type: 'text'; text: string }).text)
     .join('')
 
-  const cleaned = rawText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
+  // Strip a code fence wherever it appears, not just when anchored exactly
+  // at the start/end of the string — models don't always format identically.
+  // No \s* at the fence boundaries: the trailing .trim() already handles
+  // that, and adding it here overlaps with the [\s\S]*? capture (both can
+  // match whitespace) causing superlinear backtracking on pathological input.
+  const fenceMatch = rawText.match(/```(?:json)?([\s\S]*?)```/)
+  const cleaned = (fenceMatch ? fenceMatch[1] : rawText).trim()
   return JSON.parse(cleaned) as GeneratedResponse
 }

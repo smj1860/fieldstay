@@ -120,9 +120,15 @@ export async function POST(request: NextRequest) {
       guestName:     guestName,
       internalNotes: internalNotes,
     })
-  } catch {
-    console.error('[RepuGuard] Failed to parse Anthropic response')
-    return NextResponse.json({ error: 'Failed to parse AI response' }, { status: 500 })
+  } catch (err) {
+    // Log the REAL error server-side — this is what let the June 15 model
+    // retirement run undiagnosed for a month behind a generic message.
+    // Never collapse this back to a bare `catch {}`.
+    console.error('[RepuGuard] Response generation failed:', err instanceof Error ? err.message : err)
+    const message = err instanceof Error && err.message.toLowerCase().includes('json')
+      ? 'The AI response could not be parsed. Try regenerating.'
+      : 'Response generation failed. Please try again in a moment.'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 
   const hasFlags     = Array.isArray(parsed.flags) && parsed.flags.length > 0
