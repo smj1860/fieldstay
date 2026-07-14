@@ -1,12 +1,15 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useState, useTransition } from 'react'
 import { saveDetails } from './actions'
+import { archiveProperty } from '@/app/(dashboard)/properties/actions'
+import { unstable_rethrow } from 'next/navigation'
 import Link from 'next/link'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
+import { Dialog } from '@/components/ui/Dialog'
 import type { Property } from '@/types/database'
 
 const PROPERTY_TYPES = [
@@ -19,8 +22,28 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
   const action = saveDetails.bind(null, property.id)
   const [state, formAction, pending] = useActionState(action, null)
 
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false)
+  const [archivePending, startArchiveTransition] = useTransition()
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+
+  function handleArchive() {
+    setArchiveError(null)
+    startArchiveTransition(async () => {
+      try {
+        await archiveProperty(property.id)
+      } catch (e) {
+        // archiveProperty() redirects internally on success, which Next
+        // implements by throwing a special error — let that propagate so
+        // navigation actually happens, only surface genuine failures below.
+        unstable_rethrow(e)
+        setArchiveError(e instanceof Error ? e.message : 'Could not archive property. Please try again.')
+      }
+    })
+  }
+
   return (
-    <form action={formAction} className="space-y-5">
+    <>
+      <form action={formAction} className="space-y-5">
       {state?.error && (
         <InlineAlert tone="error">
           {state.error}
@@ -168,5 +191,67 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
         <Link href="/properties" className={buttonVariantClass('ghost') + ' text-sm'}>Done for now</Link>
       </div>
     </form>
+
+      <div className="mt-8 pt-5 space-y-3" style={{ borderTop: '1px solid var(--accent-red-dim)' }}>
+        <div>
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--accent-red)' }}>Danger Zone</h3>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+            Archiving hides this property from the properties list, booking/checklist/inventory pickers,
+            and automated jobs (calendar sync, CapEx projections, guest check-in emails). It does not
+            delete any historical data and can only be reversed by an admin directly in the database.
+          </p>
+        </div>
+
+        {archiveError && (
+          <InlineAlert tone="error">
+            {archiveError}
+          </InlineAlert>
+        )}
+
+        <Button
+          type="button"
+          variant="danger"
+          onClick={() => setShowArchiveConfirm(true)}
+          disabled={archivePending}
+        >
+          {archivePending ? 'Archiving…' : 'Archive Property'}
+        </Button>
+      </div>
+
+      {showArchiveConfirm && (
+        <Dialog
+          open
+          onClose={() => setShowArchiveConfirm(false)}
+          title="Archive this property?"
+          maxWidthClassName="max-w-sm"
+        >
+          <div className="space-y-4">
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {property.name} will be removed from the active properties list and excluded from
+              automated jobs. This can be undone only by an admin working directly in the database.
+              Are you sure you want to continue?
+            </p>
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="danger"
+                onClick={handleArchive}
+                disabled={archivePending}
+              >
+                {archivePending ? 'Archiving…' : 'Yes, Archive Property'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowArchiveConfirm(false)}
+                disabled={archivePending}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
+    </>
   )
 }

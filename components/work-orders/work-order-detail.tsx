@@ -15,7 +15,7 @@ import {
   markVendorAcknowledged,
   markWorkVerified,
 } from '@/app/(dashboard)/maintenance/work-order-actions'
-import { rateWorkOrderVendor }         from '@/app/(dashboard)/maintenance/actions'
+import { rateWorkOrderVendor, deleteWorkOrder } from '@/app/(dashboard)/maintenance/actions'
 import { dispatchWorkOrderToVendor }   from '@/app/actions/work-order-public'
 
 // ── Types ─────────────────────────────────────────────────────
@@ -151,6 +151,9 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
   const [ratingError, setRatingError] = useState<string | null>(null)
   const [ratingSuccess, setRatingSuccess] = useState(false)
 
+  // Cancel work order modal state
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+
   // Dispatch modal state
   const [showDispatch,    setShowDispatch]    = useState(false)
   const [dispatchEmail,   setDispatchEmail]   = useState(wo.vendor_dispatch_email ?? wo.vendors?.email ?? '')
@@ -163,6 +166,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
   const canEdit  = userRole === 'admin' || userRole === 'manager'
   const priority = PRIORITY_STYLES[wo.priority]
   const status   = STATUS_STYLES[wo.status]
+  const canCancel = canEdit && wo.status !== 'completed' && wo.status !== 'cancelled'
 
   const lineItems      = wo.work_order_line_items ?? []
   const hasAccess      = !!(wo.properties.access_instructions || wo.access_notes)
@@ -187,6 +191,17 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
     startTransition(async () => {
       try { await markWorkVerified(wo.id) }
       catch (e) { setActionError(e instanceof Error ? e.message : 'Failed.') }
+    })
+  }
+
+  function handleCancel() {
+    setActionError(null)
+    startTransition(async () => {
+      try {
+        await deleteWorkOrder(wo.id)
+        setShowCancelConfirm(false)
+      }
+      catch (e) { setActionError(e instanceof Error ? e.message : 'Failed to cancel work order.') }
     })
   }
 
@@ -301,6 +316,20 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
               <Send className="w-3.5 h-3.5" />
               Send to Vendor
             </button>
+          )}
+
+          {/* Cancel Work Order button */}
+          {canCancel && (
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => setShowCancelConfirm(true)}
+              disabled={isPending}
+              className="print:hidden text-xs py-1.5 px-3"
+              title="Cancel this work order"
+            >
+              Cancel Work Order
+            </Button>
           )}
 
           {/* Print button */}
@@ -631,7 +660,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
             )}
 
             {actionError && (
-              <p className="text-xs text-red-400">{actionError}</p>
+              <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
             )}
           </div>
         </Section>
@@ -731,6 +760,45 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
           </Section>
         )}
       </div>
+
+      {/* ── Cancel Confirmation Modal ─────────────────────────── */}
+      {showCancelConfirm && (
+        <Dialog
+          open
+          onClose={() => setShowCancelConfirm(false)}
+          title="Cancel this work order?"
+          maxWidthClassName="max-w-sm"
+        >
+          <div className="space-y-4">
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              This marks work order {wo.wo_number ?? ''} as cancelled and logs the change. This cannot be undone from here.
+            </p>
+            {actionError && (
+              <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
+            )}
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="danger"
+                onClick={handleCancel}
+                disabled={isPending}
+              >
+                {isPending
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : 'Yes, Cancel Work Order'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowCancelConfirm(false)}
+                disabled={isPending}
+              >
+                Never Mind
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
 
       {/* ── Dispatch Modal ────────────────────────────────────── */}
       {showDispatch && (
