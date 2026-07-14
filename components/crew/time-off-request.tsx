@@ -5,6 +5,8 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { saveCrewAvailability } from '@/lib/dexie/helpers'
 import { ChevronLeft, ChevronRight, XCircle, CheckCircle2 } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 
 interface Props {
   crewMemberId: string
@@ -173,8 +175,8 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
   return (
     <div className="space-y-6 pb-24">
       <div>
-        <h2 className="text-lg font-bold text-accent-900 mb-1">Time Off Request</h2>
-        <p className="text-sm text-accent-500 mb-4">
+        <h2 className="text-lg font-bold text-primary-themed mb-1">Time Off Request</h2>
+        <p className="text-sm text-muted-themed mb-4">
           Tap any day to mark it as time off. Add a note if needed. Tap Save when done.
         </p>
 
@@ -182,15 +184,15 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
         <div className="flex items-center justify-between mt-4 mb-2">
           <button
             onClick={() => setWeekOffset(w => w - 1)}
-            className="flex items-center gap-1 text-sm font-medium text-accent-600
-                       hover:text-accent-900 px-3 py-2 rounded-lg hover:bg-accent-100
+            className="flex items-center justify-center gap-1 min-h-11 min-w-11 text-sm font-medium text-secondary-themed
+                       hover:text-primary-themed px-3 py-2 rounded-lg hover:bg-raised-themed
                        transition-colors"
           >
             <ChevronLeft className="w-4 h-4" />
             Prev Week
           </button>
 
-          <span className="text-sm font-semibold text-accent-700">
+          <span className="text-sm font-semibold text-secondary-themed">
             {new Date(windowStart + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
             {' – '}
             {new Date(windowEnd + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
@@ -198,8 +200,8 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
 
           <button
             onClick={() => setWeekOffset(w => w + 1)}
-            className="flex items-center gap-1 text-sm font-medium text-accent-600
-                       hover:text-accent-900 px-3 py-2 rounded-lg hover:bg-accent-100
+            className="flex items-center justify-center gap-1 min-h-11 min-w-11 text-sm font-medium text-secondary-themed
+                       hover:text-primary-themed px-3 py-2 rounded-lg hover:bg-raised-themed
                        transition-colors"
           >
             Next Week
@@ -231,7 +233,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
               className={`rounded-xl border transition-all ${
                 isTimeOff
                   ? 'bg-amber-500/10 border-amber-500/30'
-                  : 'bg-surface-card border-transparent'
+                  : 'bg-card-themed border-transparent'
               }`}
             >
               <button
@@ -239,7 +241,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
                 className="w-full flex items-center justify-between px-4 py-3"
               >
                 <span className={`text-sm font-semibold ${
-                  isTimeOff ? 'text-amber-400 line-through' : 'text-white'
+                  isTimeOff ? 'text-amber-400 line-through' : 'text-primary-themed'
                 }`}>
                   {formatDay(day)}
                 </span>
@@ -254,7 +256,7 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
               {/* Note input — only visible when time off is toggled */}
               {isTimeOff && (
                 <div className="px-4 pb-3">
-                  <input
+                  <Input
                     type="text"
                     placeholder="Reason (optional)"
                     value={noteValue}
@@ -269,9 +271,6 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
                         updateNote(dateStr, e.target.value)
                       }
                     }}
-                    className="w-full bg-surface-raised border border-accent-600 rounded-lg
-                               px-3 py-2 text-sm text-white placeholder:text-accent-500
-                               focus:outline-none focus:border-brand-400"
                   />
                 </div>
               )}
@@ -283,22 +282,22 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
       {/* Save button */}
       {hasDraftChanges && (
         <div className="fixed bottom-20 left-0 right-0 px-4">
-          <button
+          <Button
+            variant="cta"
             onClick={saveChanges}
             disabled={saving}
-            className="w-full py-3 rounded-xl bg-brand-400 text-surface-base font-bold
-                       text-sm disabled:opacity-60 active:scale-95 transition-all"
+            className="w-full py-3 text-sm active:scale-95"
           >
             {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+          </Button>
           {saveError && (
-            <p className="text-xs text-red-400 text-center mt-2">{saveError}</p>
+            <p className="text-xs text-center mt-2" style={{ color: 'var(--accent-red)' }}>{saveError}</p>
           )}
         </div>
       )}
 
       {savedAt && !hasDraftChanges && (
-        <p className="text-xs text-green-400 text-center">
+        <p className="text-xs text-center" style={{ color: 'var(--accent-green)' }}>
           Your availability has been updated. Your manager&apos;s calendar will reflect this shortly.
         </p>
       )}
@@ -306,14 +305,14 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
       {/* Upcoming time off (beyond the 14-day window) */}
       {(upcomingTimeOff?.length ?? 0) > 0 && (
         <div className="mt-6">
-          <h3 className="text-sm font-semibold text-accent-400 uppercase tracking-wide mb-3">
+          <h3 className="text-sm font-semibold text-muted-themed uppercase tracking-wide mb-3">
             Upcoming Time Off
           </h3>
           <div className="space-y-2">
             {upcomingTimeOff?.map((row) => (
               <div
                 key={row.id}
-                className="flex items-center justify-between bg-surface-card
+                className="flex items-center justify-between bg-card-themed
                            rounded-xl px-4 py-3 border border-amber-500/20"
               >
                 <div>
@@ -323,21 +322,22 @@ export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
                     )}
                   </p>
                   {row.notes && (
-                    <p className="text-xs text-accent-400 mt-0.5">{row.notes}</p>
+                    <p className="text-xs text-muted-themed mt-0.5">{row.notes}</p>
                   )}
                 </div>
-                <button
+                <Button
+                  variant="danger"
                   onClick={() => cancelUpcoming(row)}
                   disabled={cancellingId === row.id}
-                  className="text-xs text-accent-500 underline disabled:opacity-50"
+                  className="text-xs px-3 py-2"
                 >
                   {cancellingId === row.id ? 'Cancelling…' : 'Cancel'}
-                </button>
+                </Button>
               </div>
             ))}
           </div>
           {cancelError && (
-            <p className="text-xs text-red-400 text-center mt-2">{cancelError}</p>
+            <p className="text-xs text-center mt-2" style={{ color: 'var(--accent-red)' }}>{cancelError}</p>
           )}
         </div>
       )}
