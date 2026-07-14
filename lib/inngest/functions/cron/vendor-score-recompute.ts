@@ -1,44 +1,6 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 
-const MIN_ON_TIME_SAMPLE = 3
-
-interface VendorWorkOrderRow {
-  vendor_rating:  number | null
-  scheduled_date: string | null
-  completed_date: string | null
-  status:         string
-}
-
-function computeVendorScores(workOrders: VendorWorkOrderRow[]): {
-  avgRating:        number | null
-  ratingCount:      number
-  onTimePct:        number | null
-  onTimeSampleSize: number
-} {
-  const ratings = workOrders
-    .map((wo) => wo.vendor_rating)
-    .filter((r): r is number => r !== null && r > 0)
-
-  const completedWithDates = workOrders.filter(
-    (wo) => wo.status === 'completed' && wo.scheduled_date && wo.completed_date
-  )
-  const onTimeCount = completedWithDates.filter(
-    (wo) => wo.completed_date! <= wo.scheduled_date!
-  ).length
-
-  return {
-    avgRating:   ratings.length > 0
-      ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10
-      : null,
-    ratingCount: ratings.length,
-    onTimePct:   completedWithDates.length >= MIN_ON_TIME_SAMPLE
-      ? Math.round((onTimeCount / completedWithDates.length) * 100)
-      : null,
-    onTimeSampleSize: completedWithDates.length,
-  }
-}
-
 /**
  * SCHEDULED: runs nightly.
  *
@@ -64,29 +26,9 @@ export const vendorScoreRecompute = inngest.createFunction(
   async ({ step, logger }) => {
     const updated = await step.run('recompute-vendor-scores', async () => {
       const supabase = createServiceClient()
-
-      const { data: vendors } = await supabase
-        .from('vendors')
-        .select('id, work_orders(vendor_rating, scheduled_date, completed_date, status)')
-
-      let count = 0
-      for (const v of vendors ?? []) {
-        const workOrders = (v.work_orders ?? []) as VendorWorkOrderRow[]
-        if (!workOrders.length) continue
-
-        const scores = computeVendorScores(workOrders)
-        await supabase
-          .from('vendors')
-          .update({
-            avg_rating:          scores.avgRating,
-            rating_count:        scores.ratingCount,
-            on_time_pct:         scores.onTimePct,
-            on_time_sample_size: scores.onTimeSampleSize,
-          })
-          .eq('id', v.id)
-        count++
-      }
-      return count
+      const { data, error } = await supabase.rpc('recompute_vendor_scores')
+      if (error) throw new Error(`recompute_vendor_scores failed: ${error.message}`)
+      return data as number
     })
 
     logger.info(`Vendor score recompute: ${updated} vendors updated`)
