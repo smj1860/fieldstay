@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { ChevronLeft }                 from 'lucide-react'
 import { createClient }                from '@/lib/supabase/client'
+import { cn }                          from '@/lib/utils'
 
 interface ConversationRow {
   id:                string
@@ -43,6 +45,11 @@ export function SupportInboxClient({
   const [selectedId, setSelectedId]       = useState<string | null>(
     initialConversations.find(c => c.needs_human)?.id ?? initialConversations[0]?.id ?? null
   )
+  // Mobile master-detail toggle — independent of selectedId, which is
+  // auto-populated above so the desktop two-pane layout has something to
+  // show on load. On mobile we still want the list pane by default and
+  // only switch to the detail pane once the user taps a conversation.
+  const [mobileShowDetail, setMobileShowDetail] = useState(false)
   const [messages, setMessages] = useState<MessageRow[]>([])
   const [replyText, setReplyText] = useState('')
   const [sending, setSending]     = useState(false)
@@ -168,7 +175,13 @@ export function SupportInboxClient({
     <>
     <div style={{ display: 'flex', height: 'calc(100vh - 64px)' }}>
       {/* Conversation list */}
-      <div style={{ width: '300px', borderRight: '1px solid var(--border)', overflowY: 'auto', flexShrink: 0 }}>
+      <div
+        className={cn(
+          'w-full md:w-[300px] flex-shrink-0',
+          mobileShowDetail ? 'hidden md:block' : 'block',
+        )}
+        style={{ borderRight: '1px solid var(--border)', overflowY: 'auto' }}
+      >
         <div style={{ padding: '16px', borderBottom: '1px solid var(--border)' }}>
           <h1 style={{ fontWeight: 700, fontSize: '14px', margin: 0 }}>Support Inbox</h1>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0' }}>
@@ -178,7 +191,10 @@ export function SupportInboxClient({
         {conversations.map((c) => (
           <button
             key={c.id}
-            onClick={() => setSelectedId(c.id)}
+            onClick={() => {
+              setSelectedId(c.id)
+              setMobileShowDetail(true)
+            }}
             style={{
               width:           '100%',
               textAlign:       'left',
@@ -215,17 +231,37 @@ export function SupportInboxClient({
       </div>
 
       {/* Conversation detail */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div
+        className={cn(
+          'flex-1 flex-col min-w-0',
+          mobileShowDetail ? 'flex' : 'hidden md:flex',
+        )}
+      >
         {selected ? (
           <>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-              <div>
-                <h2 style={{ fontWeight: 700, fontSize: '13px', margin: 0 }}>{orgName(selected.organizations)}</h2>
-                {selected.needs_human && (
-                  <p style={{ fontSize: '12px', color: 'var(--accent-red)', margin: '2px 0 0' }}>
-                    Escalated — {selected.escalation_reason}
-                  </p>
-                )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  onClick={() => setMobileShowDetail(false)}
+                  className="md:hidden inline-flex items-center justify-center p-1 -ml-1"
+                  aria-label="Back to conversation list"
+                  style={{
+                    background: 'transparent',
+                    border:     'none',
+                    color:      'var(--text-primary)',
+                    cursor:     'pointer',
+                  }}
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <div>
+                  <h2 style={{ fontWeight: 700, fontSize: '13px', margin: 0 }}>{orgName(selected.organizations)}</h2>
+                  {selected.needs_human && (
+                    <p style={{ fontSize: '12px', color: 'var(--accent-red)', margin: '2px 0 0' }}>
+                      Escalated — {selected.escalation_reason}
+                    </p>
+                  )}
+                </div>
               </div>
               {selected.needs_human && (
                 <button
