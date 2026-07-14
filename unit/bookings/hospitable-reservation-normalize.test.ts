@@ -56,9 +56,23 @@ describe('hospitableReservationToNormalized', () => {
       reservation_status: { current: { category: 'not accepted', sub_category: 'x' } },
     })).status).toBe('cancelled')
 
+    // 'unknown' and 'checkpoint' are documented Hospitable categories for an
+    // in-flight/ambiguous reservation — they map to 'tentative', not
+    // 'confirmed', so an ambiguous reservation doesn't trigger real crew
+    // dispatch.
     expect(hospitableReservationToNormalized(baseReservation({
       reservation_status: { current: { category: 'unknown', sub_category: 'x' } },
-    })).status).toBe('confirmed')
+    })).status).toBe('tentative')
+
+    expect(hospitableReservationToNormalized(baseReservation({
+      reservation_status: { current: { category: 'checkpoint', sub_category: 'x' } },
+    })).status).toBe('tentative')
+
+    // A genuinely unrecognized category (not one of Hospitable's documented
+    // values) also fails toward caution rather than defaulting to 'confirmed'.
+    expect(hospitableReservationToNormalized(baseReservation({
+      reservation_status: { current: { category: 'some_future_category' as never, sub_category: 'x' } },
+    })).status).toBe('tentative')
   })
 
   it('maps platform to the FieldStay booking source', () => {

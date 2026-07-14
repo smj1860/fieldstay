@@ -20,6 +20,7 @@ import type {
   OwnerRezBooking,
 } from '../types'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
+import { unmappedBookingStatus } from '@/lib/bookings/normalize'
 import { ok, fail, timingSafeEqual } from '../webhook-verification'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -249,7 +250,7 @@ export function mapOwnerRezBookingStatus(status: string): string {
   if (s === 'confirmed') return 'confirmed'
   if (s === 'cancelled' || s === 'canceled') return 'cancelled'
   if (s === 'tentative') return 'tentative'
-  return 'confirmed'
+  return unmappedBookingStatus('ownerrez', status)
 }
 
 export function mapOwnerRezChannelToSource(channel?: string): string {
@@ -373,9 +374,13 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
   // is_block (checked by turnover generation, guidebook emails, owner
   // portal) and status: 'blocked' (the only signal the bookings UI
   // actually renders "Blocked / Unavailable" from) — both must agree on
-  // every block-family booking, so `type` takes precedence over OwnerRez's
-  // own is_block field if the two ever disagree.
+  // every block-family booking. A legacy/future `type` value combined
+  // with a true `is_block` flag from OwnerRez must still count as a
+  // block: both signals are OR'd into one `isBlock` value and every field
+  // below derives from that same value, so status and is_block can never
+  // disagree.
   const isBlockType = b.type === 'block' || b.type === 'quote_hold' || b.type === 'linked_availability'
+  const isBlock      = isBlockType || (b.is_block ?? false)
 
   return {
     external_id: String(b.id),
@@ -386,11 +391,11 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     checkout_date: b.departure,
     checkin_time:  null,
     checkout_time: null,
-    status:      isBlockType ? 'blocked' : mapOwnerRezBookingStatus(b.status),
+    status:      isBlock ? 'blocked' : mapOwnerRezBookingStatus(b.status),
     guest_name:  b.guest?.name  ?? null,
     guest_email: b.guest?.email ?? null,
     source:      mapOwnerRezChannelToSource(b.channel_name),
-    is_block:    isBlockType || (b.is_block ?? false),
+    is_block:    isBlock,
     // Effective 2026-07-07, OwnerRez's type field can be 'owner' — the
     // property owner's own personal-use stay. It's a full booking (not a
     // block; is_block is false), so it flows through the same upsert path

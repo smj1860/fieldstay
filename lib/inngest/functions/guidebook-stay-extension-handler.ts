@@ -55,6 +55,21 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
 
         if (!optin?.is_active) return
 
+        // ── Atomic claim — wins the race, prevents double-send on retry ───────
+        // UPDATE only succeeds if sms_sent_at IS NULL. If this step is retried
+        // after a successful SMS send, the timestamp is already set, the
+        // UPDATE affects 0 rows, and we skip the send. Mirrors the pattern in
+        // guidebook-guest-opted-in.ts.
+        const { data: claimed } = await supabase
+          .from('stay_extension_requests')
+          .update({ sms_sent_at: new Date().toISOString() })
+          .eq('id', requestId)
+          .is('sms_sent_at', null)
+          .select('id')
+          .maybeSingle()
+
+        if (!claimed) return { skipped: 'already_sent' }
+
         const discountLine = discountPct
           ? ` We're offering ${discountPct}% off to extend your stay.`
           : ''
@@ -68,10 +83,11 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
 
         const result = await sendSMS(guestPhoneE164, text)
 
-        if (result.sent) {
+        if (!result.sent) {
+          // SMS failed — roll back the claim so a retry can attempt again
           await supabase
             .from('stay_extension_requests')
-            .update({ sms_sent_at: new Date().toISOString() })
+            .update({ sms_sent_at: null })
             .eq('id', requestId)
         }
       })

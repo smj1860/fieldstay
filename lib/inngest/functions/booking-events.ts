@@ -54,9 +54,15 @@ export const handleBookingConfirmed = inngest.createFunction(
 
       const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
 
-      // Atomic upsert — ON CONFLICT (source_reference_id, source) DO NOTHING
-      // Replaces check-then-insert TOCTOU pattern; duplicate concurrent workers
-      // are handled at the DB layer rather than in application code.
+      // A later post carrying a real actual_total_amount (e.g. Hospitable's
+      // financials_changed webhook firing after the initial reservation sync)
+      // must be allowed to correct an earlier avg_nightly_rate estimate —
+      // ignoreDuplicates: true would silently discard that correction and
+      // lock the estimate in forever. A re-post without a real total (just
+      // another estimate) still no-ops so it can't clobber an
+      // already-posted actual figure with a stale guess.
+      const hasActualAmount = actual_total_amount != null && actual_total_amount > 0
+
       const { error } = await supabase.from('owner_transactions').upsert(
         {
           property_id,
@@ -70,7 +76,7 @@ export const handleBookingConfirmed = inngest.createFunction(
           transaction_date:     booking.checkin_date,
           visible_to_owner:     true,
         },
-        { onConflict: 'source_reference_id,source', ignoreDuplicates: true }
+        { onConflict: 'source_reference_id,source', ignoreDuplicates: !hasActualAmount }
       )
 
       if (error) throw error

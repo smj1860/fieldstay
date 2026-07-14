@@ -17,6 +17,7 @@ import type { CrewRole } from '@/types/database'
 import { hospitableApiLimiter } from '@/lib/rate-limit'
 import type { NormalizedProperty } from '@/lib/properties/normalize'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
+import { unmappedBookingStatus } from '@/lib/bookings/normalize'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -1104,11 +1105,18 @@ export function mapHospitableStatus(
   category: HospitableReservationStatus['category']
 ): 'confirmed' | 'tentative' | 'cancelled' {
   switch (category) {
-    case 'accepted':     return 'confirmed'
-    case 'request':      return 'tentative'
+    case 'accepted':      return 'confirmed'
+    // 'unknown' and 'checkpoint' are documented, legitimate Hospitable
+    // categories (not unforeseen values) — an in-flight/ambiguous
+    // reservation should map to 'tentative' explicitly, same as 'request',
+    // rather than being lumped into the same default branch that also
+    // catches genuinely unrecognized values.
+    case 'request':
+    case 'unknown':
+    case 'checkpoint':    return 'tentative'
     case 'cancelled':
-    case 'not accepted': return 'cancelled'
-    default:             return 'confirmed'
+    case 'not accepted':  return 'cancelled'
+    default:              return unmappedBookingStatus('hospitable', category)
   }
 }
 

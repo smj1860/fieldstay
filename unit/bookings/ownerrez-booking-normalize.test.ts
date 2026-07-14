@@ -58,7 +58,8 @@ describe('ownerRezBookingToNormalized', () => {
     expect(ownerRezBookingToNormalized(baseBooking({ status: 'Tentative' })).status).toBe('tentative')
     expect(ownerRezBookingToNormalized(baseBooking({ status: 'Cancelled' })).status).toBe('cancelled')
     expect(ownerRezBookingToNormalized(baseBooking({ status: 'Canceled' })).status).toBe('cancelled')
-    expect(ownerRezBookingToNormalized(baseBooking({ status: 'hold' })).status).toBe('confirmed')
+    // Unrecognized statuses fail toward caution ('tentative'), not 'confirmed'.
+    expect(ownerRezBookingToNormalized(baseBooking({ status: 'hold' })).status).toBe('tentative')
   })
 
   it('maps channel_name to the FieldStay booking source', () => {
@@ -97,12 +98,13 @@ describe('ownerRezBookingToNormalized', () => {
     }
   )
 
-  it('still honors a raw is_block: true even when type is a plain booking', () => {
+  it('still honors a raw is_block: true even when type is a plain booking, and status agrees', () => {
     const result = ownerRezBookingToNormalized(baseBooking({ type: 'booking', is_block: true }))
+    // is_block and status must never disagree — a plain 'booking' type with
+    // is_block: true (unexpected, but not impossible) maps status to
+    // 'blocked' too, not 'confirmed', so turnover generation (which reads
+    // is_block) and the bookings UI (which reads status) show the same thing.
     expect(result.is_block).toBe(true)
-    // type takes precedence for `status` only when type itself signals a
-    // block — a plain 'booking' type with is_block: true (unexpected, but
-    // not impossible) still maps status via mapOwnerRezBookingStatus.
-    expect(result.status).toBe('confirmed')
+    expect(result.status).toBe('blocked')
   })
 })

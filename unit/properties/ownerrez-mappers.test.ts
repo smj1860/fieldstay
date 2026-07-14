@@ -25,8 +25,8 @@ describe('mapOwnerRezBookingStatus', () => {
     expect(mapOwnerRezBookingStatus('Tentative')).toBe('tentative')
   })
 
-  it('defaults unknown statuses to confirmed', () => {
-    expect(mapOwnerRezBookingStatus('hold')).toBe('confirmed')
+  it('defaults unknown statuses to tentative (fails toward caution)', () => {
+    expect(mapOwnerRezBookingStatus('hold')).toBe('tentative')
   })
 })
 

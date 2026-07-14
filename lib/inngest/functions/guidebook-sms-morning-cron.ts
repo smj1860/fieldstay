@@ -4,6 +4,7 @@ import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { distanceMiles } from '@/lib/geocoding'
 import { sendSMS, formatOffer } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
+import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
 import type { GuidebookSponsor } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
@@ -99,13 +100,16 @@ export const guidebookSmsMorningCron = inngest.createFunction(
             .maybeSingle()
 
           if (rainySponsor) {
+            // Claim the slot atomically before sending — a retry of this
+            // step after a successful send now finds the slot already
+            // claimed and skips re-sending, instead of double-texting.
+            const claimed = await claimDailySmsSlot(supabase, optin.id, 'last_morning_sms_date', todayDate)
+            if (!claimed) return false
+
             const rainBody = await renderSmsBody(optin.org_id, 'rain_alert', { property_name: property.name })
             const res = await sendSMS(optin.phone_e164, rainBody)
-            if (res.sent) {
-              await supabase
-                .from('guidebook_guest_sms_optins')
-                .update({ last_morning_sms_date: todayDate, updated_at: new Date().toISOString() })
-                .eq('id', optin.id)
+            if (!res.sent) {
+              await releaseDailySmsSlot(supabase, optin.id, 'last_morning_sms_date')
             }
             return res.sent
           }
@@ -126,6 +130,10 @@ export const guidebookSmsMorningCron = inngest.createFunction(
           sponsor.custom_offer_text
         )
 
+        // Claim the slot atomically before sending — see rain-alert branch above.
+        const claimed = await claimDailySmsSlot(supabase, optin.id, 'last_morning_sms_date', todayDate)
+        if (!claimed) return false
+
         const morningBody = await renderSmsBody(optin.org_id, 'morning_nudge', {
           property_name: property.name,
           temperature:   Math.round(weather.temperature),
@@ -133,11 +141,8 @@ export const guidebookSmsMorningCron = inngest.createFunction(
         })
         const res = await sendSMS(optin.phone_e164, morningBody)
 
-        if (res.sent) {
-          await supabase
-            .from('guidebook_guest_sms_optins')
-            .update({ last_morning_sms_date: todayDate, updated_at: new Date().toISOString() })
-            .eq('id', optin.id)
+        if (!res.sent) {
+          await releaseDailySmsSlot(supabase, optin.id, 'last_morning_sms_date')
         }
         return res.sent
       })
