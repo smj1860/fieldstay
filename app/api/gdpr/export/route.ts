@@ -1,7 +1,7 @@
 import { NextResponse }        from 'next/server'
 import { createClient }        from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { logAuditEvent }       from '@/lib/audit'
+import { logAuditEvents }      from '@/lib/audit'
 
 /**
  * GET /api/gdpr/export
@@ -43,13 +43,21 @@ export async function GET() {
 
   const orgIds = (memberships ?? []).map((m) => m.org_id)
 
-  await logAuditEvent({
-    orgId:      orgIds[0] ?? undefined,
-    actorId:    user.id,
-    action:     'gdpr.data_export.requested',
-    targetType: 'user',
-    targetId:   user.id,
-  })
+  // Log once per org the user belongs to — a single event scoped to only
+  // the first org would silently drop the export record for a multi-org
+  // user's other orgs. Skip entirely for a zero-org user rather than log
+  // with an undefined orgId.
+  if (orgIds.length > 0) {
+    await logAuditEvents(
+      orgIds.map((orgId) => ({
+        orgId,
+        actorId:    user.id,
+        action:     'gdpr.data_export.requested' as const,
+        targetType: 'user',
+        targetId:   user.id,
+      }))
+    )
+  }
 
   const payload = {
     exported_at:              new Date().toISOString(),

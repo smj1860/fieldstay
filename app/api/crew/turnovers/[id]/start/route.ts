@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvent } from '@/lib/audit'
 
 /**
  * POST /api/crew/turnovers/[id]/start
@@ -78,6 +79,14 @@ export async function POST(
       started_by_crew_id: crew.id,
       started_at:         startedAt,
     },
+  })
+
+  await logAuditEvent({
+    orgId:      turnover.org_id,
+    actorId:    user.id,
+    action:     'turnover.started',
+    targetType: 'turnover',
+    targetId:   turnover_id,
   })
 
   return NextResponse.json({ success: true })

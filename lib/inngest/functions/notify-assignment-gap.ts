@@ -1,6 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
+import { escapeHtml }          from '@/lib/utils/html'
 
 export const notifyAssignmentGap = inngest.createFunction(
   { id: 'notify-assignment-gap', name: 'Notify PM: Crew Coverage Gap', retries: 2 },
@@ -52,7 +53,7 @@ export const notifyAssignmentGap = inngest.createFunction(
               <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
                 <h2>Crew coverage gap</h2>
                 <p>
-                  ${context.propertyName} has a turnover scheduled for
+                  ${escapeHtml(context.propertyName)} has a turnover scheduled for
                   <strong>${dateStr}</strong> with no available crew member to
                   auto-assign (needed ${crew_needed}, found ${crew_found}).
                 </p>

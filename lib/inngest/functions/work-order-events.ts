@@ -12,6 +12,7 @@ import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-conne
 import { randomBytes } from 'crypto'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
+import { logAuditEvent } from '@/lib/audit'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -508,7 +509,7 @@ export const handleWorkOrderCompleted = inngest.createFunction(
       const cost = wo?.actual_cost ?? null
       if (!cost || cost <= 0) return { skipped: true }
 
-      await supabase.from('owner_transactions').upsert({
+      const { data: txn } = await supabase.from('owner_transactions').upsert({
         property_id,
         org_id,
         work_order_id,
@@ -520,7 +521,17 @@ export const handleWorkOrderCompleted = inngest.createFunction(
         description:          wo?.title ?? 'Work order expense',
         transaction_date:     new Date().toISOString().split('T')[0],
         visible_to_owner:     false,
-      }, { onConflict: 'source_reference_id,source', ignoreDuplicates: true })
+      }, { onConflict: 'source_reference_id,source', ignoreDuplicates: true }).select('id').maybeSingle()
+
+      if (txn) {
+        await logAuditEvent({
+          orgId:      org_id,
+          action:     'owner.transaction.created',
+          targetType: 'owner_transaction',
+          targetId:   txn.id,
+          metadata:   { source: 'work_order_completion', work_order_id },
+        })
+      }
 
       return { posted: cost }
     })

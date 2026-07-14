@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvent } from '@/lib/audit'
 
 export interface ChecklistItemInput {
   section:    string
@@ -14,7 +15,7 @@ export interface ChecklistItemInput {
 export async function saveMasterChecklistItems(
   items: ChecklistItemInput[]
 ): Promise<{ error?: string; saved: number }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   // Atomic replace via RPC — avoids a non-transactional delete+insert gap
   const { error } = await supabase.rpc('replace_master_checklist_items', {
@@ -31,6 +32,15 @@ export async function saveMasterChecklistItems(
     console.error('[saveMasterChecklistItems]', error)
     return { error: 'Operation failed. Please try again.', saved: 0 }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'checklist.master_template.updated',
+    targetType: 'organization',
+    targetId:   membership.org_id,
+    metadata:   { saved: items.length },
+  })
 
   revalidatePath('/setup')
   revalidatePath('/inventory')

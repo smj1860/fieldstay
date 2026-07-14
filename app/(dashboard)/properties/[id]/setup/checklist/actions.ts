@@ -29,7 +29,7 @@ export async function saveChecklistTemplate(
   templateId: string | null,
   sections: ChecklistSectionInput[]
 ): Promise<ChecklistState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   let tmplId = templateId
 
@@ -110,6 +110,15 @@ export async function saveChecklistTemplate(
     }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.checklist_template.updated',
+    targetType: 'checklist_template',
+    targetId:   tmplId ?? undefined,
+    metadata:   { property_id: propertyId, sections: sections.length },
+  })
+
   revalidatePath(`/properties/${propertyId}/setup/checklist`)
   return { success: true }
 }
@@ -135,6 +144,15 @@ export async function broadcastChecklistTemplate(
       target_property_ids: targetPropertyIds,
       triggered_by:        user.id,
     },
+  })
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.checklist_template.updated',
+    targetType: 'property',
+    targetId:   sourcePropertyId,
+    metadata:   { broadcast_to: targetPropertyIds },
   })
 
   revalidatePath('/properties')

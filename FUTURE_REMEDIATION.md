@@ -338,3 +338,50 @@ Either way, don't treat local filenames as authoritative for "what version
 is this schema change" until this is resolved — the live database is
 always the source of truth in the meantime, per this repo's own existing
 schema-reference guidance.
+
+---
+
+## 14. Migration-time dynamic SQL via `EXECUTE`/`format()` — safe today, worth a guardrail note
+
+**Files:** `supabase/migrations/20260614122755_fix_property_owners_policies.sql:7`,
+`supabase/migrations/20260614122744_fix_quote_requests_policies.sql:7`,
+`supabase/migrations/20260707141631_security_definer_execute_grants.sql:29-30`
+
+Found during a sanitization audit. Three migrations build SQL dynamically:
+the two `fix_*_policies.sql` files do
+`EXECUTE 'DROP POLICY IF EXISTS "' || r.policyname || '" ON ...'` where
+`r.policyname` comes from `pg_policies`, not user input, and
+`security_definer_execute_grants.sql` does
+`EXECUTE format('REVOKE EXECUTE ON FUNCTION %s ...', fn)` where `fn` is
+drawn from a hardcoded array literal. Neither is exploitable — these are
+one-time migration scripts, not runtime RPCs, and no value in either
+string originates from a user-supplied identifier.
+
+**Suggested fix:** no action needed against current usage, but if either
+pattern is ever copied into a runtime `SECURITY DEFINER` function callable
+from the app, switch to `format('...', quote_ident(...))` or the `%I`/`%L`
+format specifiers rather than raw string concatenation, so a future copy-
+paste doesn't turn a safe migration-only pattern into an injectable one.
+
+---
+
+## 15. PostgREST `.or()` filter-string construction — fragile pattern, not currently exploitable
+
+**Files:** `lib/turnovers/generator.ts:393`, `lib/sms/optin-claim.ts:22`,
+`app/api/integrations/[provider]/callback/route.ts:255`,
+`app/(dashboard)/messages/page.tsx:21`, `lib/dexie/context.tsx:401`
+
+Found during the same audit. Several call sites build Supabase `.or()`
+filter strings via template literals — a PostgREST filter-injection
+surface in principle (e.g. a raw `,role.eq.admin` could smuggle in an
+extra OR condition if attacker-controlled text were ever interpolated
+directly). Traced every current call site: all interpolated values are
+internally-generated UUIDs (`booking.id`, `user.id`,
+`membership.org_id` from the session) or computed ISO dates — never raw
+external/free-text input — so there is no live exploit today.
+
+**Suggested fix:** add a small typed helper (e.g. `orFilter(...)` that
+validates UUID/date shape before interpolating) at these call sites, or at
+minimum a comment noting the constraint, so a future contributor doesn't
+accidentally pass a free-text field (a search query, an external booking
+ID) into this pattern without realizing it needs escaping/validation first.

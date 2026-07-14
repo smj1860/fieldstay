@@ -6,6 +6,7 @@ import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import type { AssetType } from '@/types/database'
+import { logAuditEvent } from '@/lib/audit'
 
 // Durations beyond this are treated as tracking errors (e.g. a checklist item
 // completed a day late) and excluded from the auto-assignment learning loop.
@@ -285,7 +286,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
       const amount  = parseFloat((base + premium).toFixed(2))
 
       // Atomic upsert — ON CONFLICT (source_reference_id, source) DO NOTHING
-      const { error } = await supabase.from('owner_transactions').upsert(
+      const { data: txn, error } = await supabase.from('owner_transactions').upsert(
         {
           property_id,
           org_id,
@@ -301,9 +302,20 @@ export const handleTurnoverCompleted = inngest.createFunction(
           visible_to_owner:     false,
         },
         { onConflict: 'source_reference_id,source', ignoreDuplicates: true }
-      )
+      ).select('id').maybeSingle()
 
       if (error) throw error
+
+      if (txn) {
+        await logAuditEvent({
+          orgId:      org_id,
+          action:     'owner.transaction.created',
+          targetType: 'owner_transaction',
+          targetId:   txn.id,
+          metadata:   { source: 'turnover_completion', turnover_id },
+        })
+      }
+
       return { posted: amount }
     })
 

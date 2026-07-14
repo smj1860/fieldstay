@@ -167,6 +167,14 @@ export async function POST(request: NextRequest) {
             .from('organizations')
             .update({ repuguard_status: repuguardStatus })
             .eq('id', orgId)
+
+          await logAuditEvent({
+            orgId,
+            action:     'billing.repuguard_subscription.updated',
+            targetType: 'organization',
+            targetId:   orgId,
+            metadata:   { status: repuguardStatus, stripe_event_type: event.type },
+          })
         }
         break
       }
@@ -292,6 +300,14 @@ export async function POST(request: NextRequest) {
             .from('organizations')
             .update({ repuguard_status: 'cancelled' })
             .eq('id', orgId)
+
+          await logAuditEvent({
+            orgId,
+            action:     'billing.repuguard_subscription.updated',
+            targetType: 'organization',
+            targetId:   orgId,
+            metadata:   { status: 'cancelled', stripe_event_type: event.type },
+          })
         }
         break
       }

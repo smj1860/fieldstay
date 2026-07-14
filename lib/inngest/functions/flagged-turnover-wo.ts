@@ -1,5 +1,6 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent }       from '@/lib/audit'
 
 export const flaggedTurnoverToWO = inngest.createFunction(
   {
@@ -49,6 +50,15 @@ export const flaggedTurnoverToWO = inngest.createFunction(
         .single()
 
       if (error) throw new Error(`WO creation failed: ${error.message}`)
+
+      await logAuditEvent({
+        orgId:      org_id,
+        action:     'work_order.created',
+        targetType: 'work_order',
+        targetId:   wo.id,
+        metadata:   { source: 'crew_flag', turnover_id },
+      })
+
       return wo
     })
 

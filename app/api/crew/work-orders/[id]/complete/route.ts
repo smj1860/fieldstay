@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest }                   from '@/lib/inngest/client'
+import { logAuditEvent }             from '@/lib/audit'
 
 /**
  * POST /api/crew/work-orders/[id]/complete
@@ -91,6 +92,15 @@ export async function POST(
       completedAt:  new Date().toISOString(),
       notes:        notes?.trim() ? notes.trim() : null,
     },
+  })
+
+  await logAuditEvent({
+    orgId:      wo.org_id,
+    actorId:    user.id,
+    action:     'work_order.updated',
+    targetType: 'work_order',
+    targetId:   id,
+    metadata:   { change: 'completed_by_crew' },
   })
 
   return NextResponse.json({ completed: true })

@@ -5,6 +5,7 @@ import { stripe } from '@/lib/stripe/client'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
+import { logAuditEvent } from '@/lib/audit'
 import type { GuidebookSlotType, GuidebookOfferType } from '@/types/database'
 
 /**
@@ -62,6 +63,15 @@ export async function createSponsorCheckoutSession(
       .eq('id', sponsor.id)
       .eq('org_id', sponsor.org_id) // explicit tenant guard
 
+    // Unauthenticated flow (media kit page has no PM session) — no actorId
+    await logAuditEvent({
+      orgId:      sponsor.org_id,
+      action:     'guidebook.sponsor.checkout_started',
+      targetType: 'guidebook_sponsor',
+      targetId:   sponsor.id,
+      metadata:   { slot_type: sponsor.slot_type },
+    })
+
     return { url: session.url }
   } catch (err) {
     console.error('[createSponsorCheckoutSession]', err)
@@ -94,7 +104,7 @@ export interface UpsertSponsorInput {
 export async function upsertSponsor(
   input: UpsertSponsorInput
 ): Promise<{ mediaKitToken: string } | { error: string }> {
-  const { membership } = await requireOrgMember()
+  const { user, membership } = await requireOrgMember()
   const supabase        = createServiceClient()
 
   if (input.slotNumber < 1 || input.slotNumber > 6) {
@@ -125,10 +135,20 @@ export async function upsertSponsor(
       },
       { onConflict: 'org_id,slot_number' }
     )
-    .select('media_kit_token')
+    .select('id, media_kit_token')
     .single()
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'guidebook.sponsor.updated',
+    targetType: 'guidebook_sponsor',
+    targetId:   data.id,
+    metadata:   { slot_number: input.slotNumber, slot_type: input.slotType },
+  })
+
   return { mediaKitToken: data.media_kit_token }
 }
 
@@ -149,7 +169,7 @@ export interface UpsertPropertyGuidebookConfigInput {
 export async function upsertPropertyGuidebookConfig(
   input: UpsertPropertyGuidebookConfigInput
 ): Promise<{ error?: string }> {
-  const { membership } = await requireOrgMember()
+  const { user, membership } = await requireOrgMember()
   const supabase        = createServiceClient()
 
   const { data: property } = await supabase
@@ -180,6 +200,17 @@ export async function upsertPropertyGuidebookConfig(
     )
 
   if (error) return { error: error.message }
+
+  // Never log wifi_password value itself — it's a guest-facing credential
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'guidebook.configuration.updated',
+    targetType: 'guidebook_property_config',
+    targetId:   input.propertyId,
+    metadata:   { is_published: input.isPublished },
+  })
+
   return {}
 }
 
@@ -198,7 +229,7 @@ export interface UpdateStayExtensionSettingsInput {
 export async function updateStayExtensionSettings(
   input: UpdateStayExtensionSettingsInput
 ): Promise<{ error?: string }> {
-  const { membership } = await requireOrgMember()
+  const { user, membership } = await requireOrgMember()
   const supabase        = createServiceClient()
 
   if (input.discountPct !== null && (input.discountPct < 0 || input.discountPct > 100)) {
@@ -228,6 +259,16 @@ export async function updateStayExtensionSettings(
     .eq('org_id', membership.org_id)
 
   if (error) return { error: error.message }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'guidebook.stay_extension_settings.updated',
+    targetType: 'guidebook_configuration',
+    targetId:   membership.org_id,
+    metadata:   { enabled: input.enabled, gap_threshold_days: input.gapThresholdDays },
+  })
+
   return {}
 }
 

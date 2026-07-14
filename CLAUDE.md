@@ -743,6 +743,8 @@ renderPmAlert({ heading, body, ctaLabel, ctaUrl, details?, table?, sections?, no
 // Optional: details, table, sections, note
 // See lib/resend/emails/pm-alert.tsx PmAlertProps for the authoritative interface —
 // NOT: actionLabel, actionUrl, pmName (these were never valid props)
+// heading, body, ctaLabel, ctaUrl are REQUIRED. details/table/sections/note are optional.
+// NOT: actionLabel, actionUrl, pmName — those never existed on this component.
 ```
 
 ### Auth patterns

@@ -4,6 +4,7 @@ import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
+import { logAuditEvent } from '@/lib/audit'
 
 /**
  * SCHEDULED: runs every morning at 8am CT (independent of maintenance-schedules cron).
@@ -98,6 +99,14 @@ export const dailyWorkOrderOps = inngest.createFunction(
           .from('work_orders')
           .update({ priority: 'urgent' })
           .eq('id', wo.id)
+
+        await logAuditEvent({
+          orgId:      wo.org_id,
+          action:     'work_order.updated',
+          targetType: 'work_order',
+          targetId:   wo.id,
+          metadata:   { change: 'auto_escalated_to_urgent' },
+        })
 
         await supabase.from('work_order_updates').insert({
           work_order_id:             wo.id,
@@ -300,6 +309,14 @@ export const dailyWorkOrderOps = inngest.createFunction(
         }
 
         if (!wo) return null
+
+        await logAuditEvent({
+          orgId:      schedule.org_id,
+          action:     'work_order.created',
+          targetType: 'work_order',
+          targetId:   wo.id,
+          metadata:   { source: 'maintenance_schedule', maintenance_schedule_id: schedule.id },
+        })
 
         const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
         if (pmEmail) {

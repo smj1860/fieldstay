@@ -13,7 +13,7 @@ export async function saveDetails(
   _prev: DetailsState | null,
   formData: FormData
 ): Promise<DetailsState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   const name          = (formData.get('name') as string)?.trim()
   const address       = (formData.get('address') as string)?.trim() || null
@@ -46,6 +46,13 @@ export async function saveDetails(
 
   if (!name) return { error: 'Property name is required' }
 
+  const { data: existing } = await supabase
+    .from('properties')
+    .select('wifi_password, door_code, internal_notes')
+    .eq('id', propertyId)
+    .eq('org_id', membership.org_id)
+    .single()
+
   const { error } = await supabase
     .from('properties')
     .update({
@@ -67,10 +74,9 @@ export async function saveDetails(
   // changed) — fetching before/after values would require an extra query.
   // Future cleanup could compare against pre-update values to only log on
   // real rate changes.
-  const { data: { user } } = await supabase.auth.getUser()
   await logAuditEvent({
     orgId:      membership.org_id,
-    actorId:    user?.id,
+    actorId:    user.id,
     action:     'property.rates.updated',
     targetType: 'property',
     targetId:   propertyId,
@@ -79,6 +85,25 @@ export async function saveDetails(
       same_day_premium_pct,
     },
   })
+
+  // Guest access fields (wifi_password/door_code/internal_notes) are
+  // secrets — never put their values in audit metadata, just record that
+  // a change happened.
+  const guestAccessChanged =
+    wifi_password    !== (existing?.wifi_password    ?? null) ||
+    door_code        !== (existing?.door_code        ?? null) ||
+    internal_notes   !== (existing?.internal_notes   ?? null)
+
+  if (guestAccessChanged) {
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.updated',
+      targetType: 'property',
+      targetId:   propertyId,
+      metadata:   { change: 'guest_access_details' },
+    })
+  }
 
   await markStepComplete(propertyId, 'details')
   revalidatePath(`/properties/${propertyId}`)

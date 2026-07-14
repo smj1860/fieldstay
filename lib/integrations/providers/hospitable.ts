@@ -515,7 +515,7 @@ export const hospitableProvider: IntegrationProvider = {
       case 'reservation.changed': {
         const reservationId = entityId ?? (data.id as string | undefined)
         if (!reservationId) {
-          console.warn('[Hospitable webhook] reservation event missing id (checked data.id and payload.id):', data)
+          console.warn('[Hospitable webhook] reservation event missing id (checked data.id and payload.id):', { action, keys: Object.keys(data) })
           break
         }
         const { inngest } = await import('@/lib/inngest/client')
@@ -539,7 +539,7 @@ export const hospitableProvider: IntegrationProvider = {
       case 'property.updated':
       case 'property.deleted': {
         if (!entityId) {
-          console.warn('[Hospitable webhook] property event missing data.id:', data)
+          console.warn('[Hospitable webhook] property event missing data.id:', { action, keys: Object.keys(data) })
           break
         }
         const { inngest } = await import('@/lib/inngest/client')
@@ -565,7 +565,7 @@ export const hospitableProvider: IntegrationProvider = {
         const newId        = mergeData?.new_id
 
         if (!previousId || !newId) {
-          console.warn('[Hospitable webhook] property.merged missing previous_id/new_id:', data)
+          console.warn('[Hospitable webhook] property.merged missing previous_id/new_id:', { action, keys: Object.keys(data) })
           break
         }
 
@@ -585,7 +585,7 @@ export const hospitableProvider: IntegrationProvider = {
       case 'review.created':
       case 'review.changed': {
         if (!entityId) {
-          console.warn('[Hospitable webhook] review event missing data.id:', data)
+          console.warn('[Hospitable webhook] review event missing data.id:', { action, keys: Object.keys(data) })
           break
         }
         const { inngest } = await import('@/lib/inngest/client')
@@ -620,7 +620,7 @@ export const hospitableProvider: IntegrationProvider = {
           ?? (data.id as string | undefined)
 
         if (!messageReservationId) {
-          console.warn('[Hospitable webhook] message event missing reservation_id (checked data.reservation_id, data.id, payload.id):', data)
+          console.warn('[Hospitable webhook] message event missing reservation_id (checked data.reservation_id, data.id, payload.id):', { action, keys: Object.keys(data) })
           break
         }
 

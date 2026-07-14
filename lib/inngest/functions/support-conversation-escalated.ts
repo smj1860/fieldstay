@@ -1,4 +1,5 @@
-import { inngest } from '@/lib/inngest/client'
+import { inngest }    from '@/lib/inngest/client'
+import { escapeHtml } from '@/lib/utils/html'
 
 export const handleSupportEscalation = inngest.createFunction(
   { id: 'support-conversation-escalated', name: 'Support: Conversation Escalated', retries: 2 },
@@ -43,8 +44,8 @@ export const handleSupportEscalation = inngest.createFunction(
           to:      ['stephen@fieldstay.app'],
           subject: `Support escalation — ${context.orgName}`,
           html: `
-            <p><strong>${context.orgName}</strong> needs human follow-up in the support chat.</p>
-            <p><em>${reason}</em></p>
+            <p><strong>${escapeHtml(context.orgName)}</strong> needs human follow-up in the support chat.</p>
+            <p><em>${escapeHtml(reason)}</em></p>
             <p><a href="${appUrl}/support-inbox?conversation=${conversationId}">Open conversation →</a></p>
           `,
         },
