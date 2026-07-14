@@ -18,22 +18,26 @@ const API_KEY_PROVIDER_FIELDS: Record<string, {
   description: string
   fields: Array<{ key: string; label: string; placeholder: string; sensitive?: boolean }>
 }> = {
-  hostaway: {
-    description: 'Syncs your Hostaway listings and reservations automatically.',
-    fields: [
-      {
-        key:         'accountId',
-        label:       'Account ID',
-        placeholder: 'Find in Settings → Hostaway API',
-      },
-      {
-        key:         'apiKey',
-        label:       'API Key',
-        placeholder: 'Your Hostaway secret API key',
-        sensitive:   true,
-      },
-    ],
-  },
+  // Hostaway is not fully implemented yet — its sync never fires
+  // booking/confirmed (see ops/page.tsx's REVENUE_AUTOMATION_PROVIDER_IDS
+  // comment), so a connected org would get properties/bookings synced in
+  // with no automatic revenue posting. Hidden until that lands.
+  // hostaway: {
+  //   description: 'Syncs your Hostaway listings and reservations automatically.',
+  //   fields: [
+  //     {
+  //       key:         'accountId',
+  //       label:       'Account ID',
+  //       placeholder: 'Find in Settings → Hostaway API',
+  //     },
+  //     {
+  //       key:         'apiKey',
+  //       label:       'API Key',
+  //       placeholder: 'Your Hostaway secret API key',
+  //       sensitive:   true,
+  //     },
+  //   ],
+  // },
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty: {
   //   description: 'Syncs your Guesty listings and reservations automatically.',
@@ -56,15 +60,20 @@ const API_KEY_PROVIDER_FIELDS: Record<string, {
 // ── Provider display config (descriptions shown on each card) ─────────────────
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   ownerrez:   'Syncs bookings, properties, and guest reviews. Enables automatic revenue posting to owner ledgers.',
-  hostaway:   'Connects your Hostaway account to sync all listings and reservations in real time.',
   hospitable: 'Syncs properties, reservations, and crew from your Hospitable account.',
+  // Hostaway is not fully implemented yet — hidden until it posts revenue
+  // automatically like the other PMS integrations. See HIDDEN_PROVIDER_IDS.
+  // hostaway: 'Connects your Hostaway account to sync all listings and reservations in real time.',
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
   kroger:     'Builds Kroger grocery carts automatically from below-par inventory items.',
 }
 
-// Providers not yet wired — excluded from the rendered list until live.
-const HIDDEN_PROVIDER_IDS = new Set<string>(['guesty'])
+// Providers not yet wired (or not fully implemented) — excluded from the
+// rendered list until live. Hostaway's sync never fires booking/confirmed
+// (see ops/page.tsx's REVENUE_AUTOMATION_PROVIDER_IDS comment) — hidden so
+// nobody connects it expecting automatic revenue posting.
+const HIDDEN_PROVIDER_IDS = new Set<string>(['guesty', 'hostaway'])
 
 interface Provider {
   id:           string
@@ -259,12 +268,14 @@ function CredentialModalContent({
       </div>
 
       {/* Where to find credentials — provider-specific help text */}
+      {/* Hostaway is not fully implemented yet — hidden until it posts
+      revenue automatically like the other PMS integrations.
       {providerId === 'hostaway' && (
         <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
           Find these in your Hostaway dashboard under{' '}
           <strong>Settings → Hostaway API → Create</strong>. The key is only shown once — save it securely.
         </p>
-      )}
+      )} */}
       {/* Guesty is not yet wired — hidden until the integration is live.
       {providerId === 'guesty' && (
         <p className="text-xs mt-4" style={{ color: 'var(--text-muted)' }}>
