@@ -76,12 +76,22 @@ export async function upsertInventoryItems(
 }
 
 export async function deleteInventoryItem(itemId: string, propertyId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
   await supabase
     .from('inventory_items')
     .delete()
     .eq('id', itemId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'inventory.item.deleted',
+    targetType: 'inventory_item',
+    targetId:   itemId,
+    metadata:   { property_id: propertyId },
+  })
+
   revalidatePath(`/properties/${propertyId}/setup/inventory`)
 }
 
@@ -90,12 +100,21 @@ export async function bulkDeleteInventoryItems(
   propertyId: string
 ): Promise<void> {
   if (!itemIds.length) return
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
   await supabase
     .from('inventory_items')
     .delete()
     .in('id', itemIds)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'inventory.item.deleted',
+    targetType: 'inventory_item',
+    metadata:   { property_id: propertyId, deleted_ids: itemIds },
+  })
+
   revalidatePath(`/properties/${propertyId}/setup/inventory`)
 }
 

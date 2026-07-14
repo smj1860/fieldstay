@@ -720,9 +720,9 @@ getPmEmail(supabase, orgId)  // supabase client FIRST, orgId second
 
 **renderPmAlert**
 ```typescript
-renderPmAlert({ ctaLabel, ctaUrl, details })
-// Props are: ctaLabel, ctaUrl, details
-// NOT: actionLabel, actionUrl, heading, body, table, note, pmName
+renderPmAlert({ heading, body, ctaLabel, ctaUrl, details?, table?, sections?, note? })
+// heading, body, ctaLabel, ctaUrl are REQUIRED. details/table/sections/note are optional.
+// NOT: actionLabel, actionUrl, pmName — those never existed on this component.
 ```
 
 ### Auth patterns

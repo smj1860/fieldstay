@@ -138,7 +138,7 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
 // ── Generate combined portfolio portal token (multi-property owners) ─────────
 
 export async function generateCombinedPortalToken(ownerIds: string[]): Promise<OwnersActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   if (ownerIds.length < 2) return { error: 'Combined links require at least two properties' }
 
@@ -173,6 +173,15 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
     console.error('[generateCombinedPortalToken]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'owner_portal.token.generated',
+    targetType: 'property_owner',
+    targetId:   anchorOwnerId,
+    metadata:   { property_ids: propertyIds },
+  })
 
   revalidatePath('/owners')
   return { success: true, token }
@@ -313,19 +322,22 @@ export async function revokeOwnerPortalToken(ownerId: string): Promise<OwnersAct
 
 export async function deleteOwnerTransaction(txnId: string): Promise<void> {
   const { supabase, membership, user } = await requireOrgMember()
-  await supabase
+  const { data } = await supabase
     .from('owner_transactions')
     .delete()
     .eq('id', txnId)
     .eq('org_id', membership.org_id)
+    .select('id')
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'owner.transaction.deleted',
-    targetType: 'owner_transaction',
-    targetId:   txnId,
-  })
+  if (data && data.length > 0) {
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'owner.transaction.deleted',
+      targetType: 'owner_transaction',
+      targetId:   txnId,
+    })
+  }
 
   revalidatePath('/owners')
 }

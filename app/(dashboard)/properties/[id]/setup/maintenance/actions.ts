@@ -13,7 +13,7 @@ export async function addMaintenanceSchedule(
   _prev: MaintenanceState | null,
   formData: FormData
 ): Promise<MaintenanceState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   const name          = (formData.get('name') as string)?.trim()
   const schedule_type = formData.get('schedule_type') as 'routine' | 'seasonal'
@@ -34,7 +34,7 @@ export async function addMaintenanceSchedule(
     next_due_date = `${year}-${String(month_due).padStart(2, '0')}-01`
   }
 
-  const { error } = await supabase.from('maintenance_schedules').insert({
+  const { data: newSchedule, error } = await supabase.from('maintenance_schedules').insert({
     property_id:       propertyId,
     org_id:            membership.org_id,
     assigned_vendor_id: vendor_id,
@@ -42,20 +42,39 @@ export async function addMaintenanceSchedule(
     frequency: schedule_type === 'routine' ? (frequency as never) : null,
     month_due: schedule_type === 'seasonal' ? month_due : null,
     estimated_cost, instructions, auto_create_wo, next_due_date,
-  })
+  }).select('id').single()
 
   if (error) {
     console.error('[addMaintenanceSchedule]', error)
     return { error: 'Failed to save schedule. Please try again.' }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'maintenance_schedule.created',
+    targetType: 'maintenance_schedule',
+    targetId:   newSchedule?.id,
+    metadata:   { property_id: propertyId, name, schedule_type },
+  })
+
   revalidatePath(`/properties/${propertyId}/setup/maintenance`)
   return { success: true }
 }
 
 export async function deleteMaintenanceSchedule(id: string, propertyId: string): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
   await supabase.from('maintenance_schedules').delete().eq('id', id).eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'maintenance_schedule.deleted',
+    targetType: 'maintenance_schedule',
+    targetId:   id,
+    metadata:   { property_id: propertyId },
+  })
+
   revalidatePath(`/properties/${propertyId}/setup/maintenance`)
 }
 

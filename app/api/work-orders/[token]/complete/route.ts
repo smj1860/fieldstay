@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { workOrderRatelimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
+import { logAuditEvent } from '@/lib/audit'
 import type { WoStatus } from '@/types/database'
 
 /**
@@ -180,6 +181,15 @@ export async function POST(
 
     if (invoice) {
       invoiceId = invoice.id
+
+      await logAuditEvent({
+        orgId:      claimed.org_id,
+        action:     'work_order.invoice.created',
+        targetType: 'work_order_invoice',
+        targetId:   invoice.id,
+        metadata:   { work_order_id: claimed.id, vendor_id: claimed.vendor_id, invoice_number: invoiceNumber, amount: subtotal },
+        // No actorId — unauthenticated vendor-token route
+      })
     } else {
       // UNIQUE(work_order_id) conflict — ignoreDuplicates means the upsert
       // inserted nothing, so fetch the existing invoice instead of dropping

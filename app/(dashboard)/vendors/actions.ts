@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgRole } from '@/lib/auth'
 import { resendVendorConnectInvite as sendResendConnectInvite } from '@/lib/stripe/vendor-connect-invite'
+import { logAuditEvent } from '@/lib/audit'
 import type { ComplianceDocType } from '@/types/database'
 
 export type ComplianceDocActionState = { error?: string; success?: boolean }
@@ -13,7 +14,7 @@ export async function createComplianceDocument(
   formData: FormData
 ): Promise<ComplianceDocActionState> {
   try {
-    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     // Confirm vendor belongs to this org
     const { data: vendor } = await supabase
@@ -38,7 +39,7 @@ export async function createComplianceDocument(
     if (!document_type)  return { error: 'Document type is required' }
     if (!document_name)  return { error: 'Document name is required' }
 
-    const { error } = await supabase
+    const { data: inserted, error } = await supabase
       .from('vendor_compliance_documents')
       .insert({
         vendor_id:      vendorId,
@@ -54,11 +55,22 @@ export async function createComplianceDocument(
         is_verified:    false,
         is_active:      true,
       })
+      .select('id')
+      .single()
 
     if (error) {
       console.error('[createComplianceDocument]', error)
       return { error: 'Operation failed. Please try again.' }
     }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'vendor.compliance_document.created',
+      targetType: 'vendor_compliance_document',
+      targetId:   inserted?.id,
+      metadata:   { vendor_id: vendorId, document_type },
+    })
 
     revalidatePath(`/vendors/${vendorId}`)
     revalidatePath('/vendors')
@@ -73,12 +85,22 @@ export async function deleteComplianceDocument(
   docId: string,
   vendorId: string
 ): Promise<void> {
-  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+  const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
   await supabase
     .from('vendor_compliance_documents')
     .update({ is_active: false })
     .eq('id', docId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.compliance_document.deactivated',
+    targetType: 'vendor_compliance_document',
+    targetId:   docId,
+    metadata:   { vendor_id: vendorId },
+  })
+
   revalidatePath(`/vendors/${vendorId}`)
   revalidatePath('/vendors')
 }
@@ -88,12 +110,22 @@ export async function verifyComplianceDocument(
   vendorId: string
 ): Promise<{ error?: string }> {
   try {
-    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
     await supabase
       .from('vendor_compliance_documents')
       .update({ is_verified: true })
       .eq('id', docId)
       .eq('org_id', membership.org_id)
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'vendor.compliance_document.verified',
+      targetType: 'vendor_compliance_document',
+      targetId:   docId,
+      metadata:   { vendor_id: vendorId },
+    })
+
     revalidatePath(`/vendors/${vendorId}`)
     return {}
   } catch (err) {

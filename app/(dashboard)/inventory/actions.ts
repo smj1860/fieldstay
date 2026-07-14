@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvent } from '@/lib/audit'
 import type { InventoryCategory } from '@/types/database'
 
 export type InventoryActionState = { error?: string; success?: boolean }
@@ -589,7 +590,7 @@ export async function updatePurchaseOrderStatus(
   purchaseOrderId: string,
   status: 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   const { data: po } = await supabase
     .from('purchase_orders')
@@ -614,6 +615,15 @@ export async function updatePurchaseOrderStatus(
     console.error('[updatePurchaseOrderStatus]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'purchase_order.status_changed',
+    targetType: 'purchase_order',
+    targetId:   purchaseOrderId,
+    metadata:   { old_status: po.status, new_status: status },
+  })
 
   if (status === 'ordered') {
     await inngest.send({

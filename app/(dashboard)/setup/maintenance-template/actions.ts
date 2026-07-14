@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
+import { logAuditEvent } from '@/lib/audit'
 
 export interface MaintenanceScheduleInput {
   title:          string
@@ -14,7 +15,7 @@ export interface MaintenanceScheduleInput {
 export async function saveMasterMaintenanceSchedules(
   items: MaintenanceScheduleInput[]
 ): Promise<{ error?: string; saved: number }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   // Full replace
   await supabase
@@ -22,7 +23,17 @@ export async function saveMasterMaintenanceSchedules(
     .update({ is_active: false })
     .eq('org_id', membership.org_id)
 
-  if (items.length === 0) return { saved: 0 }
+  if (items.length === 0) {
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'maintenance.template.updated',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+      metadata:   { saved: 0 },
+    })
+    return { saved: 0 }
+  }
 
   const { error } = await supabase
     .from('org_master_maintenance_schedules')
@@ -42,6 +53,15 @@ export async function saveMasterMaintenanceSchedules(
     console.error('[saveMasterMaintenanceSchedules]', error)
     return { error: 'Operation failed. Please try again.', saved: 0 }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'maintenance.template.updated',
+    targetType: 'organization',
+    targetId:   membership.org_id,
+    metadata:   { saved: items.length },
+  })
 
   revalidatePath('/setup')
   revalidatePath('/maintenance')

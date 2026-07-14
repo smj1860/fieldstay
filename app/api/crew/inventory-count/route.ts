@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
+import { logAuditEvents } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -135,6 +136,17 @@ export async function POST(request: NextRequest) {
           .eq('id', inventory_item_id)
           .eq('org_id', crew.org_id)
       )
+    )
+
+    await logAuditEvents(
+      items.map(({ inventory_item_id, quantity_counted }) => ({
+        actorId:    user.id,
+        orgId:      crew.org_id,
+        action:     'inventory.count_committed' as const,
+        targetType: 'inventory_item',
+        targetId:   inventory_item_id,
+        metadata:   { new_quantity: quantity_counted },
+      }))
     )
   }
 

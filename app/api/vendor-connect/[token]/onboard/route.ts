@@ -3,6 +3,7 @@ import { createServiceClient }       from '@/lib/supabase/server'
 import { stripe }                    from '@/lib/stripe/client'
 import { vendorConnectRatelimit }    from '@/lib/rate-limit'
 import { extractClientIp }           from '@/lib/integrations/webhook-verification'
+import { logAuditEvent }             from '@/lib/audit'
 
 /**
  * GET /api/vendor-connect/[token]/onboard
@@ -108,6 +109,14 @@ export async function GET(
         })
         .eq('id', vendor.id)
         .eq('org_id', vendor.org_id)
+
+      await logAuditEvent({
+        orgId:      vendor.org_id,
+        action:     'vendor.stripe_connect.account_created',
+        targetType: 'vendor',
+        targetId:   vendor.id,
+        // No actorId — unauthenticated vendor-token route
+      })
     }
 
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL!

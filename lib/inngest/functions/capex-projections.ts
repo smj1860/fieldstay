@@ -9,6 +9,7 @@
 
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvent }       from '@/lib/audit'
 
 export interface CapExProjectionItem {
   asset_id:         string
@@ -138,6 +139,14 @@ export const generateCapexProjections = inngest.createFunction(
             { org_id: org.id, milestone: `capex_projection_${currentYear}`, value: payload },
             { onConflict: 'org_id,milestone' }
           )
+
+        await logAuditEvent({
+          orgId:      org.id,
+          action:     'asset.capex_projection.triggered',
+          targetType: 'org',
+          targetId:   org.id,
+          metadata:   { source: 'monthly_cron' },
+        })
 
         logger.info(`[CapEx] Org ${org.id}: ${Object.keys(projections).length} replacement years`)
         processedOrgs++

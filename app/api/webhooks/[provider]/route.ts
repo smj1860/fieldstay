@@ -117,6 +117,7 @@ export async function POST(
             `(external user ${externalUserId})`
           )
           await logAuditEvent({
+            orgId:      existingConn.org_id ?? undefined,
             actorId:    appUserId,
             action:     'integration.revoked',
             targetType: 'integration_provider',

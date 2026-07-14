@@ -14,7 +14,7 @@ export async function addIcalFeed(
   _prev: IcalState | null,
   formData: FormData
 ): Promise<IcalState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   const name   = (formData.get('name') as string)?.trim()
   const url    = (formData.get('url') as string)?.trim()
@@ -37,6 +37,7 @@ export async function addIcalFeed(
 
   await logAuditEvent({
     orgId:      membership.org_id,
+    actorId:    user.id,
     action:     'ical.feed.added',
     targetType: 'property',
     targetId:   propertyId,
