@@ -51,7 +51,7 @@ export default function RootLayout({
         */}
         <Script src="/theme-init.js" strategy="beforeInteractive" />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <SessionRefreshGuard />
         {children}
         <CookieNotice />
