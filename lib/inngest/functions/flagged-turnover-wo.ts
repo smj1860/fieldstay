@@ -29,6 +29,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
         .from('properties')
         .select('name')
         .eq('id', property_id)
+        .eq('org_id', org_id)
         .single()
 
       const propName = property?.name ?? 'Property'

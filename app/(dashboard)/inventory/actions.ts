@@ -301,7 +301,16 @@ export async function updateTemplateItemBrand(
   itemId: string,
   brand:  string | null
 ): Promise<{ error?: string }> {
-  const { supabase } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: item } = await supabase
+    .from('inventory_template_items')
+    .select('id, inventory_templates!inner(org_id)')
+    .eq('id', itemId)
+    .eq('inventory_templates.org_id', membership.org_id)
+    .maybeSingle()
+
+  if (!item) return { error: 'Item not found' }
 
   const { error } = await supabase
     .from('inventory_template_items')
@@ -317,7 +326,16 @@ export async function updateTemplateItemBrand(
 }
 
 export async function removeTemplateItem(itemId: string): Promise<{ error?: string }> {
-  const { supabase } = await requireOrgMember()
+  const { supabase, membership } = await requireOrgMember()
+
+  const { data: item } = await supabase
+    .from('inventory_template_items')
+    .select('id, inventory_templates!inner(org_id)')
+    .eq('id', itemId)
+    .eq('inventory_templates.org_id', membership.org_id)
+    .maybeSingle()
+
+  if (!item) return { error: 'Item not found' }
 
   const { error } = await supabase
     .from('inventory_template_items')
@@ -490,6 +508,15 @@ export async function bulkAddTemplateItemsFromCSV(
 export async function approveInventoryCount(draftId: string): Promise<{ error?: string }> {
   const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
 
+  const { data: draft } = await supabase
+    .from('inventory_count_drafts')
+    .select('id')
+    .eq('id', draftId)
+    .eq('org_id', membership.org_id)
+    .maybeSingle()
+
+  if (!draft) return { error: 'Draft not found' }
+
   const { data: draftItems } = await supabase
     .from('inventory_count_draft_items')
     .select('item_id, counted_qty')
@@ -500,6 +527,7 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
   const { data: neverCountedRows } = await supabase
     .from('inventory_items')
     .select('id')
+    .eq('org_id', membership.org_id)
     .in('id', draftItems.map((item) => item.item_id))
     .is('first_count_recorded_at', null)
   const neverCountedIds = new Set((neverCountedRows ?? []).map((r) => r.id))
@@ -514,6 +542,7 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
           ...(neverCountedIds.has(item.item_id) ? { first_count_recorded_at: now } : {}),
         })
         .eq('id', item.item_id)
+        .eq('org_id', membership.org_id)
     )
   )
 

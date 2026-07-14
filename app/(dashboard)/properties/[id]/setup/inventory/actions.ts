@@ -30,23 +30,40 @@ export async function upsertInventoryItems(
   const newItems      = items.filter((item) => !item.id)
 
   if (existingItems.length) {
-    const { error } = await supabase.from('inventory_items').upsert(
-      existingItems.map((item) => ({
-        id:              item.id,
-        org_id:          membership.org_id,
-        property_id:     propertyId,
-        name:            item.name,
-        category:        item.category as never,
-        unit:            item.unit,
-        par_level:       item.par_level,
-        notes:           item.notes ?? null,
-        preferred_brand: item.preferred_brand ?? null,
-      })),
-      { onConflict: 'id' }
-    )
-    if (error) {
-      console.error('[upsertInventoryItems]', error)
-      return { error: 'Operation failed. Please try again.' }
+    // Confirm every client-supplied id already belongs to this org before
+    // upserting — RLS's WITH CHECK backstops this, but a client-supplied id
+    // for another org's row should never even reach the upsert call.
+    const { data: verifiedRows } = await supabase
+      .from('inventory_items')
+      .select('id')
+      .in('id', existingItems.map((item) => item.id!))
+      .eq('org_id', membership.org_id)
+    const verifiedIds  = new Set((verifiedRows ?? []).map((r) => r.id))
+    const verifiedItems = existingItems.filter((item) => verifiedIds.has(item.id!))
+
+    if (verifiedItems.length !== existingItems.length) {
+      console.error('[upsertInventoryItems] rejected items not owned by org', { propertyId })
+    }
+
+    if (verifiedItems.length) {
+      const { error } = await supabase.from('inventory_items').upsert(
+        verifiedItems.map((item) => ({
+          id:              item.id,
+          org_id:          membership.org_id,
+          property_id:     propertyId,
+          name:            item.name,
+          category:        item.category as never,
+          unit:            item.unit,
+          par_level:       item.par_level,
+          notes:           item.notes ?? null,
+          preferred_brand: item.preferred_brand ?? null,
+        })),
+        { onConflict: 'id' }
+      )
+      if (error) {
+        console.error('[upsertInventoryItems]', error)
+        return { error: 'Operation failed. Please try again.' }
+      }
     }
   }
 

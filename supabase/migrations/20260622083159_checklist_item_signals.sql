@@ -3,7 +3,7 @@
 -- flag_probability and dynamic_photo_required are derived columns so the math
 -- can never drift out of sync with alpha/beta.
 
-CREATE TABLE checklist_item_signals (
+CREATE TABLE IF NOT EXISTS checklist_item_signals (
   id                     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id                 uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   property_id            uuid NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
@@ -28,14 +28,16 @@ CREATE TABLE checklist_item_signals (
 
 ALTER TABLE checklist_item_signals ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "org members read own signals" ON checklist_item_signals;
 CREATE POLICY "org members read own signals"
   ON checklist_item_signals FOR SELECT
   USING (is_org_member(org_id, ARRAY[
     'admin'::member_role, 'manager'::member_role, 'owner'::member_role
   ]));
 
+DROP POLICY IF EXISTS "service role manages signals" ON checklist_item_signals;
 CREATE POLICY "service role manages signals"
   ON checklist_item_signals FOR ALL TO service_role
   USING (true) WITH CHECK (true);
 
-ALTER TABLE checklist_instance_items ADD COLUMN photo_reason text NULL;
+ALTER TABLE checklist_instance_items ADD COLUMN IF NOT EXISTS photo_reason text NULL;

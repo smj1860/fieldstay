@@ -14,7 +14,7 @@
 // SECURITY: Never log token values. Server-side only.
 // ============================================================
 
-import { createClient }                from '@supabase/supabase-js'
+import { createServiceClient }         from '@/lib/supabase/server'
 import {
   readIntegrationToken,
   readIntegrationRefreshToken,
@@ -199,9 +199,5 @@ async function markConnectionError(userId: string): Promise<void> {
 }
 
 function getAdminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false } }
-  )
+  return createServiceClient()
 }

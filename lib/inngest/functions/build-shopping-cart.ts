@@ -155,6 +155,7 @@ export const buildShoppingCart = inngest.createFunction(
             .update({ status: 'revoked' })
             .eq('user_id', connection.user_id)
             .eq('provider_id', 'kroger')
+            .eq('org_id', org_id)
         }
         console.error('Kroger token refresh failed — falling back to list-only:', err instanceof Error ? err.message : err)
         return null

@@ -77,6 +77,18 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     const { belowParItems } = await step.run('apply-count-and-check-par', async () => {
       const supabase = createServiceClient()
 
+      // Validate the count session itself belongs to this org before trusting
+      // any row derived from count_id — a forged/mismatched count_id must
+      // never let one org read or write another org's inventory data.
+      const { data: countSession } = await supabase
+        .from('inventory_counts')
+        .select('id')
+        .eq('id', count_id)
+        .eq('org_id', org_id)
+        .maybeSingle()
+
+      if (!countSession) return { belowParItems: [] }
+
       // 1 query: fetch all count items for this session
       const { data: countItems } = await supabase
         .from('inventory_count_items')
@@ -91,21 +103,27 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       const typedCount = countItems as CountRow[]
       const itemIds    = typedCount.map((c) => c.inventory_item_id)
 
-      // 1 query: bulk fetch all inventory item metadata
+      // 1 query: bulk fetch all inventory item metadata, scoped to this org —
+      // itemIds come from inventory_count_items and must not be trusted to
+      // already belong to org_id.
       const { data: inventoryItems } = await supabase
         .from('inventory_items')
         .select('id, name, category, unit, par_level, low_stock_threshold_pct')
+        .eq('org_id', org_id)
         .in('id', itemIds)
 
       if (!inventoryItems?.length) return { belowParItems: [] }
 
-      const typedInv = inventoryItems as InvRow[]
+      const typedInv    = inventoryItems as InvRow[]
+      const orgItemIds  = new Set(typedInv.map((inv) => inv.id))
+      // Only ever write quantities for items confirmed to belong to this org.
+      const orgScopedCount = typedCount.filter((c) => orgItemIds.has(c.inventory_item_id))
 
       // 1 query: bulk upsert current quantities (replaces N sequential UPDATEs)
       await supabase
         .from('inventory_items')
         .upsert(
-          typedCount.map((c) => ({ id: c.inventory_item_id, current_quantity: c.quantity_counted })),
+          orgScopedCount.map((c) => ({ id: c.inventory_item_id, current_quantity: c.quantity_counted })),
           { onConflict: 'id' }
         )
 
@@ -156,6 +174,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
         .from('purchase_orders')
         .select('id')
         .eq('source_count_id', count_id)
+        .eq('org_id', org_id)
         .maybeSingle()
 
       if (existing) return { purchaseOrderId: existing.id, alreadyExisted: true }
@@ -257,7 +276,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
       await step.run('email-po-to-pm-immediate', async () => {
         const supabase = createServiceClient()
         const [{ data: property }, pmEmail] = await Promise.all([
-          supabase.from('properties').select('name').eq('id', property_id).single(),
+          supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
           getPmEmail(supabase, org_id),
         ])
 

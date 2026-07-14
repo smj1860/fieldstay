@@ -18,8 +18,8 @@ export const autoAssignTurnover = inngest.createFunction(
         { data: crew },
       ] = await Promise.all([
         supabase.from('organizations').select('auto_assign_mode').eq('id', org_id).single(),
-        supabase.from('turnovers').select('id, status, is_same_day_turnover').eq('id', turnover_id).single(),
-        supabase.from('properties').select('id, lat, lng, bedrooms').eq('id', property_id).single(),
+        supabase.from('turnovers').select('id, status, is_same_day_turnover').eq('id', turnover_id).eq('org_id', org_id).single(),
+        supabase.from('properties').select('id, lat, lng, bedrooms').eq('id', property_id).eq('org_id', org_id).single(),
         supabase
           .from('crew_members')
           .select('id, name, home_lat, home_lng, reliability_score, capacity_score')
@@ -188,6 +188,7 @@ export const autoAssignTurnover = inngest.createFunction(
             suggestion_status:    'pending',
           })
           .eq('id', turnover_id)
+          .eq('org_id', org_id)
         return { action: 'suggested' as const }
       }
 
@@ -214,6 +215,7 @@ export const autoAssignTurnover = inngest.createFunction(
             suggestion_status:    'accepted',
           })
           .eq('id', turnover_id)
+          .eq('org_id', org_id)
 
         const { logAuditEvent } = await import('@/lib/audit')
         await logAuditEvent({

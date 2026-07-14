@@ -204,6 +204,7 @@ export const hospIncrementalSync = inngest.createFunction(
         const { data: property } = await supabase
           .from('properties')
           .select('id')
+          .eq('org_id',          orgId)
           .eq('external_id',     hospPropertyId)
           .eq('external_source', PROVIDER)
           .maybeSingle()
@@ -593,21 +594,23 @@ export const hospIncrementalSync = inngest.createFunction(
         const review = data.data
 
         const supabase          = createServiceClient()
-        let   resolvedOrgId     = orgId
         let   resolvedPropertyId: string | null = null
 
-        // Resolve property_id (FK) and correct org from the Hospitable property UUID
+        // Resolve property_id (FK) from the Hospitable property UUID, scoped
+        // to the org already resolved from this webhook's integration_connection
+        // (see resolve-org-and-token above) — a property row from a different
+        // org sharing the same external_id must never override that trusted org.
         const hospPropertyId = review.property?.id ?? null
         if (hospPropertyId) {
           const { data: prop } = await supabase
             .from('properties')
-            .select('id, org_id')
+            .select('id')
+            .eq('org_id',          orgId)
             .eq('external_id',     hospPropertyId)
             .eq('external_source', PROVIDER)
             .maybeSingle()
 
           if (prop) {
-            resolvedOrgId      = prop.org_id
             resolvedPropertyId = prop.id
           }
         }
@@ -620,7 +623,7 @@ export const hospIncrementalSync = inngest.createFunction(
           .from('reviews')
           .upsert(
             {
-              org_id:          resolvedOrgId,
+              org_id:          orgId,
               external_id:     entity_id,
               external_source: PROVIDER,
               property_id:     resolvedPropertyId,
@@ -630,14 +633,14 @@ export const hospIncrementalSync = inngest.createFunction(
               review_date:     review.reviewed_at ?? null,
               response_status: 'pending',
             },
-            { onConflict: 'external_id,external_source' }
+            { onConflict: 'org_id,external_id,external_source' }
           )
           .select('id')
           .single()
 
         if (error) throw new Error(`Review upsert failed: ${error.message}`)
 
-        return { upserted: true, reviewId: upserted?.id, orgId: resolvedOrgId }
+        return { upserted: true, reviewId: upserted?.id, orgId }
       })
 
       // Trigger RepuGuard batch generation for this org.
