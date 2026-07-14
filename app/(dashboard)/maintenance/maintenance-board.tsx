@@ -1330,7 +1330,7 @@ function TemplateBroadcastModal({
   onClose: () => void
 }) {
   const [step, setStep]                       = useState<1 | 2 | 3>(1)
-  const [selectedPropertyIds, setSelectedIds] = useState<string[]>([])
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState<string[]>([])
   const [broadcasting, setBroadcasting]       = useState(false)
   const [error, setError]                     = useState<string | null>(null)
   const [result, setResult]                   = useState<BroadcastResult | null>(null)
@@ -1340,11 +1340,11 @@ function TemplateBroadcastModal({
   const totalItems   = items.length * selectedPropertyIds.length
 
   const toggleProperty = (id: string) => {
-    setSelectedIds((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id])
+    setSelectedPropertyIds((prev) => prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id])
   }
 
   const toggleAll = () => {
-    setSelectedIds(allSelected ? [] : properties.map((p) => p.id))
+    setSelectedPropertyIds(allSelected ? [] : properties.map((p) => p.id))
   }
 
   const handleBroadcast = async () => {
@@ -1520,7 +1520,7 @@ function CreateTemplateModal({
   properties: PropertyOption[]
 }) {
   const [name, setName]           = useState('')
-  const [description, setDesc]    = useState('')
+  const [description, setDescription]    = useState('')
   const [items, setItems]         = useState<NewTemplateItem[]>([{ ...EMPTY_TEMPLATE_ITEM }])
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState<string | null>(null)
@@ -1760,7 +1760,7 @@ function CreateTemplateModal({
           </div>
           <div>
             <label className="label">Description</label>
-            <Input value={description} onChange={(e) => setDesc(e.target.value)} placeholder="Optional description…" />
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional description…" />
           </div>
 
           {catalogItems.length > 0 && (

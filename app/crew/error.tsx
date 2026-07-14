@@ -19,7 +19,7 @@ export default function CrewError({
       <AlertTriangle className="w-10 h-10 text-amber-400 mb-4" />
       <h2 className="text-base font-semibold text-primary-themed mb-1">Something went wrong</h2>
       <p className="text-sm text-muted-themed mb-6">
-        {error.message || 'An unexpected error occurred. Please try again.'}
+        This has been logged. Try again, or check your connection if it keeps happening.
       </p>
       <button
         onClick={reset}

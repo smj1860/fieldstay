@@ -5,6 +5,7 @@ import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
 import { Send, MessageSquare } from 'lucide-react'
 import { cn, formatDateTime } from '@/lib/utils'
 import { sendMessageToPM, markConversationRead } from '@/app/(dashboard)/messages/actions'
+import { CrewLoading } from '@/components/crew/CrewLoading'
 
 export default function CrewMessagesPage() {
   const db = useDexieDb()
@@ -21,16 +22,18 @@ export default function CrewMessagesPage() {
     [userId]
   )
 
-  const conversation = useMemo(() => messages ?? [], [messages])
-
+  // `messages` is `undefined` while the Dexie query is still resolving, and
+  // only becomes an array once it has actually resolved (possibly empty) —
+  // do not coerce with `?? []` here or the empty state flashes before real
+  // data loads. Downstream helpers that need an array default internally.
   const unreadFromPM = useMemo(
-    () => conversation.filter((m) => userId && m.recipient_id === userId && !m.read_at),
-    [conversation, userId]
+    () => (messages ?? []).filter((m) => userId && m.recipient_id === userId && !m.read_at),
+    [messages, userId]
   )
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [conversation.length])
+  }, [messages?.length])
 
   useEffect(() => {
     if (!userId || unreadFromPM.length === 0) return
@@ -60,13 +63,14 @@ export default function CrewMessagesPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-2">
-        {conversation.length === 0 && (
+        {messages === undefined && <CrewLoading label="Loading messages…" />}
+        {messages !== undefined && messages.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center gap-2 text-muted-themed">
             <MessageSquare className="w-10 h-10" />
             <p className="text-sm">Send a message to your operations team</p>
           </div>
         )}
-        {conversation.map((m) => {
+        {messages !== undefined && messages.map((m) => {
           const fromMe = m.sender_id === userId
           return (
             <div key={m.id} className={cn('flex', fromMe ? 'justify-end' : 'justify-start')}>

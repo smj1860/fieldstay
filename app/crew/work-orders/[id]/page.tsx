@@ -6,6 +6,7 @@ import { useDexieDb }              from '@/lib/dexie/context'
 import { useRouter }              from 'next/navigation'
 import { ArrowLeft, Wrench, CheckCircle2, Check } from 'lucide-react'
 import type { PropertyRow } from '@/lib/dexie/schema'
+import { CrewLoading } from '@/components/crew/CrewLoading'
 
 export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: string }> }) {
   const [id, setId]               = useState<string | null>(null)
@@ -51,9 +52,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
     }
   }
 
-  if (!wo) return (
-    <div className="p-4 text-sm text-muted-themed">Loading...</div>
-  )
+  if (!wo) return <CrewLoading />
 
   if (done) return (
     <div className="p-6 text-center">

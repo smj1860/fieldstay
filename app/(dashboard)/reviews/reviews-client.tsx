@@ -124,7 +124,7 @@ function StatusBadge({ status }: { status: string }) {
 export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: Props) {
   const [reviews, setReviews]           = useState<ReviewRow[]>(initialReviews)
   const [selected, setSelected]         = useState<ReviewRow | null>(null)
-  const [editedResponse, setEdited]     = useState('')
+  const [editedResponse, setEditedResponse]     = useState('')
   const [generating, setGenerating]     = useState(false)
   const [savingStatus, setSavingStatus] = useState<string | null>(null)
   const [postConfirm, setPostConfirm]   = useState(false)
@@ -157,7 +157,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
   const openPanel = (review: ReviewRow) => {
     setSelected(review)
-    setEdited(review.review_responses?.edited_response ?? review.review_responses?.generated_response ?? '')
+    setEditedResponse(review.review_responses?.edited_response ?? review.review_responses?.generated_response ?? '')
     setPostConfirm(false)
   }
 
@@ -191,7 +191,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
         response_status:  response.flags?.length > 0 ? 'draft' : 'ready',
         review_responses: response,
       }
-      setEdited(response.generated_response ?? '')
+      setEditedResponse(response.generated_response ?? '')
       updateReviewInList(updatedReview)
     } finally {
       setGenerating(false)
@@ -503,7 +503,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                   </div>
                   <textarea
                     value={editedResponse}
-                    onChange={e => setEdited(e.target.value)}
+                    onChange={e => setEditedResponse(e.target.value)}
                     rows={8}
                     className="w-full rounded-xl text-sm p-4 outline-none resize-none"
                     style={{

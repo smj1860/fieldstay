@@ -4,11 +4,13 @@ import { useDexieDb } from '@/lib/dexie/context'
 import Link from 'next/link'
 import { ClipboardList, ChevronRight } from 'lucide-react'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
+import { CrewLoading } from '@/components/crew/CrewLoading'
 import type { PropertyAssetRow, PropertyRow } from '@/lib/dexie/schema'
 import type { AssetType } from '@/types/database'
 
-// Stable identity so the useLiveQuery(...) ?? fallback below doesn't change
-// reference every render while a query is still loading.
+// Stable identity used only when deriving propertyIds from a query that is
+// still resolving (undefined) — never used to mask a query's loading state
+// in the isLoading check below.
 const EMPTY_ROWS: never[] = []
 
 function isDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
@@ -30,16 +32,21 @@ export default function CrewAssetsPage() {
   const turnovers = useLiveQuery(
     () => db.turnovers.filter((t) => t.status !== 'completed' && t.status !== 'cancelled').toArray(),
     []
-  ) ?? EMPTY_ROWS
+  )
 
   const workOrders = useLiveQuery(
     () => db.crew_work_orders.filter((wo) => wo.status !== 'completed' && wo.status !== 'cancelled').toArray(),
     []
-  ) ?? EMPTY_ROWS
+  )
 
+  // Used only to derive the query key below — falls back to EMPTY_ROWS while
+  // turnovers/workOrders are still resolving so the properties/assets
+  // queries have something to key off of. This does NOT mask the loading
+  // state itself; isLoading below still checks the raw (possibly undefined)
+  // turnovers/workOrders values.
   const propertyIds = [...new Set([
-    ...turnovers.map((t) => t.property_id),
-    ...workOrders.map((w) => w.property_id),
+    ...(turnovers ?? EMPTY_ROWS).map((t) => t.property_id),
+    ...(workOrders ?? EMPTY_ROWS).map((w) => w.property_id),
   ])]
   const propertyIdsKey = propertyIds.join(',')
 
@@ -48,14 +55,24 @@ export default function CrewAssetsPage() {
       ? db.properties.where('id').anyOf(propertyIds).toArray()
       : Promise.resolve<PropertyRow[]>([]),
     [propertyIdsKey]
-  ) ?? []
+  )
 
   const assets = useLiveQuery(
     () => propertyIds.length > 0
       ? db.property_assets.where('property_id').anyOf(propertyIds).toArray()
       : Promise.resolve<PropertyAssetRow[]>([]),
     [propertyIdsKey]
-  ) ?? []
+  )
+
+  const isLoading =
+    turnovers === undefined ||
+    workOrders === undefined ||
+    properties === undefined ||
+    assets === undefined
+
+  if (isLoading) {
+    return <CrewLoading />
+  }
 
   return (
     <div>

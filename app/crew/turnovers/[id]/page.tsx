@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
+import { CrewLoading } from '@/components/crew/CrewLoading'
 import { createClient }       from '@/lib/supabase/client'
 import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -344,12 +345,7 @@ export default function CrewTurnoverPage() {
   }
 
   if (!turnover) {
-    return (
-      <div className="text-center py-20 text-muted-themed">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-        <p className="text-sm">Loading…</p>
-      </div>
-    )
+    return <CrewLoading />
   }
 
   const fullAddress = [property?.address, property?.city, property?.state].filter(Boolean).join(', ')

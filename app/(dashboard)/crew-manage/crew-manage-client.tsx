@@ -553,7 +553,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
 function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode]         = useState<'csv' | 'paste'>('csv')
   const [preview, setPreview]   = useState<ParsedRow[] | null>(null)
-  const [pasteText, setPaste]   = useState('')
+  const [pasteText, setPasteText]   = useState('')
   const [fileName, setFileName] = useState('')
   const [importing, setImporting] = useState(false)
   const [result, setResult]     = useState<{ imported: number; skipped: number } | null>(null)
@@ -680,7 +680,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
           </p>
           <textarea
             value={pasteText}
-            onChange={(e) => setPaste(e.target.value)}
+            onChange={(e) => setPasteText(e.target.value)}
             className="input text-xs font-mono h-32 resize-y mb-2"
             placeholder={"Alex Johnson, alex@example.com, 555-0101\nSarah Lee, 555-0102, sarah@example.com\n..."}
           />

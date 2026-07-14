@@ -7,6 +7,7 @@ import { ArrowLeft, Package } from 'lucide-react'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
 import { Button } from '@/components/ui/Button'
+import { CrewLoading } from '@/components/crew/CrewLoading'
 import type { InventoryCategory } from '@/types/database'
 
 export default function CrewInventoryPage() {
@@ -23,7 +24,11 @@ export default function CrewInventoryPage() {
   const items = useLiveQuery(
     () => db.inventory_items.where('property_id').equals(propertyId).sortBy('name') as unknown as Promise<InvRow[]>,
     [propertyId]
-  ) ?? []
+  )
+
+  if (items === undefined) {
+    return <CrewLoading />
+  }
 
   const grouped = items.reduce<Record<string, InvRow[]>>((acc: Record<string, InvRow[]>, item: InvRow) => {
     const cat = item.category as InventoryCategory
@@ -68,7 +73,7 @@ export default function CrewInventoryPage() {
 
       <h2 className="text-lg font-bold text-primary-themed mb-4">Inventory Count</h2>
 
-      {!items?.length && (
+      {items.length === 0 && (
         <div className="bg-card-themed rounded-xl border border-themed p-6 text-center">
           <Package className="w-8 h-8 text-muted-themed mx-auto mb-2" />
           <p className="text-sm text-muted-themed">No inventory items for this property.</p>
@@ -104,7 +109,7 @@ export default function CrewInventoryPage() {
         </div>
       ))}
 
-      {items && items.length > 0 && (
+      {items.length > 0 && (
         <div className="space-y-3 pb-8">
           <div>
             <label htmlFor="inventory-count-notes" className="label">Notes (optional)</label>

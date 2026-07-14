@@ -430,7 +430,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
 function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode]         = useState<'csv' | 'paste'>('csv')
   const [preview, setPreview]   = useState<ParsedVendor[] | null>(null)
-  const [pasteText, setPaste]   = useState('')
+  const [pasteText, setPasteText]   = useState('')
   const [fileName, setFileName] = useState('')
   const [importing, setImporting] = useState(false)
   const [result, setResult]     = useState<{ imported: number; skipped: number } | null>(null)
@@ -520,7 +520,7 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
           <p className="text-xs text-muted-themed mb-3">
             Paste text from your Word doc. One vendor per line with their name, email, and phone.
           </p>
-          <textarea value={pasteText} onChange={(e) => setPaste(e.target.value)}
+          <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)}
                     className="input text-xs font-mono h-32 resize-y mb-2"
                     placeholder={"ABC Plumbing, John Smith, 555-0101, john@abcplumbing.com\n..."} />
           <Button variant="secondary" onClick={handleParsePaste} disabled={!pasteText.trim()} className="text-sm">Parse Text</Button>

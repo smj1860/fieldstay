@@ -10,6 +10,7 @@ import { enqueueMutation } from '@/lib/dexie/syncService'
 import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
+import { CrewLoading } from '@/components/crew/CrewLoading'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -45,11 +46,7 @@ export default function CrewPropertyAssetsPage() {
   const missingTypes = missingAssetTypesFromDiscoveredSet(discoveredTypes)
 
   if (!property) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-themed" />
-      </div>
-    )
+    return <CrewLoading />
   }
 
   return (
