@@ -342,10 +342,10 @@ function CrewFaqPanel({ onClose }: { onClose: () => void }) {
         <FaqItem key={i} question={item.q} answer={item.a} />
       ))}
 
-      <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #e2e8f0' }}>
-        <p style={{ fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+      <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--border)' }}>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
           Need help?{' '}
-          <a href="mailto:help@fieldstay.app" style={{ color: '#0D1F3C', fontWeight: 700 }}>
+          <a href="mailto:help@fieldstay.app" style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
             help@fieldstay.app
           </a>
         </p>
@@ -357,21 +357,23 @@ function CrewFaqPanel({ onClose }: { onClose: () => void }) {
 function FaqItem({ question, answer }: { question: string; answer: string }) {
   const [open, setOpen] = useState(false)
   return (
-    <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 12, marginBottom: 12 }}>
+    <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 12 }}>
       <button
+        type="button"
         onClick={() => setOpen(!open)}
+        aria-expanded={open}
         style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
           width: '100%', textAlign: 'left', gap: 8,
         }}
       >
-        <span style={{ fontSize: 14, fontWeight: 700, color: '#1e293b', flex: 1 }}>
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>
           {question}
         </span>
-        <span style={{ color: '#94a3b8', flexShrink: 0 }}>{open ? '−' : '+'}</span>
+        <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{open ? '−' : '+'}</span>
       </button>
       {open && (
-        <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginTop: 8 }}>
+        <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginTop: 8 }}>
           {answer}
         </p>
       )}

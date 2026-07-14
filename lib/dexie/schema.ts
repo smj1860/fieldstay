@@ -274,6 +274,13 @@ export class FieldStayDexie extends Dexie {
       turnover_issue_reports: null,
       property_assets:        'id, property_id, org_id, asset_type',
     })
+
+    // sender_id wasn't indexed, so the "my conversation with the PM" query
+    // in app/crew/messages/page.tsx had to fall back to a full-table
+    // .filter() instead of a proper .where(...).or(...) compound query.
+    this.version(7).stores({
+      messages: 'id, org_id, turnover_id, recipient_id, sender_id, created_at',
+    })
   }
 }
 

@@ -17,7 +17,8 @@ export default function CrewMessagesPage() {
 
   const messages = useLiveQuery(
     () => db.messages
-      .filter((m) => m.sender_id === userId || m.recipient_id === userId)
+      .where('recipient_id').equals(userId)
+      .or('sender_id').equals(userId)
       .sortBy('created_at'),
     [userId]
   )
