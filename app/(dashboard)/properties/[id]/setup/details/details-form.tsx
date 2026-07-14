@@ -5,6 +5,8 @@ import { saveDetails } from './actions'
 import Link from 'next/link'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { Property } from '@/types/database'
 
 const PROPERTY_TYPES = [
@@ -20,13 +22,13 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
   return (
     <form action={formAction} className="space-y-5">
       {state?.error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+        <InlineAlert tone="error">
           {state.error}
-        </div>
+        </InlineAlert>
       )}
 
       <div>
-        <label htmlFor="name" className="label">Property Name <span className="text-red-500">*</span></label>
+        <label htmlFor="name" className="label">Property Name <RequiredMark /></label>
         <Input id="name" name="name" type="text" required defaultValue={property.name} />
       </div>
 

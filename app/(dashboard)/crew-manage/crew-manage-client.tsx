@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 import {
   addCrewMember,
   updateCrewMember,
@@ -490,7 +491,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
       <form action={formAction} className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="crew-name" className="label">Name <span className="text-red-400">*</span></label>
+            <label htmlFor="crew-name" className="label">Name <RequiredMark /></label>
             <Input id="crew-name" name="name" type="text" required placeholder="Alex Johnson" />
           </div>
           <div>
@@ -516,7 +517,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="crew-email" className="label">Email <span className="text-red-400">*</span></label>
+            <label htmlFor="crew-email" className="label">Email <RequiredMark /></label>
             <Input id="crew-email" name="email" type="email" required placeholder="alex@example.com" />
           </div>
           <div>

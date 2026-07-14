@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -93,7 +94,7 @@ function AddDocumentForm({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
-              <label htmlFor="document-type" className="label">Document Type <span className="text-red-500">*</span></label>
+              <label htmlFor="document-type" className="label">Document Type <RequiredMark /></label>
               <select id="document-type" name="document_type" required className="input">
                 <option value="">Select type…</option>
                 {DOC_TYPES.map((t) => (
@@ -103,7 +104,7 @@ function AddDocumentForm({
             </div>
 
             <div className="sm:col-span-2">
-              <label htmlFor="document-name" className="label">Document Name <span className="text-red-500">*</span></label>
+              <label htmlFor="document-name" className="label">Document Name <RequiredMark /></label>
               <Input id="document-name" name="document_name" type="text" required
                      placeholder='e.g. "General Liability COI 2025"' />
             </div>

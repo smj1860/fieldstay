@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { Vendor, VendorSpecialty } from '@/types/database'
 import {
   addVendor,
@@ -347,7 +348,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
       <form action={formAction} className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="vendor-name" className="label">Vendor Name <span className="text-red-400">*</span></label>
+            <label htmlFor="vendor-name" className="label">Vendor Name <RequiredMark /></label>
             <Input id="vendor-name" name="name" type="text" required placeholder="ABC Plumbing" />
           </div>
           <div>
@@ -358,7 +359,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="vendor-email" className="label">Email <span className="text-red-400">*</span></label>
+            <label htmlFor="vendor-email" className="label">Email <RequiredMark /></label>
             <Input id="vendor-email" name="email" type="email" required placeholder="info@abcplumbing.com" />
           </div>
           <div>

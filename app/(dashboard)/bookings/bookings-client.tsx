@@ -17,6 +17,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { VacancyGap } from './page'
 import type { BookingSource, BookingStatus } from '@/types/database'
 
@@ -434,7 +435,7 @@ function AddBookingModal({
 
         <form action={action} className="space-y-4">
           <div>
-            <label className="label">Property <span className="text-red-500">*</span></label>
+            <label className="label">Property <RequiredMark /></label>
             <select name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
               <option value="">Select property…</option>
               {properties.map((p) => (
@@ -445,7 +446,7 @@ function AddBookingModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="label">Check-in <span className="text-red-500">*</span></label>
+              <label className="label">Check-in <RequiredMark /></label>
               <Input
                 name="checkin_date"
                 type="date"
@@ -456,7 +457,7 @@ function AddBookingModal({
               />
             </div>
             <div>
-              <label className="label">Check-out <span className="text-red-500">*</span></label>
+              <label className="label">Check-out <RequiredMark /></label>
               <Input name="checkout_date" type="date" required min={checkinVal || todayStr} />
             </div>
           </div>

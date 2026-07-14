@@ -8,6 +8,8 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 import {
   addPropertyOwner,
   generatePortalToken,
@@ -270,9 +272,9 @@ function AddTransactionForm({
       </div>
 
       {state?.error && (
-        <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+        <InlineAlert tone="error" className="mb-3">
           {state.error}
-        </div>
+        </InlineAlert>
       )}
 
       <form action={formAction} className="space-y-3">
@@ -330,13 +332,13 @@ function AddTransactionForm({
         </div>
 
         <div>
-          <label htmlFor="txn-description" className="label text-xs">Description <span className="text-red-500">*</span></label>
+          <label htmlFor="txn-description" className="label text-xs">Description <RequiredMark /></label>
           <Input id="txn-description" name="description" type="text" required className="text-sm" placeholder="e.g. 4-night stay, HVAC repair" />
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="txn-amount" className="label text-xs">Amount ($) <span className="text-red-500">*</span></label>
+            <label htmlFor="txn-amount" className="label text-xs">Amount ($) <RequiredMark /></label>
             <Input id="txn-amount" name="amount" type="number" required min="0.01" step="0.01" className="text-sm" placeholder="0.00" />
           </div>
           <div>
@@ -551,15 +553,15 @@ function AddOwnerModal({
   return (
     <Dialog open onClose={onClose} title="Add Property Owner">
       {state?.error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+        <InlineAlert tone="error" className="mb-4">
           {state.error}
-        </div>
+        </InlineAlert>
       )}
 
       <form action={formAction} className="space-y-4">
         <div>
           <label htmlFor="property_id" className="label">
-            Property <span className="text-red-500">*</span>
+            Property <RequiredMark />
           </label>
           <select id="property_id" name="property_id" required className="input">
             <option value="">Select property…</option>
@@ -571,7 +573,7 @@ function AddOwnerModal({
 
         <div>
           <label htmlFor="name" className="label">
-            Owner Name <span className="text-red-500">*</span>
+            Owner Name <RequiredMark />
           </label>
           <Input id="name" name="name" type="text" required placeholder="Jane Smith" />
         </div>

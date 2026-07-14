@@ -9,6 +9,8 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { Organization } from '@/types/database'
 import {
   updateOrgSettings,
@@ -141,20 +143,20 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
         </div>
 
         {state?.success && (
-          <div className="bg-green-950 border border-green-800 text-green-400 text-sm rounded-lg px-4 py-3 mb-4">
+          <InlineAlert tone="success" className="mb-4">
             Settings saved successfully.
-          </div>
+          </InlineAlert>
         )}
         {state?.error && (
-          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
+          <InlineAlert tone="error" className="mb-4">
             {state.error}
-          </div>
+          </InlineAlert>
         )}
 
         <form action={formAction} className="space-y-4">
           <div>
             <label htmlFor="org-name" className="label">
-              Organization Name <span className="text-red-400">*</span>
+              Organization Name <RequiredMark />
             </label>
             <Input
               id="org-name"
@@ -302,9 +304,9 @@ function CommsRetentionSelector({ days }: { days: number }) {
   return (
     <div>
       {saveError && (
-        <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-3 py-2 mb-3">
+        <InlineAlert tone="error" className="mb-3">
           {saveError}
-        </div>
+        </InlineAlert>
       )}
 
       <select
@@ -358,9 +360,9 @@ function AutoAssignToggle({ mode }: { mode: string }) {
   return (
     <div>
       {saveError && (
-        <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-3 py-2 mb-3">
+        <InlineAlert tone="error" className="mb-3">
           {saveError}
-        </div>
+        </InlineAlert>
       )}
 
       <div className="flex gap-2 flex-wrap">
@@ -493,14 +495,14 @@ function SecurityTab() {
         </div>
 
         {state?.success && (
-          <div className="bg-green-950 border border-green-800 text-green-400 text-sm rounded-lg px-4 py-3 mb-4">
+          <InlineAlert tone="success" className="mb-4">
             Password updated successfully.
-          </div>
+          </InlineAlert>
         )}
         {state?.error && (
-          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
+          <InlineAlert tone="error" className="mb-4">
             {state.error}
-          </div>
+          </InlineAlert>
         )}
 
         <form action={formAction} className="space-y-4">
@@ -607,14 +609,14 @@ function NotificationsTab({ org }: { org: Organization }) {
         </div>
 
         {state?.success && (
-          <div className="bg-green-950 border border-green-800 text-green-400 text-sm rounded-lg px-4 py-3 mb-4">
+          <InlineAlert tone="success" className="mb-4">
             Preferences saved.
-          </div>
+          </InlineAlert>
         )}
         {state?.error && (
-          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
+          <InlineAlert tone="error" className="mb-4">
             {state.error}
-          </div>
+          </InlineAlert>
         )}
 
         <form action={formAction} className="space-y-1">
@@ -702,14 +704,14 @@ function NotificationsTab({ org }: { org: Organization }) {
         </div>
 
         {slackState?.success && (
-          <div className="bg-green-950 border border-green-800 text-green-400 text-sm rounded-lg px-4 py-3 mb-4">
+          <InlineAlert tone="success" className="mb-4">
             Webhook saved.
-          </div>
+          </InlineAlert>
         )}
         {slackState?.error && (
-          <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-4 py-3 mb-4">
+          <InlineAlert tone="error" className="mb-4">
             {slackState.error}
-          </div>
+          </InlineAlert>
         )}
 
         <form action={slackAction} className="space-y-3">
