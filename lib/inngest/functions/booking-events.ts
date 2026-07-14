@@ -16,8 +16,8 @@ export const handleBookingConfirmed = inngest.createFunction(
       const txnSource = source === 'uplisting' ? 'uplisting_booking' : 'booking_revenue'
 
       const [{ data: booking }, { data: property }] = await Promise.all([
-        supabase.from('bookings').select('checkin_date, checkout_date, guest_name').eq('id', booking_id).single(),
-        supabase.from('properties').select('avg_nightly_rate').eq('id', property_id).single(),
+        supabase.from('bookings').select('checkin_date, checkout_date, guest_name').eq('id', booking_id).eq('org_id', org_id).single(),
+        supabase.from('properties').select('avg_nightly_rate').eq('id', property_id).eq('org_id', org_id).single(),
       ])
 
       if (!booking) return { skipped: true }
@@ -102,12 +102,14 @@ export const handleBookingDetected = inngest.createFunction(
           .from('properties')
           .select('avg_nightly_rate')
           .eq('id', property_id)
+          .eq('org_id', org_id)
           .single()
         if (!prop?.avg_nightly_rate) return { skipped: 'no_rate' }
         const { data: booking } = await supabase
           .from('bookings')
           .select('checkin_date, checkout_date, guest_name')
           .eq('id', booking_id)
+          .eq('org_id', org_id)
           .single()
         if (!booking) return { skipped: 'booking_not_found' }
 

@@ -17,6 +17,7 @@ export const handleSupportEscalation = inngest.createFunction(
           .from('support_conversations')
           .select('id, staff_notified_at')
           .eq('id', conversationId)
+          .eq('org_id', orgId)
           .single(),
       ])
 
@@ -55,6 +56,7 @@ export const handleSupportEscalation = inngest.createFunction(
         .from('support_conversations')
         .update({ staff_notified_at: new Date().toISOString() })
         .eq('id', conversationId)
+        .eq('org_id', orgId)
     })
 
     return { notified: true, org: context.orgName }

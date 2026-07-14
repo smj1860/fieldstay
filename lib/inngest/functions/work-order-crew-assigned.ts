@@ -5,7 +5,7 @@ export const handleWorkOrderCrewAssigned = inngest.createFunction(
   { id: 'work-order-crew-assigned', name: 'Work Order: Crew Assigned', retries: 2 },
   { event: 'work-order/crew.assigned' },
   async ({ event, step }) => {
-    const { workOrderId, crewMemberId } = event.data
+    const { workOrderId, orgId, crewMemberId } = event.data
 
     // Future: send push notification to crew member's device.
     // For now, the WO surfaces in the crew app via the Dexie sync.
@@ -18,6 +18,7 @@ export const handleWorkOrderCrewAssigned = inngest.createFunction(
         .from('work_orders')
         .select('wo_number, title')
         .eq('id', workOrderId)
+        .eq('org_id', orgId)
         .single()
 
       return { workOrderId, woNumber: wo?.wo_number, crewMemberId }

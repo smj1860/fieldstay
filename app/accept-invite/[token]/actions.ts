@@ -1,8 +1,7 @@
 'use server'
 
 import { z }                   from 'zod'
-import { createServiceClient } from '@/lib/supabase/server'
-import { createClient }        from '@/lib/supabase/server'
+import { createServiceClient, createClient, adminFetch } from '@/lib/supabase/server'
 import { acceptOrgInvite }     from '@/lib/auth/invites'
 import { redirect }            from 'next/navigation'
 import { headers }             from 'next/headers'
@@ -61,9 +60,8 @@ export async function acceptTeamInvite(formData: FormData): Promise<{ error?: st
 
   // Reject if a user with this email already exists — they must use the
   // "Log in" path so we don't create a duplicate auth.users row.
-  const lookupRes = await fetch(
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(invite.email)}&per_page=1`,
-    { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}` } }
+  const lookupRes = await adminFetch(
+    `/auth/v1/admin/users?email=${encodeURIComponent(invite.email)}&per_page=1`
   )
   if (lookupRes.ok) {
     const body = await lookupRes.json() as { users?: { id: string }[] }

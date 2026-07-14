@@ -38,7 +38,7 @@ export const autoAssignVendor = inngest.createFunction(
         { data: complianceRows },
       ] = await Promise.all([
         supabase.from('organizations').select('vendor_auto_assign_mode').eq('id', org_id).single(),
-        supabase.from('properties').select('id, lat, lng').eq('id', property_id).single(),
+        supabase.from('properties').select('id, lat, lng').eq('id', property_id).eq('org_id', org_id).single(),
         supabase
           .from('vendors')
           .select('id, name, lat, lng, avg_rating')

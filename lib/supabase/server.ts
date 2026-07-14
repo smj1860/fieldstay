@@ -74,3 +74,22 @@ export function createServiceClient() {
     }
   )
 }
+
+/**
+ * Raw fetch against the Supabase Admin REST API (e.g. /auth/v1/admin/users)
+ * for admin operations not covered by the JS client's postgrest/gotrue
+ * wrapper (e.g. GET /auth/v1/admin/users?email= for a targeted user lookup).
+ * Server-only — attaches the service role key. Never call from client code.
+ */
+export function adminFetch(path: string, init?: RequestInit) {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!
+
+  return fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}${path}`, {
+    ...init,
+    headers: {
+      apikey:        key,
+      Authorization: `Bearer ${key}`,
+      ...init?.headers,
+    },
+  })
+}

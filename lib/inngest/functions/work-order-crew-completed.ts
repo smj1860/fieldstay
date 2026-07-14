@@ -17,11 +17,13 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
           .from('work_orders')
           .select('id, wo_number, title, property_id')
           .eq('id', workOrderId)
+          .eq('org_id', orgId)
           .single(),
         supabase
           .from('crew_members')
           .select('id, name')
           .eq('id', crewMemberId)
+          .eq('org_id', orgId)
           .single(),
       ])
 

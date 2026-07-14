@@ -14,6 +14,7 @@ export const logMessageCommunication = inngest.createFunction(
         .from('messages')
         .select('content, created_at, work_order_id')
         .eq('id', message_id)
+        .eq('org_id', org_id)
         .single()
       return data
     })

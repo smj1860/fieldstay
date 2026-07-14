@@ -630,6 +630,7 @@ export const handleWorkOrderOverdue = inngest.createFunction(
         .from('work_orders')
         .select('id, title, status, scheduled_date, vendors(name), properties(name)')
         .eq('id', work_order_id)
+        .eq('org_id', org_id)
         .single()
 
       if (!wo || wo.status === 'completed' || wo.status === 'cancelled') return
@@ -759,6 +760,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
         .from('work_orders')
         .select('id, title, vendors ( name ), properties ( name )')
         .eq('id', work_order_id)
+        .eq('org_id', org_id)
         .single()
 
       if (!wo) return

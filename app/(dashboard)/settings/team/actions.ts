@@ -2,7 +2,7 @@
 
 import { z }                        from 'zod'
 import { requireOrgMember }         from '@/lib/auth'
-import { createServiceClient }      from '@/lib/supabase/server'
+import { createServiceClient, adminFetch } from '@/lib/supabase/server'
 import { sendTeamInviteEmail }       from '@/lib/resend/client'
 import { revalidatePath }            from 'next/cache'
 import { logAuditEvent }             from '@/lib/audit'
@@ -27,9 +27,8 @@ export async function inviteTeamMember(
 
   // H-3: Check not already a member using targeted lookup (not listUsers).
   // Supabase admin REST supports GET /auth/v1/admin/users?email=x for point lookups.
-  const userLookupRes = await fetch(
-    `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/admin/users?email=${encodeURIComponent(normalizedEmail)}&per_page=1`,
-    { headers: { apikey: process.env.SUPABASE_SERVICE_ROLE_KEY!, Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}` } }
+  const userLookupRes = await adminFetch(
+    `/auth/v1/admin/users?email=${encodeURIComponent(normalizedEmail)}&per_page=1`
   )
   if (userLookupRes.ok) {
     const body = await userLookupRes.json() as { users?: { id: string }[] }
