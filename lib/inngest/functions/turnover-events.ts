@@ -43,11 +43,13 @@ export const handleTurnoverCreated = inngest.createFunction(
             turnover_assignments ( crew_member_id, crew_members ( name, email, phone, preferred_contact ) )
           `)
           .eq('id', turnover_id)
+          .eq('org_id', org_id)
           .single(),
         supabase
           .from('properties')
           .select('name, city, state, timezone')
           .eq('id', property_id)
+          .eq('org_id', org_id)
           .single(),
         getPmEmail(supabase, org_id),
       ])
@@ -120,6 +122,7 @@ export const handleTurnoverCreated = inngest.createFunction(
         .from('turnovers')
         .select('status, turnover_assignments(id)')
         .eq('id', turnover_id)
+        .eq('org_id', org_id)
         .single()
 
       const assigned = Array.isArray(data?.turnover_assignments)
@@ -180,7 +183,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
       const supabase = createServiceClient()
 
       const [{ data: property }, pmEmail] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', property_id).single(),
+        supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
         getPmEmail(supabase, org_id),
       ])
 
@@ -206,6 +209,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
         .from('property_assets')
         .select('asset_type, make, model, photo_url, is_na')
         .eq('property_id', property_id)
+        .eq('org_id', org_id)
         .eq('is_active', true)
 
       const discoveredTypes = new Set(
@@ -218,7 +222,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
       if (!missingTypes.length) return { skipped: 'none_missing' }
 
       const [{ data: property }, pmEmail] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', property_id).single(),
+        supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
         getPmEmail(supabase, org_id),
       ])
 
@@ -268,8 +272,8 @@ export const handleTurnoverCompleted = inngest.createFunction(
       const supabase = createServiceClient()
 
       const [{ data: property }, { data: turnover }] = await Promise.all([
-        supabase.from('properties').select('cleaning_cost, same_day_premium_pct').eq('id', property_id).single(),
-        supabase.from('turnovers').select('is_same_day_turnover').eq('id', turnover_id).single(),
+        supabase.from('properties').select('cleaning_cost, same_day_premium_pct').eq('id', property_id).eq('org_id', org_id).single(),
+        supabase.from('turnovers').select('is_same_day_turnover').eq('id', turnover_id).eq('org_id', org_id).single(),
       ])
 
       if (!property?.cleaning_cost) return { skipped: true }
@@ -310,6 +314,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
         .from('checklist_instances')
         .select('id')
         .eq('turnover_id', turnover_id)
+        .eq('org_id', org_id)
         .maybeSingle()
 
       if (!instance) return { skipped: 'no_checklist_instance' }
@@ -337,6 +342,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
         .from('assignment_outcomes')
         .update({ started_at: startedAt, completed_at: completedAt, duration_minutes: Math.round(durationMinutes) })
         .eq('turnover_id', turnover_id)
+        .eq('org_id', org_id)
         .select('id')
 
       return { updated_rows: updatedRows?.length ?? 0, duration_minutes: Math.round(durationMinutes) }

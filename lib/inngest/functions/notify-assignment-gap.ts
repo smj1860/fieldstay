@@ -12,7 +12,7 @@ export const notifyAssignmentGap = inngest.createFunction(
       const supabase = createServiceClient()
 
       const [{ data: property }, { data: managers }] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', property_id).single(),
+        supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
         supabase
           .from('organization_members')
           .select('user_id')

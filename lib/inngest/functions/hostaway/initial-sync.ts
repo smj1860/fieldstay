@@ -77,7 +77,7 @@ export const hostawayInitialSync = inngest.createFunction(
 
           const { error } = await supabase
             .from('properties')
-            .upsert(rows, { onConflict: 'external_id,external_source' })
+            .upsert(rows, { onConflict: 'org_id,external_id,external_source' })
 
           if (error) {
             logger.error(`[Hostaway:${user_id}] properties upsert failed: ${error.message}`)

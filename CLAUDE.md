@@ -50,12 +50,26 @@ These are non-negotiable. Violating them creates security vulnerabilities or
 data leaks that could expose tenant data.
 
 ### 1. Service Role Key
-- `SUPABASE_SERVICE_ROLE_KEY` is used ONLY in Inngest steps and specific
-  server-side route handlers where RLS must be bypassed intentionally.
+- `SUPABASE_SERVICE_ROLE_KEY` is used ONLY in Inngest steps, specific
+  server-side route handlers, and Server Components where RLS must be
+  bypassed intentionally.
+- Server Component (`page.tsx`) use of `createServiceClient()` is accepted
+  when — and only when — the component calls `requireOrgMember()` or
+  validates a token first, and every query it runs is explicitly scoped
+  with `.eq('org_id', ...)` (or the token's equivalent). Service role in a
+  Server Component removes RLS as a defense-in-depth backstop for that
+  page, so a missing `.eq('org_id', ...)` filter there fails open with no
+  safety net — prefer `createServerClient()` (RLS-enforced) unless the page
+  genuinely needs the bypass (e.g. cross-org aggregation re-filtered to the
+  caller's authorized scope, as in the owner-portal pages).
 - Never pass it to client components, never return it in API responses,
   never log it.
 - Use `createServiceClient()` from `lib/supabase/server.ts` for service role.
 - Use `createServerClient()` from `lib/supabase/server.ts` for normal auth.
+- Use `adminFetch()` from `lib/supabase/server.ts` for raw calls to the
+  Supabase Admin REST API (e.g. `/auth/v1/admin/users?email=`) that aren't
+  covered by the JS client's gotrue/postgrest wrapper — never build a
+  one-off `fetch()` with the service role key inline.
 
 ### 2. Row Level Security
 - **Every table has RLS enabled.** No exceptions. If you create a table,
@@ -233,8 +247,8 @@ integration_connections     — org ↔ provider tokens
 ical_feeds                  — calendar sync feeds per property
 bookings                    — confirmed bookings (from iCal, OwnerRez, Uplisting, manual)
 communication_logs          — all PM↔vendor/crew communication history
-guest_message_templates     — automated guest messaging templates
-guest_messages_sent
+reservation_messages        — automated guest messaging (superseded guest_message_templates /
+                              guest_messages_sent, dropped by 20260611000006)
 reviews / review_responses  — guest reviews + PM responses
 ```
 
@@ -245,9 +259,13 @@ org_milestones              — key-value store for org state flags + async job 
 audit_events                — append-only audit log
 push_subscriptions          — PWA push notification endpoints
 oauth_states                — CSRF state tokens for OAuth flows
-powersync_crew_*            — LEGACY. Tables from the original PowerSync sync layer,
-                              replaced by Dexie.js. Do not use in new code.
 ```
+
+`powersync_crew_*` tables from the original PowerSync sync layer (replaced by
+Dexie.js) were fully dropped by `20260611063549_drop_powersync_helper_views.sql`
+and `20260622123556_drop_dangling_powersync_crew_sync_triggers.sql` — they no
+longer exist in the live schema at all, not merely "unused." Do not reference
+them in any form.
 
 ### Guidebook & Guest Messaging
 ```
@@ -688,9 +706,9 @@ Always update `types/database.ts` in the same commit as the migration.
 
 ### Known legacy tables
 
-`powersync_crew_*` tables exist in the DB from an earlier PowerSync-based sync layer
-that was replaced by Dexie.js. They are not used by any active code path. Do not
-write new code that reads from or writes to these tables.
+`powersync_crew_*` tables were dropped entirely (see the Supporting schema section
+above) — they no longer exist in the live DB at all. Do not write new code that
+references these tables in any form.
 
 ---
 
@@ -720,9 +738,11 @@ getPmEmail(supabase, orgId)  // supabase client FIRST, orgId second
 
 **renderPmAlert**
 ```typescript
-renderPmAlert({ ctaLabel, ctaUrl, details })
-// Props are: ctaLabel, ctaUrl, details
-// NOT: actionLabel, actionUrl, heading, body, table, note, pmName
+renderPmAlert({ heading, body, ctaLabel, ctaUrl, details?, table?, sections?, note? })
+// Required: heading, body, ctaLabel, ctaUrl
+// Optional: details, table, sections, note
+// See lib/resend/emails/pm-alert.tsx PmAlertProps for the authoritative interface —
+// NOT: actionLabel, actionUrl, pmName (these were never valid props)
 ```
 
 ### Auth patterns

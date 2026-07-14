@@ -222,7 +222,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
           const { error: upsertErr } = await admin
             .from('reviews')
             .upsert(rows, {
-              onConflict: 'external_id,external_source',
+              onConflict: 'org_id,external_id,external_source',
               ignoreDuplicates: false,
             })
 

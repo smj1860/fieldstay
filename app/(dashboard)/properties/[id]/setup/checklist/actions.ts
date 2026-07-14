@@ -33,6 +33,19 @@ export async function saveChecklistTemplate(
 
   let tmplId = templateId
 
+  // A client-supplied templateId must be confirmed to belong to this org
+  // before we delete/replace its sections — the id alone is not proof of
+  // ownership.
+  if (tmplId) {
+    const { data: template } = await supabase
+      .from('checklist_templates')
+      .select('id')
+      .eq('id', tmplId)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+    if (!template) return { error: 'Checklist template not found' }
+  }
+
   // Create template if none exists
   if (!tmplId) {
     const { data, error } = await supabase

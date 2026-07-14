@@ -22,11 +22,13 @@ export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
           .from('work_orders')
           .select('id, title, vendors ( name ), properties ( name )')
           .eq('id', work_order_id)
+          .eq('org_id', org_id)
           .single(),
         supabase
           .from('work_order_invoices')
           .select('id, invoice_number, subtotal, total, status')
           .eq('id', invoice_id)
+          .eq('org_id', org_id)
           .single(),
       ])
 

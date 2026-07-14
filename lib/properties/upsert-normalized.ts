@@ -79,7 +79,7 @@ export async function upsertNormalizedProperties(
 
   const { error: upsertError } = await supabase
     .from('properties')
-    .upsert(rows, { onConflict: 'external_id,external_source' })
+    .upsert(rows, { onConflict: 'org_id,external_id,external_source' })
 
   if (upsertError) {
     throw new Error(`Properties upsert failed: ${upsertError.message}`)
