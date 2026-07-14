@@ -82,7 +82,7 @@ export default async function VendorDetailPage({ params }: Props) {
     status === 'compliant'      ? 'var(--accent-green)'  :
     status === 'expiring_soon'  ? 'var(--accent-amber)'  :
     status === 'grace_period'   ? 'var(--accent-red)'    :
-    status === 'hard_blocked'   ? '#6b7280'               :
+    status === 'hard_blocked'   ? 'var(--text-muted)'      :
     'var(--text-muted)'
 
   const statusLabel =

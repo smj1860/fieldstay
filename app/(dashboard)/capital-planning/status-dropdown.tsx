@@ -13,8 +13,8 @@ const OPTIONS: { value: ReplacementStatus; label: string }[] = [
 
 const STATUS_STYLES: Record<ReplacementStatus, string> = {
   projected: 'text-muted-themed',
-  budgeted:  'text-amber-600',
-  approved:  'text-green-600',
+  budgeted:  'text-[var(--accent-amber)]',
+  approved:  'text-[var(--accent-green)]',
   deferred:  'text-muted-themed line-through',
 }
 
