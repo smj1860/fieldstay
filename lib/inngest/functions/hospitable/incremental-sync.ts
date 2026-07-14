@@ -237,7 +237,7 @@ export const hospIncrementalSync = inngest.createFunction(
               stay_type:            normalized.stay_type,
               actual_total_amount:  normalized.actual_total_amount,
             },
-            { onConflict: 'external_id,external_source' }
+            { onConflict: 'org_id,external_id,external_source' }
           )
           .select('id')
           .single()

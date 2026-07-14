@@ -53,6 +53,12 @@ function connectionStatus(
   return 'healthy'
 }
 
+function connectionDetail(status: string, syncError: string | null): string | null {
+  if (status === 'revoked' || status === 'error') return `Connection ${status} — reconnect required`
+  if (status === 'disconnected') return null
+  return syncError
+}
+
 function feedStatus(lastSyncStatus: string | null, lastSyncedAt: string | null): HealthStatus {
   if (lastSyncStatus === 'error') return 'needs_attention'
   if (!lastSyncedAt) return 'never_synced'
@@ -93,11 +99,7 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
       label:      providerNames[c.provider_id] ?? c.provider_id,
       status:     connectionStatus(c.status, syncStatus, lastSyncedAt),
       lastSyncAt: lastSyncedAt,
-      detail:     c.status === 'revoked' || c.status === 'error'
-        ? `Connection ${c.status} — reconnect required`
-        : c.status === 'disconnected'
-        ? null
-        : syncError,
+      detail:     connectionDetail(c.status, syncError),
     }
   })
 

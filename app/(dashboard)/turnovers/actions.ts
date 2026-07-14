@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 
@@ -859,7 +859,7 @@ export async function rateTurnoverCompletion(
   turnoverId: string,
   rating: number
 ): Promise<TurnoverActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     return { error: 'Rating must be between 1 and 5' }

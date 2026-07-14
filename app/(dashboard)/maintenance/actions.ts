@@ -1137,8 +1137,11 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
       { work_order_id: workOrderId, org_id: membership.org_id, vendor_id: vendorId, was_accepted: true, was_suggestion: true },
       { onConflict: 'work_order_id,vendor_id', ignoreDuplicates: false }
     )
-  } catch {
-    // Outcome recording must not break the acceptance flow
+  } catch (err) {
+    // Outcome recording must not break the acceptance flow — but the failure
+    // still needs to be visible, or the vendor-score learning loop silently
+    // starves with zero operator signal.
+    console.error('[acceptVendorSuggestion] outcome recording failed:', err)
   }
 
   // Dispatch is gated inside this handler on the WO's own portal_enabled
@@ -1194,8 +1197,11 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
         { work_order_id: workOrderId, org_id: membership.org_id, vendor_id: vendorId, was_accepted: false, was_suggestion: true },
         { onConflict: 'work_order_id,vendor_id', ignoreDuplicates: false }
       )
-    } catch {
-      // Outcome recording must not break the dismissal flow
+    } catch (err) {
+      // Outcome recording must not break the dismissal flow — but the
+      // failure still needs to be visible, or the vendor-score learning
+      // loop silently starves with zero operator signal.
+      console.error('[dismissVendorSuggestion] outcome recording failed:', err)
     }
   }
 

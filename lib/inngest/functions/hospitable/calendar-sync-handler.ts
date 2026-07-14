@@ -80,7 +80,7 @@ export const hospCalendarSyncHandler = inngest.createFunction(
       if (rows.length > 0) {
         const { error } = await supabase
           .from('bookings')
-          .upsert(rows, { onConflict: 'external_id,external_source' })
+          .upsert(rows, { onConflict: 'org_id,external_id,external_source' })
 
         if (error) throw new Error(`Block upsert failed: ${error.message}`)
       }

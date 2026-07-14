@@ -430,7 +430,10 @@ function VendorAutoAssignToggle({ mode }: { mode: string }) {
   return (
     <div>
       {saveError && (
-        <div className="bg-red-950 border border-red-800 text-red-400 text-sm rounded-lg px-3 py-2 mb-3">
+        <div
+          className="text-sm rounded-lg px-3 py-2 mb-3"
+          style={{ background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red)', color: 'var(--accent-red)' }}
+        >
           {saveError}
         </div>
       )}

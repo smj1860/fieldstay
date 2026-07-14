@@ -168,6 +168,7 @@ export const autoAssignVendor = inngest.createFunction(
           suggestion_status:    'pending',
         })
         .eq('id', work_order_id)
+        .eq('org_id', org_id)
     })
 
     await step.run('record-outcome', async () => {
