@@ -112,7 +112,10 @@ export async function generateReviewResponse(input: ReviewInput): Promise<Genera
 
   // Strip a code fence wherever it appears, not just when anchored exactly
   // at the start/end of the string — models don't always format identically.
-  const fenceMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
+  // No \s* at the fence boundaries: the trailing .trim() already handles
+  // that, and adding it here overlaps with the [\s\S]*? capture (both can
+  // match whitespace) causing superlinear backtracking on pathological input.
+  const fenceMatch = rawText.match(/```(?:json)?([\s\S]*?)```/)
   const cleaned = (fenceMatch ? fenceMatch[1] : rawText).trim()
   return JSON.parse(cleaned) as GeneratedResponse
 }
