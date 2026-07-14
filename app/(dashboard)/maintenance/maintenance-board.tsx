@@ -1040,12 +1040,14 @@ function AddScheduleModal({
 
   return (
     <Dialog open onClose={onClose} title="Add Maintenance Schedule">
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <ScheduleFormFields properties={properties} vendors={vendors} />
-          <div className="flex gap-3 pt-2 border-t border-themed">
+        <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh] -m-6">
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+            )}
+            <ScheduleFormFields properties={properties} vendors={vendors} />
+          </div>{/* /scrollable content */}
+          <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
             <Button type="submit" disabled={saving} className="flex-1">{saving ? 'Saving…' : 'Add Schedule'}</Button>
             <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
@@ -1092,12 +1094,14 @@ function EditScheduleModal({
 
   return (
     <Dialog open onClose={onClose} title="Edit Schedule">
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
-          <div className="flex gap-3 pt-2 border-t border-themed">
+        <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh] -m-6">
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+            {error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+            )}
+            <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
+          </div>{/* /scrollable content */}
+          <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
             <Button type="submit" disabled={saving} className="flex-1">{saving ? 'Saving…' : 'Save Changes'}</Button>
             <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
@@ -1743,10 +1747,11 @@ function CreateTemplateModal({
 
   return (
     <Dialog open onClose={onClose} title="Create Schedule Template" maxWidthClassName="max-w-2xl">
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
-        )}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh] -m-6">
+          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+          )}
           <div>
             <label className="label">Template Name <span className="text-red-500">*</span></label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. STR Annual Maintenance" required />
@@ -1864,8 +1869,9 @@ function CreateTemplateModal({
               ))}
             </div>
           </div>
+          </div>{/* /scrollable content */}
 
-          <div className="flex gap-3 pt-2 border-t border-themed">
+          <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
             <Button type="submit" disabled={saving} className="flex-1">
               {saving ? 'Creating…' : 'Create Template'}
             </Button>
