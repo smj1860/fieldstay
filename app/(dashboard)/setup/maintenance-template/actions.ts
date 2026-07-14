@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
+import { logAuditEvent } from '@/lib/audit'
 
 export interface MaintenanceScheduleInput {
   title:          string

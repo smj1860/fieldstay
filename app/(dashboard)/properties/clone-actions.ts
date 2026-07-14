@@ -178,10 +178,10 @@ export async function clonePropertySetup(
       await logAuditEvent({
         orgId:      orgId,
         actorId:    user.id,
-        action:     'property.updated',
+        action:     'property.maintenance.cloned',
         targetType: 'property',
         targetId:   targetPropertyId,
-        metadata:   { clone_section: 'maintenance', source_property_id: sourcePropertyId, schedules_cloned: sourceSched.length },
+        metadata:   { source_property_id: sourcePropertyId, schedules_cloned: sourceSched.length },
       })
     }
 

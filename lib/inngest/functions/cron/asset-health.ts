@@ -4,6 +4,7 @@ import { resend, FROM } from '@/lib/resend/client'
 import { calculateHealthScore } from '@/lib/assets/health-score'
 import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
+import { logAuditEvents } from '@/lib/audit'
 
 // Alert thresholds (days relative to expiry): positive = before, negative = after
 const COMPLIANCE_ALERT_THRESHOLDS = [30, 14, 7, 0, -14, -30]
@@ -241,6 +242,7 @@ export const dailyAssetHealth = inngest.createFunction(
           condition_weight:  number
           weight_updated_at: string
         }> = []
+        const oldWeightsByType: Record<string, { age_weight: number; condition_weight: number }> = {}
 
         for (const [assetType, repairs] of Object.entries(byType)) {
           if (repairs.length < MIN_REPAIRS) continue
