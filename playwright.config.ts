@@ -2,7 +2,12 @@ import { defineConfig, devices } from '@playwright/test'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
 
-// Load E2E-specific env vars
+// Load Next.js-style local env (Supabase URL/anon/service-role keys) first,
+// then E2E-specific vars (test account, base URL). dotenv.config() never
+// overwrites an already-set process.env key, and the two files don't share
+// any key names, so load order here only matters for that non-overwrite
+// semantic, not for which value wins.
+dotenv.config({ path: path.resolve(__dirname, '.env.local') })
 dotenv.config({ path: path.resolve(__dirname, 'e2e/.env.e2e') })
 
 export default defineConfig({
