@@ -390,7 +390,7 @@ function WorkOrderCard({
           {wo.suggestion_status === 'pending' && suggestedVendorName && (
             <div
               className="mt-2 flex items-center gap-2 flex-wrap px-3 py-2 rounded-lg"
-              style={{ background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)' }}
+              style={{ background: 'var(--accent-blue-dim)', border: '1px solid var(--accent-blue)' }}
               onClick={(e) => e.stopPropagation()}
             >
               <span className="text-xs inline-flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>

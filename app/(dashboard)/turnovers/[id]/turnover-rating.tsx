@@ -24,7 +24,7 @@ export function TurnoverRating({
 
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-accent-400">How did this turnover go?</span>
+      <span className="text-xs" style={{ color: 'var(--text-muted)' }}>How did this turnover go?</span>
       <div className="flex items-center gap-0.5" onMouseLeave={() => setHovered(null)} onBlur={() => setHovered(null)}>
         {[1, 2, 3, 4, 5].map((value) => {
           const filled = (hovered ?? rating ?? 0) >= value
@@ -48,7 +48,7 @@ export function TurnoverRating({
           )
         })}
       </div>
-      {saved && <span className="text-xs text-green-600">Saved</span>}
+      {saved && <span className="text-xs" style={{ color: 'var(--accent-green)' }}>Saved</span>}
     </div>
   )
 }
