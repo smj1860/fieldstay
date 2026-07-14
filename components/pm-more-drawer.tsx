@@ -15,7 +15,7 @@ interface PmMoreDrawerProps {
   repuguardActive?: boolean
 }
 
-export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: PmMoreDrawerProps) {
+export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: Readonly<PmMoreDrawerProps>) {
   const pathname = usePathname()
 
   // Ops Snapshot, Turnovers, Inventory, and Maintenance are persistent tabs

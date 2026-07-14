@@ -10,7 +10,7 @@ interface Props {
   orgName:   string
 }
 
-export function SidebarUserMenu({ userName, userEmail, orgName }: Props) {
+export function SidebarUserMenu({ userName, userEmail, orgName }: Readonly<Props>) {
   const router            = useRouter()
   const [loading, setLoading] = useState(false)
   const [open,    setOpen]    = useState(false)

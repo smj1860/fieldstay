@@ -11,7 +11,7 @@ interface CartReadyBannerProps {
   }
 }
 
-export function CartReadyBanner({ cartData }: CartReadyBannerProps) {
+export function CartReadyBanner({ cartData }: Readonly<CartReadyBannerProps>) {
   const cartAdded  = cartData.status === 'cart_added'
   const matchCount = cartData.matched_items?.length ?? 0
   const missCount  = cartData.unmatched_items?.length ?? 0

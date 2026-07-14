@@ -28,6 +28,8 @@ import { Badge } from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -549,9 +551,9 @@ function CreateWorkOrderModal({
           <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
 
           {state?.error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">
+            <InlineAlert tone="error">
               {state.error}
-            </div>
+            </InlineAlert>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -560,7 +562,7 @@ function CreateWorkOrderModal({
               {/* Title */}
               <div>
                 <label htmlFor="wo-title" className="label">
-                  Title <span className="text-red-500">*</span>
+                  Title <RequiredMark />
                 </label>
                 <Input
                   id="wo-title"
@@ -574,7 +576,7 @@ function CreateWorkOrderModal({
               {/* Property */}
               <div>
                 <label htmlFor="wo-property" className="label">
-                  Property <span className="text-red-500">*</span>
+                  Property <RequiredMark />
                 </label>
                 <select
                   id="wo-property"
@@ -917,13 +919,13 @@ function ScheduleFormFields({
   return (
     <>
       <div>
-        <label className="label">Name <span className="text-red-500">*</span></label>
+        <label className="label">Name <RequiredMark /></label>
         <Input name="name" type="text" required defaultValue={defaults?.name ?? ''} placeholder="e.g. HVAC Filter Change" />
       </div>
 
       {!defaults && (
         <div>
-          <label className="label">Property <span className="text-red-500">*</span></label>
+          <label className="label">Property <RequiredMark /></label>
           <select name="property_id" required className="input">
             <option value="">Select property…</option>
             {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1043,7 +1045,7 @@ function AddScheduleModal({
         <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh] -m-6">
           <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+              <InlineAlert tone="error">{error}</InlineAlert>
             )}
             <ScheduleFormFields properties={properties} vendors={vendors} />
           </div>{/* /scrollable content */}
@@ -1097,7 +1099,7 @@ function EditScheduleModal({
         <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh] -m-6">
           <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+              <InlineAlert tone="error">{error}</InlineAlert>
             )}
             <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
           </div>{/* /scrollable content */}
@@ -1378,12 +1380,12 @@ function TemplateBroadcastModal({
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{error}</div>
+          <InlineAlert tone="error" className="mb-4">{error}</InlineAlert>
         )}
 
         {result ? (
           <div className="space-y-4">
-            <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3">
+            <InlineAlert tone="success">
               <p className="font-medium">Broadcast complete</p>
               <p className="mt-1">
                 Created {result.created} schedule{result.created !== 1 ? 's' : ''} across{' '}
@@ -1394,7 +1396,7 @@ function TemplateBroadcastModal({
                   {result.skipped} item{result.skipped !== 1 ? 's' : ''} skipped — already existed by name.
                 </p>
               )}
-            </div>
+            </InlineAlert>
             <Button onClick={onClose} className="w-full">Done</Button>
           </div>
         ) : (
@@ -1654,12 +1656,12 @@ function CreateTemplateModal({
           <p className="text-xs text-muted-themed -mt-3 mb-4">&quot;{createdTemplateName}&quot; was created</p>
 
           {applyError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">{applyError}</div>
+            <InlineAlert tone="error" className="mb-4">{applyError}</InlineAlert>
           )}
 
           {applyResult ? (
             <div className="space-y-4">
-              <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-3 flex items-start gap-2">
+              <InlineAlert tone="success" className="flex items-start gap-2">
                 <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="font-medium">Template applied</p>
@@ -1668,7 +1670,7 @@ function CreateTemplateModal({
                     {(applyResult.skipped ?? 0) > 0 && <> · {applyResult.skipped} skipped (already existed)</>}
                   </p>
                 </div>
-              </div>
+              </InlineAlert>
               <Button onClick={onClose} className="w-full">Done</Button>
             </div>
           ) : properties.length === 0 ? (
@@ -1750,10 +1752,10 @@ function CreateTemplateModal({
         <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh] -m-6">
           <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>
+            <InlineAlert tone="error">{error}</InlineAlert>
           )}
           <div>
-            <label className="label">Template Name <span className="text-red-500">*</span></label>
+            <label className="label">Template Name <RequiredMark /></label>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. STR Annual Maintenance" required />
           </div>
           <div>
@@ -1819,7 +1821,7 @@ function CreateTemplateModal({
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">Items <span className="text-red-500">*</span></label>
+              <label className="label mb-0">Items <RequiredMark /></label>
               <Button variant="secondary" type="button" onClick={addItem} className="text-xs py-1 px-2 flex items-center gap-1">
                 <Plus className="w-3 h-3" /> Add Item
               </Button>
@@ -1830,7 +1832,7 @@ function CreateTemplateModal({
                   <div className="flex items-start gap-2">
                     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <label className="label text-xs">Item Name <span className="text-red-500">*</span></label>
+                        <label className="label text-xs">Item Name <RequiredMark /></label>
                         <Input value={item.name} onChange={(e) => updateItem(i, 'name', e.target.value)}
                                className="text-sm" placeholder="e.g. HVAC Filter Replacement" />
                       </div>
@@ -1934,7 +1936,7 @@ function TemplatesSection({
         )}
 
         {open && templates.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {templates.map((t) => {
               const items   = t.maintenance_schedule_template_items
               const preview = items.slice(0, 4)
@@ -2061,7 +2063,7 @@ function EditTemplateModal({
         ) : (
           <div className="space-y-4">
             <div>
-              <label className="label">Template Name <span className="text-red-400">*</span></label>
+              <label className="label">Template Name <RequiredMark /></label>
               <Input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -2237,20 +2239,24 @@ export function MaintenanceBoard({
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-wrap items-center gap-1 bg-card-themed border border-themed rounded-lg px-1 py-1 max-w-full mb-4">
+      <div role="tablist" className="flex flex-wrap items-center gap-1 bg-card-themed border border-themed rounded-lg px-1 py-1 max-w-full mb-4">
         {STATUS_TABS.map((tab) => {
           const count = tab.key === 'all'
             ? allWorkOrders.length
             : allWorkOrders.filter((w) => w.status === tab.key).length
+          const isActive = activeTab === tab.key
           return (
             <button
               key={tab.key}
+              role="tab"
+              aria-selected={isActive}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap flex-shrink-0',
-                activeTab !== tab.key && 'text-muted-themed hover:text-secondary-themed'
+                'focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)]',
+                !isActive && 'text-muted-themed hover:text-secondary-themed'
               )}
-              style={activeTab === tab.key ? {
+              style={isActive ? {
                 background: 'var(--bg-raised)',
                 boxShadow:  'inset 0 0 0 1px var(--accent-gold)',
                 color:      'var(--accent-gold)',
@@ -2260,9 +2266,9 @@ export function MaintenanceBoard({
               <span
                 className={cn(
                   'px-1.5 py-0.5 rounded-full text-xs font-semibold',
-                  activeTab !== tab.key && 'bg-raised-themed text-muted-themed'
+                  !isActive && 'bg-raised-themed text-muted-themed'
                 )}
-                style={activeTab === tab.key ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' } : undefined}
+                style={isActive ? { background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' } : undefined}
               >
                 {count}
               </span>

@@ -23,7 +23,7 @@ function notDismissed(id: string): boolean {
 }
 const noopSubscribe = () => () => {}
 
-export function NudgeBanner({ id, message, href, linkText }: NudgeBannerProps) {
+export function NudgeBanner({ id, message, href, linkText }: Readonly<NudgeBannerProps>) {
   // Only the real value after mount (avoids SSR mismatch with localStorage)
   const notDismissedAtMount = useSyncExternalStore(noopSubscribe, () => notDismissed(id), () => false)
   const [dismissed, setDismissed] = useState(false)

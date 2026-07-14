@@ -18,7 +18,7 @@ type AvailRow = {
   notes:          string | null
 }
 
-export function TimeOffRequest({ crewMemberId, orgId }: Props) {
+export function TimeOffRequest({ crewMemberId, orgId }: Readonly<Props>) {
   const db     = useDexieDb()
   const userId = useDexieUserId()
 

@@ -85,7 +85,7 @@ const PLANS = [
   },
 ];
 
-export default function PricingSection({ isLoggedIn }: PricingSectionProps) {
+export default function PricingSection({ isLoggedIn }: Readonly<PricingSectionProps>) {
   const [annual, setAnnual] = useState(false);
 
   const ctaHref = isLoggedIn

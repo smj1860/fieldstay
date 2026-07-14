@@ -20,7 +20,7 @@ interface BottomNavProps {
   onMore: () => void
 }
 
-export function BottomNav({ role, onMore }: BottomNavProps) {
+export function BottomNav({ role, onMore }: Readonly<BottomNavProps>) {
   const pathname = usePathname()
   const effectiveRole = role === 'owner' ? 'admin' : role
   const items = BOTTOM_NAV_ITEMS.filter(item =>

@@ -400,7 +400,7 @@ function DashboardSidebar({
   )
 }
 
-export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, isStaff = false, children }: Props) {
+export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, isStaff = false, children }: Readonly<Props>) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)

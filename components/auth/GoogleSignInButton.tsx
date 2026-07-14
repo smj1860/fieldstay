@@ -10,7 +10,7 @@ interface Props {
 export function GoogleSignInButton({
   next,
   label = 'Continue with Google',
-}: Props) {
+}: Readonly<Props>) {
   const supabase = createClient()
 
   async function handleGoogleSignIn() {

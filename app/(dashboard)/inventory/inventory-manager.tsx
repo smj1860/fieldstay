@@ -20,6 +20,8 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Tabs, type TabItem } from '@/components/ui/Tabs'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 import type { CartBuildResult } from '@/lib/kroger/types'
 
 // ── Local types ───────────────────────────────────────────────────────────────
@@ -139,16 +141,18 @@ function StockBadge({ item }: { item: InventoryItem }) {
   return <Badge tone="green">Healthy</Badge>
 }
 
-function poBadgeClass(status: PoStatus): string {
-  const map: Record<PoStatus, string> = {
-    draft:        'badge badge-slate',
-    sent:         'badge bg-blue-50 text-blue-700',
-    acknowledged: 'badge bg-blue-50 text-blue-700',
-    ordered:      'badge bg-blue-50 text-blue-700',
-    received:     'badge badge-green',
-    cancelled:    'badge badge-red',
+type BadgeTone = 'green' | 'amber' | 'red' | 'blue' | 'gold' | 'purple' | 'slate'
+
+function poBadgeTone(status: PoStatus): BadgeTone {
+  const map: Record<PoStatus, BadgeTone> = {
+    draft:        'slate',
+    sent:         'blue',
+    acknowledged: 'blue',
+    ordered:      'blue',
+    received:     'green',
+    cancelled:    'red',
   }
-  return map[status] ?? 'badge badge-slate'
+  return map[status] ?? 'slate'
 }
 
 const CATEGORY_ORDER: InventoryCategory[] = [
@@ -233,6 +237,11 @@ type SelectedCatalogItem = {
   unit: string
 }
 
+const ADD_ITEMS_TABS: TabItem<'catalog' | 'custom'>[] = [
+  { id: 'catalog', label: 'From Catalog' },
+  { id: 'custom',  label: 'Custom Item' },
+]
+
 function AddItemsModal({
   propertyId,
   propertyItems,
@@ -298,27 +307,17 @@ function AddItemsModal({
   return (
     <Dialog open onClose={onClose} title="Add Inventory Items">
       <div className="flex flex-col max-h-[90vh] -m-6">
-        <div className="flex gap-1 px-6 pt-6 border-b border-themed flex-shrink-0">
-          {(['catalog', 'custom'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={cn(
-                'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-                tab !== t && 'border-transparent text-muted-themed hover:text-secondary-themed'
-              )}
-              style={tab === t ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
-            >
-              {t === 'catalog' ? 'From Catalog' : 'Custom Item'}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          tabs={ADD_ITEMS_TABS}
+          active={tab}
+          onChange={setTab}
+          className="px-6 pt-6 flex-shrink-0"
+        />
 
         {state?.error && (
-          <div className="mx-6 mt-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 flex-shrink-0">
+          <InlineAlert tone="error" className="mx-6 mt-4 flex-shrink-0">
             {state.error}
-          </div>
+          </InlineAlert>
         )}
 
         <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
@@ -572,9 +571,9 @@ function RunCountModal({
         <p className="text-sm text-muted-themed -mt-3 mb-4">Enter current quantities for each item</p>
 
         {state?.error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+          <InlineAlert tone="error" className="mb-4">
             {state.error}
-          </div>
+          </InlineAlert>
         )}
 
         {items.length === 0 ? (
@@ -843,9 +842,9 @@ function PropertyInventoryDetail({
       </div>
 
       {saveError && (
-        <div className="mx-6 mt-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 flex-shrink-0">
+        <InlineAlert tone="error" className="mx-6 mt-4 flex-shrink-0">
           {saveError}
-        </div>
+        </InlineAlert>
       )}
 
       {/* Scrollable content */}
@@ -955,9 +954,9 @@ function PropertyInventoryDetail({
                           onClick={() => setExpandedPO(isExpanded ? null : po.id)}
                           className="flex items-center gap-3 w-full text-left px-5 py-3 hover:bg-canvas-themed transition-colors"
                         >
-                          <span className={poBadgeClass(po.status)}>
+                          <Badge tone={poBadgeTone(po.status)}>
                             {po.status.charAt(0).toUpperCase() + po.status.slice(1)}
-                          </span>
+                          </Badge>
                           <span className="text-sm text-secondary-themed">{formatDate(po.generated_at)}</span>
                           {po.total_estimated_cost != null && (
                             <span className="text-sm font-medium text-primary-themed ml-auto mr-2">
@@ -1292,7 +1291,7 @@ export function InventoryManager({
 
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId) ?? null
 
-  const tabs: Array<{ id: InventoryTab; label: string; icon: React.ReactNode }> = [
+  const tabs: TabItem<InventoryTab>[] = [
     { id: 'property',  label: 'By Property', icon: <Package className="w-3.5 h-3.5" /> },
     { id: 'portfolio', label: 'Portfolio',   icon: <BarChart2 className="w-3.5 h-3.5" /> },
     { id: 'template',  label: 'Template',    icon: <Layers className="w-3.5 h-3.5" /> },
@@ -1330,22 +1329,7 @@ export function InventoryManager({
       </div>
 
       {/* Tab bar */}
-      <div className="flex items-center gap-1 mb-5 border-b border-themed">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              'flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors',
-              activeTab !== tab.id && 'border-transparent text-muted-themed hover:text-secondary-themed'
-            )}
-            style={activeTab === tab.id ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' } : undefined}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} className="mb-5" />
 
       {/* Pending count reviews — show on property tab */}
       {activeTab === 'property' && pendingDrafts.length > 0 && (

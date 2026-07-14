@@ -22,7 +22,7 @@ interface Props {
   availabilityMap: Record<string, CrewAvailabilityEntry[]>
 }
 
-export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Props) {
+export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly<Props>) {
   const now   = new Date()
   const thisMonth = new Date(now.getFullYear(), now.getMonth(), 1)
   const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1)
@@ -288,12 +288,12 @@ function DayAvailabilityModal({
   records,
   crewColor,
   onClose,
-}: {
+}: Readonly<{
   dateStr:   string
   records:   { member: CrewMember; entry: CrewAvailabilityEntry }[]
   crewColor: Map<string, string>
   onClose:   () => void
-}) {
+}>) {
   const dateLabel = new Date(`${dateStr}T00:00:00`).toLocaleDateString('en-US', {
     weekday: 'long',
     month:   'long',

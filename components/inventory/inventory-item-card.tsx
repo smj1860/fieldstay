@@ -2,8 +2,10 @@
 
 import { useState } from 'react'
 import { Minus, Plus, StickyNote } from 'lucide-react'
+import { Badge } from '@/components/ui/Badge'
 
 type StockStatus = 'uncounted' | 'critical' | 'low' | 'healthy'
+type BadgeTone = 'slate' | 'red' | 'amber' | 'green'
 
 function getStatus(current: number, par: number, uncounted: boolean): StockStatus {
   if (uncounted)              return 'uncounted'
@@ -12,11 +14,11 @@ function getStatus(current: number, par: number, uncounted: boolean): StockStatu
   return 'healthy'
 }
 
-const STATUS_CONFIG: Record<StockStatus, { label: string; bg: string; color: string }> = {
-  uncounted: { label: 'Needs Count',  bg: 'var(--bg-raised)',        color: 'var(--text-muted)'   },
-  critical:  { label: 'At/Below Par', bg: 'var(--accent-red-dim)',   color: 'var(--accent-red)'   },
-  low:       { label: 'Low',          bg: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' },
-  healthy:   { label: 'Healthy',      bg: 'var(--accent-green-dim)', color: 'var(--accent-green)' },
+const STATUS_CONFIG: Record<StockStatus, { label: string; tone: BadgeTone; color: string }> = {
+  uncounted: { label: 'Needs Count',  tone: 'slate', color: 'var(--text-muted)'   },
+  critical:  { label: 'At/Below Par', tone: 'red',   color: 'var(--accent-red)'   },
+  low:       { label: 'Low',          tone: 'amber', color: 'var(--accent-amber)' },
+  healthy:   { label: 'Healthy',      tone: 'green', color: 'var(--accent-green)' },
 }
 
 interface InventoryItemCardProps {
@@ -54,7 +56,7 @@ export function InventoryItemCard({
   onQuantityChange,
   note,
   onNoteChange,
-}: InventoryItemCardProps) {
+}: Readonly<InventoryItemCardProps>) {
   const [qty, setQty] = useState(currentQuantity)
   const status        = getStatus(qty, parLevel, uncounted)
   const cfg           = STATUS_CONFIG[status]
@@ -114,12 +116,9 @@ export function InventoryItemCard({
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
           {/* Status badge */}
-          <span
-            className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide"
-            style={{ background: cfg.bg, color: cfg.color }}
-          >
+          <Badge tone={cfg.tone} className="text-[10px] font-bold uppercase tracking-wide">
             {cfg.label}
-          </span>
+          </Badge>
           {variant === 'crew' && (
             <button
               onClick={() => setShowNote((s) => !s)}
