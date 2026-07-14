@@ -9,15 +9,17 @@ import {
   Minus, Plus, MapPin, CheckSquare, ChevronRight, Package,
   StickyNote, Check,
 } from 'lucide-react'
-import { cn, formatDateTime } from '@/lib/utils'
+import { cn } from '@/lib/utils'
+import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { createClient }       from '@/lib/supabase/client'
-import { savePendingPhotoBlob } from '@/lib/dexie/photo-queue'
+import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import {
   updateChecklistItem, startTurnover, completeTurnover, updateInventoryQuantity, submitTurnoverSummaryNotes,
   confirmChecklistComplete, confirmInventoryComplete, markInventoryStarted, retryFailedMutation,
+  acknowledgeDatesChanged,
 } from '@/lib/dexie/helpers'
 import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as InvRow, PropertyAssetRow } from '@/lib/dexie/schema'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
@@ -187,7 +189,8 @@ export default function CrewTurnoverPage() {
       const sectionItem = items?.find((i) => i.section_name === sectionName)
       if (!sectionItem) return
 
-      await savePendingPhotoBlob(userId, blobKey, file)
+      const compressed = await compressPhotoForQueue(file)
+      await savePendingPhotoBlob(userId, blobKey, compressed)
       await db.pending_photo_uploads.add({
         id:             crypto.randomUUID(),
         target_table:   'checklist_instances',
@@ -218,7 +221,8 @@ export default function CrewTurnoverPage() {
       const path    = `turnover-${id}/${itemId}-${Date.now()}.${ext}`
       const blobKey = `photo-${itemId}-${Date.now()}`
 
-      await savePendingPhotoBlob(userId, blobKey, file)
+      const compressed = await compressPhotoForQueue(file)
+      await savePendingPhotoBlob(userId, blobKey, compressed)
       await db.pending_photo_uploads.add({
         id:             crypto.randomUUID(),
         target_table:   'checklist_instance_items',
@@ -384,13 +388,53 @@ export default function CrewTurnoverPage() {
         <div className="mt-2 space-y-1 text-sm">
           <div className="flex gap-3">
             <span className="text-muted-themed w-20 flex-shrink-0">Checkout</span>
-            <span className="font-medium text-primary-themed">{formatDateTime(turnover.checkout_datetime)}</span>
+            <span className="font-medium text-primary-themed">
+              {formatPropertyDateTime(turnover.checkout_datetime, property?.timezone ?? 'America/Chicago')}
+            </span>
           </div>
           <div className="flex gap-3">
             <span className="text-muted-themed w-20 flex-shrink-0">Next In</span>
-            <span className="font-medium text-primary-themed">{formatDateTime(turnover.checkin_datetime)}</span>
+            <span className="font-medium text-primary-themed">
+              {formatPropertyDateTime(turnover.checkin_datetime, property?.timezone ?? 'America/Chicago')}
+            </span>
           </div>
         </div>
+
+        {/* Checkout/check-in time changed while this turnover was already
+            in progress — see lib/turnovers/generator.ts's
+            refreshExistingPairDates(). The real checkout_datetime/
+            checkin_datetime above are intentionally NOT updated; this only
+            informs the crew member so they aren't blindsided, and gives
+            them a way to dismiss it once seen. */}
+        {turnover.dates_changed_at && !turnover.dates_change_acknowledged_at && (
+          <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-amber-800">Checkout time changed</p>
+              <p className="text-sm text-amber-700 mt-0.5">
+                The guest&apos;s reservation changed after this turnover started.
+                {turnover.pending_checkout_datetime && (
+                  <> New checkout: <span className="font-medium">
+                    {formatPropertyDateTime(turnover.pending_checkout_datetime, property?.timezone ?? 'America/Chicago')}
+                  </span>.</>
+                )}
+                {turnover.pending_checkin_datetime && (
+                  <> New check-in: <span className="font-medium">
+                    {formatPropertyDateTime(turnover.pending_checkin_datetime, property?.timezone ?? 'America/Chicago')}
+                  </span>.</>
+                )}
+                {' '}The times above haven&apos;t been changed automatically — let your PM know if this affects your plan.
+              </p>
+              <button
+                type="button"
+                onClick={() => { void acknowledgeDatesChanged(userId, id) }}
+                className="mt-2 text-sm font-medium text-amber-800 underline"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
+        )}
 
         {turnover.notes && (
           <p className="mt-3 text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2 flex items-start gap-1.5">

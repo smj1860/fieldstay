@@ -167,11 +167,15 @@ resolve deterministically — do not add a new unordered `LIMIT 1` on
 1. Resolve the provider via `getProvider(providerId)` (404 if unknown).
 2. `providerAdapter.validateWebhook(request.clone())` — provider-specific signature/
    auth check. **Fail closed**: if validation throws or returns false, reject with 401.
-3. Dedup: insert into `processed_webhooks` keyed `"<provider>:<webhook_id>"`. A
-   `23505` unique-violation means it's a duplicate delivery — return early. Any other
-   insert error is logged and processing continues (never let a dedup-table hiccup
-   silently drop a real webhook). Rows are TTL-cleaned after 72h via
-   `cleanup_webhook_dedup()` (fired probabilistically on ~5% of requests — not a cron).
+3. Dedup: insert into `processed_webhooks` keyed
+   `"<provider>:<sha256(JSON.stringify(payload))>"` — a content hash, not the
+   provider's own `payload.id` (see CLAUDE_HOSPITABLE_DEXIE_AUDIT_FIXES_1.md
+   Task 1 for why `payload.id`'s semantics can't be trusted uniformly across
+   event types). A `23505` unique-violation means it's a duplicate delivery
+   — return early. Any other insert error is logged and processing continues
+   (never let a dedup-table hiccup silently drop a real webhook). Rows are
+   TTL-cleaned after 72h via `cleanup_webhook_dedup()` (fired
+   probabilistically on ~5% of requests — not a cron).
 4. The generic `authorization_revoked` event is handled centrally: marks the
    connection `revoked` via `revokeIntegrationToken()` and writes an `integration.revoked`
    audit event via `logAuditEvent()`. **PM-facing email notification on webhook-driven

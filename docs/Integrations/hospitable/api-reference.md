@@ -505,7 +505,15 @@ reservation_uuid: UUID | null
 **Verify:** `Signature` header — HMAC-SHA256 of raw body, secret from Partner Portal. Sanity-checked byte-for-byte against Hospitable's own worked example (`HMAC-SHA256({"foo": "bar"}, "123456")` → `cc99bf59...`) — confirms `hospitableProvider.validateWebhook()` uses the raw body bytes, not a re-serialized JSON string, which matters because re-serializing (different whitespace/key order) would silently break every signature check.
 **IP allowlist:** ✅ Enforced (`lib/integrations/webhook-verification.ts`'s `isIpInCidr()`) — as Vendors (not per-customer Hosts), our secret is one Partner-Portal-managed value, not the per-host-email-derived secret the docs describe for direct Host integrations. Checked ahead of the signature, since it's the cheaper rejection.
 **Retry:** 5x with backoff: 1s → 5s → 10s → 1hr → 6hr
-**Dedup:** `id` (ULID) stored in `processed_webhooks` table
+**Dedup:** SHA-256 hash of the full parsed payload, stored in
+`processed_webhooks` table as `sha256(JSON.stringify(payload))` — NOT
+`payload.id`. See the ⚠️ note below and Task 1 of
+CLAUDE_HOSPITABLE_DEXIE_AUDIT_FIXES_1.md for why: this repo's own docs (see
+the reservation.changed note two paragraphs down) made contradictory claims
+about what `payload.id` means depending on event type, which risked
+silently dropping every real reservation.changed webhook after the first
+one per reservation for 72 hours if the "stable reservation id" reading was
+correct.
 
 **Payload shape:**
 ```json
@@ -520,6 +528,22 @@ reservation_uuid: UUID | null
 `data` shape = same as GET response for that resource type — **except reservation.changed**, see below.
 
 **⚠️ CONFIRMED — `reservation.changed` sends a PARTIAL payload, not the full reservation.** Per Hospitable's own docs example, a check-in-time-only change delivers `data: { "check_in": "2019-01-03T16:30:00-05:00" }` — just the changed field(s), with no `id` on `data` at all. The reservation's own id is on the **top-level `payload.id`** for this event instead (differs from `review.created`, where the top-level `id` is the webhook's own ULID and the entity id is nested under `data.id` — the two events use `id` for different things). `handleWebhookEvent()` checks `data.id` first (for `reservation.created`, which may send the fuller object) and falls back to the top-level `payload.id`. Before this fix, any `reservation.changed` webhook carrying only a partial diff had no way to identify which reservation to re-fetch and was silently dropped.
+
+**⚠️ UNRESOLVED — verify before trusting this claim further.** The paragraph
+above asserts the top-level `payload.id` for `reservation.changed` is the
+reservation's own id, not the per-delivery ULID Hospitable's general webhook
+docs describe. This has NOT been confirmed the same way `action` values
+were confirmed via Vercel logs — the reasoning given ("no `id` on `data`, so
+it must be `payload.id`") doesn't actually establish that `payload.id` isn't
+just the normal ULID with no entity-id fallback available. To verify:
+trigger two distinct real changes to the same live reservation a few
+minutes apart and diff `payload.id` across both Vercel log entries. If it's
+different both times, this paragraph is wrong and should be corrected (and
+`hospitableProvider.handleWebhookEvent()`'s fallback to `data.id` for a
+partial `reservation.changed` payload needs a different resolution
+strategy, since payload.id can't safely stand in for the reservation id
+either). Dedup itself is no longer at risk either way (see Task 1's fix,
+above) — this only affects entity-ID resolution for partial payloads.
 
 **`triggers` array — now wired.** Present on reservation webhooks (and per Hospitable, "some property/message" webhooks — not yet confirmed which ones). Full confirmed value list for reservations:
 ```

@@ -135,3 +135,31 @@ export function formatVendorWindow(
   const end   = formatPropertyTime(checkinTime,  date, timezone, 'long')
   return `${start} – ${end}`
 }
+
+/**
+ * Formats a stored UTC ISO timestamp (e.g. turnovers.checkout_datetime) in
+ * a property's local timezone for display — the counterpart to
+ * propertyLocalToUtc() on the way back out. Use this anywhere a
+ * property-anchored timestamp (checkout, check-in) is shown to a crew
+ * member or PM; formatDateTime() in lib/utils.ts is timezone-naive
+ * (formats in the viewer's runtime timezone) and should NOT be used for
+ * these fields — see CLAUDE_HOSPITABLE_DEXIE_AUDIT_FIXES_1.md Task 5.
+ *
+ * @param isoUtc     Full ISO UTC timestamp (e.g. turnover.checkout_datetime)
+ * @param timezone   IANA string (from properties.timezone)
+ *
+ * @example
+ *   formatPropertyDateTime('2026-07-06T16:00:00.000Z', 'America/Chicago')
+ *   // → "Jul 6, 2026, 11:00 AM CDT"
+ */
+export function formatPropertyDateTime(isoUtc: string, timezone: string): string {
+  return new Date(isoUtc).toLocaleString('en-US', {
+    timeZone:     timezone,
+    month:        'short',
+    day:          'numeric',
+    year:         'numeric',
+    hour:         'numeric',
+    minute:       '2-digit',
+    timeZoneName: 'short',
+  })
+}

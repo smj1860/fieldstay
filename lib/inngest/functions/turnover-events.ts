@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { getPmEmail } from '@/lib/inngest/helpers'
-import { formatDateTime } from '@/lib/utils'
+import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import type { AssetType } from '@/types/database'
@@ -46,7 +46,7 @@ export const handleTurnoverCreated = inngest.createFunction(
           .single(),
         supabase
           .from('properties')
-          .select('name, city, state')
+          .select('name, city, state, timezone')
           .eq('id', property_id)
           .single(),
         getPmEmail(supabase, org_id),
@@ -87,8 +87,8 @@ export const handleTurnoverCreated = inngest.createFunction(
               body:     `You're on the schedule for a turnover at ${property.name}.`,
               details: [
                 { label: 'Property',      value: property.name },
-                { label: 'Checkout',      value: formatDateTime(turnover.checkout_datetime) },
-                { label: 'Next Check-in', value: formatDateTime(turnover.checkin_datetime) },
+                { label: 'Checkout',      value: formatPropertyDateTime(turnover.checkout_datetime, property.timezone ?? 'America/Chicago') },
+                { label: 'Next Check-in', value: formatPropertyDateTime(turnover.checkin_datetime, property.timezone ?? 'America/Chicago') },
                 { label: 'Window',        value: `${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m` },
                 { label: 'Priority',      value: turnover.priority.toUpperCase() },
               ],
@@ -141,8 +141,8 @@ export const handleTurnoverCreated = inngest.createFunction(
             heading:  'Turnover needs crew assigned',
             body:     `${property.name} has a turnover in ${hoursUntil} hours with no crew assigned.`,
             details: [
-              { label: 'Checkout',  value: formatDateTime(turnover.checkout_datetime) },
-              { label: 'Check-in',  value: formatDateTime(turnover.checkin_datetime) },
+              { label: 'Checkout',  value: formatPropertyDateTime(turnover.checkout_datetime, property.timezone ?? 'America/Chicago') },
+              { label: 'Check-in',  value: formatPropertyDateTime(turnover.checkin_datetime, property.timezone ?? 'America/Chicago') },
               { label: 'Window',    value: `${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m` },
               { label: 'Priority',  value: turnover.priority.toUpperCase() },
             ],

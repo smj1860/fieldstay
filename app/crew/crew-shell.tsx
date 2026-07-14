@@ -91,6 +91,19 @@ export function CrewShell({
     register()
   }, [])
 
+  // Request persistent storage so the browser is less likely to evict
+  // queued offline photos/mutations under storage pressure — iOS Safari in
+  // particular applies eviction more aggressively to "best-effort" storage
+  // than Chrome/Android does. Best-effort itself (the browser may decline,
+  // e.g. if the user hasn't interacted enough with the site yet) — this is
+  // additive and never blocks anything if it's unavailable or declined.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.storage?.persist) return
+    navigator.storage.persist().catch((err) => {
+      console.warn('[crew-shell] persistent storage request failed (non-fatal):', err)
+    })
+  }, [])
+
   async function enableNotifications() {
     if (!swReg) return
     const permission = await Notification.requestPermission()

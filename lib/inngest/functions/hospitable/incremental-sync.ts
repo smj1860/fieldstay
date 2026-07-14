@@ -27,7 +27,7 @@ import {
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
-import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
+import { generateTurnoversForProperty, cancelTurnoversForBooking } from '@/lib/turnovers/generator'
 import {
   createGuidebookPropertyConfigsForProperties,
   syncGuidebookConfigsFromProperty,
@@ -163,17 +163,28 @@ export const hospIncrementalSync = inngest.createFunction(
       })
 
       if (!reservation) {
-        await step.run('mark-cancelled', async () => {
+        const cancelledBookingId = await step.run('mark-cancelled', async () => {
           const supabase = createServiceClient()
-          const { error } = await supabase
+          const { data: cancelled, error } = await supabase
             .from('bookings')
             .update({ status: 'cancelled', updated_at: new Date().toISOString() })
             .eq('external_id',     entity_id)
             .eq('external_source', PROVIDER)
             .eq('org_id',          orgId)
+            .select('id')
+            .maybeSingle()
 
           if (error) throw new Error(`mark-cancelled failed: ${error.message}`)
+          return cancelled?.id ?? null
         })
+
+        if (cancelledBookingId) {
+          await step.run('cancel-turnovers-for-deleted-reservation', async () => {
+            const supabase = createServiceClient()
+            await cancelTurnoversForBooking(cancelledBookingId, supabase)
+          })
+        }
+
         logger.info(`[Hospitable incremental] Reservation ${entity_id} cancelled`)
         return { action: 'cancelled', entity_id }
       }
@@ -246,6 +257,7 @@ export const hospIncrementalSync = inngest.createFunction(
 
         return {
           datesChanged,
+          status:      normalized.status,
           propertyId:  property.id,
           bookingId:   upserted.id as string,
           actualTotalAmount: normalized.actual_total_amount,
@@ -272,6 +284,20 @@ export const hospIncrementalSync = inngest.createFunction(
             actual_total_amount: upsertResult.actualTotalAmount,
           },
         })
+      }
+
+      // A reservation can flip to 'cancelled' (status_changed trigger)
+      // without its dates changing at all — datesChanged alone would never
+      // catch this, and the 404 branch above only fires when Hospitable
+      // deletes the reservation outright, not when it survives with a
+      // cancelled status. Check status explicitly and short-circuit before
+      // the datesChanged regeneration path below.
+      if (upsertResult.status === 'cancelled') {
+        await step.run('cancel-turnovers-for-status-change', async () => {
+          const supabase = createServiceClient()
+          await cancelTurnoversForBooking(upsertResult.bookingId, supabase)
+        })
+        return { action: 'cancelled-via-status', entity_id }
       }
 
       // Regenerate turnovers only when dates changed.

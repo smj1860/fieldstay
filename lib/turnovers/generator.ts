@@ -112,12 +112,16 @@ export async function generateTurnoversForProperty(
       await snapshotChecklist(supabase, turnover.id, orgId, propertyId, defaultTemplate?.id ?? null)
     }
   }
-  // ── PASS 2: Upgrade standalone → precise pair ────────────────────
-  // When a next booking exists, update the standalone with real times.
+  // ── PASS 2: Upgrade standalone → precise pair, or refresh an existing pair ──
+  // When a next booking exists, update the standalone with real times. If a
+  // precise pair already exists, its dates may be stale relative to the
+  // bookings that produced it (guest extended/shortened their stay, PM
+  // corrected a time) — refresh rather than silently ignore. See
+  // CLAUDE_HOSPITABLE_DEXIE_AUDIT_FIXES_1.md Task 3.
   for (let i = 0; i < bookings.length - 1; i++) {
     const outgoing = bookings[i]!
     const incoming = bookings[i + 1]!
-    if (existingPairs.has(`${outgoing.id}:${incoming.id}`)) continue
+    const pairKey  = `${outgoing.id}:${incoming.id}`
     // Slice to 5 chars ('HH:MM') to handle both 'HH:MM' and 'HH:MM:SS' storage formats
     const checkoutTimeStr = (outgoing.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)
     const checkinTimeStr  = (incoming.checkin_time  ?? property?.checkin_time  ?? '15:00').slice(0, 5)
@@ -139,21 +143,35 @@ export async function generateTurnoversForProperty(
       windowMinutes < 120  ? 'urgent' :
       windowMinutes < 240  ? 'high'   :
       windowMinutes < 480  ? 'medium' : 'low'
+
+    if (existingPairs.has(pairKey)) {
+      await refreshExistingPairDates(supabase, {
+        propertyId, outgoingBookingId: outgoing.id, incomingBookingId: incoming.id,
+        checkoutDT, checkinDT, windowMinutes, priority,
+      })
+      continue
+    }
+
     if (existingStandalones.has(outgoing.id)) {
-      // Upgrade existing standalone to a precise pair
+      // Upgrade existing standalone to a precise pair.
+      // checkout_datetime is now included here too — previously only
+      // checkin_datetime/window_minutes/priority were updated on upgrade,
+      // silently dropping any checkout_time correction that arrived
+      // between Pass 1 creating the standalone and this upgrade running.
       await supabase
         .from('turnovers')
         .update({
-          booking_id:       incoming.id,
-          prev_booking_id:  outgoing.id,
-          checkin_datetime: checkinDT.toISOString(),
-          window_minutes:   windowMinutes,
+          booking_id:         incoming.id,
+          prev_booking_id:    outgoing.id,
+          checkout_datetime:  checkoutDT.toISOString(),
+          checkin_datetime:   checkinDT.toISOString(),
+          window_minutes:     windowMinutes,
           priority,
         })
         .eq('booking_id',      outgoing.id)
         .is('prev_booking_id', null)
         .eq('property_id',     propertyId)
-      existingPairs.add(`${outgoing.id}:${incoming.id}`)
+      existingPairs.add(pairKey)
     } else {
       // Insert a fresh pair turnover
       const { data: turnover, error } = await supabase
@@ -186,6 +204,103 @@ export async function generateTurnoversForProperty(
     }
   }
   return newTurnoverIds
+}
+
+/**
+ * Refreshes an already-paired turnover's dates when the underlying bookings'
+ * checkout/checkin have changed since the pair was formed (guest extended/
+ * shortened their stay, PM corrected a time, etc.).
+ *
+ * pending_assignment / assigned: no crew has started work — safe to update
+ * the real checkout_datetime/checkin_datetime/window_minutes/priority
+ * directly, same as any other regeneration.
+ *
+ * in_progress: a crew member is actively working against the CURRENT
+ * window. Silently rewriting it out from under them is worse than leaving
+ * it stale — instead, stage the new values on pending_checkout_datetime /
+ * pending_checkin_datetime and stamp dates_changed_at, which the crew PWA
+ * surfaces as a "checkout time changed" banner (see helpers.ts
+ * acknowledgeDatesChanged() and the crew turnover page). The real
+ * checkout_datetime/checkin_datetime are left untouched — this function
+ * never applies a pending change automatically. A newer detected change
+ * re-arms the banner (clears dates_change_acknowledged_at) even if a prior
+ * one was already dismissed.
+ *
+ * completed / cancelled: historical record — never touched.
+ */
+async function refreshExistingPairDates(
+  supabase: DBClient,
+  params: {
+    propertyId: string
+    outgoingBookingId: string
+    incomingBookingId: string
+    checkoutDT: Date
+    checkinDT: Date
+    windowMinutes: number
+    priority: PriorityLevel
+  }
+): Promise<void> {
+  const { propertyId, outgoingBookingId, incomingBookingId, checkoutDT, checkinDT, windowMinutes, priority } = params
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from('turnovers')
+    .select('id, status, checkout_datetime, checkin_datetime')
+    .eq('property_id', propertyId)
+    .eq('booking_id', incomingBookingId)
+    .eq('prev_booking_id', outgoingBookingId)
+    .maybeSingle()
+
+  if (fetchErr) {
+    console.error('[generator] pair date-refresh lookup failed', {
+      propertyId, outgoingBookingId, incomingBookingId, msg: fetchErr.message,
+    })
+    return
+  }
+  if (!existing) return // pair not found — shouldn't happen given the existingPairs check, but don't throw over it
+
+  const newCheckoutIso = checkoutDT.toISOString()
+  const newCheckinIso  = checkinDT.toISOString()
+  if (existing.checkout_datetime === newCheckoutIso && existing.checkin_datetime === newCheckinIso) {
+    return // genuinely unchanged — don't touch dates_changed_at over a no-op
+  }
+
+  if (existing.status === 'pending_assignment' || existing.status === 'assigned') {
+    const { error } = await supabase
+      .from('turnovers')
+      .update({
+        checkout_datetime: newCheckoutIso,
+        checkin_datetime:  newCheckinIso,
+        window_minutes:    windowMinutes,
+        priority,
+      })
+      .eq('id', existing.id)
+    if (error) {
+      console.error('[generator] pair date-refresh update failed', { propertyId, turnoverId: existing.id, msg: error.message })
+    } else {
+      console.log('[generator] refreshed turnover dates for changed booking pair', { propertyId, turnoverId: existing.id })
+    }
+    return
+  }
+
+  if (existing.status === 'in_progress') {
+    const { error } = await supabase
+      .from('turnovers')
+      .update({
+        pending_checkout_datetime:    newCheckoutIso,
+        pending_checkin_datetime:     newCheckinIso,
+        dates_changed_at:             new Date().toISOString(),
+        dates_change_acknowledged_at: null, // re-arm the banner even if a prior change was already acknowledged
+      })
+      .eq('id', existing.id)
+    if (error) {
+      console.error('[generator] pair pending-date-stage failed', { propertyId, turnoverId: existing.id, msg: error.message })
+    } else {
+      console.log('[generator] staged pending date change for in-progress turnover', { propertyId, turnoverId: existing.id })
+    }
+    return
+  }
+
+  // completed / cancelled — historical record, never touched.
 }
 
 export async function snapshotChecklist(

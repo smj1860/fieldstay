@@ -1,7 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
-import { formatDateTime }      from '@/lib/utils'
+import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderSmsBody }       from '@/lib/sms/templates'
 
 /**
@@ -39,7 +39,7 @@ export const handleCrewAssigned = inngest.createFunction(
           .from('turnovers')
           .select(`
             id, checkout_datetime, checkin_datetime, window_minutes, priority,
-            properties ( name )
+            properties ( name, timezone )
           `)
           .in('id', turnover_ids)
           .eq('org_id', org_id),
@@ -61,10 +61,11 @@ export const handleCrewAssigned = inngest.createFunction(
           .map(t => {
             const prop        = Array.isArray(t.properties) ? t.properties[0] : t.properties
             const windowHours = Math.round((t.window_minutes ?? 0) / 60)
+            const tz          = prop?.timezone ?? 'America/Chicago'
             return `
               <tr>
                 <td style="padding:8px;border-bottom:1px solid #e2e8f0">${prop?.name ?? 'Property'}</td>
-                <td style="padding:8px;border-bottom:1px solid #e2e8f0">${formatDateTime(t.checkout_datetime)}</td>
+                <td style="padding:8px;border-bottom:1px solid #e2e8f0">${formatPropertyDateTime(t.checkout_datetime, tz)}</td>
                 <td style="padding:8px;border-bottom:1px solid #e2e8f0">${windowHours}h</td>
                 <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-transform:uppercase;font-size:12px;color:${t.priority === 'urgent' || t.priority === 'high' ? '#b45309' : '#64748b'}">${t.priority}</td>
               </tr>
