@@ -19,6 +19,7 @@ import {
   type HostawayReservation,
 } from '@/lib/integrations/providers/hostaway'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
+import { unmappedBookingStatus }        from '@/lib/bookings/normalize'
 
 const PROVIDER = 'hostaway'
 
@@ -275,7 +276,7 @@ function mapHostawayStatus(status: string): 'confirmed' | 'tentative' | 'cancell
     case 'new':
     case 'inquiry':     return 'tentative'
     case 'cancelled':   return 'cancelled'
-    default:            return 'confirmed'
+    default:            return unmappedBookingStatus('hostaway', status)
   }
 }
 

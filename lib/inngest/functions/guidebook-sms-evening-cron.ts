@@ -4,6 +4,7 @@ import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { distanceMiles } from '@/lib/geocoding'
 import { sendSMS, formatOffer } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
+import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
 import type { GuidebookSponsor } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
@@ -102,6 +103,12 @@ export const guidebookSmsEveningCron = inngest.createFunction(
           sponsor.offer_item,
           sponsor.custom_offer_text
         )
+        // Claim the slot atomically before sending — a retry of this step
+        // after a successful send now finds the slot already claimed and
+        // skips re-sending, instead of double-texting the guest.
+        const claimed = await claimDailySmsSlot(supabase, optin.id, 'last_evening_sms_date', todayDate)
+        if (!claimed) return false
+
         const templateKey = isRainy && primaryPool.length > 0 ? 'rain_alert' as const : 'evening_nudge' as const
         const eveningBody = await renderSmsBody(optin.org_id, templateKey, {
           property_name: property.name,
@@ -109,11 +116,8 @@ export const guidebookSmsEveningCron = inngest.createFunction(
         })
         const res = await sendSMS(optin.phone_e164, eveningBody)
 
-        if (res.sent) {
-          await supabase
-            .from('guidebook_guest_sms_optins')
-            .update({ last_evening_sms_date: todayDate, updated_at: new Date().toISOString() })
-            .eq('id', optin.id)
+        if (!res.sent) {
+          await releaseDailySmsSlot(supabase, optin.id, 'last_evening_sms_date')
         }
         return res.sent
       })

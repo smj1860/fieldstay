@@ -159,10 +159,17 @@ export class OwnerRezApiClient {
 
     const { data: conn } = await supabase
       .from('integration_connections')
-      .select('org_id')
+      .select('org_id, status')
       .eq('user_id', this.userId)
       .eq('provider_id', PROVIDER)
       .single()
+
+    // A user-initiated disconnect (or an already-revoked connection) is a
+    // deliberate end state. A 401 from a paginated fetch that was still
+    // in flight when the user clicked "Disconnect" must not flip the
+    // connection back to 'error' — that would make a calm, voluntary
+    // disconnect look like an urgent problem requiring reconnection.
+    if (conn?.status === 'disconnected' || conn?.status === 'revoked') return
 
     await supabase
       .from('integration_connections')
@@ -312,21 +319,5 @@ export class OwnerRezApiClient {
 
   async getCurrentUser(): Promise<OwnerRezUser> {
     return this.fetch<OwnerRezUser>('/v2/users/me')
-  }
-
-  async deleteAccessToken(token: string): Promise<void> {
-    const clientId     = process.env.OWNERREZ_CLIENT_ID
-    const clientSecret = process.env.OWNERREZ_CLIENT_SECRET
-    if (!clientId || !clientSecret) {
-      throw new Error('OWNERREZ_CLIENT_ID or OWNERREZ_CLIENT_SECRET is not set')
-    }
-    const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
-    await globalThis.fetch(`${BASE_URL}/oauth/access_token/${token}`, {
-      method:  'DELETE',
-      headers: {
-        'Authorization': `Basic ${basicAuth}`,
-        'User-Agent':    `FieldStay/1.0 (${clientId})`,
-      },
-    })
   }
 }

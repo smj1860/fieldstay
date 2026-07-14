@@ -8,13 +8,8 @@ import {
   getBestProductImage,
   getBestPrice,
 } from '@/lib/kroger/client'
-import {
-  readIntegrationToken,
-  readIntegrationRefreshToken,
-  storeIntegrationToken,
-  storeIntegrationRefreshToken,
-} from '@/lib/integrations/vault'
-import { getProvider }                     from '@/lib/integrations/registry'
+import { getValidKrogerToken }             from '@/lib/integrations/providers/kroger-token'
+import { NonRetriableError }               from 'inngest'
 import { resend, FROM }                    from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
 import type { MatchedItem, CartBuildResult } from '@/lib/kroger/types'
@@ -141,41 +136,26 @@ export const buildShoppingCart = inngest.createFunction(
     }
 
     // ── Step 2: Read customer token from Vault, refreshing if near expiry ──
+    // Delegates to the same getValidKrogerToken/refreshKrogerToken used by
+    // the proactive token-refresh cron — this used to be a second,
+    // uncoordinated reimplementation of the refresh logic here, which could
+    // race the cron's refresh for the same connection.
     const customerToken = await step.run('get-customer-token', async () => {
-      const expiresAt    = connection.expires_at ? new Date(connection.expires_at) : null
-      const needsRefresh = !!expiresAt && expiresAt.getTime() - Date.now() < 5 * 60 * 1000
-
-      if (!needsRefresh) {
-        return readIntegrationToken(connection.user_id, 'kroger')
-      }
-
-      const refreshToken = await readIntegrationRefreshToken(connection.user_id, 'kroger')
-      if (!refreshToken) return readIntegrationToken(connection.user_id, 'kroger')
-
       try {
-        const provider  = getProvider('kroger')
-        const refreshed = await provider.refreshAccessToken!({ refreshToken })
-
-        await storeIntegrationToken({
-          userId:         connection.user_id,
-          providerId:     'kroger',
-          accessToken:    refreshed.accessToken,
-          externalUserId: connection.external_user_id ?? refreshed.externalUserId,
-          scope:          refreshed.scope,
-          metadata:       connection.metadata,
-        })
-
-        if (refreshed.refreshToken) {
-          await storeIntegrationRefreshToken({
-            userId:       connection.user_id,
-            providerId:   'kroger',
-            refreshToken: refreshed.refreshToken,
-            expiresAt:    refreshed.expiresAt,
-          })
-        }
-
-        return refreshed.accessToken
+        return await getValidKrogerToken(connection.user_id)
       } catch (err) {
+        if (err instanceof NonRetriableError) {
+          // Refresh token itself is revoked/expired — mark the connection so
+          // the PM sees a reconnect prompt instead of the cart silently
+          // degrading to list-only with no visible error state until the
+          // next proactive-refresh cron tick.
+          const supabase = createServiceClient()
+          await supabase
+            .from('integration_connections')
+            .update({ status: 'revoked' })
+            .eq('user_id', connection.user_id)
+            .eq('provider_id', 'kroger')
+        }
         console.error('Kroger token refresh failed — falling back to list-only:', err instanceof Error ? err.message : err)
         return null
       }

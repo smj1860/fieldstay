@@ -28,3 +28,14 @@ export interface NormalizedBooking {
   // field (everything except Hospitable, currently) should map to null.
   actual_total_amount:   number | null
 }
+
+/**
+ * Fallback for a booking-status value a provider mapper doesn't recognize.
+ * Defaults to 'tentative' rather than 'confirmed' — an ambiguous/unforeseen
+ * status should fail toward caution, since 'confirmed' is what schedules a
+ * real turnover and dispatches crew.
+ */
+export function unmappedBookingStatus(provider: string, rawStatus: string): 'tentative' {
+  console.warn(`[${provider}] unrecognized booking status "${rawStatus}" — defaulting to tentative`)
+  return 'tentative'
+}

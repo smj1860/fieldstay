@@ -231,6 +231,12 @@ export class SyncEngine {
       }
       return
     }
+
+    // No branch above matched this (table, op) combination — fail loudly
+    // instead of letting processOutbox() treat this as a successful sync
+    // and silently delete the mutation from the outbox without it ever
+    // reaching Supabase.
+    throw new Error(`[SyncEngine] no upload handler for mutation: table="${table}" op="${op}" targetId="${targetId}"`)
   }
 }
 
