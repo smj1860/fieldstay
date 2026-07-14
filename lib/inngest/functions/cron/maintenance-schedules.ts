@@ -291,6 +291,14 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
               status_to:                 openWO.status,
               notes:                     `Priority auto-escalated to Urgent — ${daysLate} day${daysLate !== 1 ? 's' : ''} past scheduled date`,
             })
+
+            await logAuditEvent({
+              orgId:      schedule.org_id,
+              action:     'work_order.updated',
+              targetType: 'work_order',
+              targetId:   openWO.id,
+              metadata:   { change: 'auto_escalated_to_urgent', maintenance_schedule_id: schedule.id },
+            })
           }
 
           if (pmEmail) {
@@ -343,6 +351,16 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
                 })
                 .select('id')
                 .single()
+
+          if (wo && !existingWO) {
+            await logAuditEvent({
+              orgId:      schedule.org_id,
+              action:     'work_order.created',
+              targetType: 'work_order',
+              targetId:   wo.id,
+              metadata:   { source: 'maintenance_schedule_overdue', maintenance_schedule_id: schedule.id },
+            })
+          }
 
           if (pmEmail && wo && !existingWO) {
             await resend.emails.send({

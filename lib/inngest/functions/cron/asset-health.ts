@@ -277,12 +277,31 @@ export const dailyAssetHealth = inngest.createFunction(
             condition_weight:  Math.round(newCondWeight * 10) / 10,
             weight_updated_at: new Date().toISOString(),
           })
+          oldWeightsByType[assetType] = {
+            age_weight:       std.age_weight,
+            condition_weight: std.condition_weight,
+          }
         }
 
         if (updates.length) {
           await supabase
             .from('asset_type_standards')
             .upsert(updates, { onConflict: 'asset_type' })
+
+          // Platform-level event — no org_id, orgId intentionally omitted
+          await logAuditEvents(
+            updates.map((u) => ({
+              action:     'asset.scoring_weights.auto_adjusted' as const,
+              targetType: 'asset_type_standard',
+              targetId:   u.asset_type,
+              metadata:   {
+                old_age_weight:       oldWeightsByType[u.asset_type]?.age_weight,
+                new_age_weight:       u.age_weight,
+                old_condition_weight: oldWeightsByType[u.asset_type]?.condition_weight,
+                new_condition_weight: u.condition_weight,
+              },
+            }))
+          )
         }
 
         return { nudged: updates.length, asset_types_with_data: Object.keys(byType).length }
