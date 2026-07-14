@@ -203,7 +203,7 @@ export const hospInitialSync = inngest.createFunction(
         if (bookingRows.length) {
           const { error } = await supabase
             .from('bookings')
-            .upsert(bookingRows, { onConflict: 'external_id,external_source' })
+            .upsert(bookingRows, { onConflict: 'org_id,external_id,external_source' })
 
           if (error) {
             logger.error(`[Hospitable:${user_id}] bookings upsert failed: ${error.message}`)

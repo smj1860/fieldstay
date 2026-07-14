@@ -490,7 +490,7 @@ export const ownerRezInitialSync = inngest.createFunction(
 
           const { data: upserted, error } = await supabase
             .from('bookings')
-            .upsert(bookingRows, { onConflict: 'external_id,external_source' })
+            .upsert(bookingRows, { onConflict: 'org_id,external_id,external_source' })
             .select('id, external_id')
 
           if (error) {
