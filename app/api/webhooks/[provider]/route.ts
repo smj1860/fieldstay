@@ -102,7 +102,7 @@ export async function POST(
             .eq('external_user_id', externalUserId)
             .maybeSingle()
 
-          if (!existingConn || existingConn.status === 'revoked') {
+          if (!existingConn || existingConn.status === 'revoked' || existingConn.status === 'disconnected') {
             console.log(
               `[Webhook:${providerId}] Revocation already processed or connection ` +
               `not found for external user ${externalUserId} — skipping`

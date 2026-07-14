@@ -366,9 +366,12 @@ function IntegrationCard({
 
   // Derived display state
   const isConnected     = connection?.status === 'active' && effectiveSyncStatus === 'success'
-  const isError         = connection?.status === 'error'
+  const isError          = connection?.status === 'error'
                        || connection?.status === 'revoked'
                        || effectiveSyncStatus === 'error'
+  // Deliberate disconnect — NOT an error. Show a plain Connect button with
+  // no red badge and no "token revoked" messaging.
+  const isDisconnected  = connection?.status === 'disconnected'
   const isSyncInProgress = connection?.status === 'active' && !isConnected && !isError
 
   const handleDisconnect = () => {
@@ -425,6 +428,12 @@ function IntegrationCard({
             </p>
           )}
 
+          {isDisconnected && (
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              Disconnected.
+            </p>
+          )}
+
           {error && (
             <p className="text-xs mt-2" style={{ color: 'var(--accent-red)' }}>{error}</p>
           )}
@@ -451,7 +460,7 @@ function IntegrationCard({
                   : getSyncCopy(effectivePropsFound, effectiveBookingsFound)}
               </span>
             </div>
-          ) : !connection || isError ? (
+          ) : !connection || isError || isDisconnected ? (
             provider.auth_type === 'api_key' ? (
               <Button
                 variant="secondary"
@@ -459,7 +468,7 @@ function IntegrationCard({
                 className="text-sm flex items-center gap-1.5"
               >
                 <PlugZap className="w-3.5 h-3.5" />
-                {isError ? 'Reconnect' : 'Connect'}
+                {isError || isDisconnected ? 'Reconnect' : 'Connect'}
               </Button>
             ) : (
               <a
@@ -471,7 +480,7 @@ function IntegrationCard({
                 className={buttonVariantClass('secondary') + ' text-sm flex items-center gap-1.5'}
               >
                 <PlugZap className="w-3.5 h-3.5" />
-                {isError ? 'Reconnect' : 'Connect'}
+                {isError || isDisconnected ? 'Reconnect' : 'Connect'}
               </a>
             )
           ) : confirming ? (
