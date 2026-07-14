@@ -3,7 +3,7 @@
 import { revalidatePath }                from 'next/cache'
 import { requireOrgMember }              from '@/lib/auth'
 import { createServiceClient }           from '@/lib/supabase/server'
-import { readIntegrationToken, revokeIntegrationToken, storeIntegrationToken } from '@/lib/integrations/vault'
+import { readIntegrationToken, disconnectIntegrationToken, storeIntegrationToken } from '@/lib/integrations/vault'
 import { getProvider }                   from '@/lib/integrations/registry'
 import { logAuditEvent }                 from '@/lib/audit'
 import { hostawayExchangeCredentials }   from '@/lib/integrations/providers/hostaway'
@@ -59,7 +59,7 @@ export async function triggerResync(
     .eq('provider_id', providerId)
     .maybeSingle()
 
-  if (!connection || connection.status === 'revoked') {
+  if (!connection || connection.status === 'revoked' || connection.status === 'disconnected') {
     return { error: 'This integration isn’t connected — connect it first.' }
   }
 
@@ -191,8 +191,9 @@ export async function disconnectIntegration(
       }
     }
 
-    // 3. Revoke in Vault (marks connection revoked + deletes secret)
-    await revokeIntegrationToken(user.id, providerId)
+    // 3. Disconnect in Vault (marks connection 'disconnected' + deletes secret —
+    //    distinct from revokeIntegrationToken, which is for involuntary revocation)
+    await disconnectIntegrationToken(user.id, providerId)
 
     await logAuditEvent({
       orgId:      membership.org_id,

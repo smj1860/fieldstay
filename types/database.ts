@@ -70,7 +70,7 @@ export type CommSource          = 'manual' | 'system'
 
 // Integration framework
 export type IntegrationAuthType = 'oauth2' | 'api_key'
-export type IntegrationStatus   = 'active' | 'revoked' | 'error'
+export type IntegrationStatus   = 'active' | 'revoked' | 'error' | 'disconnected'
 
 // Support bot
 export type SupportCategory    = 'faq' | 'technical' | 'account_specific'

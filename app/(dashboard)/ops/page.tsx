@@ -74,16 +74,22 @@ export default async function OpsSnapshotPage() {
     (i) => i.first_count_recorded_at && i.current_quantity <= i.par_level
   )
 
+  // Providers whose sync actually fires booking/confirmed (see
+  // lib/inngest/functions/booking-events.ts) — i.e. the ones the automation
+  // this nudge advertises actually works for. Hostaway/Guesty connections
+  // don't post revenue automatically yet, so connecting one of those
+  // shouldn't suppress the nudge.
+  const REVENUE_AUTOMATION_PROVIDER_IDS = ['ownerrez', 'hospitable']
+
   const admin = createServiceClient()
-  const { data: ownerRezConnection } = await admin
+  const { data: pmsConnections } = await admin
     .from('integration_connections')
     .select('id')
     .eq('org_id', membership.org_id)
-    .eq('provider_id', 'ownerrez')
+    .in('provider_id', REVENUE_AUTOMATION_PROVIDER_IDS)
     .eq('status', 'active')
-    .maybeSingle()
 
-  const showOwnerRezNudge = !ownerRezConnection
+  const showPmsRevenueNudge = !pmsConnections?.length
 
   const allTurnovers   = turnovers ?? []
   const openWorkOrders = openWOs ?? []
@@ -128,7 +134,7 @@ export default async function OpsSnapshotPage() {
         belowPar:         lowStockItems.length,
       }}
       metrics={{ occupancyRate, confirmedBookings, turnoversCompleted }}
-      showOwnerRezNudge={showOwnerRezNudge}
+      showPmsRevenueNudge={showPmsRevenueNudge}
     />
   )
 }

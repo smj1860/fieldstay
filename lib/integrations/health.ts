@@ -42,6 +42,9 @@ function connectionStatus(
   syncStatus: unknown,
   lastSyncedAt: unknown
 ): HealthStatus {
+  // Deliberate disconnect is not a health problem — treat it the same as
+  // never having connected, not as something needing reconnection urgency.
+  if (connectionStatus === 'disconnected') return 'never_synced'
   if (connectionStatus === 'revoked' || connectionStatus === 'error') return 'needs_reconnect'
   if (syncStatus == null && !lastSyncedAt) return 'never_synced'
   // Anything other than a clean 'success' — 'error', 'rate_limited', or any
@@ -92,6 +95,8 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
       lastSyncAt: lastSyncedAt,
       detail:     c.status === 'revoked' || c.status === 'error'
         ? `Connection ${c.status} — reconnect required`
+        : c.status === 'disconnected'
+        ? null
         : syncError,
     }
   })

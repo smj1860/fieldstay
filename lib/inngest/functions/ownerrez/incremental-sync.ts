@@ -138,7 +138,11 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       let rateLimited       = false
       let retryAfterSeconds = 60
 
-      let syncResult: string[] | { skipped: boolean; reason: string } | null | undefined
+      type SyncSuccess = {
+        affectedPropertyIds:    string[]
+        bookingsToPostRevenue: { bookingId: string; propertyId: string }[]
+      }
+      let syncResult: SyncSuccess | { skipped: boolean; reason: string } | null | undefined
       try {
       syncResult = await step.run(`sync-user-${conn.user_id}`, async () => {
         const supabase = createServiceClient()
@@ -179,6 +183,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           const bookings = await client.getBookings({ sinceUtc, propertyIds, includeGuest: true })
 
           let affectedPropertyIds: string[] = []
+          let bookingsToPostRevenue: { bookingId: string; propertyId: string }[] = []
 
           if (bookings.length) {
             // CRITICAL-2: resolve FieldStay property IDs from OwnerRez external IDs.
@@ -244,9 +249,10 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               }
             })
 
-            const { error } = await supabase
+            const { data: upserted, error } = await supabase
               .from('bookings')
               .upsert(bookingRows, { onConflict: 'external_id,external_source' })
+              .select('id, external_id')
 
             if (error) {
               logger.error(`[OwnerRez:${conn.user_id}] bookings upsert: ${error.message}`)
@@ -256,6 +262,15 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             affectedPropertyIds = Array.from(new Set(
               bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
             ))
+
+            const idByExternalId = Object.fromEntries(
+              (upserted ?? []).map((row) => [row.external_id, row.id as string])
+            )
+
+            bookingsToPostRevenue = bookingRows
+              .filter((b) => b.status === 'confirmed' && b.stay_type === 'guest_stay' && b.property_id !== null)
+              .map((b) => ({ bookingId: idByExternalId[b.external_id], propertyId: b.property_id as string }))
+              .filter((b): b is { bookingId: string; propertyId: string } => !!b.bookingId)
 
             // Send immediate maintenance-suggestion emails for owner blocks.
             // Blocks never generate turnovers (filtered at the generator query level),
@@ -367,7 +382,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             await redis.del('ownerrez:circuit:consecutive_failures')
           } catch { /* non-fatal */ }
 
-          return affectedPropertyIds
+          return { affectedPropertyIds, bookingsToPostRevenue }
 
         } catch (err) {
           if (err instanceof RateLimitError) {
@@ -547,10 +562,34 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         throw err
       }
 
+      const affectedIds = syncResult && 'affectedPropertyIds' in syncResult
+        ? syncResult.affectedPropertyIds
+        : []
+
+      // Post booking revenue for newly-confirmed guest-stay bookings. Mirrors
+      // Hospitable's incremental-sync pattern: sendEvent happens at the top
+      // level of the function body, never nested inside step.run.
+      // actual_total_amount is omitted — OwnerRez's normalizer doesn't provide
+      // one, so booking-events.ts's handleBookingConfirmed falls back to its
+      // existing avg_nightly_rate estimation.
+      const bookingsToPostRevenue = syncResult && 'bookingsToPostRevenue' in syncResult
+        ? syncResult.bookingsToPostRevenue
+        : []
+      for (const b of bookingsToPostRevenue) {
+        await step.sendEvent(`post-booking-revenue-${conn.user_id}-${b.bookingId}`, {
+          name: 'booking/confirmed' as const,
+          data: {
+            booking_id:  b.bookingId,
+            property_id: b.propertyId,
+            org_id:      conn.org_id,
+            source:      'ownerrez' as const,
+          },
+        })
+      }
+
       // Generate turnovers for any properties that received booking updates.
       // Called once per property (not per booking) so the generator sees the
       // full booking list and can apply its two-pass pairing logic correctly.
-      const affectedIds = Array.isArray(syncResult) ? syncResult : []
       if (affectedIds.length) {
         const allNewTurnoverIds = await step.run(`generate-turnovers-${conn.user_id}`, async () => {
           const supabase = createServiceClient()

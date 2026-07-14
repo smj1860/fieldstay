@@ -1,7 +1,7 @@
 import type { WebhookVerificationResult } from './webhook-verification'
 
 export type ProviderAuthType = 'oauth2' | 'api_key'
-export type ConnectionStatus = 'active' | 'revoked' | 'error'
+export type ConnectionStatus = 'active' | 'revoked' | 'error' | 'disconnected'
 
 /**
  * Normalized token response returned by every OAuth provider adapter.

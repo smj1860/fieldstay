@@ -117,6 +117,32 @@ export async function revokeIntegrationToken(
 }
 
 /**
+ * Disconnect a connection the user chose to end deliberately (clicked
+ * Disconnect in Settings). Same secret-cleanup behavior as
+ * revokeIntegrationToken, but marks status 'disconnected' instead of
+ * 'revoked' — so the UI doesn't show this as an error requiring urgent
+ * reconnection. Use revokeIntegrationToken for involuntary/webhook-driven
+ * revocation; use this one only for the user-initiated disconnect action.
+ */
+export async function disconnectIntegrationToken(
+  userId: string,
+  providerId: string
+): Promise<void> {
+  const admin = getAdminClient()
+
+  const { error } = await admin.rpc('disconnect_integration_token', {
+    p_user_id:     userId,
+    p_provider_id: providerId,
+  })
+
+  if (error) {
+    throw new Error(
+      `[Vault] Failed to disconnect token for provider "${providerId}": ${error.message}`
+    )
+  }
+}
+
+/**
  * Securely store (or update) an OAuth refresh token in Supabase Vault, and
  * record the access-token expiry on the connection row. Used by providers
  * whose access tokens expire (e.g. Kroger). The connection row must already
