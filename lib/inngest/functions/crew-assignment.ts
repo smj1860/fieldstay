@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
 import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderSmsBody }       from '@/lib/sms/templates'
+import { escapeHtml }          from '@/lib/utils/html'
 
 /**
  * Triggered when one or more turnovers are assigned to a crew member via
@@ -64,7 +65,7 @@ export const handleCrewAssigned = inngest.createFunction(
             const tz          = prop?.timezone ?? 'America/Chicago'
             return `
               <tr>
-                <td style="padding:8px;border-bottom:1px solid #e2e8f0">${prop?.name ?? 'Property'}</td>
+                <td style="padding:8px;border-bottom:1px solid #e2e8f0">${escapeHtml(prop?.name ?? 'Property')}</td>
                 <td style="padding:8px;border-bottom:1px solid #e2e8f0">${formatPropertyDateTime(t.checkout_datetime, tz)}</td>
                 <td style="padding:8px;border-bottom:1px solid #e2e8f0">${windowHours}h</td>
                 <td style="padding:8px;border-bottom:1px solid #e2e8f0;text-transform:uppercase;font-size:12px;color:${t.priority === 'urgent' || t.priority === 'high' ? '#b45309' : '#64748b'}">${t.priority}</td>

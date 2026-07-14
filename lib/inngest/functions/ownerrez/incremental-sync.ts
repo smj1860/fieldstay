@@ -37,6 +37,7 @@ import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-su
 import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 import { ownerRezBookingToNormalized } from '@/lib/integrations/providers/ownerrez'
+import { escapeHtml } from '@/lib/utils/html'
 
 const PROVIDER = 'ownerrez'
 
@@ -315,7 +316,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                     const propertyName = propertyNameById[row.property_id] ?? 'Property'
 
                     const items = candidates
-                      .map((c) => `${c.name}${c.estimated_cost ? ' (~$' + c.estimated_cost + ')' : ''}`)
+                      .map((c) => `${escapeHtml(c.name)}${c.estimated_cost ? ' (~$' + c.estimated_cost + ')' : ''}`)
                       .join(', ')
 
                     await resend.emails.send(
@@ -327,7 +328,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                       <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
                         <h2>Owner block scheduled</h2>
                         <p>
-                          ${propertyName} is blocked
+                          ${escapeHtml(propertyName)} is blocked
                           ${new Date(row.checkin_date).toLocaleDateString()} –
                           ${new Date(row.checkout_date).toLocaleDateString()}.
                           Want to schedule maintenance during this window? Candidates:
