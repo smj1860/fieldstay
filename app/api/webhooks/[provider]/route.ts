@@ -18,6 +18,7 @@
 // ============================================================
 
 import { NextResponse, type NextRequest }            from 'next/server'
+import { createHash }                                from 'crypto'
 import { getProvider }                               from '@/lib/integrations/registry'
 import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations/vault'
 import { logAuditEvent }                             from '@/lib/audit'
@@ -157,23 +158,37 @@ export async function POST(
     return NextResponse.json({ received: true }, { status: 200 })
   }
 
-  // ── 5a. Dedup webhooks using the provider's own correlation id ──────────
+  // ── 5a. Dedup webhooks using a content hash, not payload.id ──────────────
   //    Most providers retry failed webhooks several times (exponential backoff).
   //    A successful DB write that times out before the response window
   //    generates retries — all of which we must discard after the first success.
-  //    Keyed by `${providerId}:${payload.id}` so two providers can never collide
-  //    on the same raw webhook id.
-  //    payload.id (not the synthesized crypto.randomUUID() fallback in
-  //    correlationId above) is required — without a real id from the
-  //    provider there's nothing stable to dedup against.
-  //    NOTE: must check both null AND undefined — `payload.id !== null` is
-  //    true when payload.id is undefined (e.g. OwnerRez entity_insert/
-  //    update/delete events, which carry entity_id, not a top-level id),
-  //    which coerced to the literal string "undefined" and made every such
-  //    webhook after the first collide on the same dedup key.
-  const webhookId = (payload.id !== null && payload.id !== undefined) ? String(payload.id) : null
+  //
+  //    Previously keyed on payload.id directly. That field's semantics are
+  //    NOT consistent even within a single provider — Hospitable's own docs
+  //    describe `id` as a unique-per-delivery ULID, but
+  //    docs/Integrations/hospitable/api-reference.md:522 documents
+  //    reservation.changed specifically as sending the reservation's own
+  //    (stable, reused) id in that same field. Those claims contradict each
+  //    other and have not been empirically re-verified (see Task 1 in
+  //    CLAUDE_HOSPITABLE_DEXIE_AUDIT_FIXES_1.md). If the second claim is
+  //    true, keying on payload.id meant every real reservation.changed
+  //    webhook after the first one for a given reservation, within the 72h
+  //    TTL, silently collided on this table's primary key and was
+  //    discarded as a duplicate — never reaching handleWebhookEvent at all.
+  //
+  //    A hash of the parsed payload is correct regardless of which claim is
+  //    true: a genuine retry resends identical content (Hospitable's
+  //    documented retry behavior), so it still collides on the hash and is
+  //    still deduped; two distinct real changes to the same entity always
+  //    differ in `created` and/or `data`, so they hash differently and are
+  //    never conflated. JSON.stringify is deterministic for a given parsed
+  //    object, and a retry redelivers the exact same JSON structure/values
+  //    as the original, so hashing the already-parsed `payload` here is
+  //    safe without a second raw-body read.
+  const dedupSource = JSON.stringify(payload)
+  const webhookId    = createHash('sha256').update(dedupSource).digest('hex')
 
-  if (webhookId) {
+  {
     const admin = createServiceClient()
 
     const { error: dedupErr } = await admin

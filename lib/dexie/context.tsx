@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
+import type { AuthChangeEvent, Session, RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/client'
 import {
   getDexieDb,
@@ -124,7 +124,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .from('turnovers')
         .select(
           'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
-          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes'
+          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes, ' +
+          'pending_checkout_datetime, pending_checkin_datetime, dates_changed_at, dates_change_acknowledged_at'
         )
         .in('id', turnoverIds)
       if (tErr) {
@@ -146,7 +147,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (propertyIds.length) {
         const { data: properties, error: pErr } = await supabase
           .from('properties')
-          .select('id, org_id, name, address, city, state, lat, lng')
+          .select('id, org_id, name, address, city, state, lat, lng, timezone')
           .in('id', propertyIds)
         if (pErr) {
           console.error('[DexieProvider] properties fetch failed:', pErr)
@@ -241,7 +242,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .from('turnovers')
         .select(
           'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
-          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes'
+          'inventory_started_at, inventory_confirmed_complete_at, inventory_confirmed_by_crew_id, completion_notes, ' +
+          'pending_checkout_datetime, pending_checkin_datetime, dates_changed_at, dates_change_acknowledged_at'
         )
         .in('id', turnoverIds)
       if (error) {
@@ -305,17 +307,49 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'checklist_instance_items', filter },
-          () => { void pullChecklistsForTurnovers(subscribedTurnoverIds, thisCrewMemberId) }
+          (payload: RealtimePostgresChangesPayload<ChecklistInstanceItemRow>) => {
+            // Scope the refetch to just the turnover that actually changed
+            // instead of every open turnover — checklist_instance_items has
+            // turnover_id denormalized onto it specifically for this (see
+            // 20260611071742_checklist_instance_items_turnover_id_denorm.sql).
+            // Falls back to the full set if the payload doesn't carry it —
+            // e.g. a DELETE under the table's default (non-FULL) REPLICA
+            // IDENTITY only guarantees the primary key on `old`, not every
+            // column, so `old.turnover_id` may legitimately be absent there.
+            // This table is effectively insert-once/update-only in practice
+            // (items are seeded, never deleted), so that fallback path is a
+            // safety net, not the common case.
+            const changedTurnoverId =
+              (payload.new as Partial<ChecklistInstanceItemRow>).turnover_id
+              ?? (payload.old as Partial<ChecklistInstanceItemRow>).turnover_id
+            void pullChecklistsForTurnovers(
+              changedTurnoverId ? [changedTurnoverId] : subscribedTurnoverIds,
+              thisCrewMemberId,
+            )
+          }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'checklist_instances', filter },
-          () => { void pullChecklistsForTurnovers(subscribedTurnoverIds, thisCrewMemberId) }
+          (payload: RealtimePostgresChangesPayload<ChecklistInstanceRow>) => {
+            const changedTurnoverId =
+              (payload.new as Partial<ChecklistInstanceRow>).turnover_id
+              ?? (payload.old as Partial<ChecklistInstanceRow>).turnover_id
+            void pullChecklistsForTurnovers(
+              changedTurnoverId ? [changedTurnoverId] : subscribedTurnoverIds,
+              thisCrewMemberId,
+            )
+          }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'turnovers', filter: `id=in.(${turnoverIds.join(',')})` },
-          () => { void pullTurnoversOnly(subscribedTurnoverIds) }
+          (payload: RealtimePostgresChangesPayload<TurnoverRow>) => {
+            const changedId =
+              (payload.new as Partial<TurnoverRow>).id
+              ?? (payload.old as Partial<TurnoverRow>).id
+            void pullTurnoversOnly(changedId ? [changedId] : subscribedTurnoverIds)
+          }
         )
         .subscribe()
     }
@@ -351,7 +385,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
         if (propertyIds.length) {
           const { data: properties } = await supabase
             .from('properties')
-            .select('id, org_id, name, address, city, state, lat, lng')
+            .select('id, org_id, name, address, city, state, lat, lng, timezone')
             .in('id', propertyIds)
           if (properties?.length) await db.properties.bulkPut(properties as PropertyRow[])
         }

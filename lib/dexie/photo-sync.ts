@@ -56,9 +56,13 @@ export async function processPendingPhotoUploads(
         continue
       }
 
+      // Compression in photo-queue.ts always re-encodes to JPEG regardless
+      // of the original capture format — upload with that content type
+      // rather than the original file's row.mime_type, which may say
+      // image/heic or similar and no longer match the actual bytes.
       const { error } = await supabase.storage
         .from('turnover-photos')
-        .upload(row.storage_path!, blob, { contentType: row.mime_type, upsert: true })
+        .upload(row.storage_path!, blob, { contentType: 'image/jpeg', upsert: true })
 
       if (error) {
         await db.pending_photo_uploads.update(row.id, { retry_count: row.retry_count + 1 })
@@ -71,11 +75,10 @@ export async function processPendingPhotoUploads(
           photo_storage_path: row.storage_path,
         })
       } else if (row.target_table === 'checklist_instances') {
-        // NOTE: SyncEngine has no upstream handler for checklist_instances —
-        // this mirrors a pre-existing gap in the old PowerSync connector,
-        // which also had no case for this table. section_photo_path is
-        // updated locally but does not currently reach Supabase.
         await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
+        await enqueueMutation(userId, 'checklist_instances', row.target_id, 'PATCH', {
+          section_photo_path: row.storage_path,
+        })
       }
 
       await db.pending_photo_uploads.delete(row.id)

@@ -22,6 +22,16 @@ export interface TurnoverRow {
   inventory_confirmed_complete_at: string | null
   inventory_confirmed_by_crew_id:  string
   completion_notes:                string
+  // Staged checkout/checkin change against an in_progress turnover — see
+  // lib/turnovers/generator.ts's refreshExistingPairDates(). Genuinely
+  // nullable (not the ''-empty-string convention above) to match
+  // checklist_instances.completed_at's pattern for real timestamp-or-null
+  // fields. NO Dexie version bump needed for these — non-indexed fields
+  // don't require one.
+  pending_checkout_datetime:    string | null
+  pending_checkin_datetime:     string | null
+  dates_changed_at:             string | null
+  dates_change_acknowledged_at: string | null
 }
 
 export interface ChecklistInstanceRow {
@@ -64,14 +74,15 @@ export interface InventoryItemRow {
 }
 
 export interface PropertyRow {
-  id:      string
-  name:    string
-  org_id:  string
-  address: string
-  city:    string
-  state:   string
-  lat:     number | null
-  lng:     number | null
+  id:       string
+  name:     string
+  org_id:   string
+  address:  string
+  city:     string
+  state:    string
+  lat:      number | null
+  lng:      number | null
+  timezone: string   // IANA identifier, e.g. "America/Chicago" — see lib/utils/timezone.ts
 }
 
 export interface CrewAvailabilityRow {

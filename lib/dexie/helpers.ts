@@ -100,6 +100,27 @@ export async function confirmInventoryComplete(
 }
 
 /**
+ * Acknowledges a staged checkout/checkin date change on an in_progress
+ * turnover (see lib/turnovers/generator.ts's refreshExistingPairDates()).
+ * Dismisses the "checkout time changed" banner without applying the
+ * pending times — the real checkout_datetime/checkin_datetime are left
+ * as-is; a PM adjusts them from the dashboard turnover detail view if the
+ * crew's in-progress window genuinely needs to change.
+ */
+export async function acknowledgeDatesChanged(
+  userId: string,
+  turnoverId: string,
+): Promise<void> {
+  const db = getDexieDb(userId)
+  const acknowledgedAt = new Date().toISOString()
+
+  await db.turnovers.update(turnoverId, { dates_change_acknowledged_at: acknowledgedAt })
+  await enqueueMutation(userId, 'turnovers', turnoverId, 'PATCH', {
+    dates_change_acknowledged_at: acknowledgedAt,
+  })
+}
+
+/**
  * Re-queues a mutation that syncService.processOutbox() gave up on after
  * exhausting its retries (marked `failed` rather than deleted — see
  * lib/dexie/syncService.ts). Resets `failed`/`retryCount` on the existing

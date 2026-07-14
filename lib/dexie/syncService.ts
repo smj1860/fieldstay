@@ -90,11 +90,13 @@ export class SyncEngine {
       if ('photo_storage_path' in payload)   updatePayload.photo_storage_path = payload.photo_storage_path
       if ('completed_by_crew_id' in payload) updatePayload.completed_by_crew_id = payload.completed_by_crew_id || null
 
-      const { error } = await this.supabase
+      const { data, error } = await this.supabase
         .from('checklist_instance_items')
         .update(updatePayload)
         .eq('id', targetId)
+        .select('id')
       if (error) throw new Error(`checklist_instance_items upload failed: ${error.message}`)
+      if (!data || data.length === 0) throw new Error(`checklist_instance_items upload matched zero rows for id ${targetId}`)
       return
     }
 
@@ -126,36 +128,48 @@ export class SyncEngine {
       if ('inventory_confirmed_complete_at' in payload) fieldUpdate.inventory_confirmed_complete_at = payload.inventory_confirmed_complete_at
       if ('inventory_confirmed_by_crew_id' in payload) fieldUpdate.inventory_confirmed_by_crew_id = payload.inventory_confirmed_by_crew_id || null
       if ('completion_notes' in payload) fieldUpdate.completion_notes = payload.completion_notes
+      if ('dates_change_acknowledged_at' in payload) fieldUpdate.dates_change_acknowledged_at = payload.dates_change_acknowledged_at
 
       if (Object.keys(fieldUpdate).length > 0) {
-        const { error } = await this.supabase
+        const { data, error } = await this.supabase
           .from('turnovers')
           .update(fieldUpdate)
           .eq('id', targetId)
+          .select('id')
         if (error) throw new Error(`turnovers upload failed: ${error.message}`)
+        if (!data || data.length === 0) throw new Error(`turnovers upload matched zero rows for id ${targetId}`)
         return
       }
 
-      const { error } = await this.supabase
+      const { data, error } = await this.supabase
         .from('turnovers')
         .update({ status: payload.status })
         .eq('id', targetId)
+        .select('id')
       if (error) throw new Error(`turnovers upload failed: ${error.message}`)
+      if (!data || data.length === 0) throw new Error(`turnovers upload matched zero rows for id ${targetId}`)
       return
     }
 
     if (table === 'checklist_instances' && (op === 'PUT' || op === 'PATCH')) {
       // "Confirm Checklist Complete" (or un-confirm) — a deliberate human
       // assertion on the shared instance row, not derived from item state.
+      // section_photo_path added here — previously photo-sync.ts uploaded
+      // the file to Storage successfully but never pushed the resulting
+      // path upstream, so it never reached the PM dashboard and was lost
+      // entirely if the local Dexie row was ever cleared.
       const updatePayload: Record<string, unknown> = {}
       if ('completed_at' in payload)         updatePayload.completed_at = payload.completed_at
       if ('completed_by_crew_id' in payload) updatePayload.completed_by_crew_id = payload.completed_by_crew_id || null
+      if ('section_photo_path' in payload)   updatePayload.section_photo_path = payload.section_photo_path
 
-      const { error } = await this.supabase
+      const { data, error } = await this.supabase
         .from('checklist_instances')
         .update(updatePayload)
         .eq('id', targetId)
+        .select('id')
       if (error) throw new Error(`checklist_instances upload failed: ${error.message}`)
+      if (!data || data.length === 0) throw new Error(`checklist_instances upload matched zero rows for id ${targetId}`)
       return
     }
 
@@ -176,11 +190,13 @@ export class SyncEngine {
     }
 
     if (table === 'inventory_items' && (op === 'PUT' || op === 'PATCH')) {
-      const { error } = await this.supabase
+      const { data, error } = await this.supabase
         .from('inventory_items')
         .update({ current_quantity: payload.current_quantity })
         .eq('id', targetId)
+        .select('id')
       if (error) throw new Error(`inventory_items upload failed: ${error.message}`)
+      if (!data || data.length === 0) throw new Error(`inventory_items upload matched zero rows for id ${targetId}`)
       return
     }
 
@@ -202,14 +218,16 @@ export class SyncEngine {
         if (error) throw new Error(`crew_availability upsert failed: ${error.message}`)
       } else {
         // UPDATE of existing row — only push changed fields
-        const { error } = await this.supabase
+        const { data, error } = await this.supabase
           .from('crew_availability')
           .update({
             is_available: isAvailable,
             notes:        payload.notes ?? null,
           })
           .eq('id', targetId)
+          .select('id')
         if (error) throw new Error(`crew_availability upload failed: ${error.message}`)
+        if (!data || data.length === 0) throw new Error(`crew_availability upload matched zero rows for id ${targetId}`)
       }
       return
     }
