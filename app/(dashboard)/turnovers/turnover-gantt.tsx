@@ -88,7 +88,7 @@ function turnoverColors(status: string, isTight: boolean) {
 
   const map: Record<string, { bg: string; fg: string; border: string }> = {
     completed:          { bg: 'var(--accent-green-dim)',  fg: 'var(--accent-green)',  border: 'var(--accent-green)'  },
-    in_progress:        { bg: 'rgba(168,85,247,0.12)',    fg: '#a855f7',              border: '#a855f7'              },
+    in_progress:        { bg: 'var(--accent-purple-dim)', fg: 'var(--accent-purple)', border: 'var(--accent-purple)' },
     assigned:           { bg: 'var(--accent-blue-dim)',   fg: 'var(--accent-blue)',   border: 'var(--accent-blue)'   },
     pending_assignment: { bg: 'var(--accent-amber-dim)',  fg: 'var(--accent-amber)',  border: 'var(--accent-amber)'  },
     flagged:            { bg: 'var(--accent-red-dim)',    fg: 'var(--accent-red)',    border: 'var(--accent-red)'    },

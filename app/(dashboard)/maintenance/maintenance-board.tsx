@@ -210,7 +210,7 @@ function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
 const KANBAN_COLUMNS: { key: WoStatus; label: string; accentColor: string }[] = [
   { key: 'pending',     label: 'Open',        accentColor: 'var(--text-muted)'   },
   { key: 'assigned',    label: 'Assigned',    accentColor: 'var(--accent-blue)'  },
-  { key: 'in_progress', label: 'In Progress', accentColor: '#a78bfa'             },
+  { key: 'in_progress', label: 'In Progress', accentColor: 'var(--accent-purple)' },
   { key: 'completed',   label: 'Completed',   accentColor: 'var(--accent-green)' },
 ]
 

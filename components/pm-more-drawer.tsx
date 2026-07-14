@@ -86,6 +86,7 @@ export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: P
             onClick={onClose}
             className="p-1.5 rounded-lg"
             style={{ color: 'var(--text-muted)' }}
+            aria-label="Close more menu"
           >
             <X className="w-4 h-4" />
           </button>

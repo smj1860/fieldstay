@@ -98,7 +98,7 @@ export function Dialog({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="!p-1.5 !min-h-0"
+            className="!min-w-11 !min-h-11 !p-1.5"
           >
             <X className="w-4 h-4" />
           </Button>

@@ -775,7 +775,7 @@ function PropertyAssetDetail({
           <Button onClick={() => setShowAdd(true)} className="text-xs px-3 py-1.5">
             <Plus className="w-3.5 h-3.5" /> Add Asset
           </Button>
-          <Button variant="ghost" onClick={onClose} className="p-2 ml-1">
+          <Button variant="ghost" onClick={onClose} className="p-2 ml-1" aria-label={`Close ${property.name} asset manager`}>
             <X className="w-4 h-4" />
           </Button>
         </div>

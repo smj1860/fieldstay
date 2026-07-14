@@ -200,6 +200,66 @@ export class SyncEngine {
       return
     }
 
+    if (table === 'property_assets' && op === 'PUT') {
+      const { error } = await this.supabase
+        .from('property_assets')
+        .upsert({
+          id:                  targetId,
+          org_id:              payload.org_id,
+          property_id:         payload.property_id,
+          name:                payload.name,
+          asset_type:          payload.asset_type,
+          make:                payload.make,
+          model:               payload.model,
+          photo_url:           payload.photo_url,
+          is_na:               payload.is_na,
+          scan_status:         payload.scan_status,
+          macrs_class:         '5_year',
+          depreciation_method: 'macrs',
+          salvage_value:       0,
+        })
+      if (error) {
+        // 23505 = unique_violation on property_assets_property_active_type_idx
+        // — another crew member captured this same asset type first. The
+        // local optimistic row already written to Dexie is harmless debris
+        // (a different id than the winning row) rather than something we can
+        // usefully reconcile from here, so we just dead-letter it below like
+        // any other permanently-failing mutation.
+        if (error.code === '23505') {
+          throw new Error('Someone else already captured this asset type.')
+        }
+        throw new Error(`property_assets upload failed: ${error.message}`)
+      }
+      return
+    }
+
+    if (table === 'property_assets' && op === 'PATCH') {
+      const updatePayload: Record<string, unknown> = {}
+      if ('photo_url' in payload) updatePayload.photo_url = payload.photo_url
+
+      const { data, error } = await this.supabase
+        .from('property_assets')
+        .update(updatePayload)
+        .eq('id', targetId)
+        .select('id')
+      if (error) throw new Error(`property_assets upload failed: ${error.message}`)
+      if (!data || data.length === 0) throw new Error(`property_assets upload matched zero rows for id ${targetId}`)
+
+      // Fired only once photo_url has actually landed server-side — the scan
+      // route re-derives the expected storage path from the asset's own
+      // (already-org-verified) photo_url and rejects a mismatch, so this
+      // can't fire any earlier than this point.
+      if (payload.scanRequest) {
+        const { storagePath, mediaType } = payload.scanRequest as { storagePath: string; mediaType: string }
+        fetch('/api/assets/request-scan', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset_id: targetId, storage_path: storagePath, media_type: mediaType }),
+        }).catch((err) => console.error('[SyncEngine] scan request failed:', err))
+      }
+      return
+    }
+
     if (table === 'crew_availability' && (op === 'PUT' || op === 'PATCH')) {
       const isAvailable = payload.is_available === 1
       if (payload.org_id) {

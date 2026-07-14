@@ -46,7 +46,7 @@ const LINE_TYPE_LABELS: Record<LineItemType, string> = {
 const LINE_TYPE_COLORS: Record<LineItemType, string> = {
   labor:         'text-blue-400  bg-blue-400/10',
   material:      'text-emerald-400 bg-emerald-400/10',
-  equipment:     'text-purple-400 bg-purple-400/10',
+  equipment:     'text-[var(--accent-purple)] bg-[var(--accent-purple-dim)]',
   subcontractor: 'text-orange-400 bg-orange-400/10',
   other:         'text-slate-400  bg-slate-400/10',
 }

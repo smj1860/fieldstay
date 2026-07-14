@@ -98,7 +98,7 @@ const PRIORITY_STYLES: Record<PriorityLevel, { badge: string; label: string }> =
 
 const STATUS_STYLES: Record<WoStatus, { dot: string; label: string }> = {
   pending:         { dot: 'bg-slate-400',   label: 'Pending'         },
-  quote_requested: { dot: 'bg-purple-400',  label: 'Quote Requested' },
+  quote_requested: { dot: 'bg-[var(--accent-purple)]', label: 'Quote Requested' },
   assigned:        { dot: 'bg-blue-400',    label: 'Assigned'        },
   in_progress:     { dot: 'bg-yellow-400',  label: 'In Progress'     },
   completed:       { dot: 'bg-emerald-400', label: 'Completed'       },

@@ -253,6 +253,7 @@ export function MasterMaintenanceBuilder({
               onClick={() => remove(i)}
               className="flex-shrink-0 p-1.5 rounded-lg transition-colors mt-1"
               style={{ color: 'var(--text-muted)' }}
+              aria-label={`Remove ${s.title || 'schedule'}`}
             >
               <X className="w-4 h-4" />
             </button>

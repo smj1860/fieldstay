@@ -149,7 +149,7 @@ function statusBadge(status: string) {
   const map: Record<string, string> = {
     pending_assignment: 'badge badge-amber',
     assigned:           'badge badge-blue',
-    in_progress:        'badge bg-purple-50 text-purple-700',
+    in_progress:        'badge badge-purple',
     completed:          'badge badge-green',
     flagged:            'badge badge-red',
   }
@@ -1145,7 +1145,10 @@ export function TurnoverBoard({
         </div>
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => startSync(() => triggerManualSync())}
+            onClick={() => startSync(async () => {
+              const result = await triggerManualSync()
+              if (!result.success) setAssignmentWarning(result.error ?? 'Could not start the calendar sync.')
+            })}
             disabled={syncing}
             variant="secondary"
             title="Sync calendars now"

@@ -420,6 +420,7 @@ export function MasterChecklistBuilder({
                     type="button"
                     onClick={() => setItems((prev) => prev.filter((p) => !(p.section === item.section && p.task === item.task)))}
                     className="text-muted-themed hover:text-red-500 transition-colors p-0.5"
+                    aria-label={`Remove ${item.task}`}
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
