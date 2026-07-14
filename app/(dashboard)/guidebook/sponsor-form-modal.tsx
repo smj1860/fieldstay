@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { upsertSponsor } from '@/app/actions/guidebook'
+import { Dialog } from '@/components/ui/Dialog'
 import type { GuidebookSponsor, GuidebookSlotType, GuidebookOfferType } from '@/types/database'
 
 const OFFER_TYPE_OPTIONS: { value: GuidebookOfferType; label: string }[] = [
@@ -85,29 +86,12 @@ export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSave
   }
 
   return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 100, padding: '16px',
-      }}
-      role="button"
-      tabIndex={0}
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
+    <Dialog
+      open
+      onClose={onClose}
+      title={`${existing ? 'Edit' : 'Add'} Sponsor — Slot ${slotNumber}`}
+      maxWidthClassName="max-w-md"
     >
-      <div
-        style={{
-          background: 'var(--bg-card)', border: '1px solid var(--border)',
-          borderRadius: 'var(--radius-lg)', padding: '24px',
-          maxWidth: '480px', width: '100%', maxHeight: '90vh', overflowY: 'auto',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 style={{ fontSize: '17px', fontWeight: '600', color: 'var(--text-primary)', margin: '0 0 16px' }}>
-          {existing ? 'Edit' : 'Add'} Sponsor — Slot {slotNumber}
-        </h2>
-
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <Field label="Business Name">
             <input
@@ -257,8 +241,7 @@ export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSave
             {isSaving ? 'Saving…' : 'Save'}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   )
 }
 

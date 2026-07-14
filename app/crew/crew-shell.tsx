@@ -337,53 +337,20 @@ function SyncStatus() {
 
 function CrewFaqPanel({ onClose }: { onClose: () => void }) {
   return (
-    <div
-      style={{
-        position: 'fixed', inset: 0, zIndex: 50,
-        background: 'rgba(0,0,0,0.4)',
-        display: 'flex', alignItems: 'flex-end',
-      }}
-      role="button"
-      tabIndex={0}
-      aria-label="Close FAQ panel"
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
-    >
-      <div
-        style={{
-          background: '#fff', borderRadius: '16px 16px 0 0',
-          padding: '24px 20px 40px', width: '100%', maxHeight: '85vh',
-          overflowY: 'auto',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0D1F3C' }}>
-            FieldStay Crew App — FAQ
-          </h2>
-          <button
-            onClick={onClose}
-            style={{ fontSize: 20, color: '#94a3b8', padding: 4 }}
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
+    <Dialog open onClose={onClose} title="FieldStay Crew App — FAQ" mobileSheet>
+      {FAQ_ITEMS.map((item, i) => (
+        <FaqItem key={i} question={item.q} answer={item.a} />
+      ))}
 
-        {FAQ_ITEMS.map((item, i) => (
-          <FaqItem key={i} question={item.q} answer={item.a} />
-        ))}
-
-        <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #e2e8f0' }}>
-          <p style={{ fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-            Need help?{' '}
-            <a href="mailto:help@fieldstay.app" style={{ color: '#0D1F3C', fontWeight: 700 }}>
-              help@fieldstay.app
-            </a>
-          </p>
-        </div>
+      <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #e2e8f0' }}>
+        <p style={{ fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+          Need help?{' '}
+          <a href="mailto:help@fieldstay.app" style={{ color: '#0D1F3C', fontWeight: 700 }}>
+            help@fieldstay.app
+          </a>
+        </p>
       </div>
-    </div>
+    </Dialog>
   )
 }
 

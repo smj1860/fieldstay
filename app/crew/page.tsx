@@ -10,6 +10,7 @@ import { cn }                            from '@/lib/utils'
 import { useCrewContext }                from '@/lib/crew/crew-context'
 import { distanceMiles }                 from '@/lib/geocoding'
 import type { CrewWorkOrderRow }         from '@/lib/dexie/schema'
+import { Dialog }                        from '@/components/ui/Dialog'
 
 const AVG_DRIVE_SPEED_MPH = 30
 
@@ -426,81 +427,53 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label="Close feedback modal"
-      style={{
-        position: 'fixed', inset: 0, zIndex: 50,
-        background: 'rgba(0,0,0,0.4)',
-        display: 'flex', alignItems: 'flex-end',
-      }}
-      onClick={onClose}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClose() } }}
-    >
-      <div
-        style={{
-          background: '#fff', borderRadius: '16px 16px 0 0',
-          padding: '24px 20px 40px', width: '100%', maxHeight: '85vh', overflowY: 'auto',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h2 style={{ fontSize: 18, fontWeight: 800, color: '#0D1F3C' }}>
-            Send feedback
-          </h2>
-          <button onClick={onClose} style={{ fontSize: 20, color: '#94a3b8', padding: 4 }} aria-label="Close">
-            ×
+    <Dialog open onClose={onClose} title="Send feedback" mobileSheet>
+      {submitted ? (
+        <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
+          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}><PartyPopper size={32} /></div>
+          <p style={{ fontSize: 15, fontWeight: 700, color: '#0D1F3C', marginBottom: 4 }}>
+            Thank you!
+          </p>
+          <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 20 }}>
+            Your feedback goes straight to the team that builds this app.
+          </p>
+          <button
+            onClick={onClose}
+            className="w-full py-3 rounded-xl text-sm font-semibold text-white"
+            style={{ background: '#0D1F3C' }}
+          >
+            Done
           </button>
         </div>
-
-        {submitted ? (
-          <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
-            <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}><PartyPopper size={32} /></div>
-            <p style={{ fontSize: 15, fontWeight: 700, color: '#0D1F3C', marginBottom: 4 }}>
-              Thank you!
-            </p>
-            <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 20 }}>
-              Your feedback goes straight to the team that builds this app.
-            </p>
-            <button
-              onClick={onClose}
-              className="w-full py-3 rounded-xl text-sm font-semibold text-white"
-              style={{ background: '#0D1F3C' }}
-            >
-              Done
-            </button>
-          </div>
-        ) : (
-          <>
-            <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 12 }}>
-              What would make this app more helpful for your day-to-day work?
-            </p>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              rows={5}
-              placeholder="Share an idea, a frustration, or anything that would help…"
-              style={{
-                width: '100%', borderRadius: 12, border: '1px solid #e2e8f0',
-                padding: '12px', fontSize: 14, color: '#1e293b', resize: 'none',
-                outline: 'none',
-              }}
-            />
-            {error && (
-              <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>{error}</p>
-            )}
-            <button
-              onClick={handleSubmit}
-              disabled={submitting || !text.trim()}
-              className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-4 disabled:opacity-50"
-              style={{ background: '#0D1F3C' }}
-            >
-              {submitting ? 'Sending…' : 'Submit'}
-            </button>
-          </>
-        )}
-      </div>
-    </div>
+      ) : (
+        <>
+          <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 12 }}>
+            What would make this app more helpful for your day-to-day work?
+          </p>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={5}
+            placeholder="Share an idea, a frustration, or anything that would help…"
+            style={{
+              width: '100%', borderRadius: 12, border: '1px solid #e2e8f0',
+              padding: '12px', fontSize: 14, color: '#1e293b', resize: 'none',
+              outline: 'none',
+            }}
+          />
+          {error && (
+            <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>{error}</p>
+          )}
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !text.trim()}
+            className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-4 disabled:opacity-50"
+            style={{ background: '#0D1F3C' }}
+          >
+            {submitting ? 'Sending…' : 'Submit'}
+          </button>
+        </>
+      )}
+    </Dialog>
   )
 }

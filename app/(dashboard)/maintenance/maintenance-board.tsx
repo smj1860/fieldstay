@@ -2595,43 +2595,15 @@ export function MaintenanceBoard({
       )}
 
       {selectedWO && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40"
-            style={{ background: 'rgba(0,0,0,0.5)' }}
-            role="button"
-            tabIndex={0}
-            aria-label="Close work order detail"
-            onClick={() => setSelectedWO(null)}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedWO(null) } }}
-          />
-
-          {/* Panel */}
-          <div
-            className="fixed inset-y-0 right-0 z-50 w-full max-w-2xl flex flex-col shadow-2xl"
-            style={{ background: 'var(--bg-base)' }}
-          >
-            {/* Panel header */}
-            <div
-              className="flex items-center justify-between px-6 py-4 flex-shrink-0"
-              style={{ borderBottom: '1px solid var(--border)' }}
-            >
-              <span className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>
-                Work Order Detail
-              </span>
-              <button
-                onClick={() => setSelectedWO(null)}
-                className="p-2 rounded-lg transition-colors"
-                style={{ color: 'var(--text-muted)' }}
-                aria-label="Close"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
+        <Dialog
+          open
+          onClose={() => setSelectedWO(null)}
+          title="Work Order Detail"
+          maxWidthClassName="max-w-2xl"
+        >
+          <div className="max-h-[85vh] -m-6 flex flex-col">
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-0">
               <WorkOrderDetail
                 workOrder={selectedWO}
                 userRole={role as 'admin' | 'manager' | 'crew' | 'viewer'}
@@ -2639,7 +2611,7 @@ export function MaintenanceBoard({
               />
             </div>
           </div>
-        </>
+        </Dialog>
       )}
     </>
   )
