@@ -405,7 +405,11 @@ export const ownerRezInitialSync = inngest.createFunction(
               `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
             )
           }
-          return { cursor: new Date().toISOString(), count: 0, affectedPropertyIds: [] as string[] }
+          return {
+            cursor: new Date().toISOString(), count: 0,
+            affectedPropertyIds: [] as string[],
+            bookingsToPostRevenue: [] as { bookingId: string; propertyId: string }[],
+          }
         }
 
         // MEDIUM-3: capture pre-fetch timestamp as cursor value.
@@ -425,6 +429,7 @@ export const ownerRezInitialSync = inngest.createFunction(
         }
 
         let affectedPropertyIds: string[] = []
+        let bookingsToPostRevenue: { bookingId: string; propertyId: string }[] = []
 
         if (bookings.length) {
           const supabase   = createServiceClient()
@@ -483,9 +488,10 @@ export const ownerRezInitialSync = inngest.createFunction(
             }
           })
 
-          const { error } = await supabase
+          const { data: upserted, error } = await supabase
             .from('bookings')
             .upsert(bookingRows, { onConflict: 'external_id,external_source' })
+            .select('id, external_id')
 
           if (error) {
             logger.error(`[OwnerRez:${user_id}] bookings upsert failed: ${error.message}`)
@@ -497,6 +503,15 @@ export const ownerRezInitialSync = inngest.createFunction(
           affectedPropertyIds = Array.from(new Set(
             bookingRows.map((b) => b.property_id).filter((id): id is string => id !== null)
           ))
+
+          const idByExternalId = Object.fromEntries(
+            (upserted ?? []).map((row) => [row.external_id, row.id as string])
+          )
+
+          bookingsToPostRevenue = bookingRows
+            .filter((b) => b.status === 'confirmed' && b.stay_type === 'guest_stay' && b.property_id !== null)
+            .map((b) => ({ bookingId: idByExternalId[b.external_id], propertyId: b.property_id as string }))
+            .filter((b): b is { bookingId: string; propertyId: string } => !!b.bookingId)
         }
 
         try {
@@ -507,8 +522,27 @@ export const ownerRezInitialSync = inngest.createFunction(
           )
         }
 
-        return { cursor: fetchStartedAt, count: bookings.length, affectedPropertyIds }  // MEDIUM-3: pre-fetch timestamp
+        return { cursor: fetchStartedAt, count: bookings.length, affectedPropertyIds, bookingsToPostRevenue }  // MEDIUM-3: pre-fetch timestamp
       })
+
+      // ── Post booking revenue for newly-confirmed guest-stay bookings ───────
+      // Mirrors Hospitable's incremental-sync pattern: sendEvent happens in the
+      // outer function body, never nested inside step.run. actual_total_amount
+      // is omitted — OwnerRez's normalizer doesn't provide one, so
+      // booking-events.ts's handleBookingConfirmed falls back to its existing
+      // avg_nightly_rate estimation, same as any other provider without a
+      // real total.
+      for (const b of fetchBookingsResult.bookingsToPostRevenue) {
+        await step.sendEvent(`post-booking-revenue-${b.bookingId}`, {
+          name: 'booking/confirmed' as const,
+          data: {
+            booking_id:  b.bookingId,
+            property_id: b.propertyId,
+            org_id,
+            source:      'ownerrez' as const,
+          },
+        })
+      }
 
       // ── Step 3: Update sync metadata ────────────────────────────────────────
 

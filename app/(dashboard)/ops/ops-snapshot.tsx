@@ -454,7 +454,7 @@ export function OpsSnapshot({
   kpis,
   todayDate,
   metrics,
-  showOwnerRezNudge = false,
+  showPmsRevenueNudge = false,
 }: Readonly<{
   turnovers:      Turnover[]
   properties:     Property[]
@@ -463,7 +463,7 @@ export function OpsSnapshot({
   kpis:           KPIs
   todayDate:      string
   metrics?:       Metrics
-  showOwnerRezNudge?: boolean
+  showPmsRevenueNudge?: boolean
 }>) {
   const [windowDays, setWindowDays] = useState<7 | 14 | 30>(7)
 
@@ -491,12 +491,12 @@ export function OpsSnapshot({
 
   return (
     <div>
-      {showOwnerRezNudge && (
+      {showPmsRevenueNudge && (
         <NudgeBanner
-          id="ownerrez-revenue-intro"
-          message="Booking revenue and cleaning fees post to owner ledgers automatically when you connect OwnerRez."
+          id="pms-revenue-intro"
+          message="Booking revenue and cleaning fees post to owner ledgers automatically when you connect your PMS."
           href="/settings?tab=integrations"
-          linkText="Connect OwnerRez"
+          linkText="Connect your PMS"
         />
       )}
 
