@@ -6,6 +6,7 @@ import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { parseLocalDate } from '@/lib/utils/date-validation'
+import { logAuditEvent } from '@/lib/audit'
 
 const ALERT_WINDOW_DAYS  = 7   // alert PM when schedule due within 7 days
 const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
@@ -151,6 +152,16 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
                 })
                 .select('id')
                 .single()
+
+          if (wo && !existingWO) {
+            await logAuditEvent({
+              orgId:      schedule.org_id,
+              action:     'work_order.created',
+              targetType: 'work_order',
+              targetId:   wo.id,
+              metadata:   { source: 'maintenance_schedule', maintenance_schedule_id: schedule.id },
+            })
+          }
 
           if (pmEmail && wo && !existingWO) {
             await resend.emails.send(

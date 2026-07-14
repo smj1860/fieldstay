@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { getActiveSponsorCount, resolvePlanCredit } from '@/lib/guidebook/helpers'
 import { stripe } from '@/lib/stripe/client'
+import { logAuditEvent } from '@/lib/audit'
 
 export const guidebookBillingCreditHandler = inngest.createFunction(
   {
@@ -22,6 +23,10 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
     }
 
     await step.run('post-plan-credit', async () => {
+      const reason =
+        activeSponsorCount >= 6
+          ? '6_sponsor_reward'
+          : '5_sponsor_reward'
       const creditLabel =
         activeSponsorCount >= 6
           ? '6-Sponsor Reward — $25 off your FieldStay plan'
@@ -39,6 +44,13 @@ export const guidebookBillingCreditHandler = inngest.createFunction(
           idempotencyKey: `guidebook-credit-${orgId}-${currentPeriodEnd}`,
         }
       )
+
+      await logAuditEvent({
+        orgId,
+        action:     'billing.plan_credit.applied',
+        targetType: 'organization',
+        metadata:   { reason },
+      })
     })
 
     return { orgId, activeSponsorCount, planCreditCents }

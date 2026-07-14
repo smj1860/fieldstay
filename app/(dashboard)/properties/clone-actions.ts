@@ -57,10 +57,10 @@ export async function clonePropertySetup(
       await logAuditEvent({
         orgId:      orgId,
         actorId:    user.id,
-        action:     'property.updated',
+        action:     'property.inventory.cloned',
         targetType: 'property',
         targetId:   targetPropertyId,
-        metadata:   { clone_section: 'inventory', source_property_id: sourcePropertyId, items_cloned: sourceItems.length },
+        metadata:   { source_property_id: sourcePropertyId, items_cloned: sourceItems.length },
       })
     }
 
@@ -136,10 +136,10 @@ export async function clonePropertySetup(
       await logAuditEvent({
         orgId:      orgId,
         actorId:    user.id,
-        action:     'property.updated',
+        action:     'property.checklist.cloned',
         targetType: 'property',
         targetId:   targetPropertyId,
-        metadata:   { clone_section: 'checklist', source_property_id: sourcePropertyId, sections_cloned: sourceSections.length, items_cloned: totalItems },
+        metadata:   { source_property_id: sourcePropertyId, sections_cloned: sourceSections.length, items_cloned: totalItems },
       })
     }
 

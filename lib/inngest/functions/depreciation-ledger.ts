@@ -16,6 +16,7 @@
 import { inngest }                    from '@/lib/inngest/client'
 import { createServiceClient }         from '@/lib/supabase/server'
 import { calculateAnnualDepreciation } from '@/lib/assets/depreciation'
+import { logAuditEvent }               from '@/lib/audit'
 
 export const generateDepreciationLedger = inngest.createFunction(
   {
@@ -143,6 +144,13 @@ export const generateDepreciationLedger = inngest.createFunction(
             },
             { onConflict: 'org_id,milestone' }
           )
+
+        await logAuditEvent({
+          orgId,
+          action:     'asset.depreciation_ledger.generated',
+          targetType: 'organization',
+          metadata:   { tax_year: taxYear, entries_count: entries.length },
+        })
 
         logger.info(`[Depreciation] Org ${orgId}: ${entries.length} entries for ${taxYear}`)
         return entries.length

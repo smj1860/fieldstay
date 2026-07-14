@@ -101,6 +101,7 @@ import { notifyAssignmentGap }     from '@/lib/inngest/functions/notify-assignme
 // Vendor compliance expiry warnings
 import { vendorComplianceExpiryCheck }      from '@/lib/inngest/functions/cron/vendor-compliance-expiry-check'
 import { notifyVendorComplianceExpiring }   from '@/lib/inngest/functions/notify-vendor-compliance-expiring'
+import { vendorComplianceGraceCheck }       from '@/lib/inngest/functions/cron/vendor-compliance-grace-check'
 
 // Work order public dispatch + sign-off
 import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
@@ -255,6 +256,7 @@ export const { GET, POST, PUT } = serve({
     // Vendor compliance expiry warnings
     vendorComplianceExpiryCheck,
     notifyVendorComplianceExpiring,
+    vendorComplianceGraceCheck,
 
     // Work order public dispatch
     workOrderDispatch,

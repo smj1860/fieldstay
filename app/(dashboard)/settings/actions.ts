@@ -6,7 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
 import { geocodeZip } from '@/lib/geocoding'
-import { logAuditEvent } from '@/lib/audit'
+import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
 import { renderSmsBody } from '@/lib/sms/templates'
@@ -25,7 +25,7 @@ export async function updateOrgSettings(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   const name          = (formData.get('name') as string)?.trim()
   const billing_email = (formData.get('billing_email') as string)?.trim() || null
@@ -42,6 +42,14 @@ export async function updateOrgSettings(
     return { error: 'Operation failed. Please try again.' }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'org.settings.updated',
+    targetType: 'organization',
+    targetId:   membership.org_id,
+  })
+
   revalidatePath('/settings')
   return { success: true }
 }
@@ -52,7 +60,7 @@ export async function updateSlackWebhook(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   const url = (formData.get('slack_webhook_url') as string)?.trim() || null
 
@@ -69,6 +77,16 @@ export async function updateSlackWebhook(
     console.error('[updateSlackWebhook]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  // Never log the webhook URL itself — it's a credential
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'org.slack_webhook.updated',
+    targetType: 'organization',
+    targetId:   membership.org_id,
+    metadata:   { configured: url !== null },
+  })
 
   revalidatePath('/settings')
   return { success: true }
@@ -88,8 +106,7 @@ export async function changePassword(
   if (newPassword !== confirm)
     return { error: 'Passwords do not match' }
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { user, supabase, membership } = await requireOrgMember()
   const { error } = await supabase.auth.updateUser({ password: newPassword })
 
   if (error) {
@@ -97,9 +114,11 @@ export async function changePassword(
     return { error: 'Operation failed. Please try again.' }
   }
 
-  if (user) {
-    await logAuditEvent({ actorId: user.id, action: 'account.password_changed' })
-  }
+  await logAuditEvent({
+    orgId:   membership.org_id,
+    actorId: user.id,
+    action:  'account.password_changed',
+  })
 
   return { success: true }
 }
@@ -464,13 +483,22 @@ export async function updateVendor(
 }
 
 export async function updateVendorPortal(vendorId: string, enabled: boolean): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   await supabase
     .from('vendors')
     .update({ portal_enabled: enabled })
     .eq('id', vendorId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'vendor.portal_access.updated',
+    targetType: 'vendor',
+    targetId:   vendorId,
+    metadata:   { enabled },
+  })
 
   revalidatePath('/vendors')
   revalidatePath('/settings')
@@ -563,7 +591,7 @@ export async function openBillingPortal(): Promise<void> {
 export async function inviteCrewMember(
   crewMemberId: string
 ): Promise<{ error?: string; success?: boolean }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   if (!['owner', 'admin', 'manager'].includes(membership.role)) {
     return { error: 'Permission denied' }
@@ -652,13 +680,21 @@ export async function inviteCrewMember(
     }
   }
 
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'crew.invite.sent',
+    targetType: 'crew_member',
+    targetId:   crewMemberId,
+  })
+
   revalidatePath('/crew-manage')
   revalidatePath('/settings')
   return { success: true }
 }
 
 export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   if (!['owner', 'admin', 'manager'].includes(membership.role)) {
     return { sent: 0, error: 'Permission denied' }
@@ -689,6 +725,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
   const { resend: resendClient, FROM: from } = await import('@/lib/resend/client')
 
   let sent = 0
+  const invitedCrewIds: string[] = []
   for (const crew of uninvited) {
     if (!crew.email && !crew.phone) continue
 
@@ -747,6 +784,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
 
     if (delivered) {
       sent++
+      invitedCrewIds.push(crew.id)
     } else {
       // Release the claim so a future bulk run or manual resend can retry
       await supabase
@@ -755,6 +793,18 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
         .eq('id', crew.id)
         .eq('org_id', membership.org_id)
     }
+  }
+
+  if (invitedCrewIds.length > 0) {
+    await logAuditEvents(
+      invitedCrewIds.map((crewId) => ({
+        orgId:      membership.org_id,
+        actorId:    user.id,
+        action:     'crew.invite.sent' as const,
+        targetType: 'crew_member',
+        targetId:   crewId,
+      }))
+    )
   }
 
   revalidatePath('/crew-manage')
@@ -818,7 +868,7 @@ export async function updateVendorAutoAssignMode(
 }
 
 export async function updateCommsRetention(days: number): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgMember()
 
   const { error } = await supabase
     .from('organizations')
@@ -829,6 +879,15 @@ export async function updateCommsRetention(days: number): Promise<SettingsAction
     console.error('[updateCommsRetention]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'org.comms_retention.updated',
+    targetType: 'organization',
+    targetId:   membership.org_id,
+    metadata:   { retention_days: days },
+  })
 
   revalidatePath('/settings')
   return { success: true }

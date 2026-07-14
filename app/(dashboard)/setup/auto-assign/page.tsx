@@ -1,4 +1,5 @@
 import { requireOrgMember } from '@/lib/auth'
+import { logAuditEvent } from '@/lib/audit'
 import { markStepComplete } from '../actions'
 import { AutoAssignWizardStep } from './auto-assign-step'
 
@@ -18,11 +19,21 @@ export default async function AutoAssignPage() {
 
   async function continueAction(mode: AutoAssignMode) {
     'use server'
-    const { supabase, membership } = await requireOrgMember()
+    const { user, supabase, membership } = await requireOrgMember()
     await supabase
       .from('organizations')
       .update({ auto_assign_mode: mode })
       .eq('id', membership.org_id)
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org.auto_assign_mode.updated',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+      metadata:   { mode },
+    })
+
     await markStepComplete('auto_assign', '/setup/vendors')
   }
 

@@ -1,5 +1,6 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { logAuditEvents } from '@/lib/audit'
 
 /**
  * SCHEDULED: runs daily at 9am CT — staggered 1hr after the other maintenance
@@ -53,6 +54,25 @@ export const dailyCommsRetention = inngest.createFunction(
 
         commsSoftDeleted += softDeleted?.length ?? 0
         commsHardPurged  += hardPurged?.length ?? 0
+
+        const auditEntries = []
+        if (softDeleted?.length) {
+          auditEntries.push({
+            orgId:      org.id,
+            action:     'comms.log.deleted' as const,
+            targetType: 'communication_log',
+            metadata:   { source: 'retention_cron', count: softDeleted.length, stage: 'soft_delete' },
+          })
+        }
+        if (hardPurged?.length) {
+          auditEntries.push({
+            orgId:      org.id,
+            action:     'comms.log.deleted' as const,
+            targetType: 'communication_log',
+            metadata:   { source: 'retention_cron', count: hardPurged.length, stage: 'hard_purge' },
+          })
+        }
+        if (auditEntries.length) await logAuditEvents(auditEntries)
 
         return { soft_deleted: softDeleted?.length ?? 0, hard_purged: hardPurged?.length ?? 0 }
       })

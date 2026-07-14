@@ -141,7 +141,7 @@ export async function markWorkVerified(workOrderId: string) {
     .from('work_orders')
     .update({
       completion_verified_at: new Date().toISOString(),
-      completion_verified_by: (await supabase.auth.getUser()).data.user?.id,
+      completion_verified_by: user.id,
       status:                 'completed',
       completed_date:         new Date().toISOString().split('T')[0],
     })
@@ -149,6 +149,16 @@ export async function markWorkVerified(workOrderId: string) {
     .eq('org_id', membership.org_id)
 
   if (error) throw new Error(`Failed to verify completion: ${error.message}`)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.updated',
+    targetType: 'work_order',
+    targetId:   workOrderId,
+    metadata:   { change: 'verified' },
+  })
+
   revalidatePath('/maintenance')
 }
 

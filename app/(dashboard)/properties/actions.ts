@@ -440,12 +440,21 @@ export async function updateAsset(
 
 export async function deactivateAsset(assetId: string): Promise<{ error?: string }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { user, supabase, membership } = await requireOrgMember()
     await supabase
       .from('property_assets')
       .update({ is_active: false })
       .eq('id', assetId)
       .eq('org_id', membership.org_id)
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'asset.deactivated',
+      targetType: 'property_asset',
+      targetId:   assetId,
+    })
+
     revalidatePath('/assets')
     return {}
   } catch (err) {

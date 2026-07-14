@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { getPmEmail } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
+import { logAuditEvent } from '@/lib/audit'
 
 // ── Purchase Order Approved ───────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ export const handlePurchaseOrderApproved = inngest.createFunction(
       const supabase = createServiceClient()
 
       // Atomic upsert — ON CONFLICT (source_reference_id, source) DO NOTHING
-      const { error } = await supabase.from('owner_transactions').upsert(
+      const { data: txn, error } = await supabase.from('owner_transactions').upsert(
         {
           property_id,
           org_id,
@@ -32,9 +33,20 @@ export const handlePurchaseOrderApproved = inngest.createFunction(
           visible_to_owner:     false,
         },
         { onConflict: 'source_reference_id,source', ignoreDuplicates: true }
-      )
+      ).select('id').maybeSingle()
 
       if (error) throw error
+
+      if (txn) {
+        await logAuditEvent({
+          orgId:      org_id,
+          action:     'owner.transaction.created',
+          targetType: 'owner_transaction',
+          targetId:   txn.id,
+          metadata:   { source: 'purchase_order_approval', purchase_order_id },
+        })
+      }
+
       return { posted: total_estimated_cost }
     })
 

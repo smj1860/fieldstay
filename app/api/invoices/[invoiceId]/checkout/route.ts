@@ -2,6 +2,7 @@ import { NextRequest, NextResponse }  from 'next/server'
 import { requireOrgMember }           from '@/lib/auth'
 import { stripe }                     from '@/lib/stripe/client'
 import { createServiceClient }        from '@/lib/supabase/server'
+import { logAuditEvent }              from '@/lib/audit'
 
 export async function POST(
   _request: NextRequest,
@@ -132,6 +133,13 @@ export async function POST(
     .update({ stripe_checkout_session_id: session.id })
     .eq('id', invoiceId)
     .eq('org_id', membership.org_id)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    action:     'work_order.invoice.checkout_started',
+    targetType: 'work_order_invoice',
+    targetId:   invoiceId,
+  })
 
   return NextResponse.json({ url: session.url })
 }
