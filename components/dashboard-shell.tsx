@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useSyncExternalStore } from 'react'
+import { useState, useEffect, useRef, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -196,6 +196,7 @@ function DashboardSidebar({
         className={cn(
           'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm',
           'font-medium transition-all relative',
+          'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)]',
           !active && 'hover:text-[var(--chrome-text)] focus-visible:text-[var(--chrome-text)]'
         )}
         style={{
@@ -326,8 +327,8 @@ function DashboardSidebar({
                           className="w-full flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px]
                                      font-semibold uppercase tracking-wide transition-colors
                                      hover:text-[var(--chrome-text)]
-                                     focus:outline-none focus:ring-2 focus:ring-[var(--chrome-gold)]
-                                     focus:ring-offset-1 focus:ring-offset-[var(--chrome-bg)] rounded"
+                                     focus:outline-none focus:ring-2 focus:ring-inset
+                                     focus:ring-[var(--accent-gold)] rounded"
                           style={{ color: 'var(--chrome-text-muted)', opacity: 0.6 }}
                         >
                           {expanded
@@ -400,7 +401,7 @@ function DashboardSidebar({
   )
 }
 
-export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, isStaff = false, children }: Props) {
+export function DashboardShell({ role, orgName, userName, userEmail, repuguardActive = false, onboardingComplete = true, onboardingPct = 0, notifications = [], unreadMessages = 0, isStaff = false, children }: Readonly<Props>) {
   const pathname   = usePathname()
   const [collapsed,  setCollapsed]  = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -409,6 +410,53 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
   const [time,       setTime]       = useState('')
   const [swReg,        setSwReg]        = useState<ServiceWorkerRegistration | null>(null)
   const [notifVisible, setNotifVisible] = useState(false)
+  const mobileDrawerRef = useRef<HTMLDivElement>(null)
+
+  // Mobile sidebar drawer — focus trap, Escape-to-close, body-scroll lock.
+  // Same approach as components/ui/Dialog.tsx, adapted to this component's
+  // existing mobileOpen/setMobileOpen state rather than a generic
+  // open/onClose prop pair.
+  useEffect(() => {
+    if (!mobileOpen) return
+
+    const previouslyFocused = document.activeElement as HTMLElement | null
+
+    const panel = mobileDrawerRef.current
+    const focusable = panel?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+    focusable?.[0]?.focus()
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMobileOpen(false)
+        return
+      }
+      if (e.key !== 'Tab' || !focusable || focusable.length === 0) return
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = originalOverflow
+      previouslyFocused?.focus()
+    }
+  }, [mobileOpen])
 
   // Live clock
   useEffect(() => {
@@ -511,7 +559,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
             onClick={() => setMobileOpen(false)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setMobileOpen(false) } }}
           />
-          <div className="relative z-10 h-full flex-shrink-0">
+          <div ref={mobileDrawerRef} role="dialog" aria-modal="true" className="relative z-10 h-full flex-shrink-0">
             <DashboardSidebar
               mobile
               pathname={pathname}

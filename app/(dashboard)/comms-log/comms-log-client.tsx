@@ -77,7 +77,7 @@ const CHANNEL_ICON: Record<CommChannel, React.ReactNode> = {
 function LogRow({ entry }: { entry: LogEntry }) {
   const [expanded, setExpanded]     = useState(false)
   const [deleting, startDelete]     = useTransition()
-  const [confirmDelete, setConfirm] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const recipient     = entry.recipient_type === 'vendor' ? entry.vendors : entry.crew_members
   const recipientName = recipient?.name ?? '—'
@@ -191,7 +191,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
               {entry.source === 'manual' && (
                 !confirmDelete ? (
                   <button
-                    onClick={() => setConfirm(true)}
+                    onClick={() => setConfirmDelete(true)}
                     className="flex items-center gap-1 hover:opacity-80 transition-opacity"
                     style={{ color: 'var(--accent-red)' }}
                   >
@@ -211,7 +211,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
                       {deleting ? 'Deleting…' : 'Yes'}
                     </button>
                     <button
-                      onClick={() => setConfirm(false)}
+                      onClick={() => setConfirmDelete(false)}
                       className="hover:opacity-80"
                       style={{ color: 'var(--text-muted)' }}
                     >

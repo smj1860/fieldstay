@@ -226,8 +226,9 @@ export function CrewInstallClient() {
 
           {/* Skip link — always visible */}
           <button
+            type="button"
             onClick={handleSkip}
-            className="w-full text-center text-sm transition-colors pt-1"
+            className="w-full text-center text-sm transition-colors py-3"
             style={{ color: 'var(--text-muted)' }}
           >
             Skip for now — open in browser

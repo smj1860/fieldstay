@@ -19,6 +19,7 @@ const MAX_RETRIES = 5
 const ALLOWED_TARGETS: Record<string, string> = {
   checklist_instance_items: 'photo_storage_path',
   checklist_instances:      'section_photo_path',
+  property_assets:          'photo_url',
 }
 
 let processing = false
@@ -78,6 +79,18 @@ export async function processPendingPhotoUploads(
         await db.checklist_instances.update(row.target_id, { section_photo_path: row.storage_path ?? '' })
         await enqueueMutation(userId, 'checklist_instances', row.target_id, 'PATCH', {
           section_photo_path: row.storage_path,
+        })
+      } else if (row.target_table === 'property_assets') {
+        // property_assets.photo_url stores the full public URL (not a bare
+        // storage path, unlike the two targets above) — getPublicUrl() is
+        // pure string templating against the configured project URL, so
+        // this doesn't require the object to exist yet, only that the
+        // upload just above this block already succeeded.
+        const publicUrl = supabase.storage.from('turnover-photos').getPublicUrl(row.storage_path!).data.publicUrl
+        await db.property_assets.update(row.target_id, { photo_url: publicUrl })
+        await enqueueMutation(userId, 'property_assets', row.target_id, 'PATCH', {
+          photo_url:   publicUrl,
+          scanRequest: { storagePath: row.storage_path, mediaType: 'image/jpeg' },
         })
       }
 

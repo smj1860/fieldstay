@@ -175,7 +175,7 @@ function MobileExceptionBanner({
 const STATUS_COLORS: Record<string, string> = {
   pending_assignment: 'var(--text-muted)',
   assigned:           'var(--accent-blue)',
-  in_progress:        '#a78bfa',
+  in_progress:        'var(--accent-purple)',
   completed:          'var(--accent-green)',
   flagged:            'var(--accent-red)',
 }

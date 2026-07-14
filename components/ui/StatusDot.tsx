@@ -5,9 +5,9 @@ const toneClass: Record<Status, string> = {
   good:      'bg-[var(--accent-green)]',
   warning:   'bg-[var(--accent-amber)]',
   critical:  'bg-[var(--accent-red)]',
-  attention: 'bg-orange-500',
-  offline:   'bg-neutral-500',
-  unknown:   'bg-neutral-300',
+  attention: 'bg-[var(--accent-amber)]',
+  offline:   'bg-[var(--text-muted)]',
+  unknown:   'bg-[var(--border-strong)]',
 }
 
 export function StatusDot({ status, label }: Readonly<{ status: Status; label: string }>) {

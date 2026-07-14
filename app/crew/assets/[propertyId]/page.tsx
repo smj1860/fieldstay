@@ -6,7 +6,11 @@ import { useState } from 'react'
 import { ArrowLeft, Camera, CheckCircle2, Loader2, Wrench, ClipboardCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { submitWorkOrderReport } from '@/lib/dexie/helpers'
+import { enqueueMutation } from '@/lib/dexie/syncService'
+import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
+import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
+import { CrewLoading } from '@/components/crew/CrewLoading'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -42,11 +46,7 @@ export default function CrewPropertyAssetsPage() {
   const missingTypes = missingAssetTypesFromDiscoveredSet(discoveredTypes)
 
   if (!property) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-themed" />
-      </div>
-    )
+    return <CrewLoading />
   }
 
   return (
@@ -108,6 +108,7 @@ export default function CrewPropertyAssetsPage() {
           propertyId={propertyId}
           orgId={property.org_id}
           assetType={captureType}
+          userId={userId}
           onClose={() => setCaptureType(null)}
         />
       )}
@@ -131,11 +132,13 @@ function DiscoveryCaptureModal({
   propertyId,
   orgId,
   assetType,
+  userId,
   onClose,
 }: {
   propertyId: string
   orgId:      string
   assetType:  AssetType
+  userId:     string
   onClose:    () => void
 }) {
   const db = useDexieDb()
@@ -147,59 +150,54 @@ function DiscoveryCaptureModal({
   const [scanQueued, setScanQueued] = useState(false)
   const [error,      setError]      = useState<string | null>(null)
 
-  async function saveAsset(fields: {
-    make:       string | null
-    model:      string | null
-    photoUrl:   string | null
-    isNa:       boolean
-    scanStatus: 'pending' | null
-  }): Promise<string | null> {
-    const supabase = createClient()
-    const { data, error: insertError } = await supabase
-      .from('property_assets')
-      .insert({
-        property_id:         propertyId,
-        org_id:               orgId,
-        name:                 assetTypeDisplayName(assetType),
-        asset_type:           assetType,
-        make:                 fields.make,
-        model:                fields.model,
-        photo_url:            fields.photoUrl,
-        is_na:                fields.isNa,
-        scan_status:          fields.scanStatus,
-        macrs_class:          '5_year',
-        depreciation_method:  'macrs',
-        salvage_value:        0,
-      })
-      .select('id, org_id, property_id, asset_type, make, model, is_na, photo_url')
-      .single()
+  /**
+   * Offline-first, same pattern as lib/dexie/helpers.ts: write the local
+   * Dexie row immediately, then queue the insert through the mutations
+   * outbox rather than writing straight to Supabase. A direct write here
+   * used to mean a crew member capturing an asset with no signal lost the
+   * entry the moment this modal closed — the "everything syncs once you're
+   * back online" promise the crew shell's own FAQ makes didn't actually
+   * hold for this flow.
+   */
+  async function saveAsset(
+    assetId: string,
+    fields: {
+      make:       string | null
+      model:      string | null
+      photoUrl:   string | null
+      isNa:       boolean
+      scanStatus: 'pending' | null
+    },
+  ): Promise<void> {
+    await db.property_assets.put({
+      id:          assetId,
+      org_id:      orgId,
+      property_id: propertyId,
+      asset_type:  assetType,
+      make:        fields.make ?? '',
+      model:       fields.model ?? '',
+      is_na:       fields.isNa ? 1 : 0,
+      photo_url:   fields.photoUrl ?? '',
+    })
 
-    if (insertError) {
-      // 23505 = unique_violation on property_assets_property_active_type_idx
-      // — another crew member captured this same asset type moments ago.
-      // Surface a friendly message rather than the raw Postgres error.
-      if (insertError.code === '23505') {
-        throw new Error('Someone else just captured this asset — refresh to see their entry.')
-      }
-      throw new Error(insertError.message)
-    }
-    if (data) {
-      await db.property_assets.put({
-        ...data,
-        make:      data.make ?? '',
-        model:     data.model ?? '',
-        is_na:     data.is_na ? 1 : 0,
-        photo_url: data.photo_url ?? '',
-      })
-    }
-    return data?.id ?? null
+    await enqueueMutation(userId, 'property_assets', assetId, 'PUT', {
+      org_id:      orgId,
+      property_id: propertyId,
+      name:        assetTypeDisplayName(assetType),
+      asset_type:  assetType,
+      make:        fields.make,
+      model:       fields.model,
+      photo_url:   fields.photoUrl,
+      is_na:       fields.isNa,
+      scan_status: fields.scanStatus,
+    })
   }
 
   async function handleMarkNa() {
     setSubmitting(true)
     setError(null)
     try {
-      await saveAsset({ make: null, model: null, photoUrl: null, isNa: true, scanStatus: null })
+      await saveAsset(crypto.randomUUID(), { make: null, model: null, photoUrl: null, isNa: true, scanStatus: null })
       setSuccess(true)
     } catch (err: unknown) {
       setError((err as Error).message || 'Could not save. Check your connection and try again.')
@@ -218,43 +216,53 @@ function DiscoveryCaptureModal({
     setError(null)
 
     try {
+      const assetId = crypto.randomUUID()
       let photoUrl: string | null = null
-      let scanRequest: { storagePath: string; mediaType: string } | null = null
 
       if (photoFile) {
         const supabase = createClient()
-        const ext  = photoFile.name.split('.').pop() || 'jpg'
-        const path = `asset-discovery/${propertyId}/${assetType}-${crypto.randomUUID()}.${ext}`
-        const { error: uploadError } = await supabase.storage
-          .from('turnover-photos')
-          .upload(path, photoFile, { contentType: photoFile.type, upsert: true })
-        if (uploadError) throw new Error(uploadError.message)
+        const ext     = photoFile.name.split('.').pop() || 'jpg'
+        const path    = `asset-discovery/${propertyId}/${assetType}-${crypto.randomUUID()}.${ext}`
+        const blobKey = `photo-asset-${assetId}`
+
+        // getPublicUrl() is pure string templating against the configured
+        // project URL — no network call — so the final URL is known before
+        // the blob actually reaches Storage. The upload itself is queued
+        // below via pending_photo_uploads and may finish well after this
+        // handler returns, or after the device comes back online.
         photoUrl = supabase.storage.from('turnover-photos').getPublicUrl(path).data.publicUrl
-        scanRequest = { storagePath: path, mediaType: photoFile.type }
+
+        const compressed = await compressPhotoForQueue(photoFile)
+        await savePendingPhotoBlob(userId, blobKey, compressed)
+        await db.pending_photo_uploads.add({
+          id:             crypto.randomUUID(),
+          target_table:   'property_assets',
+          target_id:      assetId,
+          target_column:  'photo_url',
+          storage_path:   path,
+          local_blob_key: blobKey,
+          mime_type:      photoFile.type,
+          retry_count:    0,
+          created_at:     new Date().toISOString(),
+        })
       }
 
-      const assetId = await saveAsset({
+      await saveAsset(assetId, {
         make:       make.trim() || null,
         model:      model.trim() || null,
         photoUrl,
         isNa:       false,
-        scanStatus: scanRequest ? 'pending' : null,
+        scanStatus: photoFile ? 'pending' : null,
       })
 
-      // Fire-and-forget: the crew member doesn't wait on the vision call —
-      // make/model fill in via the realtime sync already watching this
-      // property's assets once the background scan completes.
-      if (assetId && scanRequest) {
+      if (photoFile) {
+        // The vision scan itself fires only once the photo actually reaches
+        // Storage and photo_url lands server-side (see photo-sync.ts /
+        // syncService.ts) — the crew member doesn't wait on it either way;
+        // make/model fill in via the realtime sync already watching this
+        // property's assets once the background scan completes.
         setScanQueued(true)
-        fetch('/api/assets/request-scan', {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            asset_id:     assetId,
-            storage_path: scanRequest.storagePath,
-            media_type:   scanRequest.mediaType,
-          }),
-        }).catch((err) => console.error('[DiscoveryCapture] scan request failed:', err))
+        void processPendingPhotoUploads(createClient(), userId)
       }
 
       setSuccess(true)
@@ -292,16 +300,17 @@ function DiscoveryCaptureModal({
           )}
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="label text-primary-themed">Make</label>
-              <Input type="text" value={make} onChange={(e) => setMake(e.target.value)} placeholder="e.g. Samsung" />
+              <label htmlFor="discovery-make" className="label text-primary-themed">Make</label>
+              <Input id="discovery-make" type="text" value={make} onChange={(e) => setMake(e.target.value)} placeholder="e.g. Samsung" />
             </div>
             <div>
-              <label className="label text-primary-themed">Model</label>
-              <Input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. RF28" />
+              <label htmlFor="discovery-model" className="label text-primary-themed">Model</label>
+              <Input id="discovery-model" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. RF28" />
             </div>
             <div>
-              <label className="label text-primary-themed">Photo of the data plate / sticker (optional)</label>
+              <label htmlFor="discovery-photo" className="label text-primary-themed">Photo of the data plate / sticker (optional)</label>
               <input
+                id="discovery-photo"
                 type="file"
                 accept="image/*"
                 capture="environment"
@@ -395,12 +404,13 @@ function PlaceWorkOrderModal({
           )}
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="label text-primary-themed">Property</label>
-              <Input type="text" value={propertyName} disabled />
+              <label htmlFor="wo-property" className="label text-primary-themed">Property</label>
+              <Input id="wo-property" type="text" value={propertyName} disabled />
             </div>
             <div>
-              <label className="label text-primary-themed">Which asset?</label>
+              <label htmlFor="wo-asset" className="label text-primary-themed">Which asset?</label>
               <select
+                id="wo-asset"
                 value={assetId}
                 onChange={(e) => setAssetId(e.target.value)}
                 className="input"
@@ -412,8 +422,9 @@ function PlaceWorkOrderModal({
               </select>
             </div>
             <div>
-              <label className="label text-primary-themed">What&apos;s the issue? *</label>
+              <label htmlFor="wo-issue" className="label text-primary-themed">What&apos;s the issue? *</label>
               <Input
+                id="wo-issue"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}

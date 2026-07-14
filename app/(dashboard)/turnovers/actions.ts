@@ -719,10 +719,16 @@ export async function unarchiveTurnover(
 
 // ── Trigger manual iCal sync ─────────────────────────────────────────────────
 
-export async function triggerManualSync(): Promise<void> {
-  const { membership } = await requireOrgMember()
-  await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: membership.org_id } })
-  revalidatePath('/turnovers')
+export async function triggerManualSync(): Promise<TurnoverActionState> {
+  try {
+    const { membership } = await requireOrgMember()
+    await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: membership.org_id } })
+    revalidatePath('/turnovers')
+    return { success: true }
+  } catch (err) {
+    console.error('[triggerManualSync]', err)
+    return { error: 'Could not start the calendar sync. Try again in a moment.' }
+  }
 }
 
 // ── Accept auto-assignment suggestion ────────────────────────────────────────

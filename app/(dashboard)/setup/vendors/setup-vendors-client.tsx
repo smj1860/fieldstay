@@ -5,6 +5,7 @@ import { Plus, Check } from 'lucide-react'
 import { addVendor, type SettingsActionState } from '@/app/(dashboard)/settings/actions'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 
 const VENDOR_SPECIALTIES = [
   { value: 'plumbing',     label: 'Plumbing'     },
@@ -97,7 +98,7 @@ export function SetupVendorsStep({ vendors: initialVendors, continueAction }: Pr
                 <Input id="vendor-name" name="name" type="text" required placeholder="ABC Plumbing" /></div>
               <div><label htmlFor="vendor-contact-name" className="label">Contact Name</label>
                 <Input id="vendor-contact-name" name="contact_name" type="text" placeholder="John Smith" /></div>
-              <div><label htmlFor="vendor-email" className="label">Email <span className="text-red-400 ml-0.5">*</span></label>
+              <div><label htmlFor="vendor-email" className="label">Email <RequiredMark /></label>
                 <Input id="vendor-email" name="email" type="email" required placeholder="info@abcplumbing.com" /></div>
               <div><label htmlFor="vendor-phone" className="label">Phone</label>
                 <Input id="vendor-phone" name="phone" type="tel" placeholder="+1 555-0100" /></div>

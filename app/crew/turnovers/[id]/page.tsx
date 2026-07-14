@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
+import { CrewLoading } from '@/components/crew/CrewLoading'
 import { createClient }       from '@/lib/supabase/client'
 import { savePendingPhotoBlob, compressPhotoForQueue } from '@/lib/dexie/photo-queue'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
@@ -51,6 +52,11 @@ export default function CrewTurnoverPage() {
   // Note entry — one item open at a time; saves on blur
   const [openNoteItemId, setOpenNoteItemId] = useState<string | null>(null)
   const [noteText,       setNoteText]       = useState('')
+
+  // Replaces native confirm() for "missing photos/assets — continue anyway?"
+  // prompts with the app's own Dialog component, matching the confirmation
+  // UX used everywhere else in the app.
+  const [pendingConfirm, setPendingConfirm] = useState<{ message: string; onConfirm: () => void } | null>(null)
 
   const turnover = useLiveQuery(() => db.turnovers.get(id), [id])
 
@@ -260,11 +266,13 @@ export default function CrewTurnoverPage() {
     if (!instance || !crewMemberId) return
     const confirming = !instance.completed_at
     if (confirming && missingAssetTypes.length > 0) {
-      const ok = confirm(
-        `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
-        `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')}). Confirm checklist complete anyway?`
-      )
-      if (!ok) return
+      setPendingConfirm({
+        message:
+          `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
+          `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')}). Confirm checklist complete anyway?`,
+        onConfirm: () => void confirmChecklistComplete(userId, instance.id, crewMemberId, confirming),
+      })
+      return
     }
     await confirmChecklistComplete(userId, instance.id, crewMemberId, confirming)
   }
@@ -302,21 +310,7 @@ export default function CrewTurnoverPage() {
     }
   }
 
-  const markComplete = async () => {
-    const warnings: string[] = []
-    if (pendingPhotos.length > 0) {
-      warnings.push(`${pendingPhotos.length} item${pendingPhotos.length !== 1 ? 's' : ''} still need photos`)
-    }
-    if (missingAssetTypes.length > 0) {
-      warnings.push(
-        `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
-        `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')})`
-      )
-    }
-    if (warnings.length > 0) {
-      const ok = confirm(`${warnings.join('. ')}. Mark complete anyway?`)
-      if (!ok) return
-    }
+  const runMarkComplete = async () => {
     setCompleting(true)
     setActionError(null)
     try {
@@ -329,13 +323,29 @@ export default function CrewTurnoverPage() {
     }
   }
 
+  const markComplete = () => {
+    const warnings: string[] = []
+    if (pendingPhotos.length > 0) {
+      warnings.push(`${pendingPhotos.length} item${pendingPhotos.length !== 1 ? 's' : ''} still need photos`)
+    }
+    if (missingAssetTypes.length > 0) {
+      warnings.push(
+        `${missingAssetTypes.length} asset${missingAssetTypes.length !== 1 ? 's' : ''} still need discovery ` +
+        `(${missingAssetTypes.map(assetTypeDisplayName).join(', ')})`
+      )
+    }
+    if (warnings.length > 0) {
+      setPendingConfirm({
+        message:   `${warnings.join('. ')}. Mark complete anyway?`,
+        onConfirm: () => void runMarkComplete(),
+      })
+      return
+    }
+    void runMarkComplete()
+  }
+
   if (!turnover) {
-    return (
-      <div className="text-center py-20 text-muted-themed">
-        <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
-        <p className="text-sm">Loading…</p>
-      </div>
-    )
+    return <CrewLoading />
   }
 
   const fullAddress = [property?.address, property?.city, property?.state].filter(Boolean).join(', ')
@@ -345,7 +355,8 @@ export default function CrewTurnoverPage() {
       {/* Back button — always visible */}
       <button
         onClick={() => view === 'hub' ? router.push('/crew') : setView('hub')}
-        className="flex items-center justify-center w-8 h-8 rounded-lg text-muted-themed hover:text-secondary-themed hover:bg-raised-themed transition-colors mb-4"
+        className="flex items-center justify-center rounded-lg text-muted-themed hover:text-secondary-themed hover:bg-raised-themed transition-colors mb-4"
+        style={{ width: 44, height: 44 }}
         aria-label={view === 'hub' ? 'Back to assignments' : 'Back to turnover'}
       >
         <ArrowLeft className="w-4 h-4" />
@@ -369,12 +380,19 @@ export default function CrewTurnoverPage() {
         )}
 
         <div className="mt-3 pt-3 border-t border-themed flex items-center justify-between flex-wrap gap-2">
-          <span className={cn(
-            'text-xs font-semibold px-2 py-0.5 rounded-full',
-            turnover.priority === 'urgent' ? 'bg-red-50 text-red-600' :
-            turnover.priority === 'high'   ? 'bg-amber-50 text-amber-700' :
-            'bg-raised-themed text-secondary-themed'
-          )}>
+          <span
+            className={cn(
+              'text-xs font-semibold px-2 py-0.5 rounded-full',
+              turnover.priority !== 'urgent' && turnover.priority !== 'high' && 'bg-raised-themed text-secondary-themed'
+            )}
+            style={
+              turnover.priority === 'urgent'
+                ? { background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }
+                : turnover.priority === 'high'
+                ? { background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }
+                : undefined
+            }
+          >
             {turnover.priority} priority
           </span>
           {turnover.window_minutes && (
@@ -407,11 +425,14 @@ export default function CrewTurnoverPage() {
             informs the crew member so they aren't blindsided, and gives
             them a way to dismiss it once seen. */}
         {turnover.dates_changed_at && !turnover.dates_change_acknowledged_at && (
-          <div className="mt-3 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div
+            className="mt-3 flex items-start gap-2 rounded-xl px-4 py-3"
+            style={{ background: 'var(--accent-amber-dim)', border: '1px solid rgba(245,158,11,0.25)' }}
+          >
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent-amber)' }} />
             <div className="flex-1">
-              <p className="text-sm font-medium text-amber-800">Checkout time changed</p>
-              <p className="text-sm text-amber-700 mt-0.5">
+              <p className="text-sm font-medium" style={{ color: 'var(--accent-amber)' }}>Checkout time changed</p>
+              <p className="text-sm mt-0.5" style={{ color: 'var(--accent-amber)' }}>
                 The guest&apos;s reservation changed after this turnover started.
                 {turnover.pending_checkout_datetime && (
                   <> New checkout: <span className="font-medium">
@@ -428,7 +449,8 @@ export default function CrewTurnoverPage() {
               <button
                 type="button"
                 onClick={() => { void acknowledgeDatesChanged(userId, id) }}
-                className="mt-2 text-sm font-medium text-amber-800 underline"
+                className="mt-2 text-sm font-medium underline"
+                style={{ color: 'var(--accent-amber)' }}
               >
                 Got it
               </button>
@@ -437,7 +459,10 @@ export default function CrewTurnoverPage() {
         )}
 
         {turnover.notes && (
-          <p className="mt-3 text-sm text-amber-800 bg-amber-50 rounded-lg px-3 py-2 flex items-start gap-1.5">
+          <p
+            className="mt-3 text-sm rounded-lg px-3 py-2 flex items-start gap-1.5"
+            style={{ color: 'var(--accent-amber)', background: 'var(--accent-amber-dim)' }}
+          >
             <StickyNote className="w-4 h-4 flex-shrink-0 mt-0.5" />
             <span>{turnover.notes}</span>
           </p>
@@ -446,9 +471,12 @@ export default function CrewTurnoverPage() {
 
       {/* Upload error banner */}
       {uploadError && (
-        <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4">
-          <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-red-700">{uploadError}</p>
+        <div
+          className="flex items-start gap-2 rounded-xl px-4 py-3 mb-4"
+          style={{ background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}
+        >
+          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent-red)' }} />
+          <p className="text-sm" style={{ color: 'var(--accent-red)' }}>{uploadError}</p>
         </div>
       )}
 
@@ -515,7 +543,7 @@ export default function CrewTurnoverPage() {
               style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             >
               <div className="flex items-center gap-3">
-                <Package className="w-5 h-5" style={{ color: 'var(--accent-blue, #3b82f6)' }} />
+                <Package className="w-5 h-5" style={{ color: 'var(--accent-blue)' }} />
                 Inventory
               </div>
               <ChevronRight className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
@@ -541,8 +569,12 @@ export default function CrewTurnoverPage() {
           <button
             onClick={() => setShowFlagModal(true)}
             className="w-full py-3 rounded-xl text-sm font-medium flex items-center
-                       justify-center gap-2 border border-amber-300 bg-amber-50
-                       text-amber-700 hover:bg-amber-100 transition-colors"
+                       justify-center gap-2 border transition-colors hover:opacity-80"
+            style={{
+              borderColor: 'var(--accent-amber)',
+              background:  'var(--accent-amber-dim)',
+              color:       'var(--accent-amber)',
+            }}
           >
             <StickyNote className="w-4 h-4" />
             Turnover Summary & Additional Notes
@@ -577,14 +609,15 @@ export default function CrewTurnoverPage() {
             </div>
             <div className="h-2 bg-raised-themed rounded-full overflow-hidden">
               <div
-                className={cn('h-full rounded-full transition-all duration-300',
-                  completedCount === totalCount ? 'bg-green-500' : 'bg-brand-800'
-                )}
-                style={{ width: `${Math.round((completedCount / totalCount) * 100)}%` }}
+                className={cn('h-full rounded-full transition-all duration-300', completedCount !== totalCount && 'bg-brand-800')}
+                style={{
+                  width:      `${Math.round((completedCount / totalCount) * 100)}%`,
+                  background: completedCount === totalCount ? 'var(--accent-green)' : undefined,
+                }}
               />
             </div>
             {pendingPhotos.length > 0 && (
-              <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1">
+              <p className="text-xs mt-1.5 flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
                 <Camera className="w-3 h-3" />
                 {pendingPhotos.length} item{pendingPhotos.length !== 1 ? 's' : ''} still
                 need{pendingPhotos.length === 1 ? 's' : ''} a photo
@@ -604,14 +637,18 @@ export default function CrewTurnoverPage() {
 
                   return (
                     <div key={item.id}>
-                      <div className={cn('flex items-start gap-3 px-4 py-3', item.is_completed ? 'bg-green-50' : 'bg-card-themed')}>
+                      <div
+                        className={cn('flex items-start gap-3 px-4 py-3', !item.is_completed && 'bg-card-themed')}
+                        style={item.is_completed ? { background: 'var(--accent-green-dim)' } : undefined}
+                      >
                         <button
-                          className="flex-shrink-0 mt-0.5"
+                          className="flex-shrink-0 mt-0.5 p-2 -m-2"
                           onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
+                          aria-label={item.is_completed ? 'Mark incomplete' : 'Mark complete'}
                         >
                           {item.is_completed
-                            ? <CheckCircle2 className="w-5 h-5 text-green-500" />
-                            : <Circle className={cn('w-5 h-5', needsPhoto ? 'text-amber-400' : 'text-muted-themed')} />}
+                            ? <CheckCircle2 className="w-5 h-5" style={{ color: 'var(--accent-green)' }} />
+                            : <Circle className="w-5 h-5" style={{ color: needsPhoto ? 'var(--accent-amber)' : 'var(--text-muted)' }} />}
                         </button>
 
                         <button
@@ -619,28 +656,30 @@ export default function CrewTurnoverPage() {
                           className="flex-1 min-w-0 cursor-pointer text-left"
                           onClick={() => toggleItem(item.id, item.is_completed, item.requires_photo, item.photo_storage_path, sectionName)}
                         >
-                          <p className={cn('text-sm leading-snug',
-                            item.is_completed ? 'text-green-700 line-through' : 'text-primary-themed')}>
+                          <p
+                            className={cn('text-sm leading-snug', item.is_completed ? 'line-through' : 'text-primary-themed')}
+                            style={item.is_completed ? { color: 'var(--accent-green)' } : undefined}
+                          >
                             {item.task}
                           </p>
                           {item.crew_notes && openNoteItemId !== item.id && (
                             <p className="text-xs text-muted-themed mt-0.5 italic">Note: {item.crew_notes}</p>
                           )}
                           {item.photo_storage_path && (
-                            <p className="text-xs text-green-600 mt-0.5 flex items-center gap-1">
+                            <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--accent-green)' }}>
                               <ImageIcon className="w-3 h-3" /> Photo attached
                             </p>
                           )}
                           {!item.photo_storage_path && pendingUploadIds.has(item.id) && (
-                            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                            <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
                               <Loader2 className="w-3 h-3 animate-spin" /> Photo saved — uploading when back online
                             </p>
                           )}
                           {needsPhoto && !uploading && !pendingUploadIds.has(item.id) && (
-                            <p className="text-xs text-amber-600 mt-0.5">Photo required before completing</p>
+                            <p className="text-xs mt-0.5" style={{ color: 'var(--accent-amber)' }}>Photo required before completing</p>
                           )}
                           {item.requires_photo && item.photo_reason && (
-                            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                            <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
                               <Camera className="w-3.5 h-3.5 flex-shrink-0" /> {item.photo_reason}
                             </p>
                           )}
@@ -648,8 +687,12 @@ export default function CrewTurnoverPage() {
 
                         {/* Note toggle button */}
                         <button
-                          className="flex-shrink-0 mt-0.5 p-1 rounded transition-opacity active:opacity-60"
-                          style={{ color: openNoteItemId === item.id || item.crew_notes ? 'var(--accent-gold)' : 'var(--text-muted)' }}
+                          className="flex-shrink-0 mt-0.5 rounded transition-opacity active:opacity-60 flex items-center justify-center"
+                          style={{
+                            color:  openNoteItemId === item.id || item.crew_notes ? 'var(--accent-gold)' : 'var(--text-muted)',
+                            width:  44,
+                            height: 44,
+                          }}
                           onClick={() => {
                             if (openNoteItemId === item.id) {
                               void saveNote(item.id, item.is_completed)
@@ -669,12 +712,15 @@ export default function CrewTurnoverPage() {
                             ) : (
                               <button
                                 onClick={() => fileInputRefs.current[item.id]?.click()}
-                                className={cn('p-1.5 rounded-lg transition-colors',
-                                  item.photo_storage_path
-                                    ? 'text-green-600 bg-green-50 hover:bg-green-100'
-                                    : 'text-amber-600 bg-amber-50 hover:bg-amber-100'
-                                )}
+                                className="rounded-lg transition-colors flex items-center justify-center"
+                                style={{
+                                  width:      44,
+                                  height:     44,
+                                  color:      item.photo_storage_path ? 'var(--accent-green)' : 'var(--accent-amber)',
+                                  background: item.photo_storage_path ? 'var(--accent-green-dim)' : 'var(--accent-amber-dim)',
+                                }}
                                 title={item.photo_storage_path ? 'Replace photo' : 'Tap to take required photo'}
+                                aria-label={item.photo_storage_path ? 'Replace photo' : 'Take photo'}
                               >
                                 <Camera className="w-4 h-4" />
                               </button>
@@ -713,8 +759,8 @@ export default function CrewTurnoverPage() {
                                 setNoteText(items?.find(i => i.id === item.id)?.crew_notes ?? '')
                                 setOpenNoteItemId(null)
                               }}
-                              className="text-xs px-2.5 py-1 rounded"
-                              style={{ color: 'var(--text-muted)' }}
+                              className="text-xs px-2.5 rounded flex items-center justify-center"
+                              style={{ color: 'var(--text-muted)', minHeight: 44 }}
                             >
                               Cancel
                             </button>
@@ -723,8 +769,8 @@ export default function CrewTurnoverPage() {
                                 e.preventDefault()
                                 void saveNote(item.id, item.is_completed)
                               }}
-                              className="text-xs px-2.5 py-1 rounded font-medium"
-                              style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+                              className="text-xs px-2.5 rounded font-medium flex items-center justify-center"
+                              style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)', minHeight: 44 }}
                             >
                               Save
                             </button>
@@ -740,10 +786,10 @@ export default function CrewTurnoverPage() {
               {sectionPhotoPrompt === sectionName && (
                 <div
                   className="flex items-center gap-3 mt-2 p-3 rounded-xl border-2 border-dashed"
-                  style={{ borderColor: '#FCD116', background: 'rgba(252,209,22,0.08)' }}
+                  style={{ borderColor: 'var(--accent-gold)', background: 'var(--accent-gold-dim)' }}
                 >
-                  <Camera className="w-5 h-5 flex-shrink-0" style={{ color: '#B8961A' }} />
-                  <div className="flex-1 text-sm font-medium" style={{ color: '#B8961A' }}>
+                  <Camera className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--accent-gold)' }} />
+                  <div className="flex-1 text-sm font-medium" style={{ color: 'var(--accent-gold)' }}>
                     Section complete — add a final photo
                   </div>
                   <input
@@ -756,14 +802,15 @@ export default function CrewTurnoverPage() {
                   />
                   <button
                     onClick={() => sectionPhotoRefs.current[sectionName]?.click()}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg"
-                    style={{ background: '#FCD116', color: '#1a1a1a' }}
+                    className="text-xs font-semibold px-3 rounded-lg flex items-center justify-center"
+                    style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)', minHeight: 44, minWidth: 44 }}
                   >
                     Take Photo
                   </button>
                   <button
                     onClick={() => setSectionPhotoPrompt(null)}
-                    className="text-xs px-2 py-1.5 rounded-lg text-muted-themed hover:bg-raised-themed"
+                    className="text-xs px-2 rounded-lg text-muted-themed hover:bg-raised-themed flex items-center justify-center"
+                    style={{ minHeight: 44, minWidth: 44 }}
                   >
                     Skip
                   </button>
@@ -788,23 +835,22 @@ export default function CrewTurnoverPage() {
               }
               className={cn(
                 'w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 mt-2 mb-4 text-left transition-colors',
-                instance.completed_at
-                  ? 'border-green-400 bg-green-50'
-                  : pendingPhotos.length > 0
+                !instance.completed_at && pendingPhotos.length > 0
                   ? 'border-themed opacity-60 cursor-not-allowed'
-                  : 'border-themed hover:bg-raised-themed',
+                  : !instance.completed_at && 'border-themed hover:bg-raised-themed',
                 turnover.status === 'completed' && 'cursor-not-allowed'
               )}
+              style={instance.completed_at ? { borderColor: 'var(--accent-green)', background: 'var(--accent-green-dim)' } : undefined}
             >
               {instance.completed_at
-                ? <CheckCircle2 className="w-6 h-6 text-green-500 flex-shrink-0" />
+                ? <CheckCircle2 className="w-6 h-6 flex-shrink-0" style={{ color: 'var(--accent-green)' }} />
                 : <Circle className="w-6 h-6 text-muted-themed flex-shrink-0" />}
               <div className="flex-1">
-                <p className="text-base font-semibold" style={{ color: instance.completed_at ? '#15803d' : 'var(--text-primary)' }}>
+                <p className="text-base font-semibold" style={{ color: instance.completed_at ? 'var(--accent-green)' : 'var(--text-primary)' }}>
                   Confirm Checklist Complete
                 </p>
                 {!instance.completed_at && pendingPhotos.length > 0 && (
-                  <p className="text-xs text-amber-600 mt-0.5">
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--accent-amber)' }}>
                     {pendingPhotos.length} photo{pendingPhotos.length !== 1 ? 's' : ''} still required
                   </p>
                 )}
@@ -879,14 +925,16 @@ export default function CrewTurnoverPage() {
                           <p className="text-xs text-muted-themed">
                             Par {item.par_level} {item.unit}
                             {isLow && (
-                              <span className="ml-1.5 text-amber-600 font-medium">· Low</span>
+                              <span className="ml-1.5 font-medium" style={{ color: 'var(--accent-amber)' }}>· Low</span>
                             )}
                           </p>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <button
                             onClick={() => handleCountChange(item.id, qty - 1)}
-                            className="w-7 h-7 rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
+                            className="rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
+                            style={{ width: 48, height: 48 }}
+                            aria-label={`Decrease ${item.name}`}
                           >
                             <Minus className="w-3.5 h-3.5" />
                           </button>
@@ -903,11 +951,15 @@ export default function CrewTurnoverPage() {
                               inputs[idx + 1]?.focus()
                             }}
                             data-inv-count-input
+                            aria-label={`${item.name} count`}
                             className="w-12 text-center text-sm font-semibold text-primary-themed border border-themed rounded-lg py-1 focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+                            style={{ height: 48 }}
                           />
                           <button
                             onClick={() => handleCountChange(item.id, qty + 1)}
-                            className="w-7 h-7 rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
+                            className="rounded-lg border border-themed flex items-center justify-center text-muted-themed hover:bg-raised-themed active:bg-raised-themed transition-colors"
+                            style={{ width: 48, height: 48 }}
+                            aria-label={`Increase ${item.name}`}
                           >
                             <Plus className="w-3.5 h-3.5" />
                           </button>
@@ -933,16 +985,15 @@ export default function CrewTurnoverPage() {
         disabled={turnover.status === 'completed'}
         className={cn(
           'w-full flex items-center gap-3 px-4 py-4 rounded-xl border-2 mt-2 mb-4 text-left transition-colors',
-          turnover.inventory_confirmed_complete_at
-            ? 'border-green-400 bg-green-50'
-            : 'border-themed hover:bg-raised-themed',
+          !turnover.inventory_confirmed_complete_at && 'border-themed hover:bg-raised-themed',
           turnover.status === 'completed' && 'cursor-not-allowed'
         )}
+        style={turnover.inventory_confirmed_complete_at ? { borderColor: 'var(--accent-green)', background: 'var(--accent-green-dim)' } : undefined}
       >
         {turnover.inventory_confirmed_complete_at
-          ? <CheckCircle2 className="w-6 h-6 text-green-500 flex-shrink-0" />
+          ? <CheckCircle2 className="w-6 h-6 flex-shrink-0" style={{ color: 'var(--accent-green)' }} />
           : <Circle className="w-6 h-6 text-muted-themed flex-shrink-0" />}
-        <p className="text-base font-semibold" style={{ color: turnover.inventory_confirmed_complete_at ? '#15803d' : 'var(--text-primary)' }}>
+        <p className="text-base font-semibold" style={{ color: turnover.inventory_confirmed_complete_at ? 'var(--accent-green)' : 'var(--text-primary)' }}>
           Confirm Inventory Complete
         </p>
       </button>
@@ -983,6 +1034,33 @@ export default function CrewTurnoverPage() {
           userId={userId}
           onClose={() => setShowFlagModal(false)}
         />
+      )}
+
+      {/* Missing photos/assets confirmation — replaces native confirm() */}
+      {pendingConfirm && (
+        <Dialog
+          open
+          onClose={() => setPendingConfirm(null)}
+          title="Continue anyway?"
+          maxWidthClassName="max-w-sm"
+          mobileSheet
+        >
+          <p className="text-sm text-secondary-themed mb-4">{pendingConfirm.message}</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPendingConfirm(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="cta"
+              onClick={() => {
+                pendingConfirm.onConfirm()
+                setPendingConfirm(null)
+              }}
+            >
+              Confirm
+            </Button>
+          </div>
+        </Dialog>
       )}
     </div>
   )
@@ -1026,7 +1104,7 @@ function TurnoverSummaryModal({
     <Dialog open onClose={onClose} title={success ? 'Notes Saved' : 'Turnover Summary & Additional Notes'} maxWidthClassName="max-w-sm" mobileSheet>
       {success ? (
         <div className="text-center py-4">
-          <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
+          <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--accent-green)' }} />
           <p className="text-sm text-muted-themed mb-4">
             Saved. The property manager will see this on the turnover as soon as
             your phone has a connection.
@@ -1036,15 +1114,19 @@ function TurnoverSummaryModal({
       ) : (
         <>
           {error && (
-            <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3">
+            <div
+              className="text-sm rounded-lg px-3 py-2 mb-3"
+              style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}
+            >
               {error}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="label text-primary-themed">Anything the PM should know? *</label>
+              <label htmlFor="turnover-summary-notes" className="label text-primary-themed">Anything the PM should know? *</label>
               <textarea
+                id="turnover-summary-notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={4}
@@ -1056,7 +1138,8 @@ function TurnoverSummaryModal({
             <button
               type="submit"
               disabled={submitting}
-              className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+              style={{ background: 'var(--accent-amber)', color: 'var(--text-inverse)' }}
             >
               {submitting
                 ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>

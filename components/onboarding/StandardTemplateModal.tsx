@@ -17,7 +17,7 @@ interface Props {
   onClose:    () => void
 }
 
-export function StandardTemplateModal({ propertyId, onComplete, onClose }: Props) {
+export function StandardTemplateModal({ propertyId, onComplete, onClose }: Readonly<Props>) {
   const supabase = createClient()
 
   const [items,       setItems]       = useState<MaintenanceScheduleTemplateItem[]>([])

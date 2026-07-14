@@ -5,6 +5,8 @@ import { createProperty } from '../actions'
 import Link from 'next/link'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { InlineAlert } from '@/components/ui/InlineAlert'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 
 const PROPERTY_TYPES = [
   { value: 'house',     label: 'House' },
@@ -21,15 +23,15 @@ export function NewPropertyForm() {
   return (
     <form action={action} className="space-y-6">
       {state?.error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+        <InlineAlert tone="error">
           {state.error}
-        </div>
+        </InlineAlert>
       )}
 
       {/* Name */}
       <div>
         <label htmlFor="name" className="label">
-          Property Name <span className="text-red-500">*</span>
+          Property Name <RequiredMark />
         </label>
         <Input
           id="name"

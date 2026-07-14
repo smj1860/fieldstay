@@ -15,7 +15,7 @@ import {
   markVendorAcknowledged,
   markWorkVerified,
 } from '@/app/(dashboard)/maintenance/work-order-actions'
-import { rateWorkOrderVendor }         from '@/app/(dashboard)/maintenance/actions'
+import { rateWorkOrderVendor, deleteWorkOrder } from '@/app/(dashboard)/maintenance/actions'
 import { dispatchWorkOrderToVendor }   from '@/app/actions/work-order-public'
 
 // ── Types ─────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ interface Props {
 // ── Display helpers ───────────────────────────────────────────
 
 const PRIORITY_STYLES: Record<PriorityLevel, { badge: string; label: string }> = {
-  urgent: { badge: 'bg-red-500/15 text-red-400 border border-red-500/30',   label: 'URGENT'  },
+  urgent: { badge: 'bg-[var(--accent-red-dim)] text-[var(--accent-red)] border border-[var(--accent-red)]', label: 'URGENT'  },
   high:   { badge: 'bg-orange-500/15 text-orange-400 border border-orange-500/30', label: 'HIGH'    },
   medium: { badge: 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30', label: 'MEDIUM'  },
   low:    { badge: 'bg-slate-500/15 text-slate-400 border border-slate-500/30',     label: 'LOW'     },
@@ -98,7 +98,7 @@ const PRIORITY_STYLES: Record<PriorityLevel, { badge: string; label: string }> =
 
 const STATUS_STYLES: Record<WoStatus, { dot: string; label: string }> = {
   pending:         { dot: 'bg-slate-400',   label: 'Pending'         },
-  quote_requested: { dot: 'bg-purple-400',  label: 'Quote Requested' },
+  quote_requested: { dot: 'bg-[var(--accent-purple)]', label: 'Quote Requested' },
   assigned:        { dot: 'bg-blue-400',    label: 'Assigned'        },
   in_progress:     { dot: 'bg-yellow-400',  label: 'In Progress'     },
   completed:       { dot: 'bg-emerald-400', label: 'Completed'       },
@@ -107,7 +107,7 @@ const STATUS_STYLES: Record<WoStatus, { dot: string; label: string }> = {
 
 const INVOICE_STATUS_STYLES: Record<'pending_payment' | 'paid' | 'cancelled', { badge: string; label: React.ReactNode }> = {
   paid:            { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30', label: <span className="inline-flex items-center gap-1"><Check className="w-3 h-3" /> Paid</span> },
-  pending_payment: { badge: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',       label: 'Pending Payment →' },
+  pending_payment: { badge: 'bg-[var(--accent-amber-dim)] text-[var(--accent-amber)] border border-[var(--accent-amber)]', label: 'Pending Payment →' },
   cancelled:       { badge: 'bg-slate-500/15 text-slate-400 border border-slate-500/30 line-through', label: 'Cancelled' },
 }
 
@@ -140,7 +140,7 @@ function fmtDate(iso: string | null) {
 
 // ── Component ─────────────────────────────────────────────────
 
-export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props) {
+export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Readonly<Props>) {
   const [isPending, startTransition] = useTransition()
   const [actionError, setActionError] = useState<string | null>(null)
   const [nteOverrideConfirmed, setNteOverrideConfirmed] = useState(false)
@@ -150,6 +150,9 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
   const [ratingPending, startRatingTransition] = useTransition()
   const [ratingError, setRatingError] = useState<string | null>(null)
   const [ratingSuccess, setRatingSuccess] = useState(false)
+
+  // Cancel work order modal state
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
 
   // Dispatch modal state
   const [showDispatch,    setShowDispatch]    = useState(false)
@@ -163,6 +166,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
   const canEdit  = userRole === 'admin' || userRole === 'manager'
   const priority = PRIORITY_STYLES[wo.priority]
   const status   = STATUS_STYLES[wo.status]
+  const canCancel = canEdit && wo.status !== 'completed' && wo.status !== 'cancelled'
 
   const lineItems      = wo.work_order_line_items ?? []
   const hasAccess      = !!(wo.properties.access_instructions || wo.access_notes)
@@ -187,6 +191,17 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
     startTransition(async () => {
       try { await markWorkVerified(wo.id) }
       catch (e) { setActionError(e instanceof Error ? e.message : 'Failed.') }
+    })
+  }
+
+  function handleCancel() {
+    setActionError(null)
+    startTransition(async () => {
+      try {
+        await deleteWorkOrder(wo.id)
+        setShowCancelConfirm(false)
+      }
+      catch (e) { setActionError(e instanceof Error ? e.message : 'Failed to cancel work order.') }
     })
   }
 
@@ -292,15 +307,29 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
               onClick={() => setShowDispatch(true)}
               className="print:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
               style={{
-                background: 'rgba(255,107,0,0.1)',
-                color:      '#FF6B00',
-                border:     '1px solid rgba(255,107,0,0.3)',
+                background: 'var(--accent-gold-dim)',
+                color:      'var(--accent-gold)',
+                border:     '1px solid var(--accent-gold)',
               }}
               title="Send work order to vendor"
             >
               <Send className="w-3.5 h-3.5" />
               Send to Vendor
             </button>
+          )}
+
+          {/* Cancel Work Order button */}
+          {canCancel && (
+            <Button
+              type="button"
+              variant="danger"
+              onClick={() => setShowCancelConfirm(true)}
+              disabled={isPending}
+              className="print:hidden text-xs py-1.5 px-3"
+              title="Cancel this work order"
+            >
+              Cancel Work Order
+            </Button>
           )}
 
           {/* Print button */}
@@ -531,24 +560,24 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
             <div
               className={cn(
                 'flex items-center gap-2 px-3 py-2 rounded-lg text-sm mt-2',
-                nteExceeded ? 'border border-red-200' : 'border border-green-200'
+                nteExceeded ? 'border border-[var(--accent-red)]' : 'border border-[var(--accent-green)]'
               )}
               style={{
-                background: nteExceeded ? 'rgba(220,38,38,0.07)' : 'rgba(16,185,129,0.07)',
+                background: nteExceeded ? 'var(--accent-red-dim)' : 'var(--accent-green-dim)',
               }}
             >
               {nteExceeded ? (
                 <>
-                  <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0" />
-                  <span className="font-medium text-red-700">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent-red)' }} />
+                  <span className="font-medium" style={{ color: 'var(--accent-red)' }}>
                     Exceeds NTE by{' '}
                     {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(nteOverage)}
                   </span>
                 </>
               ) : (
                 <>
-                  <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-                  <span className="text-green-700">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--accent-green)' }} />
+                  <span style={{ color: 'var(--accent-green)' }}>
                     Within NTE (
                     {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(wo.nte_amount! - lineItemsTotal)}{' '}
                     remaining)
@@ -589,9 +618,9 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
                   type="checkbox"
                   checked={nteOverrideConfirmed}
                   onChange={e => setNteOverrideConfirmed(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded text-red-600 focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
+                  className="mt-0.5 w-4 h-4 rounded text-[var(--accent-red)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-gold)]"
                 />
-                <span style={{ color: '#991b1b', fontWeight: 500 }}>
+                <span style={{ color: 'var(--accent-red)', fontWeight: 500 }}>
                   I authorize this work order to exceed the NTE amount and confirm the additional cost of{' '}
                   {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(nteOverage)}.
                 </span>
@@ -631,7 +660,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
             )}
 
             {actionError && (
-              <p className="text-xs text-red-400">{actionError}</p>
+              <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
             )}
           </div>
         </Section>
@@ -640,7 +669,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
         {(wo.work_order_photos ?? []).length > 0 && (
           <Section icon={<Camera className="w-4 h-4" />} title="Photos" mobileCollapse defaultOpen={false}>
             <div className="flex flex-wrap gap-2">
-              {wo.work_order_photos!.map(photo => {
+              {wo.work_order_photos!.map((photo, index) => {
                 const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/work-order-photos/${photo.storage_path}`
                 return (
                   <a
@@ -654,7 +683,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={url}
-                      alt="Work order photo"
+                      alt={`Work order photo ${index + 1} of ${wo.work_order_photos!.length}`}
                       className="w-full h-full object-cover"
                     />
                   </a>
@@ -731,6 +760,45 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
           </Section>
         )}
       </div>
+
+      {/* ── Cancel Confirmation Modal ─────────────────────────── */}
+      {showCancelConfirm && (
+        <Dialog
+          open
+          onClose={() => setShowCancelConfirm(false)}
+          title="Cancel this work order?"
+          maxWidthClassName="max-w-sm"
+        >
+          <div className="space-y-4">
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              This marks work order {wo.wo_number ?? ''} as cancelled and logs the change. This cannot be undone from here.
+            </p>
+            {actionError && (
+              <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
+            )}
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="danger"
+                onClick={handleCancel}
+                disabled={isPending}
+              >
+                {isPending
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : 'Yes, Cancel Work Order'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowCancelConfirm(false)}
+                disabled={isPending}
+              >
+                Never Mind
+              </Button>
+            </div>
+          </div>
+        </Dialog>
+      )}
 
       {/* ── Dispatch Modal ────────────────────────────────────── */}
       {showDispatch && (
@@ -814,9 +882,9 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
                   disabled={dispatching || !dispatchEmail.trim()}
                   className="w-full btn flex items-center justify-center gap-2 py-2.5 text-sm font-semibold"
                   style={{
-                    background: '#1A1A1A',
-                    color:      '#F0F0F0',
-                    border:     '2px solid #FF6B00',
+                    background: 'var(--bg-raised)',
+                    color:      'var(--text-primary)',
+                    border:     '2px solid var(--accent-gold)',
                     borderRadius: 12,
                     opacity: (dispatching || !dispatchEmail.trim()) ? 0.6 : 1,
                   }}
@@ -869,7 +937,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
                       style={{
                         background: copied ? 'rgba(16,185,129,0.15)' : 'var(--bg-raised)',
                         border:     '1px solid var(--border)',
-                        color:      copied ? '#34D399' : 'var(--text-muted)',
+                        color:      copied ? 'var(--accent-green)' : 'var(--text-muted)',
                       }}
                       title="Copy link"
                     >
@@ -896,6 +964,15 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Props
 
 // ── Section wrapper ───────────────────────────────────────────
 
+interface SectionProps {
+  icon:            React.ReactNode
+  title:           string
+  action?:         React.ReactNode
+  mobileCollapse?: boolean
+  defaultOpen?:    boolean
+  children:        React.ReactNode
+}
+
 function Section({
   icon,
   title,
@@ -903,14 +980,7 @@ function Section({
   mobileCollapse = false,
   defaultOpen = true,
   children,
-}: {
-  icon:            React.ReactNode
-  title:           string
-  action?:         React.ReactNode
-  mobileCollapse?: boolean
-  defaultOpen?:    boolean
-  children:        React.ReactNode
-}) {
+}: Readonly<SectionProps>) {
   const [open, setOpen] = useState(defaultOpen)
 
   const header = (
@@ -960,6 +1030,15 @@ function Section({
 
 // ── Sign-off row ──────────────────────────────────────────────
 
+interface SignOffRowProps {
+  label:       string
+  timestamp:   string | null
+  canAction:   boolean
+  isPending:   boolean
+  onAction:    () => void
+  actionLabel: string
+}
+
 function SignOffRow({
   label,
   timestamp,
@@ -967,14 +1046,7 @@ function SignOffRow({
   isPending,
   onAction,
   actionLabel,
-}: {
-  label:       string
-  timestamp:   string | null
-  canAction:   boolean
-  isPending:   boolean
-  onAction:    () => void
-  actionLabel: string
-}) {
+}: Readonly<SignOffRowProps>) {
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="flex items-center gap-2.5">

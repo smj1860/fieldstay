@@ -124,7 +124,7 @@ function StatusBadge({ status }: { status: string }) {
 export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: Props) {
   const [reviews, setReviews]           = useState<ReviewRow[]>(initialReviews)
   const [selected, setSelected]         = useState<ReviewRow | null>(null)
-  const [editedResponse, setEdited]     = useState('')
+  const [editedResponse, setEditedResponse]     = useState('')
   const [generating, setGenerating]     = useState(false)
   const [savingStatus, setSavingStatus] = useState<string | null>(null)
   const [postConfirm, setPostConfirm]   = useState(false)
@@ -157,7 +157,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
   const openPanel = (review: ReviewRow) => {
     setSelected(review)
-    setEdited(review.review_responses?.edited_response ?? review.review_responses?.generated_response ?? '')
+    setEditedResponse(review.review_responses?.edited_response ?? review.review_responses?.generated_response ?? '')
     setPostConfirm(false)
   }
 
@@ -191,7 +191,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
         response_status:  response.flags?.length > 0 ? 'draft' : 'ready',
         review_responses: response,
       }
-      setEdited(response.generated_response ?? '')
+      setEditedResponse(response.generated_response ?? '')
       updateReviewInList(updatedReview)
     } finally {
       setGenerating(false)
@@ -425,54 +425,25 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
 
       {/* Side panel */}
       {selected && (
-        <>
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 z-40"
-            style={{ background: 'rgba(0,0,0,0.4)' }}
-            role="button"
-            tabIndex={0}
-            aria-label="Close review panel"
-            onClick={closePanel}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closePanel() } }}
-          />
-
-          {/* Drawer */}
-          <aside
-            className="fixed right-0 top-0 h-full z-50 flex flex-col overflow-y-auto"
-            style={{
-              width:       'min(520px, 95vw)',
-              background:  'var(--bg-base)',
-              borderLeft:  '1px solid var(--border)',
-              boxShadow:   '-8px 0 40px rgba(0,0,0,0.25)',
-            }}
-          >
-            {/* Panel header */}
-            <div
-              className="flex items-center justify-between px-6 py-5 flex-shrink-0"
-              style={{ borderBottom: '1px solid var(--border)' }}
-            >
-              <div>
-                <h2 className="font-bold text-base" style={{ color: 'var(--text-primary)' }}>
-                  {selected.guest_name ?? 'Guest'} · <StarRating rating={selected.rating} />
-                </h2>
-                {selected.properties?.name && (
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    {selected.properties.name}
-                    {selected.review_date && ` · ${new Date(selected.review_date).toLocaleDateString()}`}
-                  </p>
-                )}
-              </div>
-              <button
-                onClick={closePanel}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-xl"
-                style={{ color: 'var(--text-muted)', background: 'var(--bg-raised)' }}
-              >
-                ×
-              </button>
+        <Dialog
+          open
+          onClose={closePanel}
+          title={selected.guest_name ?? 'Guest'}
+          maxWidthClassName="max-w-lg"
+          mobileSheet
+        >
+            {/* Panel header details — rating / property / date */}
+            <div className="flex items-center gap-1 mb-1">
+              <StarRating rating={selected.rating} />
             </div>
+            {selected.properties?.name && (
+              <p className="text-xs mb-4" style={{ color: 'var(--text-muted)' }}>
+                {selected.properties.name}
+                {selected.review_date && ` · ${new Date(selected.review_date).toLocaleDateString()}`}
+              </p>
+            )}
 
-            <div className="flex-1 px-6 py-5 space-y-5">
+            <div className="space-y-5">
               {/* Review text */}
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-muted)' }}>
@@ -532,7 +503,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                   </div>
                   <textarea
                     value={editedResponse}
-                    onChange={e => setEdited(e.target.value)}
+                    onChange={e => setEditedResponse(e.target.value)}
                     rows={8}
                     className="w-full rounded-xl text-sm p-4 outline-none resize-none"
                     style={{
@@ -653,8 +624,7 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
                 </div>
               )}
             </div>
-          </aside>
-        </>
+        </Dialog>
       )}
 
       {/* Manual review paste modal */}

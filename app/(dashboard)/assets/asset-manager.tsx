@@ -775,7 +775,7 @@ function PropertyAssetDetail({
           <Button onClick={() => setShowAdd(true)} className="text-xs px-3 py-1.5">
             <Plus className="w-3.5 h-3.5" /> Add Asset
           </Button>
-          <Button variant="ghost" onClick={onClose} className="p-2 ml-1">
+          <Button variant="ghost" onClick={onClose} className="p-2 ml-1" aria-label={`Close ${property.name} asset manager`}>
             <X className="w-4 h-4" />
           </Button>
         </div>
@@ -788,11 +788,11 @@ function PropertyAssetDetail({
             <div className="p-5">
               {assets.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-4">
-                  {goodCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(34,197,94,0.1)',  color: 'var(--accent-green)', border: '1px solid rgba(34,197,94,0.2)' }}><StatusDot status="good" label="Good" /> {goodCount} Good</span>}
-                  {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(250,189,0,0.1)',  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)' }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
-                  {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
-                  {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'rgba(240,84,84,0.1)',  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)' }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
-                  {endOfLifeCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: 'var(--border)', color: 'var(--text-muted)', border: '1px solid var(--border-strong)' }}><StatusDot status="offline" label="End of Life" /> {endOfLifeCount} End of Life</span>}
+                  {goodCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: healthBgStyle(80),  color: 'var(--accent-green)', border: '1px solid rgba(34,197,94,0.2)' }}><StatusDot status="good" label="Good" /> {goodCount} Good</span>}
+                  {fairCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: healthBgStyle(60),  color: 'var(--accent-gold)',  border: '1px solid rgba(250,189,0,0.2)' }}><StatusDot status="warning" label="Fair" /> {fairCount} Fair</span>}
+                  {agingCount    > 0 && <span className="badge flex items-center gap-1.5" style={{ background: healthBgStyle(40), color: 'var(--accent-amber)', border: '1px solid rgba(245,158,11,0.2)' }}><StatusDot status="attention" label="Aging" /> {agingCount} Aging</span>}
+                  {poorCount     > 0 && <span className="badge flex items-center gap-1.5" style={{ background: healthBgStyle(20),  color: 'var(--accent-red)',   border: '1px solid rgba(240,84,84,0.2)' }}><StatusDot status="critical" label="Poor" /> {poorCount} Poor</span>}
+                  {endOfLifeCount > 0 && <span className="badge flex items-center gap-1.5" style={{ background: healthBgStyle(0), color: 'var(--text-muted)', border: '1px solid var(--border-strong)' }}><StatusDot status="offline" label="End of Life" /> {endOfLifeCount} End of Life</span>}
                 </div>
               )}
 

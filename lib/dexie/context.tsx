@@ -518,10 +518,32 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     let channel: ReturnType<typeof supabase.channel> | null = null
     let checklistChannel: ReturnType<typeof supabase.channel> | null = null
     let assetsChannel: ReturnType<typeof supabase.channel> | null = null
+    let onlineHandler: (() => void) | null = null
     let subscribedTurnoverIds: string[] = []
     let subscribedAssetPropertyIds: string[] = []
     let checklistRefreshGeneration = 0
     let assetsRefreshGeneration = 0
+
+    // Realtime's postgres_changes subscriptions never replay events fired
+    // while the socket was disconnected — a crew member offline for a
+    // stretch (a reassignment, a co-crew-member's checklist completion)
+    // would otherwise leave Dexie silently stuck at pre-outage state until
+    // the next full page load re-ran run() from scratch. Reusing the exact
+    // same full-pull set as the initial mount on every reconnect closes
+    // that gap without needing a separate incremental "what did I miss"
+    // query.
+    async function fullResync(crewMemberId: string): Promise<void> {
+      await Promise.all([
+        syncAssignedTurnovers(crewMemberId, true),
+        syncWorkOrders(crewMemberId),
+        syncMessages(),
+        syncCrewAvailability(crewMemberId),
+      ])
+      if (cancelled) return
+
+      await refreshChecklistSubscription(crewMemberId)
+      await refreshAssetsSubscription()
+    }
 
     async function run() {
       const { data: crewMember } = await supabase
@@ -535,16 +557,8 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       setCrewMemberId(crewMember.id as string)
 
       // force=true: full pull on mount, bypasses any stale watermark
-      await Promise.all([
-        syncAssignedTurnovers(crewMember.id, true),
-        syncWorkOrders(crewMember.id),
-        syncMessages(),
-        syncCrewAvailability(crewMember.id),
-      ])
+      await fullResync(crewMember.id)
       if (cancelled) return
-
-      await refreshChecklistSubscription(crewMember.id)
-      await refreshAssetsSubscription()
 
       channel = supabase
         .channel(`turnover-assignments-${crewMember.id}`)
@@ -567,6 +581,14 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
           }
         )
         .subscribe()
+
+      onlineHandler = () => {
+        if (cancelled) return
+        void fullResync(crewMember.id).catch((err) =>
+          console.error('[DexieProvider] reconnect resync failed:', err)
+        )
+      }
+      window.addEventListener('online', onlineHandler)
     }
 
     run().catch((err) => console.error('[DexieProvider] sync failed:', err))
@@ -576,6 +598,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (channel) supabase.removeChannel(channel)
       if (checklistChannel) supabase.removeChannel(checklistChannel)
       if (assetsChannel) supabase.removeChannel(assetsChannel)
+      if (onlineHandler) window.removeEventListener('online', onlineHandler)
     }
   }, [userId])
 

@@ -5,6 +5,7 @@ import { addCrewMember, completeCrewStep } from './actions'
 import { Plus, CheckCircle2, PartyPopper } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 
 interface CrewMember {
   id: string; name: string; email: string | null
@@ -73,7 +74,7 @@ export function CrewSetup({
 
           <form action={formAction} className="space-y-4">
             <div>
-              <label htmlFor="crew-name" className="label">Name <span className="text-red-500">*</span></label>
+              <label htmlFor="crew-name" className="label">Name <RequiredMark /></label>
               <Input id="crew-name" name="name" type="text" required placeholder="Full name" />
             </div>
             <div className="grid grid-cols-2 gap-4">

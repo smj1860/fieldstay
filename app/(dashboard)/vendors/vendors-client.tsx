@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Button, buttonVariantClass } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { Vendor, VendorSpecialty } from '@/types/database'
 import {
   addVendor,
@@ -347,7 +348,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
       <form action={formAction} className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="vendor-name" className="label">Vendor Name <span className="text-red-400">*</span></label>
+            <label htmlFor="vendor-name" className="label">Vendor Name <RequiredMark /></label>
             <Input id="vendor-name" name="name" type="text" required placeholder="ABC Plumbing" />
           </div>
           <div>
@@ -358,7 +359,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="vendor-email" className="label">Email <span className="text-red-400">*</span></label>
+            <label htmlFor="vendor-email" className="label">Email <RequiredMark /></label>
             <Input id="vendor-email" name="email" type="email" required placeholder="info@abcplumbing.com" />
           </div>
           <div>
@@ -429,7 +430,7 @@ function AddVendorForm({ onSuccess }: { onSuccess: () => void }) {
 function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode]         = useState<'csv' | 'paste'>('csv')
   const [preview, setPreview]   = useState<ParsedVendor[] | null>(null)
-  const [pasteText, setPaste]   = useState('')
+  const [pasteText, setPasteText]   = useState('')
   const [fileName, setFileName] = useState('')
   const [importing, setImporting] = useState(false)
   const [result, setResult]     = useState<{ imported: number; skipped: number } | null>(null)
@@ -519,7 +520,7 @@ function BulkVendorUpload({ onSuccess }: { onSuccess: () => void }) {
           <p className="text-xs text-muted-themed mb-3">
             Paste text from your Word doc. One vendor per line with their name, email, and phone.
           </p>
-          <textarea value={pasteText} onChange={(e) => setPaste(e.target.value)}
+          <textarea value={pasteText} onChange={(e) => setPasteText(e.target.value)}
                     className="input text-xs font-mono h-32 resize-y mb-2"
                     placeholder={"ABC Plumbing, John Smith, 555-0101, john@abcplumbing.com\n..."} />
           <Button variant="secondary" onClick={handleParsePaste} disabled={!pasteText.trim()} className="text-sm">Parse Text</Button>
@@ -804,7 +805,7 @@ function VendorRow({ vendor, onSelect }: { vendor: VendorWithStats; onSelect?: (
           >
             Details
           </Link>
-          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor">
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor" aria-label={`Deactivate ${vendor.name}`}>
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
           </Button>
         </div>
@@ -872,7 +873,7 @@ function VendorCard({ vendor, onSelect }: { vendor: VendorWithStats; onSelect?: 
           >
             Details
           </Link>
-          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor">
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor" aria-label={`Deactivate ${vendor.name}`}>
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
           </Button>
         </div>

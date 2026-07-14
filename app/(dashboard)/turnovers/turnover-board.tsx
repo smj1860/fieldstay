@@ -145,15 +145,17 @@ function groupTurnovers(turnovers: Turnover[]) {
   return groups
 }
 
-function statusBadge(status: string) {
-  const map: Record<string, string> = {
-    pending_assignment: 'badge badge-amber',
-    assigned:           'badge badge-blue',
-    in_progress:        'badge bg-purple-50 text-purple-700',
-    completed:          'badge badge-green',
-    flagged:            'badge badge-red',
+type BadgeTone = 'amber' | 'blue' | 'purple' | 'green' | 'red' | 'slate'
+
+function statusBadge(status: string): BadgeTone {
+  const map: Record<string, BadgeTone> = {
+    pending_assignment: 'amber',
+    assigned:           'blue',
+    in_progress:        'purple',
+    completed:          'green',
+    flagged:            'red',
   }
-  return map[status] ?? 'badge badge-slate'
+  return map[status] ?? 'slate'
 }
 
 // ── Crew Assignment (chip-based) ─────────────────────────────────────────────
@@ -434,15 +436,17 @@ function TurnoverCard({
             {turnover.status === 'pending_assignment' ? (
               <button
                 onClick={(e) => { e.stopPropagation(); setAssignOpen(true) }}
-                className={cn(statusBadge(turnover.status), 'cursor-pointer hover:brightness-95')}
+                className="cursor-pointer hover:brightness-95"
                 title="Click to assign crew"
               >
-                {TURNOVER_STATUS_LABELS.pending_assignment}
+                <Badge tone={statusBadge(turnover.status)}>
+                  {TURNOVER_STATUS_LABELS.pending_assignment}
+                </Badge>
               </button>
             ) : (
-              <span className={statusBadge(turnover.status)}>
+              <Badge tone={statusBadge(turnover.status)}>
                 {TURNOVER_STATUS_LABELS[turnover.status as keyof typeof TURNOVER_STATUS_LABELS] ?? turnover.status}
-              </span>
+              </Badge>
             )}
             {isOverdue && (
               <Badge tone="red" className="flex items-center gap-1">
@@ -1145,7 +1149,10 @@ export function TurnoverBoard({
         </div>
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => startSync(() => triggerManualSync())}
+            onClick={() => startSync(async () => {
+              const result = await triggerManualSync()
+              if (!result.success) setAssignmentWarning(result.error ?? 'Could not start the calendar sync.')
+            })}
             disabled={syncing}
             variant="secondary"
             title="Sync calendars now"

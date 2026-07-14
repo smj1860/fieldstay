@@ -609,6 +609,7 @@ export function PropertyMaintenanceManager({
                   disabled={removing && removingId === s.id}
                   className="p-1.5 text-muted-themed hover:text-red-500"
                   title="Remove"
+                  aria-label={`Remove ${s.name}`}
                 >
                   {removing && removingId === s.id
                     ? <Loader2 className="w-3.5 h-3.5 animate-spin" />

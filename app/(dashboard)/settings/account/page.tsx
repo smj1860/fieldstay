@@ -4,6 +4,8 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
+import { Button } from '@/components/ui/Button'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 
 export default function AccountSettingsPage() {
   const router = useRouter()
@@ -36,18 +38,15 @@ export default function AccountSettingsPage() {
       <p className="text-sm text-muted-themed mb-10">Manage your account settings.</p>
 
       {/* Danger Zone */}
-      <div className="border border-red-200 rounded-xl p-6">
-        <h2 className="text-base font-semibold text-red-700 mb-1">Danger Zone</h2>
-        <p className="text-sm text-gray-600 mb-4">
+      <div className="rounded-xl p-6" style={{ border: '1px solid var(--accent-red)' }}>
+        <h2 className="text-base font-semibold mb-1" style={{ color: 'var(--accent-red)' }}>Danger Zone</h2>
+        <p className="text-sm text-muted-themed mb-4">
           Permanently delete your account and all associated data. This action cannot be undone.
           If you are the organization owner, all team members must be removed first.
         </p>
-        <button
-          onClick={() => setShowModal(true)}
-          className="bg-red-600 text-white text-sm font-medium rounded-lg px-4 py-2 hover:bg-red-700 transition-colors"
-        >
+        <Button variant="danger" onClick={() => setShowModal(true)}>
           Delete My Account
-        </button>
+        </Button>
       </div>
 
       <Dialog
@@ -56,15 +55,15 @@ export default function AccountSettingsPage() {
         title="Delete Account"
         maxWidthClassName="max-w-md"
       >
-        <p className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-muted-themed mb-4">
           This will permanently delete your account, cancel any active subscriptions, revoke all
           integration tokens, and erase all your data. Type <strong>DELETE</strong> to confirm.
         </p>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
+          <InlineAlert tone="error" className="mb-4">
             {error}
-          </div>
+          </InlineAlert>
         )}
 
         <Input
@@ -77,19 +76,21 @@ export default function AccountSettingsPage() {
         />
 
         <div className="flex gap-3">
-          <button
+          <Button
+            variant="danger"
             onClick={handleDelete}
             disabled={confirm !== 'DELETE' || pending}
-            className="flex-1 bg-red-600 text-white text-sm font-medium rounded-lg px-4 py-2 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex-1"
           >
             {pending ? 'Deleting…' : 'Permanently Delete Account'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => { setShowModal(false); setConfirm(''); setError(null) }}
-            className="flex-1 border border-gray-200 text-gray-700 text-sm font-medium rounded-lg px-4 py-2 hover:bg-gray-50 transition-colors"
+            className="flex-1"
           >
             Cancel
-          </button>
+          </Button>
         </div>
       </Dialog>
     </div>

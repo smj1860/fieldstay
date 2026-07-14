@@ -103,7 +103,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
           <span className={cn('badge text-sm px-3 py-1',
             turnover.status === 'completed'          ? 'badge-green' :
             turnover.status === 'flagged'            ? 'badge-red' :
-            turnover.status === 'in_progress'        ? 'bg-purple-50 text-purple-700' :
+            turnover.status === 'in_progress'        ? 'badge-purple' :
             turnover.status === 'assigned'           ? 'badge-blue' : 'badge-amber'
           )}>
             {TURNOVER_STATUS_LABELS[turnover.status as keyof typeof TURNOVER_STATUS_LABELS] ?? turnover.status}

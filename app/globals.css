@@ -44,6 +44,8 @@
   --accent-amber-dim:  rgba(245, 158, 11, 0.12);
   --accent-blue:       #4da6ff;
   --accent-blue-dim:   rgba(77, 166, 255, 0.10);
+  --accent-purple:      #a78bfa;
+  --accent-purple-dim:  rgba(167, 139, 250, 0.12);
 
   --shadow-card: 0 1px 4px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.25);
   --shadow-lg:   0 8px 32px rgba(0,0,0,0.5);
@@ -116,6 +118,8 @@
   --accent-amber-dim:  rgba(217, 119, 6, 0.12);
   --accent-blue:       #1d6fa4;
   --accent-blue-dim:   rgba(29, 111, 164, 0.12);
+  --accent-purple:      #7c3aed;
+  --accent-purple-dim:  rgba(124, 58, 237, 0.12);
 
   --shadow-card: 0 1px 4px rgba(10,22,40,0.10), 0 4px 16px rgba(10,22,40,0.08);
   --shadow-lg:   0 8px 32px rgba(10,22,40,0.18);
@@ -320,6 +324,7 @@
   .badge-red    { background: var(--accent-red-dim);   color: var(--accent-red);   }
   .badge-blue   { background: var(--accent-blue-dim);  color: var(--accent-blue);  }
   .badge-gold   { background: var(--accent-gold-dim);  color: var(--accent-gold);  }
+  .badge-purple { background: var(--accent-purple-dim); color: var(--accent-purple); }
   .badge-slate  {
     background: var(--border);
     color:      var(--text-secondary);

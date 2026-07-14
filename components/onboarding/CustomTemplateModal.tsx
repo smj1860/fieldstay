@@ -28,7 +28,7 @@ interface Props {
   onClose:    () => void
 }
 
-export function CustomTemplateModal({ propertyId, onComplete, onClose }: Props) {
+export function CustomTemplateModal({ propertyId, onComplete, onClose }: Readonly<Props>) {
   const [step,     setStep]     = useState<1 | 2>(1)
   const [catalog,  setCatalog]  = useState<MaintenanceCatalogItem[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())

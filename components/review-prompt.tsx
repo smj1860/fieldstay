@@ -12,7 +12,7 @@ interface ReviewPromptProps {
   message:   string
 }
 
-export function ReviewPrompt({ milestone, message }: ReviewPromptProps) {
+export function ReviewPrompt({ milestone, message }: Readonly<ReviewPromptProps>) {
   const [hidden, setHidden] = useState(false)
 
   if (hidden) return null

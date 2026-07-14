@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
+import { RequiredMark } from '@/components/ui/RequiredMark'
 import {
   addCrewMember,
   updateCrewMember,
@@ -490,7 +491,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
       <form action={formAction} className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="crew-name" className="label">Name <span className="text-red-400">*</span></label>
+            <label htmlFor="crew-name" className="label">Name <RequiredMark /></label>
             <Input id="crew-name" name="name" type="text" required placeholder="Alex Johnson" />
           </div>
           <div>
@@ -516,7 +517,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label htmlFor="crew-email" className="label">Email <span className="text-red-400">*</span></label>
+            <label htmlFor="crew-email" className="label">Email <RequiredMark /></label>
             <Input id="crew-email" name="email" type="email" required placeholder="alex@example.com" />
           </div>
           <div>
@@ -552,7 +553,7 @@ function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
 function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
   const [mode, setMode]         = useState<'csv' | 'paste'>('csv')
   const [preview, setPreview]   = useState<ParsedRow[] | null>(null)
-  const [pasteText, setPaste]   = useState('')
+  const [pasteText, setPasteText]   = useState('')
   const [fileName, setFileName] = useState('')
   const [importing, setImporting] = useState(false)
   const [result, setResult]     = useState<{ imported: number; skipped: number } | null>(null)
@@ -679,7 +680,7 @@ function BulkCrewUpload({ onSuccess }: { onSuccess: () => void }) {
           </p>
           <textarea
             value={pasteText}
-            onChange={(e) => setPaste(e.target.value)}
+            onChange={(e) => setPasteText(e.target.value)}
             className="input text-xs font-mono h-32 resize-y mb-2"
             placeholder={"Alex Johnson, alex@example.com, 555-0101\nSarah Lee, 555-0102, sarah@example.com\n..."}
           />
@@ -831,10 +832,10 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         <td className="py-2 pr-4" />
         <td className="py-2 text-right">
           <div className="flex items-center justify-end gap-1">
-            <Button onClick={handleSave} disabled={saving} className="py-1 px-2 text-xs" title="Save">
+            <Button onClick={handleSave} disabled={saving} className="py-1 px-2 text-xs" title="Save" aria-label={`Save ${member.name}`}>
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
             </Button>
-            <Button variant="ghost" onClick={() => setEditing(false)} className="py-1 px-2 text-xs" title="Cancel">
+            <Button variant="ghost" onClick={() => setEditing(false)} className="py-1 px-2 text-xs" title="Cancel" aria-label={`Cancel editing ${member.name}`}>
               <X className="w-3.5 h-3.5" />
             </Button>
           </div>
@@ -892,10 +893,10 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
       </td>
       <td className="py-2.5 text-right">
         <div className="flex items-center justify-end gap-1">
-          <Button variant="ghost" onClick={() => setEditing(true)} className="py-1 px-2 text-xs" title="Edit">
+          <Button variant="ghost" onClick={() => setEditing(true)} className="py-1 px-2 text-xs" title="Edit" aria-label={`Edit ${member.name}`}>
             <Pencil className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate">
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate" aria-label={`Deactivate ${member.name}`}>
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
           </Button>
         </div>

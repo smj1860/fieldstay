@@ -44,9 +44,9 @@ const LINE_TYPE_LABELS: Record<LineItemType, string> = {
 }
 
 const LINE_TYPE_COLORS: Record<LineItemType, string> = {
-  labor:         'text-blue-400  bg-blue-400/10',
+  labor:         'text-[var(--accent-blue)] bg-[var(--accent-blue-dim)]',
   material:      'text-emerald-400 bg-emerald-400/10',
-  equipment:     'text-purple-400 bg-purple-400/10',
+  equipment:     'text-[var(--accent-purple)] bg-[var(--accent-purple-dim)]',
   subcontractor: 'text-orange-400 bg-orange-400/10',
   other:         'text-slate-400  bg-slate-400/10',
 }
@@ -70,7 +70,7 @@ const BLANK = {
 
 // ── Component ─────────────────────────────────────────────────
 
-export function LineItemsEditor({ workOrderId, items, canEdit }: Props) {
+export function LineItemsEditor({ workOrderId, items, canEdit }: Readonly<Props>) {
   const [adding, setAdding]     = useState(false)
   const [form, setForm]         = useState(BLANK)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -190,12 +190,12 @@ export function LineItemsEditor({ workOrderId, items, canEdit }: Props) {
                         onClick={() => handleDelete(item.id)}
                         disabled={deletingId === item.id || isPending}
                         className="opacity-0 group-hover:opacity-100 transition-opacity
-                                   p-1 rounded hover:bg-red-500/10"
+                                   p-1 rounded hover:bg-[var(--accent-red-dim)]"
                         aria-label="Remove line item"
                       >
                         {deletingId === item.id
-                          ? <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
-                          : <Trash2  className="w-3.5 h-3.5 text-red-400" />}
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--accent-red)]" />
+                          : <Trash2  className="w-3.5 h-3.5 text-[var(--accent-red)]" />}
                       </button>
                     </td>
                   )}
