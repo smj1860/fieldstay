@@ -222,7 +222,11 @@ export const syncIcalFeed = inngest.createFunction(
           // only status was set here, leaving is_block permanently false
           // for every iCal-sourced block.
           is_block:      event.status === 'blocked',
-          raw_ical_data: { summary: event.guestName, uid: event.uid },
+          // raw_ical_data intentionally left unset here — event.guestName and
+          // event.uid are already persisted as guest_name/ical_uid above.
+          // Duplicating guest-identifying data into a second column would
+          // give it a second, easy-to-forget retention surface with no
+          // benefit (nothing reads raw_ical_data).
         }))
 
         type UpsertedRow = { id: string; ical_uid: string; status: string }

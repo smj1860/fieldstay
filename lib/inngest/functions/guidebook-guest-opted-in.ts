@@ -15,7 +15,7 @@ export const guidebookGuestOptedIn = inngest.createFunction(
         const supabase = createServiceClient()
         const { data, error } = await supabase
           .from('properties')
-          .select('id, name, door_code, org_id')
+          .select('id, name, door_code_secret_id, org_id')
           .eq('id', propertyId)
           .single()
         if (error) throw new Error(`Failed to fetch property: ${error.message}`)
@@ -36,7 +36,18 @@ export const guidebookGuestOptedIn = inngest.createFunction(
     await step.run('send-door-code-sms', async () => {
       const supabase = createServiceClient()
 
-      if (!property.door_code) return { skipped: 'no_door_code' }
+      if (!property.door_code_secret_id) return { skipped: 'no_door_code' }
+
+      // Decrypted just-in-time, inside this step, and never returned from
+      // it — step return values are persisted as Inngest execution history,
+      // so the plaintext code must not end up in that record (same reasoning
+      // as not returning the guest's phone number from this step).
+      const { data: doorCode, error: decryptError } = await supabase.rpc('read_property_door_code', {
+        p_property_id: property.id,
+        p_org_id:      property.org_id,
+      })
+      if (decryptError) throw new Error(`Failed to decrypt door code: ${decryptError.message}`)
+      if (!doorCode) return { skipped: 'no_door_code' }
 
       // ── Atomic claim — wins the race, prevents double-send on retry ───────────
       // UPDATE only succeeds if door_code_sent_at IS NULL.
@@ -62,7 +73,7 @@ export const guidebookGuestOptedIn = inngest.createFunction(
 
       const body = await renderSmsBody(property.org_id, 'door_code', {
         property_name: property.name,
-        door_code:     property.door_code,
+        door_code:     doorCode,
         portal_url:    portalUrl,
       })
       const result = await sendSMS(phoneE164, body)
@@ -77,9 +88,9 @@ export const guidebookGuestOptedIn = inngest.createFunction(
         throw new Error(`SMS send failed: ${result.reason ?? 'unknown'}`)
       }
 
-      return { sent: true, phone: phoneE164 }
+      return { sent: true }
     })
 
-    return { optinId, sentDoorCode: Boolean(property.door_code) }
+    return { optinId, sentDoorCode: Boolean(property.door_code_secret_id) }
   }
 )
