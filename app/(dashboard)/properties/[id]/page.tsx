@@ -10,6 +10,7 @@ import type { InvoiceHistoryRow } from '@/components/work-orders/vendor-invoice-
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { buttonVariantClass } from '@/components/ui/Button'
+import { DoorCodeReveal } from './door-code-reveal'
 import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/database'
 import type { Metadata } from 'next'
 
@@ -210,7 +211,14 @@ export default async function PropertyDetailPage({ params }: Props) {
           <DetailRow label="Check-in"  value={property.checkin_time} />
           <DetailRow label="Check-out" value={property.checkout_time} />
           {property.wifi_name  && <DetailRow label="Wi-Fi" value={`${property.wifi_name} / ${property.wifi_password}`} />}
-          {property.door_code  && <DetailRow label="Door Code" value={property.door_code} />}
+          {property.door_code_secret_id && (
+            <>
+              <span className="text-muted-themed">Door Code</span>
+              <span className="text-secondary-themed font-medium">
+                <DoorCodeReveal propertyId={property.id} />
+              </span>
+            </>
+          )}
           {property.cleaning_cost !== null && (
             <DetailRow label="Cleaning Fee" value={`$${property.cleaning_cost.toFixed(2)}`} />
           )}

@@ -74,7 +74,6 @@ export async function createProperty(
       checkout_time,
       wifi_name,
       wifi_password,
-      door_code,
       internal_notes,
       avg_nightly_rate,
       setup_steps_completed: { details: true },
@@ -85,6 +84,14 @@ export async function createProperty(
   if (error) {
     console.error('[createProperty]', error)
     return { error: 'Operation failed. Please try again.' }
+  }
+
+  if (door_code) {
+    await supabase.rpc('store_property_door_code', {
+      p_property_id: property.id,
+      p_org_id:      membership.org_id,
+      p_door_code:   door_code,
+    })
   }
 
   if (zip) {
@@ -155,7 +162,7 @@ export async function updateProperty(
       state: state || null, zip: zip || null,
       property_type, bedrooms, bathrooms, max_guests,
       checkin_time, checkout_time, wifi_name,
-      wifi_password, door_code, internal_notes,
+      wifi_password, internal_notes,
     })
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
@@ -164,6 +171,12 @@ export async function updateProperty(
     console.error('[updateProperty]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  await supabase.rpc('store_property_door_code', {
+    p_property_id: propertyId,
+    p_org_id:      membership.org_id,
+    p_door_code:   door_code,
+  })
 
   if (zip && zip !== (existing?.zip ?? '')) {
     const coords = await geocodeZip(zip)
@@ -184,6 +197,50 @@ export async function updateProperty(
 
   revalidatePath(`/properties/${propertyId}`)
   return { success: true }
+}
+
+// ── Door code reveal ───────────────────────────────────────────
+
+/**
+ * Decrypts and returns a property's door code on demand for the read-only
+ * property detail view, which otherwise renders it masked. Audit-logs every
+ * reveal so there's a record of who viewed a physical-access credential
+ * and when.
+ */
+export async function revealPropertyDoorCode(
+  propertyId: string
+): Promise<{ doorCode: string | null } | { error: string }> {
+  const { user, supabase, membership } = await requireOrgMember()
+
+  const { data: property } = await supabase
+    .from('properties')
+    .select('id, door_code_secret_id')
+    .eq('id', propertyId)
+    .eq('org_id', membership.org_id)
+    .single()
+
+  if (!property) return { error: 'Property not found' }
+  if (!property.door_code_secret_id) return { doorCode: null }
+
+  const { data: doorCode, error } = await supabase.rpc('read_property_door_code', {
+    p_property_id: propertyId,
+    p_org_id:      membership.org_id,
+  })
+
+  if (error) {
+    console.error('[revealPropertyDoorCode]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'property.door_code.viewed',
+    targetType: 'property',
+    targetId:   propertyId,
+  })
+
+  return { doorCode: (doorCode as string | null) ?? null }
 }
 
 // ── Mark step complete ────────────────────────────────────────

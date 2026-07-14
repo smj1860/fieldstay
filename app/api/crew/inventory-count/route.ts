@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvents } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await requireCrewMember()
+  if (!auth.ok) return auth.response
+  const { user, supabase, crew } = auth
 
   const { propertyId, counts, notes, itemNotes, submitAsDraft } = await request.json() as {
     propertyId: string
@@ -15,14 +15,6 @@ export async function POST(request: NextRequest) {
     itemNotes?: Record<string, string>
     submitAsDraft?: boolean
   }
-
-  const { data: crew } = await supabase
-    .from('crew_members')
-    .select('id, org_id')
-    .eq('user_id', user.id)
-    .single()
-
-  if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 403 })
 
   // Verify the property belongs to this crew member's org — never trust a client-supplied propertyId
   const { data: property } = await supabase

@@ -107,6 +107,7 @@ export interface Organization {
   auto_assign_mode:             AutoAssignMode
   vendor_auto_assign_mode:      VendorAutoAssignMode
   comms_log_retention_days:     number
+  guest_pii_retention_days:     number
   slack_webhook_url:            string | null
   repuguard_status:             'inactive' | 'trial' | 'active' | 'cancelled'
   repuguard_trial_start:        string | null
@@ -146,7 +147,7 @@ export interface Property {
   avg_turnovers_per_month: number
   wifi_name:               string | null
   wifi_password:           string | null
-  door_code:               string | null
+  door_code_secret_id:     string | null
   checkout_time:           string
   checkin_time:            string
   timezone:                string
@@ -237,6 +238,8 @@ export interface Booking {
   guidebook_token:      string | null
   guidebook_pre_arrival_email_sent_at: string | null
   actual_total_amount:  number | null
+  door_code_secret_id:  string | null
+  guest_pii_anonymized_at: string | null
   created_at:           string
   updated_at:           string
 }

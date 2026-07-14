@@ -128,6 +128,9 @@ export type AuditAction =
   | 'billing.repuguard_subscription.updated'
   | 'billing.plan_credit.applied'
   | 'work_order.invoice.checkout_started'
+  | 'booking.guest_pii_anonymized'
+  | 'sms.optin_phone_anonymized'
+  | 'property.door_code.viewed'
 
 interface AuditParams {
   orgId?:         string

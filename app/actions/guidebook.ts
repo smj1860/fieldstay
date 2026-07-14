@@ -2,7 +2,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
@@ -104,7 +104,7 @@ export interface UpsertSponsorInput {
 export async function upsertSponsor(
   input: UpsertSponsorInput
 ): Promise<{ mediaKitToken: string } | { error: string }> {
-  const { user, membership } = await requireOrgMember()
+  const { user, membership } = await requireOrgRole(['admin', 'manager'])
   const supabase        = createServiceClient()
 
   if (input.slotNumber < 1 || input.slotNumber > 6) {
@@ -169,7 +169,7 @@ export interface UpsertPropertyGuidebookConfigInput {
 export async function upsertPropertyGuidebookConfig(
   input: UpsertPropertyGuidebookConfigInput
 ): Promise<{ error?: string }> {
-  const { user, membership } = await requireOrgMember()
+  const { user, membership } = await requireOrgRole(['admin', 'manager'])
   const supabase        = createServiceClient()
 
   const { data: property } = await supabase
@@ -229,7 +229,7 @@ export interface UpdateStayExtensionSettingsInput {
 export async function updateStayExtensionSettings(
   input: UpdateStayExtensionSettingsInput
 ): Promise<{ error?: string }> {
-  const { user, membership } = await requireOrgMember()
+  const { user, membership } = await requireOrgRole(['admin', 'manager'])
   const supabase        = createServiceClient()
 
   if (input.discountPct !== null && (input.discountPct < 0 || input.discountPct > 100)) {

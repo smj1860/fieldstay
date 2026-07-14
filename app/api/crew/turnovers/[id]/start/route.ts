@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 
@@ -16,18 +16,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: turnover_id } = await params
-  const supabase = await createClient()
-
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-
-  const { data: crew } = await supabase
-    .from('crew_members')
-    .select('id, org_id')
-    .eq('user_id', user.id)
-    .single()
-
-  if (!crew) return NextResponse.json({ error: 'Crew member not found' }, { status: 403 })
+  const auth = await requireCrewMember()
+  if (!auth.ok) return auth.response
+  const { user, supabase, crew } = auth
 
   const { data: turnover } = await supabase
     .from('turnovers')

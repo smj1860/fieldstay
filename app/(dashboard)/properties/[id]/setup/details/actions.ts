@@ -48,7 +48,7 @@ export async function saveDetails(
 
   const { data: existing } = await supabase
     .from('properties')
-    .select('wifi_password, door_code, internal_notes')
+    .select('wifi_password, door_code_secret_id, internal_notes')
     .eq('id', propertyId)
     .eq('org_id', membership.org_id)
     .single()
@@ -58,7 +58,7 @@ export async function saveDetails(
     .update({
       name, address, city, state, zip, property_type,
       bedrooms, bathrooms, max_guests, checkin_time,
-      checkout_time, wifi_name, wifi_password, door_code, internal_notes,
+      checkout_time, wifi_name, wifi_password, internal_notes,
       avg_nightly_rate, cleaning_cost, same_day_premium_pct, square_footage,
       cleaning_cost_visible_to_owner,
     })
@@ -69,6 +69,12 @@ export async function saveDetails(
     console.error('[saveDetails]', error)
     return { error: 'Operation failed. Please try again.' }
   }
+
+  await supabase.rpc('store_property_door_code', {
+    p_property_id: propertyId,
+    p_org_id:      membership.org_id,
+    p_door_code:   door_code,
+  })
 
   // Simplification: logs on every details save (not just when rates actually
   // changed) — fetching before/after values would require an extra query.
@@ -88,11 +94,14 @@ export async function saveDetails(
 
   // Guest access fields (wifi_password/door_code/internal_notes) are
   // secrets — never put their values in audit metadata, just record that
-  // a change happened.
+  // a change happened. door_code is now Vault-encrypted (no plaintext
+  // column to diff against), so treat any submitted/cleared door code as
+  // a reportable change rather than comparing decrypted values.
   const guestAccessChanged =
     wifi_password    !== (existing?.wifi_password    ?? null) ||
-    door_code        !== (existing?.door_code        ?? null) ||
-    internal_notes   !== (existing?.internal_notes   ?? null)
+    internal_notes   !== (existing?.internal_notes   ?? null) ||
+    Boolean(door_code) ||
+    (door_code === null && Boolean(existing?.door_code_secret_id))
 
   if (guestAccessChanged) {
     await logAuditEvent({

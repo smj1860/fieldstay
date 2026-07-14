@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { requireOrgMember } from '@/lib/auth'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import type { InventoryCategory } from '@/types/database'
@@ -488,7 +488,7 @@ export async function bulkAddTemplateItemsFromCSV(
 // ── Count approval actions ────────────────────────────────────────────────────
 
 export async function approveInventoryCount(draftId: string): Promise<{ error?: string }> {
-  const { supabase, user } = await requireOrgMember()
+  const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: draftItems } = await supabase
     .from('inventory_count_draft_items')
@@ -517,22 +517,38 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
     )
   )
 
-  await supabase
+  const { data: approved, error: approveError } = await supabase
     .from('inventory_count_drafts')
     .update({ status: 'approved', reviewed_at: new Date().toISOString(), reviewed_by: user.id })
     .eq('id', draftId)
+    .eq('org_id', membership.org_id)
+    .select('id')
+    .maybeSingle()
+
+  if (approveError || !approved) {
+    console.error('[approveInventoryCount]', approveError)
+    return { error: 'Draft not found' }
+  }
 
   revalidatePath('/inventory')
   return {}
 }
 
 export async function rejectInventoryCount(draftId: string): Promise<{ error?: string }> {
-  const { supabase, user } = await requireOrgMember()
+  const { supabase, user, membership } = await requireOrgRole(['admin', 'manager'])
 
-  await supabase
+  const { data: rejected, error } = await supabase
     .from('inventory_count_drafts')
     .update({ status: 'rejected', reviewed_at: new Date().toISOString(), reviewed_by: user.id })
     .eq('id', draftId)
+    .eq('org_id', membership.org_id)
+    .select('id')
+    .maybeSingle()
+
+  if (error || !rejected) {
+    console.error('[rejectInventoryCount]', error)
+    return { error: 'Draft not found' }
+  }
 
   revalidatePath('/inventory')
   return {}
@@ -590,7 +606,7 @@ export async function updatePurchaseOrderStatus(
   purchaseOrderId: string,
   status: 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 ): Promise<{ error?: string }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: po } = await supabase
     .from('purchase_orders')
@@ -605,13 +621,15 @@ export async function updatePurchaseOrderStatus(
   const statusUpdate: Record<string, unknown> = { status }
   if (status === 'sent') statusUpdate.sent_at = new Date().toISOString()
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from('purchase_orders')
     .update(statusUpdate)
     .eq('id', purchaseOrderId)
     .eq('org_id', membership.org_id)
+    .select('id')
+    .maybeSingle()
 
-  if (error) {
+  if (error || !updated) {
     console.error('[updatePurchaseOrderStatus]', error)
     return { error: 'Operation failed. Please try again.' }
   }

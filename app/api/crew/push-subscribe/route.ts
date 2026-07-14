@@ -1,18 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient }              from '@/lib/supabase/server'
+import { requireCrewMember } from '@/lib/crew-auth'
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { data: crew } = await supabase
-    .from('crew_members')
-    .select('id, org_id')
-    .eq('user_id', user.id)
-    .single()
-
-  if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 403 })
+  const auth = await requireCrewMember()
+  if (!auth.ok) return auth.response
+  const { supabase, crew } = auth
 
   const body = await request.json().catch(() => null)
   if (!body?.endpoint || !body?.p256dh || !body?.auth) {

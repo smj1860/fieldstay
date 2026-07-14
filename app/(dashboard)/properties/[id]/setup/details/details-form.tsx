@@ -18,7 +18,10 @@ const PROPERTY_TYPES = [
   { value: 'townhouse', label: 'Townhouse' }, { value: 'other', label: 'Other' },
 ]
 
-export function DetailsForm({ property }: Readonly<{ property: Property }>) {
+export function DetailsForm({
+  property,
+  doorCode,
+}: Readonly<{ property: Property; doorCode: string | null }>) {
   const action = saveDetails.bind(null, property.id)
   const [state, formAction, pending] = useActionState(action, null)
 
@@ -120,7 +123,7 @@ export function DetailsForm({ property }: Readonly<{ property: Property }>) {
 
       <div>
         <label htmlFor="door_code" className="label">Door Code / Lockbox</label>
-        <Input id="door_code" name="door_code" type="text" defaultValue={property.door_code ?? ''} />
+        <Input id="door_code" name="door_code" type="text" defaultValue={doorCode ?? ''} />
       </div>
 
       <div>
