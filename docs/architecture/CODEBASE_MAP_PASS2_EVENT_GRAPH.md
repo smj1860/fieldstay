@@ -26,11 +26,29 @@ OwnerRez/Hospitable/Hostaway/iCal sync functions (see §6)
                                                 crew/assignment-gap
                                                   └─ notify-assignment-gap.ts
                                                      → PM email (renderPmAlert)
+                                             └─ writes assignment_outcomes
+                                                (was_suggestion, suggested_score,
+                                                score_breakdown) for the learning
+                                                loop below
 
-turnovers/actions.ts (PM assigns crew manually)
+turnovers/actions.ts (PM assigns crew manually — accepts or overrides the
+suggestion, or a plain manual assign with no suggestion involved)
   └─ emits turnover/crew-assigned ────────► crew-assignment.ts
                                              └─ writes turnover_assignments,
                                                 notifies crew (push/SMS)
+     also writes/updates assignment_outcomes (was_accepted, override_reason,
+     suggestion_status: accepted/overridden) via trackAssignmentAgainstSuggestions()
+
+turnovers/[id]/turnover-rating.tsx (PM submits 1–5 star post-completion rating)
+  └─ rateTurnoverCompletion() writes assignment_outcomes.pm_rating directly
+     (no event — a same-request DB write, not part of the async graph)
+
+cron/crew-score-recompute.ts (nightly, standalone — closes the learning loop)
+  └─ reads unscored assignment_outcomes (scored_at IS NULL), computes
+     was_late/was_missed from checklist timestamps + pm_rating, applies a
+     reliability_score delta per crew member, marks scored_at
+  └─ no event in/out — pure scheduled recompute, same shape as
+     cron/asset-health.ts in §3
 
 turnovers/actions.ts, app/api/crew/turnovers/[id]/complete
   └─ emits turnover/completed ────────────► turnover-events.ts (turnover-completed)
@@ -66,6 +84,40 @@ cron/work-order-ops.ts (aging/repeat-issue detection)
                                              └─ selects vendor if auto-assign,
                                                 writes wo_number via
                                                 wo_number_counters
+
+maintenance/actions.ts (createWorkOrder / createWorkOrderFromSchedule),
+cron/work-order-ops.ts (auto-create-wo step) — only when the WO has a
+category (manual category field, or derived from vendor_specialty_hint)
+and org.vendor_auto_assign_mode = 'suggest'
+  └─ emit work-order/vendor-suggestion.requested ► auto-assign-vendor.ts
+                                             └─ scores vendor candidates
+                                                (geo proximity, specialty
+                                                match, compliance-status
+                                                penalty/exclusion,
+                                                familiarity), sets
+                                                suggested_vendor_ids /
+                                                suggestion_reasoning,
+                                                writes vendor_assignment_outcomes
+                                                (was_suggestion, suggested_score,
+                                                score_breakdown) — mirrors the
+                                                crew auto-assign-turnover.ts
+                                                shape in §1, using the shared
+                                                lib/scoring/geo.ts helpers
+
+maintenance/actions.ts (PM accepts/dismisses a vendor suggestion)
+  └─ acceptVendorSuggestion emits work-order/vendor.assigned (see below) and
+     updates vendor_assignment_outcomes (was_accepted, suggestion_status:
+     accepted); dismissVendorSuggestion only updates suggestion_status:
+     dismissed, no event
+     Any other vendor assignment (bulkAssignVendor) while a suggestion was
+     pending records suggestion_status: overridden via
+     trackVendorAssignmentAgainstSuggestions()
+
+cron/vendor-score-recompute.ts (nightly, standalone)
+  └─ recomputes vendors.avg_rating/rating_count from wo vendor_rating and
+     on_time_pct/on_time_sample_size from vendor_assignment_outcomes —
+     same shape as cron/crew-score-recompute.ts in §1
+  └─ no event in/out
 
 maintenance/actions.ts (vendor dispatch)
   └─ emits work-order/dispatched ─────────► work-order-dispatch.ts
@@ -215,7 +267,11 @@ recurring incremental sync**, plus a shared token-refresh and
 connection-error path.
 
 ```
-app/connect/finish, app/api/integrations/[provider]/callback (OAuth done)
+app/connect/finish, app/api/integrations/[provider]/callback (OAuth done),
+app/api/integrations/[provider]/callback/oneclick (marketplace-initiated —
+see Pass 1 §2; always routes through the same hold-token → /connect/finish
+claim as the standard callback's no-session branch, regardless of any
+active session, then converges on the same connected event below)
   └─ emits integration/ownerrez.connected ► ownerrez/initial-sync.ts,
                                              ownerrez-reviews-sync.ts, AND
                                              email-ownerrez-connected.tsx
@@ -228,6 +284,10 @@ app/connect/finish, app/api/integrations/[provider]/callback (OAuth done)
                                                 (→ §1) and integration/
                                                 connection.error on failure
                                                 (→ notify-integration-error.ts)
+                                             └─ for confirmed guest-stay
+                                                bookings, also emits
+                                                booking/confirmed (see
+                                                revenue-posting note below)
 
   └─ emits integration/hospitable.connected ► hospitable/initial-sync.ts
                                              AND email-hospitable-connected.tsx
@@ -236,7 +296,9 @@ app/connect/finish, app/api/integrations/[provider]/callback (OAuth done)
                                              PM a "you're connected"
                                              confirmation)
                                              └─ same shape, emits
-                                                turnover/created
+                                                turnover/created and (for
+                                                confirmed guest-stay
+                                                bookings) booking/confirmed
 
   └─ emits integration/kroger.connected ──► kroger-connected.ts
                                              └─ auto-configures store prefs
@@ -254,17 +316,39 @@ lib/integrations/providers/ownerrez.ts, ownerrez-api.ts (internal callers)
        trigger paths converge on one handler: cron, webhook-relay, and
        manual "sync now")
                                              └─ emits turnover/created,
-                                                integration/connection.error
+                                                integration/connection.error,
+                                                and booking/confirmed for
+                                                confirmed guest-stay bookings
 
 app/api/webhooks/[provider]/route.ts (Hospitable webhook)
   └─ calls lib/integrations/providers/hospitable.ts, which emits
      integration/hospitable.sync.requested ► hospitable/incremental-sync.ts
                                              └─ emits turnover/created,
-                                                repuguard/batch_generate.requested
+                                                repuguard/batch_generate.requested,
+                                                booking/confirmed
      integration/hospitable.property_merged ► hospitable/property-merge.ts
                                              └─ repoints property FKs from
                                                 previous_external_id to
                                                 new_external_id
+
+booking/confirmed (emitted by both providers above, on both their initial
+and incremental syncs, for status: confirmed + stay_type: guest_stay
+bookings — NOT for owner_stay bookings or blocks)
+  └─ ────────────────────────────────────► booking-events.ts
+                                             (handleBookingConfirmed)
+                                             └─ posts owner_transactions
+                                                (source: booking_revenue,
+                                                idempotent on
+                                                source_reference_id);
+                                                falls back to an
+                                                avg_nightly_rate estimate
+                                                when the event has no
+                                                actual_total_amount (true
+                                                for OwnerRez — its booking
+                                                payload has no total; Hospitable
+                                                supplies one when available)
+     Uplisting and generic iCal-sourced bookings do NOT currently emit this
+     event — revenue posting is OwnerRez/Hospitable-only today.
 
 hospitable/teammate-sync-cron.ts (09:00 daily, standalone)
   └─ emits integration/hospitable.teammate_sync.requested
