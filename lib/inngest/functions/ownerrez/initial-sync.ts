@@ -297,8 +297,12 @@ export const ownerRezInitialSync = inngest.createFunction(
       // Only applies to properties that do not yet have a default template.
       // Skips any property where the PM has already set one up.
 
-      await step.run('apply-checklist-template', async () => {
-        if (!fetchPropsResult.patchData.length) return
+      // Fanned out the same way as Step 1c-iii above: a single memoized step
+      // determines which properties still need the default template, then one
+      // memoized step per property applies it — so a retry only redoes the
+      // properties that hadn't been applied yet, not the whole batch.
+      const propertiesNeedingChecklist = await step.run('find-properties-needing-checklist', async () => {
+        if (!fetchPropsResult.patchData.length) return []
 
         const supabase    = createServiceClient()
         const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
@@ -310,7 +314,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           .eq('external_source', PROVIDER)
           .in('external_id', externalIds)
 
-        if (!properties?.length) return
+        if (!properties?.length) return []
 
         // Filter to properties without an existing default template
         const { data: existingTemplates } = await supabase
@@ -321,19 +325,24 @@ export const ownerRezInitialSync = inngest.createFunction(
           .in('property_id', properties.map((p) => p.id))
 
         const hasTemplate = new Set((existingTemplates ?? []).map((t) => t.property_id as string))
-        const toApply     = properties.filter((p) => !hasTemplate.has(p.id as string))
+        return properties
+          .filter((p) => !hasTemplate.has(p.id as string))
+          .map((p) => p.id as string)
+      })
 
-        for (const property of toApply) {
-          await applyMasterChecklistToProperty(property.id as string, org_id, supabase, {
+      for (const propertyId of propertiesNeedingChecklist) {
+        await step.run(`apply-checklist-${propertyId}`, async () => {
+          const supabase = createServiceClient()
+          await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
             force:   false,
             actorId: user_id,
           })
-        }
+        })
+      }
 
-        logger.info(
-          `[OwnerRez:${user_id}] Applied master checklist to ${toApply.length} of ${properties.length} properties`
-        )
-      })
+      logger.info(
+        `[OwnerRez:${user_id}] Applied master checklist to ${propertiesNeedingChecklist.length} properties`
+      )
 
       // ── Step 1e: Seed asset discovery from stored amenity data ─────────────
       // properties.amenities is a Record<string, boolean> written during the

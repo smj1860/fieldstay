@@ -45,19 +45,20 @@ export const hospCalendarSyncCron = inngest.createFunction(
     const adminUserIdByOrg = await step.run('resolve-admins-by-org', async () => {
       const supabase = createServiceClient()
       const orgIds   = Array.from(new Set(properties.map((p) => p.org_id)))
+
+      // One batched query for all orgs instead of one sequential query per org.
+      const { data: members } = await supabase
+        .from('organization_members')
+        .select('org_id, user_id, role')
+        .in('org_id', orgIds)
+        .in('role', ['owner', 'admin'])
+        .not('invite_accepted_at', 'is', null)
+
       const result: Record<string, string> = {}
-
-      for (const orgId of orgIds) {
-        const { data: member } = await supabase
-          .from('organization_members')
-          .select('user_id')
-          .eq('org_id', orgId)
-          .in('role', ['owner', 'admin'])
-          .not('invite_accepted_at', 'is', null)
-          .limit(1)
-          .single()
-
-        if (member) result[orgId] = member.user_id
+      for (const member of members ?? []) {
+        if (!result[member.org_id] || member.role === 'owner') {
+          result[member.org_id] = member.user_id
+        }
       }
 
       return result

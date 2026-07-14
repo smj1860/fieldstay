@@ -27,14 +27,21 @@ export const geocodingBackfill = inngest.createFunction(
 
     const propertiesResult = await step.run('geocode-properties', async (): Promise<{ geocoded: number; skipped: number }> => {
       const supabase = createServiceClient()
+      const pageSize = 1000
+      const properties: { id: string; zip: string | null }[] = []
+      for (let from = 0; ; from += pageSize) {
+        const { data } = await supabase
+          .from('properties')
+          .select('id, zip')
+          .is('lat', null)
+          .not('zip', 'is', null)
+          .range(from, from + pageSize - 1)
+        if (!data?.length) break
+        properties.push(...data)
+        if (data.length < pageSize) break
+      }
 
-      const { data: properties } = await supabase
-        .from('properties')
-        .select('id, zip')
-        .is('lat', null)
-        .not('zip', 'is', null)
-
-      if (!properties?.length) return { geocoded: 0, skipped: 0 }
+      if (!properties.length) return { geocoded: 0, skipped: 0 }
 
       // LOW-4: properties sharing a zip code resolve to the same coordinates —
       // geocode each unique zip once instead of once per property.
@@ -51,17 +58,21 @@ export const geocodingBackfill = inngest.createFunction(
       let geocoded = 0
       let skipped  = 0
 
+      // Group by resolved coordinates so properties sharing a zip write in
+      // one batched update instead of one sequential update per property.
+      const idsByCoordsKey = new Map<string, { lat: number; lng: number; ids: string[] }>()
       for (const prop of properties) {
         const coords = zipCoords.get(prop.zip!)
-        if (coords) {
-          await supabase
-            .from('properties')
-            .update({ lat: coords.lat, lng: coords.lng })
-            .eq('id', prop.id)
-          geocoded++
-        } else {
-          skipped++
-        }
+        if (!coords) { skipped++; continue }
+        const key = `${coords.lat},${coords.lng}`
+        const group = idsByCoordsKey.get(key)
+        if (group) group.ids.push(prop.id)
+        else idsByCoordsKey.set(key, { lat: coords.lat, lng: coords.lng, ids: [prop.id] })
+      }
+
+      for (const { lat, lng, ids } of idsByCoordsKey.values()) {
+        await supabase.from('properties').update({ lat, lng }).in('id', ids)
+        geocoded += ids.length
       }
 
       return { geocoded, skipped }
@@ -69,14 +80,21 @@ export const geocodingBackfill = inngest.createFunction(
 
     const vendorsResult = await step.run('geocode-vendors', async (): Promise<{ geocoded: number; skipped: number }> => {
       const supabase = createServiceClient()
+      const pageSize = 1000
+      const vendors: { id: string; service_zip: string | null }[] = []
+      for (let from = 0; ; from += pageSize) {
+        const { data } = await supabase
+          .from('vendors')
+          .select('id, service_zip')
+          .is('lat', null)
+          .not('service_zip', 'is', null)
+          .range(from, from + pageSize - 1)
+        if (!data?.length) break
+        vendors.push(...data)
+        if (data.length < pageSize) break
+      }
 
-      const { data: vendors } = await supabase
-        .from('vendors')
-        .select('id, service_zip')
-        .is('lat', null)
-        .not('service_zip', 'is', null)
-
-      if (!vendors?.length) return { geocoded: 0, skipped: 0 }
+      if (!vendors.length) return { geocoded: 0, skipped: 0 }
 
       // LOW-4: vendors sharing a service zip resolve to the same coordinates —
       // geocode each unique zip once instead of once per vendor.
@@ -93,17 +111,21 @@ export const geocodingBackfill = inngest.createFunction(
       let geocoded = 0
       let skipped  = 0
 
+      // Group by resolved coordinates so vendors sharing a zip write in one
+      // batched update instead of one sequential update per vendor.
+      const idsByCoordsKey = new Map<string, { lat: number; lng: number; ids: string[] }>()
       for (const vendor of vendors) {
         const coords = zipCoords.get(vendor.service_zip!)
-        if (coords) {
-          await supabase
-            .from('vendors')
-            .update({ lat: coords.lat, lng: coords.lng })
-            .eq('id', vendor.id)
-          geocoded++
-        } else {
-          skipped++
-        }
+        if (!coords) { skipped++; continue }
+        const key = `${coords.lat},${coords.lng}`
+        const group = idsByCoordsKey.get(key)
+        if (group) group.ids.push(vendor.id)
+        else idsByCoordsKey.set(key, { lat: coords.lat, lng: coords.lng, ids: [vendor.id] })
+      }
+
+      for (const { lat, lng, ids } of idsByCoordsKey.values()) {
+        await supabase.from('vendors').update({ lat, lng }).in('id', ids)
+        geocoded += ids.length
       }
 
       return { geocoded, skipped }

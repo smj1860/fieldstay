@@ -46,37 +46,43 @@ export const guidebookDailyMonitor = inngest.createFunction(
 
     const events: (CreditEvent | GraceExpiredEvent)[] = []
 
-    for (const row of activeOrgs) {
-      const org = Array.isArray(row.organizations)
-        ? row.organizations[0]
-        : row.organizations
+    // Each org's Stripe lookup runs as its own independently-memoized/retried
+    // step, but the steps themselves fire concurrently instead of one at a time.
+    const creditEvents = await Promise.all(
+      activeOrgs.map((row) => {
+        const org = Array.isArray(row.organizations)
+          ? row.organizations[0]
+          : row.organizations
 
-      if (!org?.stripe_subscription_id || !org.stripe_customer_id) continue
+        if (!org?.stripe_subscription_id || !org.stripe_customer_id) return null
 
-      // Check renewal window — only dispatch if billing within 48 hours
-      // Store currentPeriodEnd here so the handler has it for idempotency key
-      // without needing another Stripe API call
-      const creditEvent = await step.run(`check-renewal-${row.org_id}`, async () => {
-        const subscription = await stripe.subscriptions.retrieve(
-          org.stripe_subscription_id!
-        )
-        const periodEnd = new Date(subscription.current_period_end * 1000)
-        if (periodEnd > now48hrs) return null
+        // Check renewal window — only dispatch if billing within 48 hours
+        // Store currentPeriodEnd here so the handler has it for idempotency key
+        // without needing another Stripe API call
+        return step.run(`check-renewal-${row.org_id}`, async () => {
+          const subscription = await stripe.subscriptions.retrieve(
+            org.stripe_subscription_id!
+          )
+          const periodEnd = new Date(subscription.current_period_end * 1000)
+          if (periodEnd > now48hrs) return null
 
-        // Only dispatch if org has ≥ 5 sponsors (credit threshold)
-        const activeSponsorCount = await getActiveSponsorCount(row.org_id)
-        if (activeSponsorCount < 5) return null
+          // Only dispatch if org has ≥ 5 sponsors (credit threshold)
+          const activeSponsorCount = await getActiveSponsorCount(row.org_id)
+          if (activeSponsorCount < 5) return null
 
-        return {
-          name: 'guidebook/billing.credit.evaluate' as const,
-          data: {
-            orgId:            row.org_id,
-            stripeCustomerId: org.stripe_customer_id!,
-            currentPeriodEnd: subscription.current_period_end,
-          },
-        }
+          return {
+            name: 'guidebook/billing.credit.evaluate' as const,
+            data: {
+              orgId:            row.org_id,
+              stripeCustomerId: org.stripe_customer_id!,
+              currentPeriodEnd: subscription.current_period_end,
+            },
+          }
+        })
       })
+    )
 
+    for (const creditEvent of creditEvents) {
       if (creditEvent) events.push(creditEvent)
     }
 

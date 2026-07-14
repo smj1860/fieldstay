@@ -110,20 +110,32 @@ interface AuditParams {
 }
 
 export async function logAuditEvent(params: AuditParams): Promise<void> {
+  await logAuditEvents([params])
+}
+
+/**
+ * Batched variant of logAuditEvent — writes multiple audit_events rows in a
+ * single insert instead of one round-trip per event. Use this whenever a
+ * caller would otherwise loop calling logAuditEvent() sequentially.
+ */
+export async function logAuditEvents(entries: AuditParams[]): Promise<void> {
+  if (!entries.length) return
   try {
     const admin = createServiceClient()
-    await admin.from('audit_events').insert({
-      org_id:      params.orgId      ?? null,
-      actor_id:    params.actorId    ?? null,
-      action:      params.action,
-      target_type: params.targetType ?? null,
-      target_id:   params.targetId   ?? null,
-      ip_address:  params.ipAddress  ?? null,
-      metadata: {
-        ...(params.metadata ?? {}),
-        ...(params.correlationId ? { correlation_id: params.correlationId } : {}),
-      },
-    })
+    await admin.from('audit_events').insert(
+      entries.map((params) => ({
+        org_id:      params.orgId      ?? null,
+        actor_id:    params.actorId    ?? null,
+        action:      params.action,
+        target_type: params.targetType ?? null,
+        target_id:   params.targetId   ?? null,
+        ip_address:  params.ipAddress  ?? null,
+        metadata: {
+          ...(params.metadata ?? {}),
+          ...(params.correlationId ? { correlation_id: params.correlationId } : {}),
+        },
+      }))
+    )
   } catch (err) {
     // Audit failures must never crash the main flow — log and continue
     console.error('[Audit] Failed to write audit event:', err)

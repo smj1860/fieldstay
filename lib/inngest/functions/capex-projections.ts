@@ -47,8 +47,18 @@ export const generateCapexProjections = inngest.createFunction(
 
     const orgs = await step.run('fetch-orgs', async () => {
       const supabase = createServiceClient()
-      const { data } = await supabase.from('organizations').select('id')
-      return data ?? []
+      const pageSize = 1000
+      const all: { id: string }[] = []
+      for (let from = 0; ; from += pageSize) {
+        const { data } = await supabase
+          .from('organizations')
+          .select('id')
+          .range(from, from + pageSize - 1)
+        if (!data?.length) break
+        all.push(...data)
+        if (data.length < pageSize) break
+      }
+      return all
     })
 
     let processedOrgs = 0

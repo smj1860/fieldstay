@@ -575,22 +575,25 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
         ? `${photos.length} photo${photos.length !== 1 ? 's' : ''} attached to the work order.`
         : undefined
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      pmEmail,
-        subject: `✅ Work order complete — ${wo.title} at ${property?.name}`,
-        html: await renderPmAlert({
-          heading:  'Work order marked complete',
-          body:     `${vendor?.name ?? 'Your vendor'} has completed: ${wo.title}.`,
-          details: [
-            { label: 'Property', value: property?.name ?? null },
-            { label: 'Notes',    value: wo.completion_notes ?? null },
-          ],
-          note:     photoNote,
-          ctaLabel: 'View Work Order →',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance?wo=${work_order_id}`,
-        }),
-      })
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      pmEmail,
+          subject: `✅ Work order complete — ${wo.title} at ${property?.name}`,
+          html: await renderPmAlert({
+            heading:  'Work order marked complete',
+            body:     `${vendor?.name ?? 'Your vendor'} has completed: ${wo.title}.`,
+            details: [
+              { label: 'Property', value: property?.name ?? null },
+              { label: 'Notes',    value: wo.completion_notes ?? null },
+            ],
+            note:     photoNote,
+            ctaLabel: 'View Work Order →',
+            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance?wo=${work_order_id}`,
+          }),
+        },
+        { idempotencyKey: `wo-completed-via-portal-${work_order_id}` }
+      )
     })
 
     return { work_order_id, notified: true }
@@ -629,20 +632,23 @@ export const handleWorkOrderOverdue = inngest.createFunction(
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      pmEmail,
-        subject: `⚠️ Work order overdue — ${wo.title} at ${property?.name}`,
-        html: await renderPmAlert({
-          heading:  `Work order ${days_overdue} day${days_overdue !== 1 ? 's' : ''} overdue`,
-          body:     `${wo.title} was scheduled for ${new Date(wo.scheduled_date!).toLocaleDateString()} and hasn't been completed.`,
-          details: [
-            { label: 'Assigned To', value: vendor?.name ?? null },
-          ],
-          ctaLabel: 'Review Work Orders →',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-        }),
-      })
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      pmEmail,
+          subject: `⚠️ Work order overdue — ${wo.title} at ${property?.name}`,
+          html: await renderPmAlert({
+            heading:  `Work order ${days_overdue} day${days_overdue !== 1 ? 's' : ''} overdue`,
+            body:     `${wo.title} was scheduled for ${new Date(wo.scheduled_date!).toLocaleDateString()} and hasn't been completed.`,
+            details: [
+              { label: 'Assigned To', value: vendor?.name ?? null },
+            ],
+            ctaLabel: 'Review Work Orders →',
+            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
+          }),
+        },
+        { idempotencyKey: `wo-overdue-${work_order_id}` }
+      )
     })
 
     return { work_order_id, alerted: true }
@@ -706,12 +712,15 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
         portalUrl:     quoteUrl,
       })
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      vendor.email,
-        subject: `Quote request: ${wo?.title} — ${property?.name}`,
-        html,
-      })
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      vendor.email,
+          subject: `Quote request: ${wo?.title} — ${property?.name}`,
+          html,
+        },
+        { idempotencyKey: `wo-quote-requested-${quote_request_id}` }
+      )
 
       logger.info(`Sent quote request to ${vendor.email} for WO ${work_order_id}`)
     })
@@ -730,7 +739,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
   },
   { event: 'work-order/quote-submitted' as const },
   async ({ event, step, logger }) => {
-    const { work_order_id, org_id, quoted_amount, quote_notes } = event.data
+    const { work_order_id, quote_request_id, org_id, quoted_amount, quote_notes } = event.data
 
     await step.run('notify-pm-of-quote', async () => {
       const supabase = createServiceClient()
@@ -752,22 +761,25 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
         return
       }
 
-      await resend.emails.send({
-        from:    FROM,
-        to:      pmEmail,
-        subject: `💬 Quote received — ${wo.title} at ${property?.name}`,
-        html: await renderPmAlert({
-          heading:  'Quote received',
-          body:     `${vendor?.name ?? 'Your vendor'} has submitted a quote for ${wo.title}.`,
-          details: [
-            { label: 'Property',      value: property?.name ?? null },
-            { label: 'Quoted Amount', value: `$${quoted_amount.toFixed(2)}` },
-            { label: 'Vendor Notes',  value: quote_notes ?? null },
-          ],
-          ctaLabel: 'Review Quote →',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-        }),
-      })
+      await resend.emails.send(
+        {
+          from:    FROM,
+          to:      pmEmail,
+          subject: `💬 Quote received — ${wo.title} at ${property?.name}`,
+          html: await renderPmAlert({
+            heading:  'Quote received',
+            body:     `${vendor?.name ?? 'Your vendor'} has submitted a quote for ${wo.title}.`,
+            details: [
+              { label: 'Property',      value: property?.name ?? null },
+              { label: 'Quoted Amount', value: `$${quoted_amount.toFixed(2)}` },
+              { label: 'Vendor Notes',  value: quote_notes ?? null },
+            ],
+            ctaLabel: 'Review Quote →',
+            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
+          }),
+        },
+        { idempotencyKey: `wo-quote-submitted-${quote_request_id}` }
+      )
     })
 
     return { work_order_id, notified: true }

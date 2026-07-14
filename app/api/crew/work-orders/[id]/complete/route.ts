@@ -47,7 +47,10 @@ export async function POST(
   if (!wo)                       return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (wo.status === 'completed') return NextResponse.json({ alreadyCompleted: true })
 
-  const { error } = await supabase
+  // The WHERE clause (not the earlier read) is the real guard against a
+  // concurrent duplicate request completing the WO twice — .neq ensures
+  // only one racing request's UPDATE actually matches a row.
+  const { data: updated, error } = await supabase
     .from('work_orders')
     .update({
       status:         'completed',
@@ -55,11 +58,17 @@ export async function POST(
       updated_at:     new Date().toISOString(),
     })
     .eq('id', id)
+    .neq('status', 'completed')
+    .select('id')
+    .maybeSingle()
 
   if (error) {
     console.error('[CrewWorkOrderComplete]', error)
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
   }
+
+  // Lost the race to a concurrent request — it already completed this WO.
+  if (!updated) return NextResponse.json({ alreadyCompleted: true })
 
   // Record the status change (+ optional note) in the WO update log
   await supabase.from('work_order_updates').insert({

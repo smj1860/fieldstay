@@ -131,30 +131,32 @@ export async function syncGuidebookConfigsFromProperty(
 
   const configByPropertyId = new Map((configs ?? []).map((c) => [c.property_id, c]))
 
-  for (const prop of props) {
-    const config = configByPropertyId.get(prop.id)
-    if (!config) continue // no guidebook config yet — createGuidebookPropertyConfigsForProperties handles creation
+  await Promise.all(
+    props.map(async (prop) => {
+      const config = configByPropertyId.get(prop.id)
+      if (!config) return // no guidebook config yet — createGuidebookPropertyConfigsForProperties handles creation
 
-    const patch: Record<string, unknown> = {}
+      const patch: Record<string, unknown> = {}
 
-    if (!config.wifi_network           && prop.wifi_name)             patch.wifi_network           = prop.wifi_name
-    if (!config.wifi_password          && prop.wifi_password)         patch.wifi_password          = prop.wifi_password
-    if (!config.check_in_instructions  && prop.access_instructions)   patch.check_in_instructions  = prop.access_instructions
-    if (!config.check_out_instructions && prop.checkout_instructions) patch.check_out_instructions = prop.checkout_instructions
+      if (!config.wifi_network           && prop.wifi_name)             patch.wifi_network           = prop.wifi_name
+      if (!config.wifi_password          && prop.wifi_password)         patch.wifi_password          = prop.wifi_password
+      if (!config.check_in_instructions  && prop.access_instructions)   patch.check_in_instructions  = prop.access_instructions
+      if (!config.check_out_instructions && prop.checkout_instructions) patch.check_out_instructions = prop.checkout_instructions
 
-    if (!config.house_rules) {
-      const rulesLines = buildRulesSummaryLines(prop)
-      const houseRules = [...rulesLines, ...(prop.house_manual ? [prop.house_manual] : [])].join('\n')
-      if (houseRules) patch.house_rules = houseRules
-    }
+      if (!config.house_rules) {
+        const rulesLines = buildRulesSummaryLines(prop)
+        const houseRules = [...rulesLines, ...(prop.house_manual ? [prop.house_manual] : [])].join('\n')
+        if (houseRules) patch.house_rules = houseRules
+      }
 
-    if (Object.keys(patch).length === 0) continue
+      if (Object.keys(patch).length === 0) return
 
-    patch.updated_at = new Date().toISOString()
+      patch.updated_at = new Date().toISOString()
 
-    await supabase
-      .from('guidebook_property_configs')
-      .update(patch)
-      .eq('id', config.id)
-  }
+      await supabase
+        .from('guidebook_property_configs')
+        .update(patch)
+        .eq('id', config.id)
+    })
+  )
 }

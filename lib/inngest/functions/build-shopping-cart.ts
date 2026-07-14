@@ -19,6 +19,23 @@ import { resend, FROM }                    from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
 import type { MatchedItem, CartBuildResult } from '@/lib/kroger/types'
 
+// Bounded-concurrency map — runs `limit` items at a time instead of fully
+// serial, while still letting each item apply its own rate-limit pacing.
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const item = items[next++]!
+      await fn(item)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+}
+
 export type ShoppingCartRequestedEvent = {
   name: 'inventory/cart_requested'
   data: {
@@ -256,7 +273,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
         const clientToken = await getClientToken()
         const results: Record<string, KrogerProduct | null> = {}
 
-        for (const originalName of batchNames) {
+        await mapWithConcurrency(batchNames, 3, async (originalName) => {
           const searchTerm = normalizedItems[originalName] ?? originalName
           const products   = await searchProducts(
             searchTerm,
@@ -284,7 +301,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
           }
 
           await new Promise(r => setTimeout(r, 100))
-        }
+        })
 
         return results
       })
