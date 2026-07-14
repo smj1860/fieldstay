@@ -26,26 +26,33 @@ export async function upsertInventoryItems(
 ): Promise<InventoryState> {
   const { supabase, membership } = await requireOrgMember()
 
-  for (const item of items) {
-    if (item.id) {
-      const { error } = await supabase
-        .from('inventory_items')
-        .update({
-          name:            item.name,
-          category:        item.category as never,
-          unit:            item.unit,
-          par_level:       item.par_level,
-          notes:           item.notes ?? null,
-          preferred_brand: item.preferred_brand ?? null,
-        })
-        .eq('id', item.id)
-        .eq('org_id', membership.org_id)
-      if (error) {
-        console.error('[upsertInventoryItems]', error)
-        return { error: 'Operation failed. Please try again.' }
-      }
-    } else {
-      const { error } = await supabase.from('inventory_items').insert({
+  const existingItems = items.filter((item) => item.id)
+  const newItems      = items.filter((item) => !item.id)
+
+  if (existingItems.length) {
+    const { error } = await supabase.from('inventory_items').upsert(
+      existingItems.map((item) => ({
+        id:              item.id,
+        org_id:          membership.org_id,
+        property_id:     propertyId,
+        name:            item.name,
+        category:        item.category as never,
+        unit:            item.unit,
+        par_level:       item.par_level,
+        notes:           item.notes ?? null,
+        preferred_brand: item.preferred_brand ?? null,
+      })),
+      { onConflict: 'id' }
+    )
+    if (error) {
+      console.error('[upsertInventoryItems]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+  }
+
+  if (newItems.length) {
+    const { error } = await supabase.from('inventory_items').insert(
+      newItems.map((item) => ({
         property_id:      propertyId,
         org_id:           membership.org_id,
         catalog_item_id:  item.catalog_item_id ?? null,
@@ -56,11 +63,11 @@ export async function upsertInventoryItems(
         current_quantity: 0,
         notes:            item.notes ?? null,
         preferred_brand:  item.preferred_brand ?? null,
-      })
-      if (error) {
-        console.error('[upsertInventoryItems]', error)
-        return { error: 'Operation failed. Please try again.' }
-      }
+      }))
+    )
+    if (error) {
+      console.error('[upsertInventoryItems]', error)
+      return { error: 'Operation failed. Please try again.' }
     }
   }
 

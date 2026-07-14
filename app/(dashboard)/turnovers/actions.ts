@@ -235,12 +235,18 @@ export async function assignCrewIndividually(
     groups.set(a.crewMemberId, list)
   }
 
-  const warnings: string[] = []
-  for (const [crewMemberId, turnoverIds] of groups.entries()) {
-    const result = await assignCrew(turnoverIds, crewMemberId)
-    if (result.error) return result
-    if (result.warning) warnings.push(result.warning)
-  }
+  const results = await Promise.all(
+    Array.from(groups.entries()).map(([crewMemberId, turnoverIds]) =>
+      assignCrew(turnoverIds, crewMemberId)
+    )
+  )
+
+  const firstError = results.find((result) => result.error)
+  if (firstError) return firstError
+
+  const warnings = results
+    .map((result) => result.warning)
+    .filter((warning): warning is string => Boolean(warning))
 
   return warnings.length ? { success: true, warning: warnings.join(' ') } : { success: true }
 }

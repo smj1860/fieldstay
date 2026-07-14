@@ -62,15 +62,27 @@ export async function POST(
     turnover.inventory_confirmed_complete_at ?? null,
   )
 
-  const { error } = await supabase
+  // The WHERE clause (not the earlier read) is the real guard against a
+  // concurrent duplicate request completing the turnover twice — .neq
+  // ensures only one racing request's UPDATE actually matches a row.
+  const { data: updated, error } = await supabase
     .from('turnovers')
     .update({ status: 'completed', completed_at: completedAt })
     .eq('id', turnover_id)
     .eq('org_id', crew.org_id)
+    .neq('status', 'completed')
+    .select('id')
+    .maybeSingle()
 
   if (error) {
     console.error('[CrewTurnoverComplete]', error)
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+  }
+
+  // Lost the race to a concurrent request — it already completed this
+  // turnover and will fire the event, so don't re-fire it here.
+  if (!updated) {
+    return NextResponse.json({ success: true })
   }
 
   await inngest.send({

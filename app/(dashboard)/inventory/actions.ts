@@ -397,6 +397,7 @@ export async function applyTemplateToProperties(
   const { data: allExisting } = await supabase
     .from('inventory_items')
     .select('property_id, catalog_item_id, name')
+    .eq('org_id', membership.org_id)
     .in('property_id', propertyIds)
 
   const existingByProperty: Record<string, { catalogIds: Set<string>; names: Set<string> }> = {}

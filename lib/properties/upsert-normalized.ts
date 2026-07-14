@@ -1,5 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { logAuditEvent } from '@/lib/audit'
+import { logAuditEvents } from '@/lib/audit'
 import {
   CONTENT_FIELDS,
   REDACTED_CONTENT_FIELDS,
@@ -96,15 +96,17 @@ export async function upsertNormalizedProperties(
     throw new Error(`Properties re-select after upsert failed: ${selectError.message}`)
   }
 
-  for (const row of upserted ?? []) {
-    idMap[row.external_id as string] = row.id as string
+  await Promise.all(
+    (upserted ?? []).map((row) => {
+      idMap[row.external_id as string] = row.id as string
 
-    const existing = existingByExternalId.get(row.external_id as string)
-    const incoming = normalized.find((n) => n.external_id === row.external_id)
-    if (!existing || !incoming) continue
+      const existing = existingByExternalId.get(row.external_id as string)
+      const incoming = normalized.find((n) => n.external_id === row.external_id)
+      if (!existing || !incoming) return undefined
 
-    await logContentOverwrites(orgId, row.id as string, provider, existing, incoming)
-  }
+      return logContentOverwrites(orgId, row.id as string, provider, existing, incoming)
+    })
+  )
 
   await backfillCleaningCost(supabase, normalized, idMap)
 
@@ -123,21 +125,23 @@ async function backfillCleaningCost(
   normalized: NormalizedProperty[],
   idMap:      Record<string, string>
 ): Promise<void> {
-  for (const n of normalized) {
-    if (n.cleaning_cost == null || n.cleaning_cost <= 0) continue
-    const propertyId = idMap[n.external_id]
-    if (!propertyId) continue
+  await Promise.all(
+    normalized.map(async (n) => {
+      if (n.cleaning_cost == null || n.cleaning_cost <= 0) return
+      const propertyId = idMap[n.external_id]
+      if (!propertyId) return
 
-    const { error } = await supabase
-      .from('properties')
-      .update({ cleaning_cost: n.cleaning_cost })
-      .eq('id', propertyId)
-      .is('cleaning_cost', null)
+      const { error } = await supabase
+        .from('properties')
+        .update({ cleaning_cost: n.cleaning_cost })
+        .eq('id', propertyId)
+        .is('cleaning_cost', null)
 
-    if (error) {
-      console.error(`[backfillCleaningCost] update failed for property ${propertyId}: ${error.message}`)
-    }
-  }
+      if (error) {
+        console.error(`[backfillCleaningCost] update failed for property ${propertyId}: ${error.message}`)
+      }
+    })
+  )
 }
 
 /**
@@ -145,7 +149,7 @@ async function backfillCleaningCost(
  * wifi_password, access_instructions, house_manual) whose existing,
  * non-null value is about to be replaced with a different value.
  * wifi_password's actual value is never logged — only that it changed.
- * Non-fatal: logAuditEvent already swallows its own failures.
+ * Non-fatal: logAuditEvents already swallows its own failures.
  */
 async function logContentOverwrites(
   orgId:      string,
@@ -154,6 +158,8 @@ async function logContentOverwrites(
   existing:   Record<string, unknown>,
   incoming:   NormalizedProperty
 ): Promise<void> {
+  const entries = []
+
   for (const field of CONTENT_FIELDS) {
     const previousValue = existing[field] as string | null
     const newValue       = incoming[field]
@@ -162,9 +168,9 @@ async function logContentOverwrites(
 
     const redacted = REDACTED_CONTENT_FIELDS.has(field)
 
-    await logAuditEvent({
+    entries.push({
       orgId,
-      action:     'property.content.overwritten_by_sync',
+      action:     'property.content.overwritten_by_sync' as const,
       targetType: 'property',
       targetId:   propertyId,
       metadata: {
@@ -176,4 +182,6 @@ async function logContentOverwrites(
       },
     })
   }
+
+  await logAuditEvents(entries)
 }

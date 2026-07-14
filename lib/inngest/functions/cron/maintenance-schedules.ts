@@ -519,17 +519,22 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     }
 
     // ── Thirty-day milestone ────────────────────────────────────────────────
+    // Only look at orgs that just crossed the 30-day mark since roughly the last run
+    // (2-day lookback window for safety) instead of re-scanning every org that has
+    // ever existed — the upsert's ignoreDuplicates guards against overlap/reruns.
     await step.run('check-thirty-day-milestone', async () => {
       const supabase = createServiceClient()
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString()
+      const windowStart = new Date(Date.now() - 32 * 86_400_000).toISOString()
+      const windowEnd   = new Date(Date.now() - 30 * 86_400_000).toISOString()
       const { data: orgs } = await supabase
         .from('organizations')
         .select('id')
-        .lte('created_at', thirtyDaysAgo)
+        .gte('created_at', windowStart)
+        .lte('created_at', windowEnd)
 
-      for (const org of orgs ?? []) {
+      if (orgs?.length) {
         await supabase.from('org_milestones').upsert(
-          { org_id: org.id, milestone: 'thirty_days' },
+          orgs.map(org => ({ org_id: org.id, milestone: 'thirty_days' })),
           { onConflict: 'org_id,milestone', ignoreDuplicates: true }
         )
       }

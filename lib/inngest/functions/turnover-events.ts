@@ -71,32 +71,34 @@ export const handleTurnoverCreated = inngest.createFunction(
 
     if (assignments.length > 0) {
       await step.run('notify-assigned-crew', async () => {
-        for (const assignment of assignments) {
-          const crew = Array.isArray(assignment.crew_members)
-            ? assignment.crew_members[0]
-            : assignment.crew_members
+        await Promise.all(
+          assignments.map(async (assignment) => {
+            const crew = Array.isArray(assignment.crew_members)
+              ? assignment.crew_members[0]
+              : assignment.crew_members
 
-          if (!crew?.email) continue
+            if (!crew?.email) return
 
-          await resend.emails.send({
-            from:    FROM,
-            to:      crew.email,
-            subject: `Turnover assigned — ${property.name} on ${checkoutDT.toLocaleDateString()}`,
-            html: await renderPmAlert({
-              heading:  "You've been assigned a turnover",
-              body:     `You're on the schedule for a turnover at ${property.name}.`,
-              details: [
-                { label: 'Property',      value: property.name },
-                { label: 'Checkout',      value: formatPropertyDateTime(turnover.checkout_datetime, property.timezone ?? 'America/Chicago') },
-                { label: 'Next Check-in', value: formatPropertyDateTime(turnover.checkin_datetime, property.timezone ?? 'America/Chicago') },
-                { label: 'Window',        value: `${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m` },
-                { label: 'Priority',      value: turnover.priority.toUpperCase() },
-              ],
-              ctaLabel: 'View Turnover →',
-              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers`,
-            }),
-          }, { idempotencyKey: `turnover-assigned-${turnover_id}-${assignment.crew_member_id}` })
-        }
+            await resend.emails.send({
+              from:    FROM,
+              to:      crew.email,
+              subject: `Turnover assigned — ${property.name} on ${checkoutDT.toLocaleDateString()}`,
+              html: await renderPmAlert({
+                heading:  "You've been assigned a turnover",
+                body:     `You're on the schedule for a turnover at ${property.name}.`,
+                details: [
+                  { label: 'Property',      value: property.name },
+                  { label: 'Checkout',      value: formatPropertyDateTime(turnover.checkout_datetime, property.timezone ?? 'America/Chicago') },
+                  { label: 'Next Check-in', value: formatPropertyDateTime(turnover.checkin_datetime, property.timezone ?? 'America/Chicago') },
+                  { label: 'Window',        value: `${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m` },
+                  { label: 'Priority',      value: turnover.priority.toUpperCase() },
+                ],
+                ctaLabel: 'View Turnover →',
+                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers`,
+              }),
+            }, { idempotencyKey: `turnover-assigned-${turnover_id}-${assignment.crew_member_id}` })
+          })
+        )
       })
 
       // Crew is assigned — schedule completion check, then done

@@ -20,7 +20,7 @@ import { inngest }                 from '@/lib/inngest/client'
 import { createServiceClient }     from '@/lib/supabase/server'
 import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
 import { hospFetchTeammates, hospitableTeammatesToCrewRows } from '@/lib/integrations/providers/hospitable'
-import { logAuditEvent } from '@/lib/audit'
+import { logAuditEvents } from '@/lib/audit'
 
 const PROVIDER = 'hospitable'
 
@@ -81,15 +81,15 @@ export const hospTeammateSyncHandler = inngest.createFunction(
 
       if (updateErr) throw new Error(`Deactivating removed teammates failed: ${updateErr.message}`)
 
-      for (const row of toDeactivate) {
-        await logAuditEvent({
+      await logAuditEvents(
+        toDeactivate.map((row) => ({
           orgId:      org_id,
-          action:     'crew.member.deactivated',
+          action:     'crew.member.deactivated' as const,
           targetType: 'crew_member',
           targetId:   row.id,
           metadata:   { reason: 'removed_from_hospitable' },
-        })
-      }
+        }))
+      )
 
       return toDeactivate.length
     })

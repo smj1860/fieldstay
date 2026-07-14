@@ -44,7 +44,10 @@ export async function POST(
 
   const startedAt = new Date().toISOString()
 
-  const { error } = await supabase
+  // The WHERE clause (not the earlier read) is the real guard against a
+  // concurrent duplicate request starting the turnover twice — .eq('status',
+  // 'assigned') ensures only one racing request's UPDATE actually matches a row.
+  const { data: updated, error } = await supabase
     .from('turnovers')
     .update({
       status:     'in_progress',
@@ -52,10 +55,19 @@ export async function POST(
     })
     .eq('id', turnover_id)
     .eq('org_id', crew.org_id)
+    .eq('status', 'assigned')
+    .select('id')
+    .maybeSingle()
 
   if (error) {
     console.error('[CrewTurnoverStart]', error)
     return NextResponse.json({ error: 'Something went wrong' }, { status: 500 })
+  }
+
+  // Lost the race to a concurrent request — it already started this
+  // turnover and will fire the event, so don't re-fire it here.
+  if (!updated) {
+    return NextResponse.json({ success: true })
   }
 
   await inngest.send({

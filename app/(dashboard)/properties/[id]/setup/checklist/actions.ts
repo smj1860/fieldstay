@@ -58,30 +58,38 @@ export async function saveChecklistTemplate(
     .delete()
     .eq('template_id', tmplId)
 
-  // Re-insert sections and items
-  for (const section of sections) {
-    const { data: sectionRow, error: se } = await supabase
+  // Re-insert sections and items — batched into two round-trips (all
+  // sections, then all items) instead of one insert pair per section.
+  if (sections.length > 0) {
+    const { data: sectionRows, error: se } = await supabase
       .from('checklist_template_sections')
-      .insert({ template_id: tmplId, name: section.name, sort_order: section.sort_order })
+      .insert(
+        sections.map((section) => ({
+          template_id: tmplId,
+          name:        section.name,
+          sort_order:  section.sort_order,
+        }))
+      )
       .select('id')
-      .single()
 
-    if (se || !sectionRow) {
+    if (se || !sectionRows || sectionRows.length !== sections.length) {
       console.error('[saveChecklistTemplate] section insert failed', se)
       return { error: 'Failed to save checklist section. Please try again.' }
     }
 
-    if (section.items.length > 0) {
-      const { error: ie } = await supabase.from('checklist_template_items').insert(
-        section.items.map((item) => ({
-          section_id:     sectionRow.id,
-          template_id:    tmplId!,
-          task:           item.task,
-          requires_photo: item.requires_photo,
-          notes:          item.notes || null,
-          sort_order:     item.sort_order,
-        }))
-      )
+    const allItems = sections.flatMap((section, i) =>
+      section.items.map((item) => ({
+        section_id:     sectionRows[i]!.id,
+        template_id:    tmplId!,
+        task:           item.task,
+        requires_photo: item.requires_photo,
+        notes:          item.notes || null,
+        sort_order:     item.sort_order,
+      }))
+    )
+
+    if (allItems.length > 0) {
+      const { error: ie } = await supabase.from('checklist_template_items').insert(allItems)
       if (ie) {
         console.error('[saveChecklistTemplate] items insert failed', ie)
         return { error: 'Failed to save checklist items. Please try again.' }

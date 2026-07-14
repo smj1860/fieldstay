@@ -166,37 +166,39 @@ export async function createWorkOrder(
 
   // Send RFQ emails to each selected vendor
   if (request_quotes && quote_vendor_ids.length) {
-    for (const vendorId of quote_vendor_ids) {
-      const quote_token            = crypto.randomUUID()
-      const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+    await Promise.all(
+      quote_vendor_ids.map(async (vendorId) => {
+        const quote_token            = crypto.randomUUID()
+        const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
 
-      const { data: qr, error: qrError } = await supabase
-        .from('quote_requests')
-        .insert({
-          work_order_id: wo.id,
-          org_id:        membership.org_id,
-          vendor_id:     vendorId,
-          quote_token,
-          quote_token_expires_at,
-          status:        'pending',
+        const { data: qr, error: qrError } = await supabase
+          .from('quote_requests')
+          .insert({
+            work_order_id: wo.id,
+            org_id:        membership.org_id,
+            vendor_id:     vendorId,
+            quote_token,
+            quote_token_expires_at,
+            status:        'pending',
+          })
+          .select('id')
+          .single()
+
+        if (qrError || !qr) return
+
+        await inngest.send({
+          name: 'work-order/quote-requested' as const,
+          data: {
+            work_order_id:    wo.id,
+            quote_request_id: qr.id,
+            property_id,
+            org_id:           membership.org_id,
+            vendor_id:        vendorId,
+            quote_token,
+          },
         })
-        .select('id')
-        .single()
-
-      if (qrError || !qr) continue
-
-      await inngest.send({
-        name: 'work-order/quote-requested' as const,
-        data: {
-          work_order_id:    wo.id,
-          quote_request_id: qr.id,
-          property_id,
-          org_id:           membership.org_id,
-          vendor_id:        vendorId,
-          quote_token,
-        },
       })
-    }
+    )
 
     revalidatePath('/maintenance')
     redirect(`/maintenance/${wo.id}`)
@@ -729,41 +731,43 @@ export async function sendQuoteRequests(
     return { error: 'All selected vendors already have an active quote request', sent: 0 }
   }
 
-  let sent = 0
+  const results = await Promise.all(
+    toSend.map(async (vendorId) => {
+      const quote_token            = crypto.randomUUID()
+      const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
 
-  for (const vendorId of toSend) {
-    const quote_token            = crypto.randomUUID()
-    const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
+      const { data: qr, error } = await supabase
+        .from('quote_requests')
+        .insert({
+          work_order_id: workOrderId,
+          org_id:        membership.org_id,
+          vendor_id:     vendorId,
+          quote_token,
+          quote_token_expires_at,
+          status:        'pending',
+        })
+        .select('id')
+        .single()
 
-    const { data: qr, error } = await supabase
-      .from('quote_requests')
-      .insert({
-        work_order_id: workOrderId,
-        org_id:        membership.org_id,
-        vendor_id:     vendorId,
-        quote_token,
-        quote_token_expires_at,
-        status:        'pending',
+      if (error || !qr) return false
+
+      await inngest.send({
+        name: 'work-order/quote-requested',
+        data: {
+          work_order_id:    workOrderId,
+          quote_request_id: qr.id,
+          property_id:      wo.property_id,
+          org_id:           membership.org_id,
+          vendor_id:        vendorId,
+          quote_token,
+        },
       })
-      .select('id')
-      .single()
 
-    if (error || !qr) continue
-
-    await inngest.send({
-      name: 'work-order/quote-requested',
-      data: {
-        work_order_id:    workOrderId,
-        quote_request_id: qr.id,
-        property_id:      wo.property_id,
-        org_id:           membership.org_id,
-        vendor_id:        vendorId,
-        quote_token,
-      },
+      return true
     })
+  )
 
-    sent++
-  }
+  const sent = results.filter(Boolean).length
 
   revalidatePath(`/maintenance/${workOrderId}`)
   revalidatePath('/maintenance')
@@ -1931,6 +1935,7 @@ export async function fetchArchivedWorkOrders() {
     .eq('org_id', membership.org_id)
     .in('status', ['completed', 'cancelled'])
     .order('created_at', { ascending: false })
+    .limit(200)
 
   if (error) {
     console.error('[fetchArchivedWorkOrders]', error)

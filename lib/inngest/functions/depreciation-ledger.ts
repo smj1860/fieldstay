@@ -41,21 +41,34 @@ export const generateDepreciationLedger = inngest.createFunction(
 
     const assets = await step.run('load-assets', async () => {
       const supabase = createServiceClient()
-      const query = supabase
-        .from('property_assets')
-        .select('id, org_id, property_id, name, asset_type, placed_in_service_date, purchase_price, salvage_value, macrs_class')
-        .eq('is_active', true)
-        .not('placed_in_service_date', 'is', null)
-        .not('purchase_price', 'is', null)
+      const pageSize = 1000
+      const all: Array<{
+        id: string; org_id: string; property_id: string; name: string; asset_type: string
+        placed_in_service_date: string; purchase_price: number; salvage_value: number | null; macrs_class: string
+      }> = []
 
-      // Cron has no event data — runs for all orgs.
-      // Manual trigger from the PM dashboard provides org_id — scope to that org.
-      if (triggerOrgId) {
-        query.eq('org_id', triggerOrgId)
+      for (let from = 0; ; from += pageSize) {
+        const query = supabase
+          .from('property_assets')
+          .select('id, org_id, property_id, name, asset_type, placed_in_service_date, purchase_price, salvage_value, macrs_class')
+          .eq('is_active', true)
+          .not('placed_in_service_date', 'is', null)
+          .not('purchase_price', 'is', null)
+          .range(from, from + pageSize - 1)
+
+        // Cron has no event data — runs for all orgs.
+        // Manual trigger from the PM dashboard provides org_id — scope to that org.
+        if (triggerOrgId) {
+          query.eq('org_id', triggerOrgId)
+        }
+
+        const { data } = await query
+        if (!data?.length) break
+        all.push(...data)
+        if (data.length < pageSize) break
       }
 
-      const { data } = await query
-      return data ?? []
+      return all
     })
 
     if (!assets.length) {
