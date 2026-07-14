@@ -2,6 +2,7 @@
 
 import { requireOrgRole } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
+import { logAuditEvent } from '@/lib/audit'
 
 // ── Line Items ────────────────────────────────────────────────
 
@@ -34,7 +35,14 @@ export async function addWorkOrderLineItem(
 }
 
 export async function deleteWorkOrderLineItem(lineItemId: string) {
-  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+  const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+  const { data: lineItem } = await supabase
+    .from('work_order_line_items')
+    .select('work_order_id')
+    .eq('id', lineItemId)
+    .eq('org_id', membership.org_id)
+    .single()
 
   const { error } = await supabase
     .from('work_order_line_items')
@@ -46,6 +54,16 @@ export async function deleteWorkOrderLineItem(lineItemId: string) {
     console.error('[deleteWorkOrderLineItem]', error)
     throw new Error('Failed to delete line item')
   }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.updated',
+    targetType: 'work_order',
+    targetId:   lineItem?.work_order_id,
+    metadata:   { change: 'line_item_deleted', line_item_id: lineItemId },
+  })
+
   revalidatePath('/maintenance')
 }
 
@@ -71,23 +89,33 @@ export async function reorderWorkOrderLineItems(
 // ── Sign-Off ──────────────────────────────────────────────────
 
 export async function markVendorAcknowledged(workOrderId: string) {
-  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+  const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { error } = await supabase
     .from('work_orders')
     .update({
       vendor_acknowledged_at: new Date().toISOString(),
-      vendor_acknowledged_by: (await supabase.auth.getUser()).data.user?.id,
+      vendor_acknowledged_by: user.id,
     })
     .eq('id', workOrderId)
     .eq('org_id', membership.org_id)
 
   if (error) throw new Error(`Failed to mark acknowledged: ${error.message}`)
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'work_order.updated',
+    targetType: 'work_order',
+    targetId:   workOrderId,
+    metadata:   { change: 'vendor_acknowledged' },
+  })
+
   revalidatePath('/maintenance')
 }
 
 export async function markWorkVerified(workOrderId: string) {
-  const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+  const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
   const { data: wo } = await supabase
     .from('work_orders')
