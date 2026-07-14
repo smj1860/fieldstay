@@ -193,7 +193,7 @@ function OrgTab({ org, connections, krogerNeedsStore }: { org: Organization; con
           Connected Accounts
         </h2>
         <p className="text-xs text-muted-themed mb-3">
-          Connect OwnerRez, Hostaway, and other platforms to sync
+          Connect OwnerRez, Hospitable, and other platforms to sync
           bookings and properties automatically.
         </p>
         <a href="/settings/integrations" className={buttonVariantClass('secondary') + ' text-sm inline-flex items-center gap-1.5'}>

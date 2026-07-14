@@ -10,7 +10,11 @@ import { Button, buttonVariantClass } from '@/components/ui/Button'
 // 'guesty' is commented out: it's registered as oauth2 in integration_providers but
 // not yet wired into lib/integrations/registry.ts or connectWithApiKey() — the
 // Connect button would 404. Re-add once that backend support lands.
-const PMS_PROVIDER_IDS = ['ownerrez', 'hostaway' /* , 'guesty' */] as const
+// 'hostaway' is commented out: its sync never fires booking/confirmed (see
+// ops/page.tsx's REVENUE_AUTOMATION_PROVIDER_IDS comment), so a connected org
+// would get properties/bookings synced in with no automatic revenue posting.
+// Re-add once lib/inngest/functions/hostaway/initial-sync.ts posts revenue.
+const PMS_PROVIDER_IDS = ['ownerrez' /* , 'hostaway', 'guesty' */] as const
 
 export default async function OnboardingPmsPage() {
   const { membership } = await requireOrgMember()
