@@ -832,10 +832,10 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         <td className="py-2 pr-4" />
         <td className="py-2 text-right">
           <div className="flex items-center justify-end gap-1">
-            <Button onClick={handleSave} disabled={saving} className="py-1 px-2 text-xs" title="Save">
+            <Button onClick={handleSave} disabled={saving} className="py-1 px-2 text-xs" title="Save" aria-label={`Save ${member.name}`}>
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
             </Button>
-            <Button variant="ghost" onClick={() => setEditing(false)} className="py-1 px-2 text-xs" title="Cancel">
+            <Button variant="ghost" onClick={() => setEditing(false)} className="py-1 px-2 text-xs" title="Cancel" aria-label={`Cancel editing ${member.name}`}>
               <X className="w-3.5 h-3.5" />
             </Button>
           </div>
@@ -893,10 +893,10 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
       </td>
       <td className="py-2.5 text-right">
         <div className="flex items-center justify-end gap-1">
-          <Button variant="ghost" onClick={() => setEditing(true)} className="py-1 px-2 text-xs" title="Edit">
+          <Button variant="ghost" onClick={() => setEditing(true)} className="py-1 px-2 text-xs" title="Edit" aria-label={`Edit ${member.name}`}>
             <Pencil className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate">
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate" aria-label={`Deactivate ${member.name}`}>
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
           </Button>
         </div>

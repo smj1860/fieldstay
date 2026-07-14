@@ -303,16 +303,17 @@ function DiscoveryCaptureModal({
           )}
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="label text-primary-themed">Make</label>
-              <Input type="text" value={make} onChange={(e) => setMake(e.target.value)} placeholder="e.g. Samsung" />
+              <label htmlFor="discovery-make" className="label text-primary-themed">Make</label>
+              <Input id="discovery-make" type="text" value={make} onChange={(e) => setMake(e.target.value)} placeholder="e.g. Samsung" />
             </div>
             <div>
-              <label className="label text-primary-themed">Model</label>
-              <Input type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. RF28" />
+              <label htmlFor="discovery-model" className="label text-primary-themed">Model</label>
+              <Input id="discovery-model" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. RF28" />
             </div>
             <div>
-              <label className="label text-primary-themed">Photo of the data plate / sticker (optional)</label>
+              <label htmlFor="discovery-photo" className="label text-primary-themed">Photo of the data plate / sticker (optional)</label>
               <input
+                id="discovery-photo"
                 type="file"
                 accept="image/*"
                 capture="environment"
@@ -406,12 +407,13 @@ function PlaceWorkOrderModal({
           )}
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="label text-primary-themed">Property</label>
-              <Input type="text" value={propertyName} disabled />
+              <label htmlFor="wo-property" className="label text-primary-themed">Property</label>
+              <Input id="wo-property" type="text" value={propertyName} disabled />
             </div>
             <div>
-              <label className="label text-primary-themed">Which asset?</label>
+              <label htmlFor="wo-asset" className="label text-primary-themed">Which asset?</label>
               <select
+                id="wo-asset"
                 value={assetId}
                 onChange={(e) => setAssetId(e.target.value)}
                 className="input"
@@ -423,8 +425,9 @@ function PlaceWorkOrderModal({
               </select>
             </div>
             <div>
-              <label className="label text-primary-themed">What&apos;s the issue? *</label>
+              <label htmlFor="wo-issue" className="label text-primary-themed">What&apos;s the issue? *</label>
               <Input
+                id="wo-issue"
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}

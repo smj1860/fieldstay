@@ -338,6 +338,7 @@ export function ComplianceSection({
                       disabled={removing && actingId === doc.id}
                       className="p-1.5 text-muted-themed hover:text-red-500"
                       title="Remove document"
+                      aria-label={`Remove ${doc.document_name}`}
                     >
                       {removing && actingId === doc.id
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />

@@ -72,7 +72,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
   return (
     <div className="flex flex-col min-h-full">
       <div className="flex items-center gap-2 p-4 border-b border-themed">
-        <button onClick={() => router.back()}>
+        <button onClick={() => router.back()} aria-label="Back" className="p-2.5 -m-2.5">
           <ArrowLeft className="w-5 h-5 text-secondary-themed" />
         </button>
         <div className="flex items-center gap-2">
@@ -124,7 +124,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
               onClick={handleComplete}
               disabled={completing}
               className="mt-3 w-full rounded-xl py-3 font-bold text-sm text-brand-900 disabled:opacity-60"
-              style={{ background: '#FCD116' }}
+              style={{ background: 'var(--accent-gold)' }}
             >
               {completing ? 'Marking Complete...' : 'Mark Work Complete'}
             </button>
@@ -137,8 +137,8 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
         )}
 
         {wo.status === 'completed' && (
-          <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-            <p className="text-sm font-bold text-green-700 flex items-center justify-center gap-1"><Check className="w-4 h-4" /> Completed</p>
+          <div className="rounded-xl p-3 text-center border" style={{ background: 'var(--accent-green-dim)', borderColor: 'var(--accent-green-dim)' }}>
+            <p className="text-sm font-bold flex items-center justify-center gap-1" style={{ color: 'var(--accent-green)' }}><Check className="w-4 h-4" /> Completed</p>
           </div>
         )}
       </div>

@@ -805,7 +805,7 @@ function VendorRow({ vendor, onSelect }: { vendor: VendorWithStats; onSelect?: (
           >
             Details
           </Link>
-          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor">
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor" aria-label={`Deactivate ${vendor.name}`}>
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
           </Button>
         </div>
@@ -873,7 +873,7 @@ function VendorCard({ vendor, onSelect }: { vendor: VendorWithStats; onSelect?: 
           >
             Details
           </Link>
-          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor">
+          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate vendor" aria-label={`Deactivate ${vendor.name}`}>
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
           </Button>
         </div>

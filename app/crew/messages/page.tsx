@@ -113,7 +113,7 @@ export default function CrewMessagesPage() {
         <button
           onClick={handleSend}
           disabled={sending || !draft.trim()}
-          className="p-2.5 rounded-lg shrink-0 bg-brand-800 text-white disabled:opacity-40"
+          className="min-h-11 min-w-11 flex items-center justify-center rounded-lg shrink-0 bg-brand-800 text-white disabled:opacity-40"
         >
           <Send className="w-4 h-4" />
         </button>

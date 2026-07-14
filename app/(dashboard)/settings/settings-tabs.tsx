@@ -75,10 +75,12 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }
   return (
     <div>
       {/* Tab bar */}
-      <div className="flex flex-wrap gap-x-0 gap-y-0 border-b border-themed mb-6 overflow-x-auto">
+      <div role="tablist" className="flex flex-wrap gap-x-0 gap-y-0 border-b border-themed mb-6 overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab}
+            role="tab"
+            aria-selected={activeTab === tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
               'px-3 py-2.5 text-xs sm:text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap flex-shrink-0',

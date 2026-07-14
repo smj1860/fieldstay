@@ -640,7 +640,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
         {(wo.work_order_photos ?? []).length > 0 && (
           <Section icon={<Camera className="w-4 h-4" />} title="Photos" mobileCollapse defaultOpen={false}>
             <div className="flex flex-wrap gap-2">
-              {wo.work_order_photos!.map(photo => {
+              {wo.work_order_photos!.map((photo, index) => {
                 const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/work-order-photos/${photo.storage_path}`
                 return (
                   <a
@@ -654,7 +654,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={url}
-                      alt="Work order photo"
+                      alt={`Work order photo ${index + 1} of ${wo.work_order_photos!.length}`}
                       className="w-full h-full object-cover"
                     />
                   </a>

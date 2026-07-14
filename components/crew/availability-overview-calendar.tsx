@@ -95,7 +95,7 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly
         <button
           onClick={() => setViewDate(thisMonth)}
           disabled={isCurrentMonth}
-          className="p-2 rounded-lg transition-colors disabled:opacity-30"
+          className="min-h-11 min-w-11 flex items-center justify-center rounded-lg transition-colors disabled:opacity-30"
           style={{
             background: isCurrentMonth ? 'transparent' : 'var(--bg-raised)',
             color:      'var(--text-muted)',
@@ -112,7 +112,7 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly
         <button
           onClick={() => setViewDate(nextMonth)}
           disabled={isNextMonth}
-          className="p-2 rounded-lg transition-colors disabled:opacity-30"
+          className="min-h-11 min-w-11 flex items-center justify-center rounded-lg transition-colors disabled:opacity-30"
           style={{
             background: isNextMonth ? 'transparent' : 'var(--bg-raised)',
             color:      'var(--text-muted)',
@@ -182,7 +182,6 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly
                 borderBottom: '1px solid var(--border)',
                 outline:      isToday ? '2px solid var(--accent-gold)' : 'none',
                 outlineOffset: '-2px',
-                opacity:      isPast && !isToday ? 0.55 : 1,
               }}
             >
               {/* Day number */}
@@ -191,6 +190,8 @@ export function AvailabilityOverviewCalendar({ crew, availabilityMap }: Readonly
                 style={{
                   color: isToday
                     ? 'var(--accent-gold)'
+                    : isPast
+                    ? 'var(--text-muted)'
                     : 'var(--text-secondary)',
                 }}
               >
