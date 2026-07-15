@@ -127,15 +127,22 @@ export interface OwnerRezProperty {
   max_adults?:      number
   max_children?:    number
   max_pets?:        number
+  // ✅ Confirmed live 2026-07-15 against a real GET /v2/properties and
+  // GET /v2/properties/{id} response: living_area (+ living_area_type,
+  // e.g. "sq. ft.") is the real square-footage field. sqft/square_feet/size
+  // were never real fields on this API — removed after confirming their
+  // fallback chain always resolved to null on live data.
   living_area?:     number
   living_area_type?: string
-  sqft?:            number
-  square_feet?:     number
-  size?:            number
   latitude?:        number  // confirmed field name
   longitude?:       number  // confirmed field name
   property_type?:   string
-  addresses?:       OwnerRezPropertyAddress[]  // nested array, not flat fields
+  // ✅ Confirmed live 2026-07-15 — this is a SINGLE object, not an array.
+  // The previous `addresses?: OwnerRezPropertyAddress[]` shape meant
+  // buildOwnerRezDetailPatch's `(detail.addresses ?? []).find(...)` always
+  // read an empty array and never patched address/city/state/zip from any
+  // property, on any org, ever.
+  address?:         OwnerRezPropertyAddress
   check_in?:        string
   check_out?:       string
   is_snoozed?:      boolean

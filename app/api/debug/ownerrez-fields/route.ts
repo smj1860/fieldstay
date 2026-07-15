@@ -53,10 +53,18 @@ export async function GET() {
     .eq('external_source', PROVIDER)
     .not('external_id', 'is', null)
 
+  // GET /v2/bookings requires property_ids or since_utc (confirmed live —
+  // a plain call with neither 400s). Pass both the org's known property
+  // ids AND a wide since_utc range so at least one combination succeeds
+  // regardless of which one actually works as expected.
+  const propertyIdsParam = (orProperties ?? []).map((p) => p.external_id).join(',')
+  const sinceUtc = '2020-01-01T00:00:00Z'
+
   const bookingVariants = await Promise.all([
-    orFetch('/v2/bookings?limit=5'),
-    orFetch('/v2/bookings?limit=5&include_guest=true'),
-    orFetch('/v2/bookings?limit=5&include=guest'),
+    orFetch(`/v2/bookings?limit=5&property_ids=${propertyIdsParam}`),
+    orFetch(`/v2/bookings?limit=5&property_ids=${propertyIdsParam}&include_guest=true`),
+    orFetch(`/v2/bookings?limit=5&property_ids=${propertyIdsParam}&include=guest`),
+    orFetch(`/v2/bookings?limit=5&since_utc=${encodeURIComponent(sinceUtc)}&include_guest=true`),
   ])
 
   // Door codes: per a migration comment, these were meant to come from
@@ -83,9 +91,10 @@ export async function GET() {
 
   return NextResponse.json({
     bookingVariants: {
-      'no guest param':        bookingVariants[0],
-      'include_guest=true':    bookingVariants[1],
-      'include=guest':         bookingVariants[2],
+      'property_ids, no guest param':          bookingVariants[0],
+      'property_ids + include_guest=true':     bookingVariants[1],
+      'property_ids + include=guest':          bookingVariants[2],
+      'since_utc + include_guest=true':        bookingVariants[3],
     },
     bookingDetail,
     propertyList,

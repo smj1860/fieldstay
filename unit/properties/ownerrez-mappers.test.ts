@@ -105,15 +105,13 @@ function baseDetail(overrides: Partial<OwnerRezProperty> = {}): OwnerRezProperty
     bedrooms: 3,
     bathrooms: 2,
     max_occupancy: 8,
-    addresses: [
-      {
-        street1: '123 Forest Rd',
-        city: 'Gatlinburg',
-        state: 'TN',
-        postal_code: '37738',
-        is_default: true,
-      },
-    ],
+    address: {
+      street1: '123 Forest Rd',
+      city: 'Gatlinburg',
+      state: 'TN',
+      postal_code: '37738',
+      is_default: true,
+    },
     latitude: 35.7,
     longitude: -83.3,
     max_guests: 8,
@@ -217,13 +215,11 @@ describe('buildOwnerRezDetailPatch', () => {
     expect(patch).toEqual({})
   })
 
-  it('falls back to the first address when none is marked is_default', () => {
+  it('maps address fields from the single address object regardless of is_default', () => {
     const patch = buildOwnerRezDetailPatch(
       emptyExisting,
       baseDetail({
-        addresses: [
-          { street1: '456 Other St', city: 'Pigeon Forge', state: 'TN', postal_code: '37863', is_default: false },
-        ],
+        address: { street1: '456 Other St', city: 'Pigeon Forge', state: 'TN', postal_code: '37863', is_default: false },
       }),
       undefined
     )
@@ -231,8 +227,8 @@ describe('buildOwnerRezDetailPatch', () => {
     expect(patch.city).toBe('Pigeon Forge')
   })
 
-  it('omits address fields when addresses is empty', () => {
-    const patch = buildOwnerRezDetailPatch(emptyExisting, baseDetail({ addresses: [] }), undefined)
+  it('omits address fields when address is undefined', () => {
+    const patch = buildOwnerRezDetailPatch(emptyExisting, baseDetail({ address: undefined }), undefined)
     expect(patch.address).toBeUndefined()
     expect(patch.city).toBeUndefined()
     expect(patch.state).toBeUndefined()

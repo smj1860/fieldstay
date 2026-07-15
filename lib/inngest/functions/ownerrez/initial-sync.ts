@@ -108,7 +108,10 @@ export const ownerRezInitialSync = inngest.createFunction(
           externalId: String(p.id),
           bedrooms:   p.bedrooms,
           bathrooms:  p.bathrooms,
-          sqft:       p.sqft ?? p.square_feet ?? p.size ?? null,
+          // ✅ Confirmed live 2026-07-15 — living_area is the real field;
+          // the previous sqft/square_feet/size fallback chain was never
+          // real and always resolved to null.
+          sqft:       p.living_area ?? null,
         }))
 
         const supabase = createServiceClient()
