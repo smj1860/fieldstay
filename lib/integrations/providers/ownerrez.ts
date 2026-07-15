@@ -313,15 +313,13 @@ export function buildOwnerRezDetailPatch(
   const patch: Record<string, unknown> = {}
 
   if (detail) {
-    const defaultAddress =
-      (detail.addresses ?? []).find((a) => a.is_default) ??
-      (detail.addresses ?? [])[0]
+    const addr = detail.address
 
-    if (defaultAddress) {
-      if (defaultAddress.street1)     patch.address = defaultAddress.street1
-      if (defaultAddress.state)       patch.state   = defaultAddress.state
-      if (defaultAddress.city)        patch.city    = defaultAddress.city
-      if (defaultAddress.postal_code) patch.zip     = defaultAddress.postal_code
+    if (addr) {
+      if (addr.street1)     patch.address = addr.street1
+      if (addr.state)       patch.state   = addr.state
+      if (addr.city)        patch.city    = addr.city
+      if (addr.postal_code) patch.zip     = addr.postal_code
     }
 
     if (detail.latitude       !== null && detail.latitude       !== undefined) patch.lat            = detail.latitude
