@@ -238,11 +238,15 @@ export interface HospitablePagedReservations {
   }
 }
 
-// 📄 Spec — from Hospitable's own published API reference for
-// GET /properties/{uuid}/reviews (2026-07-15), not yet verified against a
-// real live response. `private` (feedback/detailed_ratings) is guest-
-// submitted private feedback, not for public consumption — FieldStay never
-// persists it; typed here only for documentation completeness.
+// ✅ Confirmed live 2026-07-15 against a real GET /properties/{uuid}/reviews
+// response (5 real reviews on a real property). With only include=guest
+// requested, `reservation`/`property`/`listing` never appeared on any row —
+// confirmed absent, not just undocumented — which is why
+// hospitable-reviews-backfill.ts tags each row with the already-known
+// FieldStay property_id from its own per-property fetch loop rather than
+// reading review.property.id. `private` (feedback/detailed_ratings) is
+// guest-submitted private feedback, not for public consumption — FieldStay
+// never persists it; typed here only for documentation completeness.
 export interface HospitableReview {
   id:            string
   platform:      'airbnb' | 'direct'
@@ -250,9 +254,10 @@ export interface HospitableReview {
   responded_at?: string | null
   can_respond?:  boolean
   public: {
-    rating:    number
-    review:    string
-    response?: string | null
+    rating:                    number
+    rating_platform_original?: string   // e.g. "5.00" — not consumed, typed for completeness
+    review:                    string
+    response?:                 string | null
   }
   private?: {
     feedback?:         string | null
@@ -280,10 +285,11 @@ export interface HospitableReview {
   } | null
 }
 
-// 📄 Spec — GET /properties/{uuid}/reviews returns BOTH a links cursor
-// object and a meta page-count object; links.next is used for pagination
-// here (same cursor style as hospFetchProperties/hospFetchTeammates)
-// since it needs no extra page-counter bookkeeping.
+// ✅ Confirmed live 2026-07-15 — GET /properties/{uuid}/reviews returns BOTH
+// a links cursor object and a meta page-count object; links.next is used
+// for pagination here (same cursor style as
+// hospFetchProperties/hospFetchTeammates) since it needs no extra
+// page-counter bookkeeping.
 export interface HospitablePagedReviews {
   data:  HospitableReview[]
   links?: {
