@@ -247,17 +247,24 @@ export interface OwnerRezPagedResponse<T> {
   next_page_token?: string | null
 }
 
+// ✅ Confirmed live 2026-07-15 against a real GET /v2/reviews response
+// (submitted for "The Big Moose Lodge"). The previous shape guessed
+// `rating` — a field that doesn't exist on this endpoint at all; since
+// reviews.rating is NOT NULL, that would have failed every single
+// OwnerRez review upsert outright, not just landed with a wrong value.
+// guest_name is also a single display_name, NOT a first_name/last_name
+// split (unlike OwnerRezBooking.guest, which is split).
 export interface OwnerRezReview {
   id:            number
-  rating:        number
-  comments?:     string
-  body?:         string
-  review_text?:  string
-  guest_name?:   string
-  guest?: { name?: string }
-  created_at?:   string
-  submitted_at?: string
+  stars:         number
+  body?:         string | null
+  title?:        string | null
+  display_name?: string | null
+  date?:         string   // stay/review date
+  created_utc?:  string   // when the review record was created in OwnerRez
   property_id?:  number
+  visible?:      boolean
+  reviewer?:     string   // e.g. "guest"
 }
 
 // ── Error classes ─────────────────────────────────────────────────────────────

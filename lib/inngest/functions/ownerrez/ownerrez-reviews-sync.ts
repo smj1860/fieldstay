@@ -205,6 +205,10 @@ export const ownerRezReviewsSync = inngest.createFunction(
             }
           }
 
+          // ✅ Confirmed live 2026-07-15 — see OwnerRezReview's doc comment.
+          // stars (not rating), display_name (not guest_name/guest.name),
+          // and date/created_utc (not created_at/submitted_at) are the real
+          // fields.
           const rows = reviews.map(review => ({
             external_id:     String(review.id),
             external_source: 'ownerrez',
@@ -213,10 +217,10 @@ export const ownerRezReviewsSync = inngest.createFunction(
             property_id:     review.property_id
               ? (propertyMap.get(String(review.property_id)) ?? null)
               : null,
-            guest_name:  review.guest_name ?? review.guest?.name ?? null,
-            rating:      review.rating,
-            review_text: review.comments ?? review.body ?? review.review_text ?? '',
-            review_date: review.created_at ?? review.submitted_at ?? null,
+            guest_name:  review.display_name ?? null,
+            rating:      review.stars,
+            review_text: review.body ?? '',
+            review_date: review.date ?? review.created_utc ?? null,
           }))
 
           const { error: upsertErr } = await admin
