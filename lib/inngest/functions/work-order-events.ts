@@ -1,18 +1,13 @@
 import { inngest } from '@/lib/inngest/client'
-import { NonRetriableError } from 'inngest'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
-import { render } from '@react-email/render'
-import WorkOrderDispatchEmail from '@/emails/WorkOrderDispatch'
 import { renderWorkOrderEmail } from '@/emails/work-order'
 import { getPmEmail } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
-import { randomBytes } from 'crypto'
-import { renderSmsBody } from '@/lib/sms/templates'
-import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { logAuditEvent } from '@/lib/audit'
+import { loadDispatchContext, sendVendorDispatchEmail, sendVendorDispatchSms } from './work-order-events-helpers'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
 
@@ -27,197 +22,31 @@ export const handleWorkOrderCreated = inngest.createFunction(
     const { work_order_id, property_id, org_id, portal_enabled } = event.data
 
     if (portal_enabled) {
-      // ── Step 1: Build context and send vendor email ────────────────────────
-      // All dispatch work is in a single step so failures surface here, not in
-      // a secondary `workOrderDispatch` function run.
-      const dispatchResult = await step.run('dispatch-to-vendor', async () => {
+      // ── Step 1: Load dispatch context (WO/vendor/property/dispatcher/org,
+      // completion-token ensure) ──────────────────────────────────────────────
+      const dispatchResult = await step.run('load-dispatch-context', async () => {
         const supabase = createServiceClient()
-
-        const { data: wo, error: woErr } = await supabase
-          .from('work_orders')
-          .select(`
-            id, title, description, wo_number, nte_amount,
-            completion_token, asset_id,
-            vendor_id,
-            scheduled_date, scheduled_time,
-            vendors ( name, email, phone ),
-            properties ( name, address, timezone )
-          `)
-          .eq('id', work_order_id)
-          .single()
-
-        if (woErr || !wo) {
-          throw new NonRetriableError(
-            `Work order ${work_order_id} query failed: ${woErr?.message ?? 'not found'} ` +
-            `(code: ${woErr?.code ?? 'unknown'})`
-          )
-        }
-
-        const vendor   = Array.isArray(wo.vendors)    ? wo.vendors[0]    : wo.vendors
-        const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
-
-        // Build vendor window string for same-day flip dispatch
-        let vendorWindow: string | undefined
-        if (wo.scheduled_time && wo.scheduled_date) {
-          const propTz = property?.timezone ?? 'America/New_York'
-          const { formatPropertyTime } = await import('@/lib/utils/timezone')
-          vendorWindow = formatPropertyTime(
-            wo.scheduled_time.slice(0, 5),
-            wo.scheduled_date,
-            propTz,
-            'long'
-          )
-        }
-
-        if (!vendor?.email) {
-          // Non-retriable: retrying will never produce an email address.
-          // Return a structured failure so the PM notification step can handle it.
-          return {
-            dispatched:  false as const,
-            reason:      'no_vendor_email' as const,
-            vendorName:  vendor?.name ?? null,
-          }
-        }
-
-        // Reuse existing completion_token if WO was created with portal enabled.
-        // Only generate a new one if the WO somehow arrived here without one.
-        let token = wo.completion_token
-        if (!token) {
-          token = randomBytes(32).toString('hex')
-          const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
-          const { error: tokenErr } = await supabase
-            .from('work_orders')
-            .update({
-              completion_token:            token,
-              completion_token_expires_at: expiresAt,
-              vendor_dispatch_email:       vendor.email,
-            })
-            .eq('id', work_order_id)
-
-          if (tokenErr) throw new Error(`Failed to write completion_token: ${tokenErr.message}`)
-        } else {
-          // Record dispatch email even if token was already set
-          await supabase
-            .from('work_orders')
-            .update({ vendor_dispatch_email: vendor.email })
-            .eq('id', work_order_id)
-        }
-
-        // Dispatcher info — use org owner/admin since work_orders has no created_by column
-        let dispatcherName  = 'Your Property Manager'
-        let dispatcherPhone: string | null = null
-
-        const { data: dispatchMembers } = await supabase
-          .from('organization_members')
-          .select('user_id')
-          .eq('org_id', org_id)
-          .in('role', ['owner', 'admin'])
-          .not('invite_accepted_at', 'is', null)
-          .limit(1)
-
-        if (dispatchMembers?.[0]?.user_id) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('full_name, phone')
-            .eq('id', dispatchMembers[0].user_id)
-            .single()
-          if (profile?.full_name) dispatcherName = profile.full_name
-          if (profile?.phone)     dispatcherPhone = profile.phone
-        }
-
-        const appUrl    = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
-        const publicUrl = `${appUrl}/work-orders/${token}`
-
-        const propertyName    = (property as { name: string } | null)?.name    ?? 'Property'
-        const propertyAddress = (property as { address: string | null } | null)?.address ?? ''
-
-        // Fetch org name for the dispatcher email footer
-        let orgName = 'FieldStay Property Management'
-        const { data: orgRow } = await supabase
-          .from('organizations')
-          .select('name')
-          .eq('id', org_id)
-          .single()
-        if (orgRow?.name) orgName = orgRow.name
-
-        const manualUrl = await getManualUrlForAsset(supabase, org_id, wo.asset_id ?? null)
-
-        // Send vendor email directly — no secondary event hop
-        const html = await render(WorkOrderDispatchEmail({
-          woNumber:        wo.wo_number ?? '',
-          publicUrl,
-          vendorName:      vendor.name ?? '',
-          propertyName,
-          propertyAddress,
-          title:           wo.title,
-          description:     wo.description ?? '',
-          nteAmount:       (wo.nte_amount as number | null) ?? 0,
-          dispatcherName,
-          dispatcherOrg:   orgName,
-          dispatcherPhone,
-          manualUrl,
-        }))
-
-        const { error: emailErr } = await resend.emails.send(
-          {
-            from:    FROM,
-            to:      [vendor.email],
-            subject: `Work Order ${wo.wo_number ?? ''} — ${propertyName}`,
-            html,
-          },
-          { idempotencyKey: `wo-dispatch-created-${work_order_id}-${vendor.email}` }
-        )
-
-        if (emailErr) throw new Error(`Resend error: ${JSON.stringify(emailErr)}`)
-
-        logger.info(`Dispatched WO ${work_order_id} to vendor ${vendor.email}`)
-
-        // SMS — send alongside email when vendor has a mobile number. Non-fatal.
-        if (vendor.phone) {
-          const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
-
-          const vendorPhone = (vendor as { name: string; email: string; phone: string | null }).phone!
-          const e164 = normalizePhoneToE164(vendorPhone)
-          if (e164) {
-            const nteAmt    = (wo.nte_amount as number | null) ?? 0
-            const nteLine   = nteAmt > 0 ? `\nNTE: $${nteAmt.toLocaleString()}` : ''
-            const windowLine = vendorWindow
-              ? `\nAvailable window: ${vendorWindow}\nProperty must be ready before guest check-in.`
-              : ''
-
-            try {
-              const smsBody = await renderSmsBody(org_id, 'vendor_work_order', {
-                vendor_name:   vendor.name ?? '',
-                wo_number:     wo.wo_number ?? '',
-                property_name: propertyName,
-                pm_name:       dispatcherName,
-                org_name:      orgName,
-                nte_amount:    nteAmt,
-                window:        vendorWindow ?? null,
-                nte_line:      nteLine,
-                window_line:   windowLine,
-                portal_url:    publicUrl,
-              })
-              await sendSMS(e164, smsBody)
-            } catch (smsErr) {
-              console.error('[WO dispatch-to-vendor] SMS failed (non-fatal):', smsErr)
-            }
-          }
-        }
-
-        return {
-          dispatched:      true as const,
-          vendorEmail:     vendor.email,
-          vendorName:      vendor.name ?? '',
-          propertyName,
-          publicUrl,
-          woNumber:        wo.wo_number ?? '',
-          dispatcherName,
-          orgName,
-        }
+        return loadDispatchContext(supabase, work_order_id, org_id)
       })
 
-      // ── Step 2: Notify PM of dispatch outcome ──────────────────────────────
+      // ── Step 2: Send vendor email ───────────────────────────────────────────
+      // Its own step so a retry of the SMS step below can never re-trigger a
+      // duplicate email send, and vice versa.
+      if (dispatchResult.dispatched) {
+        await step.run('send-vendor-email', async () => {
+          const supabase = createServiceClient()
+          await sendVendorDispatchEmail(work_order_id, dispatchResult, supabase, org_id)
+          logger.info(`Dispatched WO ${work_order_id} to vendor ${dispatchResult.vendorEmail}`)
+        })
+
+        // ── Step 3: Send vendor SMS (non-fatal) — send alongside email when
+        // vendor has a mobile number ────────────────────────────────────────
+        await step.run('send-vendor-sms', async () => {
+          await sendVendorDispatchSms(org_id, dispatchResult)
+        })
+      }
+
+      // ── Step 4: Notify PM of dispatch outcome ──────────────────────────────
       await step.run('notify-pm', async () => {
         const supabase = createServiceClient()
         const pmEmail  = await getPmEmail(supabase, org_id)
@@ -274,7 +103,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
         return { skipped: true }
       })
 
-      // ── Step 3: Immediate Stripe Connect invite if vendor isn't set up yet ───
+      // ── Step 5: Immediate Stripe Connect invite if vendor isn't set up yet ───
       //
       // The nightly cron covers vendors created in the last 2 days, but misses
       // same-day dispatches and vendors added more than 2 days ago. This step
