@@ -1,17 +1,19 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
-import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvent } from '@/lib/audit'
 
 /**
  * SCHEDULED: runs every morning at 8am CT (independent of maintenance-schedules cron).
  *
  *  • 7.1 — WO aging escalation: bumps stale open WOs to urgent priority
- *  • 7.2 — repeat issue detection: alerts PM when 3+ WOs of same category hit a property in 90 days
  *  • 7.4 — auto-WO creation: creates work orders for due maintenance schedules with auto_create_wo = true
+ *
+ * 7.2 (repeat issue detection) was removed entirely — see the comment at its
+ * old call site. All PM-facing alert emails that used to fire from this cron
+ * (aging escalation, repeat issues, auto-WO-created) are now covered by
+ * cron-daily-wrapup's daily digest instead; this cron's non-email side
+ * effects (priority escalation, WO auto-creation, audit logs) are unchanged.
  */
 export const dailyWorkOrderOps = inngest.createFunction(
   {
@@ -62,34 +64,6 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     logger.info(`Found ${autoWOSchedules.length} schedules eligible for auto-WO creation`)
 
-    // ── Pre-collect org IDs with repeat issues so their PM emails are batched below ──
-    const repeatIssueOrgIds = await step.run('find-repeat-issue-org-ids', async () => {
-      const supabase = createServiceClient()
-      const ninetyDaysAgo = new Date(today)
-      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
-
-      const { data } = await supabase
-        .from('work_orders')
-        .select('org_id')
-        .neq('status', 'cancelled')
-        .gte('created_at', ninetyDaysAgo.toISOString())
-
-      return [...new Set((data ?? []).map((w) => w.org_id))]
-    })
-
-    // ── Batch-resolve PM emails for every org touched by aging WOs, auto-WO schedules, or repeat issues ──
-    const pmEmailEntries = await step.run('find-pm-emails', async () => {
-      const supabase = createServiceClient()
-      const orgIds = Array.from(new Set([
-        ...agingWOs.map((wo) => wo.org_id),
-        ...autoWOSchedules.map((s) => s.org_id),
-        ...repeatIssueOrgIds,
-      ]))
-      const emails = await getPmEmailsByOrgIds(supabase, orgIds)
-      return Array.from(emails.entries())
-    })
-    const pmEmailByOrg = new Map(pmEmailEntries)
-
     for (const wo of agingWOs) {
       const escalationEventData = await step.run(`escalate-aging-wo-${wo.id}`, async () => {
         const supabase = createServiceClient()
@@ -117,23 +91,8 @@ export const dailyWorkOrderOps = inngest.createFunction(
           notes:                     `Priority auto-escalated to Urgent — open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without update`,
         })
 
-        const pmEmail = pmEmailByOrg.get(wo.org_id) ?? null
-        if (pmEmail) {
-          await resend.emails.send({
-            from:    FROM,
-            to:      pmEmail,
-            subject: `Work order escalated to Urgent — open ${daysOpen} days`,
-            html:    await renderPmAlert({
-              heading:  'Work order auto-escalated to Urgent',
-              body:     `${(wo.category ?? 'Work order').replace(/_/g, ' ')} has been open for ${daysOpen} day${daysOpen !== 1 ? 's' : ''} without an update and was auto-escalated to Urgent priority.`,
-              details: [
-                { label: 'Opened', value: new Date(wo.created_at).toLocaleDateString() },
-              ],
-              ctaLabel: 'Review Work Order →',
-              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
-            }),
-          })
-        }
+        // PM-facing escalation alert removed — cron-daily-wrapup's
+        // escalations digest section reads this work_order_updates note.
 
         return {
           work_order_id: wo.id,
@@ -156,93 +115,16 @@ export const dailyWorkOrderOps = inngest.createFunction(
     }
 
     // ── 7.2: Repeat Issue Detection ──────────────────────────────────────────
-    const repeatGroupsToAlert = await step.run('detect-repeat-issues', async () => {
-      const supabase = createServiceClient()
-      const ninetyDaysAgo = new Date(today)
-      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
-
-      const { data: wos } = await supabase
-        .from('work_orders')
-        .select('id, org_id, property_id, category')
-        .neq('status', 'cancelled')
-        .not('category', 'is', null)
-        .gte('created_at', ninetyDaysAgo.toISOString())
-
-      const groups: Record<string, { org_id: string; property_id: string; category: string; count: number }> = {}
-      for (const wo of wos ?? []) {
-        const key = `${wo.org_id}:${wo.property_id}:${wo.category}`
-        if (!groups[key]) {
-          groups[key] = { org_id: wo.org_id, property_id: wo.property_id, category: wo.category, count: 0 }
-        }
-        groups[key]!.count++
-      }
-
-      const repeatGroups = Object.values(groups).filter((g) => g.count >= 3)
-      const thirtyDaysAgo = new Date(today.getTime() - 30 * 86_400_000)
-      const toAlert: typeof repeatGroups = []
-
-      for (const group of repeatGroups) {
-        const milestoneKey = `repeat_issue:${group.property_id}:${group.category}`
-
-        const { data: existing } = await supabase
-          .from('org_milestones')
-          .select('created_at')
-          .eq('org_id', group.org_id)
-          .eq('milestone', milestoneKey)
-          .maybeSingle()
-
-        if (existing && new Date(existing.created_at) > thirtyDaysAgo) continue
-
-        const pmEmail = pmEmailByOrg.get(group.org_id) ?? null
-        if (pmEmail) {
-          await resend.emails.send({
-            from:    FROM,
-            to:      pmEmail,
-            subject: `Repeat maintenance issue — ${(group.category ?? '').replace(/_/g, ' ')} (${group.count}x in 90 days)`,
-            html:    await renderPmAlert({
-              heading:  'Repeat maintenance issue detected',
-              body:     `${(group.category ?? '').replace(/_/g, ' ')} has come up ${group.count} times in the last 90 days at this property — this may indicate a recurring problem worth investigating.`,
-              details: [
-                { label: 'Work Orders', value: `${group.count} in the last 90 days` },
-              ],
-              ctaLabel: 'View Work Orders →',
-              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
-            }),
-          })
-        }
-
-        // Reset milestone timestamp so we re-alert after 30 days
-        await supabase.from('org_milestones')
-          .delete()
-          .eq('org_id', group.org_id)
-          .eq('milestone', milestoneKey)
-        await supabase.from('org_milestones')
-          .insert({ org_id: group.org_id, milestone: milestoneKey })
-
-        toAlert.push(group)
-      }
-
-      return toAlert
-    })
-
-    for (const group of repeatGroupsToAlert) {
-      await step.sendEvent(`send-repeat-issue-event-${group.org_id}-${group.property_id}-${group.category}`, {
-        name: 'maintenance/repeat-issue-detected' as const,
-        data: {
-          org_id:      group.org_id,
-          property_id: group.property_id,
-          wo_category: group.category,
-          count:       group.count,
-          window_days: 90,
-        },
-      })
-    }
+    // Removed entirely — its only purpose was gating the PM alert email on a
+    // 30-day re-alert milestone. Nothing else consumed the
+    // maintenance/repeat-issue-detected event. cron-daily-wrapup's repeat-issues
+    // digest section (3+ same-category WOs per property in 90 days) re-implements
+    // the detection independently and simplified, with no 30-day suppression.
 
     // ── 7.4: Auto-create WOs for due maintenance schedules ───────────────────
     for (const schedule of autoWOSchedules) {
       const autoCreateEventData = await step.run(`auto-create-wo-${schedule.id}`, async () => {
         const supabase = createServiceClient()
-        const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
 
         // Idempotency: skip if an open WO already exists for this schedule + date
         const { data: existingWO } = await supabase
@@ -318,25 +200,8 @@ export const dailyWorkOrderOps = inngest.createFunction(
           metadata:   { source: 'maintenance_schedule', maintenance_schedule_id: schedule.id },
         })
 
-        const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
-        if (pmEmail) {
-          await resend.emails.send({
-            from:    FROM,
-            to:      pmEmail,
-            subject: `Work order auto-created — ${schedule.name} at ${property?.name}`,
-            html:    await renderPmAlert({
-              heading:  'Scheduled maintenance work order created',
-              body:     `${schedule.name} is due today — a work order has been created.`,
-              details: [
-                { label: 'Property',  value: property?.name ?? null },
-                { label: 'Due Date',  value: new Date(schedule.next_due_date! + 'T00:00:00').toLocaleDateString() },
-                { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
-              ],
-              ctaLabel: 'View Work Order →',
-              ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/work-orders`,
-            }),
-          })
-        }
+        // PM-facing "work order auto-created" alert removed — cron-daily-wrapup's
+        // maintenance digest section (due schedules + unassigned WOs) covers it.
 
         return {
           work_order_id:  wo.id,

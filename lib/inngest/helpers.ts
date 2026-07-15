@@ -168,3 +168,46 @@ export async function createPmNotification(
     throw new Error(`Failed to create notification: ${error.message}`)
   }
 }
+
+/**
+ * "Stay static between days" behavior for digest sections (design b):
+ * compares today's computed item-id set against yesterday's stored snapshot
+ * for this org+category, returns which ids are net-new, then persists
+ * today's set as the new snapshot. Every Monday, the caller should treat
+ * the returned "unchanged" list as worth re-surfacing in full regardless —
+ * this function only tracks the diff, it doesn't decide display behavior.
+ */
+export interface DigestDiffResult {
+  newIds:       string[]
+  unchangedIds: string[]
+  removedIds:   string[]   // present yesterday, gone today (resolved)
+}
+
+export async function diffDigestSnapshot(
+  supabase: ServiceClient,
+  orgId: string,
+  category: string,
+  currentIds: string[]
+): Promise<DigestDiffResult> {
+  const { data: existing } = await supabase
+    .from('notification_digest_state')
+    .select('snapshot')
+    .eq('org_id', orgId)
+    .eq('category', category)
+    .maybeSingle()
+
+  const previousIds: string[] = Array.isArray(existing?.snapshot?.ids) ? existing.snapshot.ids : []
+  const previousSet = new Set(previousIds)
+  const currentSet  = new Set(currentIds)
+
+  const newIds       = currentIds.filter((id) => !previousSet.has(id))
+  const unchangedIds = currentIds.filter((id) => previousSet.has(id))
+  const removedIds   = previousIds.filter((id) => !currentSet.has(id))
+
+  await supabase.from('notification_digest_state').upsert(
+    { org_id: orgId, category, snapshot: { ids: currentIds }, updated_at: new Date().toISOString() },
+    { onConflict: 'org_id,category' }
+  )
+
+  return { newIds, unchangedIds, removedIds }
+}

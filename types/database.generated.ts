@@ -2,7 +2,7 @@
  * FieldStay — Generated Supabase Types (Reference)
  *
  * Auto-generated from the live Supabase project (vpmznjktllhmmbfnxuvk)
- * via the Supabase MCP generate_typescript_types tool on 2026-07-15.
+ * via the Supabase MCP generate_typescript_types tool on 2026-07-16.
  *
  * This file is NOT imported anywhere in the app. types/database.ts is the
  * hand-maintained file that the codebase actually imports from (flat
@@ -2249,6 +2249,35 @@ export type Database = {
             columns: ["work_order_id"]
             isOneToOne: false
             referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_digest_state: {
+        Row: {
+          category: string
+          org_id: string
+          snapshot: Json
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          org_id: string
+          snapshot?: Json
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          org_id?: string
+          snapshot?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_digest_state_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
