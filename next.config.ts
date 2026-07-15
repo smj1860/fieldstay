@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next'
+import { withSentryConfig } from '@sentry/nextjs'
 
 const nextConfig: NextConfig = {
   async redirects() {
@@ -55,8 +56,11 @@ const nextConfig: NextConfig = {
               // Workers: blob: required for Supabase Realtime and some WASM usage
               "worker-src 'self' blob:",
 
-              // API + WebSocket connections — preserved from previous config
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com http://localhost:* ws://localhost:* wss://localhost:*",
+              // API + WebSocket connections — preserved from previous config.
+              // Sentry ingest host added for client-side error/trace reporting
+              // (instrumentation-client.ts) — without this the browser SDK's
+              // own requests get silently blocked by this same CSP.
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511737962364928.ingest.us.sentry.io http://localhost:* ws://localhost:* wss://localhost:*",
 
               // Object/media: locked down entirely
               "object-src 'none'",
@@ -75,4 +79,21 @@ const nextConfig: NextConfig = {
   }
 }
 
-export default nextConfig
+export default withSentryConfig(nextConfig, {
+  org:     process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  // Unset in local dev — source maps are only uploaded when this is present,
+  // so a missing authToken locally just skips the upload step rather than
+  // failing the build. Required in CI/Vercel for symbolicated stack traces.
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  silent:               !process.env.CI,
+  widenClientFileUpload: true,
+
+  // No effect under Turbopack (this project's dev/build default) — kept for
+  // when a webpack build is used (e.g. explicit `next build --no-turbopack`).
+  webpack: {
+    treeshake:              { removeDebugLogging: true },
+    automaticVercelMonitors: true,
+  },
+})

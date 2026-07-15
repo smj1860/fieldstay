@@ -36,7 +36,7 @@ created from a maintenance schedule, the right vendor is selected and notified.
 | Geocoding | Mapbox | Properties and vendors — one call on save |
 | SMS | Telnyx | Guest opt-in, door code delivery, morning/evening nudges. `SMS_ENABLED=false` env var gates all sends — do not flip to true until 10DLC is verified |
 | Weather | Tomorrow.io | Contextual SMS — rain/temperature signals for guest recommendations |
-| Observability | Axiom | Native Vercel integration. All Inngest logger calls route here |
+| Observability | Axiom, Sentry | Axiom: native Vercel integration, all Inngest logger calls route here (independent of OpenTelemetry — a Vercel log capture, not a trace exporter). Sentry (`@sentry/nextjs`, added 2026-07-15): errors + performance traces for the Next.js app. Owns the OTEL tracer-provider registration in `instrumentation.ts`/`instrumentation-client.ts` — do not add a second one (e.g. `@vercel/otel`, removed when Sentry was added) |
 
 **Never introduce:** Vite, Turborepo, tRPC, Prisma, or any ORM.
 **Never add** client-side Supabase reads that bypass the Dexie local-first sync layer
