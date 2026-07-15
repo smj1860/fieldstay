@@ -3,6 +3,7 @@
 import { useState, useTransition, useActionState, useEffect } from 'react'
 import { Plus, X, Link2, RefreshCw, Copy, Check, ExternalLink, ChevronDown, ChevronRight, Trash2, Eye, EyeOff } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { unwrapJoin, unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { Dialog } from '@/components/ui/Dialog'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -90,14 +91,11 @@ const CATEGORY_LABELS: Record<string, string> = {
 }
 
 function getPropertyName(owner: Owner): string {
-  const p = Array.isArray(owner.properties) ? owner.properties[0] : owner.properties
-  return p?.name ?? '—'
+  return unwrapJoin(owner.properties)?.name ?? '—'
 }
 
 function getTokens(owner: Owner): PortalToken[] {
-  const t = owner.owner_portal_tokens
-  if (!t) return []
-  return Array.isArray(t) ? t : [t]
+  return unwrapJoinArray(owner.owner_portal_tokens)
 }
 
 function getToken(owner: Owner): PortalToken | null {

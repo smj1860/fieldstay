@@ -8,6 +8,7 @@ import {
   BarChart2, Layers, Loader2, Save,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
+import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount, triggerShoppingCart } from './actions'
 import type { InventoryCategory, PoStatus } from '@/types/database'
 import { PortfolioInventoryView } from './portfolio-view'
@@ -944,9 +945,7 @@ function PropertyInventoryDetail({
               {showPOs && (
                 <div className="border-t border-themed divide-y divide-themed">
                   {purchaseOrders.map((po) => {
-                    const poItems = Array.isArray(po.purchase_order_items)
-                      ? po.purchase_order_items
-                      : po.purchase_order_items ? [po.purchase_order_items] : []
+                    const poItems = unwrapJoinArray(po.purchase_order_items)
                     const isExpanded = expandedPO === po.id
                     return (
                       <div key={po.id}>
