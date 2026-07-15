@@ -59,6 +59,17 @@ export async function GET() {
     orFetch('/v2/bookings?limit=5&include=guest'),
   ])
 
+  // Door codes: per a migration comment, these were meant to come from
+  // GET /v2/bookings/{id} (the single-booking DETAIL endpoint) as
+  // door_codes[0].code / lock_names — not the list endpoint above. No
+  // OwnerRez sync code has ever actually called this. Pull the first
+  // booking id off the plain list response and hit its detail endpoint so
+  // this diagnostic actually covers it instead of assuming.
+  const firstBookingId = extractFirstBookingId(bookingVariants[0].body)
+  const bookingDetail = firstBookingId
+    ? await orFetch(`/v2/bookings/${firstBookingId}`)
+    : { note: 'No booking id found in the list response to fetch detail for.' }
+
   const propertyList = await orFetch('/v2/properties?limit=5')
 
   const propertyDetails = orProperties?.length
@@ -76,9 +87,18 @@ export async function GET() {
       'include_guest=true':    bookingVariants[1],
       'include=guest':         bookingVariants[2],
     },
+    bookingDetail,
     propertyList,
     propertyDetails,
   })
+}
+
+function extractFirstBookingId(body: unknown): string | number | null {
+  if (!body || typeof body !== 'object') return null
+  const items = (body as { items?: unknown }).items
+  if (!Array.isArray(items) || !items.length) return null
+  const first = items[0] as { id?: string | number }
+  return first?.id ?? null
 }
 
 function safeJsonParse(text: string): unknown {
