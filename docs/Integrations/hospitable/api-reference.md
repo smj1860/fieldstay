@@ -35,7 +35,7 @@
 | `property:read` | ✅ Live | Properties, details, listings |
 | `reservation:read` | ✅ Live | All reservation data |
 | `listing:read` | ✅ Live | Channel listing details |
-| `reviews:read` | ✅ Live | Guest reviews and responses |
+| `reviews:read` | ✅ Live | Guest reviews and responses — granted 2026-07-15. Unlike message:read/financials:read/calendar:read above (all previously flagged "not yet granted" here while actually already live), this one ran the other way: this table listed it as ✅ Live before the grant had actually gone through. Any Hospitable connection authorized before 2026-07-15 was issued a token without this scope — GET /reviews will 403 on it until the PM disconnects and reconnects. |
 | `teammate:read` | ✅ Live | Crew/teammate sync |
 | `message:read` | ✅ Live | Guest/host reservation conversation sync — confirmed 2026-07-09 that this has been granted all along; the earlier "not yet granted" flag on this scope below was stale, not the actual account status. Was simply unused until reservation_messages sync was built. |
 | `financials:read` | ✅ Live | Per-reservation revenue (`financials.host.revenue`) — confirmed live 2026-07-10 against a real test reservation; `bookings.actual_total_amount` populated with the exact correct dollar amount and flowed through to `owner_transactions`. Previously listed below as "to request" — that was stale, not the actual account status, same pattern as `message:read` above. |
