@@ -39,6 +39,7 @@ import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sy
 import { hospInitialSync }              from '@/lib/inngest/functions/hospitable/initial-sync'
 import { sendHospitableConnectedEmail } from '@/lib/inngest/functions/email-hospitable-connected'
 import { hospIncrementalSync }          from '@/lib/inngest/functions/hospitable/incremental-sync'
+import { hospReviewsBackfill }          from '@/lib/inngest/functions/hospitable/hospitable-reviews-backfill'
 import { hospPropertyMerge }            from '@/lib/inngest/functions/hospitable/property-merge'
 import { hospTeammateSyncCron }         from '@/lib/inngest/functions/hospitable/teammate-sync-cron'
 import { hospTeammateSyncHandler }      from '@/lib/inngest/functions/hospitable/teammate-sync-handler'
@@ -198,6 +199,7 @@ export const { GET, POST, PUT } = serve({
     hospInitialSync,
     sendHospitableConnectedEmail,
     hospIncrementalSync,
+    hospReviewsBackfill,
     hospPropertyMerge,
     hospTeammateSyncCron,
     hospTeammateSyncHandler,

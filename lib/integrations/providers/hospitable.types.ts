@@ -238,6 +238,48 @@ export interface HospitablePagedReservations {
   }
 }
 
+// 📄 Spec — only the single-review GET /reviews/{id} shape (used by the
+// review.created/review.changed webhook handler in incremental-sync.ts) has
+// been confirmed against a real payload. This is assumed to share the same
+// nested shape for each list-endpoint entry; verify against a real
+// multi-review response before trusting it further.
+export interface HospitableReview {
+  id:           string
+  reviewed_at?: string | null
+  can_respond?: boolean
+  public?: {
+    rating?:   number | null
+    review?:   string | null
+    response?: string | null
+  } | null
+  guest?: {
+    first_name?: string | null
+    last_name?:  string | null
+  } | null
+  property?: {
+    id?: string | null
+  } | null
+  reservation?: {
+    id?:        string | null
+    check_in?:  string | null
+    check_out?: string | null
+  } | null
+}
+
+// 📄 Spec — pagination style for GET /reviews isn't documented. Mirrors
+// HospitablePagedReservations' page/per_page + meta.last_page shape (the
+// only other paginated, filtered Hospitable list endpoint confirmed live)
+// rather than guessing a links.next cursor style instead.
+export interface HospitablePagedReviews {
+  data: HospitableReview[]
+  meta?: {
+    current_page: number
+    last_page:    number
+    per_page:     number
+    total:        number
+  }
+}
+
 // GET /reservations/{uuid}/messages — no per-message id in the documented
 // response shape (only conversation_id/reservation_id at the message-list
 // level), so callers derive their own dedup key from conversation_id +
