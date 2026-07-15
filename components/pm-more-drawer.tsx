@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { X } from 'lucide-react'
 import type { MemberRole } from '@/types/database'
 import { getVisibleNavItems, type NavItem } from '@/lib/navigation'
+import { useFocusTrap } from '@/lib/hooks/use-focus-trap'
 
 const CLUSTER_ORDER = ['Portfolio', 'Team & Vendors', 'Guest & Comms'] as const
 
@@ -30,51 +31,12 @@ export function PmMoreDrawer({ open, onClose, role, repuguardActive = false }: R
       item.id !== 'help' && item.id !== 'support-inbox'
   )
 
-  // Focus trap, Escape-to-close, body-scroll lock — same approach as
-  // components/ui/Dialog.tsx. Hooks must run before the `if (!open)` guard
-  // below (Rules of Hooks — no hooks after an early return), so this effect
-  // lives here rather than alongside renderItem further down.
-  useEffect(() => {
-    if (!open) return
-
-    const previouslyFocused = document.activeElement as HTMLElement | null
-
-    const panel = drawerRef.current
-    const focusable = panel?.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    )
-    focusable?.[0]?.focus()
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-        return
-      }
-      if (e.key !== 'Tab' || !focusable || focusable.length === 0) return
-
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    const originalOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.body.style.overflow = originalOverflow
-      previouslyFocused?.focus()
-    }
-  }, [open, onClose])
+  // Focus trap, Escape-to-close, body-scroll lock — same shared hook as
+  // components/ui/Dialog.tsx and DashboardShell's mobile drawer. Hooks must
+  // run before the `if (!open)` guard below (Rules of Hooks — no hooks
+  // after an early return), so this call lives here rather than alongside
+  // renderItem further down.
+  useFocusTrap(drawerRef, open, onClose)
 
   if (!open) return null
 

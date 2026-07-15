@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -17,6 +17,7 @@ import { NotificationBell } from '@/components/notification-bell'
 import { SidebarUserMenu } from '@/components/layout/SidebarUserMenu'
 import { InstallBanner } from '@/components/pwa/install-banner'
 import { useTheme } from '@/lib/hooks/use-theme'
+import { useFocusTrap } from '@/lib/hooks/use-focus-trap'
 import { getVisibleNavItems, type NavItem } from '@/lib/navigation'
 
 function urlBase64ToUint8Array(base64String: string) {
@@ -413,50 +414,14 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
   const mobileDrawerRef = useRef<HTMLDivElement>(null)
 
   // Mobile sidebar drawer — focus trap, Escape-to-close, body-scroll lock.
-  // Same approach as components/ui/Dialog.tsx, adapted to this component's
-  // existing mobileOpen/setMobileOpen state rather than a generic
-  // open/onClose prop pair.
-  useEffect(() => {
-    if (!mobileOpen) return
-
-    const previouslyFocused = document.activeElement as HTMLElement | null
-
-    const panel = mobileDrawerRef.current
-    const focusable = panel?.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    )
-    focusable?.[0]?.focus()
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setMobileOpen(false)
-        return
-      }
-      if (e.key !== 'Tab' || !focusable || focusable.length === 0) return
-
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    const originalOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.body.style.overflow = originalOverflow
-      previouslyFocused?.focus()
-    }
-  }, [mobileOpen])
+  // Same shared hook as components/ui/Dialog.tsx and pm-more-drawer.tsx,
+  // adapted to this component's existing mobileOpen/setMobileOpen state
+  // rather than a generic open/onClose prop pair. closeMobileDrawer is
+  // memoized with a stable identity (setMobileOpen itself never changes)
+  // so the hook's effect re-fires only when mobileOpen changes, matching
+  // this effect's original single-dependency `[mobileOpen]` array exactly.
+  const closeMobileDrawer = useCallback(() => setMobileOpen(false), [])
+  useFocusTrap(mobileDrawerRef, mobileOpen, closeMobileDrawer)
 
   // Live clock
   useEffect(() => {

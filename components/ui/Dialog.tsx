@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { useFocusTrap } from '@/lib/hooks/use-focus-trap'
 
 interface DialogProps {
   open: boolean
@@ -24,49 +25,8 @@ export function Dialog({
   maxWidthClassName = 'max-w-lg',
 }: Readonly<DialogProps>) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const previouslyFocused = useRef<HTMLElement | null>(null)
 
-  useEffect(() => {
-    if (!open) return
-
-    previouslyFocused.current = document.activeElement as HTMLElement
-
-    const panel = panelRef.current
-    const focusable = panel?.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    )
-    focusable?.[0]?.focus()
-
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onClose()
-        return
-      }
-      if (e.key !== 'Tab' || !focusable || focusable.length === 0) return
-
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault()
-        last.focus()
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    const originalOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.body.style.overflow = originalOverflow
-      previouslyFocused.current?.focus()
-    }
-  }, [open, onClose])
+  useFocusTrap(panelRef, open, onClose)
 
   if (!open) return null
 
