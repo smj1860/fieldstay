@@ -414,48 +414,47 @@ services:      [{id: integer, label: string}]   → role + specialty
 **Scope:** `reviews:read`
 **Used by:** RepuGuard — review sync and AI response drafting
 
-📄 Spec — from Hospitable's own published API reference (2026-07-15), not
-yet verified against a real live response (see
-app/api/debug/hospitable-reviews/route.ts, a temporary diagnostic route to
-confirm it). This corrects an earlier version of this section that
-documented a flat `GET /reviews?properties[]=...` collection endpoint —
-that shape 404's live; reviews are fetched **per property**, not
+✅ Confirmed live 2026-07-15 against a real response (5 real reviews
+returned for a real property; 3 other properties returned an empty but
+well-formed `data: []`). This corrects an earlier version of this section
+that documented a flat `GET /reviews?properties[]=...` collection endpoint
+— that shape 404's live; reviews are fetched **per property**, not
 account-wide, and there is no flat collection endpoint at all.
 
 ```
 per_page: integer, max 50, default 10
-include:  "guest"   (only documented value; property/listing/reservation
-                      appear to be present without needing an include)
+include:  "guest"   (only documented value)
 ```
 
-**Key fields:**
+With only `include=guest` requested, `reservation`/`property`/`listing`
+never appeared on any row in the live response — confirmed absent, not
+just undocumented. `hospFetchReviews`'s consumer
+(hospitable-reviews-backfill.ts) doesn't need them anyway: it already knows
+which FieldStay property a review belongs to from its own per-property
+fetch loop.
+
+**Key fields (confirmed live):**
 ```
-id:                    string (uuid)
-platform:              "airbnb" | "direct"
-public.rating:         integer
-public.review:         string
-public.response:       string | null   (null = not yet responded)
-private.feedback:      string | null   (guest-private feedback — never persisted)
-private.detailed_ratings: array         (guest-private — never persisted)
-responded_at:          date-time | null
-reviewed_at:           date-time
-can_respond:           boolean
-guest.first_name:      string
-guest.last_name:       string
-guest.language:        string
-reservation.id:        UUID
-reservation.code:      string
-reservation.check_in:  date-time
-reservation.check_out: date-time
-property.id:           UUID
-property.name:         string
-property.public_name:  string
-listing.platform:      string
-listing.platform_id:   string
+id:                        string (uuid)
+platform:                  "airbnb" | "direct"
+public.rating:             integer
+public.rating_platform_original: string   (e.g. "5.00" — not consumed)
+public.review:             string
+public.response:           string | null   (null = not yet responded)
+private.feedback:          string | null   (guest-private feedback — never persisted)
+private.detailed_ratings:  array           (guest-private — never persisted)
+responded_at:              date-time | null
+reviewed_at:               date-time
+can_respond:               boolean
+guest.first_name:          string | null
+guest.last_name:           string | null
+guest.language:            string | null
 ```
 
 Pagination: both a `links` object (`first`/`last`/`prev`/`next`) and a
-`meta` object (`current_page`/`last_page`/`per_page`/`total`) are returned.
+`meta` object (`current_page`/`last_page`/`per_page`/`total`) are returned,
+confirmed live on both an empty and a populated page.
+`hospFetchReviews()` uses `links.next`.
 `hospFetchReviews()` uses `links.next`, matching the cursor style already
 used for `hospFetchProperties`/`hospFetchTeammates`.
 

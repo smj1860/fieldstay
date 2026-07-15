@@ -583,12 +583,12 @@ async function fetchReservationsWindow(
   return reservations
 }
 
-// GET /properties/{uuid}/reviews — confirmed 2026-07-15 against Hospitable's
-// own published API reference: reviews are fetched per-property, NOT via a
-// flat /reviews?properties[]=... collection (an earlier version of this
-// function assumed the latter and 404'd on first live try). per_page maxes
-// at 50 (not the 100 used elsewhere in this file) — Hospitable's own docs
-// cap it there for this endpoint specifically.
+// GET /properties/{uuid}/reviews — ✅ confirmed live 2026-07-15 against a
+// real response (5 real reviews returned for a real property): reviews are
+// fetched per-property, NOT via a flat /reviews?properties[]=... collection
+// (an earlier version of this function assumed the latter and 404'd on
+// first live try). per_page maxes at 50 (not the 100 used elsewhere in this
+// file) — Hospitable's own docs cap it there for this endpoint specifically.
 //
 // Used for the one-time historical backfill (see
 // hospitable/hospitable-reviews-backfill.ts) — ongoing new/changed reviews
