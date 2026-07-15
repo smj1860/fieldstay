@@ -1,13 +1,10 @@
 // TEMPORARY diagnostic route — not part of the product surface.
 //
-// Purpose: confirm whether this org's Hospitable OAuth connection actually
-// carries the reviews:read scope (granted 2026-07-15, per
-// docs/Integrations/hospitable/api-reference.md's OAuth Scopes table), and
-// what a real GET /reviews response actually looks like — every field path
-// currently read by hospFetchReviews/hospitable-reviews-backfill.ts is
-// carried over from the single-review GET /reviews/{id} shape used by the
-// review.created/review.changed webhook handler, never confirmed against
-// this list endpoint itself. Delete this file once that's answered — see
+// Purpose: confirm the real GET /properties/{uuid}/reviews response against
+// this org's live, reconnected Hospitable token (reviews:read granted
+// 2026-07-15) — the endpoint shape and per_page/pagination details are from
+// Hospitable's own published API reference, not yet verified against a
+// real live response. Delete this file once that's answered — see
 // docs/Integrations/hospitable/api-reference.md's "Reviews" section.
 //
 // Auth: same as any dashboard page — requireOrgMember, so only a logged-in
@@ -22,8 +19,7 @@ export async function GET(request: NextRequest) {
   const { user, supabase, membership } = await requireOrgMember()
 
   const searchParams = request.nextUrl.searchParams
-  const page    = searchParams.get('page') ?? '1'
-  const perPage = searchParams.get('per_page') ?? '25'
+  const perPage = searchParams.get('per_page') ?? '10'
 
   const { data: properties, error: propertyError } = await supabase
     .from('properties')
@@ -49,28 +45,28 @@ export async function GET(request: NextRequest) {
     )
   }
 
-  const propertiesQuery = properties
-    .map((p) => `properties[]=${encodeURIComponent(p.external_id as string)}`)
-    .join('&')
+  const results = []
+  for (const property of properties) {
+    const url = `${HOSPITABLE_API_BASE}/properties/${property.external_id}/reviews`
+      + `?per_page=${perPage}&include=guest`
 
-  const url = `${HOSPITABLE_API_BASE}/reviews?page=${page}&per_page=${perPage}`
-    + `&include=guest,reservation&${propertiesQuery}`
+    const res  = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept:        'application/json',
+      },
+    })
+    const text = await res.text()
 
-  const hospitableResponse = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept:        'application/json',
-    },
-  })
+    results.push({
+      property: { id: property.id, name: property.name, external_id: property.external_id },
+      url,
+      status: res.status,
+      body:   safeJsonParse(text),
+    })
+  }
 
-  const body = await hospitableResponse.text()
-
-  return NextResponse.json({
-    properties:       properties.map((p) => ({ id: p.id, name: p.name, external_id: p.external_id })),
-    requestUrl:       url,
-    hospitableStatus: hospitableResponse.status,
-    hospitableBody:   safeJsonParse(body),
-  })
+  return NextResponse.json({ results })
 }
 
 function safeJsonParse(text: string): unknown {

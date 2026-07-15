@@ -238,40 +238,60 @@ export interface HospitablePagedReservations {
   }
 }
 
-// 📄 Spec — only the single-review GET /reviews/{id} shape (used by the
-// review.created/review.changed webhook handler in incremental-sync.ts) has
-// been confirmed against a real payload. This is assumed to share the same
-// nested shape for each list-endpoint entry; verify against a real
-// multi-review response before trusting it further.
+// 📄 Spec — from Hospitable's own published API reference for
+// GET /properties/{uuid}/reviews (2026-07-15), not yet verified against a
+// real live response. `private` (feedback/detailed_ratings) is guest-
+// submitted private feedback, not for public consumption — FieldStay never
+// persists it; typed here only for documentation completeness.
 export interface HospitableReview {
-  id:           string
-  reviewed_at?: string | null
-  can_respond?: boolean
-  public?: {
-    rating?:   number | null
-    review?:   string | null
+  id:            string
+  platform:      'airbnb' | 'direct'
+  reviewed_at:   string
+  responded_at?: string | null
+  can_respond?:  boolean
+  public: {
+    rating:    number
+    review:    string
     response?: string | null
+  }
+  private?: {
+    feedback?:         string | null
+    detailed_ratings?: Array<{ type: string; rating: number; comment?: string | null }>
   } | null
   guest?: {
     first_name?: string | null
     last_name?:  string | null
-  } | null
-  property?: {
-    id?: string | null
+    language?:   string | null
   } | null
   reservation?: {
     id?:        string | null
+    code?:      string | null
     check_in?:  string | null
     check_out?: string | null
   } | null
+  property?: {
+    id?:          string | null
+    name?:        string | null
+    public_name?: string | null
+  } | null
+  listing?: {
+    platform?:    string | null
+    platform_id?: string | null
+  } | null
 }
 
-// 📄 Spec — pagination style for GET /reviews isn't documented. Mirrors
-// HospitablePagedReservations' page/per_page + meta.last_page shape (the
-// only other paginated, filtered Hospitable list endpoint confirmed live)
-// rather than guessing a links.next cursor style instead.
+// 📄 Spec — GET /properties/{uuid}/reviews returns BOTH a links cursor
+// object and a meta page-count object; links.next is used for pagination
+// here (same cursor style as hospFetchProperties/hospFetchTeammates)
+// since it needs no extra page-counter bookkeeping.
 export interface HospitablePagedReviews {
-  data: HospitableReview[]
+  data:  HospitableReview[]
+  links?: {
+    first: string | null
+    last:  string | null
+    prev:  string | null
+    next:  string | null
+  }
   meta?: {
     current_page: number
     last_page:    number
