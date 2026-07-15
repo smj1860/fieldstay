@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
-import { getPmEmails } from '@/lib/inngest/helpers'
+import { getPmEmails, createPmNotification } from '@/lib/inngest/helpers'
 import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
@@ -184,25 +184,18 @@ export const handleTurnoverCompleted = inngest.createFunction(
     await step.run('notify-pm-of-completion', async () => {
       const supabase = createServiceClient()
 
-      const [{ data: property }, pmEmails] = await Promise.all([
-        supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
-        getPmEmails(supabase, org_id),
-      ])
-      const [pmEmail] = pmEmails
+      const { data: property } = await supabase
+        .from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single()
 
-      if (!pmEmail) return
-
-      await resend.emails.send({
-        from:    FROM,
-        to:      pmEmail,
-        subject: `✅ Turnover complete — ${property?.name}`,
-        html: await renderPmAlert({
-          heading:  'Turnover marked complete',
-          body:     `${property?.name} is ready for guests.`,
-          ctaLabel: 'View Turnover →',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers/${turnover_id}`,
-        }),
-      }, { idempotencyKey: `turnover-completed-pm-${turnover_id}` })
+      await createPmNotification(supabase, {
+        orgId:     org_id,
+        type:      'turnover_complete',
+        title:     `✓ Turnover complete — ${property?.name}`,
+        subtitle:  `${property?.name} is ready for guests`,
+        href:      `/turnovers/${turnover_id}`,
+        severity:  'green',
+        dedupeKey: `turnover-completed-pm-${turnover_id}`,
+      })
     })
 
     await step.run('notify-pm-of-open-mandatory-items', async () => {

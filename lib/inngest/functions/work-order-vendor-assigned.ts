@@ -4,8 +4,7 @@ import { NonRetriableError }    from 'inngest'
 import { render }               from '@react-email/render'
 import WorkOrderDispatchEmail   from '@/emails/WorkOrderDispatch'
 import { resend, FROM }         from '@/lib/resend/client'
-import { getPmEmails }          from '@/lib/inngest/helpers'
-import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
+import { createPmNotification } from '@/lib/inngest/helpers'
 import { renderSmsBody }        from '@/lib/sms/templates'
 import { randomBytes }          from 'crypto'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
@@ -221,27 +220,15 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     // ── Step 5: Notify PM that vendor was dispatched ───────────────────────
     await step.run('notify-pm-dispatched', async () => {
       const supabase = createServiceClient()
-      const [pmEmail] = await getPmEmails(supabase, orgId)
-      if (!pmEmail) return { skipped: true }
-
-      await resend.emails.send(
-        {
-          from:    FROM,
-          to:      pmEmail,
-          subject: `Work order dispatched — ${wo.wo_number ?? ''} · ${propertyName}`,
-          html: await renderPmAlert({
-            heading:  'Work order sent to vendor',
-            body:     `${vendor.name ?? 'The assigned vendor'} has been notified of work order ${wo.wo_number ?? workOrderId} and can access the job details via their portal link.`,
-            details:  [
-              { label: 'Property', value: propertyName ?? null },
-              { label: 'Vendor',   value: vendor.name ?? null },
-            ],
-            ctaLabel: 'View work order →',
-            ctaUrl:   `${appUrl}/maintenance/${workOrderId}`,
-          }),
-        },
-        { idempotencyKey: `wo-pm-notified-vendor-assigned-${workOrderId}-${vendorId}` }
-      )
+      await createPmNotification(supabase, {
+        orgId,
+        type:      'work_order_dispatched',
+        title:     `Work order dispatched — ${wo.wo_number ?? ''} · ${propertyName}`,
+        subtitle:  `${vendor.name ?? 'The assigned vendor'} was notified and can access job details via their portal link`,
+        href:      `/maintenance/${workOrderId}`,
+        severity:  'green',
+        dedupeKey: `wo-pm-notified-vendor-assigned-${workOrderId}-${vendorId}`,
+      })
       return { notified: true }
     })
 

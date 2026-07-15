@@ -5,7 +5,43 @@ export interface NotificationItem {
   title:    string
   subtitle: string
   href:     string
-  severity: 'amber' | 'red'
+  severity: 'amber' | 'red' | 'green' | 'blue'
+  /** Only meaningful for persisted (event-log) notifications. */
+  read?:    boolean
+}
+
+interface PersistedNotificationRow {
+  id:         string
+  title:      string
+  subtitle:   string | null
+  href:       string
+  severity:   string
+  read_at:    string | null
+  created_at: string
+}
+
+// Recent one-time events (work order complete, dispatched, etc.) — see
+// createPmNotification() in lib/inngest/helpers.ts for the write side.
+// Distinct from the derived "currently true" alerts below: those resolve
+// themselves (e.g. an unassigned turnover disappears once assigned), these
+// are a persisted event log that needs explicit read state.
+async function getPersistedNotifications(orgId: string): Promise<NotificationItem[]> {
+  const supabase = await createClient()
+  const { data } = await supabase
+    .from('notifications')
+    .select('id, title, subtitle, href, severity, read_at, created_at')
+    .eq('org_id', orgId)
+    .order('created_at', { ascending: false })
+    .limit(20)
+
+  return ((data ?? []) as PersistedNotificationRow[]).map((n) => ({
+    id:       n.id,
+    title:    n.title,
+    subtitle: n.subtitle ?? '',
+    href:     n.href,
+    severity: n.severity as NotificationItem['severity'],
+    read:     n.read_at !== null,
+  }))
 }
 
 interface TurnoverAlertRow {
@@ -130,5 +166,7 @@ export async function getNotifications(orgId: string): Promise<NotificationItem[
     })
   }
 
-  return items
+  // Live "currently true" alerts first, then the recent event-log feed.
+  const persisted = await getPersistedNotifications(orgId)
+  return [...items, ...persisted]
 }

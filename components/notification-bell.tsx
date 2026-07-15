@@ -4,9 +4,20 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Bell } from 'lucide-react'
 import type { NotificationItem } from '@/lib/notifications'
+import { markNotificationRead } from '@/app/(dashboard)/notifications-actions'
+
+const SEVERITY_COLOR: Record<NotificationItem['severity'], string> = {
+  red:   'var(--accent-red)',
+  amber: 'var(--accent-amber)',
+  green: 'var(--accent-green)',
+  blue:  'var(--accent-blue)',
+}
 
 export function NotificationBell({ items }: Readonly<{ items: NotificationItem[] }>) {
   const [open, setOpen] = useState(false)
+  // Local optimistic read-tracking so clicking doesn't wait on revalidation
+  // to clear the badge dot.
+  const [readIds, setReadIds] = useState<Set<string>>(new Set())
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -16,6 +27,23 @@ export function NotificationBell({ items }: Readonly<{ items: NotificationItem[]
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // Unread = derived alerts (always "unread" — they have no read state) OR
+  // a persisted item that isn't read yet and hasn't been optimistically
+  // marked read in this session.
+  const hasUnread = items.some(
+    (item) => item.read === undefined || (!item.read && !readIds.has(item.id))
+  )
+
+  function handleItemClick(item: NotificationItem) {
+    setOpen(false)
+    if (item.read === false) {
+      setReadIds((prev) => new Set(prev).add(item.id))
+      markNotificationRead(item.id).catch(() => {
+        // Non-fatal — worst case the dot reappears on next server fetch.
+      })
+    }
+  }
 
   return (
     <div className="relative" ref={ref}>
@@ -27,7 +55,7 @@ export function NotificationBell({ items }: Readonly<{ items: NotificationItem[]
         aria-label="Notifications"
       >
         <Bell className="w-4 h-4" />
-        {items.length > 0 && (
+        {hasUnread && (
           <span
             className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full"
             style={{ background: 'var(--accent-red)' }}
@@ -51,28 +79,34 @@ export function NotificationBell({ items }: Readonly<{ items: NotificationItem[]
             </div>
           ) : (
             <div className="max-h-96 overflow-y-auto">
-              {items.map((item) => (
-                <Link
-                  key={item.id}
-                  href={item.href}
-                  onClick={() => setOpen(false)}
-                  className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-[var(--bg-raised)]"
-                  style={{ borderBottom: '1px solid var(--border)' }}
-                >
-                  <span
-                    className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
-                    style={{ background: item.severity === 'red' ? 'var(--accent-red)' : 'var(--accent-amber)' }}
-                  />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                      {item.title}
-                    </p>
-                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      {item.subtitle}
-                    </p>
-                  </div>
-                </Link>
-              ))}
+              {items.map((item) => {
+                const isRead = item.read === true || readIds.has(item.id)
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    onClick={() => handleItemClick(item)}
+                    className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-[var(--bg-raised)]"
+                    style={{
+                      borderBottom: '1px solid var(--border)',
+                      opacity: isRead ? 0.6 : 1,
+                    }}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0"
+                      style={{ background: isRead ? 'var(--text-muted)' : SEVERITY_COLOR[item.severity] }}
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
+                        {item.title}
+                      </p>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        {item.subtitle}
+                      </p>
+                    </div>
+                  </Link>
+                )
+              })}
             </div>
           )}
         </div>
