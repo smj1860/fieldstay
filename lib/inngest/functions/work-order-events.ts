@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderWorkOrderEmail } from '@/emails/work-order'
-import { getPmEmails } from '@/lib/inngest/helpers'
+import { getPmEmails, createPmNotification } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
@@ -48,45 +48,22 @@ export const handleWorkOrderCreated = inngest.createFunction(
 
       // ── Step 4: Notify PM of dispatch outcome ──────────────────────────────
       await step.run('notify-pm', async () => {
+        if (!dispatchResult.dispatched) {
+          // no_vendor_email — silent skip, no PM alert (see PART 2 notes).
+          return { skipped: true, reason: dispatchResult.reason }
+        }
+
         const supabase = createServiceClient()
-        const [pmEmail] = await getPmEmails(supabase, org_id)
-
-        if (!pmEmail) {
-          logger.warn(`No PM email found for org ${org_id} — skipping PM notification`)
-          return { skipped: true }
-        }
-
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
-
-        if (!dispatchResult.dispatched && dispatchResult.reason === 'no_vendor_email') {
-          // Vendor has no email — silent skip, no PM alert (see PART 2 notes).
-          return { skipped: true, reason: 'no_vendor_email' }
-        }
-
-        if (dispatchResult.dispatched) {
-          // Confirm to PM that vendor was notified
-          await resend.emails.send(
-            {
-              from:    FROM,
-              to:      pmEmail,
-              subject: `Work order dispatched — ${dispatchResult.woNumber} · ${dispatchResult.propertyName}`,
-              html: await renderPmAlert({
-                heading:  'Work order sent to vendor',
-                body:     `${dispatchResult.vendorName} has been notified of work order ${dispatchResult.woNumber} and can access the job details and sign off via the link in their email.`,
-                details:  [
-                  { label: 'Property', value: dispatchResult.propertyName ?? null },
-                  { label: 'Vendor',   value: dispatchResult.vendorName   ?? null },
-                ],
-                ctaLabel: 'View work order →',
-                ctaUrl:   `${appUrl}/maintenance/${work_order_id}`,
-              }),
-            },
-            { idempotencyKey: `wo-pm-notified-created-${work_order_id}` }
-          )
-          return { notified: true }
-        }
-
-        return { skipped: true }
+        await createPmNotification(supabase, {
+          orgId:     org_id,
+          type:      'work_order_dispatched',
+          title:     `Work order dispatched — ${dispatchResult.woNumber} · ${dispatchResult.propertyName}`,
+          subtitle:  `${dispatchResult.vendorName} was notified and can sign off via their portal link`,
+          href:      `/maintenance/${work_order_id}`,
+          severity:  'green',
+          dedupeKey: `wo-pm-notified-created-${work_order_id}`,
+        })
+        return { notified: true }
       })
 
       // ── Step 5: Immediate Stripe Connect invite if vendor isn't set up yet ───
@@ -364,7 +341,7 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
     retries: 2,
   },
   { event: 'work-order/completed-via-portal' as const },
-  async ({ event, step, logger }) => {
+  async ({ event, step }) => {
     const { work_order_id } = event.data
 
     await step.run('notify-pm-of-completion', async () => {
@@ -383,12 +360,6 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
 
       if (!wo) return
 
-      const [pmEmail] = await getPmEmails(supabase, wo.org_id)
-      if (!pmEmail) {
-        logger.warn(`No PM email for org_id=${wo.org_id} work_order_id=${work_order_id} event=work-order/completed-via-portal — skipping notification`)
-        return
-      }
-
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
       const photos   = Array.isArray(wo.work_order_photos) ? wo.work_order_photos : []
@@ -398,28 +369,18 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
       // lock in whichever amount lands first via ignoreDuplicates.
 
       const photoNote = photos.length > 0
-        ? `${photos.length} photo${photos.length !== 1 ? 's' : ''} attached to the work order.`
-        : undefined
+        ? ` (${photos.length} photo${photos.length !== 1 ? 's' : ''} attached)`
+        : ''
 
-      await resend.emails.send(
-        {
-          from:    FROM,
-          to:      pmEmail,
-          subject: `✅ Work order complete — ${wo.title} at ${property?.name}`,
-          html: await renderPmAlert({
-            heading:  'Work order marked complete',
-            body:     `${vendor?.name ?? 'Your vendor'} has completed: ${wo.title}.`,
-            details: [
-              { label: 'Property', value: property?.name ?? null },
-              { label: 'Notes',    value: wo.completion_notes ?? null },
-            ],
-            note:     photoNote,
-            ctaLabel: 'View Work Order →',
-            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance?wo=${work_order_id}`,
-          }),
-        },
-        { idempotencyKey: `wo-completed-via-portal-${work_order_id}` }
-      )
+      await createPmNotification(supabase, {
+        orgId:     wo.org_id,
+        type:      'work_order_complete',
+        title:     `✓ Work Complete — ${wo.title} at ${property?.name}`,
+        subtitle:  `${vendor?.name ?? 'Your vendor'} completed this job${photoNote}`,
+        href:      `/maintenance/${work_order_id}`,
+        severity:  'green',
+        dedupeKey: `wo-completed-via-portal-${work_order_id}`,
+      })
     })
 
     return { work_order_id, notified: true }
@@ -565,7 +526,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
     retries: 2,
   },
   { event: 'work-order/quote-submitted' as const },
-  async ({ event, step, logger }) => {
+  async ({ event, step }) => {
     const { work_order_id, quote_request_id, org_id, quoted_amount, quote_notes } = event.data
 
     await step.run('notify-pm-of-quote', async () => {
@@ -583,31 +544,15 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
-      const [pmEmail] = await getPmEmails(supabase, org_id)
-      if (!pmEmail) {
-        logger.warn(`No PM email for org_id=${org_id} work_order_id=${work_order_id} event=work-order/quote-submitted — skipping notification`)
-        return
-      }
-
-      await resend.emails.send(
-        {
-          from:    FROM,
-          to:      pmEmail,
-          subject: `💬 Quote received — ${wo.title} at ${property?.name}`,
-          html: await renderPmAlert({
-            heading:  'Quote received',
-            body:     `${vendor?.name ?? 'Your vendor'} has submitted a quote for ${wo.title}.`,
-            details: [
-              { label: 'Property',      value: property?.name ?? null },
-              { label: 'Quoted Amount', value: `$${quoted_amount.toFixed(2)}` },
-              { label: 'Vendor Notes',  value: quote_notes ?? null },
-            ],
-            ctaLabel: 'Review Quote →',
-            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-          }),
-        },
-        { idempotencyKey: `wo-quote-submitted-${quote_request_id}` }
-      )
+      await createPmNotification(supabase, {
+        orgId:     org_id,
+        type:      'work_order_quote_received',
+        title:     `💬 Quote received — ${wo.title} at ${property?.name}`,
+        subtitle:  `${vendor?.name ?? 'Your vendor'} quoted $${quoted_amount.toFixed(2)}${quote_notes ? ` — ${quote_notes}` : ''}`,
+        href:      `/maintenance/${work_order_id}`,
+        severity:  'amber',
+        dedupeKey: `wo-quote-submitted-${quote_request_id}`,
+      })
     })
 
     return { work_order_id, notified: true }

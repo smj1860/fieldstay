@@ -1,9 +1,6 @@
 import { inngest }                    from '@/lib/inngest/client'
 import { createServiceClient }       from '@/lib/supabase/server'
 import { generateReviewResponse }    from '@/lib/repuguard/generate-response'
-import { getPmEmails }               from '@/lib/inngest/helpers'
-import { resend, FROM }              from '@/lib/resend/client'
-import { renderPmAlert }             from '@/lib/resend/emails/pm-alert'
 
 const BATCH_LIMIT = 25
 
@@ -121,29 +118,10 @@ export const repuguardBatchGenerate = inngest.createFunction(
     const generated = results.filter((r) => r.generated).length
     const skipped   = results.filter((r) => !r.generated).length
 
-    // ── Notify PM ─────────────────────────────────────────────────────────────
-    // Scope the idempotency key to org+date+batch marker (first review id) so a
-    // second same-day batch run — triggered after BATCH_LIMIT capped the first —
-    // still notifies the PM instead of being silently de-duped.
-    const batchRunId = reviews[0]?.id ?? 'empty'
-
-    await step.run('notify-pm', async () => {
-      const supabase = createServiceClient()
-      const [pmEmail] = await getPmEmails(supabase, org_id)
-      if (!pmEmail) return
-
-      const html = await renderPmAlert({
-        heading:  'RepuGuard batch complete',
-        body:     `${generated} review draft${generated !== 1 ? 's' : ''} are ready for your review.${skipped > 0 ? ' ' + skipped + ' could not be generated and will need to be drafted manually.' : ''}`,
-        ctaLabel: 'Review Drafts →',
-        ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/reviews`,
-      })
-
-      await resend.emails.send(
-        { from: FROM, to: pmEmail, subject: `RepuGuard: ${generated} review draft${generated !== 1 ? 's' : ''} ready`, html },
-        { idempotencyKey: `repuguard-batch-${org_id}-${new Date().toISOString().split('T')[0]}-${batchRunId}` }
-      )
-    })
+    // PM notification for generated drafts is now a once-daily digest —
+    // see lib/inngest/functions/cron/notification-digest.ts. Nothing to
+    // do here per-batch; review_responses.generated_at is what the digest
+    // cron counts.
 
     return { generated, skipped }
   }

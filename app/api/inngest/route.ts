@@ -20,6 +20,7 @@ import { dailyGuestPiiRetention }        from '@/lib/inngest/functions/cron/gues
 import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audit-retention'
 import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale-feed-alert'
 import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turnover-priority-decay'
+import { notificationDigest }           from '@/lib/inngest/functions/cron/notification-digest'
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
@@ -178,6 +179,7 @@ export const { GET, POST, PUT } = serve({
     auditRetentionCron,
     staleFeedAlert,
     turnoverPriorityDecay,
+    notificationDigest,
     computeChecklistSignals,
 
     // Inventory → PO

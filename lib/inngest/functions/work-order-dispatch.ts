@@ -2,10 +2,9 @@ import { inngest }             from '@/lib/inngest/client'
 import { resend, FROM }        from '@/lib/resend/client'
 import { render }              from '@react-email/render'
 import WorkOrderDispatchEmail  from '@/emails/WorkOrderDispatch'
-import WorkOrderSignOffEmail   from '@/emails/WorkOrderSignOff'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
-import { getPmMembers } from '@/lib/inngest/helpers'
+import { getPmMembers, createPmNotification } from '@/lib/inngest/helpers'
 
 export const workOrderDispatch = inngest.createFunction(
   {
@@ -143,8 +142,8 @@ export const workOrderSignedOff = inngest.createFunction(
 
   async ({ event, step }) => {
     const {
-      workOrderId, woNumber, title, signOffNotes, signedOffAt,
-      propertyName, propertyAddress, orgId, vendorEmail
+      workOrderId, woNumber, signOffNotes, signedOffAt,
+      propertyName, orgId,
     } = event.data
 
     // ── Step 1: Find PM email from org owner/admin/manager ───────────────
@@ -171,26 +170,16 @@ export const workOrderSignedOff = inngest.createFunction(
 
     // ── Step 2: Notify PM ─────────────────────────────────────────────────
     await step.run('notify-pm', async () => {
-      const html = await render(WorkOrderSignOffEmail({
-        woNumber,
-        title,
-        propertyName,
-        propertyAddress,
-        vendorName:   vendorEmail ?? null,
-        signOffNotes: signOffNotes ?? null,
-        signedOffAt,
-        pmName:       pmEmail.fullName,
-      }))
-      const { error } = await resend.emails.send(
-        {
-          from:    FROM,
-          to:      [pmEmail.email!],
-          subject: `✓ Work Complete — ${woNumber} · ${propertyName}`,
-          html,
-        },
-        { idempotencyKey: `work-order-signed-off-pm-${workOrderId}` }
-      )
-      if (error) throw new Error(`Resend sign-off error: ${JSON.stringify(error)}`)
+      const supabase = createServiceClient()
+      await createPmNotification(supabase, {
+        orgId,
+        type:      'work_order_complete',
+        title:     `✓ Work Complete — ${woNumber} · ${propertyName}`,
+        subtitle:  signOffNotes ? `Signed off — ${signOffNotes}` : 'Vendor signed off with no notes',
+        href:      `/maintenance/${workOrderId}`,
+        severity:  'green',
+        dedupeKey: `work-order-signed-off-pm-${workOrderId}`,
+      })
     })
 
     // ── Step 3: Log sign-off to communication_logs ────────────────────────
