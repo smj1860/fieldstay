@@ -59,7 +59,6 @@ export async function generateTurnoversForProperty(
       .map(t => t.booking_id as string)
   )
   const newTurnoverIds: string[] = []
-  const DEFAULT_WINDOW_HOURS = 4
   // ── PASS 1: Standalone turnover for every checkout ──────────────
   // Ensures every booking gets a clean regardless of whether a next
   // booking exists. Pass 2 upgrades these to precise pairs.
@@ -69,48 +68,18 @@ export async function generateTurnoversForProperty(
       t => t.booking_id === booking.id && t.prev_booking_id !== null
     )
     if (alreadyPaired) continue
-    const checkoutTimeStr = (booking.checkout_time ?? property?.checkout_time ?? '11:00').slice(0, 5)
-    // Convert local wall-clock checkout to UTC using property timezone.
-    // Without this, "11:00 AM CDT" is stored as 11:00 UTC = 6:00 AM local — wrong.
-    const checkoutDT = propertyLocalToUtc(booking.checkout_date, checkoutTimeStr, tz)
-    if (isNaN(checkoutDT.getTime())) {
-      console.error('[generator] invalid date in Pass 1', {
-        propertyId, checkout_date: booking.checkout_date, checkoutTimeStr,
-      })
-      continue
-    }
-    const checkinDT       = new Date(checkoutDT.getTime() + DEFAULT_WINDOW_HOURS * 3_600_000)
-    const windowMinutes   = DEFAULT_WINDOW_HOURS * 60
-    const { data: turnover, error } = await supabase
-      .from('turnovers')
-      .insert({
-        property_id:           propertyId,
-        org_id:                orgId,
-        booking_id:            booking.id,
-        prev_booking_id:       null,
-        checkout_datetime:     checkoutDT.toISOString(),
-        checkin_datetime:      checkinDT.toISOString(),
-        window_minutes:        windowMinutes,
-        status:                'pending_assignment',
-        priority:              'medium' as const,
-        auto_generated:        true,
-        checklist_template_id: defaultTemplate?.id ?? null,
-      })
-      .select('id')
-      .single()
-    if (error) {
-      // 23505 = unique_violation: concurrent worker already inserted this standalone.
-      // The new turnovers_standalone_unique partial index makes this safe to ignore.
-      if (error.code !== '23505') {
-        console.error('[generator] Pass 1 insert error', { propertyId, bookingId: booking.id, code: error.code, msg: error.message })
-      }
-      continue
-    }
-    if (turnover) {
-      newTurnoverIds.push(turnover.id)
-      existingStandalones.add(booking.id)
-      await snapshotChecklist(supabase, turnover.id, orgId, propertyId, defaultTemplate?.id ?? null)
-    }
+
+    const newTurnoverId = await insertStandaloneTurnover(supabase, {
+      orgId, propertyId, booking,
+      propertyCheckoutTime: property?.checkout_time ?? null,
+      propertyTimezone:     tz,
+      checklistTemplateId:  defaultTemplate?.id ?? null,
+    })
+    if (!newTurnoverId) continue
+
+    newTurnoverIds.push(newTurnoverId)
+    existingStandalones.add(booking.id)
+    await snapshotChecklist(supabase, newTurnoverId, orgId, propertyId, defaultTemplate?.id ?? null)
   }
   // ── PASS 2: Upgrade standalone → precise pair, or refresh an existing pair ──
   // When a next booking exists, update the standalone with real times. If a
@@ -153,57 +122,181 @@ export async function generateTurnoversForProperty(
     }
 
     if (existingStandalones.has(outgoing.id)) {
-      // Upgrade existing standalone to a precise pair.
-      // checkout_datetime is now included here too — previously only
-      // checkin_datetime/window_minutes/priority were updated on upgrade,
-      // silently dropping any checkout_time correction that arrived
-      // between Pass 1 creating the standalone and this upgrade running.
-      await supabase
-        .from('turnovers')
-        .update({
-          booking_id:         incoming.id,
-          prev_booking_id:    outgoing.id,
-          checkout_datetime:  checkoutDT.toISOString(),
-          checkin_datetime:   checkinDT.toISOString(),
-          window_minutes:     windowMinutes,
-          priority,
-        })
-        .eq('booking_id',      outgoing.id)
-        .is('prev_booking_id', null)
-        .eq('property_id',     propertyId)
+      await upgradeStandaloneToPair(supabase, {
+        propertyId, outgoingBookingId: outgoing.id, incomingBookingId: incoming.id,
+        checkoutDT, checkinDT, windowMinutes, priority,
+      })
       existingPairs.add(pairKey)
-    } else {
-      // Insert a fresh pair turnover
-      const { data: turnover, error } = await supabase
-        .from('turnovers')
-        .insert({
-          property_id:           propertyId,
-          org_id:                orgId,
-          booking_id:            incoming.id,
-          prev_booking_id:       outgoing.id,
-          checkout_datetime:     checkoutDT.toISOString(),
-          checkin_datetime:      checkinDT.toISOString(),
-          window_minutes:        windowMinutes,
-          status:                'pending_assignment',
-          priority,
-          auto_generated:        true,
-          checklist_template_id: defaultTemplate?.id ?? null,
-        })
-        .select('id')
-        .single()
-      if (error) {
-        // 23505 = unique_violation: concurrent worker already inserted this pair
-        // (covered by the existing turnovers_booking_pair_unique partial index).
-        if (error.code !== '23505') {
-          console.error('[generator] Pass 2 insert error', { propertyId, code: error.code, msg: error.message })
-        }
-      } else if (turnover) {
-        newTurnoverIds.push(turnover.id)
-        await snapshotChecklist(supabase, turnover.id, orgId, propertyId, defaultTemplate?.id ?? null)
-      }
+      continue
     }
+
+    const newTurnoverId = await insertPairTurnover(supabase, {
+      orgId, propertyId, outgoingBookingId: outgoing.id, incomingBookingId: incoming.id,
+      checkoutDT, checkinDT, windowMinutes, priority,
+      checklistTemplateId: defaultTemplate?.id ?? null,
+    })
+    if (!newTurnoverId) continue
+
+    newTurnoverIds.push(newTurnoverId)
+    await snapshotChecklist(supabase, newTurnoverId, orgId, propertyId, defaultTemplate?.id ?? null)
   }
   return newTurnoverIds
+}
+
+const DEFAULT_STANDALONE_WINDOW_HOURS = 4
+
+/**
+ * Inserts a Pass 1 standalone turnover for a single booking's checkout.
+ * Returns the new turnover's id, or null if the insert was skipped (a
+ * concurrent worker already created it — 23505 unique_violation, safe to
+ * ignore) or a date failed to parse.
+ */
+async function insertStandaloneTurnover(
+  supabase: DBClient,
+  params: {
+    orgId:                string
+    propertyId:            string
+    booking:               { id: string; checkout_date: string; checkout_time: string | null }
+    propertyCheckoutTime:  string | null
+    propertyTimezone:      string
+    checklistTemplateId:   string | null
+  }
+): Promise<string | null> {
+  const { orgId, propertyId, booking, propertyCheckoutTime, propertyTimezone, checklistTemplateId } = params
+
+  const checkoutTimeStr = (booking.checkout_time ?? propertyCheckoutTime ?? '11:00').slice(0, 5)
+  // Convert local wall-clock checkout to UTC using property timezone.
+  // Without this, "11:00 AM CDT" is stored as 11:00 UTC = 6:00 AM local — wrong.
+  const checkoutDT = propertyLocalToUtc(booking.checkout_date, checkoutTimeStr, propertyTimezone)
+  if (isNaN(checkoutDT.getTime())) {
+    console.error('[generator] invalid date in Pass 1', {
+      propertyId, checkout_date: booking.checkout_date, checkoutTimeStr,
+    })
+    return null
+  }
+
+  const checkinDT     = new Date(checkoutDT.getTime() + DEFAULT_STANDALONE_WINDOW_HOURS * 3_600_000)
+  const windowMinutes = DEFAULT_STANDALONE_WINDOW_HOURS * 60
+
+  const { data: turnover, error } = await supabase
+    .from('turnovers')
+    .insert({
+      property_id:           propertyId,
+      org_id:                orgId,
+      booking_id:            booking.id,
+      prev_booking_id:       null,
+      checkout_datetime:     checkoutDT.toISOString(),
+      checkin_datetime:      checkinDT.toISOString(),
+      window_minutes:        windowMinutes,
+      status:                'pending_assignment',
+      priority:              'medium' as const,
+      auto_generated:        true,
+      checklist_template_id: checklistTemplateId,
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    // 23505 = unique_violation: concurrent worker already inserted this standalone.
+    // The new turnovers_standalone_unique partial index makes this safe to ignore.
+    if (error.code !== '23505') {
+      console.error('[generator] Pass 1 insert error', { propertyId, bookingId: booking.id, code: error.code, msg: error.message })
+    }
+    return null
+  }
+
+  return turnover?.id ?? null
+}
+
+/**
+ * Upgrades an existing Pass 1 standalone turnover to a precise pair once a
+ * next booking is known. checkout_datetime is included here too — a prior
+ * version of this update only touched checkin_datetime/window_minutes/
+ * priority on upgrade, silently dropping any checkout_time correction that
+ * arrived between Pass 1 creating the standalone and this upgrade running.
+ */
+async function upgradeStandaloneToPair(
+  supabase: DBClient,
+  params: {
+    propertyId:         string
+    outgoingBookingId:  string
+    incomingBookingId:  string
+    checkoutDT:         Date
+    checkinDT:          Date
+    windowMinutes:      number
+    priority:           PriorityLevel
+  }
+): Promise<void> {
+  const { propertyId, outgoingBookingId, incomingBookingId, checkoutDT, checkinDT, windowMinutes, priority } = params
+
+  await supabase
+    .from('turnovers')
+    .update({
+      booking_id:         incomingBookingId,
+      prev_booking_id:    outgoingBookingId,
+      checkout_datetime:  checkoutDT.toISOString(),
+      checkin_datetime:   checkinDT.toISOString(),
+      window_minutes:     windowMinutes,
+      priority,
+    })
+    .eq('booking_id',      outgoingBookingId)
+    .is('prev_booking_id', null)
+    .eq('property_id',     propertyId)
+}
+
+/**
+ * Inserts a fresh Pass 2 pair turnover for a booking pair that has neither
+ * an existing pair nor an upgradeable standalone. Returns the new
+ * turnover's id, or null if the insert was skipped (a concurrent worker
+ * already inserted this pair — 23505 unique_violation, safe to ignore).
+ */
+async function insertPairTurnover(
+  supabase: DBClient,
+  params: {
+    orgId:                string
+    propertyId:            string
+    outgoingBookingId:     string
+    incomingBookingId:     string
+    checkoutDT:            Date
+    checkinDT:             Date
+    windowMinutes:         number
+    priority:              PriorityLevel
+    checklistTemplateId:   string | null
+  }
+): Promise<string | null> {
+  const {
+    orgId, propertyId, outgoingBookingId, incomingBookingId,
+    checkoutDT, checkinDT, windowMinutes, priority, checklistTemplateId,
+  } = params
+
+  const { data: turnover, error } = await supabase
+    .from('turnovers')
+    .insert({
+      property_id:           propertyId,
+      org_id:                orgId,
+      booking_id:            incomingBookingId,
+      prev_booking_id:       outgoingBookingId,
+      checkout_datetime:     checkoutDT.toISOString(),
+      checkin_datetime:      checkinDT.toISOString(),
+      window_minutes:        windowMinutes,
+      status:                'pending_assignment',
+      priority,
+      auto_generated:        true,
+      checklist_template_id: checklistTemplateId,
+    })
+    .select('id')
+    .single()
+
+  if (error) {
+    // 23505 = unique_violation: concurrent worker already inserted this pair
+    // (covered by the existing turnovers_booking_pair_unique partial index).
+    if (error.code !== '23505') {
+      console.error('[generator] Pass 2 insert error', { propertyId, code: error.code, msg: error.message })
+    }
+    return null
+  }
+
+  return turnover?.id ?? null
 }
 
 /**
