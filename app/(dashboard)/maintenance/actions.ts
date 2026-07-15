@@ -9,6 +9,12 @@ import { logAuditEvent } from '@/lib/audit'
 import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import {
+  resolveWorkOrderStatus,
+  sendQuoteRequestEmails,
+  checkCrewTimeOffWarning,
+  dispatchWorkOrderEvents,
+} from './create-work-order-helpers'
 
 export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string; warning?: string }
 
@@ -125,9 +131,7 @@ export async function createWorkOrder(
   if (!property) return { error: 'Property not found' }
 
   // In quote-request mode, WO starts as quote_requested with no vendor assigned yet
-  const woStatus            = WoStatusSchema.parse(
-    request_quotes ? 'quote_requested' : (vendor_id ? 'assigned' : 'pending')
-  )
+  const woStatus            = resolveWorkOrderStatus(request_quotes, vendor_id)
   const usePortal           = portal_enabled && !request_quotes
   const completion_token    = usePortal ? crypto.randomUUID() : null
   const completion_token_expires_at = usePortal
@@ -166,97 +170,31 @@ export async function createWorkOrder(
 
   // Send RFQ emails to each selected vendor
   if (request_quotes && quote_vendor_ids.length) {
-    await Promise.all(
-      quote_vendor_ids.map(async (vendorId) => {
-        const quote_token            = crypto.randomUUID()
-        const quote_token_expires_at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString()
-
-        const { data: qr, error: qrError } = await supabase
-          .from('quote_requests')
-          .insert({
-            work_order_id: wo.id,
-            org_id:        membership.org_id,
-            vendor_id:     vendorId,
-            quote_token,
-            quote_token_expires_at,
-            status:        'pending',
-          })
-          .select('id')
-          .single()
-
-        if (qrError || !qr) return
-
-        await inngest.send({
-          name: 'work-order/quote-requested' as const,
-          data: {
-            work_order_id:    wo.id,
-            quote_request_id: qr.id,
-            property_id,
-            org_id:           membership.org_id,
-            vendor_id:        vendorId,
-            quote_token,
-          },
-        })
-      })
-    )
+    await sendQuoteRequestEmails(supabase, wo.id, property_id, membership.org_id, quote_vendor_ids)
 
     revalidatePath('/maintenance')
     redirect(`/maintenance/${wo.id}`)
   }
 
-  if (usePortal) {
-    await inngest.send({
-      name: 'work-order/created',
-      data: {
-        work_order_id:  wo.id,
-        property_id,
-        org_id:         membership.org_id,
-        vendor_id:      vendor_id ?? null,
-        portal_enabled: true,
-      },
-    })
-  }
-
-  // Vendor suggestion — only when the PM left this to be figured out later:
-  // no vendor picked yet, and not already in quote-request mode (that's an
-  // explicit "let the market decide" flow, not a single top-pick recommendation).
-  // The Inngest function itself checks vendor_auto_assign_mode and no-ops if
-  // vendor suggestions are disabled for this org.
-  if (!request_quotes && !vendor_id && category) {
-    await inngest.send({
-      name: 'work-order/vendor-suggestion.requested',
-      data: {
-        work_order_id: wo.id,
-        property_id,
-        org_id:        membership.org_id,
-        category,
-      },
-    })
-  }
+  await dispatchWorkOrderEvents({
+    workOrderId:          wo.id,
+    propertyId:           property_id,
+    orgId:                membership.org_id,
+    vendorId:             vendor_id,
+    usePortal,
+    requestQuotes:        request_quotes,
+    category,
+    assignedCrewMemberId: assigned_crew_member_id,
+  })
 
   // Warn the PM when a vendor was assigned but no notification will be
   // sent — otherwise they're left assuming the vendor was notified.
+  // The crew-time-off warning below overrides this if both apply.
   let warning: string | undefined
   if (vendor_id && !usePortal) {
     warning = 'Work order created, but the vendor was not notified because the portal link is disabled for this vendor. Enable the portal in Vendor settings or notify them manually.'
   }
-
-  // Warn the PM when the assigned crew member marked time off that day —
-  // non-blocking, since they may want to override.
-  if (assigned_crew_member_id && scheduled_date) {
-    const { data: timeOff } = await supabase
-      .from('crew_availability')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .eq('crew_member_id', assigned_crew_member_id)
-      .eq('available_date', scheduled_date)
-      .eq('is_available', false)
-      .maybeSingle()
-
-    if (timeOff) {
-      warning = 'Work order created, but the assigned crew member marked time off on the scheduled date.'
-    }
-  }
+  warning = (await checkCrewTimeOffWarning(supabase, membership.org_id, assigned_crew_member_id, scheduled_date)) ?? warning
 
   await logAuditEvent({
     orgId:      membership.org_id,
@@ -266,20 +204,6 @@ export async function createWorkOrder(
     targetId:   wo.id,
     metadata:   { title, property_id, priority, source: 'manual' },
   })
-
-  // Internal crew assignment: no vendor, no portal/dispatch email. The WO
-  // surfaces in the crew PWA via Dexie sync; this event scaffolds push notify.
-  const isCrew = !vendor_id && !!assigned_crew_member_id
-  if (isCrew) {
-    await inngest.send({
-      name: 'work-order/crew.assigned',
-      data: {
-        workOrderId:  wo.id,
-        orgId:        membership.org_id,
-        crewMemberId: assigned_crew_member_id,
-      },
-    })
-  }
 
   revalidatePath('/maintenance')
   return { success: true, workOrderId: wo.id, warning }
