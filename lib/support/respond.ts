@@ -85,6 +85,33 @@ export async function generateResponse(params: {
   }
 }
 
+/**
+ * Runs one round of tool calls: executes every tool_use block in `res`,
+ * then appends the assistant turn and the tool results to `messages` (in
+ * place). Shared by the tool-use loop below and the forced-final-round
+ * case that follows it, which used to duplicate this exact sequence.
+ */
+async function runToolRound(
+  res:      Anthropic.Messages.Message,
+  orgId:    string,
+  messages: Anthropic.Messages.MessageParam[],
+): Promise<void> {
+  const toolUseBlocks = res.content.filter(
+    (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use'
+  )
+
+  const toolResults = await Promise.all(
+    toolUseBlocks.map(async (block) => ({
+      type:        'tool_result' as const,
+      tool_use_id: block.id,
+      content:     JSON.stringify(await callAccountTool(block.name, orgId)),
+    }))
+  )
+
+  messages.push({ role: 'assistant', content: res.content })
+  messages.push({ role: 'user', content: toolResults })
+}
+
 async function generateAccountSpecificResponse(params: {
   model:        string
   systemPrompt: string
@@ -108,20 +135,7 @@ async function generateAccountSpecificResponse(params: {
   // Tool-use loop — handle up to 3 rounds of tool calls before forcing a final answer
   let rounds = 0
   while (res.stop_reason === 'tool_use' && rounds < 3) {
-    const toolUseBlocks = res.content.filter(
-      (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use'
-    )
-
-    const toolResults = await Promise.all(
-      toolUseBlocks.map(async (block) => ({
-        type:        'tool_result' as const,
-        tool_use_id: block.id,
-        content:     JSON.stringify(await callAccountTool(block.name, params.orgId)),
-      }))
-    )
-
-    messages.push({ role: 'assistant', content: res.content })
-    messages.push({ role: 'user', content: toolResults })
+    await runToolRound(res, params.orgId, messages)
 
     res = await getAnthropicClient().messages.create({
       model:      params.model,
@@ -137,18 +151,7 @@ async function generateAccountSpecificResponse(params: {
   // Tool-use loop is done (or capped) — force a final structured response
   // rather than reading free text off whatever res currently holds.
   if (res.stop_reason === 'tool_use') {
-    const toolUseBlocks = res.content.filter(
-      (b): b is Anthropic.Messages.ToolUseBlock => b.type === 'tool_use'
-    )
-    const toolResults = await Promise.all(
-      toolUseBlocks.map(async (block) => ({
-        type:        'tool_result' as const,
-        tool_use_id: block.id,
-        content:     JSON.stringify(await callAccountTool(block.name, params.orgId)),
-      }))
-    )
-    messages.push({ role: 'assistant', content: res.content })
-    messages.push({ role: 'user', content: toolResults })
+    await runToolRound(res, params.orgId, messages)
   }
 
   const finalRes = await getAnthropicClient().messages.create({
