@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -18,32 +18,10 @@ import { SidebarUserMenu } from '@/components/layout/SidebarUserMenu'
 import { InstallBanner } from '@/components/pwa/install-banner'
 import { useTheme } from '@/lib/hooks/use-theme'
 import { useFocusTrap } from '@/lib/hooks/use-focus-trap'
+import { useLiveClock } from '@/lib/hooks/use-live-clock'
+import { useDashboardPushNotifications } from '@/lib/hooks/use-dashboard-push-notifications'
+import { useNavClusters } from '@/lib/hooks/use-nav-clusters'
 import { getVisibleNavItems, type NavItem } from '@/lib/navigation'
-
-function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
-  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const rawData = window.atob(base64)
-  return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
-}
-
-async function subscribeToDashboardPush(reg: ServiceWorkerRegistration) {
-  const sub  = await reg.pushManager.subscribe({
-    userVisibleOnly:      true,
-    applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!),
-  })
-  const json = sub.toJSON()
-  if (!json.keys) return
-  await fetch('/api/dashboard/push-subscribe', {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({
-      endpoint: json.endpoint,
-      p256dh:   json.keys.p256dh,
-      auth:     json.keys.auth,
-    }),
-  })
-}
 
 const PAGE_TITLES: Record<string, string> = {
   '/ops':          'Ops Snapshot',
@@ -80,49 +58,7 @@ interface Props {
   children:                   React.ReactNode
 }
 
-const CLUSTER_STORAGE_KEY = 'fs-nav-clusters'
 const CLUSTER_ORDER = ['Portfolio', 'Team & Vendors', 'Guest & Comms'] as const
-
-// Same useSyncExternalStore + module-level-listeners pattern as
-// lib/hooks/use-theme.ts — the correct way to sync a localStorage-backed
-// preference into render without a hydration mismatch (React uses
-// getServerSnapshot during SSR and the initial client render, then swaps to
-// the real client snapshot post-hydration) or an effect+setState cascade.
-const clusterListeners = new Set<() => void>()
-let clusterSnapshot: Record<string, boolean> = readClusterStateFromStorage()
-
-function readClusterStateFromStorage(): Record<string, boolean> {
-  if (typeof window === 'undefined') return {}
-  try {
-    const raw = window.localStorage.getItem(CLUSTER_STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
-  } catch {
-    return {}
-  }
-}
-
-function getClusterSnapshot(): Record<string, boolean> {
-  return clusterSnapshot
-}
-
-function getClusterServerSnapshot(): Record<string, boolean> {
-  return {}
-}
-
-function subscribeToClusters(onChange: () => void): () => void {
-  clusterListeners.add(onChange)
-  return () => clusterListeners.delete(onChange)
-}
-
-function writeClusterState(next: Record<string, boolean>) {
-  clusterSnapshot = next
-  try {
-    window.localStorage.setItem(CLUSTER_STORAGE_KEY, JSON.stringify(next))
-  } catch {
-    // localStorage unavailable — collapse preference just won't persist
-  }
-  clusterListeners.forEach((l) => l())
-}
 
 interface DashboardSidebarProps {
   mobile?:             boolean
@@ -161,27 +97,7 @@ function DashboardSidebar({
   userName,
   userEmail,
 }: Readonly<DashboardSidebarProps>) {
-  // getServerSnapshot ({}) covers SSR and the initial client render so
-  // there's no hydration mismatch; useSyncExternalStore swaps to the real
-  // localStorage-backed snapshot right after. isClusterExpanded's `?? true`
-  // fallback keeps everything expanded until then, which is also the
-  // correct default for a first-ever visit.
-  const expandedClusters = useSyncExternalStore(
-    subscribeToClusters, getClusterSnapshot, getClusterServerSnapshot
-  )
-
-  function isClusterExpanded(category: string): boolean {
-    const hasActiveItem = mgmtNav.some(
-      (item) => item.category === category && (pathname === item.href || pathname.startsWith(item.href + '/'))
-    )
-    if (hasActiveItem) return true
-    return expandedClusters[category] ?? true
-  }
-
-  function toggleCluster(category: string) {
-    const next = { ...expandedClusters, [category]: !isClusterExpanded(category) }
-    writeClusterState(next)
-  }
+  const { isClusterExpanded, toggleCluster } = useNavClusters(mgmtNav, pathname)
 
   const renderNavLink = (item: NavItem) => {
     const Icon   = item.icon
@@ -408,9 +324,8 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
   const [mobileOpen, setMobileOpen] = useState(false)
   const [moreDrawerOpen, setMoreDrawerOpen] = useState(false)
   const { theme, toggle: toggleTheme } = useTheme()
-  const [time,       setTime]       = useState('')
-  const [swReg,        setSwReg]        = useState<ServiceWorkerRegistration | null>(null)
-  const [notifVisible, setNotifVisible] = useState(false)
+  const time = useLiveClock()
+  const { notifVisible, enableNotifications } = useDashboardPushNotifications()
   const mobileDrawerRef = useRef<HTMLDivElement>(null)
 
   // Mobile sidebar drawer — focus trap, Escape-to-close, body-scroll lock.
@@ -422,57 +337,6 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
   // this effect's original single-dependency `[mobileOpen]` array exactly.
   const closeMobileDrawer = useCallback(() => setMobileOpen(false), [])
   useFocusTrap(mobileDrawerRef, mobileOpen, closeMobileDrawer)
-
-  // Live clock
-  useEffect(() => {
-    const tick = () => {
-      setTime(new Date().toLocaleTimeString('en-US', {
-        hour: 'numeric', minute: '2-digit', hour12: true,
-      }))
-    }
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [])
-
-  // Register service worker for dashboard push — no permission prompt on mount
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
-
-    const register = async () => {
-      try {
-        const reg      = await navigator.serviceWorker.register('/sw.js')
-        setSwReg(reg)
-
-        const existing = await reg.pushManager.getSubscription()
-        if (existing) return
-
-        const permission = Notification.permission
-        if (permission === 'default') {
-          setNotifVisible(true)
-        } else if (permission === 'granted') {
-          await subscribeToDashboardPush(reg)
-        }
-      } catch (err) {
-        console.error('[sw] dashboard registration failed:', err)
-      }
-    }
-
-    register()
-  }, [])
-
-  async function enableDashboardNotifications() {
-    if (!swReg) return
-    const permission = await Notification.requestPermission()
-    setNotifVisible(false)
-    if (permission !== 'granted') return
-    try {
-      await subscribeToDashboardPush(swReg)
-    } catch (err) {
-      console.error('[push] dashboard subscription failed:', err)
-    }
-  }
 
   const visibleItems = getVisibleNavItems(role, { repuguardActive, isStaff })
 
@@ -618,7 +482,7 @@ export function DashboardShell({ role, orgName, userName, userEmail, repuguardAc
 
             {notifVisible && (
               <button
-                onClick={enableDashboardNotifications}
+                onClick={enableNotifications}
                 title="Enable push notifications"
                 className="w-8 h-8 rounded-lg flex items-center justify-center transition-all relative hover:bg-[var(--border)] focus-visible:bg-[var(--border)]"
                 style={{ color: 'var(--accent-amber, #f59e0b)' }}
