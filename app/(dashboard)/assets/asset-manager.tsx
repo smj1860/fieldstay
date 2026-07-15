@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import {
   createAsset, updateAsset, deactivateAsset, bulkImportAssets,
-  type AssetActionState, type CsvAssetRow,
+  type AssetActionState,
 } from '../properties/actions'
 import { healthLabel, healthColor, healthDot, healthBgStyle } from '@/lib/assets/health-score'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
@@ -22,6 +22,7 @@ import { Card } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
 import type { PropertyAsset, AssetTypeStandard, AssetType } from '@/types/database'
+import { parseAssetCsvText, type ParsedAssetCsvRow } from '@/lib/csv/parseAssetCsv'
 
 // ── Local types ───────────────────────────────────────────────────────────────
 
@@ -40,82 +41,6 @@ const ASSET_TYPES: AssetType[] = [
   'wifi_router','fire_extinguisher','thermostat',
   'other',
 ]
-
-const ASSET_TYPE_ALIASES: Record<string, AssetType> = {
-  'hvac':            'hvac',
-  'water heater':    'water_heater',
-  'waterheater':     'water_heater',
-  'roof':            'roof',
-  'refrigerator':    'refrigerator',
-  'fridge':          'refrigerator',
-  'washer':          'washer',
-  'dryer':           'dryer',
-  'dishwasher':      'dishwasher',
-  'microwave':       'microwave',
-  'oven':            'oven_range',
-  'range':           'oven_range',
-  'oven range':      'oven_range',
-  'pool pump':       'pool_pump',
-  'pool':            'pool_pump',
-  'hot tub':         'hot_tub',
-  'hottub':          'hot_tub',
-  'spa':             'hot_tub',
-  'garage door':     'garage_door',
-  'garagedoor':      'garage_door',
-  'smart lock':      'smart_lock',
-  'smartlock':       'smart_lock',
-  'lock':            'smart_lock',
-  'deck':            'deck_structure',
-  'deck structure':  'deck_structure',
-  'electrical panel':'electrical_panel',
-  'panel':           'electrical_panel',
-  'plumbing':        'plumbing_system',
-  'septic':          'septic_system',
-  'well pump':       'well_pump',
-  'wellpump':        'well_pump',
-  'generator':       'generator',
-  'solar':           'solar_system',
-  'solar system':    'solar_system',
-  'ice maker':       'ice_maker',
-  'icemaker':        'ice_maker',
-  'garbage disposal':'garbage_disposal',
-  'disposal':        'garbage_disposal',
-  'trash compactor': 'trash_compactor',
-  'compactor':       'trash_compactor',
-  'water shutoff valve': 'water_shutoff_valve',
-  'water shutoff':       'water_shutoff_valve',
-  'shutoff valve':       'water_shutoff_valve',
-  'solar inverter':      'solar_inverter',
-  'inverter':            'solar_inverter',
-  'whole home water filter': 'whole_home_water_filter',
-  'water filter':            'whole_home_water_filter',
-  'heated tile system': 'heated_tile_system',
-  'heated tile':        'heated_tile_system',
-  'radiant floor':      'heated_tile_system',
-  'range hood vent': 'range_hood_vent',
-  'range hood':      'range_hood_vent',
-  'hood vent':       'range_hood_vent',
-  'coffee station': 'coffee_station',
-  'coffee maker':   'coffee_station',
-  'nespresso':      'coffee_station',
-  'toaster oven': 'toaster_oven',
-  'toaster':      'toaster_oven',
-  'wifi router': 'wifi_router',
-  'wifi':        'wifi_router',
-  'router':      'wifi_router',
-  'fire extinguisher': 'fire_extinguisher',
-  'extinguisher':      'fire_extinguisher',
-  'thermostat': 'thermostat',
-  'other':           'other',
-}
-
-function normalizeAssetType(raw: string): AssetType | null {
-  const lower = raw.toLowerCase().trim().replace(/_/g, ' ')
-  if (ASSET_TYPE_ALIASES[lower]) return ASSET_TYPE_ALIASES[lower]
-  if (ASSET_TYPES.includes(lower.replace(/ /g, '_') as AssetType))
-    return lower.replace(/ /g, '_') as AssetType
-  return null
-}
 
 // ── Health score pill ─────────────────────────────────────────────────────────
 
@@ -438,12 +363,6 @@ function AssetForm({
 
 // ── CSV import modal ──────────────────────────────────────────────────────────
 
-interface ParsedRow extends CsvAssetRow {
-  _valid:        boolean
-  _typeResolved: AssetType | null
-  _raw_type:     string
-}
-
 function CsvImportModal({
   propertyId,
   standards,
@@ -453,7 +372,7 @@ function CsvImportModal({
   standards:  AssetTypeStandard[]
   onClose:    () => void
 }) {
-  const [rows,      setRows]      = useState<ParsedRow[]>([])
+  const [rows,      setRows]      = useState<ParsedAssetCsvRow[]>([])
   const [importing, setImporting] = useState(false)
   const [done,      setDone]      = useState(false)
   const [error,     setError]     = useState<string | null>(null)
@@ -461,74 +380,16 @@ function CsvImportModal({
   const labelFor = (type: string) =>
     standards.find((s) => s.asset_type === type)?.display_name ?? type.replace(/_/g, ' ')
 
-  // Naive comma-split breaks on any field with a comma inside quotes
-  // (most likely `notes`, e.g. `"Replaced 3,500 sq ft of ductwork"`).
-  // This is a minimal state-machine parser — correct for quoted fields
-  // and escaped ("") quotes, without pulling in a new dependency for one
-  // import modal.
-  function parseCsvLine(line: string): string[] {
-    const cells: string[] = []
-    let current  = ''
-    let inQuotes = false
-
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i]
-      if (inQuotes) {
-        if (char === '"') {
-          if (line[i + 1] === '"') { current += '"'; i++ }
-          else inQuotes = false
-        } else {
-          current += char
-        }
-      } else {
-        if (char === '"') inQuotes = true
-        else if (char === ',') { cells.push(current); current = '' }
-        else current += char
-      }
-    }
-    cells.push(current)
-    return cells.map((c) => c.trim())
-  }
-
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
     const reader = new FileReader()
     reader.onload = (evt) => {
-      const text  = evt.target?.result as string
-      const lines = text.split(/\r?\n/).filter((l) => l.trim())
-      if (lines.length < 2) { setError('CSV must have a header row and at least one data row.'); return }
-
-      const header = parseCsvLine(lines[0]).map((h) => h.toLowerCase())
-      const parsed: ParsedRow[] = []
-
-      for (let i = 1; i < lines.length; i++) {
-        const cells = parseCsvLine(lines[i])
-        const get   = (key: string) => cells[header.indexOf(key)] ?? ''
-
-        const rawType    = get('asset_type')
-        const resolved   = normalizeAssetType(rawType)
-        const name       = get('name').trim()
-
-        parsed.push({
-          name,
-          asset_type:                 resolved ?? rawType,
-          make:                       get('make') || null,
-          model:                      get('model') || null,
-          serial_number:              get('serial_number') || null,
-          installation_date:          get('installation_date') || null,
-          purchase_price:             get('purchase_price') ? parseFloat(get('purchase_price')) : null,
-          estimated_replacement_cost: get('estimated_replacement_cost') ? parseFloat(get('estimated_replacement_cost')) : null,
-          warranty_expiry_date:       get('warranty_expiry_date') || null,
-          warranty_provider:          get('warranty_provider') || null,
-          notes:                      get('notes') || null,
-          _valid:                     Boolean(name && resolved),
-          _typeResolved:              resolved,
-          _raw_type:                  rawType,
-        })
-      }
-      setRows(parsed)
+      const text   = evt.target?.result as string
+      const result = parseAssetCsvText(text, ASSET_TYPES)
+      if (!result.ok) { setError(result.error); return }
+      setRows(result.rows)
       setError(null)
     }
     reader.readAsText(file)

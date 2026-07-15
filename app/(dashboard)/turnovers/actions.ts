@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
@@ -186,10 +187,7 @@ export async function assignCrew(
         .eq('id', turnovers[0]!.id)
         .single()
 
-      const props    = firstTurnover?.properties
-      const propName = Array.isArray(props)
-        ? (props[0] as { name?: string } | undefined)?.name
-        : (props as unknown as { name?: string } | null)?.name
+      const propName = unwrapJoin(firstTurnover?.properties)?.name
 
       const body = count === 1 && propName
         ? `${propName} — ${new Date(firstTurnover!.checkout_datetime).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`
@@ -522,7 +520,7 @@ export async function addCrewToTurnover(
     const newEnd   = new Date((newT as unknown as { checkin_datetime: string }).checkin_datetime ?? (newT as unknown as { checkout_datetime: string }).checkout_datetime).getTime()
     for (const a of (existingAssignments ?? [])) {
       if (a.turnover_id === newT.id) continue
-      const existing_turnovers = Array.isArray(a.turnovers) ? a.turnovers[0] : a.turnovers
+      const existing_turnovers = unwrapJoin(a.turnovers)
       if (!existing_turnovers) continue
       const existStart = new Date(existing_turnovers.checkout_datetime).getTime()
       const existEnd   = new Date(existing_turnovers.checkin_datetime).getTime()

@@ -9,6 +9,7 @@ import {
 import { cn } from '@/lib/utils'
 import { NudgeBanner } from '@/components/nudge-banner'
 import { distanceMiles } from '@/lib/geocoding'
+import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { StatusDot } from '@/components/ui/StatusDot'
 import { buttonVariantClass } from '@/components/ui/Button'
 
@@ -187,16 +188,9 @@ function TurnoverCard({
   turnover:     Turnover
   propertyName: string
 }>) {
-  const assignments = Array.isArray(turnover.turnover_assignments)
-    ? turnover.turnover_assignments
-    : turnover.turnover_assignments
-      ? [turnover.turnover_assignments]
-      : []
+  const assignments = unwrapJoinArray(turnover.turnover_assignments)
 
-  const crew = assignments.flatMap((a) => {
-    const cm = a.crew_member
-    return cm ? (Array.isArray(cm) ? cm : [cm]) : []
-  })
+  const crew = assignments.flatMap((a) => unwrapJoinArray(a.crew_member))
 
   const statusColor = STATUS_COLORS[turnover.status] ?? 'var(--text-muted)'
   const isUrgent    = turnover.priority === 'urgent' || turnover.priority === 'high'
@@ -410,13 +404,10 @@ function getCrewTravelSummaries(
   const byCrew: Record<string, { name: string; turnovers: Turnover[] }> = {}
 
   for (const t of turnovers) {
-    const assignments = Array.isArray(t.turnover_assignments)
-      ? t.turnover_assignments
-      : t.turnover_assignments ? [t.turnover_assignments] : []
+    const assignments = unwrapJoinArray(t.turnover_assignments)
 
     for (const a of assignments) {
-      const cm  = a.crew_member
-      const cms = cm ? (Array.isArray(cm) ? cm : [cm]) : []
+      const cms = unwrapJoinArray(a.crew_member)
       for (const c of cms) {
         if (!byCrew[c.id]) byCrew[c.id] = { name: c.name, turnovers: [] }
         byCrew[c.id]!.turnovers.push(t)

@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore } from '@/lib/scoring/geo'
+import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 
 export const autoAssignTurnover = inngest.createFunction(
   { id: 'auto-assign-turnover', name: 'Auto-Assign Crew to Turnover', retries: 2 },
@@ -65,8 +66,7 @@ export const autoAssignTurnover = inngest.createFunction(
           .in('turnover_id', pastTurnoverIds)
           .in('crew_member_id', availableCrew.map((c) => c.id))
 
-        const historyItems = (history ?? []) as Array<{ crew_member_id: string }>
-        familiarCrewIds = [...new Set(historyItems.map((h) => h.crew_member_id))]
+        familiarCrewIds = computeFamiliarIds(history ?? [], (h) => h.crew_member_id)
       }
 
       // Workload: assignments in next 14 days only (not all-time history)
@@ -80,10 +80,7 @@ export const autoAssignTurnover = inngest.createFunction(
         .gte('turnovers.checkout_datetime', new Date().toISOString())
         .lte('turnovers.checkout_datetime', windowEnd.toISOString())
 
-      const workloadMap: Record<string, number> = {}
-      for (const a of upcoming ?? []) {
-        workloadMap[a.crew_member_id] = (workloadMap[a.crew_member_id] ?? 0) + 1
-      }
+      const workloadMap = computeWorkloadMap(upcoming ?? [], (a) => a.crew_member_id)
 
       return {
         mode,

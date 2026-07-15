@@ -32,6 +32,32 @@ import { storeIntegrationToken, storeIntegrationRefreshToken, holdPendingIntegra
 import { logAuditEvent }                  from '@/lib/audit'
 import { inngest }                        from '@/lib/inngest/client'
 
+interface OAuthConnectedContext {
+  userId:         string
+  orgId:          string
+  externalUserId: string
+}
+
+// One entry per provider that needs an initial-sync event fired right after
+// a successful OAuth connect. Each event has its own payload shape (Kroger's
+// doesn't carry external_user_id), so entries are dispatch functions rather
+// than plain event-name strings — adding a new provider here is one table
+// entry instead of a new `if (providerId === '...')` block.
+const OAUTH_CONNECTED_EVENTS: Partial<Record<string, (ctx: OAuthConnectedContext) => Promise<unknown>>> = {
+  ownerrez: (ctx) => inngest.send({
+    name: 'integration/ownerrez.connected',
+    data: { user_id: ctx.userId, org_id: ctx.orgId, external_user_id: ctx.externalUserId },
+  }),
+  kroger: (ctx) => inngest.send({
+    name: 'integration/kroger.connected',
+    data: { org_id: ctx.orgId, user_id: ctx.userId },
+  }),
+  hospitable: (ctx) => inngest.send({
+    name: 'integration/hospitable.connected',
+    data: { user_id: ctx.userId, org_id: ctx.orgId, external_user_id: ctx.externalUserId },
+  }),
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
@@ -261,32 +287,12 @@ export async function GET(
     //    org_id, which previously flipped the brand-new connection to
     //    status='error' seconds after a successful connect. A user with
     //    no org yet simply has nothing to sync until they have one.
-    if (providerId === 'ownerrez' && membership?.org_id) {
-      await inngest.send({
-        name: 'integration/ownerrez.connected',
-        data: {
-          user_id:          appUserId,
-          org_id:           membership.org_id,
-          external_user_id: tokenData.externalUserId,
-        },
-      })
-    }
-
-    if (providerId === 'kroger' && membership?.org_id) {
-      await inngest.send({
-        name: 'integration/kroger.connected',
-        data: { org_id: membership.org_id, user_id: appUserId },
-      })
-    }
-
-    if (providerId === 'hospitable' && membership?.org_id) {
-      await inngest.send({
-        name: 'integration/hospitable.connected',
-        data: {
-          user_id:          appUserId,
-          org_id:           membership.org_id,
-          external_user_id: tokenData.externalUserId,
-        },
+    const fireConnectedEvent = OAUTH_CONNECTED_EVENTS[providerId]
+    if (fireConnectedEvent && membership?.org_id) {
+      await fireConnectedEvent({
+        userId:         appUserId,
+        orgId:          membership.org_id,
+        externalUserId: tokenData.externalUserId,
       })
     }
   } catch (err) {

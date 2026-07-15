@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, RefreshCw, CalendarCheck, Clock, ChevronDown,
-  AlertTriangle, CheckCircle2, Flag, X, UserPlus, LayoutList, GanttChartSquare, Camera,
+  AlertTriangle, CheckCircle2, Flag, X, UserPlus, LayoutList, GanttChartSquare,
   Sparkles, Check,
 } from 'lucide-react'
 import { cn, formatWindow, TURNOVER_STATUS_LABELS, formatDuration } from '@/lib/utils'
@@ -24,8 +24,9 @@ import {
   archiveTurnover, unarchiveTurnover,
 } from './actions'
 import { TurnoverGantt } from './turnover-gantt'
-import { createClient } from '@/lib/supabase/client'
 import { NudgeBanner } from '@/components/nudge-banner'
+import { QuickFlagPanel } from './QuickFlagPanel'
+import { turnoverUrgencyTone, CARD_BORDER_CLASS, PRIORITY_INDICATOR_CLASS, windowUrgencyColor } from './turnover-urgency'
 import type { AssignedCrewMember } from '@/types/database'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -311,12 +312,6 @@ function TurnoverCard({
   const [archiving,       startArchive]       = useTransition()
   const [flagNotes,       setFlagNotes]       = useState('')
   const [showFlagInput,   setShowFlagInput]   = useState(false)
-  const [showQuickFlag,   setShowQuickFlag]   = useState(false)
-  const [quickFlagNotes,  setQuickFlagNotes]  = useState('')
-  const [flagPhotoFile,   setFlagPhotoFile]   = useState<File | null>(null)
-  const [flagPhotoPreview,setFlagPhotoPreview]= useState<string | null>(null)
-  const [quickFlagging,   setQuickFlagging]   = useState(false)
-  const flagPhotoRef = useRef<HTMLInputElement | null>(null)
 
   const suggestedNames = (turnover.suggested_crew_ids ?? [])
     .map((id) => crewMembers.find((c) => c.id === id)?.name)
@@ -334,42 +329,13 @@ function TurnoverCard({
 
   const propertyName = property?.name ?? 'Unknown Property'
 
-  const handleFlagPhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] ?? null
-    if (!file) return
-    setFlagPhotoFile(file)
-    setFlagPhotoPreview(URL.createObjectURL(file))
-  }
-
-  const handleQuickFlag = async () => {
-    if (!quickFlagNotes.trim()) return
-    setQuickFlagging(true)
-    try {
-      if (flagPhotoFile) {
-        const supabase = createClient()
-        const ext  = flagPhotoFile.name.split('.').pop() ?? 'jpg'
-        const path = `turnover-${turnover.id}/flag-${Date.now()}.${ext}`
-        await supabase.storage.from('turnover-photos').upload(path, flagPhotoFile, { upsert: true })
-      }
-      await updateTurnoverStatus(turnover.id, 'flagged', quickFlagNotes)
-      setShowQuickFlag(false)
-      setQuickFlagNotes('')
-      setFlagPhotoFile(null)
-      setFlagPhotoPreview(null)
-    } finally {
-      setQuickFlagging(false)
-    }
-  }
-
   const checkout     = new Date(turnover.checkout_datetime)
   const checkin      = new Date(turnover.checkin_datetime)
   const assignedCrew = getAllAssignedCrew(turnover)
   const isOverdue    = isPast(checkout) && turnover.status !== 'completed' && turnover.status !== 'in_progress'
   const windowMins   = turnover.window_minutes ?? 0
-  const windowColor  =
-    windowMins < 120 ? 'text-red-600'   :
-    windowMins < 240 ? 'text-amber-600' :
-    windowMins < 480 ? 'text-blue-600'  : 'text-green-600'
+  const windowColor  = windowUrgencyColor(windowMins)
+  const urgencyTone  = turnoverUrgencyTone(isOverdue, turnover.priority)
 
   const duration = formatDuration(turnover.started_at, turnover.completed_at)
 
@@ -389,10 +355,7 @@ function TurnoverCard({
     <div
       className={cn(
         'bg-card-themed rounded-xl border transition-shadow',
-        isOverdue          ? 'border-red-200 shadow-[0_0_0_1px_#fca5a5]' :
-        turnover.priority === 'urgent' ? 'border-red-200' :
-        turnover.priority === 'high'   ? 'border-amber-200' :
-        'border-themed',
+        CARD_BORDER_CLASS[urgencyTone],
         'hover:shadow-card-md'
       )}
     >
@@ -418,10 +381,7 @@ function TurnoverCard({
         {/* Priority / overdue indicator */}
         <div className={cn(
           'w-1 self-stretch rounded-full flex-shrink-0',
-          isOverdue              ? 'bg-red-500' :
-          turnover.priority === 'urgent' ? 'bg-red-400' :
-          turnover.priority === 'high'   ? 'bg-amber-400' :
-          turnover.priority === 'medium' ? 'bg-blue-300' : 'bg-raised-themed'
+          PRIORITY_INDICATOR_CLASS[urgencyTone]
         )} />
 
         <div className="flex-1 min-w-0">
@@ -530,83 +490,11 @@ function TurnoverCard({
             onOpenChange={setAssignOpen}
           />
           {turnover.status !== 'completed' && turnover.status !== 'cancelled' && (
-            <button
-              onClick={e => { e.stopPropagation(); setShowQuickFlag(true) }}
-              className="p-1.5 rounded-lg transition-colors flex-shrink-0"
-              style={{ color: 'var(--text-muted)' }}
-              title="Flag an issue"
-              aria-label="Flag issue"
-            >
-              <Flag className="w-4 h-4" />
-            </button>
+            <QuickFlagPanel turnoverId={turnover.id} propertyName={propertyName} />
           )}
           <ChevronDown className={cn('w-4 h-4 text-muted-themed transition-transform', expanded && 'rotate-180')} />
         </div>
       </div>
-
-      {/* Quick-flag bottom sheet */}
-      <Dialog
-        open={showQuickFlag}
-        onClose={() => setShowQuickFlag(false)}
-        title={`Flag Issue — ${propertyName}`}
-        mobileSheet
-        maxWidthClassName="max-w-sm"
-      >
-        <textarea
-          value={quickFlagNotes}
-          onChange={e => setQuickFlagNotes(e.target.value)}
-          rows={3}
-          className="input resize-none w-full text-sm"
-          placeholder="Describe the issue…"
-          autoFocus
-        />
-
-        <div className="mt-3">
-          <input
-            ref={flagPhotoRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={handleFlagPhotoSelect}
-          />
-          {flagPhotoPreview ? (
-            <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-themed">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={flagPhotoPreview} alt="Flag photo" className="w-full h-full object-cover" />
-              <button
-                onClick={() => { setFlagPhotoPreview(null); setFlagPhotoFile(null) }}
-                className="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center"
-              >
-                <X className="w-3 h-3 text-white" />
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => flagPhotoRef.current?.click()}
-              className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg border-dashed border-2 border-themed w-full justify-center transition-colors"
-              style={{ color: 'var(--text-muted)' }}
-            >
-              <Camera className="w-4 h-4" />
-              Add Photo (optional)
-            </button>
-          )}
-        </div>
-
-        <div className="flex gap-2 mt-4">
-          <Button
-            onClick={handleQuickFlag}
-            disabled={!quickFlagNotes.trim() || quickFlagging}
-            variant="danger"
-            className="flex-1 text-sm"
-          >
-            {quickFlagging ? 'Flagging…' : 'Flag Issue'}
-          </Button>
-          <Button onClick={() => setShowQuickFlag(false)} variant="ghost" className="text-sm">
-            Cancel
-          </Button>
-        </div>
-      </Dialog>
 
       {/* Expanded detail */}
       {expanded && (

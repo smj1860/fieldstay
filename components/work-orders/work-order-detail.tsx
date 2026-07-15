@@ -1,22 +1,18 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState } from 'react'
 import {
   MapPin, Wrench, Calendar, AlertTriangle, CheckCircle2,
   Circle, Key, Printer, Loader2, Hash, Tag, ChevronRight, ChevronDown,
-  ShieldAlert, ClipboardList, User, Star, Camera, Send, Copy, Check,
+  ShieldAlert, ClipboardList, User, Star, Camera, Send, Check,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
 import { LineItemsEditor, type WorkOrderLineItem } from './line-items-editor'
-import {
-  markVendorAcknowledged,
-  markWorkVerified,
-} from '@/app/(dashboard)/maintenance/work-order-actions'
-import { rateWorkOrderVendor, deleteWorkOrder } from '@/app/(dashboard)/maintenance/actions'
-import { dispatchWorkOrderToVendor }   from '@/app/actions/work-order-public'
+import { useWorkOrderActions } from './use-work-order-actions'
+import { CancelConfirmDialog } from './CancelConfirmDialog'
+import { VendorDispatchDialog } from './VendorDispatchDialog'
+import { VendorRatingPanel } from './VendorRatingPanel'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -141,27 +137,14 @@ function fmtDate(iso: string | null) {
 // ── Component ─────────────────────────────────────────────────
 
 export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Readonly<Props>) {
-  const [isPending, startTransition] = useTransition()
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [nteOverrideConfirmed, setNteOverrideConfirmed] = useState(false)
-  const [hoverRating, setHoverRating] = useState(0)
-  const [savedRating, setSavedRating] = useState<number | null>(wo.vendor_rating ?? null)
-  const [ratingNotes, setRatingNotes] = useState(wo.vendor_rating_notes ?? '')
-  const [ratingPending, startRatingTransition] = useTransition()
-  const [ratingError, setRatingError] = useState<string | null>(null)
-  const [ratingSuccess, setRatingSuccess] = useState(false)
-
-  // Cancel work order modal state
-  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
-
-  // Dispatch modal state
-  const [showDispatch,    setShowDispatch]    = useState(false)
-  const [dispatchEmail,   setDispatchEmail]   = useState(wo.vendor_dispatch_email ?? wo.vendors?.email ?? '')
-  const [dispatchName,    setDispatchName]    = useState(wo.vendors?.name ?? '')
-  const [dispatching,     setDispatching]     = useState(false)
-  const [dispatchError,   setDispatchError]   = useState<string | null>(null)
-  const [dispatchedUrl,   setDispatchedUrl]   = useState<string | null>(null)
-  const [copied,          setCopied]          = useState(false)
+  const actions = useWorkOrderActions(wo)
+  const {
+    isPending, actionError,
+    nteOverrideConfirmed, setNteOverrideConfirmed,
+    showCancelConfirm, setShowCancelConfirm,
+    showDispatch, setShowDispatch, setDispatchedUrl, setDispatchError,
+    handleAcknowledge, handleVerify, handleCancel,
+  } = actions
 
   const canEdit  = userRole === 'admin' || userRole === 'manager'
   const priority = PRIORITY_STYLES[wo.priority]
@@ -175,88 +158,6 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
   const nteSet      = wo.nte_amount != null && wo.nte_amount > 0
   const nteExceeded = nteSet && lineItemsTotal > wo.nte_amount!
   const nteOverage  = nteExceeded ? lineItemsTotal - wo.nte_amount! : 0
-
-  // ── Action handlers ──────────────────────────────────────────
-
-  function handleAcknowledge() {
-    setActionError(null)
-    startTransition(async () => {
-      try { await markVendorAcknowledged(wo.id) }
-      catch (e) { setActionError(e instanceof Error ? e.message : 'Failed.') }
-    })
-  }
-
-  function handleVerify() {
-    setActionError(null)
-    startTransition(async () => {
-      try { await markWorkVerified(wo.id) }
-      catch (e) { setActionError(e instanceof Error ? e.message : 'Failed.') }
-    })
-  }
-
-  function handleCancel() {
-    setActionError(null)
-    startTransition(async () => {
-      try {
-        await deleteWorkOrder(wo.id)
-        setShowCancelConfirm(false)
-      }
-      catch (e) { setActionError(e instanceof Error ? e.message : 'Failed to cancel work order.') }
-    })
-  }
-
-  function handleRating(star: number) {
-    setSavedRating(star)
-    setRatingError(null)
-    setRatingSuccess(false)
-    startRatingTransition(async () => {
-      try {
-        await rateWorkOrderVendor(wo.id, star as 1 | 2 | 3 | 4 | 5, ratingNotes)
-        setRatingSuccess(true)
-      } catch (e) {
-        setRatingError(e instanceof Error ? e.message : 'Failed to save rating.')
-      }
-    })
-  }
-
-  function handleRatingNotesSave() {
-    if (!savedRating) return
-    handleRating(savedRating)
-  }
-
-  async function handleDispatch() {
-    if (!dispatchEmail.trim()) return
-    setDispatching(true)
-    setDispatchError(null)
-    try {
-      const result = await dispatchWorkOrderToVendor({
-        workOrderId: wo.id,
-        vendorEmail: dispatchEmail.trim(),
-        vendorName:  dispatchName.trim() || 'Contractor',
-        vendorPhone: wo.vendors?.phone ?? null,
-      })
-      if (result.error) {
-        setDispatchError(result.error)
-        return
-      }
-      if (result.publicUrl) {
-        setDispatchedUrl(result.publicUrl)
-      }
-    } catch (err) {
-      console.error('[handleDispatch] failed:', err)
-      setDispatchError('Could not dispatch vendor. Please check your connection and try again.')
-    } finally {
-      setDispatching(false)
-    }
-  }
-
-  function handleCopyUrl() {
-    if (!dispatchedUrl) return
-    navigator.clipboard.writeText(dispatchedUrl).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
 
   // ── Render ───────────────────────────────────────────────────
 
@@ -696,267 +597,30 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
         {/* ── Vendor Rating ─────────────────────────────────────── */}
         {wo.status === 'completed' && wo.vendors && canEdit && (
           <Section icon={<Star className="w-4 h-4" />} title="Vendor Rating" mobileCollapse defaultOpen={false}>
-            <div className="space-y-3">
-              <div className="flex items-center gap-1">
-                {[1, 2, 3, 4, 5].map(star => (
-                  <button
-                    key={star}
-                    type="button"
-                    onClick={() => handleRating(star)}
-                    onMouseEnter={() => setHoverRating(star)}
-                    onFocus={() => setHoverRating(star)}
-                    onMouseLeave={() => setHoverRating(0)}
-                    onBlur={() => setHoverRating(0)}
-                    disabled={ratingPending}
-                    className="p-0.5 transition-transform hover:scale-110"
-                  >
-                    <Star
-                      className="w-6 h-6"
-                      style={{
-                        color: star <= (hoverRating || savedRating || 0)
-                          ? 'var(--accent-gold)'
-                          : 'var(--border)',
-                        fill: star <= (hoverRating || savedRating || 0)
-                          ? 'var(--accent-gold)'
-                          : 'transparent',
-                      }}
-                    />
-                  </button>
-                ))}
-                {savedRating && (
-                  <span className="ml-2 text-sm" style={{ color: 'var(--text-muted)' }}>
-                    {savedRating}/5
-                  </span>
-                )}
-                {ratingPending && <Loader2 className="w-4 h-4 ml-2 animate-spin" style={{ color: 'var(--text-muted)' }} />}
-              </div>
-
-              <div className="space-y-1.5">
-                <textarea
-                  value={ratingNotes}
-                  onChange={e => setRatingNotes(e.target.value)}
-                  placeholder="Optional notes about the vendor's performance…"
-                  rows={2}
-                  className="input w-full text-sm resize-none"
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={handleRatingNotesSave}
-                  disabled={ratingPending || !savedRating}
-                  className="text-xs py-1 px-3"
-                >
-                  Save Notes
-                </Button>
-              </div>
-
-              {ratingSuccess && (
-                <p className="text-xs" style={{ color: 'var(--accent-green)' }}>Rating saved.</p>
-              )}
-              {ratingError && (
-                <p className="text-xs text-red-400">{ratingError}</p>
-              )}
-            </div>
+            <VendorRatingPanel actions={actions} />
           </Section>
         )}
       </div>
 
       {/* ── Cancel Confirmation Modal ─────────────────────────── */}
       {showCancelConfirm && (
-        <Dialog
-          open
+        <CancelConfirmDialog
+          woNumber={wo.wo_number}
+          actionError={actionError}
+          isPending={isPending}
+          onConfirm={handleCancel}
           onClose={() => setShowCancelConfirm(false)}
-          title="Cancel this work order?"
-          maxWidthClassName="max-w-sm"
-        >
-          <div className="space-y-4">
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              This marks work order {wo.wo_number ?? ''} as cancelled and logs the change. This cannot be undone from here.
-            </p>
-            {actionError && (
-              <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
-            )}
-            <div className="flex items-center gap-3">
-              <Button
-                type="button"
-                variant="danger"
-                onClick={handleCancel}
-                disabled={isPending}
-              >
-                {isPending
-                  ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : 'Yes, Cancel Work Order'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setShowCancelConfirm(false)}
-                disabled={isPending}
-              >
-                Never Mind
-              </Button>
-            </div>
-          </div>
-        </Dialog>
+        />
       )}
 
       {/* ── Dispatch Modal ────────────────────────────────────── */}
       {showDispatch && (
-        <Dialog
-          open
+        <VendorDispatchDialog
+          vendorDispatchEmail={wo.vendor_dispatch_email}
+          vendors={vendors}
+          actions={actions}
           onClose={() => { setShowDispatch(false); setDispatchedUrl(null); setDispatchError(null) }}
-          title="Send to Vendor"
-          maxWidthClassName="max-w-sm"
-        >
-          <div className="space-y-4">
-            <p className="text-xs -mt-2" style={{ color: 'var(--text-muted)' }}>
-              Vendor receives a magic link to view and sign off this work order
-            </p>
-
-            {!dispatchedUrl ? (
-              <>
-                {/* Vendor selector */}
-                {vendors.filter(v => v.email).length > 0 && (
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-                      Select Vendor
-                    </label>
-                    <select
-                      className="input text-sm w-full"
-                      value={dispatchEmail}
-                      onChange={(e) => {
-                        const selected = vendors.find(v => v.email === e.target.value)
-                        setDispatchEmail(e.target.value)
-                        setDispatchName(selected?.name ?? '')
-                      }}
-                    >
-                      <option value="">Select a vendor…</option>
-                      {vendors.filter(v => v.email).map(v => (
-                        <option key={v.id} value={v.email!}>{v.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                {/* Free-text email fallback */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-                    {vendors.filter(v => v.email).length > 0
-                      ? 'Or enter an email directly for a one-off contractor:'
-                      : 'Vendor Email *'}
-                  </label>
-                  <Input
-                    type="email"
-                    value={dispatchEmail}
-                    onChange={e => {
-                      setDispatchEmail(e.target.value)
-                      if (!vendors.find(v => v.email === e.target.value)) {
-                        setDispatchName('')
-                      }
-                    }}
-                    placeholder="contractor@email.com"
-                    className="w-full text-sm"
-                  />
-                </div>
-
-                {/* Vendor name */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-                    Vendor Name
-                  </label>
-                  <Input
-                    type="text"
-                    value={dispatchName}
-                    onChange={e => setDispatchName(e.target.value)}
-                    placeholder="e.g. Mike Johnson"
-                    className="w-full text-sm"
-                  />
-                </div>
-
-                {dispatchError && (
-                  <p className="text-xs text-red-400">{dispatchError}</p>
-                )}
-
-                <button
-                  onClick={handleDispatch}
-                  disabled={dispatching || !dispatchEmail.trim()}
-                  className="w-full btn flex items-center justify-center gap-2 py-2.5 text-sm font-semibold"
-                  style={{
-                    background: 'var(--bg-raised)',
-                    color:      'var(--text-primary)',
-                    border:     '2px solid var(--accent-gold)',
-                    borderRadius: 12,
-                    opacity: (dispatching || !dispatchEmail.trim()) ? 0.6 : 1,
-                  }}
-                >
-                  {dispatching ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  {dispatching
-                    ? 'Sending…'
-                    : wo.vendor_dispatch_email
-                      ? (dispatchEmail === wo.vendor_dispatch_email ? 'Resend to Vendor' : 'Send to New Vendor')
-                      : 'Dispatch to Vendor'}
-                </button>
-              </>
-            ) : (
-              <>
-                {/* Success state */}
-                <div
-                  className="rounded-xl p-4 space-y-3"
-                  style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)' }}
-                >
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-                    <p className="text-sm font-semibold text-emerald-400">
-                      Work order sent to {dispatchEmail}
-                    </p>
-                  </div>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    The vendor will receive an email with a magic link. Link expires in 30 days.
-                  </p>
-                </div>
-
-                {/* Copy link */}
-                <div className="space-y-1.5">
-                  <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-                    Magic Link (shareable)
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      readOnly
-                      value={dispatchedUrl}
-                      className="flex-1 text-xs font-mono"
-                      onClick={e => (e.target as HTMLInputElement).select()}
-                    />
-                    <button
-                      onClick={handleCopyUrl}
-                      className="p-2 rounded-lg flex-shrink-0 transition-colors"
-                      style={{
-                        background: copied ? 'rgba(16,185,129,0.15)' : 'var(--bg-raised)',
-                        border:     '1px solid var(--border)',
-                        color:      copied ? 'var(--accent-green)' : 'var(--text-muted)',
-                      }}
-                      title="Copy link"
-                    >
-                      {copied ? <CheckCircle2 className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <Button
-                  variant="secondary"
-                  onClick={() => { setShowDispatch(false); setDispatchedUrl(null) }}
-                  className="w-full text-sm py-2"
-                >
-                  Done
-                </Button>
-              </>
-            )}
-          </div>
-        </Dialog>
+        />
       )}
     </div>
   )
