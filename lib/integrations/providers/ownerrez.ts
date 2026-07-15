@@ -353,6 +353,27 @@ export function buildOwnerRezDetailPatch(
   return patch
 }
 
+// ✅ Confirmed live 2026-07-15 — GET /v2/bookings/{id} returns charges[],
+// each carrying owner_amount (what's owed to the property owner, net of
+// any PM commission) alongside amount (the gross charge). Summing
+// owner_amount across every charge line item is the direct read of "total
+// owed to the owner" the field is named for; total_amount/total_owed
+// (equal to each other and to the owner_amount sum on every sampled
+// booking, all commission-free) are the fallback when charges is absent.
+// Mirrors extractHospitableActualTotal's "prefer the PMS's own owner-side
+// figure over a guest-paid total" preference.
+function extractOwnerRezActualTotal(b: OwnerRezBooking): number | null {
+  if (b.charges?.length) {
+    const sum = b.charges.reduce((total, charge) => total + (charge.owner_amount ?? charge.amount), 0)
+    if (Number.isFinite(sum) && sum > 0) return sum
+  }
+
+  const total = b.total_amount ?? b.total_owed
+  if (typeof total === 'number' && Number.isFinite(total) && total > 0) return total
+
+  return null
+}
+
 /**
  * Pure raw -> NormalizedBooking mapper for an OwnerRez booking. Extracted
  * from the previously-duplicated inline row-building logic in
@@ -390,8 +411,11 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     checkin_time:  null,
     checkout_time: null,
     status:      isBlock ? 'blocked' : mapOwnerRezBookingStatus(b.status),
-    guest_name:  b.guest?.name  ?? null,
-    guest_email: b.guest?.email ?? null,
+    // ✅ Confirmed live 2026-07-15 — OwnerRez's guest object has
+    // first_name/last_name, not a combined name field (see OwnerRezBooking.guest
+    // doc comment). No email field was ever present on this endpoint.
+    guest_name:  [b.guest?.first_name, b.guest?.last_name].filter(Boolean).join(' ') || null,
+    guest_email: null,
     source:      mapOwnerRezChannelToSource(b.channel_name),
     is_block:    isBlock,
     // Effective 2026-07-07, OwnerRez's type field can be 'owner' — the
@@ -399,8 +423,6 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     // block; is_block is false), so it flows through the same upsert path
     // as a guest booking and still gets a turnover — just tagged.
     stay_type:   b.type === 'owner' ? 'owner_stay' : 'guest_stay',
-    // OwnerRez has no per-booking real-total field today — revenue posting
-    // for OwnerRez bookings still relies on the avg_nightly_rate estimate.
-    actual_total_amount: null,
+    actual_total_amount: extractOwnerRezActualTotal(b),
   }
 }

@@ -205,10 +205,34 @@ export interface OwnerRezBooking {
   type?:         'booking' | 'block' | 'quote_hold' | 'linked_availability' | 'owner'
   property_id?:  number
   channel_name?: string
+  // ✅ Confirmed live 2026-07-15 against GET /v2/bookings with
+  // include_guest=true — the real shape has first_name/last_name, NOT a
+  // combined `name` field. This is why guest_name has been null on every
+  // single OwnerRez booking ever synced, on every org — include_guest=true
+  // itself was always the right param, but this field read it back wrong.
+  // No `email` field was present on any sampled booking either; guest_id
+  // is available for a future GET /v2/guests/{id} join if email is needed.
   guest?: {
-    name:  string | null
-    email: string | null
+    id?:         number
+    first_name?: string | null
+    last_name?:  string | null
   }
+  // ✅ Confirmed live 2026-07-15 against GET /v2/bookings and
+  // GET /v2/bookings/{id} — total_amount/total_owed are always present
+  // (equal to each other on every sampled booking, all commission-free —
+  // direct/referral channels). charges[] carries owner_amount per line
+  // item, which is what's actually owed to the property owner net of any
+  // PM commission (owner_commission_percent/owner_amount only diverge from
+  // amount/total_amount when commission is nonzero — not yet observed
+  // live). Only "rent" was seen as a charge type; other types (cleaning
+  // fee, tax, etc.) are unconfirmed but assumed to sum the same way.
+  total_amount?: number
+  total_owed?:   number
+  charges?: Array<{
+    type:          string
+    amount:        number
+    owner_amount?: number
+  }>
 }
 
 export interface OwnerRezUser {

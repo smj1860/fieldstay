@@ -11,7 +11,7 @@ function baseBooking(overrides: Partial<OwnerRezBooking> = {}): OwnerRezBooking 
     is_block:     false,
     property_id:  7,
     channel_name: 'Airbnb (API)',
-    guest: { name: 'Jane Doe', email: 'jane@example.com' },
+    guest: { id: 99, first_name: 'Jane', last_name: 'Doe' },
     ...overrides,
   }
 }
@@ -28,7 +28,7 @@ describe('ownerRezBookingToNormalized', () => {
     expect(result.checkout_time).toBeNull()
     expect(result.status).toBe('confirmed')
     expect(result.guest_name).toBe('Jane Doe')
-    expect(result.guest_email).toBe('jane@example.com')
+    expect(result.guest_email).toBeNull()
     expect(result.source).toBe('airbnb')
     expect(result.is_block).toBe(false)
   })

@@ -139,7 +139,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
       type SyncSuccess = {
         affectedPropertyIds:    string[]
-        bookingsToPostRevenue: { bookingId: string; propertyId: string }[]
+        bookingsToPostRevenue: { bookingId: string; propertyId: string; actualTotalAmount: number | null }[]
       }
       let syncResult: SyncSuccess | { skipped: boolean; reason: string } | null | undefined
       try {
@@ -182,7 +182,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           const bookings = await client.getBookings({ sinceUtc, propertyIds, includeGuest: true })
 
           let affectedPropertyIds: string[] = []
-          let bookingsToPostRevenue: { bookingId: string; propertyId: string }[] = []
+          let bookingsToPostRevenue: { bookingId: string; propertyId: string; actualTotalAmount: number | null }[] = []
 
           if (bookings.length) {
             // CRITICAL-2: resolve FieldStay property IDs from OwnerRez external IDs.
@@ -237,14 +237,15 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                 // checkout_date) so these stay typed as non-nullable strings —
                 // OwnerRez's booking payload always has both, unlike Hospitable
                 // where the normalized fields can be null.
-                checkin_date:    b.arrival,
-                checkout_date:   b.departure,
-                status:          normalized.status,
-                guest_name:      normalized.guest_name,
-                guest_email:     normalized.guest_email,
-                source:          normalized.source,
-                is_block:        normalized.is_block,
-                stay_type:       normalized.stay_type,
+                checkin_date:        b.arrival,
+                checkout_date:       b.departure,
+                status:              normalized.status,
+                guest_name:          normalized.guest_name,
+                guest_email:         normalized.guest_email,
+                source:              normalized.source,
+                is_block:            normalized.is_block,
+                stay_type:           normalized.stay_type,
+                actual_total_amount: normalized.actual_total_amount,
               }
             })
 
@@ -268,8 +269,12 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
             bookingsToPostRevenue = bookingRows
               .filter((b) => b.status === 'confirmed' && b.stay_type === 'guest_stay' && b.property_id !== null)
-              .map((b) => ({ bookingId: idByExternalId[b.external_id], propertyId: b.property_id as string }))
-              .filter((b): b is { bookingId: string; propertyId: string } => !!b.bookingId)
+              .map((b) => ({
+                bookingId:         idByExternalId[b.external_id],
+                propertyId:        b.property_id as string,
+                actualTotalAmount: b.actual_total_amount,
+              }))
+              .filter((b): b is { bookingId: string; propertyId: string; actualTotalAmount: number | null } => !!b.bookingId)
 
             // Send immediate maintenance-suggestion notifications for owner blocks.
             // Blocks never generate turnovers (filtered at the generator query level),
@@ -554,9 +559,10 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       // Post booking revenue for newly-confirmed guest-stay bookings. Mirrors
       // Hospitable's incremental-sync pattern: sendEvent happens at the top
       // level of the function body, never nested inside step.run.
-      // actual_total_amount is omitted — OwnerRez's normalizer doesn't provide
-      // one, so booking-events.ts's handleBookingConfirmed falls back to its
-      // existing avg_nightly_rate estimation.
+      // actual_total_amount now comes from extractOwnerRezActualTotal
+      // (charges[].owner_amount / total_amount, confirmed live 2026-07-15);
+      // booking-events.ts's handleBookingConfirmed still falls back to the
+      // avg_nightly_rate estimate whenever it's null.
       const bookingsToPostRevenue = syncResult && 'bookingsToPostRevenue' in syncResult
         ? syncResult.bookingsToPostRevenue
         : []
@@ -564,10 +570,11 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         await step.sendEvent(`post-booking-revenue-${conn.user_id}-${b.bookingId}`, {
           name: 'booking/confirmed' as const,
           data: {
-            booking_id:  b.bookingId,
-            property_id: b.propertyId,
-            org_id:      conn.org_id,
-            source:      'ownerrez' as const,
+            booking_id:          b.bookingId,
+            property_id:         b.propertyId,
+            org_id:              conn.org_id,
+            source:              'ownerrez' as const,
+            actual_total_amount: b.actualTotalAmount,
           },
         })
       }

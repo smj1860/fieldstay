@@ -420,7 +420,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           return {
             cursor: new Date().toISOString(), count: 0,
             affectedPropertyIds: [] as string[],
-            bookingsToPostRevenue: [] as { bookingId: string; propertyId: string }[],
+            bookingsToPostRevenue: [] as { bookingId: string; propertyId: string; actualTotalAmount: number | null }[],
           }
         }
 
@@ -441,7 +441,7 @@ export const ownerRezInitialSync = inngest.createFunction(
         }
 
         let affectedPropertyIds: string[] = []
-        let bookingsToPostRevenue: { bookingId: string; propertyId: string }[] = []
+        let bookingsToPostRevenue: { bookingId: string; propertyId: string; actualTotalAmount: number | null }[] = []
 
         if (bookings.length) {
           const supabase   = createServiceClient()
@@ -491,12 +491,13 @@ export const ownerRezInitialSync = inngest.createFunction(
               // Hospitable where the normalized fields can be null.
               checkin_date:    b.arrival,
               checkout_date:   b.departure,
-              status:          normalized.status,
-              guest_name:      normalized.guest_name,
-              guest_email:     normalized.guest_email,
-              source:          normalized.source,
-              is_block:        normalized.is_block,
-              stay_type:       normalized.stay_type,
+              status:              normalized.status,
+              guest_name:          normalized.guest_name,
+              guest_email:         normalized.guest_email,
+              source:              normalized.source,
+              is_block:            normalized.is_block,
+              stay_type:           normalized.stay_type,
+              actual_total_amount: normalized.actual_total_amount,
             }
           })
 
@@ -522,8 +523,12 @@ export const ownerRezInitialSync = inngest.createFunction(
 
           bookingsToPostRevenue = bookingRows
             .filter((b) => b.status === 'confirmed' && b.stay_type === 'guest_stay' && b.property_id !== null)
-            .map((b) => ({ bookingId: idByExternalId[b.external_id], propertyId: b.property_id as string }))
-            .filter((b): b is { bookingId: string; propertyId: string } => !!b.bookingId)
+            .map((b) => ({
+              bookingId:         idByExternalId[b.external_id],
+              propertyId:        b.property_id as string,
+              actualTotalAmount: b.actual_total_amount,
+            }))
+            .filter((b): b is { bookingId: string; propertyId: string; actualTotalAmount: number | null } => !!b.bookingId)
         }
 
         try {
@@ -540,18 +545,20 @@ export const ownerRezInitialSync = inngest.createFunction(
       // ── Post booking revenue for newly-confirmed guest-stay bookings ───────
       // Mirrors Hospitable's incremental-sync pattern: sendEvent happens in the
       // outer function body, never nested inside step.run. actual_total_amount
-      // is omitted — OwnerRez's normalizer doesn't provide one, so
-      // booking-events.ts's handleBookingConfirmed falls back to its existing
-      // avg_nightly_rate estimation, same as any other provider without a
-      // real total.
+      // is now sourced from charges[].owner_amount (or total_amount/total_owed
+      // as fallback) via extractOwnerRezActualTotal — confirmed live
+      // 2026-07-15; booking-events.ts's handleBookingConfirmed still falls
+      // back to the avg_nightly_rate estimate whenever this is null (e.g. a
+      // booking whose charges genuinely didn't resolve to a positive total).
       for (const b of fetchBookingsResult.bookingsToPostRevenue) {
         await step.sendEvent(`post-booking-revenue-${b.bookingId}`, {
           name: 'booking/confirmed' as const,
           data: {
-            booking_id:  b.bookingId,
-            property_id: b.propertyId,
+            booking_id:          b.bookingId,
+            property_id:         b.propertyId,
             org_id,
-            source:      'ownerrez' as const,
+            source:              'ownerrez' as const,
+            actual_total_amount: b.actualTotalAmount,
           },
         })
       }
