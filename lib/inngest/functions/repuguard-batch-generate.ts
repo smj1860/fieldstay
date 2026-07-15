@@ -1,7 +1,7 @@
 import { inngest }                    from '@/lib/inngest/client'
 import { createServiceClient }       from '@/lib/supabase/server'
 import { generateReviewResponse }    from '@/lib/repuguard/generate-response'
-import { getPmEmail }                from '@/lib/inngest/helpers'
+import { getPmEmails }               from '@/lib/inngest/helpers'
 import { resend, FROM }              from '@/lib/resend/client'
 import { renderPmAlert }             from '@/lib/resend/emails/pm-alert'
 
@@ -129,7 +129,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
 
     await step.run('notify-pm', async () => {
       const supabase = createServiceClient()
-      const pmEmail  = await getPmEmail(supabase, org_id)
+      const [pmEmail] = await getPmEmails(supabase, org_id)
       if (!pmEmail) return
 
       const html = await renderPmAlert({

@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
 import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 import { renderVendorComplianceNudgeEmail } from '@/lib/resend/emails/vendor-compliance-nudge'
-import { getPmEmail }          from '@/lib/inngest/helpers'
+import { getPmEmails }         from '@/lib/inngest/helpers'
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   coi:                'Certificate of Insurance',
@@ -24,7 +24,7 @@ export const notifyVendorComplianceExpiring = inngest.createFunction(
 
     await step.run('notify-pm', async () => {
       const supabase = createServiceClient()
-      const pmEmail  = await getPmEmail(supabase, org_id)
+      const [pmEmail] = await getPmEmails(supabase, org_id)
       if (!pmEmail) {
         logger.warn(`[vendor-compliance-expiring] no PM email for org ${org_id}`)
         return

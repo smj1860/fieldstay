@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
-import { getOrgPmEmails } from '@/lib/guidebook/pm-emails'
+import { getPmEmails } from '@/lib/inngest/helpers'
 import { sendGuidebookGracePeriodEmail } from '@/lib/resend/client'
 import { logAuditEvent } from '@/lib/audit'
 
@@ -69,7 +69,12 @@ export const guidebookSponsorDeactivated = inngest.createFunction(
 
     if (gracePeriodEndsAt) {
       await step.run('notify-pm-grace-period', async () => {
-        const { emails, orgName } = await getOrgPmEmails(orgId)
+        const supabase = createServiceClient()
+        const [emails, { data: org }] = await Promise.all([
+          getPmEmails(supabase, orgId),
+          supabase.from('organizations').select('name').eq('id', orgId).single(),
+        ])
+        const orgName = org?.name ?? ''
         if (emails.length === 0) return
 
         const guidebookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/guidebook`

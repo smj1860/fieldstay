@@ -2,7 +2,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { sendSMS }             from '@/lib/sms/telnyx'
 import { renderSmsBody }       from '@/lib/sms/templates'
-import { getPmEmail }          from '@/lib/inngest/helpers'
+import { getPmEmails }         from '@/lib/inngest/helpers'
 
 export const guidebookStayExtensionHandler = inngest.createFunction(
   { id: 'guidebook-stay-extension-handler', name: 'Guidebook: Stay Extension Notify' },
@@ -96,7 +96,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
     // ── Notify PM ─────────────────────────────────────────────────────
     const pmEmail = await step.run('fetch-pm-email', async () => {
       const supabase = createServiceClient()
-      return getPmEmail(supabase, orgId)
+      const [email] = await getPmEmails(supabase, orgId); return email ?? null
     })
 
     if (pmEmail) {

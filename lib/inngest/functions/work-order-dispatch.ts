@@ -5,6 +5,7 @@ import WorkOrderDispatchEmail  from '@/emails/WorkOrderDispatch'
 import WorkOrderSignOffEmail   from '@/emails/WorkOrderSignOff'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
+import { getPmMembers } from '@/lib/inngest/helpers'
 
 export const workOrderDispatch = inngest.createFunction(
   {
@@ -146,38 +147,20 @@ export const workOrderSignedOff = inngest.createFunction(
       propertyName, propertyAddress, orgId, vendorEmail
     } = event.data
 
-    // ── Step 1: Find PM email from org admin/manager ─────────────────────
+    // ── Step 1: Find PM email from org owner/admin/manager ───────────────
     const pmEmail = await step.run('find-pm-email', async () => {
       const supabase = createServiceClient()
-
-      const { data: members } = await supabase
-        .from('organization_members')
-        .select('user_id, role')
-        .eq('org_id', orgId)
-        .in('role', ['owner', 'admin', 'manager'])
-        .not('invite_accepted_at', 'is', null)
-
-      if (!members?.length) return null
-
-      // Prefer owner → admin → manager order
-      const roleOrder = ['owner', 'admin', 'manager']
-      const sorted = [...members].sort(
-        (a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role)
-      )
-
-      const userId = sorted[0].user_id as string
+      const [member] = await getPmMembers(supabase, orgId, { roles: ['owner', 'admin', 'manager'], limit: 1 })
+      if (!member) return null
 
       const { data: profile } = await supabase
         .from('profiles')
         .select('full_name')
-        .eq('id', userId)
+        .eq('id', member.userId)
         .single()
 
-      // Auth email via admin API
-      const { data: { user } } = await supabase.auth.admin.getUserById(userId)
-
       return {
-        email:    user?.email ?? null,
+        email:    member.email,
         fullName: profile?.full_name ?? 'Property Manager',
       }
     })

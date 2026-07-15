@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderWorkOrderEmail } from '@/emails/work-order'
-import { getPmEmail } from '@/lib/inngest/helpers'
+import { getPmEmails } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
@@ -49,7 +49,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
       // ── Step 4: Notify PM of dispatch outcome ──────────────────────────────
       await step.run('notify-pm', async () => {
         const supabase = createServiceClient()
-        const pmEmail  = await getPmEmail(supabase, org_id)
+        const [pmEmail] = await getPmEmails(supabase, org_id)
 
         if (!pmEmail) {
           logger.warn(`No PM email found for org ${org_id} — skipping PM notification`)
@@ -59,22 +59,8 @@ export const handleWorkOrderCreated = inngest.createFunction(
         const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
 
         if (!dispatchResult.dispatched && dispatchResult.reason === 'no_vendor_email') {
-          // Vendor has no email — alert PM so they can manually notify the vendor
-          await resend.emails.send({
-            from:    FROM,
-            to:      pmEmail,
-            subject: 'Action required — vendor has no email address',
-            html: await renderPmAlert({
-              heading:  'Work order created — vendor not notified',
-              body:     `A work order was created with the vendor portal enabled, but the assigned vendor${dispatchResult.vendorName ? ` (${dispatchResult.vendorName})` : ''} has no email address on file. The vendor was not notified automatically.`,
-              details:  [
-                { label: 'Action required', value: 'Add an email address to the vendor record so future work orders dispatch automatically.' },
-              ],
-              ctaLabel: 'Go to Vendors →',
-              ctaUrl:   `${appUrl}/vendors`,
-            }),
-          })
-          return { notified: true, reason: 'no_vendor_email_warning' }
+          // Vendor has no email — silent skip, no PM alert (see PART 2 notes).
+          return { skipped: true, reason: 'no_vendor_email' }
         }
 
         if (dispatchResult.dispatched) {
@@ -397,7 +383,7 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
 
       if (!wo) return
 
-      const pmEmail = await getPmEmail(supabase, wo.org_id)
+      const [pmEmail] = await getPmEmails(supabase, wo.org_id)
       if (!pmEmail) {
         logger.warn(`No PM email for org_id=${wo.org_id} work_order_id=${work_order_id} event=work-order/completed-via-portal — skipping notification`)
         return
@@ -464,7 +450,7 @@ export const handleWorkOrderOverdue = inngest.createFunction(
 
       if (!wo || wo.status === 'completed' || wo.status === 'cancelled') return
 
-      const pmEmail = await getPmEmail(supabase, org_id)
+      const [pmEmail] = await getPmEmails(supabase, org_id)
       if (!pmEmail) {
         logger.warn(`No PM email for org_id=${org_id} work_order_id=${work_order_id} event=work-order/overdue — skipping alert`)
         return
@@ -597,7 +583,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
-      const pmEmail = await getPmEmail(supabase, org_id)
+      const [pmEmail] = await getPmEmails(supabase, org_id)
       if (!pmEmail) {
         logger.warn(`No PM email for org_id=${org_id} work_order_id=${work_order_id} event=work-order/quote-submitted — skipping notification`)
         return

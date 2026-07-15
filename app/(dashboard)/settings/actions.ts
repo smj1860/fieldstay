@@ -532,10 +532,10 @@ export async function bulkImportVendors(
 
   if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
 
-  const valid   = rows.filter((r) => r.name?.trim())
+  const valid   = rows.filter((r) => r.name?.trim() && r.email?.trim())
   const skipped = rows.length - valid.length
 
-  if (!valid.length) return { imported: 0, skipped, error: 'No rows with a valid name' }
+  if (!valid.length) return { imported: 0, skipped, error: 'No rows with a valid name and email' }
 
   const records = valid.map((r) => ({
     org_id:         membership.org_id,

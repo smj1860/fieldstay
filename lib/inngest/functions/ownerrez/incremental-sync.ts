@@ -32,7 +32,7 @@ import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/int
 import { logAuditEvent }                from '@/lib/audit'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { resend, FROM }                 from '@/lib/resend/client'
-import { getPmEmail }                   from '@/lib/inngest/helpers'
+import { getPmEmails }                  from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
@@ -277,7 +277,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             // Blocks never generate turnovers (filtered at the generator query level),
             // but a known vacancy window is the best signal for scheduling maintenance.
             // Don't wait for the next cron cycle — notify the PM right away.
-            const pmEmail = await getPmEmail(supabase, conn.org_id)
+            const [pmEmail] = await getPmEmails(supabase, conn.org_id)
 
             type BookingRow = typeof bookingRows[number]
             const ownerBlocks = bookingRows.filter(
