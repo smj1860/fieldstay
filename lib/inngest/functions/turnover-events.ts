@@ -15,11 +15,10 @@ const MAX_PLAUSIBLE_DURATION_MINUTES = 8 * 60
 /**
  * Triggered when a new turnover is created (from iCal sync or manual).
  *
- * Steps:
- *  1. Fetch turnover + property details
- *  2. (Future) Auto-assign if default crew set
- *  3. Sleep until 24 hours before checkout
- *  4. If still unassigned, send urgent warning to PM
+ * Fetches turnover + property details and, if crew is already assigned,
+ * notifies them. Unassigned turnovers are no longer tracked here — the
+ * daily wrap-up digest (cron-daily-wrapup, section 9) surfaces them fresh
+ * every day instead of this function sleeping until a fixed deadline.
  */
 export const handleTurnoverCreated = inngest.createFunction(
   {
@@ -33,10 +32,10 @@ export const handleTurnoverCreated = inngest.createFunction(
 
     // ── Fetch turnover data ──────────────────────────────────────────────────
 
-    const { turnover, property, pmEmail } = await step.run('fetch-turnover-data', async () => {
+    const { turnover, property } = await step.run('fetch-turnover-data', async () => {
       const supabase = createServiceClient()
 
-      const [{ data: turnover }, { data: property }, pmEmails] = await Promise.all([
+      const [{ data: turnover }, { data: property }] = await Promise.all([
         supabase
           .from('turnovers')
           .select(`
@@ -52,18 +51,15 @@ export const handleTurnoverCreated = inngest.createFunction(
           .eq('id', property_id)
           .eq('org_id', org_id)
           .single(),
-        getPmEmails(supabase, org_id),
       ])
-      const pmEmail = pmEmails[0]
 
-      return { turnover, property, pmEmail }
+      return { turnover, property }
     })
 
     if (!turnover || !property) return
 
     const checkoutDT    = new Date(checkout_datetime)
     const windowHours   = Math.round((turnover.window_minutes ?? 0) / 60)
-    const isUrgent      = turnover.priority === 'urgent' || turnover.priority === 'high'
 
     // ── Notify already-assigned crew (if any) ───────────────────────────────
 
@@ -109,58 +105,10 @@ export const handleTurnoverCreated = inngest.createFunction(
       return { turnover_id, crewNotified: assignments.length }
     }
 
-    // ── No crew assigned — schedule 24h warning ──────────────────────────────
-
-    // Warn 24 hours before checkout (or immediately if urgent)
-    const warnAt = new Date(checkoutDT)
-    warnAt.setHours(warnAt.getHours() - (isUrgent ? 4 : 24))
-
-    await step.sleepUntil('wait-for-assignment-deadline', warnAt)
-
-    // Re-check assignment status
-    const stillUnassigned = await step.run('check-assignment-status', async () => {
-      const supabase = createServiceClient()
-      const { data } = await supabase
-        .from('turnovers')
-        .select('status, turnover_assignments(id)')
-        .eq('id', turnover_id)
-        .eq('org_id', org_id)
-        .single()
-
-      const assigned = Array.isArray(data?.turnover_assignments)
-        ? data.turnover_assignments.length > 0
-        : !!data?.turnover_assignments
-
-      return data?.status !== 'cancelled' && !assigned
-    })
-
-    if (stillUnassigned && pmEmail) {
-      await step.run('send-unassigned-warning', async () => {
-        const hoursUntil = Math.round(
-          (checkoutDT.getTime() - Date.now()) / 3_600_000
-        )
-
-        await resend.emails.send({
-          from:    FROM,
-          to:      pmEmail!,
-          subject: `⚠️ Turnover needs crew — ${property.name} in ${hoursUntil}h`,
-          html: await renderPmAlert({
-            heading:  'Turnover needs crew assigned',
-            body:     `${property.name} has a turnover in ${hoursUntil} hours with no crew assigned.`,
-            details: [
-              { label: 'Checkout',  value: formatPropertyDateTime(turnover.checkout_datetime, property.timezone ?? 'America/Chicago') },
-              { label: 'Check-in',  value: formatPropertyDateTime(turnover.checkin_datetime, property.timezone ?? 'America/Chicago') },
-              { label: 'Window',    value: `${windowHours}h ${(turnover.window_minutes ?? 0) % 60}m` },
-              { label: 'Priority',  value: turnover.priority.toUpperCase() },
-            ],
-            ctaLabel: 'Assign Crew →',
-            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/turnovers`,
-          }),
-        }, { idempotencyKey: `turnover-unassigned-warning-${turnover_id}` })
-      })
-    }
-
-    return { turnover_id, warned: stillUnassigned }
+    // No crew assigned — the daily wrap-up digest catches this fresh every
+    // day (see cron-daily-wrapup, section 9) rather than this function
+    // sleeping until a fixed per-turnover deadline.
+    return { turnover_id, warned: false }
   }
 )
 

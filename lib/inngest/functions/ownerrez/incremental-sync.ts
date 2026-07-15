@@ -31,13 +31,11 @@ import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/owner
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
-import { resend, FROM }                 from '@/lib/resend/client'
-import { getPmEmails }                  from '@/lib/inngest/helpers'
+import { createPmNotification }         from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
 import { ownerRezBookingToNormalized } from '@/lib/integrations/providers/ownerrez'
-import { escapeHtml } from '@/lib/utils/html'
 
 const PROVIDER = 'ownerrez'
 
@@ -273,19 +271,17 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               .map((b) => ({ bookingId: idByExternalId[b.external_id], propertyId: b.property_id as string }))
               .filter((b): b is { bookingId: string; propertyId: string } => !!b.bookingId)
 
-            // Send immediate maintenance-suggestion emails for owner blocks.
+            // Send immediate maintenance-suggestion notifications for owner blocks.
             // Blocks never generate turnovers (filtered at the generator query level),
             // but a known vacancy window is the best signal for scheduling maintenance.
             // Don't wait for the next cron cycle — notify the PM right away.
-            const [pmEmail] = await getPmEmails(supabase, conn.org_id)
-
             type BookingRow = typeof bookingRows[number]
             const ownerBlocks = bookingRows.filter(
               (r): r is BookingRow & { property_id: string } =>
                 Boolean(r.is_block) && r.property_id !== null
             )
 
-            if (pmEmail && ownerBlocks.length) {
+            if (ownerBlocks.length) {
               // Batch-fetch property names for every owner-block property in one
               // query instead of a per-booking SELECT inside the loop.
               const uniquePropertyIds = [...new Set(ownerBlocks.map((b) => b.property_id))]
@@ -316,30 +312,18 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                     const propertyName = propertyNameById[row.property_id] ?? 'Property'
 
                     const items = candidates
-                      .map((c) => `${escapeHtml(c.name)}${c.estimated_cost ? ' (~$' + c.estimated_cost + ')' : ''}`)
+                      .map((c) => `${c.name}${c.estimated_cost ? ` (~$${c.estimated_cost})` : ''}`)
                       .join(', ')
 
-                    await resend.emails.send(
-                      {
-                        from:    FROM,
-                        to:      pmEmail,
-                        subject: `Maintenance opportunity — ${propertyName} blocked for owner use`,
-                        html: `
-                      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-                        <h2>Owner block scheduled</h2>
-                        <p>
-                          ${escapeHtml(propertyName)} is blocked
-                          ${new Date(row.checkin_date).toLocaleDateString()} –
-                          ${new Date(row.checkout_date).toLocaleDateString()}.
-                          Want to schedule maintenance during this window? Candidates:
-                          ${items}.
-                        </p>
-                        <p><a href="${process.env.NEXT_PUBLIC_APP_URL}/maintenance" style="background:#093b31;color:white;padding:10px 20px;text-decoration:none;border-radius:6px;display:inline-block">Review Maintenance →</a></p>
-                      </div>
-                    `,
-                      },
-                      { idempotencyKey: `ownerrez-maint-opportunity-${row.external_id}` }
-                    )
+                    await createPmNotification(supabase, {
+                      orgId:     conn.org_id,
+                      type:      'maintenance_opportunity',
+                      title:     `Maintenance opportunity — ${propertyName} blocked for owner use`,
+                      subtitle:  `Blocked ${new Date(row.checkin_date).toLocaleDateString()} – ${new Date(row.checkout_date).toLocaleDateString()}. Candidates: ${items}`,
+                      href:      '/maintenance',
+                      severity:  'blue',
+                      dedupeKey: `ownerrez-maint-opportunity-${row.external_id}`,
+                    })
                   } catch (err) {
                     logger.error(
                       `[OwnerRez] Failed to send owner-block email for booking ${row.external_id}: ${err instanceof Error ? err.message : String(err)}`

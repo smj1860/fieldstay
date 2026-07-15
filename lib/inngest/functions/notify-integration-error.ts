@@ -8,6 +8,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   kroger:     'Kroger',
   hostaway:   'Hostaway',
   hospitable: 'Hospitable',
+  ical:       'iCal',
 }
 
 export const notifyIntegrationError = inngest.createFunction(

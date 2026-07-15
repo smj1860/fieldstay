@@ -1,7 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { resend, FROM } from '@/lib/resend/client'
 import { calculateHealthScore } from '@/lib/assets/health-score'
-import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 /**
  * Helpers for dailyAssetHealth's per-org scoring step and the Bayesian
@@ -120,29 +118,6 @@ export async function persistScores(supabase: SupabaseClient, updates: ScoreUpda
       })),
       { onConflict: 'id' }
     )
-}
-
-export async function notifyThresholdCrossings(pmEmail: string | null, crossings: ScoreCrossing[]): Promise<void> {
-  if (!crossings.length || !pmEmail) return
-
-  for (const c of crossings) {
-    const label = c.newScore < 20 ? 'Critical' : c.newScore < 40 ? 'Poor' : 'Fair'
-    await resend.emails.send({
-      from:    FROM,
-      to:      pmEmail,
-      subject: `Asset health alert — ${c.asset_type.replace(/_/g, ' ')} dropped to ${label}`,
-      html: await renderPmAlert({
-        heading:  'Asset health score dropped',
-        body:     `${c.asset_type.replace(/_/g, ' ')} health score dropped from ${c.oldScore} to ${c.newScore}/100 (${label}).`,
-        details: [
-          { label: 'Previous Score', value: `${c.oldScore}/100` },
-          { label: 'Current Score',  value: `${c.newScore}/100 (${label})` },
-        ],
-        ctaLabel: 'View Property →',
-        ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/properties/${c.property_id}`,
-      }),
-    })
-  }
 }
 
 // ── Bayesian weight nudge ─────────────────────────────────────────────────────

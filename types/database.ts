@@ -1452,6 +1452,14 @@ export interface Notification {
   created_at: string
 }
 
+// ── Daily wrap-up digest diff/stay-static tracking ──────────────────────────
+export interface NotificationDigestState {
+  org_id:     string
+  category:   string
+  snapshot:   Record<string, unknown>
+  updated_at: string
+}
+
 // ─────────────────────────────────────────────────────────────
 // Supabase Database interface — used by createClient()
 //
@@ -1540,6 +1548,7 @@ export interface Database {
 
       // ── In-app notifications (bell) ─────────────────────────
       notifications:               { Row: Notification;             Insert: Partial<Notification>;             Update: Partial<Notification>;             Relationships: [] }
+      notification_digest_state:   { Row: NotificationDigestState;  Insert: Partial<NotificationDigestState>; Update: Partial<NotificationDigestState>; Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }

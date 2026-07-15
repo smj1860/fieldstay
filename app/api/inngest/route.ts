@@ -21,10 +21,10 @@ import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audi
 import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale-feed-alert'
 import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turnover-priority-decay'
 import { notificationDigest }           from '@/lib/inngest/functions/cron/notification-digest'
+import { dailyWrapUp }                  from '@/lib/inngest/functions/cron/daily-wrapup'
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
-import { inventoryOrderEmailCron } from '@/lib/inngest/functions/inventory-order-email-cron'
 
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
@@ -180,12 +180,12 @@ export const { GET, POST, PUT } = serve({
     staleFeedAlert,
     turnoverPriorityDecay,
     notificationDigest,
+    dailyWrapUp,
     computeChecklistSignals,
 
     // Inventory → PO
     handleInventoryCountSubmitted,
     handlePurchaseOrderApproved,
-    inventoryOrderEmailCron,
 
     // OwnerRez sync
     ownerRezInitialSync,
