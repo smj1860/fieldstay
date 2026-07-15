@@ -1,10 +1,16 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
-import { calculateHealthScore } from '@/lib/assets/health-score'
 import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvents } from '@/lib/audit'
+import {
+  scoreAssets,
+  persistScores,
+  notifyThresholdCrossings,
+  computeWeightNudge,
+  type RepairRecord,
+} from './asset-health-helpers'
 
 // Alert thresholds (days relative to expiry): positive = before, negative = after
 const COMPLIANCE_ALERT_THRESHOLDS = [30, 14, 7, 0, -14, -30]
@@ -108,90 +114,27 @@ export const dailyAssetHealth = inngest.createFunction(
       const assetPmEmailByOrg = new Map(assetPmEmailEntries)
 
       for (const [orgId, orgAssets] of Object.entries(assetsByOrg)) {
-        await step.run(`score-org-assets-${orgId}`, async () => {
-          const supabase = createServiceClient()
-          type Crossing = { asset_type: string; property_id: string; oldScore: number; newScore: number }
-          const crossings: Crossing[] = []
-          const updates: Array<{ id: string; health_score: number; health_score_updated_at: string }> = []
+        // Scoring is pure — its own step so a retry of persist or notify
+        // below never re-runs the (cheap, deterministic) computation.
+        const { updates, crossings } = await step.run(`score-org-assets-${orgId}`, async () => {
           const now = new Date().toISOString()
-
-          for (const asset of orgAssets) {
-            const std = standards.find((s) => s.asset_type === asset.asset_type)
-            if (!std) continue
-
-            const repair = repairByAsset[asset.id] ?? {
-              total_repairs: 0, total_repair_cost: 0, last_serviced_at: null,
-            }
-
-            const newScore = calculateHealthScore(
-              {
-                installation_date:          asset.installation_date,
-                expected_lifespan_years:    asset.expected_lifespan_years,
-                estimated_replacement_cost: asset.estimated_replacement_cost,
-              },
-              std,
-              repair,
-              { age: std.age_weight, condition: std.condition_weight }
-            )
-
-            updates.push({ id: asset.id, health_score: newScore, health_score_updated_at: now })
-
-            // 8.5: detect threshold crossings (old > threshold >= new)
-            const oldScore = asset.health_score
-            if (oldScore !== null && newScore !== oldScore) {
-              for (const threshold of [60, 40, 20]) {
-                if (oldScore > threshold && newScore <= threshold) {
-                  crossings.push({
-                    asset_type:  asset.asset_type,
-                    property_id: asset.property_id,
-                    oldScore,
-                    newScore,
-                  })
-                  break
-                }
-              }
-            }
-          }
-
-          if (updates.length > 0) {
-            // Single round trip per org — upsert with onConflict: 'id' only updates
-            // the columns provided; all other NOT NULL columns are untouched.
-            await supabase
-              .from('property_assets')
-              .upsert(
-                updates.map((u) => ({
-                  id:                      u.id,
-                  health_score:            u.health_score,
-                  health_score_updated_at: u.health_score_updated_at,
-                })),
-                { onConflict: 'id' }
-              )
-          }
-
-          if (crossings.length > 0) {
-            const pmEmail = assetPmEmailByOrg.get(orgId) ?? null
-            if (pmEmail) {
-              for (const c of crossings) {
-                const label = c.newScore < 20 ? 'Critical' : c.newScore < 40 ? 'Poor' : 'Fair'
-                await resend.emails.send({
-                  from:    FROM,
-                  to:      pmEmail,
-                  subject: `Asset health alert — ${c.asset_type.replace(/_/g, ' ')} dropped to ${label}`,
-                  html: await renderPmAlert({
-                    heading:  'Asset health score dropped',
-                    body:     `${c.asset_type.replace(/_/g, ' ')} health score dropped from ${c.oldScore} to ${c.newScore}/100 (${label}).`,
-                    details: [
-                      { label: 'Previous Score', value: `${c.oldScore}/100` },
-                      { label: 'Current Score',  value: `${c.newScore}/100 (${label})` },
-                    ],
-                    ctaLabel: 'View Property →',
-                    ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/properties/${c.property_id}`,
-                  }),
-                })
-              }
-            }
-          }
+          return scoreAssets(orgAssets, standards, repairByAsset, now)
         })
+
+        if (updates.length > 0) {
+          await step.run(`persist-scores-${orgId}`, async () => {
+            const supabase = createServiceClient()
+            await persistScores(supabase, updates)
+          })
+        }
+
+        if (crossings.length > 0) {
+          // Its own step so a retry of persist-scores above can never
+          // re-trigger a duplicate crossing-alert email.
+          await step.run(`notify-crossings-${orgId}`, async () => {
+            await notifyThresholdCrossings(assetPmEmailByOrg.get(orgId) ?? null, crossings)
+          })
+        }
       }
 
       // ── Bayesian weight nudge: per-asset-type age vs. condition weight drift ──
@@ -206,11 +149,6 @@ export const dailyAssetHealth = inngest.createFunction(
 
         if (!assetRepairs?.length) return { nudged: 0 }
 
-        type RepairRecord = {
-          ageAtRepair: number
-          repairCost:  number
-          assetType:   string
-        }
         const byType: Record<string, RepairRecord[]> = {}
 
         for (const wo of assetRepairs) {
@@ -231,11 +169,6 @@ export const dailyAssetHealth = inngest.createFunction(
           .from('asset_type_standards')
           .select('asset_type, age_weight, condition_weight, lifespan_min_years, lifespan_max_years')
 
-        const MAX_NUDGE   = 2.0
-        const MIN_WEIGHT  = 30
-        const MAX_WEIGHT  = 70
-        const MIN_REPAIRS = 5
-
         const updates: Array<{
           asset_type:        string
           age_weight:        number
@@ -245,36 +178,15 @@ export const dailyAssetHealth = inngest.createFunction(
         const oldWeightsByType: Record<string, { age_weight: number; condition_weight: number }> = {}
 
         for (const [assetType, repairs] of Object.entries(byType)) {
-          if (repairs.length < MIN_REPAIRS) continue
-
           const std = currentStandards?.find((s) => s.asset_type === assetType)
           if (!std) continue
 
-          const lifespan = Math.round((std.lifespan_min_years + std.lifespan_max_years) / 2) || 10
-
-          const lateLifeRepairs = repairs.filter((r) => r.ageAtRepair / lifespan > 0.8).length
-          const lateLifeRatio   = lateLifeRepairs / repairs.length
-
-          const TARGET_LATE_RATIO = 0.6
-          let ageNudge = 0
-
-          if (lateLifeRatio > TARGET_LATE_RATIO) {
-            ageNudge = +MAX_NUDGE * ((lateLifeRatio - TARGET_LATE_RATIO) / (1 - TARGET_LATE_RATIO))
-          } else if (lateLifeRatio < (1 - TARGET_LATE_RATIO)) {
-            ageNudge = -MAX_NUDGE * ((TARGET_LATE_RATIO - lateLifeRatio) / TARGET_LATE_RATIO)
-          }
-
-          if (Math.abs(ageNudge) < 0.1) continue
-
-          const newAgeWeight = Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, std.age_weight + ageNudge))
-          const newCondWeight = 100 - newAgeWeight
-
-          if (Math.abs(newAgeWeight - std.age_weight) < 0.05) continue
+          const nudge = computeWeightNudge(repairs, std)
+          if (!nudge) continue
 
           updates.push({
             asset_type:        assetType,
-            age_weight:        Math.round(newAgeWeight * 10) / 10,
-            condition_weight:  Math.round(newCondWeight * 10) / 10,
+            ...nudge,
             weight_updated_at: new Date().toISOString(),
           })
           oldWeightsByType[assetType] = {
