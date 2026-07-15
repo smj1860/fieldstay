@@ -1,8 +1,6 @@
-import { inngest }               from '@/lib/inngest/client'
+import { inngest }              from '@/lib/inngest/client'
 import { createServiceClient }  from '@/lib/supabase/server'
-import { resend, FROM }         from '@/lib/resend/client'
-import { getPmEmailsByOrgIds }  from '@/lib/inngest/helpers'
-import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
+import { getPmMembers }         from '@/lib/inngest/helpers'
 
 const STALE_HOURS = 6
 
@@ -14,26 +12,14 @@ type StaleRow = {
   properties:     { name: string } | { name: string }[] | null
 }
 
-function propertyName(row: StaleRow): string {
-  if (Array.isArray(row.properties)) return row.properties[0]?.name ?? 'Unknown property'
-  return row.properties?.name ?? 'Unknown property'
-}
-
-function formatSyncTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month:  'short',
-    day:    'numeric',
-    hour:   'numeric',
-    minute: '2-digit',
-  })
-}
-
 /**
  * SCHEDULED: 3pm UTC daily.
  *
  * Finds all active iCal feeds that haven't synced in the past 6 hours (or
- * have never synced), groups by org, and sends one alert email per org.
- * Idempotency prevents duplicate emails if the step is retried.
+ * have never synced), groups by org, and fires one 'integration/connection.error'
+ * event per org — the same event notify-integration-error.ts listens for on a
+ * real OAuth connection failure, so staleness reads as one alert category to
+ * the PM instead of its own separately-branded email.
  */
 export const staleFeedAlert = inngest.createFunction(
   {
@@ -76,45 +62,38 @@ export const staleFeedAlert = inngest.createFunction(
       byOrg.set(feed.org_id, group)
     }
 
-    const today  = new Date().toISOString().split('T')[0]
-    const orgIds = [...byOrg.keys()]
-
-    await step.run('send-stale-alerts', async () => {
-      const supabase    = createServiceClient()
-      const emailsByOrg = await getPmEmailsByOrgIds(supabase, orgIds)
-
-      for (const [orgId, feeds] of byOrg) {
-        const pmEmail = emailsByOrg.get(orgId)
-        if (!pmEmail) continue
-
-        const feedCount   = feeds.length
-        const feedWord    = feedCount !== 1 ? 'feeds' : 'feed'
-        const subject     = `Warning: ${feedCount} iCal ${feedWord} haven't synced in ${STALE_HOURS}+ hours`
-        const bodyText    = `The following ${feedWord} haven't synced in over ${STALE_HOURS} hours. Your booking calendar may be out of date.`
-        const tableRows   = feeds.map(f => [
-          f.name,
-          propertyName(f),
-          f.last_synced_at ? formatSyncTime(f.last_synced_at) : 'Never',
-        ])
-
-        const html = await renderPmAlert({
-          heading:  'iCal feeds are stale',
-          body:     bodyText,
-          table: {
-            headers: ['Feed Name', 'Property', 'Last Synced'],
-            rows:    tableRows,
-          },
-          ctaLabel: 'View Integrations',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/settings/integrations`,
-        })
-
-        await resend.emails.send(
-          { from: FROM, to: pmEmail, subject, html },
-          { idempotencyKey: `stale-feed-alert-${orgId}-${today}` }
-        )
+    // One PM per org, resolved up front — step.sendEvent must run at the
+    // top level of the function, not nested inside another step's callback.
+    const pmUserIdByOrg = await step.run('resolve-pm-members', async () => {
+      const supabase = createServiceClient()
+      const result: Record<string, string> = {}
+      for (const orgId of byOrg.keys()) {
+        const [pmMember] = await getPmMembers(supabase, orgId, { limit: 1 })
+        if (pmMember) result[orgId] = pmMember.userId
       }
+      return result
     })
 
-    return { alerted: byOrg.size }
+    let alerted = 0
+    for (const [orgId, feeds] of byOrg) {
+      const userId = pmUserIdByOrg[orgId]
+      if (!userId) continue
+
+      const feedCount = feeds.length
+      const feedWord  = feedCount !== 1 ? 'feeds' : 'feed'
+
+      await step.sendEvent(`notify-stale-feed-${orgId}`, {
+        name: 'integration/connection.error',
+        data: {
+          user_id:     userId,
+          org_id:      orgId,
+          provider_id: 'ical',
+          reason:      `${feedCount} ${feedWord} haven't synced in ${STALE_HOURS}+ hours`,
+        },
+      })
+      alerted++
+    }
+
+    return { alerted }
   }
 )
