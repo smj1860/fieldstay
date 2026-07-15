@@ -7,7 +7,17 @@
 // currently read by hospFetchReviews/hospitable-reviews-backfill.ts is
 // carried over from the single-review GET /reviews/{id} shape used by the
 // review.created/review.changed webhook handler, never confirmed against
-// this list endpoint itself. Delete this file once that's answered — see
+// this list endpoint itself.
+//
+// The documented flat GET /reviews?properties[]=... shape 404'd on first
+// live try (a real "route does not exist" response, not a 403 scope
+// rejection) — the same class of doc-vs-reality gap already hit twice
+// before for this integration (check-in/checkin, reservations' status[]
+// filter). Rather than guess one variant at a time, this tries several
+// plausible shapes in one request and reports every status back, mirroring
+// how the reservations diagnostic (efc82f5) resolved an analogous gap.
+//
+// Delete this file once the real shape is confirmed — see
 // docs/Integrations/hospitable/api-reference.md's "Reviews" section.
 //
 // Auth: same as any dashboard page — requireOrgMember, so only a logged-in
@@ -23,7 +33,7 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams
   const page    = searchParams.get('page') ?? '1'
-  const perPage = searchParams.get('per_page') ?? '25'
+  const perPage = searchParams.get('per_page') ?? '10'
 
   const { data: properties, error: propertyError } = await supabase
     .from('properties')
@@ -52,24 +62,51 @@ export async function GET(request: NextRequest) {
   const propertiesQuery = properties
     .map((p) => `properties[]=${encodeURIComponent(p.external_id as string)}`)
     .join('&')
+  const firstPropertyId = properties[0]!.external_id as string
 
-  const url = `${HOSPITABLE_API_BASE}/reviews?page=${page}&per_page=${perPage}`
-    + `&include=guest,reservation&${propertiesQuery}`
-
-  const hospitableResponse = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept:        'application/json',
+  const candidates: Array<{ label: string; url: string }> = [
+    {
+      label: 'flat /reviews with properties[] + include',
+      url: `${HOSPITABLE_API_BASE}/reviews?page=${page}&per_page=${perPage}&include=guest,reservation&${propertiesQuery}`,
     },
-  })
+    {
+      label: 'flat /reviews with properties[], no include',
+      url: `${HOSPITABLE_API_BASE}/reviews?page=${page}&per_page=${perPage}&${propertiesQuery}`,
+    },
+    {
+      label: 'singular /review with properties[]',
+      url: `${HOSPITABLE_API_BASE}/review?page=${page}&per_page=${perPage}&${propertiesQuery}`,
+    },
+    {
+      label: 'nested /properties/{id}/reviews (first property only)',
+      url: `${HOSPITABLE_API_BASE}/properties/${firstPropertyId}/reviews?page=${page}&per_page=${perPage}`,
+    },
+    {
+      label: 'nested /properties/{id}/review (singular, first property only)',
+      url: `${HOSPITABLE_API_BASE}/properties/${firstPropertyId}/review?page=${page}&per_page=${perPage}`,
+    },
+  ]
 
-  const body = await hospitableResponse.text()
+  const results = []
+  for (const candidate of candidates) {
+    const res  = await fetch(candidate.url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept:        'application/json',
+      },
+    })
+    const text = await res.text()
+    results.push({
+      label:  candidate.label,
+      url:    candidate.url,
+      status: res.status,
+      body:   safeJsonParse(text),
+    })
+  }
 
   return NextResponse.json({
-    properties:       properties.map((p) => ({ id: p.id, name: p.name, external_id: p.external_id })),
-    requestUrl:       url,
-    hospitableStatus: hospitableResponse.status,
-    hospitableBody:   safeJsonParse(body),
+    properties: properties.map((p) => ({ id: p.id, name: p.name, external_id: p.external_id })),
+    results,
   })
 }
 
