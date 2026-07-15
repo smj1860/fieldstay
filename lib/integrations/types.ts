@@ -217,6 +217,22 @@ export interface OwnerRezBooking {
     first_name?: string | null
     last_name?:  string | null
   }
+  // ✅ Confirmed live 2026-07-15 against GET /v2/bookings and
+  // GET /v2/bookings/{id} — total_amount/total_owed are always present
+  // (equal to each other on every sampled booking, all commission-free —
+  // direct/referral channels). charges[] carries owner_amount per line
+  // item, which is what's actually owed to the property owner net of any
+  // PM commission (owner_commission_percent/owner_amount only diverge from
+  // amount/total_amount when commission is nonzero — not yet observed
+  // live). Only "rent" was seen as a charge type; other types (cleaning
+  // fee, tax, etc.) are unconfirmed but assumed to sum the same way.
+  total_amount?: number
+  total_owed?:   number
+  charges?: Array<{
+    type:          string
+    amount:        number
+    owner_amount?: number
+  }>
 }
 
 export interface OwnerRezUser {

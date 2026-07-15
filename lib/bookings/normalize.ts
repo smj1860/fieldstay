@@ -25,7 +25,7 @@ export interface NormalizedBooking {
   // Real total booking revenue reported by the PMS itself, when known —
   // preferred over the nights * avg_nightly_rate estimate that
   // booking-events.ts otherwise falls back to. Providers with no such
-  // field (everything except Hospitable, currently) should map to null.
+  // field should map to null.
   actual_total_amount:   number | null
 }
 

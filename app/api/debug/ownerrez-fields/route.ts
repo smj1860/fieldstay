@@ -1,16 +1,14 @@
 // TEMPORARY diagnostic route — not part of the product surface.
 //
-// Purpose: the live `reviews` table shows 0/28 OwnerRez bookings across two
-// orgs ever getting a guest_name, including "confirmed" bookings — despite
-// getBookings() requesting include_guest=true. That param was never
-// confirmed against OwnerRez's real API (unlike the property/address fix
-// in 160a3a8, which explicitly cites "confirmed live API shapes") — the
-// working theory is it's not a real param at all and OwnerRez silently
-// ignores it. This tries several plausible variants for the bookings guest
-// data, plus a raw property-list and per-property detail fetch (to check
-// the real live shape of address/sqft against properties that do and don't
-// currently have those fields populated), all in one hit. Delete this file
-// once the real shapes are confirmed and the sync code is fixed to match.
+// Purpose: a systematic re-check of every OwnerRez field this codebase
+// reads, after finding the same class of bug repeatedly (booking guest
+// name, property address, square footage — all read an assumed field name
+// that was never actually confirmed live, and all resolved to null/wrong
+// on every synced row). This now also covers the OwnerRezReview shape
+// (ownerrez-reviews-sync.ts reads comments/body/review_text,
+// guest_name/guest.name, created_at/submitted_at — the exact same
+// unconfirmed-fallback-chain pattern) and door codes. Delete this file
+// once every shape below is confirmed and the sync code matches.
 //
 // Auth: same as any dashboard page — requireOrgMember, so only a logged-in
 // member of the org can hit this. Uses the current user's own OwnerRez
@@ -78,6 +76,16 @@ export async function GET() {
     ? await orFetch(`/v2/bookings/${firstBookingId}`)
     : { note: 'No booking id found in the list response to fetch detail for.' }
 
+  // Reviews: ownerrez-reviews-sync.ts reads review.comments/body/review_text,
+  // review.guest_name/guest.name, and review.created_at/submitted_at — the
+  // exact same class of unconfirmed fallback-chain guess that's been wrong
+  // on every other OwnerRez field checked so far (address, sqft, booking
+  // guest name). Confirm the real shape before trusting it any further.
+  const reviewVariants = await Promise.all([
+    orFetch(`/v2/reviews?limit=5&since_utc=${encodeURIComponent(sinceUtc)}`),
+    orFetch(`/v2/reviews?limit=5&property_ids=${propertyIdsParam}`),
+  ])
+
   const propertyList = await orFetch('/v2/properties?limit=5')
 
   const propertyDetails = orProperties?.length
@@ -97,6 +105,10 @@ export async function GET() {
       'since_utc + include_guest=true':        bookingVariants[3],
     },
     bookingDetail,
+    reviewVariants: {
+      'since_utc':    reviewVariants[0],
+      'property_ids': reviewVariants[1],
+    },
     propertyList,
     propertyDetails,
   })

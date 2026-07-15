@@ -35,9 +35,10 @@ export type FieldStayEvents = {
       property_id: string
       org_id:      string
       source:      'ownerrez' | 'uplisting' | 'hospitable'
-      // Real total booking revenue, when the PMS reports one — currently
-      // only ever populated for source: 'hospitable' (📄 spec, pending
-      // financials:read). Absent/null falls back to the existing
+      // Real total booking revenue, when the PMS reports one — populated
+      // for 'hospitable' (📄 spec, pending financials:read) and 'ownerrez'
+      // (✅ confirmed live 2026-07-15, via charges[].owner_amount /
+      // total_amount). Absent/null falls back to the existing
       // nights * avg_nightly_rate estimate in booking-events.ts.
       actual_total_amount?: number | null
     }
