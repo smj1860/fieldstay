@@ -205,9 +205,17 @@ export interface OwnerRezBooking {
   type?:         'booking' | 'block' | 'quote_hold' | 'linked_availability' | 'owner'
   property_id?:  number
   channel_name?: string
+  // ✅ Confirmed live 2026-07-15 against GET /v2/bookings with
+  // include_guest=true — the real shape has first_name/last_name, NOT a
+  // combined `name` field. This is why guest_name has been null on every
+  // single OwnerRez booking ever synced, on every org — include_guest=true
+  // itself was always the right param, but this field read it back wrong.
+  // No `email` field was present on any sampled booking either; guest_id
+  // is available for a future GET /v2/guests/{id} join if email is needed.
   guest?: {
-    name:  string | null
-    email: string | null
+    id?:         number
+    first_name?: string | null
+    last_name?:  string | null
   }
 }
 

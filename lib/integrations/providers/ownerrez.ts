@@ -390,8 +390,11 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     checkin_time:  null,
     checkout_time: null,
     status:      isBlock ? 'blocked' : mapOwnerRezBookingStatus(b.status),
-    guest_name:  b.guest?.name  ?? null,
-    guest_email: b.guest?.email ?? null,
+    // ✅ Confirmed live 2026-07-15 — OwnerRez's guest object has
+    // first_name/last_name, not a combined name field (see OwnerRezBooking.guest
+    // doc comment). No email field was ever present on this endpoint.
+    guest_name:  [b.guest?.first_name, b.guest?.last_name].filter(Boolean).join(' ') || null,
+    guest_email: null,
     source:      mapOwnerRezChannelToSource(b.channel_name),
     is_block:    isBlock,
     // Effective 2026-07-07, OwnerRez's type field can be 'owner' — the
