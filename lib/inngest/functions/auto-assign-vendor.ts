@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { haversineKm, proximityScore, clamp01 } from '@/lib/scoring/geo'
+import { computeWorkloadMap, computeFamiliarIds } from '@/lib/scoring/pools'
 
 // Compliance nudges the score down instead of a second hard filter layered on
 // top of hard_blocked exclusion — grace_period vendors already had their
@@ -76,7 +77,7 @@ export const autoAssignVendor = inngest.createFunction(
         .not('vendor_id', 'is', null)
         .in('vendor_id', eligibleVendors.map((v) => v.id))
 
-      const familiarVendorIds = [...new Set((pastWOs ?? []).map((w) => w.vendor_id as string))]
+      const familiarVendorIds = computeFamiliarIds(pastWOs ?? [], (w) => w.vendor_id)
 
       // Workload: currently open (assigned/in_progress) work orders per vendor
       const { data: openWOs } = await supabase
@@ -86,11 +87,7 @@ export const autoAssignVendor = inngest.createFunction(
         .in('vendor_id', eligibleVendors.map((v) => v.id))
         .in('status', ['assigned', 'in_progress'])
 
-      const workloadMap: Record<string, number> = {}
-      for (const w of openWOs ?? []) {
-        if (!w.vendor_id) continue
-        workloadMap[w.vendor_id] = (workloadMap[w.vendor_id] ?? 0) + 1
-      }
+      const workloadMap = computeWorkloadMap(openWOs ?? [], (w) => w.vendor_id)
 
       return {
         property:  { lat: property?.lat ?? null, lng: property?.lng ?? null },
