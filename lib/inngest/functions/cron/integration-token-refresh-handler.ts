@@ -13,7 +13,7 @@ import { createServiceClient }          from '@/lib/supabase/server'
 import { NonRetriableError }            from 'inngest'
 import { resend, FROM }                 from '@/lib/resend/client'
 import { renderIntegrationErrorEmail }  from '@/lib/resend/emails/integration-error'
-import { getPmEmail }                   from '@/lib/inngest/helpers'
+import { getPmEmails }                  from '@/lib/inngest/helpers'
 import { refreshHospitableToken }       from '@/lib/integrations/providers/hospitable-token'
 import { refreshKrogerToken }           from '@/lib/integrations/providers/kroger-token'
 
@@ -109,7 +109,7 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
         }
 
         const supabase = createServiceClient()
-        const pmEmail  = await getPmEmail(supabase, org_id)
+        const [pmEmail] = await getPmEmails(supabase, org_id)
 
         if (!pmEmail) {
           logger.warn(`[TokenRefresh] No PM email found for org ${org_id} — cannot send reconnect notification`)

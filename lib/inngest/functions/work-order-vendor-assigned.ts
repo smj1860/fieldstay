@@ -4,7 +4,7 @@ import { NonRetriableError }    from 'inngest'
 import { render }               from '@react-email/render'
 import WorkOrderDispatchEmail   from '@/emails/WorkOrderDispatch'
 import { resend, FROM }         from '@/lib/resend/client'
-import { getPmEmail }           from '@/lib/inngest/helpers'
+import { getPmEmails }          from '@/lib/inngest/helpers'
 import { renderPmAlert }        from '@/lib/resend/emails/pm-alert'
 import { renderSmsBody }        from '@/lib/sms/templates'
 import { randomBytes }          from 'crypto'
@@ -71,33 +71,11 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     }
 
     if (!vendor.email) {
-      // Can't dispatch without an email. Notify PM instead of silently failing.
+      // Can't dispatch without an email — vendor.email is required at
+      // creation via the standard Add Vendor form. No PM alert here:
+      // this is now a silent skip (see bulkImportVendors gap noted
+      // separately if this ever fires from a bulk-imported vendor).
       logger.warn(`WO ${workOrderId}: vendor ${vendorId} has no email — cannot dispatch`)
-
-      await step.run('notify-pm-no-vendor-email', async () => {
-        const supabase = createServiceClient()
-        const pmEmail  = await getPmEmail(supabase, orgId)
-        if (!pmEmail) return { skipped: true }
-
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
-        await resend.emails.send({
-          from:    FROM,
-          to:      pmEmail,
-          subject: 'Action required — vendor has no email address',
-          html: await renderPmAlert({
-            heading:  'Vendor assigned but not notified',
-            body:     `${vendor.name ?? 'The assigned vendor'} was added to work order ${wo.wo_number ?? workOrderId} but has no email address on file. They were not notified.`,
-            details:  [
-              { label: 'Property', value: property?.name ?? null },
-              { label: 'Action',   value: 'Add an email address to the vendor record.' },
-            ],
-            ctaLabel: 'Go to Vendors →',
-            ctaUrl:   `${appUrl}/vendors`,
-          }),
-        })
-        return { notified: true }
-      })
-
       return { skipped: true, reason: 'no_vendor_email' }
     }
 
@@ -243,7 +221,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     // ── Step 5: Notify PM that vendor was dispatched ───────────────────────
     await step.run('notify-pm-dispatched', async () => {
       const supabase = createServiceClient()
-      const pmEmail  = await getPmEmail(supabase, orgId)
+      const [pmEmail] = await getPmEmails(supabase, orgId)
       if (!pmEmail) return { skipped: true }
 
       await resend.emails.send(

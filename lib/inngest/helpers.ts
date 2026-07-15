@@ -2,34 +2,98 @@ import type { createServiceClient } from '@/lib/supabase/server'
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
+export type PmRole = 'owner' | 'admin' | 'manager'
+
+export interface PmMember {
+  userId: string
+  email:  string
+  role:   PmRole
+}
+
+export interface GetPmMembersOptions {
+  /** Roles to include. Defaults to ['owner', 'admin'] — the historical PM definition. */
+  roles?: PmRole[]
+  /** Cap the number of members returned, after role-preference sorting. Omit for "all". */
+  limit?: number
+}
+
+const ROLE_PREFERENCE: PmRole[] = ['owner', 'admin', 'manager']
+
 /**
- * Resolve the org owner/admin email from an org_id.
- * Checks owner role first, falls back to admin.
- * Two-step: organization_members SELECT → auth.admin.getUserById.
- * Called by all notification-sending Inngest functions.
+ * SINGLE SOURCE OF TRUTH for "who is the PM" for an org. Every
+ * notification-sending Inngest function and cron must go through this
+ * (or getPmEmails, below) instead of querying organization_members
+ * directly.
+ *
+ * - Only invite-accepted members are eligible (verified: every code path
+ *   that inserts an organization_members row sets invite_accepted_at at
+ *   insert time — org creation and invite acceptance both set it — so
+ *   this never excludes a real, active member).
+ * - Results are sorted owner → admin → manager.
+ * - roles defaults to ['owner','admin']. Pass roles: ['owner','admin','manager']
+ *   for anything that should also reach managers (e.g. crew coverage gaps,
+ *   work order sign-off).
+ * - limit caps how many members come back after sorting — omit for "all".
  */
-export async function getPmEmail(
+export async function getPmMembers(
   supabase: ServiceClient,
-  orgId: string
-): Promise<string | null> {
+  orgId: string,
+  options: GetPmMembersOptions = {}
+): Promise<PmMember[]> {
+  const { roles = ['owner', 'admin'], limit } = options
+
   const { data: members } = await supabase
     .from('organization_members')
     .select('user_id, role')
     .eq('org_id', orgId)
-    .in('role', ['owner', 'admin'])
+    .in('role', roles)
+    .not('invite_accepted_at', 'is', null)
 
-  if (!members?.length) return null
+  if (!members?.length) return []
 
-  const member = members.find(m => m.role === 'owner') ?? members[0]
-  if (!member?.user_id) return null
+  const sorted = [...members].sort(
+    (a, b) => ROLE_PREFERENCE.indexOf(a.role as PmRole) - ROLE_PREFERENCE.indexOf(b.role as PmRole)
+  )
+  const limited = typeof limit === 'number' ? sorted.slice(0, limit) : sorted
 
-  const { data: { user } } = await supabase.auth.admin.getUserById(member.user_id)
-  return user?.email ?? null
+  const resolved = await Promise.all(
+    limited.map(async (m) => {
+      const { data: { user } } = await supabase.auth.admin.getUserById(m.user_id as string)
+      if (!user?.email) return null
+      return { userId: m.user_id as string, email: user.email, role: m.role as PmRole }
+    })
+  )
+
+  return resolved.filter((m): m is PmMember => m !== null)
 }
 
 /**
- * Batch-resolve PM emails for multiple orgs — avoids N×2 round-trips
- * inside cron functions that loop across all orgs.
+ * Convenience wrapper around getPmMembers() for the common case of just
+ * wanting email addresses. This is what nearly every email-sending path
+ * should call — use getPmMembers() directly only when you also need the
+ * user_id (e.g. to look up push subscriptions or a display name).
+ *
+ * getPmEmails(supabase, orgId)                                    → single "primary" PM's email as a 1-element array (old getPmEmail)
+ * getPmEmails(supabase, orgId, { limit: 1 })                      → same, explicit
+ * getPmEmails(supabase, orgId)  with no limit                     → ALL owner/admin emails (old getOrgPmEmails)
+ * getPmEmails(supabase, orgId, { roles: [...], limit: N })        → broadcast to up to N (old notify-assignment-gap inline query)
+ */
+export async function getPmEmails(
+  supabase: ServiceClient,
+  orgId: string,
+  options: GetPmMembersOptions = {}
+): Promise<string[]> {
+  const members = await getPmMembers(supabase, orgId, options)
+  return members.map((m) => m.email)
+}
+
+/**
+ * Batch-resolve a single PM email per org — avoids N×2 round-trips inside
+ * cron functions that loop across all orgs. Kept as a separate function
+ * (rather than folded into getPmEmails) because the batch SQL shape is
+ * fundamentally different from the per-org lookups above; internally it
+ * shares the same role-preference order so "who counts as the PM" never
+ * drifts between the single-org and batch paths.
  * Returns Map<orgId, email>.
  */
 export async function getPmEmailsByOrgIds(
@@ -43,13 +107,17 @@ export async function getPmEmailsByOrgIds(
     .select('org_id, user_id, role')
     .in('org_id', orgIds)
     .in('role', ['owner', 'admin'])
+    .not('invite_accepted_at', 'is', null)
 
   if (!members?.length) return new Map()
 
-  // Keep one member per org — prefer owner over admin
   const bestByOrg = new Map<string, string>()
   for (const m of members) {
-    if (!bestByOrg.has(m.org_id) || m.role === 'owner') {
+    const existing = bestByOrg.get(m.org_id)
+    if (!existing) {
+      bestByOrg.set(m.org_id, m.user_id)
+    } else if (m.role === 'owner') {
+      // owner always wins, matching ROLE_PREFERENCE order used elsewhere
       bestByOrg.set(m.org_id, m.user_id)
     }
   }
@@ -63,4 +131,40 @@ export async function getPmEmailsByOrgIds(
   )
 
   return result
+}
+
+/**
+ * Create an in-app bell notification for an org's PMs (owner/admin/manager
+ * viewing the dashboard). Notifications are org-scoped, not per-recipient —
+ * see CLAUDE_notification_bell_migration.md for the full system.
+ */
+export interface CreatePmNotificationInput {
+  orgId:      string
+  type:       string
+  title:      string
+  subtitle?:  string
+  href:       string
+  severity?:  'red' | 'amber' | 'green' | 'blue'
+  dedupeKey?: string
+}
+
+export async function createPmNotification(
+  supabase: ServiceClient,
+  input: CreatePmNotificationInput
+): Promise<void> {
+  const { error } = await supabase.from('notifications').insert({
+    org_id:     input.orgId,
+    type:       input.type,
+    title:      input.title,
+    subtitle:   input.subtitle ?? null,
+    href:       input.href,
+    severity:   input.severity ?? 'blue',
+    dedupe_key: input.dedupeKey ?? null,
+  })
+
+  // 23505 = unique_violation on the partial dedupe_key index — expected
+  // on retries/duplicate triggers, not a real error.
+  if (error && error.code !== '23505') {
+    throw new Error(`Failed to create notification: ${error.message}`)
+  }
 }

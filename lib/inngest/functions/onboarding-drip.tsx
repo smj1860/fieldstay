@@ -2,7 +2,6 @@ import { inngest }                                 from '@/lib/inngest/client'
 import { createServiceClient }                     from '@/lib/supabase/server'
 import { resend }                                  from '@/lib/resend/client'
 import { renderWelcomeEmailV2 }                    from '@/emails/welcome-v2'
-import { renderFrictionForecasterEmail }           from '@/emails/friction-forecaster-drip'
 import { renderGuidebookFeatureAnnouncementEmail } from '@/emails/guidebook-feature-announcement'
 import { renderReengagementEmail }                 from '@/emails/reengagement-drip'
 
@@ -52,55 +51,10 @@ export const onboardingDrip = inngest.createFunction(
       }
     })
 
-    // ── Wait 24 hours ──────────────────────────────────────────────────
-    await step.sleep('wait-24h', '24h')
+    // ── Wait 72 hours ─────────────────────────────────────────────────
+    await step.sleep('wait-72h', '72h')
 
-    // ── Email 2: Friction Forecaster ───────────────────────────────────
-    const unsubscribedAt24h = await step.run('check-suppression-24h', async () => {
-      const supabase = createServiceClient()
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('email_unsubscribed_at')
-        .eq('id', user_id)
-        .maybeSingle()
-      return profile?.email_unsubscribed_at ?? null
-    })
-
-    if (unsubscribedAt24h) {
-      logger.info(`[Drip:${org_id}] User unsubscribed — stopping before Email 2`)
-      return { stopped: true, reason: 'unsubscribed', emails_sent: 1 }
-    }
-
-    await step.run('send-forecaster', async () => {
-      try {
-        const { error } = await resend.emails.send(
-          {
-            from:    DRIP_FROM,
-            to:      email,
-            replyTo: 'stephen@fieldstay.app',
-            subject: "It's 7:00 AM. Here's what FieldStay already knows.",
-            html:    await renderFrictionForecasterEmail({
-              firstName:    first_name,
-              dashboardUrl: `${APP_URL}/ops`,
-              turnoversUrl: `${APP_URL}/turnovers`,
-            }),
-          },
-          { idempotencyKey: `onboarding-forecaster-${org_id}` }
-        )
-        if (error) {
-          logger.error(`[Drip:${org_id}] Forecaster email failed: ${JSON.stringify(error)}`)
-        } else {
-          logger.info(`[Drip:${org_id}] Email 2 (Forecaster) sent`)
-        }
-      } catch (err) {
-        logger.error(`[Drip:${org_id}] Forecaster email threw: ${String(err)}`)
-      }
-    })
-
-    // ── Wait 48 more hours (72h total) ────────────────────────────────
-    await step.sleep('wait-48h', '48h')
-
-    // ── Email 3: Guidebook (existing template, repurposed) ────────────
+    // ── Email 2: Guidebook (existing template, repurposed) ─────────────
     const unsubscribedAt72h = await step.run('check-suppression-72h', async () => {
       const supabase = createServiceClient()
       const { data: profile } = await supabase
@@ -112,8 +66,8 @@ export const onboardingDrip = inngest.createFunction(
     })
 
     if (unsubscribedAt72h) {
-      logger.info(`[Drip:${org_id}] User unsubscribed — stopping before Email 3`)
-      return { stopped: true, reason: 'unsubscribed', emails_sent: 2 }
+      logger.info(`[Drip:${org_id}] User unsubscribed — stopping before Email 2`)
+      return { stopped: true, reason: 'unsubscribed', emails_sent: 1 }
     }
 
     await step.run('send-guidebook', async () => {
@@ -135,7 +89,7 @@ export const onboardingDrip = inngest.createFunction(
         if (error) {
           logger.error(`[Drip:${org_id}] Guidebook email failed: ${JSON.stringify(error)}`)
         } else {
-          logger.info(`[Drip:${org_id}] Email 3 (Guidebook) sent`)
+          logger.info(`[Drip:${org_id}] Email 2 (Guidebook) sent`)
         }
       } catch (err) {
         logger.error(`[Drip:${org_id}] Guidebook email threw: ${String(err)}`)
@@ -145,7 +99,7 @@ export const onboardingDrip = inngest.createFunction(
     // ── Wait 96 more hours (168h / 7 days total) ──────────────────────
     await step.sleep('wait-96h', '96h')
 
-    // ── Email 4: Behavioral split on PMS connection ───────────────────
+    // ── Email 3: Behavioral split on PMS connection ────────────────────
     const unsubscribedAt168h = await step.run('check-suppression-168h', async () => {
       const supabase = createServiceClient()
       const { data: profile } = await supabase
@@ -158,7 +112,7 @@ export const onboardingDrip = inngest.createFunction(
 
     if (unsubscribedAt168h) {
       logger.info(`[Drip:${org_id}] User unsubscribed — sequence complete`)
-      return { stopped: true, reason: 'unsubscribed', emails_sent: 3 }
+      return { stopped: true, reason: 'unsubscribed', emails_sent: 2 }
     }
 
     const isConnected = await step.run('check-pms-connection', async () => {
@@ -197,13 +151,13 @@ export const onboardingDrip = inngest.createFunction(
         if (error) {
           logger.error(`[Drip:${org_id}] Reengagement email failed: ${JSON.stringify(error)}`)
         } else {
-          logger.info(`[Drip:${org_id}] Email 4 (Re-engagement, connected=${isConnected}) sent`)
+          logger.info(`[Drip:${org_id}] Email 3 (Re-engagement, connected=${isConnected}) sent`)
         }
       } catch (err) {
         logger.error(`[Drip:${org_id}] Reengagement email threw: ${String(err)}`)
       }
     })
 
-    return { org_id, emails_sent: 4, variant: isConnected ? 'connected' : 'not_connected' }
+    return { org_id, emails_sent: 3, variant: isConnected ? 'connected' : 'not_connected' }
   }
 )

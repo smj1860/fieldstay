@@ -1,6 +1,6 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getPmEmail }          from '@/lib/inngest/helpers'
+import { getPmEmails }         from '@/lib/inngest/helpers'
 import { resend, FROM }        from '@/lib/resend/client'
 import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 
@@ -38,7 +38,7 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
 
     const pmEmail = await step.run('fetch-pm-email', async () => {
       const supabase = createServiceClient()
-      return getPmEmail(supabase, orgId)
+      const [email] = await getPmEmails(supabase, orgId); return email ?? null
     })
 
     if (!pmEmail) return { skipped: 'no PM email' }

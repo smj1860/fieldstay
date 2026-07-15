@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM } from '@/lib/resend/client'
-import { getPmEmail } from '@/lib/inngest/helpers'
+import { getPmEmails } from '@/lib/inngest/helpers'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { logAuditEvent } from '@/lib/audit'
 
@@ -275,10 +275,11 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     if (isSameDayFlip) {
       await step.run('email-po-to-pm-immediate', async () => {
         const supabase = createServiceClient()
-        const [{ data: property }, pmEmail] = await Promise.all([
+        const [{ data: property }, pmEmails] = await Promise.all([
           supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
-          getPmEmail(supabase, org_id),
+          getPmEmails(supabase, org_id),
         ])
+        const [pmEmail] = pmEmails
 
         if (!pmEmail) return
 

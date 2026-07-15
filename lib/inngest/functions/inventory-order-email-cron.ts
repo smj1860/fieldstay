@@ -1,7 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
-import { getPmEmail }          from '@/lib/inngest/helpers'
+import { getPmEmails }         from '@/lib/inngest/helpers'
 import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 
 type PoItemRow = {
@@ -64,7 +64,7 @@ export const inventoryOrderEmailCron = inngest.createFunction(
 
     for (const [orgId, orgPOs] of byOrg) {
       await step.run(`send-order-email-${orgId}`, async () => {
-        const pmEmail = await getPmEmail(supabase, orgId)
+        const [pmEmail] = await getPmEmails(supabase, orgId)
         if (!pmEmail) return
 
         // ── Aggregate all items across all properties ─────────────────────────
