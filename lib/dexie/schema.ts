@@ -159,9 +159,9 @@ export interface CrewWorkOrderRow {
 
 export type MutationOp = 'PUT' | 'PATCH' | 'DELETE'
 
-// Every value here must have a matching handler branch in
-// SyncEngine.uploadOne() (lib/dexie/syncService.ts) — an unhandled table
-// used to silently vanish from the outbox instead of reaching Supabase.
+// Every value here must have a matching entry in UPLOAD_HANDLERS
+// (lib/dexie/syncService.ts) — an unhandled table used to silently vanish
+// from the outbox instead of reaching Supabase.
 export type MutationTable =
   | 'checklist_instance_items'
   | 'turnovers'
