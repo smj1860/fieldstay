@@ -54,56 +54,74 @@ export const hospReviewsBackfill = inngest.createFunction(
         return { reviews: 0 }
       }
 
-      const propertyMap = new Map(
-        properties.map((p) => [p.external_id as string, p.id as string])
-      )
-      const propertyExternalIds = Array.from(propertyMap.keys())
-
       const token = await step.run('read-token', async () => getValidHospitableToken(user_id))
 
-      let reviews
-      try {
-        reviews = await step.run('fetch-reviews', async () => {
-          return hospFetchReviews(token, propertyExternalIds)
-        })
-      } catch (err) {
-        if (!(err instanceof RateLimitError)) throw err
-        await step.sleep('rate-limit-sleep', `${err.retryAfter}s`)
-        reviews = await step.run('fetch-reviews-retry', async () => {
-          return hospFetchReviews(token, propertyExternalIds)
-        })
-      }
+      // Reviews are fetched per-property (GET /properties/{uuid}/reviews —
+      // there is no flat account-wide collection, see hospFetchReviews' doc
+      // comment), so each property gets its own fetch step. The FieldStay
+      // property_id is already known here — no need to resolve it back out
+      // of the response's property.id the way the review.created webhook
+      // handler has to (that path doesn't know which property triggered it
+      // up front).
+      const reviewRows: Array<{
+        org_id:          string
+        external_id:     string
+        external_source: string
+        external_url:    null
+        property_id:     string
+        guest_name:      string | null
+        rating:          number
+        review_text:     string
+        review_date:     string | null
+        response_status: string
+      }> = []
 
-      logger.info(`[Hospitable:${user_id}] Fetched ${reviews.length} historical reviews`)
+      for (const property of properties) {
+        const propertyId         = property.id as string
+        const propertyExternalId = property.external_id as string
 
-      const reviewCount = await step.run('upsert-reviews', async () => {
-        if (reviews.length === 0) return 0
+        let propertyReviews
+        try {
+          propertyReviews = await step.run(`fetch-reviews-${propertyId}`, async () =>
+            hospFetchReviews(token, propertyExternalId)
+          )
+        } catch (err) {
+          if (!(err instanceof RateLimitError)) throw err
+          await step.sleep(`rate-limit-sleep-${propertyId}`, `${err.retryAfter}s`)
+          propertyReviews = await step.run(`fetch-reviews-retry-${propertyId}`, async () =>
+            hospFetchReviews(token, propertyExternalId)
+          )
+        }
 
-        const rows = reviews.map((review) => {
+        for (const review of propertyReviews) {
           const guestName = [review.guest?.first_name, review.guest?.last_name]
             .filter(Boolean)
             .join(' ') || null
 
-          const hospPropertyId = review.property?.id ?? null
-
-          return {
+          reviewRows.push({
             org_id,
             external_id:     review.id,
             external_source: PROVIDER,
             external_url:    null,
-            property_id:     hospPropertyId ? (propertyMap.get(hospPropertyId) ?? null) : null,
+            property_id:     propertyId,
             guest_name:      guestName,
-            rating:          review.public?.rating ?? 0,
-            review_text:     review.public?.review ?? '',
-            review_date:     review.reviewed_at ?? null,
+            rating:          review.public.rating,
+            review_text:     review.public.review,
+            review_date:     review.reviewed_at,
             response_status: 'pending',
-          }
-        })
+          })
+        }
+      }
+
+      logger.info(`[Hospitable:${user_id}] Fetched ${reviewRows.length} historical reviews`)
+
+      const reviewCount = await step.run('upsert-reviews', async () => {
+        if (reviewRows.length === 0) return 0
 
         const supabase = createServiceClient()
         const { error } = await supabase
           .from('reviews')
-          .upsert(rows, {
+          .upsert(reviewRows, {
             onConflict:       'org_id,external_id,external_source',
             ignoreDuplicates: false,
           })
@@ -112,7 +130,7 @@ export const hospReviewsBackfill = inngest.createFunction(
           throw new Error(`[Hospitable:${user_id}] Reviews upsert failed: ${error.message}`)
         }
 
-        return rows.length
+        return reviewRows.length
       })
 
       await step.run('record-backfill-success', async () => {

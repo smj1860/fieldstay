@@ -410,29 +410,54 @@ services:      [{id: integer, label: string}]   → role + specialty
 
 ### Reviews
 
-#### `GET /reviews`
+#### `GET /properties/{uuid}/reviews`
 **Scope:** `reviews:read`
 **Used by:** RepuGuard — review sync and AI response drafting
 
+📄 Spec — from Hospitable's own published API reference (2026-07-15), not
+yet verified against a real live response (see
+app/api/debug/hospitable-reviews/route.ts, a temporary diagnostic route to
+confirm it). This corrects an earlier version of this section that
+documented a flat `GET /reviews?properties[]=...` collection endpoint —
+that shape 404's live; reviews are fetched **per property**, not
+account-wide, and there is no flat collection endpoint at all.
+
 ```
-properties[]: [uuid1, uuid2]   REQUIRED
-include:      "guest,reservation"
+per_page: integer, max 50, default 10
+include:  "guest"   (only documented value; property/listing/reservation
+                      appear to be present without needing an include)
 ```
 
 **Key fields:**
 ```
-id:                   string
-rating:               integer (1-5)
-public.review:        string
-public.response:      string | null   (null = not yet responded)
-can_respond:          boolean
-reviewed_at:          date-time
-guest.first_name:     string
-guest.last_name:      string
-reservation.id:       UUID
-reservation.check_in: date-time
+id:                    string (uuid)
+platform:              "airbnb" | "direct"
+public.rating:         integer
+public.review:         string
+public.response:       string | null   (null = not yet responded)
+private.feedback:      string | null   (guest-private feedback — never persisted)
+private.detailed_ratings: array         (guest-private — never persisted)
+responded_at:          date-time | null
+reviewed_at:           date-time
+can_respond:           boolean
+guest.first_name:      string
+guest.last_name:       string
+guest.language:        string
+reservation.id:        UUID
+reservation.code:      string
+reservation.check_in:  date-time
 reservation.check_out: date-time
+property.id:           UUID
+property.name:         string
+property.public_name:  string
+listing.platform:      string
+listing.platform_id:   string
 ```
+
+Pagination: both a `links` object (`first`/`last`/`prev`/`next`) and a
+`meta` object (`current_page`/`last_page`/`per_page`/`total`) are returned.
+`hospFetchReviews()` uses `links.next`, matching the cursor style already
+used for `hospFetchProperties`/`hospFetchTeammates`.
 
 ---
 

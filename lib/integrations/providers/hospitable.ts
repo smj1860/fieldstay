@@ -583,68 +583,47 @@ async function fetchReservationsWindow(
   return reservations
 }
 
-// GET /reviews — requires properties[] (REQUIRED per api-reference.md; no
-// account-wide "all reviews" mode exists). Used for the one-time historical
-// backfill (see hospitable/hospitable-reviews-backfill.ts) — ongoing new/
-// changed reviews arrive via the review.created/review.changed webhook
-// instead (incremental-sync.ts), which fetches one review at a time and
-// doesn't go through this function at all.
+// GET /properties/{uuid}/reviews — confirmed 2026-07-15 against Hospitable's
+// own published API reference: reviews are fetched per-property, NOT via a
+// flat /reviews?properties[]=... collection (an earlier version of this
+// function assumed the latter and 404'd on first live try). per_page maxes
+// at 50 (not the 100 used elsewhere in this file) — Hospitable's own docs
+// cap it there for this endpoint specifically.
 //
-// propertyIds is chunked to keep the properties[] query string from growing
-// unbounded for a large portfolio; each chunk is paginated independently.
+// Used for the one-time historical backfill (see
+// hospitable/hospitable-reviews-backfill.ts) — ongoing new/changed reviews
+// arrive via the review.created/review.changed webhook instead
+// (incremental-sync.ts), which fetches one review at a time by id and
+// doesn't go through this function at all.
 export async function hospFetchReviews(
-  token:       string,
-  propertyIds: string[]
+  token:      string,
+  propertyId: string
 ): Promise<HospitableReview[]> {
-  if (propertyIds.length === 0) return []
-
   const reviews: HospitableReview[] = []
-  const PER_PAGE            = 100
-  const MAX_PAGES           = 200
-  const PROPERTY_CHUNK_SIZE = 25
+  const PER_PAGE  = 50
+  const MAX_PAGES = 200
 
-  for (let i = 0; i < propertyIds.length; i += PROPERTY_CHUNK_SIZE) {
-    const chunk = propertyIds.slice(i, i + PROPERTY_CHUNK_SIZE)
+  let url: string | null =
+    `${HOSPITABLE_API_BASE}/properties/${propertyId}/reviews?per_page=${PER_PAGE}&include=guest`
+  let pageCount = 0
 
-    // properties[] must use literal brackets — URLSearchParams encodes []
-    // as %5B%5D, which Hospitable does not accept (same constraint as
-    // fetchReservationsWindow above). Each id is still percent-encoded
-    // individually so a malformed value can't inject extra query params.
-    const propertiesQuery = chunk
-      .map((id) => `properties[]=${encodeURIComponent(id)}`)
-      .join('&')
-
-    let page      = 1
-    let lastPage  = 1
-    let pageCount = 0
-
-    while (page <= lastPage) {
-      pageCount++
-      if (pageCount > MAX_PAGES) {
-        console.error('[Hospitable] reviews pagination exceeded max pages — aborting chunk')
-        break
-      }
-
-      const params = new URLSearchParams({
-        page:     String(page),
-        per_page: String(PER_PAGE),
-        include:  'guest,reservation',
-      })
-
-      const url = `${HOSPITABLE_API_BASE}/reviews?${params.toString()}&${propertiesQuery}`
-      const res = await hospitableFetch(url, token)
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => '')
-        throw new Error(`Hospitable /reviews failed (${res.status}): ${text.slice(0, 200)}`)
-      }
-
-      const data = await res.json() as HospitablePagedReviews
-      reviews.push(...(data.data ?? []))
-
-      lastPage = data.meta?.last_page ?? page
-      page++
+  while (url) {
+    pageCount++
+    if (pageCount > MAX_PAGES) {
+      console.error(`[Hospitable] reviews pagination exceeded ${MAX_PAGES} pages for property ${propertyId} — aborting`)
+      break
     }
+
+    const res = await hospitableFetch(url, token)
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`Hospitable /properties/${propertyId}/reviews failed (${res.status}): ${text.slice(0, 200)}`)
+    }
+
+    const data = await res.json() as HospitablePagedReviews
+    reviews.push(...(data.data ?? []))
+    url = data.links?.next ?? null
   }
 
   return reviews
