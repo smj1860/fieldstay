@@ -183,12 +183,13 @@ export const ownerRezProvider: IntegrationProvider = {
   },
 
   // Handles OwnerRez-specific webhook events beyond the generic revocation.
-  // ✅ Confirmed live 2026-07-16 against OwnerRez's own published webhooks
-  // doc — action is entity_create/entity_update/entity_delete (also
-  // application_authorization_revoked and webhook_test). The previous
-  // 'entity_insert' here was never a real action value, so every real
-  // create-type webhook OwnerRez has ever sent fell through to the
-  // "Unhandled webhook action" default branch and did nothing.
+  // ⚠️ OwnerRez's own webhooks doc is internally inconsistent about the
+  // create-action name: the "Actions" reference table on that page lists
+  // entity_create, but the "Keeping track of blocks/bookings over time"
+  // section further down the SAME page says to listen for entity_insert.
+  // Handling both costs nothing — neither string means anything else — so
+  // this doesn't pick a side. entity_update/entity_delete are consistent
+  // across both sections. See app-api-webhooks doc, 2026-07-16.
   async handleWebhookEvent({ action, payload, externalUserId: _externalUserId, correlationId }) {
     const data       = payload as Record<string, unknown>
     const entityType = String(data.entity_type ?? '')
@@ -206,6 +207,7 @@ export const ownerRezProvider: IntegrationProvider = {
         // any case that doesn't throw).
         break
 
+      case 'entity_insert':
       case 'entity_create':
       case 'entity_update':
       case 'entity_delete': {
