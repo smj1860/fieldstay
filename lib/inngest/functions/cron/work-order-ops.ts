@@ -166,7 +166,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
         // vendor's specialty against when this chain doesn't resolve one.
         const category = schedule.vendor_specialty_hint ?? null
 
-        const { data: wo } = await supabase
+        const { data: wo, error: insertError } = await supabase
           .from('work_orders')
           .insert({
             property_id:        schedule.property_id,
@@ -186,7 +186,21 @@ export const dailyWorkOrderOps = inngest.createFunction(
           .select('id')
           .single()
 
-        // Advance next_due_date for routine schedules
+        if (insertError) {
+          // 23505 = unique_violation on wo_maintenance_schedule_date_unique
+          // (source_schedule_id, scheduled_date) WHERE source='maintenance_schedule' —
+          // dailyMaintenanceScheduleCheck's Pass 1 races this same schedule+date at
+          // the same 8am CT cron time. The DB constraint is the real guard against
+          // a duplicate WO; losing this race is expected, not an error — any other
+          // error code is real and should retry the step.
+          if (insertError.code !== '23505') throw new Error(`Failed to insert auto-created WO: ${insertError.message}`)
+          return null
+        }
+
+        // Advance next_due_date for routine schedules. Optimistic-locked on the
+        // current next_due_date, same guard dailyMaintenanceScheduleCheck's Pass 1
+        // uses — prevents this cron from double-advancing a date the other cron
+        // already rolled forward for the same schedule.
         if (schedule.schedule_type === 'routine' && schedule.frequency) {
           const dueDate = new Date(schedule.next_due_date! + 'T00:00:00')
           const nextDue = calcNextDueDate(schedule.frequency, dueDate)
@@ -194,6 +208,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
             .from('maintenance_schedules')
             .update({ next_due_date: nextDue.toISOString().split('T')[0] })
             .eq('id', schedule.id)
+            .eq('next_due_date', schedule.next_due_date!)
         }
 
         if (!wo) return null

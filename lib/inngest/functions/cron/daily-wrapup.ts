@@ -79,15 +79,36 @@ export const dailyWrapUp = inngest.createFunction(
         const { data: activeProperties } = await supabase
           .from('properties').select('id, name').eq('org_id', orgId).eq('is_active', true)
 
+        const propertyIds = (activeProperties ?? []).map((p) => p.id)
+
+        // ONE batch query for every active property instead of one query per
+        // property — same fix maintenance-schedules.ts's vacancy-gap pass
+        // already applies to the identical N+1 shape ("N round trips → 1").
+        const assetsByProperty = new Map<string, Array<{
+          asset_type: string; make: string | null; model: string | null;
+          photo_url: string | null; is_na: boolean | null
+        }>>()
+        if (propertyIds.length) {
+          const { data: allAssets } = await supabase
+            .from('property_assets')
+            .select('property_id, asset_type, make, model, photo_url, is_na')
+            .in('property_id', propertyIds)
+            .eq('org_id', orgId)
+            .eq('is_active', true)
+
+          for (const a of allAssets ?? []) {
+            const list = assetsByProperty.get(a.property_id) ?? []
+            list.push(a)
+            assetsByProperty.set(a.property_id, list)
+          }
+        }
+
         const checklistByProperty: Array<{ propertyId: string; propertyName: string; openCount: number }> = []
         for (const prop of activeProperties ?? []) {
-          const { data: assets } = await supabase
-            .from('property_assets')
-            .select('asset_type, make, model, photo_url, is_na')
-            .eq('property_id', prop.id).eq('org_id', orgId).eq('is_active', true)
+          const assets = assetsByProperty.get(prop.id) ?? []
 
           const discoveredTypes = new Set(
-            (assets ?? [])
+            assets
               .filter((a) => a.is_na === true || a.make !== null || a.model !== null || a.photo_url !== null)
               .map((a) => a.asset_type as AssetType)
           )

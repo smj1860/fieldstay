@@ -57,26 +57,40 @@ export async function createMaintenanceWorkOrder(
     .eq('source', 'maintenance_schedule')
     .maybeSingle()
 
-  const { data: wo } = existingWO
-    ? { data: existingWO }
-    : await supabase
-        .from('work_orders')
-        .insert({
-          property_id:        schedule.property_id,
-          org_id:             schedule.org_id,
-          vendor_id:          schedule.assigned_vendor_id ?? null,
-          title:              schedule.name,
-          description:        schedule.instructions,
-          priority:           daysUntilDue <= 1 ? 'urgent' : daysUntilDue <= 3 ? 'high' : 'medium',
-          status:             'pending',
-          source:             'maintenance_schedule',
-          source_schedule_id: schedule.id,
-          scheduled_date:     schedule.next_due_date,
-          estimated_cost:     schedule.estimated_cost,
-          portal_enabled:     vendor?.portal_enabled ?? false,
-        })
-        .select('id')
-        .single()
+  let wo = existingWO
+  if (!existingWO) {
+    const { data: inserted, error } = await supabase
+      .from('work_orders')
+      .insert({
+        property_id:        schedule.property_id,
+        org_id:             schedule.org_id,
+        vendor_id:          schedule.assigned_vendor_id ?? null,
+        title:              schedule.name,
+        description:        schedule.instructions,
+        priority:           daysUntilDue <= 1 ? 'urgent' : daysUntilDue <= 3 ? 'high' : 'medium',
+        status:             'pending',
+        source:             'maintenance_schedule',
+        source_schedule_id: schedule.id,
+        scheduled_date:     schedule.next_due_date,
+        estimated_cost:     schedule.estimated_cost,
+        portal_enabled:     vendor?.portal_enabled ?? false,
+      })
+      .select('id')
+      .single()
+
+    if (error) {
+      // 23505 = unique_violation on wo_maintenance_schedule_date_unique
+      // (source_schedule_id, scheduled_date) WHERE source='maintenance_schedule' —
+      // dailyWorkOrderOps's own auto-WO pass (7.4) races this same schedule+date
+      // at the same 8am CT cron time. The DB constraint is the real guard against
+      // a duplicate WO; losing this race is expected, not an error — any other
+      // error code is real and should retry the step.
+      if (error.code !== '23505') throw new Error(`Failed to insert maintenance WO: ${error.message}`)
+      wo = null
+    } else {
+      wo = inserted
+    }
+  }
 
   if (wo && !existingWO) {
     await logAuditEvent({
