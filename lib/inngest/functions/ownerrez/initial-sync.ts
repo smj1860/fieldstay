@@ -725,25 +725,16 @@ export const ownerRezInitialSync = inngest.createFunction(
         .in('repuguard_status', ['inactive', 'cancelled'])
     })
 
-    // ── Step 5: Register entity webhook subscriptions ──────────────────────────
-
-    await step.run('register-entity-webhooks', async () => {
-      const appUrl = process.env.NEXT_PUBLIC_APP_URL
-      if (!appUrl) {
-        logger.warn('[OwnerRez] NEXT_PUBLIC_APP_URL not set — skipping webhook registration')
-        return
-      }
-      const webhookUrl = `${appUrl}/api/webhooks/ownerrez`
-      try {
-        await client.registerWebhookSubscriptions(webhookUrl)
-        logger.info(`[OwnerRez:${user_id}] Entity webhook subscriptions registered`)
-      } catch (err) {
-        // Non-fatal: polling fallback still works. Log and continue.
-        logger.error(
-          `[OwnerRez:${user_id}] Webhook registration failed: ${err instanceof Error ? err.message : String(err)}`
-        )
-      }
-    })
+    // Webhook delivery is NOT registered per-connection via the API — confirmed
+    // 2026-07-16 against the live OwnerRez dashboard: the URL, Basic Auth
+    // credentials, and enabled entity types (Booking, Guest) are configured
+    // once at the OAuth app level (Developer/API settings → Webhooks), and
+    // OwnerRez applies that config automatically to every connected user.
+    // The removed step here used to POST to /v2/webhooksubscriptions per
+    // sync trying to recreate that config — an operation that was never
+    // valid (confirmed 400 on every attempt for weeks) and, even if it had
+    // succeeded, would have been entirely redundant with the dashboard
+    // config that already covers this.
 
     return { user_id, synced: true }
   }
