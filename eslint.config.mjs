@@ -10,11 +10,22 @@ import jsxA11y from 'eslint-plugin-jsx-a11y'
 // actually being linted. Downgraded to 'warn' (from the preset's default
 // 'error') so turning this on surfaces pre-existing issues elsewhere in the
 // codebase without immediately failing `npm run lint` over them.
+//
+// Rules jsx-a11y itself ships disabled (severity 'off') are left alone,
+// not flipped to 'warn' — a naive map over every entry previously did this
+// unconditionally, silently re-enabling anchor-ambiguous-text,
+// control-has-associated-label, and label-has-for. That last one is the
+// deprecated predecessor to label-has-associated-control (which IS
+// correctly 'error'→'warn' here) and defaults to requiring BOTH nesting
+// AND htmlFor/id on every label — an impossible ask for an ordinary
+// sibling label+input, which is a perfectly valid, W3C-conformant pattern
+// label-has-associated-control already accepts on its own.
 const jsxA11yWarnRules = Object.fromEntries(
-  Object.entries(jsxA11y.flatConfigs.recommended.rules).map(([rule, severity]) => [
-    rule,
-    Array.isArray(severity) ? ['warn', ...severity.slice(1)] : 'warn',
-  ])
+  Object.entries(jsxA11y.flatConfigs.recommended.rules).map(([rule, severity]) => {
+    const defaultSeverity = Array.isArray(severity) ? severity[0] : severity
+    if (defaultSeverity === 'off') return [rule, severity]
+    return [rule, Array.isArray(severity) ? ['warn', ...severity.slice(1)] : 'warn']
+  })
 )
 
 const eslintConfig = [
