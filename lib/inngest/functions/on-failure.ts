@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/nextjs'
 import { inngest } from '@/lib/inngest/client'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
@@ -24,6 +25,23 @@ export const onFunctionFailure = inngest.createFunction(
     const errorMessage = error.message ?? 'Unknown error'
 
     logger.error(`[Inngest Failure] ${function_id} (run ${run_id}) exhausted all retries: ${errorMessage}`)
+
+    // Errors thrown inside an Inngest step are caught by Inngest's own
+    // retry/step framework — they never surface as an uncaught exception at
+    // the Next.js request level, so Sentry's automatic instrumentation never
+    // sees them (the /api/inngest route still returns 200/206 regardless of
+    // whether the underlying job succeeded). This dead-letter handler is the
+    // one place every function's TERMINAL failure (retries exhausted) is
+    // already guaranteed to pass through, so it's the cheapest single point
+    // to get real signal into Sentry — rebuild an Error to capture, since
+    // Inngest only gives us the serialized name/message/stack, not a live
+    // Error instance.
+    const sentryError = new Error(`[Inngest] ${function_id} exhausted all retries: ${errorMessage}`)
+    if (error.stack) sentryError.stack = error.stack
+    Sentry.captureException(sentryError, {
+      tags:  { inngest_function_id: function_id },
+      extra: { run_id, original_error_name: error.name ?? null },
+    })
 
     if (!CRITICAL_FUNCTION_IDS.has(function_id)) {
       return { function_id, alerted: false }
