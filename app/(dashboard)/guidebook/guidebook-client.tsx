@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
-import { QRCodeSVG } from 'qrcode.react'
+import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react'
 import { Sun, Wine, CloudRain, Tent, MapPin, Pencil, Check, type LucideIcon } from 'lucide-react'
 import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
@@ -374,18 +374,21 @@ export function GuidebookClient({
 
               <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                 {sponsor && (
-                  <a
-                    href={`${appUrl}/g/kit/${sponsor.media_kit_token}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
-                      border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                      padding: '6px 12px', textDecoration: 'none', backgroundColor: 'var(--bg-card)',
-                    }}
-                  >
-                    Media Kit
-                  </a>
+                  <>
+                    <a
+                      href={`${appUrl}/g/kit/${sponsor.media_kit_token}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
+                        border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                        padding: '6px 12px', textDecoration: 'none', backgroundColor: 'var(--bg-card)',
+                      }}
+                    >
+                      Media Kit
+                    </a>
+                    <SponsorOnePagerButton sponsor={sponsor} appUrl={appUrl} />
+                  </>
                 )}
                 <button
                   onClick={() => setEditingSlot(slotNum)}
@@ -623,12 +626,13 @@ function PropertyGuidebookForm({
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '16px' }}>
 
         <div style={{ gridColumn: '1 / -1' }}>
-          <label style={labelStyle}>Guest URL Slug</label>
+          <label style={labelStyle} htmlFor={`guidebook-slug-${property.id}`}>Guest URL Slug</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '13px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
               {appUrl}/g/
             </span>
             <input
+              id={`guidebook-slug-${property.id}`}
               style={{ ...inputStyle, flex: 1 }}
               value={config.slug}
               onChange={(e) => setConfig((c) => c && ({ ...c, slug: e.target.value }))}
@@ -646,17 +650,18 @@ function PropertyGuidebookForm({
         </div>
 
         <div>
-          <label style={labelStyle}>WiFi Network</label>
-          <input style={inputStyle} value={config.wifiNetwork} onChange={(e) => setConfig((c) => c && ({ ...c, wifiNetwork: e.target.value }))} placeholder="CabinWifi_5G" />
+          <label style={labelStyle} htmlFor={`guidebook-wifi-network-${property.id}`}>WiFi Network</label>
+          <input id={`guidebook-wifi-network-${property.id}`} style={inputStyle} value={config.wifiNetwork} onChange={(e) => setConfig((c) => c && ({ ...c, wifiNetwork: e.target.value }))} placeholder="CabinWifi_5G" />
         </div>
         <div>
-          <label style={labelStyle}>WiFi Password</label>
-          <input style={inputStyle} value={config.wifiPassword} onChange={(e) => setConfig((c) => c && ({ ...c, wifiPassword: e.target.value }))} placeholder="bearhollowguest2024" />
+          <label style={labelStyle} htmlFor={`guidebook-wifi-password-${property.id}`}>WiFi Password</label>
+          <input id={`guidebook-wifi-password-${property.id}`} style={inputStyle} value={config.wifiPassword} onChange={(e) => setConfig((c) => c && ({ ...c, wifiPassword: e.target.value }))} placeholder="bearhollowguest2024" />
         </div>
 
         <div>
-          <label style={labelStyle}>Check-In Instructions</label>
+          <label style={labelStyle} htmlFor={`guidebook-checkin-${property.id}`}>Check-In Instructions</label>
           <textarea
+            id={`guidebook-checkin-${property.id}`}
             style={{ ...inputStyle, minHeight: '80px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.checkInInstructions}
             onChange={(e) => setConfig((c) => c && ({ ...c, checkInInstructions: e.target.value }))}
@@ -664,8 +669,9 @@ function PropertyGuidebookForm({
           />
         </div>
         <div>
-          <label style={labelStyle}>Check-Out Instructions</label>
+          <label style={labelStyle} htmlFor={`guidebook-checkout-${property.id}`}>Check-Out Instructions</label>
           <textarea
+            id={`guidebook-checkout-${property.id}`}
             style={{ ...inputStyle, minHeight: '80px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.checkOutInstructions}
             onChange={(e) => setConfig((c) => c && ({ ...c, checkOutInstructions: e.target.value }))}
@@ -674,8 +680,9 @@ function PropertyGuidebookForm({
         </div>
 
         <div style={{ gridColumn: '1 / -1' }}>
-          <label style={labelStyle}>House Rules (optional)</label>
+          <label style={labelStyle} htmlFor={`guidebook-house-rules-${property.id}`}>House Rules (optional)</label>
           <textarea
+            id={`guidebook-house-rules-${property.id}`}
             style={{ ...inputStyle, minHeight: '60px', resize: 'vertical', fontFamily: 'inherit' }}
             value={config.houseRules}
             onChange={(e) => setConfig((c) => c && ({ ...c, houseRules: e.target.value }))}
@@ -684,8 +691,9 @@ function PropertyGuidebookForm({
         </div>
 
         <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} htmlFor={`guidebook-publish-${property.id}`}>
             <input
+              id={`guidebook-publish-${property.id}`}
               type="checkbox"
               checked={config.isPublished}
               onChange={(e) => setConfig((c) => c && ({ ...c, isPublished: e.target.checked }))}
@@ -779,8 +787,9 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
 
       <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
         {/* Enable toggle */}
-        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }} htmlFor="gap-night-enabled">
           <input
+            id="gap-night-enabled"
             type="checkbox"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
@@ -793,9 +802,10 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
 
         {/* Gap threshold */}
         <div>
-          <label style={labelStyle}>Only offer when the gap is at least</label>
+          <label style={labelStyle} htmlFor="gap-night-threshold">Only offer when the gap is at least</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
+              id="gap-night-threshold"
               type="number" min={1} value={gapThreshold}
               onChange={(e) => setGapThreshold(e.target.value)}
               style={inputStyle}
@@ -806,9 +816,10 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
 
         {/* Discount offer */}
         <div>
-          <label style={labelStyle}>Include a discount offer (optional)</label>
+          <label style={labelStyle} htmlFor="gap-night-discount">Include a discount offer (optional)</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
+              id="gap-night-discount"
               type="number" min={0} max={100} value={discount}
               onChange={(e) => setDiscount(e.target.value)}
               placeholder="—"
@@ -818,17 +829,20 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
           </div>
         </div>
 
-        {/* Contact method */}
-        <div>
-          <label style={labelStyle}>When a guest is interested</label>
+        {/* Contact method — fieldset/legend, not label, since this heading
+            describes a group of three radio controls rather than a single
+            one; a <label> can only ever be associated with one control. */}
+        <fieldset style={{ border: 'none', margin: 0, padding: 0 }}>
+          <legend style={{ ...labelStyle, padding: 0 }}>When a guest is interested</legend>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {([
               { value: 'ownerrez_url', label: 'Link guests to your OwnerRez booking page' },
               { value: 'email',        label: 'Send me an email' },
               { value: 'sms',          label: 'Send me a text' },
             ] as const).map((opt) => (
-              <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+              <label key={opt.value} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} htmlFor={`gap-night-contact-${opt.value}`}>
                 <input
+                  id={`gap-night-contact-${opt.value}`}
                   type="radio"
                   name="extension-contact-method"
                   checked={contactMethod === opt.value}
@@ -846,15 +860,17 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
               onChange={(e) => setOwnerRezUrl(e.target.value)}
               placeholder="https://app.ownerrez.com/..."
               style={{ ...inputStyle, maxWidth: '100%', marginTop: '8px' }}
+              aria-label="OwnerRez booking page URL"
             />
           )}
-        </div>
+        </fieldset>
 
         {/* Message timing */}
         <div>
-          <label style={labelStyle}>Send the offer</label>
+          <label style={labelStyle} htmlFor="gap-night-days-before">Send the offer</label>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input
+              id="gap-night-days-before"
               type="number" min={1} value={daysBefore}
               onChange={(e) => setDaysBefore(e.target.value)}
               style={inputStyle}
@@ -888,6 +904,66 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
         </div>
       </div>
     </div>
+  )
+}
+
+// Renders a hidden QR canvas for the sponsor's media kit URL and, on click,
+// builds a printable one-pager PDF (pitch copy + the sponsor's own preview
+// info + the QR code) for the PM to hand a prospective business during an
+// in-person sponsor conversation. PDF assembly lives in
+// lib/guidebook/sponsor-one-pager.ts — this component only owns the DOM/canvas
+// plumbing pdf-lib can't do itself (reading the rendered QR as PNG bytes).
+function SponsorOnePagerButton({
+  sponsor,
+  appUrl,
+}: Readonly<{
+  sponsor: GuidebookSponsor
+  appUrl:  string
+}>) {
+  const canvasRef                     = useRef<HTMLCanvasElement>(null)
+  const [generating, setGenerating]   = useState(false)
+  const kitUrl = `${appUrl}/g/kit/${sponsor.media_kit_token}`
+
+  async function handleDownload() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    setGenerating(true)
+    try {
+      const { buildSponsorOnePagerPdf } = await import('@/lib/guidebook/sponsor-one-pager')
+      const qrPngBytes = await (await fetch(canvas.toDataURL('image/png'))).arrayBuffer()
+      const pdfBytes   = await buildSponsorOnePagerPdf(sponsor, qrPngBytes, kitUrl)
+
+      const blob    = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' })
+      const blobUrl = URL.createObjectURL(blob)
+      const fileSlug = sponsor.business_name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+
+      const a = document.createElement('a')
+      a.href     = blobUrl
+      a.download = `${fileSlug}-sponsor-one-pager.pdf`
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <>
+      <QRCodeCanvas ref={canvasRef} value={kitUrl} size={240} style={{ display: 'none' }} />
+      <button
+        onClick={handleDownload}
+        disabled={generating}
+        style={{
+          fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+          padding: '6px 12px', backgroundColor: 'var(--bg-card)',
+          cursor: generating ? 'default' : 'pointer', opacity: generating ? 0.6 : 1,
+        }}
+      >
+        {generating ? 'Generating…' : 'One-Pager'}
+      </button>
+    </>
   )
 }
 
