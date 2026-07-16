@@ -83,7 +83,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
   return (
     <div className="max-w-3xl">
       {/* Back */}
-      <Link href="/turnovers" className="flex items-center gap-1.5 text-sm text-accent-400 hover:text-accent-600 mb-5 transition-colors">
+      <Link href="/turnovers" className="flex items-center gap-1.5 text-sm text-muted-themed hover:text-secondary-themed mb-5 transition-colors">
         <ArrowLeft className="w-3.5 h-3.5" />
         Back to Turnovers
       </Link>
@@ -93,7 +93,9 @@ export default async function TurnoverDetailPage({ params }: Props) {
         <div>
           <h1 className="page-title">{property?.name}</h1>
           {property?.city && (
-            <p className="text-sm text-accent-400 mt-0.5">{property.city}, {property.state}</p>
+            <p className="text-sm text-muted-themed mt-0.5">
+              {property.state ? `${property.city}, ${property.state}` : property.city}
+            </p>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -117,15 +119,15 @@ export default async function TurnoverDetailPage({ params }: Props) {
           <h3 className="section-header">Timing</h3>
           <div className="space-y-3 text-sm">
             <div>
-              <p className="text-accent-400 text-xs">Checkout</p>
+              <p className="text-muted-themed text-xs">Checkout</p>
               <p className="font-semibold text-primary-themed">{formatDateTime(turnover.checkout_datetime)}</p>
             </div>
             <div>
-              <p className="text-accent-400 text-xs">Next Check-in</p>
+              <p className="text-muted-themed text-xs">Next Check-in</p>
               <p className="font-semibold text-primary-themed">{formatDateTime(turnover.checkin_datetime)}</p>
             </div>
-            <div className="flex items-center gap-2 pt-1 border-t border-accent-100">
-              <Clock className="w-4 h-4 text-accent-400" />
+            <div className="flex items-center gap-2 pt-1 border-t border-themed">
+              <Clock className="w-4 h-4 text-muted-themed" />
               <span className="font-bold text-secondary-themed">
                 {formatWindow(turnover.window_minutes ?? 0)} window
               </span>
@@ -138,7 +140,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
           <h3 className="section-header">Assignment</h3>
           {incomingBooking && (
             <div className="mb-3">
-              <p className="text-xs text-accent-400">Incoming Guest</p>
+              <p className="text-xs text-muted-themed">Incoming Guest</p>
               <p className="text-sm font-medium text-primary-themed">
                 {incomingBooking.guest_name ?? 'Unknown'} · {incomingBooking.source}
               </p>
@@ -149,12 +151,15 @@ export default async function TurnoverDetailPage({ params }: Props) {
               const crew = a.crew_members[0]
               return (
                 <div key={a.id} className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-700 text-sm font-bold flex items-center justify-center">
+                  <div
+                    className="w-8 h-8 rounded-full text-sm font-bold flex items-center justify-center"
+                    style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}
+                  >
                     {crew?.name[0]?.toUpperCase()}
                   </div>
                   <div>
                     <p className="text-sm font-medium text-primary-themed">{crew?.name}</p>
-                    <p className="text-xs text-accent-400">
+                    <p className="text-xs text-muted-themed">
                       Assigned {new Date(a.assigned_at).toLocaleDateString()}
                     </p>
                   </div>
@@ -162,7 +167,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
               )
             })
           ) : (
-            <div className="flex items-center gap-2 text-amber-600">
+            <div className="flex items-center gap-2" style={{ color: 'var(--accent-amber)' }}>
               <User className="w-4 h-4" />
               <p className="text-sm font-medium">No crew assigned</p>
             </div>
@@ -201,14 +206,14 @@ export default async function TurnoverDetailPage({ params }: Props) {
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-primary-themed">Turnover Checklist</h3>
             <div className="flex items-center gap-3">
-              <span className="text-sm text-accent-500">{completedCount}/{totalCount}</span>
-              <div className="w-24 h-1.5 bg-accent-100 rounded-full overflow-hidden">
+              <span className="text-sm text-muted-themed">{completedCount}/{totalCount}</span>
+              <div className="w-24 h-1.5 bg-raised-themed rounded-full overflow-hidden">
                 <div
-                  className={cn('h-full rounded-full', checklistPct === 100 ? 'bg-green-500' : 'bg-brand-600')}
-                  style={{ width: `${checklistPct}%` }}
+                  className="h-full rounded-full"
+                  style={{ width: `${checklistPct}%`, background: checklistPct === 100 ? 'var(--accent-green)' : 'var(--accent-gold)' }}
                 />
               </div>
-              <span className="text-sm font-medium text-accent-600">{checklistPct}%</span>
+              <span className="text-sm font-medium text-secondary-themed">{checklistPct}%</span>
             </div>
           </div>
 
@@ -218,40 +223,48 @@ export default async function TurnoverDetailPage({ params }: Props) {
               return (
                 <div key={section}>
                   <div className="flex items-center gap-2 mb-2">
-                    <p className="text-xs font-semibold text-accent-500 uppercase tracking-wide">{section}</p>
-                    <span className="text-xs text-accent-400">{sectionDone}/{items.length}</span>
+                    <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide">{section}</p>
+                    <span className="text-xs text-muted-themed">{sectionDone}/{items.length}</span>
                   </div>
                   <div className="space-y-1.5">
                     {items.map((item) => (
                       <div
                         key={item.id}
-                        className={cn(
-                          'flex items-start gap-2.5 px-3 py-2 rounded-lg text-sm',
-                          item.is_completed ? 'bg-green-50' : 'bg-accent-50'
-                        )}
+                        className="flex items-start gap-2.5 px-3 py-2 rounded-lg text-sm"
+                        style={{ background: 'var(--bg-raised)' }}
                       >
-                        <div className={cn(
-                          'w-4 h-4 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center',
-                          item.is_completed ? 'border-green-500 bg-green-500' : 'border-accent-300'
-                        )}>
+                        <div
+                          className="w-4 h-4 rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center"
+                          style={item.is_completed
+                            ? { borderColor: 'var(--accent-green)', background: 'var(--accent-green)' }
+                            : { borderColor: 'var(--border)' }}
+                        >
                           {item.is_completed && <CheckCircle2 className="w-3 h-3 text-white" />}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className={cn('text-sm', item.is_completed ? 'text-green-700 line-through' : 'text-secondary-themed')}>
+                          <p
+                            className="text-sm"
+                            style={item.is_completed
+                              ? { color: 'var(--accent-green)', textDecoration: 'line-through' }
+                              : { color: 'var(--text-secondary)' }}
+                          >
                             {item.task}
                           </p>
                           {item.crew_notes && (
-                            <p className="text-xs text-accent-400 mt-0.5">{item.crew_notes}</p>
+                            <p className="text-xs text-muted-themed mt-0.5">{item.crew_notes}</p>
                           )}
                           {item.requires_photo && item.photo_reason && (
-                            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+                            <p className="text-xs mt-0.5 flex items-center gap-1" style={{ color: 'var(--accent-amber)' }}>
                               <Camera className="w-3.5 h-3.5 flex-shrink-0" /> {item.photo_reason}
                             </p>
                           )}
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
                           {item.requires_photo && (
-                            <Camera className={cn('w-3.5 h-3.5', item.photo_storage_path ? 'text-green-500' : 'text-accent-300')} />
+                            <Camera
+                              className="w-3.5 h-3.5"
+                              style={{ color: item.photo_storage_path ? 'var(--accent-green)' : 'var(--text-muted)' }}
+                            />
                           )}
                         </div>
                       </div>

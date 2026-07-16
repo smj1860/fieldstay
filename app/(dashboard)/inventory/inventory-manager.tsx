@@ -701,11 +701,12 @@ function CategoryRows({
         {items.map((item) => (
           <div
             key={item.id}
-            className={cn(
-              'grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2.5 items-center text-sm',
-              getStockStatus(item) === 'critical' && 'bg-red-50/40',
-              getStockStatus(item) === 'low'      && 'bg-amber-50/30',
-            )}
+            className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2.5 items-center text-sm"
+            style={{
+              background: getStockStatus(item) === 'critical' ? 'var(--accent-red-dim)'
+                        : getStockStatus(item) === 'low'      ? 'var(--accent-amber-dim)'
+                        : undefined,
+            }}
           >
             <div className="min-w-0">
               <span className="font-medium text-primary-themed truncate block">{item.name}</span>
