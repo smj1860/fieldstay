@@ -1,16 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { resend, FROM } from '@/lib/resend/client'
-import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { logAuditEvent } from '@/lib/audit'
 
 /**
  * Helpers for dailyMaintenanceScheduleCheck's Pass 1 (due-soon schedules)
  * and Pass 3 (vacancy-gap suggestions) — extracted out of
- * lib/inngest/functions/cron/maintenance-schedules.ts. The auto-create-WO
- * and notify-only flows used to be interleaved in one ~140-line step body;
- * they're independent business flows sharing only the schedule/property/
- * vendor/pmEmail inputs, so they're split into their own functions here.
+ * lib/inngest/functions/cron/maintenance-schedules.ts.
  */
 
 export interface DueSoonScheduleRow {
@@ -23,10 +18,6 @@ export interface DueSoonScheduleRow {
   property_id:         string
   org_id:              string
   estimated_cost:      number | null
-}
-
-export interface DueSoonProperty {
-  name: string
 }
 
 export interface DueSoonVendor {
@@ -46,17 +37,16 @@ export type VendorPortalEvent = {
 
 /**
  * schedule.auto_create_wo === true path: create the WO (idempotent on
- * schedule + due date), audit log, notify the PM, and return the vendor
- * portal-dispatch event to fire (or null when nothing new was created).
+ * schedule + due date), audit log, and return the vendor portal-dispatch
+ * event to fire (or null when nothing new was created). The PM-facing
+ * "work order created" alert that used to fire here is now covered by
+ * cron-daily-wrapup's maintenance digest section instead.
  */
 export async function createMaintenanceWorkOrder(
   supabase:     SupabaseClient,
   schedule:     DueSoonScheduleRow,
-  property:     DueSoonProperty | null,
   vendor:       DueSoonVendor | null,
-  dueDate:      Date,
   daysUntilDue: number,
-  pmEmail:      string | null,
 ): Promise<VendorPortalEvent | null> {
   // Idempotency: skip insert if a WO already exists for this schedule + due date
   const { data: existingWO } = await supabase
@@ -98,29 +88,6 @@ export async function createMaintenanceWorkOrder(
     })
   }
 
-  if (pmEmail && wo && !existingWO) {
-    await resend.emails.send(
-      {
-        from:    FROM,
-        to:      pmEmail,
-        subject: `Work order created — ${schedule.name} at ${property?.name}`,
-        html: await renderPmAlert({
-          heading:  'Scheduled maintenance work order created',
-          body:     `${schedule.name} is due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''} — a work order has been created.`,
-          details: [
-            { label: 'Property',  value: property?.name ?? null },
-            { label: 'Due Date',  value: dueDate.toLocaleDateString() },
-            { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
-            { label: 'Vendor',    value: vendor?.name ?? null },
-          ],
-          ctaLabel: 'View Work Order →',
-          ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-        }),
-      },
-      { idempotencyKey: `maint-wo-created-${schedule.id}-${schedule.next_due_date}` }
-    )
-  }
-
   return (wo && vendor?.email && vendor?.portal_enabled && !existingWO)
     ? {
         work_order_id:  wo.id,
@@ -130,39 +97,6 @@ export async function createMaintenanceWorkOrder(
         portal_enabled: true as const,
       }
     : null
-}
-
-/** schedule.auto_create_wo === false path: just alert the PM that it's coming up. */
-export async function sendDueSoonAlert(
-  pmEmail:      string | null,
-  schedule:     DueSoonScheduleRow,
-  property:     DueSoonProperty | null,
-  vendor:       DueSoonVendor | null,
-  dueDate:      Date,
-  daysUntilDue: number,
-): Promise<void> {
-  if (!pmEmail) return
-
-  await resend.emails.send(
-    {
-      from:    FROM,
-      to:      pmEmail,
-      subject: `🔧 Maintenance due soon — ${schedule.name} at ${property?.name}`,
-      html: await renderPmAlert({
-        heading:  'Scheduled maintenance coming up',
-        body:     `${schedule.name} is due in ${daysUntilDue} day${daysUntilDue !== 1 ? 's' : ''}.`,
-        details: [
-          { label: 'Property',  value: property?.name ?? null },
-          { label: 'Due Date',  value: dueDate.toLocaleDateString() },
-          { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
-          { label: 'Vendor',    value: vendor?.name ?? null },
-        ],
-        ctaLabel: 'Create Work Order →',
-        ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-      }),
-    },
-    { idempotencyKey: `maint-due-soon-${schedule.id}-${schedule.next_due_date}` }
-  )
 }
 
 // ── Vacancy-gap suggestions (Pass 3) ─────────────────────────────────────────

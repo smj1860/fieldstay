@@ -1,8 +1,8 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { sendSMS }             from '@/lib/sms/telnyx'
+import { sendSMS, normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { renderSmsBody }       from '@/lib/sms/templates'
-import { getPmEmail }          from '@/lib/inngest/helpers'
+import { getPmEmails, getPmMembers } from '@/lib/inngest/helpers'
 
 export const guidebookStayExtensionHandler = inngest.createFunction(
   { id: 'guidebook-stay-extension-handler', name: 'Guidebook: Stay Extension Notify' },
@@ -11,7 +11,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
     const {
       requestId, orgId, bookingId, propertyId,
       gapDays, discountPct,
-      guestPhoneE164,
+      guestPhoneE164, contactMethod,
     } = event.data
 
     // Fetch property and booking context
@@ -93,52 +93,84 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
       })
     }
 
-    // ── Notify PM ─────────────────────────────────────────────────────
-    const pmEmail = await step.run('fetch-pm-email', async () => {
-      const supabase = createServiceClient()
-      return getPmEmail(supabase, orgId)
-    })
+    // ── Notify PM — respects the org's guidebook config contact method ────
+    // 'ownerrez_url'  → guest self-serves directly to the PM's OwnerRez
+    //                   booking page; nothing for FieldStay to notify.
+    // 'email'         → existing behavior, via resend.
+    // 'sms'           → Telnyx to the PM's own phone number, not the guest's.
+    if (contactMethod !== 'ownerrez_url') {
+      const propName = property?.name ?? 'your property'
+      const discountLine = discountPct ? ` (${discountPct}% discount offered)` : ''
 
-    if (pmEmail) {
-      await step.run('notify-pm', async () => {
-        const supabase = createServiceClient()
-        const { resend, FROM } = await import('@/lib/resend/client')
-        const { renderPmAlert } = await import('@/lib/resend/emails/pm-alert')
+      if (contactMethod === 'sms') {
+        await step.run('notify-pm-sms', async () => {
+          const supabase = createServiceClient()
+          const [pmMember] = await getPmMembers(supabase, orgId, { limit: 1 })
+          if (!pmMember) return { skipped: true }
 
-        const discountLine = discountPct ? ` (${discountPct}% discount offered)` : ''
-        const propName     = property?.name ?? 'your property'
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('phone')
+            .eq('id', pmMember.userId)
+            .single()
 
-        const html = await renderPmAlert({
-          heading:  'Stay Extension Opportunity',
-          body:     `A guest at ${propName} checks out on ${booking?.checkout_date}. There are ${gapDays} days before the next booking.${discountLine} A message has been sent to the guest via the guidebook.`,
-          details: [
-            { label: 'Property',  value: propName },
-            { label: 'Gap',       value: `${gapDays} day${gapDays !== 1 ? 's' : ''}` },
-            { label: 'Checkout',  value: booking?.checkout_date ?? undefined },
-          ],
-          ctaLabel: 'View Dashboard →',
-          ctaUrl:   `${appUrl}/maintenance`,
+          if (!profile?.phone) return { skipped: true, reason: 'no_pm_phone' }
+
+          const e164 = normalizePhoneToE164(profile.phone)
+          if (!e164) return { skipped: true, reason: 'invalid_pm_phone' }
+
+          const text =
+            `Stay extension opportunity — ${propName}: guest checks out ` +
+            `${booking?.checkout_date}, ${gapDays} day${gapDays !== 1 ? 's' : ''} ` +
+            `before next booking.${discountLine} Guest was messaged via the guidebook.`
+
+          await sendSMS(e164, text)
+
+          await supabase
+            .from('stay_extension_requests')
+            .update({ pm_notified_at: new Date().toISOString() })
+            .eq('id', requestId)
+
+          return { notified: true }
         })
+      } else {
+        // contactMethod === 'email' (also the fallback if null/unset)
+        await step.run('notify-pm-email', async () => {
+          const supabase = createServiceClient()
+          const [pmEmail] = await getPmEmails(supabase, orgId, { limit: 1 })
+          if (!pmEmail) return { skipped: true }
 
-        const { error } = await resend.emails.send(
-          {
-            from:    FROM,
-            to:      pmEmail,
-            subject: `Stay Extension Opportunity — ${propName}`,
-            html,
-          },
-          { idempotencyKey: `stay-extension-pm-${requestId}` }
-        )
+          const { resend, FROM } = await import('@/lib/resend/client')
+          const { renderPmAlert } = await import('@/lib/resend/emails/pm-alert')
 
-        if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
+          const html = await renderPmAlert({
+            heading:  'Stay Extension Opportunity',
+            body:     `A guest at ${propName} checks out on ${booking?.checkout_date}. There are ${gapDays} days before the next booking.${discountLine} A message has been sent to the guest via the guidebook.`,
+            details: [
+              { label: 'Property',  value: propName },
+              { label: 'Gap',       value: `${gapDays} day${gapDays !== 1 ? 's' : ''}` },
+              { label: 'Checkout',  value: booking?.checkout_date ?? undefined },
+            ],
+            ctaLabel: 'View Dashboard →',
+            ctaUrl:   `${appUrl}/maintenance`,
+          })
 
-        await supabase
-          .from('stay_extension_requests')
-          .update({ pm_notified_at: new Date().toISOString() })
-          .eq('id', requestId)
-      })
+          const { error } = await resend.emails.send(
+            { from: FROM, to: pmEmail, subject: `Stay Extension Opportunity — ${propName}`, html },
+            { idempotencyKey: `stay-extension-pm-${requestId}` }
+          )
+          if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
+
+          await supabase
+            .from('stay_extension_requests')
+            .update({ pm_notified_at: new Date().toISOString() })
+            .eq('id', requestId)
+
+          return { notified: true }
+        })
+      }
     }
 
-    return { requestId, smsSent: Boolean(guestPhoneE164), pmNotified: Boolean(pmEmail) }
+    return { requestId, smsSent: Boolean(guestPhoneE164), pmNotified: contactMethod !== 'ownerrez_url' }
   }
 )

@@ -1,15 +1,11 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { resend, FROM } from '@/lib/resend/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
-import { getPmEmailsByOrgIds } from '@/lib/inngest/helpers'
-import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { logAuditEvent } from '@/lib/audit'
 import {
   createMaintenanceWorkOrder,
-  sendDueSoonAlert,
   computeVacancyGaps,
   type GapBooking,
   type GapScheduleRow,
@@ -23,14 +19,19 @@ const ESCALATE_DAYS_PAST = 3   // escalate when schedule is 3+ days overdue
  * SCHEDULED: runs every morning at 8am CT.
  *
  * Pass 1 — due-soon: schedules due within ALERT_WINDOW_DAYS
- *   • auto_create_wo = true  → create WO + notify PM
- *   • auto_create_wo = false → alert email
+ *   • auto_create_wo = true  → create WO
+ *   • auto_create_wo = false → no-op (surfaced by cron-daily-wrapup instead)
  *
  * Pass 2 — overdue escalation: schedules past their due date
  *   • If an open WO exists for the schedule → bump priority to urgent
- *   • If no WO exists → create one (regardless of auto_create_wo) + alert PM
+ *   • If no WO exists → create one (regardless of auto_create_wo)
  *
  * Also handles the thirty-day org milestone check.
+ *
+ * The PM-facing alert emails that used to fire from every pass here (due
+ * soon, escalated, vacancy-gap suggestions) were removed — all covered by
+ * cron-daily-wrapup's daily digest instead. This cron's non-email side
+ * effects (WO auto-creation, priority escalation, audit logs) are unchanged.
  */
 export const dailyMaintenanceScheduleCheck = inngest.createFunction(
   {
@@ -87,22 +88,9 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     logger.info(`Found ${overdueSchedules.length} overdue schedules`)
 
-    // ── Batch-resolve PM emails for every org touched by either pass ────────
-    const pmEmailEntries = await step.run('find-pm-emails', async () => {
-      const supabase = createServiceClient()
-      const orgIds = Array.from(new Set([
-        ...dueSchedules.map((s) => s.org_id),
-        ...overdueSchedules.map((s) => s.org_id),
-      ]))
-      const emails = await getPmEmailsByOrgIds(supabase, orgIds)
-      return Array.from(emails.entries())
-    })
-    const pmEmailByOrg = new Map(pmEmailEntries)
-
     for (const schedule of dueSchedules) {
       const processResult = await step.run(`process-schedule-${schedule.id}`, async () => {
         const supabase = createServiceClient()
-        const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
         const vendor   = Array.isArray(schedule.vendors)   ? schedule.vendors[0]   : schedule.vendors
 
         let dueDate: Date
@@ -123,13 +111,12 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
           return
         }
 
-        const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
-
+        // schedule.auto_create_wo === false path used to alert the PM here
+        // that a schedule was coming up due soon — now covered by
+        // cron-daily-wrapup's maintenance digest section instead.
         let vendorPortalEvent: VendorPortalEvent | null = null
         if (schedule.auto_create_wo) {
-          vendorPortalEvent = await createMaintenanceWorkOrder(supabase, schedule, property ?? null, vendor ?? null, dueDate, daysUntilDue, pmEmail)
-        } else {
-          await sendDueSoonAlert(pmEmail, schedule, property ?? null, vendor ?? null, dueDate, daysUntilDue)
+          vendorPortalEvent = await createMaintenanceWorkOrder(supabase, schedule, vendor ?? null, daysUntilDue)
         }
 
         // Advance next_due_date for routine schedules
@@ -160,8 +147,6 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     for (const schedule of overdueSchedules) {
       await step.run(`escalate-overdue-${schedule.id}`, async () => {
         const supabase = createServiceClient()
-        const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
-        const vendor   = Array.isArray(schedule.vendors)   ? schedule.vendors[0]   : schedule.vendors
         let dueDate: Date
         try {
           dueDate = parseLocalDate(schedule.next_due_date, 'next_due_date')
@@ -185,8 +170,9 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
           .limit(1)
           .maybeSingle()
 
-        const pmEmail = pmEmailByOrg.get(schedule.org_id) ?? null
-
+        // The PM-facing escalation alerts that used to fire here (both the
+        // existing-WO-escalated and new-WO-created cases) are now covered
+        // by cron-daily-wrapup's maintenance digest section instead.
         if (openWO) {
           // Escalate existing WO priority to urgent if not already
           if (openWO.priority !== 'urgent') {
@@ -210,26 +196,6 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
               targetType: 'work_order',
               targetId:   openWO.id,
               metadata:   { change: 'auto_escalated_to_urgent', maintenance_schedule_id: schedule.id },
-            })
-          }
-
-          if (pmEmail) {
-            await resend.emails.send({
-              from:    FROM,
-              to:      pmEmail,
-              subject: `🚨 Overdue maintenance escalated — ${schedule.name} at ${property?.name}`,
-              html: await renderPmAlert({
-                heading:  'Overdue maintenance escalated to Urgent',
-                body:     `${schedule.name} is ${daysLate} day${daysLate !== 1 ? 's' : ''} overdue. The linked work order has been escalated to Urgent priority.`,
-                details: [
-                  { label: 'Property',  value: property?.name ?? null },
-                  { label: 'Due Date',  value: dueDate.toLocaleDateString() },
-                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
-                  { label: 'Vendor',    value: vendor?.name ?? null },
-                ],
-                ctaLabel: 'Review Work Order →',
-                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-              }),
             })
           }
         } else {
@@ -271,26 +237,6 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
               targetType: 'work_order',
               targetId:   wo.id,
               metadata:   { source: 'maintenance_schedule_overdue', maintenance_schedule_id: schedule.id },
-            })
-          }
-
-          if (pmEmail && wo && !existingWO) {
-            await resend.emails.send({
-              from:    FROM,
-              to:      pmEmail,
-              subject: `🚨 Overdue maintenance — urgent WO created — ${schedule.name} at ${property?.name}`,
-              html: await renderPmAlert({
-                heading:  'Overdue maintenance — urgent work order created',
-                body:     `${schedule.name} is ${daysLate} day${daysLate !== 1 ? 's' : ''} overdue — a new work order has been created and marked Urgent.`,
-                details: [
-                  { label: 'Property',  value: property?.name ?? null },
-                  { label: 'Due Date',  value: dueDate.toLocaleDateString() },
-                  { label: 'Est. Cost', value: schedule.estimated_cost ? `$${schedule.estimated_cost}` : null },
-                  { label: 'Vendor',    value: vendor?.name ?? null },
-                ],
-                ctaLabel: 'Assign Work Order →',
-                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-              }),
             })
           }
         }
@@ -350,46 +296,9 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
       return computeVacancyGaps(properties, bookingsByProperty, schedulesByProperty)
     })
 
-    if (gapSuggestions.length) {
-      const gapPmEmails = await step.run('find-pm-emails-gaps', async () => {
-        const supabase = createServiceClient()
-        const orgIds = Array.from(new Set(gapSuggestions.map(g => g.org_id)))
-        const emails = await getPmEmailsByOrgIds(supabase, orgIds)
-        return Array.from(emails.entries())
-      })
-      const gapPmByOrg = new Map(gapPmEmails)
-
-      for (const gap of gapSuggestions) {
-        await step.run(`notify-gap-${gap.property_id}-${gap.gap_start}`, async () => {
-          const pmEmail = gapPmByOrg.get(gap.org_id)
-          if (!pmEmail) return
-
-          const tierLabel = gap.tier === 'strong' ? 'Vacancy opportunity' : 'Possible vacancy window'
-          const items = gap.candidates
-            .map(c => `${c.name}${c.estimated_cost ? ' (~$' + c.estimated_cost + ')' : ''}`)
-            .join(', ')
-
-          await resend.emails.send(
-            {
-              from:    FROM,
-              to:      pmEmail,
-              subject: `${tierLabel} — ${gap.property_name}, ${gap.gap_days} days`,
-              html: await renderPmAlert({
-                heading: tierLabel,
-                body:    `${gap.property_name} has a ${gap.gap_days}-day gap starting ${new Date(gap.gap_start).toLocaleDateString()}${gap.gap_end ? '' : ' (no booking on the books yet)'}. Consider scheduling: ${items}.`,
-                details: gap.candidates.slice(0, 5).map(c => ({
-                  label: c.name,
-                  value: c.estimated_cost ? `~$${c.estimated_cost}` : 'Cost TBD',
-                })),
-                ctaLabel: 'Review Maintenance →',
-                ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance`,
-              }),
-            },
-            { idempotencyKey: `vacancy-gap-${gap.property_id}-${gap.gap_start}` }
-          )
-        })
-      }
-    }
+    // gapSuggestions used to be emailed to the PM here — superseded by
+    // cron-daily-wrapup's Monday-only vacancy section (a simpler gap-detection
+    // query, not a port of this file's fuller candidate-scoring logic).
 
     // ── Thirty-day milestone ────────────────────────────────────────────────
     // Only look at orgs that just crossed the 30-day mark since roughly the last run

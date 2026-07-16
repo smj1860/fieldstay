@@ -1,7 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
-import { getPmEmail }          from '@/lib/inngest/helpers'
+import { getPmEmails }         from '@/lib/inngest/helpers'
 import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 
 export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
@@ -40,7 +40,7 @@ export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
       const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
       const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
 
-      const pmEmail = await getPmEmail(supabase, org_id)
+      const [pmEmail] = await getPmEmails(supabase, org_id)
       if (!pmEmail) {
         logger.warn(`[invoice-submitted] no PM email for org ${org_id}`)
         return

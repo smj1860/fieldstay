@@ -1,9 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
-import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 import { renderVendorComplianceNudgeEmail } from '@/lib/resend/emails/vendor-compliance-nudge'
-import { getPmEmail }          from '@/lib/inngest/helpers'
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   coi:                'Certificate of Insurance',
@@ -15,41 +13,15 @@ const DOC_TYPE_LABELS: Record<string, string> = {
 }
 
 export const notifyVendorComplianceExpiring = inngest.createFunction(
-  { id: 'notify-vendor-compliance-expiring', name: 'Notify PM + Vendor: Compliance Doc Expiring Soon', retries: 2 },
+  { id: 'notify-vendor-compliance-expiring', name: 'Notify Vendor: Compliance Doc Expiring Soon', retries: 2 },
   { event: 'vendor-compliance/expiry-warning' as const },
   async ({ event, step, logger }) => {
     const { document_id, vendor_id, org_id, document_type, vendor_name, expiry_date, days_until } = event.data
     const docLabel = DOC_TYPE_LABELS[document_type] ?? document_type
-    const dayWord  = days_until !== 1 ? 'days' : 'day'
 
-    await step.run('notify-pm', async () => {
-      const supabase = createServiceClient()
-      const pmEmail  = await getPmEmail(supabase, org_id)
-      if (!pmEmail) {
-        logger.warn(`[vendor-compliance-expiring] no PM email for org ${org_id}`)
-        return
-      }
-
-      await resend.emails.send(
-        {
-          from:    FROM,
-          to:      pmEmail,
-          subject: `Compliance doc expiring soon — ${vendor_name}`,
-          html: await renderPmAlert({
-            heading: 'Vendor compliance document expiring soon',
-            body:    `${vendor_name}'s ${docLabel} expires in ${days_until} ${dayWord}. They've been sent a reminder to renew it — no action needed unless it lapses.`,
-            details: [
-              { label: 'Vendor',   value: vendor_name },
-              { label: 'Document', value: docLabel },
-              { label: 'Expires',  value: new Date(expiry_date).toLocaleDateString() },
-            ],
-            ctaLabel: 'View Vendor →',
-            ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/vendors`,
-          }),
-        },
-        { idempotencyKey: `compliance-expiry-pm-${document_id}` }
-      )
-    })
+    // PM-facing alert removed — asset-health.ts's daily compliance scan feeds
+    // the wrap-up digest instead, and was alerting the PM twice for the same
+    // document. Vendor nudge below is unchanged.
 
     await step.run('notify-vendor', async () => {
       const supabase = createServiceClient()

@@ -2,9 +2,9 @@ import { inngest }             from '@/lib/inngest/client'
 import { resend, FROM }        from '@/lib/resend/client'
 import { render }              from '@react-email/render'
 import WorkOrderDispatchEmail  from '@/emails/WorkOrderDispatch'
-import WorkOrderSignOffEmail   from '@/emails/WorkOrderSignOff'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
+import { getPmMembers, createPmNotification } from '@/lib/inngest/helpers'
 
 export const workOrderDispatch = inngest.createFunction(
   {
@@ -142,42 +142,24 @@ export const workOrderSignedOff = inngest.createFunction(
 
   async ({ event, step }) => {
     const {
-      workOrderId, woNumber, title, signOffNotes, signedOffAt,
-      propertyName, propertyAddress, orgId, vendorEmail
+      workOrderId, woNumber, signOffNotes, signedOffAt,
+      propertyName, orgId,
     } = event.data
 
-    // ── Step 1: Find PM email from org admin/manager ─────────────────────
+    // ── Step 1: Find PM email from org owner/admin/manager ───────────────
     const pmEmail = await step.run('find-pm-email', async () => {
       const supabase = createServiceClient()
-
-      const { data: members } = await supabase
-        .from('organization_members')
-        .select('user_id, role')
-        .eq('org_id', orgId)
-        .in('role', ['owner', 'admin', 'manager'])
-        .not('invite_accepted_at', 'is', null)
-
-      if (!members?.length) return null
-
-      // Prefer owner → admin → manager order
-      const roleOrder = ['owner', 'admin', 'manager']
-      const sorted = [...members].sort(
-        (a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role)
-      )
-
-      const userId = sorted[0].user_id as string
+      const [member] = await getPmMembers(supabase, orgId, { roles: ['owner', 'admin', 'manager'], limit: 1 })
+      if (!member) return null
 
       const { data: profile } = await supabase
         .from('profiles')
         .select('full_name')
-        .eq('id', userId)
+        .eq('id', member.userId)
         .single()
 
-      // Auth email via admin API
-      const { data: { user } } = await supabase.auth.admin.getUserById(userId)
-
       return {
-        email:    user?.email ?? null,
+        email:    member.email,
         fullName: profile?.full_name ?? 'Property Manager',
       }
     })
@@ -188,26 +170,16 @@ export const workOrderSignedOff = inngest.createFunction(
 
     // ── Step 2: Notify PM ─────────────────────────────────────────────────
     await step.run('notify-pm', async () => {
-      const html = await render(WorkOrderSignOffEmail({
-        woNumber,
-        title,
-        propertyName,
-        propertyAddress,
-        vendorName:   vendorEmail ?? null,
-        signOffNotes: signOffNotes ?? null,
-        signedOffAt,
-        pmName:       pmEmail.fullName,
-      }))
-      const { error } = await resend.emails.send(
-        {
-          from:    FROM,
-          to:      [pmEmail.email!],
-          subject: `✓ Work Complete — ${woNumber} · ${propertyName}`,
-          html,
-        },
-        { idempotencyKey: `work-order-signed-off-pm-${workOrderId}` }
-      )
-      if (error) throw new Error(`Resend sign-off error: ${JSON.stringify(error)}`)
+      const supabase = createServiceClient()
+      await createPmNotification(supabase, {
+        orgId,
+        type:      'work_order_complete',
+        title:     `✓ Work Complete — ${woNumber} · ${propertyName}`,
+        subtitle:  signOffNotes ? `Signed off — ${signOffNotes}` : 'Vendor signed off with no notes',
+        href:      `/maintenance/${workOrderId}`,
+        severity:  'green',
+        dedupeKey: `work-order-signed-off-pm-${workOrderId}`,
+      })
     })
 
     // ── Step 3: Log sign-off to communication_logs ────────────────────────

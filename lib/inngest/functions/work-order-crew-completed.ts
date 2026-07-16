@@ -1,8 +1,6 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getPmEmail }          from '@/lib/inngest/helpers'
-import { resend, FROM }        from '@/lib/resend/client'
-import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
+import { createPmNotification } from '@/lib/inngest/helpers'
 
 export const handleWorkOrderCrewCompleted = inngest.createFunction(
   { id: 'work-order-crew-completed', name: 'Work Order: Crew Marked Complete', retries: 2 },
@@ -36,41 +34,21 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
       return { wo: woRes.data, crew: crewRes.data, property }
     })
 
-    const pmEmail = await step.run('fetch-pm-email', async () => {
-      const supabase = createServiceClient()
-      return getPmEmail(supabase, orgId)
-    })
-
-    if (!pmEmail) return { skipped: 'no PM email' }
-
     await step.run('notify-pm', async () => {
+      const supabase = createServiceClient()
       const crewName = context.crew?.name ?? 'A crew member'
       const woTitle  = context.wo?.title ?? 'a work order'
       const propName = context.property?.name ?? 'the property'
 
-      const html = await renderPmAlert({
-        heading:  `Work Complete — ${context.wo?.wo_number ?? 'WO'}`,
-        body:     `${crewName} marked work order "${woTitle}" complete at ${propName}.`,
-        details: [
-          { label: 'Property',   value: propName },
-          { label: 'Crew',       value: crewName },
-          { label: 'Notes',      value: notes ?? undefined },
-        ],
-        ctaLabel: 'View Work Order →',
-        ctaUrl:   `${process.env.NEXT_PUBLIC_APP_URL}/maintenance/${workOrderId}`,
+      await createPmNotification(supabase, {
+        orgId,
+        type:      'work_order_complete',
+        title:     `✓ Work Complete — ${context.wo?.wo_number ?? 'WO'} · ${propName}`,
+        subtitle:  `${crewName} marked "${woTitle}" complete${notes ? ` — ${notes}` : ''}`,
+        href:      `/maintenance/${workOrderId}`,
+        severity:  'green',
+        dedupeKey: `crew-wo-complete-${workOrderId}`,
       })
-
-      const { error } = await resend.emails.send(
-        {
-          from:    FROM,
-          to:      pmEmail,
-          subject: `✓ Work Complete — ${context.wo?.wo_number ?? 'WO'} · ${propName}`,
-          html,
-        },
-        { idempotencyKey: `crew-wo-complete-${workOrderId}` }
-      )
-
-      if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`)
     })
 
     return { notified: true }

@@ -1438,6 +1438,28 @@ export interface SupportMessage {
   created_at:      string
 }
 
+// ── In-app notifications (bell) ─────────────────────────────────────────────
+export interface Notification {
+  id:         string
+  org_id:     string
+  type:       string
+  title:      string
+  subtitle:   string | null
+  href:       string
+  severity:   'red' | 'amber' | 'green' | 'blue'
+  dedupe_key: string | null
+  read_at:    string | null
+  created_at: string
+}
+
+// ── Daily wrap-up digest diff/stay-static tracking ──────────────────────────
+export interface NotificationDigestState {
+  org_id:     string
+  category:   string
+  snapshot:   Record<string, unknown>
+  updated_at: string
+}
+
 // ─────────────────────────────────────────────────────────────
 // Supabase Database interface — used by createClient()
 //
@@ -1523,6 +1545,10 @@ export interface Database {
       guidebook_property_configs:  { Row: GuidebookPropertyConfig;  Insert: Partial<GuidebookPropertyConfig>;  Update: Partial<GuidebookPropertyConfig>;  Relationships: [] }
       guidebook_guest_sms_optins:  { Row: GuidebookGuestSmsOptin;   Insert: Partial<GuidebookGuestSmsOptin>;   Update: Partial<GuidebookGuestSmsOptin>;   Relationships: [] }
       stay_extension_requests:     { Row: StayExtensionRequest;     Insert: Partial<StayExtensionRequest>;     Update: Partial<StayExtensionRequest>;     Relationships: [] }
+
+      // ── In-app notifications (bell) ─────────────────────────
+      notifications:               { Row: Notification;             Insert: Partial<Notification>;             Update: Partial<Notification>;             Relationships: [] }
+      notification_digest_state:   { Row: NotificationDigestState;  Insert: Partial<NotificationDigestState>; Update: Partial<NotificationDigestState>; Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }

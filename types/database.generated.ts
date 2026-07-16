@@ -2,7 +2,7 @@
  * FieldStay — Generated Supabase Types (Reference)
  *
  * Auto-generated from the live Supabase project (vpmznjktllhmmbfnxuvk)
- * via the Supabase MCP generate_typescript_types tool on 2026-06-10.
+ * via the Supabase MCP generate_typescript_types tool on 2026-07-16.
  *
  * This file is NOT imported anywhere in the app. types/database.ts is the
  * hand-maintained file that the codebase actually imports from (flat
@@ -84,11 +84,60 @@ export type Database = {
           },
         ]
       }
+      asset_manuals: {
+        Row: {
+          asset_type: Database["public"]["Enums"]["asset_type"]
+          created_at: string
+          found_via: string | null
+          id: string
+          make: string
+          model: string
+          org_id: string
+          source_url: string | null
+          updated_at: string
+          verified_at: string | null
+        }
+        Insert: {
+          asset_type: Database["public"]["Enums"]["asset_type"]
+          created_at?: string
+          found_via?: string | null
+          id?: string
+          make: string
+          model: string
+          org_id: string
+          source_url?: string | null
+          updated_at?: string
+          verified_at?: string | null
+        }
+        Update: {
+          asset_type?: Database["public"]["Enums"]["asset_type"]
+          created_at?: string
+          found_via?: string | null
+          id?: string
+          make?: string
+          model?: string
+          org_id?: string
+          source_url?: string | null
+          updated_at?: string
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_manuals_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       asset_type_standards: {
         Row: {
+          age_weight: number
           asset_type: Database["public"]["Enums"]["asset_type"]
           avg_replacement_cost_high: number | null
           avg_replacement_cost_low: number | null
+          condition_weight: number
           display_name: string
           lifespan_max_years: number
           lifespan_min_years: number
@@ -97,11 +146,14 @@ export type Database = {
           vendor_specialty_default:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
+          weight_updated_at: string | null
         }
         Insert: {
+          age_weight?: number
           asset_type: Database["public"]["Enums"]["asset_type"]
           avg_replacement_cost_high?: number | null
           avg_replacement_cost_low?: number | null
+          condition_weight?: number
           display_name: string
           lifespan_max_years: number
           lifespan_min_years: number
@@ -110,11 +162,14 @@ export type Database = {
           vendor_specialty_default?:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
+          weight_updated_at?: string | null
         }
         Update: {
+          age_weight?: number
           asset_type?: Database["public"]["Enums"]["asset_type"]
           avg_replacement_cost_high?: number | null
           avg_replacement_cost_low?: number | null
+          condition_weight?: number
           display_name?: string
           lifespan_max_years?: number
           lifespan_min_years?: number
@@ -123,6 +178,7 @@ export type Database = {
           vendor_specialty_default?:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
+          weight_updated_at?: string | null
         }
         Relationships: []
       }
@@ -139,10 +195,13 @@ export type Database = {
           property_bedrooms: number | null
           property_id: string | null
           score_breakdown: Json | null
+          scored_at: string | null
           started_at: string | null
           suggested_score: number | null
           turnover_id: string
           was_accepted: boolean | null
+          was_late: boolean | null
+          was_missed: boolean
           was_suggestion: boolean
         }
         Insert: {
@@ -157,10 +216,13 @@ export type Database = {
           property_bedrooms?: number | null
           property_id?: string | null
           score_breakdown?: Json | null
+          scored_at?: string | null
           started_at?: string | null
           suggested_score?: number | null
           turnover_id: string
           was_accepted?: boolean | null
+          was_late?: boolean | null
+          was_missed?: boolean
           was_suggestion?: boolean
         }
         Update: {
@@ -175,10 +237,13 @@ export type Database = {
           property_bedrooms?: number | null
           property_id?: string | null
           score_breakdown?: Json | null
+          scored_at?: string | null
           started_at?: string | null
           suggested_score?: number | null
           turnover_id?: string
           was_accepted?: boolean | null
+          was_late?: boolean | null
+          was_missed?: boolean
           was_suggestion?: boolean
         }
         Relationships: [
@@ -251,66 +316,96 @@ export type Database = {
       }
       bookings: {
         Row: {
+          actual_total_amount: number | null
           checkin_date: string
           checkin_time: string | null
           checkout_date: string
           checkout_time: string | null
           created_at: string
+          door_code_lock: string | null
+          door_code_secret_id: string | null
+          door_code_synced_at: string | null
           external_id: string | null
           external_source: string | null
           guest_email: string | null
           guest_name: string | null
+          guest_pii_anonymized_at: string | null
+          guidebook_pre_arrival_email_sent_at: string | null
+          guidebook_token: string | null
+          has_overlap_conflict: boolean
           ical_feed_id: string | null
           ical_uid: string | null
           id: string
+          is_block: boolean
           notes: string | null
           org_id: string
           property_id: string
           raw_ical_data: Json | null
           source: Database["public"]["Enums"]["booking_source"] | null
           status: Database["public"]["Enums"]["booking_status"]
+          stay_type: string
           updated_at: string
         }
         Insert: {
+          actual_total_amount?: number | null
           checkin_date: string
           checkin_time?: string | null
           checkout_date: string
           checkout_time?: string | null
           created_at?: string
+          door_code_lock?: string | null
+          door_code_secret_id?: string | null
+          door_code_synced_at?: string | null
           external_id?: string | null
           external_source?: string | null
           guest_email?: string | null
           guest_name?: string | null
+          guest_pii_anonymized_at?: string | null
+          guidebook_pre_arrival_email_sent_at?: string | null
+          guidebook_token?: string | null
+          has_overlap_conflict?: boolean
           ical_feed_id?: string | null
           ical_uid?: string | null
           id?: string
+          is_block?: boolean
           notes?: string | null
           org_id: string
           property_id: string
           raw_ical_data?: Json | null
           source?: Database["public"]["Enums"]["booking_source"] | null
           status?: Database["public"]["Enums"]["booking_status"]
+          stay_type?: string
           updated_at?: string
         }
         Update: {
+          actual_total_amount?: number | null
           checkin_date?: string
           checkin_time?: string | null
           checkout_date?: string
           checkout_time?: string | null
           created_at?: string
+          door_code_lock?: string | null
+          door_code_secret_id?: string | null
+          door_code_synced_at?: string | null
           external_id?: string | null
           external_source?: string | null
           guest_email?: string | null
           guest_name?: string | null
+          guest_pii_anonymized_at?: string | null
+          guidebook_pre_arrival_email_sent_at?: string | null
+          guidebook_token?: string | null
+          has_overlap_conflict?: boolean
           ical_feed_id?: string | null
           ical_uid?: string | null
           id?: string
+          is_block?: boolean
           notes?: string | null
           org_id?: string
           property_id?: string
           raw_ical_data?: Json | null
           source?: Database["public"]["Enums"]["booking_source"] | null
           status?: Database["public"]["Enums"]["booking_status"]
+          stay_type?: string
           updated_at?: string
         }
         Relationships: [
@@ -339,6 +434,7 @@ export type Database = {
       }
       checklist_instance_items: {
         Row: {
+          asset_discovery_type: string | null
           completed_at: string | null
           completed_by_crew_id: string | null
           created_at: string
@@ -346,16 +442,21 @@ export type Database = {
           id: string
           instance_id: string
           is_completed: boolean
+          is_mandatory: boolean
           is_section_final_item: boolean
+          non_deletable: boolean
           notes: string | null
+          photo_reason: string | null
           photo_storage_path: string | null
           requires_photo: boolean
           section_name: string
           sort_order: number
           task: string
+          turnover_id: string | null
           updated_at: string
         }
         Insert: {
+          asset_discovery_type?: string | null
           completed_at?: string | null
           completed_by_crew_id?: string | null
           created_at?: string
@@ -363,16 +464,21 @@ export type Database = {
           id?: string
           instance_id: string
           is_completed?: boolean
+          is_mandatory?: boolean
           is_section_final_item?: boolean
+          non_deletable?: boolean
           notes?: string | null
+          photo_reason?: string | null
           photo_storage_path?: string | null
           requires_photo?: boolean
           section_name: string
           sort_order?: number
           task: string
+          turnover_id?: string | null
           updated_at?: string
         }
         Update: {
+          asset_discovery_type?: string | null
           completed_at?: string | null
           completed_by_crew_id?: string | null
           created_at?: string
@@ -380,13 +486,17 @@ export type Database = {
           id?: string
           instance_id?: string
           is_completed?: boolean
+          is_mandatory?: boolean
           is_section_final_item?: boolean
+          non_deletable?: boolean
           notes?: string | null
+          photo_reason?: string | null
           photo_storage_path?: string | null
           requires_photo?: boolean
           section_name?: string
           sort_order?: number
           task?: string
+          turnover_id?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -404,14 +514,23 @@ export type Database = {
             referencedRelation: "checklist_instances"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "checklist_instance_items_turnover_id_fkey"
+            columns: ["turnover_id"]
+            isOneToOne: false
+            referencedRelation: "turnovers"
+            referencedColumns: ["id"]
+          },
         ]
       }
       checklist_instances: {
         Row: {
           completed_at: string | null
+          completed_by_crew_id: string | null
           created_at: string
           id: string
           org_id: string
+          section_photo_path: string | null
           started_at: string | null
           status: Database["public"]["Enums"]["checklist_status"]
           template_id: string | null
@@ -421,9 +540,11 @@ export type Database = {
         }
         Insert: {
           completed_at?: string | null
+          completed_by_crew_id?: string | null
           created_at?: string
           id?: string
           org_id: string
+          section_photo_path?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["checklist_status"]
           template_id?: string | null
@@ -433,9 +554,11 @@ export type Database = {
         }
         Update: {
           completed_at?: string | null
+          completed_by_crew_id?: string | null
           created_at?: string
           id?: string
           org_id?: string
+          section_photo_path?: string | null
           started_at?: string | null
           status?: Database["public"]["Enums"]["checklist_status"]
           template_id?: string | null
@@ -444,6 +567,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "checklist_instances_completed_by_crew_id_fkey"
+            columns: ["completed_by_crew_id"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "checklist_instances_org_id_fkey"
             columns: ["org_id"]
@@ -463,6 +593,69 @@ export type Database = {
             columns: ["turnover_id"]
             isOneToOne: false
             referencedRelation: "turnovers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      checklist_item_signals: {
+        Row: {
+          alpha: number
+          beta: number
+          computed_at: string
+          dynamic_photo_required: boolean | null
+          flag_probability: number | null
+          id: string
+          org_id: string
+          property_id: string
+          reason: string | null
+          section_name: string
+          task: string
+          total_completions: number
+          total_flags: number
+        }
+        Insert: {
+          alpha?: number
+          beta?: number
+          computed_at?: string
+          dynamic_photo_required?: boolean | null
+          flag_probability?: number | null
+          id?: string
+          org_id: string
+          property_id: string
+          reason?: string | null
+          section_name: string
+          task: string
+          total_completions?: number
+          total_flags?: number
+        }
+        Update: {
+          alpha?: number
+          beta?: number
+          computed_at?: string
+          dynamic_photo_required?: boolean | null
+          flag_probability?: number | null
+          id?: string
+          org_id?: string
+          property_id?: string
+          reason?: string | null
+          section_name?: string
+          task?: string
+          total_completions?: number
+          total_flags?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "checklist_item_signals_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "checklist_item_signals_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
             referencedColumns: ["id"]
           },
         ]
@@ -605,6 +798,7 @@ export type Database = {
           communicated_at: string
           created_at: string
           crew_member_id: string | null
+          dedup_key: string | null
           deleted_at: string | null
           id: string
           logged_by_user_id: string | null
@@ -622,6 +816,7 @@ export type Database = {
           communicated_at?: string
           created_at?: string
           crew_member_id?: string | null
+          dedup_key?: string | null
           deleted_at?: string | null
           id?: string
           logged_by_user_id?: string | null
@@ -639,6 +834,7 @@ export type Database = {
           communicated_at?: string
           created_at?: string
           crew_member_id?: string | null
+          dedup_key?: string | null
           deleted_at?: string | null
           id?: string
           logged_by_user_id?: string | null
@@ -733,13 +929,65 @@ export type Database = {
           },
         ]
       }
+      crew_feedback: {
+        Row: {
+          crew_member_id: string
+          feedback_text: string
+          id: string
+          org_id: string
+          property_id: string | null
+          submitted_at: string
+        }
+        Insert: {
+          crew_member_id: string
+          feedback_text: string
+          id?: string
+          org_id: string
+          property_id?: string | null
+          submitted_at?: string
+        }
+        Update: {
+          crew_member_id?: string
+          feedback_text?: string
+          id?: string
+          org_id?: string
+          property_id?: string | null
+          submitted_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_feedback_crew_member_id_fkey"
+            columns: ["crew_member_id"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crew_feedback_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crew_feedback_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       crew_members: {
         Row: {
           capacity_score: number
           created_at: string
           email: string | null
+          external_id: string | null
+          external_source: string | null
           home_lat: number | null
           home_lng: number | null
+          home_zip: string | null
           id: string
           invite_accepted_at: string | null
           invite_sent_at: string | null
@@ -761,8 +1009,11 @@ export type Database = {
           capacity_score?: number
           created_at?: string
           email?: string | null
+          external_id?: string | null
+          external_source?: string | null
           home_lat?: number | null
           home_lng?: number | null
+          home_zip?: string | null
           id?: string
           invite_accepted_at?: string | null
           invite_sent_at?: string | null
@@ -784,8 +1035,11 @@ export type Database = {
           capacity_score?: number
           created_at?: string
           email?: string | null
+          external_id?: string | null
+          external_source?: string | null
           home_lat?: number | null
           home_lng?: number | null
+          home_zip?: string | null
           id?: string
           invite_accepted_at?: string | null
           invite_sent_at?: string | null
@@ -813,56 +1067,125 @@ export type Database = {
           },
         ]
       }
-      guest_message_templates: {
+      guidebook_configurations: {
         Row: {
-          body: string
           created_at: string
-          days_before: number | null
+          extension_contact_method: string | null
+          extension_discount_pct: number | null
+          extension_gap_threshold_days: number
+          extension_message_days_before: number
+          extension_messaging_enabled: boolean
+          extension_ownerrez_url: string | null
+          grace_period_ends_at: string | null
           id: string
           is_active: boolean
-          name: string
           org_id: string
-          property_id: string
-          subject: string
-          trigger: Database["public"]["Enums"]["message_trigger"]
+          trial_ends_at: string | null
           updated_at: string
         }
         Insert: {
-          body: string
           created_at?: string
-          days_before?: number | null
+          extension_contact_method?: string | null
+          extension_discount_pct?: number | null
+          extension_gap_threshold_days?: number
+          extension_message_days_before?: number
+          extension_messaging_enabled?: boolean
+          extension_ownerrez_url?: string | null
+          grace_period_ends_at?: string | null
           id?: string
           is_active?: boolean
-          name: string
           org_id: string
-          property_id: string
-          subject: string
-          trigger: Database["public"]["Enums"]["message_trigger"]
+          trial_ends_at?: string | null
           updated_at?: string
         }
         Update: {
-          body?: string
           created_at?: string
-          days_before?: number | null
+          extension_contact_method?: string | null
+          extension_discount_pct?: number | null
+          extension_gap_threshold_days?: number
+          extension_message_days_before?: number
+          extension_messaging_enabled?: boolean
+          extension_ownerrez_url?: string | null
+          grace_period_ends_at?: string | null
           id?: string
           is_active?: boolean
-          name?: string
           org_id?: string
-          property_id?: string
-          subject?: string
-          trigger?: Database["public"]["Enums"]["message_trigger"]
+          trial_ends_at?: string | null
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "guest_message_templates_org_id_fkey"
+            foreignKeyName: "guidebook_configurations_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: true
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      guidebook_guest_sms_optins: {
+        Row: {
+          booking_id: string
+          created_at: string
+          door_code_sent_at: string | null
+          id: string
+          is_active: boolean
+          last_evening_sms_date: string | null
+          last_morning_sms_date: string | null
+          opted_in_at: string
+          opted_out_at: string | null
+          org_id: string
+          phone_e164: string
+          property_id: string
+          updated_at: string
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          door_code_sent_at?: string | null
+          id?: string
+          is_active?: boolean
+          last_evening_sms_date?: string | null
+          last_morning_sms_date?: string | null
+          opted_in_at?: string
+          opted_out_at?: string | null
+          org_id: string
+          phone_e164: string
+          property_id: string
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          door_code_sent_at?: string | null
+          id?: string
+          is_active?: boolean
+          last_evening_sms_date?: string | null
+          last_morning_sms_date?: string | null
+          opted_in_at?: string
+          opted_out_at?: string | null
+          org_id?: string
+          phone_e164?: string
+          property_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "guidebook_guest_sms_optins_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: true
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "guidebook_guest_sms_optins_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "guest_message_templates_property_id_fkey"
+            foreignKeyName: "guidebook_guest_sms_optins_property_id_fkey"
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
@@ -870,82 +1193,160 @@ export type Database = {
           },
         ]
       }
-      guest_messages_sent: {
+      guidebook_property_configs: {
         Row: {
-          body_rendered: string
-          booking_id: string | null
+          check_in_instructions: string | null
+          check_out_instructions: string | null
           created_at: string
+          house_rules: string | null
           id: string
+          is_published: boolean
           org_id: string
           property_id: string
-          recipient_email: string
-          recipient_name: string | null
-          resend_message_id: string | null
-          sent_at: string
-          status: Database["public"]["Enums"]["message_status"]
-          subject: string
-          template_id: string | null
-          trigger: Database["public"]["Enums"]["message_trigger"]
+          slug: string
+          updated_at: string
+          wifi_network: string | null
+          wifi_password: string | null
         }
         Insert: {
-          body_rendered: string
-          booking_id?: string | null
+          check_in_instructions?: string | null
+          check_out_instructions?: string | null
           created_at?: string
+          house_rules?: string | null
           id?: string
+          is_published?: boolean
           org_id: string
           property_id: string
-          recipient_email: string
-          recipient_name?: string | null
-          resend_message_id?: string | null
-          sent_at?: string
-          status?: Database["public"]["Enums"]["message_status"]
-          subject: string
-          template_id?: string | null
-          trigger: Database["public"]["Enums"]["message_trigger"]
+          slug: string
+          updated_at?: string
+          wifi_network?: string | null
+          wifi_password?: string | null
         }
         Update: {
-          body_rendered?: string
-          booking_id?: string | null
+          check_in_instructions?: string | null
+          check_out_instructions?: string | null
           created_at?: string
+          house_rules?: string | null
           id?: string
+          is_published?: boolean
           org_id?: string
           property_id?: string
-          recipient_email?: string
-          recipient_name?: string | null
-          resend_message_id?: string | null
-          sent_at?: string
-          status?: Database["public"]["Enums"]["message_status"]
-          subject?: string
-          template_id?: string | null
-          trigger?: Database["public"]["Enums"]["message_trigger"]
+          slug?: string
+          updated_at?: string
+          wifi_network?: string | null
+          wifi_password?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "guest_messages_sent_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "guest_messages_sent_org_id_fkey"
+            foreignKeyName: "guidebook_property_configs_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "guest_messages_sent_property_id_fkey"
+            foreignKeyName: "guidebook_property_configs_property_id_fkey"
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
             referencedColumns: ["id"]
           },
+        ]
+      }
+      guidebook_sponsors: {
+        Row: {
+          activated_at: string | null
+          address: string | null
+          business_description: string | null
+          business_name: string
+          business_phone: string | null
+          business_website: string | null
+          checkout_session_id: string | null
+          created_at: string
+          custom_offer_text: string | null
+          deactivated_at: string | null
+          featured_item: string | null
+          id: string
+          lat: number | null
+          lng: number | null
+          media_kit_token: string
+          offer_item: string | null
+          offer_type: string
+          offer_value: number | null
+          org_id: string
+          photo_storage_path: string | null
+          slot_context: string | null
+          slot_number: number
+          slot_type: string
+          status: string
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          activated_at?: string | null
+          address?: string | null
+          business_description?: string | null
+          business_name: string
+          business_phone?: string | null
+          business_website?: string | null
+          checkout_session_id?: string | null
+          created_at?: string
+          custom_offer_text?: string | null
+          deactivated_at?: string | null
+          featured_item?: string | null
+          id?: string
+          lat?: number | null
+          lng?: number | null
+          media_kit_token?: string
+          offer_item?: string | null
+          offer_type?: string
+          offer_value?: number | null
+          org_id: string
+          photo_storage_path?: string | null
+          slot_context?: string | null
+          slot_number: number
+          slot_type: string
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          activated_at?: string | null
+          address?: string | null
+          business_description?: string | null
+          business_name?: string
+          business_phone?: string | null
+          business_website?: string | null
+          checkout_session_id?: string | null
+          created_at?: string
+          custom_offer_text?: string | null
+          deactivated_at?: string | null
+          featured_item?: string | null
+          id?: string
+          lat?: number | null
+          lng?: number | null
+          media_kit_token?: string
+          offer_item?: string | null
+          offer_type?: string
+          offer_value?: number | null
+          org_id?: string
+          photo_storage_path?: string | null
+          slot_context?: string | null
+          slot_number?: number
+          slot_type?: string
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
           {
-            foreignKeyName: "guest_messages_sent_template_id_fkey"
-            columns: ["template_id"]
+            foreignKeyName: "guidebook_sponsors_org_id_fkey"
+            columns: ["org_id"]
             isOneToOne: false
-            referencedRelation: "guest_message_templates"
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -1014,11 +1415,15 @@ export type Database = {
         Row: {
           connected_at: string
           created_at: string
+          expires_at: string | null
           external_user_id: string | null
           id: string
           last_used_at: string | null
           metadata: Json
+          org_id: string | null
           provider_id: string
+          reconnect_email_sent_at: string | null
+          refresh_token_vault_secret_id: string | null
           scope: string | null
           status: string
           updated_at: string
@@ -1028,11 +1433,15 @@ export type Database = {
         Insert: {
           connected_at?: string
           created_at?: string
+          expires_at?: string | null
           external_user_id?: string | null
           id?: string
           last_used_at?: string | null
           metadata?: Json
+          org_id?: string | null
           provider_id: string
+          reconnect_email_sent_at?: string | null
+          refresh_token_vault_secret_id?: string | null
           scope?: string | null
           status?: string
           updated_at?: string
@@ -1042,11 +1451,15 @@ export type Database = {
         Update: {
           connected_at?: string
           created_at?: string
+          expires_at?: string | null
           external_user_id?: string | null
           id?: string
           last_used_at?: string | null
           metadata?: Json
+          org_id?: string | null
           provider_id?: string
+          reconnect_email_sent_at?: string | null
+          refresh_token_vault_secret_id?: string | null
           scope?: string | null
           status?: string
           updated_at?: string
@@ -1054,6 +1467,13 @@ export type Database = {
           vault_secret_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "integration_connections_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "integration_connections_provider_id_fkey"
             columns: ["provider_id"]
@@ -1124,6 +1544,8 @@ export type Database = {
           id: string
           item_id: string
           note: string | null
+          notes: string | null
+          previous_quantity: number
         }
         Insert: {
           counted_qty?: number
@@ -1131,6 +1553,8 @@ export type Database = {
           id?: string
           item_id: string
           note?: string | null
+          notes?: string | null
+          previous_quantity?: number
         }
         Update: {
           counted_qty?: number
@@ -1138,6 +1562,8 @@ export type Database = {
           id?: string
           item_id?: string
           note?: string | null
+          notes?: string | null
+          previous_quantity?: number
         }
         Relationships: [
           {
@@ -1193,6 +1619,13 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_count_drafts_submitted_by_fkey"
+            columns: ["submitted_by"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
             referencedColumns: ["id"]
           },
         ]
@@ -1294,6 +1727,7 @@ export type Database = {
           category: Database["public"]["Enums"]["inventory_category"]
           created_at: string
           current_quantity: number
+          first_count_recorded_at: string | null
           id: string
           is_active: boolean
           low_stock_threshold_pct: number
@@ -1311,6 +1745,7 @@ export type Database = {
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
           current_quantity?: number
+          first_count_recorded_at?: string | null
           id?: string
           is_active?: boolean
           low_stock_threshold_pct?: number
@@ -1328,6 +1763,7 @@ export type Database = {
           category?: Database["public"]["Enums"]["inventory_category"]
           created_at?: string
           current_quantity?: number
+          first_count_recorded_at?: string | null
           id?: string
           is_active?: boolean
           low_stock_threshold_pct?: number
@@ -1366,9 +1802,11 @@ export type Database = {
       }
       inventory_template_items: {
         Row: {
+          catalog_item_id: string | null
           category: string | null
           id: string
           name: string
+          notes: string | null
           par_level: number
           par_qty: number
           preferred_brand: string | null
@@ -1377,9 +1815,11 @@ export type Database = {
           unit: string | null
         }
         Insert: {
+          catalog_item_id?: string | null
           category?: string | null
           id?: string
           name: string
+          notes?: string | null
           par_level?: number
           par_qty?: number
           preferred_brand?: string | null
@@ -1388,9 +1828,11 @@ export type Database = {
           unit?: string | null
         }
         Update: {
+          catalog_item_id?: string | null
           category?: string | null
           id?: string
           name?: string
+          notes?: string | null
           par_level?: number
           par_qty?: number
           preferred_brand?: string | null
@@ -1399,6 +1841,13 @@ export type Database = {
           unit?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "inventory_template_items_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_catalog"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "inventory_template_items_template_id_fkey"
             columns: ["template_id"]
@@ -1432,8 +1881,111 @@ export type Database = {
         }
         Relationships: []
       }
+      maintenance_catalog_items: {
+        Row: {
+          asset_category: string | null
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+          suggested_recurrence: string | null
+        }
+        Insert: {
+          asset_category?: string | null
+          category: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+          suggested_recurrence?: string | null
+        }
+        Update: {
+          asset_category?: string | null
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+          suggested_recurrence?: string | null
+        }
+        Relationships: []
+      }
+      maintenance_completions: {
+        Row: {
+          asset_category: string | null
+          completed_at: string
+          completed_by: string | null
+          created_at: string
+          id: string
+          maintenance_schedule_id: string
+          next_due_date_set: string | null
+          notes: string | null
+          org_id: string
+          property_id: string
+          work_order_id: string | null
+        }
+        Insert: {
+          asset_category?: string | null
+          completed_at?: string
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          maintenance_schedule_id: string
+          next_due_date_set?: string | null
+          notes?: string | null
+          org_id: string
+          property_id: string
+          work_order_id?: string | null
+        }
+        Update: {
+          asset_category?: string | null
+          completed_at?: string
+          completed_by?: string | null
+          created_at?: string
+          id?: string
+          maintenance_schedule_id?: string
+          next_due_date_set?: string | null
+          notes?: string | null
+          org_id?: string
+          property_id?: string
+          work_order_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "maintenance_completions_maintenance_schedule_id_fkey"
+            columns: ["maintenance_schedule_id"]
+            isOneToOne: false
+            referencedRelation: "maintenance_schedules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maintenance_completions_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maintenance_completions_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       maintenance_schedule_template_items: {
         Row: {
+          active_from_month: number | null
+          active_to_month: number | null
+          asset_category: string | null
           created_at: string
           description: string | null
           estimated_cost: number | null
@@ -1448,6 +2000,9 @@ export type Database = {
             | null
         }
         Insert: {
+          active_from_month?: number | null
+          active_to_month?: number | null
+          asset_category?: string | null
           created_at?: string
           description?: string | null
           estimated_cost?: number | null
@@ -1462,6 +2017,9 @@ export type Database = {
             | null
         }
         Update: {
+          active_from_month?: number | null
+          active_to_month?: number | null
+          asset_category?: string | null
           created_at?: string
           description?: string | null
           estimated_cost?: number | null
@@ -1514,6 +2072,9 @@ export type Database = {
       }
       maintenance_schedules: {
         Row: {
+          active_from_month: number | null
+          active_to_month: number | null
+          asset_category: string | null
           assigned_vendor_id: string | null
           auto_create_wo: boolean
           created_at: string
@@ -1524,6 +2085,7 @@ export type Database = {
           id: string
           instructions: string | null
           is_active: boolean
+          is_from_standard_template: boolean
           last_completed_date: string | null
           month_due: number | null
           name: string
@@ -1531,12 +2093,17 @@ export type Database = {
           org_id: string
           property_id: string
           schedule_type: Database["public"]["Enums"]["schedule_type"]
+          source_catalog_item_id: string | null
+          source_template_item_id: string | null
           updated_at: string
           vendor_specialty_hint:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
         }
         Insert: {
+          active_from_month?: number | null
+          active_to_month?: number | null
+          asset_category?: string | null
           assigned_vendor_id?: string | null
           auto_create_wo?: boolean
           created_at?: string
@@ -1547,6 +2114,7 @@ export type Database = {
           id?: string
           instructions?: string | null
           is_active?: boolean
+          is_from_standard_template?: boolean
           last_completed_date?: string | null
           month_due?: number | null
           name: string
@@ -1554,12 +2122,17 @@ export type Database = {
           org_id: string
           property_id: string
           schedule_type?: Database["public"]["Enums"]["schedule_type"]
+          source_catalog_item_id?: string | null
+          source_template_item_id?: string | null
           updated_at?: string
           vendor_specialty_hint?:
             | Database["public"]["Enums"]["vendor_specialty"]
             | null
         }
         Update: {
+          active_from_month?: number | null
+          active_to_month?: number | null
+          asset_category?: string | null
           assigned_vendor_id?: string | null
           auto_create_wo?: boolean
           created_at?: string
@@ -1570,6 +2143,7 @@ export type Database = {
           id?: string
           instructions?: string | null
           is_active?: boolean
+          is_from_standard_template?: boolean
           last_completed_date?: string | null
           month_due?: number | null
           name?: string
@@ -1577,6 +2151,8 @@ export type Database = {
           org_id?: string
           property_id?: string
           schedule_type?: Database["public"]["Enums"]["schedule_type"]
+          source_catalog_item_id?: string | null
+          source_template_item_id?: string | null
           updated_at?: string
           vendor_specialty_hint?:
             | Database["public"]["Enums"]["vendor_specialty"]
@@ -1611,12 +2187,21 @@ export type Database = {
             referencedRelation: "properties"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "maintenance_schedules_source_template_item_id_fkey"
+            columns: ["source_template_item_id"]
+            isOneToOne: false
+            referencedRelation: "maintenance_schedule_template_items"
+            referencedColumns: ["id"]
+          },
         ]
       }
       messages: {
         Row: {
           content: string
           created_at: string
+          group_id: string | null
+          group_label: string | null
           id: string
           org_id: string
           read_at: string | null
@@ -1628,6 +2213,8 @@ export type Database = {
         Insert: {
           content: string
           created_at?: string
+          group_id?: string | null
+          group_label?: string | null
           id?: string
           org_id: string
           read_at?: string | null
@@ -1639,6 +2226,8 @@ export type Database = {
         Update: {
           content?: string
           created_at?: string
+          group_id?: string | null
+          group_label?: string | null
           id?: string
           org_id?: string
           read_at?: string | null
@@ -1660,6 +2249,82 @@ export type Database = {
             columns: ["work_order_id"]
             isOneToOne: false
             referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_digest_state: {
+        Row: {
+          category: string
+          org_id: string
+          snapshot: Json
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          org_id: string
+          snapshot?: Json
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          org_id?: string
+          snapshot?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notification_digest_state_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notifications: {
+        Row: {
+          created_at: string
+          dedupe_key: string | null
+          href: string
+          id: string
+          org_id: string
+          read_at: string | null
+          severity: string
+          subtitle: string | null
+          title: string
+          type: string
+        }
+        Insert: {
+          created_at?: string
+          dedupe_key?: string | null
+          href: string
+          id?: string
+          org_id: string
+          read_at?: string | null
+          severity?: string
+          subtitle?: string | null
+          title: string
+          type: string
+        }
+        Update: {
+          created_at?: string
+          dedupe_key?: string | null
+          href?: string
+          id?: string
+          org_id?: string
+          read_at?: string | null
+          severity?: string
+          subtitle?: string | null
+          title?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -1690,53 +2355,6 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
-      }
-      pending_integration_links: {
-        Row: {
-          created_at: string
-          external_user_id: string
-          expires_at: string
-          id: string
-          metadata: Json
-          pending_link_token: string
-          provider_id: string
-          refresh_token_vault_secret_id: string | null
-          scope: string | null
-          vault_secret_id: string
-        }
-        Insert: {
-          created_at?: string
-          external_user_id: string
-          expires_at?: string
-          id?: string
-          metadata?: Json
-          pending_link_token: string
-          provider_id: string
-          refresh_token_vault_secret_id?: string | null
-          scope?: string | null
-          vault_secret_id: string
-        }
-        Update: {
-          created_at?: string
-          external_user_id?: string
-          expires_at?: string
-          id?: string
-          metadata?: Json
-          pending_link_token?: string
-          provider_id?: string
-          refresh_token_vault_secret_id?: string | null
-          scope?: string | null
-          vault_secret_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "pending_integration_links_provider_id_fkey"
-            columns: ["provider_id"]
-            isOneToOne: false
-            referencedRelation: "integration_providers"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       org_invites: {
         Row: {
@@ -1920,6 +2538,41 @@ export type Database = {
           },
         ]
       }
+      org_sms_templates: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          key: string
+          org_id: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          key: string
+          org_id: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          key?: string
+          org_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_sms_templates_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_members: {
         Row: {
           created_at: string
@@ -1968,6 +2621,7 @@ export type Database = {
           billing_email: string | null
           comms_log_retention_days: number
           created_at: string
+          guest_pii_retention_days: number
           id: string
           kroger_location_id: string | null
           kroger_location_name: string | null
@@ -1988,6 +2642,7 @@ export type Database = {
           stripe_subscription_id: string | null
           trial_ends_at: string | null
           updated_at: string
+          vendor_auto_assign_mode: string
         }
         Insert: {
           auto_assign_enabled?: boolean
@@ -1995,6 +2650,7 @@ export type Database = {
           billing_email?: string | null
           comms_log_retention_days?: number
           created_at?: string
+          guest_pii_retention_days?: number
           id?: string
           kroger_location_id?: string | null
           kroger_location_name?: string | null
@@ -2015,6 +2671,7 @@ export type Database = {
           stripe_subscription_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
+          vendor_auto_assign_mode?: string
         }
         Update: {
           auto_assign_enabled?: boolean
@@ -2022,6 +2679,7 @@ export type Database = {
           billing_email?: string | null
           comms_log_retention_days?: number
           created_at?: string
+          guest_pii_retention_days?: number
           id?: string
           kroger_location_id?: string | null
           kroger_location_name?: string | null
@@ -2042,6 +2700,7 @@ export type Database = {
           stripe_subscription_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
+          vendor_auto_assign_mode?: string
         }
         Relationships: []
       }
@@ -2185,48 +2844,98 @@ export type Database = {
           },
         ]
       }
-      powersync_crew_instances: {
+      pending_integration_links: {
         Row: {
-          instance_id: string
+          created_at: string
+          expires_at: string
+          external_user_id: string
+          id: string
+          metadata: Json
+          pending_link_token: string
+          provider_id: string
+          refresh_token_vault_secret_id: string | null
+          scope: string | null
+          vault_secret_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          external_user_id: string
+          id?: string
+          metadata?: Json
+          pending_link_token: string
+          provider_id: string
+          refresh_token_vault_secret_id?: string | null
+          scope?: string | null
+          vault_secret_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          external_user_id?: string
+          id?: string
+          metadata?: Json
+          pending_link_token?: string
+          provider_id?: string
+          refresh_token_vault_secret_id?: string | null
+          scope?: string | null
+          vault_secret_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_integration_links_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "integration_providers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_admins: {
+        Row: {
+          created_at: string
           user_id: string
         }
         Insert: {
-          instance_id: string
+          created_at?: string
           user_id: string
         }
         Update: {
-          instance_id?: string
+          created_at?: string
           user_id?: string
         }
         Relationships: []
       }
-      powersync_crew_properties: {
+      platform_staff: {
         Row: {
-          property_id: string
+          created_at: string
+          role: string
           user_id: string
         }
         Insert: {
-          property_id: string
+          created_at?: string
+          role?: string
           user_id: string
         }
         Update: {
-          property_id?: string
+          created_at?: string
+          role?: string
           user_id?: string
         }
         Relationships: []
       }
-      powersync_crew_turnovers: {
+      processed_webhooks: {
         Row: {
-          turnover_id: string
-          user_id: string
+          processed_at: string
+          webhook_id: string
         }
         Insert: {
-          turnover_id: string
-          user_id: string
+          processed_at?: string
+          webhook_id: string
         }
         Update: {
-          turnover_id?: string
-          user_id?: string
+          processed_at?: string
+          webhook_id?: string
         }
         Relationships: []
       }
@@ -2234,6 +2943,7 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string
+          email_unsubscribed_at: string | null
           full_name: string | null
           id: string
           phone: string | null
@@ -2242,6 +2952,7 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           created_at?: string
+          email_unsubscribed_at?: string | null
           full_name?: string | null
           id: string
           phone?: string | null
@@ -2250,6 +2961,7 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           created_at?: string
+          email_unsubscribed_at?: string | null
           full_name?: string | null
           id?: string
           phone?: string | null
@@ -2261,33 +2973,42 @@ export type Database = {
         Row: {
           access_instructions: string | null
           address: string | null
+          amenities: Json | null
           avg_nightly_rate: number | null
           avg_stay_length: number | null
           avg_turnovers_per_month: number | null
           bathrooms: number | null
           bedrooms: number | null
           checkin_time: string | null
+          checkout_instructions: string | null
           checkout_time: string | null
           city: string | null
           cleaning_cost: number | null
           cleaning_cost_visible_to_owner: boolean
           created_at: string
-          door_code: string | null
+          door_code_secret_id: string | null
+          events_allowed: boolean | null
           external_id: string | null
           external_source: string | null
+          house_manual: string | null
           id: string
           internal_notes: string | null
           is_active: boolean
           lat: number | null
           lng: number | null
           max_guests: number | null
+          max_pets: number | null
+          min_renter_age: number | null
           name: string
           org_id: string
+          pets_allowed: boolean | null
           property_type: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct: number | null
           setup_steps_completed: Json
+          smoking_allowed: boolean | null
           square_footage: number | null
           state: string | null
+          timezone: string
           updated_at: string
           wifi_name: string | null
           wifi_password: string | null
@@ -2296,33 +3017,42 @@ export type Database = {
         Insert: {
           access_instructions?: string | null
           address?: string | null
+          amenities?: Json | null
           avg_nightly_rate?: number | null
           avg_stay_length?: number | null
           avg_turnovers_per_month?: number | null
           bathrooms?: number | null
           bedrooms?: number | null
           checkin_time?: string | null
+          checkout_instructions?: string | null
           checkout_time?: string | null
           city?: string | null
           cleaning_cost?: number | null
           cleaning_cost_visible_to_owner?: boolean
           created_at?: string
-          door_code?: string | null
+          door_code_secret_id?: string | null
+          events_allowed?: boolean | null
           external_id?: string | null
           external_source?: string | null
+          house_manual?: string | null
           id?: string
           internal_notes?: string | null
           is_active?: boolean
           lat?: number | null
           lng?: number | null
           max_guests?: number | null
+          max_pets?: number | null
+          min_renter_age?: number | null
           name: string
           org_id: string
+          pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
           setup_steps_completed?: Json
+          smoking_allowed?: boolean | null
           square_footage?: number | null
           state?: string | null
+          timezone?: string
           updated_at?: string
           wifi_name?: string | null
           wifi_password?: string | null
@@ -2331,33 +3061,42 @@ export type Database = {
         Update: {
           access_instructions?: string | null
           address?: string | null
+          amenities?: Json | null
           avg_nightly_rate?: number | null
           avg_stay_length?: number | null
           avg_turnovers_per_month?: number | null
           bathrooms?: number | null
           bedrooms?: number | null
           checkin_time?: string | null
+          checkout_instructions?: string | null
           checkout_time?: string | null
           city?: string | null
           cleaning_cost?: number | null
           cleaning_cost_visible_to_owner?: boolean
           created_at?: string
-          door_code?: string | null
+          door_code_secret_id?: string | null
+          events_allowed?: boolean | null
           external_id?: string | null
           external_source?: string | null
+          house_manual?: string | null
           id?: string
           internal_notes?: string | null
           is_active?: boolean
           lat?: number | null
           lng?: number | null
           max_guests?: number | null
+          max_pets?: number | null
+          min_renter_age?: number | null
           name?: string
           org_id?: string
+          pets_allowed?: boolean | null
           property_type?: Database["public"]["Enums"]["property_type"] | null
           same_day_premium_pct?: number | null
           setup_steps_completed?: Json
+          smoking_allowed?: boolean | null
           square_footage?: number | null
           state?: string | null
+          timezone?: string
           updated_at?: string
           wifi_name?: string | null
           wifi_password?: string | null
@@ -2385,6 +3124,7 @@ export type Database = {
           id: string
           installation_date: string | null
           is_active: boolean
+          is_na: boolean
           macrs_class: Database["public"]["Enums"]["macrs_class"] | null
           make: string | null
           manufacture_date: string | null
@@ -2392,13 +3132,17 @@ export type Database = {
           name: string
           notes: string | null
           org_id: string
+          photo_url: string | null
           placed_in_service_date: string | null
           property_id: string
           purchase_price: number | null
           replaced_by_asset_id: string | null
+          replacement_status: string
           salvage_value: number | null
+          scan_status: Database["public"]["Enums"]["asset_scan_status"] | null
           serial_number: string | null
           updated_at: string
+          verified_at: string | null
           warranty_expiry_date: string | null
           warranty_notes: string | null
           warranty_provider: string | null
@@ -2414,6 +3158,7 @@ export type Database = {
           id?: string
           installation_date?: string | null
           is_active?: boolean
+          is_na?: boolean
           macrs_class?: Database["public"]["Enums"]["macrs_class"] | null
           make?: string | null
           manufacture_date?: string | null
@@ -2421,13 +3166,17 @@ export type Database = {
           name: string
           notes?: string | null
           org_id: string
+          photo_url?: string | null
           placed_in_service_date?: string | null
           property_id: string
           purchase_price?: number | null
           replaced_by_asset_id?: string | null
+          replacement_status?: string
           salvage_value?: number | null
+          scan_status?: Database["public"]["Enums"]["asset_scan_status"] | null
           serial_number?: string | null
           updated_at?: string
+          verified_at?: string | null
           warranty_expiry_date?: string | null
           warranty_notes?: string | null
           warranty_provider?: string | null
@@ -2443,6 +3192,7 @@ export type Database = {
           id?: string
           installation_date?: string | null
           is_active?: boolean
+          is_na?: boolean
           macrs_class?: Database["public"]["Enums"]["macrs_class"] | null
           make?: string | null
           manufacture_date?: string | null
@@ -2450,18 +3200,29 @@ export type Database = {
           name?: string
           notes?: string | null
           org_id?: string
+          photo_url?: string | null
           placed_in_service_date?: string | null
           property_id?: string
           purchase_price?: number | null
           replaced_by_asset_id?: string | null
+          replacement_status?: string
           salvage_value?: number | null
+          scan_status?: Database["public"]["Enums"]["asset_scan_status"] | null
           serial_number?: string | null
           updated_at?: string
+          verified_at?: string | null
           warranty_expiry_date?: string | null
           warranty_notes?: string | null
           warranty_provider?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "property_assets_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "property_assets_property_id_fkey"
             columns: ["property_id"]
@@ -2489,6 +3250,7 @@ export type Database = {
           phone: string | null
           property_id: string
           revenue_share_pct: number | null
+          share_capital_plan: boolean
           updated_at: string
         }
         Insert: {
@@ -2501,6 +3263,7 @@ export type Database = {
           phone?: string | null
           property_id: string
           revenue_share_pct?: number | null
+          share_capital_plan?: boolean
           updated_at?: string
         }
         Update: {
@@ -2513,6 +3276,7 @@ export type Database = {
           phone?: string | null
           property_id?: string
           revenue_share_pct?: number | null
+          share_capital_plan?: boolean
           updated_at?: string
         }
         Relationships: [
@@ -2544,6 +3308,7 @@ export type Database = {
           par_level: number
           purchase_order_id: string
           quantity_to_buy: number
+          unit: string | null
         }
         Insert: {
           created_at?: string
@@ -2556,6 +3321,7 @@ export type Database = {
           par_level: number
           purchase_order_id: string
           quantity_to_buy: number
+          unit?: string | null
         }
         Update: {
           created_at?: string
@@ -2568,6 +3334,7 @@ export type Database = {
           par_level?: number
           purchase_order_id?: string
           quantity_to_buy?: number
+          unit?: string | null
         }
         Relationships: [
           {
@@ -2592,10 +3359,13 @@ export type Database = {
           created_at: string
           generated_at: string
           id: string
+          is_same_day_flip: boolean
           notes: string | null
+          order_email_sent: boolean
           org_id: string
           property_id: string
           sent_at: string | null
+          source_count_id: string | null
           status: Database["public"]["Enums"]["po_status"]
           total_estimated_cost: number | null
           updated_at: string
@@ -2605,10 +3375,13 @@ export type Database = {
           created_at?: string
           generated_at?: string
           id?: string
+          is_same_day_flip?: boolean
           notes?: string | null
+          order_email_sent?: boolean
           org_id: string
           property_id: string
           sent_at?: string | null
+          source_count_id?: string | null
           status?: Database["public"]["Enums"]["po_status"]
           total_estimated_cost?: number | null
           updated_at?: string
@@ -2618,10 +3391,13 @@ export type Database = {
           created_at?: string
           generated_at?: string
           id?: string
+          is_same_day_flip?: boolean
           notes?: string | null
+          order_email_sent?: boolean
           org_id?: string
           property_id?: string
           sent_at?: string | null
+          source_count_id?: string | null
           status?: Database["public"]["Enums"]["po_status"]
           total_estimated_cost?: number | null
           updated_at?: string
@@ -2641,35 +3417,45 @@ export type Database = {
             referencedRelation: "properties"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "purchase_orders_source_count_id_fkey"
+            columns: ["source_count_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_counts"
+            referencedColumns: ["id"]
+          },
         ]
       }
       push_subscriptions: {
         Row: {
           auth: string
           created_at: string
-          crew_member_id: string
+          crew_member_id: string | null
           endpoint: string
           id: string
           org_id: string
           p256dh: string
+          user_id: string | null
         }
         Insert: {
           auth: string
           created_at?: string
-          crew_member_id: string
+          crew_member_id?: string | null
           endpoint: string
           id?: string
           org_id: string
           p256dh: string
+          user_id?: string | null
         }
         Update: {
           auth?: string
           created_at?: string
-          crew_member_id?: string
+          crew_member_id?: string | null
           endpoint?: string
           id?: string
           org_id?: string
           p256dh?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -2762,6 +3548,78 @@ export type Database = {
           },
         ]
       }
+      reservation_messages: {
+        Row: {
+          attachments: Json | null
+          body: string
+          booking_id: string | null
+          content_type: string | null
+          conversation_id: string | null
+          created_at: string
+          dedup_key: string
+          external_reservation_id: string
+          external_source: string
+          id: string
+          message_created_at: string
+          org_id: string
+          platform: string | null
+          sender_name: string | null
+          sender_type: string
+          source: string | null
+        }
+        Insert: {
+          attachments?: Json | null
+          body: string
+          booking_id?: string | null
+          content_type?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          dedup_key: string
+          external_reservation_id: string
+          external_source?: string
+          id?: string
+          message_created_at: string
+          org_id: string
+          platform?: string | null
+          sender_name?: string | null
+          sender_type: string
+          source?: string | null
+        }
+        Update: {
+          attachments?: Json | null
+          body?: string
+          booking_id?: string | null
+          content_type?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          dedup_key?: string
+          external_reservation_id?: string
+          external_source?: string
+          id?: string
+          message_created_at?: string
+          org_id?: string
+          platform?: string | null
+          sender_name?: string | null
+          sender_type?: string
+          source?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservation_messages_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservation_messages_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       review_responses: {
         Row: {
           created_at: string
@@ -2772,6 +3630,7 @@ export type Database = {
           generated_response: string | null
           id: string
           org_id: string
+          regeneration_count: number
           review_id: string
           tone_used: string | null
           updated_at: string
@@ -2786,6 +3645,7 @@ export type Database = {
           generated_response?: string | null
           id?: string
           org_id: string
+          regeneration_count?: number
           review_id: string
           tone_used?: string | null
           updated_at?: string
@@ -2800,6 +3660,7 @@ export type Database = {
           generated_response?: string | null
           id?: string
           org_id?: string
+          regeneration_count?: number
           review_id?: string
           tone_used?: string | null
           updated_at?: string
@@ -2885,6 +3746,73 @@ export type Database = {
           },
         ]
       }
+      stay_extension_requests: {
+        Row: {
+          booking_id: string
+          created_at: string
+          discount_pct: number | null
+          gap_days: number
+          id: string
+          next_booking_checkin: string | null
+          org_id: string
+          pm_notified_at: string | null
+          property_id: string
+          sms_sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          discount_pct?: number | null
+          gap_days: number
+          id?: string
+          next_booking_checkin?: string | null
+          org_id: string
+          pm_notified_at?: string | null
+          property_id: string
+          sms_sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          discount_pct?: number | null
+          gap_days?: number
+          id?: string
+          next_booking_checkin?: string | null
+          org_id?: string
+          pm_notified_at?: string | null
+          property_id?: string
+          sms_sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stay_extension_requests_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: true
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stay_extension_requests_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stay_extension_requests_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stripe_processed_events: {
         Row: {
           processed_at: string
@@ -2900,6 +3828,189 @@ export type Database = {
         }
         Relationships: []
       }
+      support_conversations: {
+        Row: {
+          assigned_staff_id: string | null
+          created_at: string
+          escalated_at: string | null
+          escalation_reason: string | null
+          id: string
+          last_message_at: string
+          needs_human: boolean
+          org_id: string
+          resolved_at: string | null
+          staff_notified_at: string | null
+          status: string
+          user_id: string
+        }
+        Insert: {
+          assigned_staff_id?: string | null
+          created_at?: string
+          escalated_at?: string | null
+          escalation_reason?: string | null
+          id?: string
+          last_message_at?: string
+          needs_human?: boolean
+          org_id: string
+          resolved_at?: string | null
+          staff_notified_at?: string | null
+          status?: string
+          user_id: string
+        }
+        Update: {
+          assigned_staff_id?: string | null
+          created_at?: string
+          escalated_at?: string | null
+          escalation_reason?: string | null
+          id?: string
+          last_message_at?: string
+          needs_human?: boolean
+          org_id?: string
+          resolved_at?: string | null
+          staff_notified_at?: string | null
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_conversations_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      support_kb_chunks: {
+        Row: {
+          content: string
+          created_at: string
+          embedding: string | null
+          id: string
+          source: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          source?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          embedding?: string | null
+          id?: string
+          source?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      support_messages: {
+        Row: {
+          category: Database["public"]["Enums"]["support_category"] | null
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          model_used: string | null
+          role: Database["public"]["Enums"]["support_message_role"]
+          sent_by_user_id: string | null
+        }
+        Insert: {
+          category?: Database["public"]["Enums"]["support_category"] | null
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          model_used?: string | null
+          role: Database["public"]["Enums"]["support_message_role"]
+          sent_by_user_id?: string | null
+        }
+        Update: {
+          category?: Database["public"]["Enums"]["support_category"] | null
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          model_used?: string | null
+          role?: Database["public"]["Enums"]["support_message_role"]
+          sent_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "support_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "support_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      system_job_runs: {
+        Row: {
+          attempt: number
+          created_at: string
+          duration_ms: number | null
+          error_message: string | null
+          error_stack: string | null
+          finished_at: string | null
+          function_id: string
+          function_name: string
+          id: string
+          metadata: Json
+          org_id: string | null
+          run_id: string
+          started_at: string
+          status: string
+        }
+        Insert: {
+          attempt?: number
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          error_stack?: string | null
+          finished_at?: string | null
+          function_id: string
+          function_name: string
+          id?: string
+          metadata?: Json
+          org_id?: string | null
+          run_id: string
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          attempt?: number
+          created_at?: string
+          duration_ms?: number | null
+          error_message?: string | null
+          error_stack?: string | null
+          finished_at?: string | null
+          function_id?: string
+          function_name?: string
+          id?: string
+          metadata?: Json
+          org_id?: string | null
+          run_id?: string
+          started_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "system_job_runs_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       turnover_assignments: {
         Row: {
           assigned_at: string
@@ -2908,7 +4019,10 @@ export type Database = {
           id: string
           notification_type: Database["public"]["Enums"]["contact_pref"] | null
           notified_at: string | null
+          org_id: string | null
+          property_id: string | null
           turnover_id: string
+          user_id: string | null
         }
         Insert: {
           assigned_at?: string
@@ -2917,7 +4031,10 @@ export type Database = {
           id?: string
           notification_type?: Database["public"]["Enums"]["contact_pref"] | null
           notified_at?: string | null
+          org_id?: string | null
+          property_id?: string | null
           turnover_id: string
+          user_id?: string | null
         }
         Update: {
           assigned_at?: string
@@ -2926,7 +4043,10 @@ export type Database = {
           id?: string
           notification_type?: Database["public"]["Enums"]["contact_pref"] | null
           notified_at?: string | null
+          org_id?: string | null
+          property_id?: string | null
           turnover_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -2934,6 +4054,20 @@ export type Database = {
             columns: ["crew_member_id"]
             isOneToOne: false
             referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turnover_assignments_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "turnover_assignments_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
             referencedColumns: ["id"]
           },
           {
@@ -2955,10 +4089,18 @@ export type Database = {
           completed_at: string | null
           completion_notes: string | null
           created_at: string
+          dates_change_acknowledged_at: string | null
+          dates_changed_at: string | null
           id: string
+          inventory_confirmed_by_crew_id: string | null
+          inventory_confirmed_complete_at: string | null
+          inventory_started_at: string | null
+          is_archived: boolean
           is_same_day_turnover: boolean
           notes: string | null
           org_id: string
+          pending_checkin_datetime: string | null
+          pending_checkout_datetime: string | null
           prev_booking_id: string | null
           priority: Database["public"]["Enums"]["priority_level"]
           property_id: string
@@ -2979,10 +4121,18 @@ export type Database = {
           completed_at?: string | null
           completion_notes?: string | null
           created_at?: string
+          dates_change_acknowledged_at?: string | null
+          dates_changed_at?: string | null
           id?: string
+          inventory_confirmed_by_crew_id?: string | null
+          inventory_confirmed_complete_at?: string | null
+          inventory_started_at?: string | null
+          is_archived?: boolean
           is_same_day_turnover?: boolean
           notes?: string | null
           org_id: string
+          pending_checkin_datetime?: string | null
+          pending_checkout_datetime?: string | null
           prev_booking_id?: string | null
           priority?: Database["public"]["Enums"]["priority_level"]
           property_id: string
@@ -3003,10 +4153,18 @@ export type Database = {
           completed_at?: string | null
           completion_notes?: string | null
           created_at?: string
+          dates_change_acknowledged_at?: string | null
+          dates_changed_at?: string | null
           id?: string
+          inventory_confirmed_by_crew_id?: string | null
+          inventory_confirmed_complete_at?: string | null
+          inventory_started_at?: string | null
+          is_archived?: boolean
           is_same_day_turnover?: boolean
           notes?: string | null
           org_id?: string
+          pending_checkin_datetime?: string | null
+          pending_checkout_datetime?: string | null
           prev_booking_id?: string | null
           priority?: Database["public"]["Enums"]["priority_level"]
           property_id?: string
@@ -3034,6 +4192,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "turnovers_inventory_confirmed_by_crew_id_fkey"
+            columns: ["inventory_confirmed_by_crew_id"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "turnovers_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
@@ -3052,6 +4217,77 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_assignment_outcomes: {
+        Row: {
+          created_at: string
+          id: string
+          org_id: string
+          override_reason: string | null
+          property_id: string | null
+          score_breakdown: Json | null
+          suggested_score: number | null
+          vendor_id: string
+          was_accepted: boolean | null
+          was_suggestion: boolean
+          work_order_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          org_id: string
+          override_reason?: string | null
+          property_id?: string | null
+          score_breakdown?: Json | null
+          suggested_score?: number | null
+          vendor_id: string
+          was_accepted?: boolean | null
+          was_suggestion?: boolean
+          work_order_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          org_id?: string
+          override_reason?: string | null
+          property_id?: string | null
+          score_breakdown?: Json | null
+          suggested_score?: number | null
+          vendor_id?: string
+          was_accepted?: boolean | null
+          was_suggestion?: boolean
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_assignment_outcomes_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_assignment_outcomes_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_compliance_status"
+            referencedColumns: ["vendor_id"]
+          },
+          {
+            foreignKeyName: "vendor_assignment_outcomes_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_assignment_outcomes_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
             referencedColumns: ["id"]
           },
         ]
@@ -3119,6 +4355,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "vendor_compliance_documents_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "vendor_compliance_documents_vendor_id_fkey"
             columns: ["vendor_id"]
             isOneToOne: false
@@ -3148,6 +4391,8 @@ export type Database = {
           lng: number | null
           name: string
           notes: string | null
+          on_time_pct: number | null
+          on_time_sample_size: number
           org_id: string
           phone: string | null
           portal_enabled: boolean
@@ -3156,6 +4401,12 @@ export type Database = {
           service_zip: string | null
           specialty: Database["public"]["Enums"]["vendor_specialty"] | null
           state: string | null
+          stripe_connect_account_id: string | null
+          stripe_connect_charges_enabled: boolean
+          stripe_connect_invite_claimed_at: string | null
+          stripe_connect_invite_sent_at: string | null
+          stripe_connect_onboarded_at: string | null
+          stripe_connect_token: string
           updated_at: string
         }
         Insert: {
@@ -3171,6 +4422,8 @@ export type Database = {
           lng?: number | null
           name: string
           notes?: string | null
+          on_time_pct?: number | null
+          on_time_sample_size?: number
           org_id: string
           phone?: string | null
           portal_enabled?: boolean
@@ -3179,6 +4432,12 @@ export type Database = {
           service_zip?: string | null
           specialty?: Database["public"]["Enums"]["vendor_specialty"] | null
           state?: string | null
+          stripe_connect_account_id?: string | null
+          stripe_connect_charges_enabled?: boolean
+          stripe_connect_invite_claimed_at?: string | null
+          stripe_connect_invite_sent_at?: string | null
+          stripe_connect_onboarded_at?: string | null
+          stripe_connect_token?: string
           updated_at?: string
         }
         Update: {
@@ -3194,6 +4453,8 @@ export type Database = {
           lng?: number | null
           name?: string
           notes?: string | null
+          on_time_pct?: number | null
+          on_time_sample_size?: number
           org_id?: string
           phone?: string | null
           portal_enabled?: boolean
@@ -3202,6 +4463,12 @@ export type Database = {
           service_zip?: string | null
           specialty?: Database["public"]["Enums"]["vendor_specialty"] | null
           state?: string | null
+          stripe_connect_account_id?: string | null
+          stripe_connect_charges_enabled?: boolean
+          stripe_connect_invite_claimed_at?: string | null
+          stripe_connect_invite_sent_at?: string | null
+          stripe_connect_onboarded_at?: string | null
+          stripe_connect_token?: string
           updated_at?: string
         }
         Relationships: [
@@ -3240,6 +4507,96 @@ export type Database = {
           },
         ]
       }
+      work_order_invoices: {
+        Row: {
+          created_at: string
+          id: string
+          invoice_number: string
+          org_id: string
+          paid_at: string | null
+          platform_fee_amount: number
+          property_id: string
+          status: string
+          stripe_checkout_session_id: string | null
+          stripe_payment_intent_id: string | null
+          submitted_at: string
+          subtotal: number
+          total: number
+          vendor_id: string
+          work_order_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invoice_number: string
+          org_id: string
+          paid_at?: string | null
+          platform_fee_amount?: number
+          property_id: string
+          status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          submitted_at?: string
+          subtotal?: number
+          total?: number
+          vendor_id: string
+          work_order_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invoice_number?: string
+          org_id?: string
+          paid_at?: string | null
+          platform_fee_amount?: number
+          property_id?: string
+          status?: string
+          stripe_checkout_session_id?: string | null
+          stripe_payment_intent_id?: string | null
+          submitted_at?: string
+          subtotal?: number
+          total?: number
+          vendor_id?: string
+          work_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "work_order_invoices_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_invoices_property_id_fkey"
+            columns: ["property_id"]
+            isOneToOne: false
+            referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_invoices_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_compliance_status"
+            referencedColumns: ["vendor_id"]
+          },
+          {
+            foreignKeyName: "work_order_invoices_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_order_invoices_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: true
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       work_order_line_items: {
         Row: {
           created_at: string
@@ -3252,6 +4609,7 @@ export type Database = {
           sort_order: number
           unit: string | null
           unit_cost: number
+          vendor_submitted: boolean
           work_order_id: string
         }
         Insert: {
@@ -3265,6 +4623,7 @@ export type Database = {
           sort_order?: number
           unit?: string | null
           unit_cost: number
+          vendor_submitted?: boolean
           work_order_id: string
         }
         Update: {
@@ -3278,6 +4637,7 @@ export type Database = {
           sort_order?: number
           unit?: string | null
           unit_cost?: number
+          vendor_submitted?: boolean
           work_order_id?: string
         }
         Relationships: [
@@ -3388,6 +4748,7 @@ export type Database = {
           assigned_crew_id: string | null
           assigned_crew_member_id: string | null
           category: Database["public"]["Enums"]["wo_category"] | null
+          client_report_id: string | null
           completed_date: string | null
           completion_notes: string | null
           completion_token: string | null
@@ -3399,20 +4760,33 @@ export type Database = {
           estimated_cost: number | null
           id: string
           invoice_reference: string | null
+          lockbox_code: string | null
           nte_amount: number | null
           org_id: string
+          parking_notes: string | null
           portal_enabled: boolean
           priority: Database["public"]["Enums"]["priority_level"]
           property_id: string
+          public_signed_off_at: string | null
+          public_token: string | null
+          public_token_expires_at: string | null
+          public_viewed_at: string | null
+          reported_by_crew_member_id: string | null
           scheduled_date: string | null
+          scheduled_time: string | null
+          sign_off_notes: string | null
           source: Database["public"]["Enums"]["wo_source"]
           source_schedule_id: string | null
           source_turnover_id: string | null
           status: Database["public"]["Enums"]["wo_status"]
+          suggested_vendor_ids: string[] | null
+          suggestion_reasoning: string | null
+          suggestion_status: string | null
           title: string
           updated_at: string
           vendor_acknowledged_at: string | null
           vendor_acknowledged_by: string | null
+          vendor_dispatch_email: string | null
           vendor_id: string | null
           vendor_rating: number | null
           vendor_rating_notes: string | null
@@ -3425,6 +4799,7 @@ export type Database = {
           assigned_crew_id?: string | null
           assigned_crew_member_id?: string | null
           category?: Database["public"]["Enums"]["wo_category"] | null
+          client_report_id?: string | null
           completed_date?: string | null
           completion_notes?: string | null
           completion_token?: string | null
@@ -3436,20 +4811,33 @@ export type Database = {
           estimated_cost?: number | null
           id?: string
           invoice_reference?: string | null
+          lockbox_code?: string | null
           nte_amount?: number | null
           org_id: string
+          parking_notes?: string | null
           portal_enabled?: boolean
           priority?: Database["public"]["Enums"]["priority_level"]
           property_id: string
+          public_signed_off_at?: string | null
+          public_token?: string | null
+          public_token_expires_at?: string | null
+          public_viewed_at?: string | null
+          reported_by_crew_member_id?: string | null
           scheduled_date?: string | null
+          scheduled_time?: string | null
+          sign_off_notes?: string | null
           source?: Database["public"]["Enums"]["wo_source"]
           source_schedule_id?: string | null
           source_turnover_id?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
+          suggested_vendor_ids?: string[] | null
+          suggestion_reasoning?: string | null
+          suggestion_status?: string | null
           title: string
           updated_at?: string
           vendor_acknowledged_at?: string | null
           vendor_acknowledged_by?: string | null
+          vendor_dispatch_email?: string | null
           vendor_id?: string | null
           vendor_rating?: number | null
           vendor_rating_notes?: string | null
@@ -3462,6 +4850,7 @@ export type Database = {
           assigned_crew_id?: string | null
           assigned_crew_member_id?: string | null
           category?: Database["public"]["Enums"]["wo_category"] | null
+          client_report_id?: string | null
           completed_date?: string | null
           completion_notes?: string | null
           completion_token?: string | null
@@ -3473,20 +4862,33 @@ export type Database = {
           estimated_cost?: number | null
           id?: string
           invoice_reference?: string | null
+          lockbox_code?: string | null
           nte_amount?: number | null
           org_id?: string
+          parking_notes?: string | null
           portal_enabled?: boolean
           priority?: Database["public"]["Enums"]["priority_level"]
           property_id?: string
+          public_signed_off_at?: string | null
+          public_token?: string | null
+          public_token_expires_at?: string | null
+          public_viewed_at?: string | null
+          reported_by_crew_member_id?: string | null
           scheduled_date?: string | null
+          scheduled_time?: string | null
+          sign_off_notes?: string | null
           source?: Database["public"]["Enums"]["wo_source"]
           source_schedule_id?: string | null
           source_turnover_id?: string | null
           status?: Database["public"]["Enums"]["wo_status"]
+          suggested_vendor_ids?: string[] | null
+          suggestion_reasoning?: string | null
+          suggestion_status?: string | null
           title?: string
           updated_at?: string
           vendor_acknowledged_at?: string | null
           vendor_acknowledged_by?: string | null
+          vendor_dispatch_email?: string | null
           vendor_id?: string | null
           vendor_rating?: number | null
           vendor_rating_notes?: string | null
@@ -3526,6 +4928,13 @@ export type Database = {
             columns: ["property_id"]
             isOneToOne: false
             referencedRelation: "properties"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "work_orders_reported_by_crew_member_id_fkey"
+            columns: ["reported_by_crew_member_id"]
+            isOneToOne: false
+            referencedRelation: "crew_members"
             referencedColumns: ["id"]
           },
           {
@@ -3581,7 +4990,52 @@ export type Database = {
       }
     }
     Functions: {
+      apply_crew_score_recompute: { Args: never; Returns: Json }
+      claim_pending_integration_link: {
+        Args: { p_pending_link_token: string; p_user_id: string }
+        Returns: {
+          external_user_id: string
+          org_id: string
+          provider_id: string
+        }[]
+      }
       cleanup_expired_oauth_states: { Args: never; Returns: undefined }
+      cleanup_expired_pending_integration_links: {
+        Args: never
+        Returns: undefined
+      }
+      cleanup_webhook_dedup: { Args: never; Returns: undefined }
+      create_organization_with_owner: {
+        Args: {
+          p_billing_email: string
+          p_max_properties: number
+          p_name: string
+          p_slug: string
+          p_trial_ends_at: string
+          p_user_id: string
+        }
+        Returns: {
+          created: boolean
+          org_id: string
+        }[]
+      }
+      create_pending_integration_link: {
+        Args: {
+          p_access_token: string
+          p_external_user_id: string
+          p_metadata?: Json
+          p_pending_link_token: string
+          p_provider_id: string
+          p_refresh_token?: string
+          p_scope?: string
+        }
+        Returns: string
+      }
+      delete_vault_secret: { Args: { p_secret_id: string }; Returns: undefined }
+      disconnect_integration_token: {
+        Args: { p_provider_id: string; p_user_id: string }
+        Returns: undefined
+      }
       get_asset_repair_summary: {
         Args: never
         Returns: {
@@ -3592,6 +5046,7 @@ export type Database = {
         }[]
       }
       get_crew_member_id: { Args: never; Returns: string }
+      get_crew_turnover_ids: { Args: never; Returns: string[] }
       get_repeat_issues: {
         Args: { since_date: string }
         Returns: {
@@ -3601,6 +5056,7 @@ export type Database = {
           wo_count: number
         }[]
       }
+      get_system_health: { Args: never; Returns: Json }
       get_user_org_ids: { Args: never; Returns: string[] }
       is_org_member: {
         Args: {
@@ -3609,11 +5065,37 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_platform_staff: { Args: never; Returns: boolean }
+      match_kb_chunks: {
+        Args: {
+          match_count?: number
+          min_similarity?: number
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          id: string
+          similarity: number
+          source: string
+          title: string
+        }[]
+      }
       next_wo_number: { Args: { p_org_id: string }; Returns: string }
+      next_work_order_invoice_seq: { Args: never; Returns: number }
+      purge_expired_audit_events: { Args: never; Returns: Json }
+      read_integration_refresh_token: {
+        Args: { p_provider_id: string; p_user_id: string }
+        Returns: string
+      }
       read_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: string
       }
+      read_property_door_code: {
+        Args: { p_org_id: string; p_property_id: string }
+        Returns: string
+      }
+      recompute_vendor_scores: { Args: never; Returns: number }
       replace_master_checklist_items: {
         Args: { p_items: Json; p_org_id: string }
         Returns: undefined
@@ -3621,6 +5103,15 @@ export type Database = {
       revoke_integration_token: {
         Args: { p_provider_id: string; p_user_id: string }
         Returns: undefined
+      }
+      store_integration_refresh_token: {
+        Args: {
+          p_expires_at?: string
+          p_provider_id: string
+          p_refresh_token: string
+          p_user_id: string
+        }
+        Returns: string
       }
       store_integration_token: {
         Args: {
@@ -3633,8 +5124,13 @@ export type Database = {
         }
         Returns: string
       }
+      store_property_door_code: {
+        Args: { p_door_code: string; p_org_id: string; p_property_id: string }
+        Returns: string
+      }
     }
     Enums: {
+      asset_scan_status: "pending" | "processing" | "completed" | "failed"
       asset_type:
         | "hvac"
         | "water_heater"
@@ -3657,6 +5153,19 @@ export type Database = {
         | "generator"
         | "solar_system"
         | "other"
+        | "water_shutoff_valve"
+        | "solar_inverter"
+        | "whole_home_water_filter"
+        | "heated_tile_system"
+        | "range_hood_vent"
+        | "coffee_station"
+        | "toaster_oven"
+        | "wifi_router"
+        | "fire_extinguisher"
+        | "thermostat"
+        | "ice_maker"
+        | "garbage_disposal"
+        | "trash_compactor"
       booking_source:
         | "airbnb"
         | "vrbo"
@@ -3664,6 +5173,7 @@ export type Database = {
         | "direct"
         | "manual"
         | "other"
+        | "ownerrez"
       booking_status: "confirmed" | "cancelled" | "blocked" | "tentative"
       checklist_status: "not_started" | "in_progress" | "completed"
       comm_channel: "email" | "sms" | "phone" | "in_person" | "note"
@@ -3705,9 +5215,7 @@ export type Database = {
         | "39_year"
         | "section_179"
       member_role: "admin" | "manager" | "crew" | "viewer" | "owner"
-      message_status: "sent" | "failed" | "bounced"
-      message_trigger: "booking_confirmed" | "pre_checkout"
-      org_plan: "starter" | "growth" | "pro" | "enterprise"
+      org_plan: "starter" | "growth" | "pro" | "enterprise" | "portfolio"
       org_plan_status:
         | "trialing"
         | "active"
@@ -3743,6 +5251,8 @@ export type Database = {
         | "semi_annual"
         | "annual"
       schedule_type: "routine" | "seasonal"
+      support_category: "faq" | "technical" | "account_specific"
+      support_message_role: "user" | "assistant" | "human"
       sync_status: "pending" | "success" | "error"
       turnover_status:
         | "pending_assignment"
@@ -3926,6 +5436,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      asset_scan_status: ["pending", "processing", "completed", "failed"],
       asset_type: [
         "hvac",
         "water_heater",
@@ -3948,6 +5459,19 @@ export const Constants = {
         "generator",
         "solar_system",
         "other",
+        "water_shutoff_valve",
+        "solar_inverter",
+        "whole_home_water_filter",
+        "heated_tile_system",
+        "range_hood_vent",
+        "coffee_station",
+        "toaster_oven",
+        "wifi_router",
+        "fire_extinguisher",
+        "thermostat",
+        "ice_maker",
+        "garbage_disposal",
+        "trash_compactor",
       ],
       booking_source: [
         "airbnb",
@@ -3956,6 +5480,7 @@ export const Constants = {
         "direct",
         "manual",
         "other",
+        "ownerrez",
       ],
       booking_status: ["confirmed", "cancelled", "blocked", "tentative"],
       checklist_status: ["not_started", "in_progress", "completed"],
@@ -3996,9 +5521,7 @@ export const Constants = {
       ],
       macrs_class: ["5_year", "15_year", "27_5_year", "39_year", "section_179"],
       member_role: ["admin", "manager", "crew", "viewer", "owner"],
-      message_status: ["sent", "failed", "bounced"],
-      message_trigger: ["booking_confirmed", "pre_checkout"],
-      org_plan: ["starter", "growth", "pro", "enterprise"],
+      org_plan: ["starter", "growth", "pro", "enterprise", "portfolio"],
       org_plan_status: [
         "trialing",
         "active",
@@ -4039,6 +5562,8 @@ export const Constants = {
         "annual",
       ],
       schedule_type: ["routine", "seasonal"],
+      support_category: ["faq", "technical", "account_specific"],
+      support_message_role: ["user", "assistant", "human"],
       sync_status: ["pending", "success", "error"],
       turnover_status: [
         "pending_assignment",

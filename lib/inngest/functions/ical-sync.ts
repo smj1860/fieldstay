@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { parseIcalFeed, toDateString, toTimeString, isAllDay, type ParsedBooking } from '@/lib/ical/parser'
 import { cancelTurnoversForBooking } from '@/lib/turnovers/generator'
 import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
-import { getPmEmail } from '@/lib/inngest/helpers'
+import { getPmEmails } from '@/lib/inngest/helpers'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import type { BookingSource } from '@/types/database'
@@ -293,7 +293,7 @@ export const syncIcalFeed = inngest.createFunction(
     if (newConflicts.length > 0) {
       await step.run('alert-pm-overlap-conflict', async () => {
         const supabase = createServiceClient()
-        const pmEmail  = await getPmEmail(supabase, org_id)
+        const [pmEmail] = await getPmEmails(supabase, org_id)
         if (!pmEmail) return
 
         const { data: property } = await supabase
