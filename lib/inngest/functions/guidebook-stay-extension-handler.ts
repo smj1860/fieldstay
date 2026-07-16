@@ -119,19 +119,37 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
           const e164 = normalizePhoneToE164(profile.phone)
           if (!e164) return { skipped: true, reason: 'invalid_pm_phone' }
 
+          // Atomic claim — Telnyx has no idempotency-key mechanism (unlike
+          // Resend), so this mirrors the guest-SMS claim above: only the
+          // caller that wins the UPDATE sends. A retry after a successful
+          // send finds pm_notified_at already set and skips, instead of
+          // texting the PM's own phone twice.
+          const { data: claimed } = await supabase
+            .from('stay_extension_requests')
+            .update({ pm_notified_at: new Date().toISOString() })
+            .eq('id', requestId)
+            .is('pm_notified_at', null)
+            .select('id')
+            .maybeSingle()
+
+          if (!claimed) return { skipped: true, reason: 'already_notified' }
+
           const text =
             `Stay extension opportunity — ${propName}: guest checks out ` +
             `${booking?.checkout_date}, ${gapDays} day${gapDays !== 1 ? 's' : ''} ` +
             `before next booking.${discountLine} Guest was messaged via the guidebook.`
 
-          await sendSMS(e164, text)
+          const result = await sendSMS(e164, text)
 
-          await supabase
-            .from('stay_extension_requests')
-            .update({ pm_notified_at: new Date().toISOString() })
-            .eq('id', requestId)
+          if (!result.sent) {
+            // SMS failed — roll back the claim so a retry can attempt again
+            await supabase
+              .from('stay_extension_requests')
+              .update({ pm_notified_at: null })
+              .eq('id', requestId)
+          }
 
-          return { notified: true }
+          return { notified: result.sent }
         })
       } else {
         // contactMethod === 'email' (also the fallback if null/unset)

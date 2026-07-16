@@ -117,16 +117,26 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
         let vendorPortalEvent: VendorPortalEvent | null = null
         if (schedule.auto_create_wo) {
           vendorPortalEvent = await createMaintenanceWorkOrder(supabase, schedule, vendor ?? null, daysUntilDue)
-        }
 
-        // Advance next_due_date for routine schedules
-        if (schedule.schedule_type === 'routine' && schedule.frequency) {
-          const nextDue = calcNextDueDate(schedule.frequency, dueDate)
-          await supabase
-            .from('maintenance_schedules')
-            .update({ next_due_date: nextDue.toISOString().split('T')[0] })
-            .eq('id', schedule.id)
-            .eq('next_due_date', schedule.next_due_date!)  // optimistic lock — prevents double-advance on retry
+          // Advance next_due_date for routine schedules — only once a WO was
+          // actually created to track it. Reminder-only (auto_create_wo=false)
+          // schedules must NOT roll forward here: nothing acted on them yet,
+          // and cron-daily-wrapup's due-schedule section reads next_due_date
+          // at 6pm — if this 8am pass had already advanced it past today,
+          // the schedule would get no PM-facing surface at all (no email,
+          // since that was removed; not the digest either, since it's no
+          // longer "due"). Reminder-only schedules stay due until the PM acts
+          // on them manually (advanceScheduleAfterCompletion in
+          // app/(dashboard)/maintenance/actions.ts advances next_due_date at
+          // that point), so they keep showing up in the digest daily until then.
+          if (schedule.schedule_type === 'routine' && schedule.frequency) {
+            const nextDue = calcNextDueDate(schedule.frequency, dueDate)
+            await supabase
+              .from('maintenance_schedules')
+              .update({ next_due_date: nextDue.toISOString().split('T')[0] })
+              .eq('id', schedule.id)
+              .eq('next_due_date', schedule.next_due_date!)  // optimistic lock — prevents double-advance on retry
+          }
         }
 
         return { vendorPortalEvent }
