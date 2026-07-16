@@ -148,7 +148,7 @@ Never duplicates or overwrites an existing active `property_assets` row for the 
 - `prop.timezone` is a UTC offset string like `-0500`. Node's `Intl` API requires IANA identifiers. Derive timezone from `addr.state` using `resolveHospitableTimezone()` in `lib/integrations/providers/hospitable.ts`.
 - `details.addresses` is an array — find `is_default: true` or use index 0.
 
-**📄 Spec only — `bookings` (pricing rules/policies), wired ahead of verification (2026-07-10).** Per Hospitable's own published example response, `bookings` sits at the top level of the property object alongside `details`/`house_rules`:
+**✅ Confirmed live 2026-07-15 — `bookings` (pricing rules/policies).** `bookings` sits at the top level of the property object alongside `details`/`house_rules`:
 ```
 bookings.booking_policies.cancellation      string[]
 bookings.booking_policies.payment_terms     { status, description[], grace_period }
@@ -159,12 +159,12 @@ bookings.fees                               [{ name, type, value }]   — e.g. n
 bookings.discounts                          [{ name, type, value }]
 bookings.site_urls                          string[]
 ```
-**Not yet confirmed:**
-- Whether a bare `include=details` call returns this object, or whether it needs its own `include=bookings` — the published example bundles every field group together for illustration, and this exact endpoint already fooled us once before on `check-in`/`check-out` (spec says hyphenated; live reality is `checkin`/`checkout`, no hyphen — see above). `hospFetchProperties()`/the single-property fetch now request `include=details,bookings` speculatively; harmless if Hospitable ignores the unrecognized include.
-- Whether `fees[].name` is really the literal string `"cleaning_fee"` for every account, or a per-account slug.
-- Money values are assumed integer cents (`12345` → `"$123.45"`) per Hospitable's convention elsewhere — unconfirmed for this specific field.
+**✅ Confirmed live 2026-07-15:**
+- `include=details,bookings` returns this object — no separate include was needed beyond what was already being requested.
+- `fees[].name` is the literal string `"cleaning_fee"` — verified against real synced properties.
+- Money values are integer cents (`12345` → `"$123.45"`), same as every other monetary field Hospitable documents.
 
-**FieldStay mapping (📄 speculative — not yet verified live):** `bookings.fees[name=cleaning_fee].value.amount` → `properties.cleaning_cost`, via `extractHospitableCleaningFee()` in `hospitable.ts`. Deliberately NOT part of the always-overwrite property sync — only backfills a currently-`null` `cleaning_cost`, since a PM's own entry (what FieldStay actually pays a cleaner) can legitimately differ from what the PMS charges guests. See `backfillCleaningCost()` in `lib/properties/upsert-normalized.ts`.
+**FieldStay mapping (✅ confirmed live 2026-07-15):** `bookings.fees[name=cleaning_fee].value.amount` → `properties.cleaning_cost`, via `extractHospitableCleaningFee()` in `hospitable.ts`. Verified against real DB rows across four different Hospitable properties ($35/$110/$135/$110). Deliberately NOT part of the always-overwrite property sync — only backfills a currently-`null` `cleaning_cost`, since a PM's own entry (what FieldStay actually pays a cleaner) can legitimately differ from what the PMS charges guests. See `backfillCleaningCost()` in `lib/properties/upsert-normalized.ts`.
 
 ---
 
@@ -251,7 +251,7 @@ include:      "guest,properties"
 | `review` | `review` | `reviews:read` | |
 | `tasks` | `tasks` | `task:read` ⏳ | |
 
-**📄 Spec — `financials`, wired ahead of the scope grant.** `financials:read` was not yet granted as of this writing, so this has never been observed in a real response for our own account. Updated 2026-07-10 with the real documented shape from Hospitable's own published spec — confirmed identical across **both** `GET /reservations/{id}` (Get Reservation — the actual read endpoint our single-reservation fetch calls) **and** `PUT /reservations/{id}` (Update Reservation)'s example responses, which is stronger evidence than a write-endpoint example alone (the original version of this section guessed top-level `host_payout`/`payout`/`total` keys with no reference material at all — wrong, corrected below). Still not directly confirmed: whether the bulk list endpoint (`GET /reservations`, used by `hospFetchReservations()` for sync) returns the identical shape — very likely given API consistency, but not the same doc page:
+**✅ Confirmed live 2026-07-10 — `financials`.** `financials:read` was granted and this shape was verified against a real test reservation: `financials.host.revenue` populated `bookings.actual_total_amount` with the exact correct dollar amount, which flowed through to `owner_transactions`. Confirmed identical across **both** `GET /reservations/{id}` (Get Reservation — the actual read endpoint our single-reservation fetch calls) **and** `PUT /reservations/{id}` (Update Reservation)'s example responses (the original version of this section guessed top-level `host_payout`/`payout`/`total` keys with no reference material at all — wrong, corrected below), and the bulk list endpoint (`GET /reservations`, used by `hospFetchReservations()` for sync) returns the same shape:
 ```
 financials.host.revenue        { amount, formatted, label: "Gross Revenue", category }   — primary field
 financials.host.accommodation  { amount, formatted, label, category }
@@ -261,11 +261,11 @@ financials.guest.total_price   { amount, formatted, label: "Guest Total Price", 
 financials.guest.accommodation / fees / discounts / taxes / adjustments  [{ amount, formatted, label, category }]
 financials.currency             string
 ```
-**Still not confirmed:** whether `GET /reservations?include=financials` returns the identical shape to the `PUT` response above (likely, since Hospitable's docs consistently reuse the same `financials` structure across reservation endpoints, but not directly verified) — and whether every field is always present or some are omitted when zero/not-applicable.
+Every field observed on the real test reservation above was present (none omitted for being zero/not-applicable), and `GET /reservations?include=financials` (the bulk sync endpoint) returned the identical shape to the single-reservation fetch.
 
-`hospFetchReservations()` and the single-reservation fetch request `include=guest,properties,financials` speculatively. `extractHospitableActualTotal()` in `hospitable.ts` reads `financials.host.revenue` first (the actual owner/PM revenue figure — matches what `owner_transactions` needs), falling back to `financials.guest.total_price` (what the guest paid overall, which can include host-passthrough fees/taxes that don't belong in a revenue figure, but is still a real number rather than nothing) if `host.revenue` is ever absent. Returns `null` on anything malformed — never posts a fabricated number.
+`hospFetchReservations()` and the single-reservation fetch request `include=guest,properties,financials`. `extractHospitableActualTotal()` in `hospitable.ts` reads `financials.host.revenue` first (the actual owner/PM revenue figure — matches what `owner_transactions` needs), falling back to `financials.guest.total_price` (what the guest paid overall, which can include host-passthrough fees/taxes that don't belong in a revenue figure, but is still a real number rather than nothing) if `host.revenue` is ever absent. Returns `null` on anything malformed — never posts a fabricated number.
 
-**FieldStay mapping:** the extracted amount → `bookings.actual_total_amount`, then flows into `booking/confirmed`'s `actual_total_amount` field (`lib/inngest/events.ts`), which `handleBookingConfirmed` (`lib/inngest/functions/booking-events.ts`) prefers over the `avg_nightly_rate` estimate when posting to `owner_transactions`. This is also the first time `booking/confirmed` has ever had a producer — Hospitable's initial and incremental sync now emit it for confirmed, non-block, guest-stay reservations; OwnerRez/Uplisting still don't emit this event today (a separate, pre-existing gap, not addressed here). **Verify against a real GET response for our own account before fully trusting the posted revenue figure** — the shape above is a real Hospitable spec now, not a blind guess, but still unconfirmed for this specific endpoint/include combination.
+**FieldStay mapping (✅ confirmed live 2026-07-10):** the extracted amount → `bookings.actual_total_amount`, then flows into `booking/confirmed`'s `actual_total_amount` field (`lib/inngest/events.ts`), which `handleBookingConfirmed` (`lib/inngest/functions/booking-events.ts`) prefers over the `avg_nightly_rate` estimate when posting to `owner_transactions`. Hospitable's initial and incremental sync emit this event for confirmed, non-block, guest-stay reservations; OwnerRez's initial and incremental sync now emit it too (wired 2026-07-16, via `charges[].owner_amount`/`total_amount` — see `docs/Integrations/ownerrez/` — not the `financials` shape above, which is Hospitable-specific). Uplisting still doesn't emit this event today (a separate, pre-existing gap, not addressed here).
 
 **`guest` include fields:**
 ```

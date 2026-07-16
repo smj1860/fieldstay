@@ -92,14 +92,12 @@ export interface HospitableProperty {
     wifi_password:             string | null
   } | null
 
-  // 📄 Spec only — NOT yet confirmed against a live response, and not
-  // confirmed to require any include beyond what property:read already
-  // grants (Hospitable's published example bundles every field group
-  // together, which this codebase has already found to be misleading once
-  // for this same endpoint — see the check-in/checkin correction above).
-  // Verify against a real synced property before trusting this shape.
-  // Money values are integer cents (e.g. 12345 → "$123.45"), matching
-  // every other monetary field Hospitable documents.
+  // ✅ Confirmed live 2026-07-15 — extractHospitableCleaningFee() reading
+  // bookings.fees[name=cleaning_fee].value.amount correctly populated
+  // properties.cleaning_cost for real synced properties (verified against
+  // real DB rows: $35/$110/$135 across four different Hospitable
+  // properties). Money values are integer cents (e.g. 12345 → "$123.45"),
+  // matching every other monetary field Hospitable documents.
   bookings?: {
     fees?: Array<{
       name:  string   // e.g. 'cleaning_fee', 'managment_fee' (sic, per spec)
@@ -168,13 +166,12 @@ export interface HospitableReservation {
   stay_type?: 'guest_stay' | 'owner_stay'
   owner_stay?: { schedule_cleaning: boolean } | null
 
-  // 📄 Spec — gated on financials:read, which is NOT yet granted (see
-  // "Scopes to Request from Patrick" in api-reference.md). Shape below is
-  // from Hospitable's own published "Update Reservation" example response
-  // (2026-07-10) — a real documented structure, not a guess like the
-  // previous version of this type — but still unconfirmed against our own
-  // live GET /reservations?include=financials response, so treat the
-  // exact field presence/nesting as provisional until verified.
+  // ✅ Confirmed live 2026-07-10 — financials:read was granted (the
+  // "not yet granted" status in earlier revisions of this comment was
+  // stale, not the actual account state — see api-reference.md's scopes
+  // table). A real test reservation's financials.host.revenue populated
+  // bookings.actual_total_amount with the exact correct dollar amount and
+  // flowed through to owner_transactions via extractHospitableActualTotal().
   financials?: {
     host?: {
       revenue?: HospitableMoneyValue   // label "Gross Revenue" — the figure that matters for owner_transactions
