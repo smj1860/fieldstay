@@ -295,13 +295,20 @@ export function GuidebookClient({
           marginBottom:    '32px',
         }}
       >
-        <div data-sponsor-slots style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>
-            Sponsor Slots
-          </h2>
-          <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            {activeSponsorCount}/6 active
-          </span>
+        <div data-sponsor-slots style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <h2 style={{ fontSize: '15px', fontWeight: '600', color: 'var(--text-primary)', margin: 0 }}>
+              Sponsor Slots
+            </h2>
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+              {activeSponsorCount}/6 active
+            </span>
+          </div>
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
+            Each slot gets its own Media Kit link — share it with a local business during
+            your sponsor conversation. It previews their listing exactly as guests will see
+            it and lets them subscribe on the spot, no paperwork required.
+          </p>
         </div>
 
         {[1, 2, 3, 4, 5, 6].map((slotNum) => {
