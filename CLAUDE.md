@@ -259,6 +259,22 @@ org_milestones              — key-value store for org state flags + async job 
 audit_events                — append-only audit log
 push_subscriptions          — PWA push notification endpoints
 oauth_states                — CSRF state tokens for OAuth flows
+notifications                — in-app notification bell event log (added 2026-07-15).
+                              Has type, title, subtitle, href, severity
+                              (red|amber|green|blue), dedupe_key (unique when
+                              NOT NULL — cron/retry idempotency), read_at.
+                              System-inserted only (service role from Inngest);
+                              org members can SELECT and can UPDATE only
+                              read_at via RLS (no column-level lock-down yet).
+                              Superseded 7 PM email categories — see
+                              lib/notifications.ts.
+notification_digest_state    — per-org/category snapshot for the daily 6pm PM
+                              wrap-up digest (added 2026-07-16). PK
+                              (org_id, category), snapshot jsonb. Used by
+                              diffDigestSnapshot() to show new/unchanged/
+                              removed items vs. yesterday. Read-only via RLS
+                              for org members; writes are service-role only
+                              from lib/inngest/functions/cron/notification-digest.ts.
 ```
 
 `powersync_crew_*` tables from the original PowerSync sync layer (replaced by
