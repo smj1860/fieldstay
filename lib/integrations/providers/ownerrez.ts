@@ -183,8 +183,12 @@ export const ownerRezProvider: IntegrationProvider = {
   },
 
   // Handles OwnerRez-specific webhook events beyond the generic revocation.
-  // OwnerRez uses generic action names (entity_insert/entity_update/entity_delete)
-  // with entity type carried separately in the entity_type field.
+  // ✅ Confirmed live 2026-07-16 against OwnerRez's own published webhooks
+  // doc — action is entity_create/entity_update/entity_delete (also
+  // application_authorization_revoked and webhook_test). The previous
+  // 'entity_insert' here was never a real action value, so every real
+  // create-type webhook OwnerRez has ever sent fell through to the
+  // "Unhandled webhook action" default branch and did nothing.
   async handleWebhookEvent({ action, payload, externalUserId: _externalUserId, correlationId }) {
     const data       = payload as Record<string, unknown>
     const entityType = String(data.entity_type ?? '')
@@ -195,7 +199,14 @@ export const ownerRezProvider: IntegrationProvider = {
         // Handled by the generic webhook route — nothing to do here
         break
 
-      case 'entity_insert':
+      case 'webhook_test':
+        // OwnerRez's own connectivity check when the webhook URL is saved
+        // in the Developer/API settings — no sync action needed, just
+        // acknowledge with a 2xx (the route handler already does this for
+        // any case that doesn't throw).
+        break
+
+      case 'entity_create':
       case 'entity_update':
       case 'entity_delete': {
         if (entityType === 'booking') {
@@ -225,7 +236,12 @@ export const ownerRezProvider: IntegrationProvider = {
             },
           })
         } else {
-          // property, review, etc. — not yet wired to a specific handler.
+          // property, inquiry, quote, thread_message — OwnerRez's real
+          // supported entity_type list (confirmed live 2026-07-16), none
+          // wired to a specific handler yet. Note: 'review' is NOT a valid
+          // OwnerRez webhook entity_type at all — reviews can only be
+          // synced via the existing 6-hour polling cron
+          // (ownerrez-reviews-sync.ts), there is no webhook alternative.
           // Distinct from an unrecognized action: known entity type, no handler yet.
           console.log(`[OwnerRez] entity_type "${entityType}" webhook received, no specific handler yet (action=${action})`)
         }

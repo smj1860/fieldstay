@@ -218,9 +218,13 @@ export async function POST(
   }
 
   // ── 5. Delegate provider-specific events ──────────────────
-  //    Future events: booking.created, booking.modified, guest.updated, etc.
-  //    These are fired via individual webhook subscriptions (POST /v2/webhooksubscriptions)
-  //    and have a different payload format than the global revocation event.
+  //    OwnerRez's real non-revocation actions (✅ confirmed live 2026-07-16
+  //    against OwnerRez's own webhooks doc): entity_create/entity_update/
+  //    entity_delete, with entity_type carried separately (booking/guest/
+  //    property/inquiry/quote/thread_message — 'review' is not a valid
+  //    entity_type at all). These are delivered to whatever single URL is
+  //    configured in the OAuth app's Developer/API settings page in the
+  //    OwnerRez dashboard, not via a per-connection subscription API call.
   //
   //    We always return 200 quickly and offload heavy processing to Inngest.
   try {
