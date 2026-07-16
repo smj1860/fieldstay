@@ -27,13 +27,6 @@ import type {
 const BASE_URL   = 'https://api.ownerrez.com'
 const PROVIDER   = 'ownerrez'
 
-interface OwnerRezWebhookSubscription {
-  id?:        number
-  url:        string
-  event_type: string
-  is_active?: boolean
-}
-
 // ── Shared IP rate-limit budget tracker ──────────────────────────────────────
 //
 // OwnerRez limits 300 requests per 5-minute rolling window per IP address —
@@ -289,33 +282,6 @@ export class OwnerRezApiClient {
     return this.fetchAllPages<OwnerRezReview>('/v2/reviews', queryParams)
   }
 
-  async registerWebhookSubscriptions(webhookBaseUrl: string): Promise<void> {
-    const eventsToRegister = [
-      'booking.created',
-      'booking.modified',
-      'booking.cancelled',
-      'guest.created',
-      'guest.updated',
-    ]
-
-    const existing = await this.fetchAllPages<OwnerRezWebhookSubscription>(
-      '/v2/webhooksubscriptions'
-    )
-    const existingUrls = new Set(
-      existing
-        .filter(s => s.url === webhookBaseUrl && s.is_active)
-        .map(s => s.event_type)
-    )
-
-    for (const eventType of eventsToRegister) {
-      if (existingUrls.has(eventType)) continue
-
-      await this.fetch('/v2/webhooksubscriptions', undefined, {
-        method: 'POST',
-        body: JSON.stringify({ url: webhookBaseUrl, event_type: eventType, is_active: true }),
-      })
-    }
-  }
 
   async getCurrentUser(): Promise<OwnerRezUser> {
     return this.fetch<OwnerRezUser>('/v2/users/me')
