@@ -17,7 +17,8 @@ import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/int
 import type { OwnerRezProperty, OwnerRezBooking, OwnerRezListing } from '@/lib/integrations/types'
 import {
   buildOwnerRezDetailPatch,
-  ownerRezBookingToNormalized,
+  buildOwnerRezBookingRow,
+  selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
 import { logAuditEvent }        from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
@@ -469,37 +470,7 @@ export const ownerRezInitialSync = inngest.createFunction(
             fsProps.map((p) => [p.external_id, p.id])
           )
 
-          // NOTE: checkin_time/checkout_time are intentionally omitted here.
-          // OwnerRez's booking endpoint never provides a time-of-day (unlike
-          // Hospitable's check_in/check_out), so ownerRezBookingToNormalized
-          // always returns null for both — writing that null on every sync
-          // would silently clobber a PM's manual edit to those fields
-          // (see app/(dashboard)/bookings/actions.ts). Omitting the keys
-          // entirely leaves them untouched on conflict, same as before this
-          // extraction.
-          const bookingRows = bookings.map((b) => {
-            const normalized = ownerRezBookingToNormalized(b)
-            return {
-              org_id,
-              property_id:     normalized.property_external_id
-                                 ? (externalToFsId[normalized.property_external_id] ?? null)
-                                 : null,
-              external_source: PROVIDER,
-              external_id:     normalized.external_id,
-              // b.arrival/b.departure used directly so these stay typed as
-              // non-nullable strings — OwnerRez always has both, unlike
-              // Hospitable where the normalized fields can be null.
-              checkin_date:    b.arrival,
-              checkout_date:   b.departure,
-              status:              normalized.status,
-              guest_name:          normalized.guest_name,
-              guest_email:         normalized.guest_email,
-              source:              normalized.source,
-              is_block:            normalized.is_block,
-              stay_type:           normalized.stay_type,
-              actual_total_amount: normalized.actual_total_amount,
-            }
-          })
+          const bookingRows = bookings.map((b) => buildOwnerRezBookingRow(org_id, b, externalToFsId))
 
           const { data: upserted, error } = await supabase
             .from('bookings')
@@ -521,14 +492,7 @@ export const ownerRezInitialSync = inngest.createFunction(
             (upserted ?? []).map((row) => [row.external_id, row.id as string])
           )
 
-          bookingsToPostRevenue = bookingRows
-            .filter((b) => b.status === 'confirmed' && b.stay_type === 'guest_stay' && b.property_id !== null)
-            .map((b) => ({
-              bookingId:         idByExternalId[b.external_id],
-              propertyId:        b.property_id as string,
-              actualTotalAmount: b.actual_total_amount,
-            }))
-            .filter((b): b is { bookingId: string; propertyId: string; actualTotalAmount: number | null } => !!b.bookingId)
+          bookingsToPostRevenue = selectOwnerRezBookingsToPostRevenue(bookingRows, idByExternalId)
         }
 
         try {
