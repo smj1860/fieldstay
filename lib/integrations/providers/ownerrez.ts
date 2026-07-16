@@ -282,6 +282,64 @@ export function normalizeOwnerRezAmenities(
   return result
 }
 
+type OwnerRezDetailPatchExisting = {
+  wifi_name:           string | null
+  wifi_password:       string | null
+  access_instructions: string | null
+  house_manual:        string | null
+}
+
+function isPresent<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined
+}
+
+function patchAddressFields(patch: Record<string, unknown>, addr: OwnerRezProperty['address']): void {
+  if (!addr) return
+  if (addr.street1)     patch.address = addr.street1
+  if (addr.state)       patch.state   = addr.state
+  if (addr.city)        patch.city    = addr.city
+  if (addr.postal_code) patch.zip     = addr.postal_code
+}
+
+// Several detail fields used truthy checks (`if (detail.latitude)`) before
+// this was extracted, meaning a legitimate value of exactly 0 (or, for
+// min_renter_age, an explicit null clearing a prior value) would be silently
+// skipped. Low real-world likelihood (no real US property sits on the
+// equator or requires a minimum renter age of 0), but corrected for
+// consistency with the rest of the codebase's null-handling convention.
+function patchDetailScalarFields(patch: Record<string, unknown>, detail: OwnerRezProperty): void {
+  if (isPresent(detail.latitude))        patch.lat            = detail.latitude
+  if (isPresent(detail.longitude))       patch.lng            = detail.longitude
+  if (isPresent(detail.max_guests))      patch.max_guests      = detail.max_guests
+  if (isPresent(detail.smoking_allowed)) patch.smoking_allowed = detail.smoking_allowed
+  if (isPresent(detail.pets_allowed))    patch.pets_allowed    = detail.pets_allowed
+  if (isPresent(detail.max_pets))        patch.max_pets        = detail.max_pets
+  if (isPresent(detail.events_allowed))  patch.events_allowed  = detail.events_allowed
+  if (isPresent(detail.min_renter_age))  patch.min_renter_age  = detail.min_renter_age
+}
+
+function patchListingContentFields(
+  patch:    Record<string, unknown>,
+  existing: OwnerRezDetailPatchExisting,
+  listing:  OwnerRezListing
+): void {
+  if (!existing.wifi_name && listing.wifi_network)
+    patch.wifi_name = listing.wifi_network
+
+  if (!existing.wifi_password && listing.wifi_password)
+    patch.wifi_password = listing.wifi_password
+
+  if (!existing.access_instructions && listing.check_in_instructions)
+    patch.access_instructions = listing.check_in_instructions
+
+  if (!existing.house_manual && listing.house_manual)
+    patch.house_manual = listing.house_manual
+
+  if (listing.amenity_categories?.length) {
+    patch.amenities = normalizeOwnerRezAmenities(listing.amenity_categories)
+  }
+}
+
 /**
  * Builds the DB patch for a property's enrichment pass (address, lat/lng,
  * occupancy/rules from the detail endpoint; WiFi/instructions/house
@@ -290,64 +348,21 @@ export function normalizeOwnerRezAmenities(
  * mapper policy; everything else always overwrites). Pure function — no
  * I/O — extracted from the per-property enrichment step in
  * ownerrez/initial-sync.ts for direct unit test coverage.
- *
- * Fixes an inconsistency found while extracting this: several detail
- * fields used truthy checks (`if (detail.latitude)`) instead of explicit
- * null/undefined checks, meaning a legitimate value of exactly 0 (or,
- * for min_renter_age, an explicit null clearing a prior value) would be
- * silently skipped. Low real-world likelihood (no real US property sits
- * on the equator or requires a minimum renter age of 0), but corrected
- * for consistency with the rest of the codebase's null-handling
- * convention now that it's being pulled out for direct testing.
  */
 export function buildOwnerRezDetailPatch(
-  existing: {
-    wifi_name:           string | null
-    wifi_password:       string | null
-    access_instructions: string | null
-    house_manual:        string | null
-  },
+  existing: OwnerRezDetailPatchExisting,
   detail:  OwnerRezProperty | null,
   listing: OwnerRezListing | undefined
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {}
 
   if (detail) {
-    const addr = detail.address
-
-    if (addr) {
-      if (addr.street1)     patch.address = addr.street1
-      if (addr.state)       patch.state   = addr.state
-      if (addr.city)        patch.city    = addr.city
-      if (addr.postal_code) patch.zip     = addr.postal_code
-    }
-
-    if (detail.latitude       !== null && detail.latitude       !== undefined) patch.lat            = detail.latitude
-    if (detail.longitude      !== null && detail.longitude      !== undefined) patch.lng            = detail.longitude
-    if (detail.max_guests     !== null && detail.max_guests     !== undefined) patch.max_guests      = detail.max_guests
-    if (detail.smoking_allowed !== null && detail.smoking_allowed !== undefined) patch.smoking_allowed = detail.smoking_allowed
-    if (detail.pets_allowed    !== null && detail.pets_allowed    !== undefined) patch.pets_allowed    = detail.pets_allowed
-    if (detail.max_pets        !== null && detail.max_pets        !== undefined) patch.max_pets        = detail.max_pets
-    if (detail.events_allowed  !== null && detail.events_allowed  !== undefined) patch.events_allowed  = detail.events_allowed
-    if (detail.min_renter_age  !== null && detail.min_renter_age  !== undefined) patch.min_renter_age  = detail.min_renter_age
+    patchAddressFields(patch, detail.address)
+    patchDetailScalarFields(patch, detail)
   }
 
   if (listing) {
-    if (!existing.wifi_name && listing.wifi_network)
-      patch.wifi_name = listing.wifi_network
-
-    if (!existing.wifi_password && listing.wifi_password)
-      patch.wifi_password = listing.wifi_password
-
-    if (!existing.access_instructions && listing.check_in_instructions)
-      patch.access_instructions = listing.check_in_instructions
-
-    if (!existing.house_manual && listing.house_manual)
-      patch.house_manual = listing.house_manual
-
-    if (listing.amenity_categories?.length) {
-      patch.amenities = normalizeOwnerRezAmenities(listing.amenity_categories)
-    }
+    patchListingContentFields(patch, existing, listing)
   }
 
   return patch
@@ -425,4 +440,81 @@ export function ownerRezBookingToNormalized(b: OwnerRezBooking): NormalizedBooki
     stay_type:   b.type === 'owner' ? 'owner_stay' : 'guest_stay',
     actual_total_amount: extractOwnerRezActualTotal(b),
   }
+}
+
+export interface OwnerRezBookingRow {
+  org_id:              string
+  property_id:         string | null
+  external_source:     'ownerrez'
+  external_id:         string
+  checkin_date:        string
+  checkout_date:       string
+  status:              string
+  guest_name:          string | null
+  guest_email:         string | null
+  source:              string
+  is_block:            boolean
+  stay_type:           string
+  actual_total_amount: number | null
+}
+
+/**
+ * Builds one `bookings` upsert row from a raw OwnerRez booking, resolving
+ * property_id through the externalToFsId map each sync builds from its own
+ * property lookup step. Consolidates row-building logic previously
+ * duplicated verbatim in ownerrez/initial-sync.ts and
+ * ownerrez/incremental-sync.ts.
+ *
+ * checkin_time/checkout_time are intentionally omitted — OwnerRez never
+ * provides a time-of-day, so writing null on every sync would silently
+ * clobber a PM's manual edit to those fields (see
+ * app/(dashboard)/bookings/actions.ts). Omitting the keys leaves them
+ * untouched on conflict.
+ */
+export function buildOwnerRezBookingRow(
+  orgId:          string,
+  b:              OwnerRezBooking,
+  externalToFsId: Record<string, string>
+): OwnerRezBookingRow {
+  const normalized = ownerRezBookingToNormalized(b)
+  return {
+    org_id: orgId,
+    property_id: normalized.property_external_id
+      ? (externalToFsId[normalized.property_external_id] ?? null)
+      : null,
+    external_source:     'ownerrez',
+    external_id:         normalized.external_id,
+    // b.arrival/b.departure used directly so these stay typed as
+    // non-nullable strings — OwnerRez always has both, unlike Hospitable
+    // where the normalized fields can be null.
+    checkin_date:        b.arrival,
+    checkout_date:       b.departure,
+    status:              normalized.status,
+    guest_name:          normalized.guest_name,
+    guest_email:         normalized.guest_email,
+    source:              normalized.source,
+    is_block:            normalized.is_block,
+    stay_type:           normalized.stay_type,
+    actual_total_amount: normalized.actual_total_amount,
+  }
+}
+
+/**
+ * Selects newly-upserted confirmed guest-stay bookings eligible for revenue
+ * posting, pairing each with its FieldStay booking id. Consolidates the
+ * filter/map/filter chain previously duplicated verbatim in
+ * ownerrez/initial-sync.ts and ownerrez/incremental-sync.ts.
+ */
+export function selectOwnerRezBookingsToPostRevenue(
+  rows:           OwnerRezBookingRow[],
+  idByExternalId: Record<string, string>
+): { bookingId: string; propertyId: string; actualTotalAmount: number | null }[] {
+  return rows
+    .filter((b) => b.status === 'confirmed' && b.stay_type === 'guest_stay' && b.property_id !== null)
+    .map((b) => ({
+      bookingId:         idByExternalId[b.external_id],
+      propertyId:        b.property_id as string,
+      actualTotalAmount: b.actual_total_amount,
+    }))
+    .filter((b): b is { bookingId: string; propertyId: string; actualTotalAmount: number | null } => !!b.bookingId)
 }

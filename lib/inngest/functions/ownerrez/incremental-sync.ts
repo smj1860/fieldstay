@@ -35,7 +35,10 @@ import { createPmNotification }         from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
 import { createGuidebookPropertyConfigsForProperties } from '@/lib/guidebook/sync'
 import { seedPresentAssetsFromAmenities } from '@/lib/asset-discovery/seed-from-amenities'
-import { ownerRezBookingToNormalized } from '@/lib/integrations/providers/ownerrez'
+import {
+  buildOwnerRezBookingRow,
+  selectOwnerRezBookingsToPostRevenue,
+} from '@/lib/integrations/providers/ownerrez'
 
 const PROVIDER = 'ownerrez'
 
@@ -220,34 +223,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               }
             }
 
-            // NOTE: checkin_time/checkout_time are intentionally omitted —
-            // OwnerRez never provides a time-of-day, so writing null on every
-            // sync would clobber a PM's manual edit to those fields. See the
-            // matching note in ownerrez/initial-sync.ts.
-            const bookingRows = bookings.map((b) => {
-              const normalized = ownerRezBookingToNormalized(b)
-              return {
-                org_id:          conn.org_id,
-                property_id:     normalized.property_external_id
-                                   ? (externalToFsId[normalized.property_external_id] ?? null)
-                                   : null,
-                external_source: PROVIDER,
-                external_id:     normalized.external_id,
-                // b.arrival/b.departure used directly (not normalized.checkin_date/
-                // checkout_date) so these stay typed as non-nullable strings —
-                // OwnerRez's booking payload always has both, unlike Hospitable
-                // where the normalized fields can be null.
-                checkin_date:        b.arrival,
-                checkout_date:       b.departure,
-                status:              normalized.status,
-                guest_name:          normalized.guest_name,
-                guest_email:         normalized.guest_email,
-                source:              normalized.source,
-                is_block:            normalized.is_block,
-                stay_type:           normalized.stay_type,
-                actual_total_amount: normalized.actual_total_amount,
-              }
-            })
+            const bookingRows = bookings.map((b) => buildOwnerRezBookingRow(conn.org_id, b, externalToFsId))
 
             const { data: upserted, error } = await supabase
               .from('bookings')
@@ -267,14 +243,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               (upserted ?? []).map((row) => [row.external_id, row.id as string])
             )
 
-            bookingsToPostRevenue = bookingRows
-              .filter((b) => b.status === 'confirmed' && b.stay_type === 'guest_stay' && b.property_id !== null)
-              .map((b) => ({
-                bookingId:         idByExternalId[b.external_id],
-                propertyId:        b.property_id as string,
-                actualTotalAmount: b.actual_total_amount,
-              }))
-              .filter((b): b is { bookingId: string; propertyId: string; actualTotalAmount: number | null } => !!b.bookingId)
+            bookingsToPostRevenue = selectOwnerRezBookingsToPostRevenue(bookingRows, idByExternalId)
 
             // Send immediate maintenance-suggestion notifications for owner blocks.
             // Blocks never generate turnovers (filtered at the generator query level),
