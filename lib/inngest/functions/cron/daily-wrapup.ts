@@ -18,7 +18,13 @@ export const dailyWrapUp = inngest.createFunction(
   { id: 'cron-daily-wrapup', name: 'Cron: Daily PM Wrap-Up Email', retries: 2 },
   { cron: '0 23 * * *' },
   async ({ step, logger }) => {
-    const now            = new Date()
+    // Captured in its own memoized step so `now` (and everything derived from
+    // it below, including the email's idempotencyKey) is stable across a
+    // retry — this cron fires at 23:00 UTC, an hour from midnight, so
+    // re-reading the wall clock on a post-send retry would compute a
+    // different date, defeat the idempotencyKey, and double-send the email.
+    const nowMs = await step.run('capture-now', async () => Date.now())
+    const now            = new Date(nowMs)
     const isFriday        = now.getUTCDay() === 5   // cron fires at a fixed UTC hour — see timezone note
     const isMonday         = now.getUTCDay() === 1
     const tomorrowStart    = new Date(now); tomorrowStart.setUTCHours(0, 0, 0, 0); tomorrowStart.setUTCDate(tomorrowStart.getUTCDate() + 1)

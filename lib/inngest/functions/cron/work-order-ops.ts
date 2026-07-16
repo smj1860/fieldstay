@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
+import { createPmNotification } from '@/lib/inngest/helpers'
 
 /**
  * SCHEDULED: runs every morning at 8am CT (independent of maintenance-schedules cron).
@@ -10,10 +11,14 @@ import { logAuditEvent } from '@/lib/audit'
  *  • 7.4 — auto-WO creation: creates work orders for due maintenance schedules with auto_create_wo = true
  *
  * 7.2 (repeat issue detection) was removed entirely — see the comment at its
- * old call site. All PM-facing alert emails that used to fire from this cron
- * (aging escalation, repeat issues, auto-WO-created) are now covered by
- * cron-daily-wrapup's daily digest instead; this cron's non-email side
- * effects (priority escalation, WO auto-creation, audit logs) are unchanged.
+ * old call site. The aging-escalation email is covered by cron-daily-wrapup's
+ * daily digest instead. The 7.4 auto-created-WO email was replaced with a
+ * direct bell notification (not left to the digest) — these WOs always have
+ * portal_enabled=false, so handleWorkOrderCreated's own notify step never
+ * runs for them, and they may not be vendor_id-null either (assigned_vendor_id/
+ * specialty-hint chain), so the digest's unassigned-WO section can't be
+ * relied on to catch them. This cron's non-email side effects (priority
+ * escalation, WO auto-creation, audit logs) are unchanged.
  */
 export const dailyWorkOrderOps = inngest.createFunction(
   {
@@ -125,6 +130,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
     for (const schedule of autoWOSchedules) {
       const autoCreateEventData = await step.run(`auto-create-wo-${schedule.id}`, async () => {
         const supabase = createServiceClient()
+        const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
 
         // Idempotency: skip if an open WO already exists for this schedule + date
         const { data: existingWO } = await supabase
@@ -200,8 +206,23 @@ export const dailyWorkOrderOps = inngest.createFunction(
           metadata:   { source: 'maintenance_schedule', maintenance_schedule_id: schedule.id },
         })
 
-        // PM-facing "work order auto-created" alert removed — cron-daily-wrapup's
-        // maintenance digest section (due schedules + unassigned WOs) covers it.
+        // Bell notification (not the removed PM alert email) — required here
+        // because portal_enabled is always false for this path, so
+        // handleWorkOrderCreated's own notify-pm step never runs for these WOs
+        // (it's gated on portal_enabled), and cron-daily-wrapup's unassigned-WO
+        // section filters vendor_id IS NULL — which this WO may not satisfy if
+        // the assigned_vendor_id/specialty-hint chain above resolved one. Without
+        // this, a WO auto-created here with a resolved vendor would get zero
+        // PM-facing surface at all.
+        await createPmNotification(supabase, {
+          orgId:     schedule.org_id,
+          type:      'work_order_created',
+          title:     `Work order auto-created — ${schedule.name}`,
+          subtitle:  `${property?.name ?? 'Property'}${vendorId ? '' : ' — no vendor assigned yet'}`,
+          href:      `/maintenance/${wo.id}`,
+          severity:  'blue',
+          dedupeKey: `auto-wo-created-${schedule.id}-${schedule.next_due_date}`,
+        })
 
         return {
           work_order_id:  wo.id,
