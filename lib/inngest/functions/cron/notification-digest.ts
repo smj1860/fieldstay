@@ -13,6 +13,14 @@ import { createPmNotification } from '@/lib/inngest/helpers'
  * review or per manual "Generate drafts" click — so per-run notifications
  * would spam the bell. This rolls them into one notification per org per day.)
  *
+ * The work-order count excludes anything still unassigned (no vendor_id,
+ * status pending/quote_requested) — cron-daily-wrapup's unassigned-WO
+ * section (6pm CT) names those individually, so a WO created this morning
+ * would otherwise get surfaced twice: once as an anonymous count here, once
+ * by name that evening. This digest is left covering only WOs that already
+ * have a vendor / are past that stage, so the two notifications complement
+ * rather than duplicate each other.
+ *
  * dedupe_key protects against a retried/duplicate cron run producing two
  * rows for the same org+day+category.
  */
@@ -20,20 +28,34 @@ export const notificationDigest = inngest.createFunction(
   { id: 'cron-notification-digest', name: 'Cron: Daily Notification Digest', retries: 2 },
   { cron: '0 12 * * *' },
   async ({ step, logger }) => {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
-    const today = new Date().toISOString().split('T')[0]
+    // Captured in its own memoized step so `since`/`today` (baked into each
+    // notification's dedupeKey below) stay stable across a retry — reading
+    // the wall clock outside a step gets recomputed on every replay, and a
+    // retry that crosses the date boundary would mint a different dedupeKey
+    // than the original attempt, letting a duplicate notification through.
+    const { since, today } = await step.run('capture-now', async () => {
+      const nowMs = Date.now()
+      return {
+        since: new Date(nowMs - 24 * 60 * 60 * 1000).toISOString(),
+        today: new Date(nowMs).toISOString().split('T')[0]!,
+      }
+    })
 
     const woCreatedByOrg = await step.run('count-work-orders-created', async () => {
       const supabase = createServiceClient()
       const { data, error } = await supabase
         .from('work_orders')
-        .select('org_id')
+        .select('org_id, vendor_id, status')
         .gte('created_at', since)
 
       if (error) throw new Error(`Failed to count work orders created: ${error.message}`)
 
+      // Exclude WOs that cron-daily-wrapup's unassigned-WO section will name
+      // individually this evening — see the doc comment above.
       const counts = new Map<string, number>()
       for (const row of data ?? []) {
+        const stillUnassigned = row.vendor_id === null && ['pending', 'quote_requested'].includes(row.status)
+        if (stillUnassigned) continue
         counts.set(row.org_id, (counts.get(row.org_id) ?? 0) + 1)
       }
       return Array.from(counts.entries())
@@ -65,7 +87,7 @@ export const notificationDigest = inngest.createFunction(
           orgId,
           type:      'work_order_created_digest',
           title:     `${count} work order${count !== 1 ? 's' : ''} created today`,
-          subtitle:  'Tap to view all work orders',
+          subtitle:  'Already assigned — tonight\'s wrap-up covers any still needing a vendor',
           href:      '/maintenance',
           severity:  'blue',
           dedupeKey: `wo-created-digest-${orgId}-${today}`,

@@ -48,7 +48,15 @@ export const dailyWrapUp = inngest.createFunction(
     let sentCount = 0
 
     for (const orgId of orgIds) {
-      await step.run(`build-wrapup-${orgId}`, async () => {
+      // Split into two steps: compute (read-only queries + diffDigestSnapshot's
+      // writes) and send (email + PO-sent marking). diffDigestSnapshot mutates
+      // notification_digest_state every time it's called — if that lived in the
+      // same step as the (retriable) email send, a retry after a send failure
+      // would re-run the diff against the snapshot the FAILED attempt just
+      // wrote, silently losing the "NEW" badge on genuinely-new items in the
+      // email that actually goes out. Splitting means the compute step is
+      // memoized once it succeeds — a send-step retry never re-triggers it.
+      const wrapup = await step.run(`compute-wrapup-${orgId}`, async () => {
         const supabase = createServiceClient()
 
         // ── 1. Turnover schedule for tomorrow ──────────────────────────────
@@ -342,30 +350,42 @@ export const dailyWrapUp = inngest.createFunction(
           }
         })
 
-        // ── Assemble + send if anything's non-empty ─────────────────────────
-        const hasContent =
+        // ── Assemble — hand off to the send step below ──────────────────────
+        const hasContent = Boolean(
           tomorrowSection.length || checklistSection.length || assetHealthSection.length ||
           complianceSection.length || maintenanceSection.due.length || maintenanceSection.unassigned.length ||
           escalationSection.length || vacancySection.length || repeatSection.length ||
           unassignedTurnoverSection.length || sponsorsSection || inventorySection.length
+        )
 
-        if (!hasContent) return { orgId, sent: false, reason: 'nothing_to_report' }
+        return {
+          hasContent,
+          tomorrowSection, checklistSection, assetHealthSection, complianceSection,
+          maintenanceSection, escalationSection, vacancySection, repeatSection,
+          unassignedTurnoverSection, sponsorsSection, inventorySection,
+          pendingPOIds: (pendingPOs ?? []).map((p) => p.id as string),
+        }
+      })
 
+      await step.run(`send-wrapup-${orgId}`, async () => {
+        if (!wrapup.hasContent) return { orgId, sent: false, reason: 'nothing_to_report' }
+
+        const supabase = createServiceClient()
         const [pmEmail] = await getPmEmails(supabase, orgId)
         if (!pmEmail) return { orgId, sent: false, reason: 'no_pm_email' }
 
         const html = await renderDailyWrapUpEmail({
-          tomorrow:            tomorrowSection,
-          checklist:           checklistSection,
-          assetHealth:         assetHealthSection,
-          compliance:          complianceSection,
-          maintenance:         maintenanceSection,
-          escalations:         escalationSection,
-          vacancy:             vacancySection,
-          repeatIssues:        repeatSection,
-          unassignedTurnovers: unassignedTurnoverSection,
-          sponsors:            sponsorsSection,
-          inventory:           inventorySection,
+          tomorrow:            wrapup.tomorrowSection,
+          checklist:           wrapup.checklistSection,
+          assetHealth:         wrapup.assetHealthSection,
+          compliance:          wrapup.complianceSection,
+          maintenance:         wrapup.maintenanceSection,
+          escalations:         wrapup.escalationSection,
+          vacancy:             wrapup.vacancySection,
+          repeatIssues:        wrapup.repeatSection,
+          unassignedTurnovers: wrapup.unassignedTurnoverSection,
+          sponsors:            wrapup.sponsorsSection,
+          inventory:           wrapup.inventorySection,
           dashboardUrl:        `${appUrl}/ops`,
         })
 
@@ -377,11 +397,11 @@ export const dailyWrapUp = inngest.createFunction(
 
         // Mark today's aggregated POs as sent, same as the retired
         // inventory-order-email-cron.ts used to do.
-        if (pendingPOs?.length) {
+        if (wrapup.pendingPOIds.length) {
           await supabase
             .from('purchase_orders')
             .update({ order_email_sent: true })
-            .in('id', pendingPOs.map((p) => p.id))
+            .in('id', wrapup.pendingPOIds)
         }
 
         return { orgId, sent: true }
