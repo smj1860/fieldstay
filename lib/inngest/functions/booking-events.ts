@@ -3,7 +3,14 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 
-// ── Booking Confirmed (OwnerRez / Uplisting) ─────────────────────────────────
+// A real per-booking total from the PMS beats the avg_nightly_rate estimate —
+// only a positive, present value counts as "real"; 0 or a missing figure
+// falls through to the estimate.
+function hasPositiveAmount(value: number | null | undefined): value is number {
+  return value !== null && value !== undefined && value > 0
+}
+
+// ── Booking Confirmed (Hospitable / OwnerRez) ────────────────────────────────
 
 export const handleBookingConfirmed = inngest.createFunction(
   { id: 'booking-confirmed', name: 'Booking Confirmed — Post Revenue', retries: 3 },
@@ -39,12 +46,12 @@ export const handleBookingConfirmed = inngest.createFunction(
       const nights = Math.round((checkout.getTime() - checkin.getTime()) / 86_400_000)
       if (nights <= 0) return { skipped: true, reason: 'non_positive_nights' }
 
-      // Prefer the PMS's own reported total (currently only Hospitable,
-      // once financials:read is granted) over the avg_nightly_rate
-      // estimate — a real per-booking figure beats a guess whenever we
-      // have one.
+      // Prefer the PMS's own reported total (Hospitable via financials.host.revenue,
+      // OwnerRez via charges[].owner_amount/total_amount) over the
+      // avg_nightly_rate estimate — a real per-booking figure beats a
+      // guess whenever we have one.
       let amount: number
-      if (actual_total_amount != null && actual_total_amount > 0) {
+      if (hasPositiveAmount(actual_total_amount)) {
         amount = actual_total_amount
       } else if (property?.avg_nightly_rate) {
         amount = parseFloat((nights * property.avg_nightly_rate).toFixed(2))
@@ -52,7 +59,8 @@ export const handleBookingConfirmed = inngest.createFunction(
         return { skipped: true, reason: 'no_rate' }
       }
 
-      const guestLabel = booking.guest_name ? ` — ${booking.guest_name}` : ''
+      const guestLabel     = booking.guest_name ? ` — ${booking.guest_name}` : ''
+      const hasActualAmount = hasPositiveAmount(actual_total_amount)
 
       // A later post carrying a real actual_total_amount (e.g. Hospitable's
       // financials_changed webhook firing after the initial reservation sync)
@@ -61,7 +69,6 @@ export const handleBookingConfirmed = inngest.createFunction(
       // lock the estimate in forever. A re-post without a real total (just
       // another estimate) still no-ops so it can't clobber an
       // already-posted actual figure with a stale guess.
-      const hasActualAmount = actual_total_amount != null && actual_total_amount > 0
 
       const { error } = await supabase.from('owner_transactions').upsert(
         {

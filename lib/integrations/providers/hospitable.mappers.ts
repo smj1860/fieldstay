@@ -32,9 +32,10 @@ export function normalizeHospitableAmenities(
   return Object.fromEntries(amenities.map((a) => [a, true]))
 }
 
-// 📄 Spec only — see HospitableProperty.bookings' doc comment. Returns
-// dollars (converts from integer cents), or null if the fee is absent or
-// malformed in any way — never guesses a value from a partial match.
+// ✅ Confirmed live 2026-07-15 — see HospitableProperty.bookings' doc
+// comment. Returns dollars (converts from integer cents), or null if the
+// fee is absent or malformed in any way — never guesses a value from a
+// partial match.
 function extractHospitableCleaningFee(
   bookings: HospitableProperty['bookings']
 ): number | null {
@@ -47,13 +48,14 @@ function extractHospitableCleaningFee(
   return Math.round(amount) / 100
 }
 
-// 📄 Spec only — see HospitableReservation.financials' doc comment. Tries
-// each plausible key in priority order (host_payout is what a PM/owner
-// actually receives, which is the more useful and more likely-present
-// figure for owner_transactions than a raw "total" the guest paid) and
-// returns dollars for the first one that's present and well-formed, or
-// null if none match — a wrong/absent guess falls back to the existing
-// avg_nightly_rate estimate in booking-events.ts, never a fabricated number.
+// ✅ Confirmed live 2026-07-10 — see HospitableReservation.financials' doc
+// comment. Tries each plausible key in priority order (host.revenue is
+// what a PM/owner actually receives, which is the more useful and more
+// likely-present figure for owner_transactions than a raw total the guest
+// paid) and returns dollars for the first one that's present and
+// well-formed, or null if none match — a wrong/absent guess falls back to
+// the existing avg_nightly_rate estimate in booking-events.ts, never a
+// fabricated number.
 function extractHospitableActualTotal(
   financials: HospitableReservation['financials']
 ): number | null {
