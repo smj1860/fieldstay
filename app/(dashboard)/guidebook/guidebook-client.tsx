@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
-import { QRCodeSVG } from 'qrcode.react'
+import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react'
 import { Sun, Wine, CloudRain, Tent, MapPin, Pencil, Check, type LucideIcon } from 'lucide-react'
 import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
@@ -374,18 +374,21 @@ export function GuidebookClient({
 
               <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                 {sponsor && (
-                  <a
-                    href={`${appUrl}/g/kit/${sponsor.media_kit_token}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
-                      border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                      padding: '6px 12px', textDecoration: 'none', backgroundColor: 'var(--bg-card)',
-                    }}
-                  >
-                    Media Kit
-                  </a>
+                  <>
+                    <a
+                      href={`${appUrl}/g/kit/${sponsor.media_kit_token}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
+                        border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                        padding: '6px 12px', textDecoration: 'none', backgroundColor: 'var(--bg-card)',
+                      }}
+                    >
+                      Media Kit
+                    </a>
+                    <SponsorOnePagerButton sponsor={sponsor} appUrl={appUrl} />
+                  </>
                 )}
                 <button
                   onClick={() => setEditingSlot(slotNum)}
@@ -888,6 +891,66 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
         </div>
       </div>
     </div>
+  )
+}
+
+// Renders a hidden QR canvas for the sponsor's media kit URL and, on click,
+// builds a printable one-pager PDF (pitch copy + the sponsor's own preview
+// info + the QR code) for the PM to hand a prospective business during an
+// in-person sponsor conversation. PDF assembly lives in
+// lib/guidebook/sponsor-one-pager.ts — this component only owns the DOM/canvas
+// plumbing pdf-lib can't do itself (reading the rendered QR as PNG bytes).
+function SponsorOnePagerButton({
+  sponsor,
+  appUrl,
+}: Readonly<{
+  sponsor: GuidebookSponsor
+  appUrl:  string
+}>) {
+  const canvasRef                     = useRef<HTMLCanvasElement>(null)
+  const [generating, setGenerating]   = useState(false)
+  const kitUrl = `${appUrl}/g/kit/${sponsor.media_kit_token}`
+
+  async function handleDownload() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    setGenerating(true)
+    try {
+      const { buildSponsorOnePagerPdf } = await import('@/lib/guidebook/sponsor-one-pager')
+      const qrPngBytes = await (await fetch(canvas.toDataURL('image/png'))).arrayBuffer()
+      const pdfBytes   = await buildSponsorOnePagerPdf(sponsor, qrPngBytes, kitUrl)
+
+      const blob    = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' })
+      const blobUrl = URL.createObjectURL(blob)
+      const fileSlug = sponsor.business_name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+
+      const a = document.createElement('a')
+      a.href     = blobUrl
+      a.download = `${fileSlug}-sponsor-one-pager.pdf`
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <>
+      <QRCodeCanvas ref={canvasRef} value={kitUrl} size={240} style={{ display: 'none' }} />
+      <button
+        onClick={handleDownload}
+        disabled={generating}
+        style={{
+          fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+          padding: '6px 12px', backgroundColor: 'var(--bg-card)',
+          cursor: generating ? 'default' : 'pointer', opacity: generating ? 0.6 : 1,
+        }}
+      >
+        {generating ? 'Generating…' : 'One-Pager'}
+      </button>
+    </>
   )
 }
 
