@@ -287,3 +287,199 @@ architecture — same order of complexity as what already exists in
   flat if-chains) is now **stale** — the dispatch has already been
   refactored into the `UPLOAD_HANDLERS` lookup map described above.
   Worth a follow-up pass to correct or remove that entry.
+
+---
+
+## 2. Modular room-based turnover checklist templates
+
+**Concept:** replace the current per-property, hand-typed checklist with
+reusable **room templates** (e.g. "Standard Bedroom," "Deluxe Bathroom")
+that a PM composes a property's checklist out of — pick a room type, set
+how many the property has (Bedroom × 3, Bathroom × 2, Screen Porch × 1),
+and the property's actual checklist sections/items get generated from
+those modules. Editing a room module later can be pushed out to every
+property still using it, instead of a PM hand-editing the same task
+across dozens of properties independently — which is exactly the problem
+today, since every property's checklist is a fully independent copy with
+no ongoing link to anything, from the moment it's created.
+
+### The key finding that shrinks this a lot
+
+The instance-level fields that make checklist items special —
+`is_mandatory`, `non_deletable`, `asset_discovery_type` (Progressive
+Asset Discovery's system-injected tasks), `photo_reason` (the Bayesian
+dynamic-photo-requirement signal) — are **never part of the template at
+all**. They're computed fresh at turnover-creation time from
+`property_assets` and a separate per-property learned-signal table
+(`checklist_item_signals`), keyed by `property_id`, with zero dependency
+on section/room structure. Same story for the mandatory-item PM-email
+completion check (`lib/inngest/functions/turnover-events.ts`'s
+`handleTurnoverCompleted`) — it queries `property_assets` directly, never
+`checklist_instance_items.is_mandatory`. Same for crew Dexie sync (only
+ever touches instance-level columns) and photo storage (keyed by
+`turnover_id`, not template/room id).
+
+**This means `lib/turnovers/generator.ts`'s `snapshotChecklist()` — the
+function that clones a property's template into a live turnover — needs
+zero changes.** It already just reads whatever rows are sitting in
+`checklist_template_items` regardless of where they came from. Turnover
+generation, the crew PWA, offline sync, photo capture, and mandatory-item
+enforcement are all completely insulated from this redesign, as long as
+a property's `checklist_template_items` end up with the same row shape
+they have today — which they do, since nothing about that table changes.
+
+### Schema
+
+No need for the two new "top-level" tables originally proposed
+(`property_templates`, `property_template_rooms`) — `checklist_templates`
+already is a property's blueprint record, and `checklist_template_sections`
+already is the per-room row within it (`name`, `sort_order`). It just
+needs a pointer to a reusable module:
+
+```sql
+CREATE TABLE room_templates (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id     uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name       text NOT NULL,              -- 'Standard Bedroom'
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE room_template_items (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_template_id uuid NOT NULL REFERENCES room_templates(id) ON DELETE CASCADE,
+  task             text NOT NULL,
+  requires_photo   boolean NOT NULL DEFAULT false,
+  notes            text,
+  sort_order       int NOT NULL,
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE checklist_template_sections
+  ADD COLUMN room_template_id uuid REFERENCES room_templates(id) ON DELETE SET NULL,
+  ADD COLUMN room_synced_at   timestamptz;
+```
+
+RLS on the two new tables mirrors `org_master_checklist_items`'s existing
+policy shape exactly: direct `org_id`, `is_org_member(org_id,
+ARRAY['admin','manager','owner'])` for writes, `org_id IN (SELECT
+get_user_org_ids())` for reads.
+
+Existing sections all get `room_template_id = NULL` automatically —
+purely additive, no backfill, no risk to existing property data.
+`checklist_template_items` itself doesn't change shape at all; it just
+gets *populated from* `room_template_items` instead of typed by hand
+when a section is linked to a module.
+
+### Property-setup UX
+
+The property checklist-setup page shows every room template the org has
+built, each with a quantity stepper (default 0). PM sets Bedroom → 3,
+Bathroom → 2, Screen Porch → 1, Kitchen → 1, Dining Room → 1, leaves
+everything else at 0. On save:
+- One `checklist_template_sections` row gets created per unit — Bedroom
+  × 3 creates 3 sections, each tagged `room_template_id` = the Bedroom
+  module's id, auto-labeled "Bedroom 1"/"Bedroom 2"/"Bedroom 3" (renamable
+  inline afterward, e.g. to "Primary Bedroom").
+- Each new section's `checklist_template_items` gets populated by copying
+  that room module's current `room_template_items`.
+- Turning a quantity down removes the extra section(s).
+- A "+ Add custom section" escape hatch stays available for a genuine
+  one-off area not worth a shared module (a boat dock at one specific
+  property) — that section just never gets a `room_template_id`,
+  identical to how every section works today.
+
+### Bulk push — reuse the existing pattern, don't build a new one
+
+The org already has a proven "push an update to every property" mechanism:
+`lib/inngest/functions/apply-master-checklist.ts`, an Inngest-driven
+batched fan-out (batched specifically to avoid a serverless timeout
+looping over 20+ properties synchronously) backing today's "Apply Master
+Checklist to Properties" button. Don't design a new bulk-update mechanism
+for room templates — adapt this one. The only real difference: today's
+version does a full delete-and-replace of a property's *entire* checklist
+sourced from the flat `org_master_checklist_items` catalog; a room-level
+version instead needs to touch only the sections tagged with a specific
+`room_template_id` on each property (leave every other section alone),
+sourced from `room_template_items`. Same event → batched-fan-out →
+per-property-write shape, smaller/targeted blast radius per push. The
+room library page gets the same "Apply to Properties" button the master-
+checklist page has today, just living on each individual room template.
+
+### The org-wide master checklist goes away
+
+Once room templates + per-room push exist, `org_master_checklist_items`,
+`master-checklist-builder.tsx`, `applyMasterChecklistToProperty()`, and
+the whole "master checklist" concept are superseded — a PM building a
+brand-new org's checklist library builds room templates directly instead
+of a flat master list. This needs a plan for two things currently wired
+to the old mechanism:
+
+1. **New-property auto-seed.** `createProperty()`
+   (`app/(dashboard)/properties/actions.ts`) and both PMS initial-sync
+   functions (`lib/inngest/functions/ownerrez/initial-sync.ts`,
+   `lib/inngest/functions/hospitable/initial-sync.ts`) currently call
+   `applyMasterChecklistToProperty(..., { force: false })` to give a new
+   property a non-empty starting checklist. Retiring the master checklist
+   means deciding what replaces this — recommend a small org-level
+   **default room quantities** preset (e.g. "every new property starts
+   with Bedroom × 1, Bathroom × 1, Kitchen × 1, Living Room × 1"), applied
+   automatically through the exact same room-instantiation logic the
+   manual quantity-picker uses, rather than resurrecting a flat-list
+   concept. A manually-added or PMS-synced property with zero rooms
+   configured is a worse first impression than one pre-seeded with a
+   sensible default a PM can then adjust.
+2. **Migration for existing orgs.** Every org currently has real,
+   populated `org_master_checklist_items` rows and real property
+   checklists built from them. Retirement needs either a one-time
+   conversion (group the org's existing master items by `section` name
+   into equivalent `room_templates`, one room template per distinct
+   section) or a decision to just leave existing data alone and only
+   apply the new system going forward, with the old master-checklist UI
+   kept around read-only (or removed) once every org has migrated.
+
+### What does not need to change
+
+Turnover generation (`snapshotChecklist`), crew PWA, Dexie sync, the
+offline mutation outbox, photo capture/storage, the mandatory-asset-
+discovery-item injection, and the PM completion-notification email — all
+confirmed decoupled from template/section structure by the research above.
+
+### What needs to change
+
+- Migration + RLS (schema above)
+- `types/database.ts` — new `RoomTemplate`/`RoomTemplateItem` interfaces,
+  `room_template_id`/`room_synced_at` on `ChecklistTemplateSection`
+  (worth fixing a pre-existing drift while in there:
+  `checklist_template_sections.requires_section_photo` exists on the real
+  table, added by `20260604223345_add_checklist_template_broadcasting.sql`
+  and read/written by `lib/inngest/functions/checklist-broadcast.ts`, but
+  was never added to the `ChecklistTemplateSection` TypeScript interface)
+- A new Room Library settings page + Server Actions — structurally a
+  clone of `app/(dashboard)/setup/checklist-template/`'s existing
+  master-checklist builder (same replace-style RPC pattern, same CSV/DOCX
+  import already built there)
+- `app/(dashboard)/properties/[id]/setup/checklist/checklist-builder.tsx`
+  — the quantity-picker UI, a linked-section indicator, and a way to
+  detach a section from its module (clears `room_template_id`, keeps the
+  items as a normal independent section)
+- A new Inngest fan-out function adapted from
+  `lib/inngest/functions/apply-master-checklist.ts`, scoped to one
+  `room_template_id` instead of the whole checklist
+- Eventually: retiring `org_master_checklist_items` +
+  `master-checklist-builder.tsx` + `applyMasterChecklistToProperty()`,
+  per the plan above
+
+### Phasing
+
+1. **Phase 1** — schema, Room Library CRUD, and the property-setup
+   quantity-picker (create/link/populate sections from modules on save).
+   Fully additive; existing properties untouched. This alone delivers
+   the core ask: pick rooms and quantities, checklist populates, same
+   downstream infrastructure.
+2. **Phase 2** — the per-room bulk-push action (adapted
+   `apply-master-checklist.ts`), "Apply to Properties" button on each
+   room template.
+3. **Phase 3** — retire the org-wide master checklist: default-room-
+   quantities preset for new-property auto-seed, and a decision on
+   migrating vs. freezing existing orgs' `org_master_checklist_items` data.
