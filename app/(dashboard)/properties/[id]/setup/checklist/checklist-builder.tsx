@@ -2,12 +2,18 @@
 
 import { useState, useTransition, useRef } from 'react'
 import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate, cloneChecklistFromProperty } from './actions'
-import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check, ClipboardList, AlertTriangle, Upload } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check, ClipboardList, AlertTriangle, Upload, Home, Link2, Minus } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
-interface Section { tempId: string; id?: string; name: string; items: Item[] }
+interface Section { tempId: string; id?: string; name: string; roomTemplateId?: string | null; items: Item[] }
+
+interface RoomTemplateOption {
+  id: string
+  name: string
+  items: Array<{ task: string; requires_photo: boolean; notes: string | null }>
+}
 
 function makeId() {
   if (typeof window === 'undefined') return 'ssr'
@@ -57,7 +63,7 @@ const DEFAULT_SECTIONS: Section[] = [
   },
 ]
 
-function buildInitialSections(template: { checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null): Section[] {
+function buildInitialSections(template: { checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; room_template_id?: string | null; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null): Section[] {
   if (!template?.checklist_template_sections?.length) return DEFAULT_SECTIONS
 
   return [...template.checklist_template_sections]
@@ -66,6 +72,7 @@ function buildInitialSections(template: { checklist_template_sections?: Array<{ 
       tempId: makeId(),
       id: s.id,
       name: s.name,
+      roomTemplateId: s.room_template_id ?? null,
       items: [...(s.checklist_template_items ?? [])]
         .sort((a, b) => a.sort_order - b.sort_order)
         .map((item) => ({
@@ -78,6 +85,20 @@ function buildInitialSections(template: { checklist_template_sections?: Array<{ 
     }))
 }
 
+function makeSectionFromRoom(room: RoomTemplateOption, label: string): Section {
+  return {
+    tempId: makeId(),
+    name: label,
+    roomTemplateId: room.id,
+    items: room.items.map((item) => ({
+      tempId: makeId(),
+      task: item.task,
+      requires_photo: item.requires_photo,
+      notes: item.notes ?? '',
+    })),
+  }
+}
+
 interface OtherProperty { id: string; name: string }
 interface SourceProperty { id: string; name: string; sectionCount: number }
 
@@ -86,11 +107,13 @@ export function ChecklistBuilder({
   template,
   otherProperties = [],
   sourceProperties = [],
+  roomTemplates = [],
 }: {
   propertyId: string
-  template: { id: string; name: string; checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null
+  template: { id: string; name: string; checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; room_template_id?: string | null; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null
   otherProperties?: OtherProperty[]
   sourceProperties?: SourceProperty[]
+  roomTemplates?: RoomTemplateOption[]
 }) {
   const [sections, setSections] = useState<Section[]>(() => buildInitialSections(template))
   const [saving, startSave] = useTransition()
@@ -98,6 +121,8 @@ export function ChecklistBuilder({
   const [broadcasting, startBroadcast] = useTransition()
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [roomPickerOpen, setRoomPickerOpen] = useState(false)
+  const [roomQuantities, setRoomQuantities] = useState<Record<string, number>>({})
   const [broadcastModal, setBroadcastModal] = useState(false)
   const [broadcastTargets, setBroadcastTargets] = useState<Set<string>>(new Set())
   const [broadcastResult, setBroadcastResult] = useState<string | null>(null)
@@ -202,6 +227,28 @@ export function ChecklistBuilder({
     setSections((p) => [...p, { tempId: makeId(), name: 'New Section', items: [] }])
   }
 
+  const applyRoomQuantities = () => {
+    setSections((prev) => {
+      const next = [...prev]
+      for (const room of roomTemplates) {
+        const targetCount = roomQuantities[room.id] ?? 0
+        if (targetCount <= 0) continue
+        const currentCount = next.filter((s) => s.roomTemplateId === room.id).length
+        for (let i = currentCount + 1; i <= targetCount; i++) {
+          const label = targetCount > 1 ? `${room.name} ${i}` : room.name
+          next.push(makeSectionFromRoom(room, label))
+        }
+      }
+      return next
+    })
+    setRoomQuantities({})
+    setRoomPickerOpen(false)
+  }
+
+  const detachSectionFromRoom = (tempId: string) => {
+    setSections((p) => p.map((s) => s.tempId === tempId ? { ...s, roomTemplateId: null } : s))
+  }
+
   const removeSection = (tempId: string) => {
     setSections((p) => p.filter((s) => s.tempId !== tempId))
   }
@@ -285,6 +332,7 @@ export function ChecklistBuilder({
         id:   s.id,
         name: s.name,
         sort_order: si,
+        room_template_id: s.roomTemplateId ?? null,
         items: s.items.map((item, ii) => ({
           id:             item.id,
           task:           item.task,
@@ -344,6 +392,17 @@ export function ChecklistBuilder({
               onChange={(e) => updateSection(section.tempId, e.target.value)}
               className="flex-1 text-sm font-semibold bg-transparent text-primary-themed focus:outline-none border-b border-transparent focus:border-[var(--accent-gold)]"
             />
+            {section.roomTemplateId && (
+              <button
+                type="button"
+                onClick={() => detachSectionFromRoom(section.tempId)}
+                title="Linked to a room template — click to detach and customize freely"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0"
+                style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}
+              >
+                <Link2 className="w-3 h-3" /> Linked
+              </button>
+            )}
             <div className="flex items-center gap-0.5 ml-auto">
               {(() => {
                 const sectionAllPhoto = section.items.length > 0 &&
@@ -485,8 +544,18 @@ export function ChecklistBuilder({
         </div>
       ) : (
         <div className="flex gap-2">
+          {roomTemplates.length > 0 && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setRoomPickerOpen(true)}
+              className="flex-1 justify-center border-dashed inline-flex items-center gap-1.5"
+            >
+              <Home className="w-4 h-4" /> Insert Rooms from Library
+            </Button>
+          )}
           <Button variant="secondary" onClick={addSection} className="flex-1 justify-center border-dashed">
-            <Plus className="w-4 h-4" /> Add Section
+            <Plus className="w-4 h-4" /> Add Custom Section
           </Button>
           <Button
             type="button"
@@ -519,6 +588,7 @@ export function ChecklistBuilder({
                 id:         s.id,
                 name:       s.name,
                 sort_order: si,
+                room_template_id: s.roomTemplateId ?? null,
                 items:      s.items.map((item, ii) => ({
                   id:             item.id,
                   task:           item.task,
@@ -625,6 +695,60 @@ export function ChecklistBuilder({
             {cloningFrom ? 'Importing…' : 'Import Checklist'}
           </Button>
           <Button variant="ghost" onClick={() => setCloneFromModal(false)}>Cancel</Button>
+        </div>
+      </Dialog>
+
+      <Dialog open={roomPickerOpen} onClose={() => setRoomPickerOpen(false)} title="Insert Rooms from Library" maxWidthClassName="max-w-sm">
+        <p className="text-xs text-muted-themed mb-4">
+          Pick a quantity for each room type this property has. A section gets
+          added for each one, pre-filled with that room&apos;s tasks — rename
+          them afterward (e.g. &quot;Primary Bedroom&quot;) if you&apos;d like.
+        </p>
+        <div className="space-y-3 max-h-72 overflow-y-auto">
+          {roomTemplates.map((room) => {
+            const existingCount = sections.filter((s) => s.roomTemplateId === room.id).length
+            const qty = roomQuantities[room.id] ?? 0
+            return (
+              <div key={room.id} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-primary-themed truncate">{room.name}</p>
+                  {existingCount > 0 && (
+                    <p className="text-xs text-muted-themed">{existingCount} already on this property</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setRoomQuantities((prev) => ({ ...prev, [room.id]: Math.max(0, (prev[room.id] ?? 0) - 1) }))}
+                    disabled={qty === 0}
+                    className="p-1.5 disabled:opacity-30"
+                  >
+                    <Minus className="w-3.5 h-3.5" />
+                  </Button>
+                  <span className="w-6 text-center text-sm font-semibold text-primary-themed">{qty}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setRoomQuantities((prev) => ({ ...prev, [room.id]: (prev[room.id] ?? 0) + 1 }))}
+                    className="p-1.5"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="pt-3 mt-3 border-t border-themed flex gap-3">
+          <Button
+            onClick={applyRoomQuantities}
+            disabled={Object.values(roomQuantities).every((q) => !q)}
+            className="flex-1 text-sm"
+          >
+            Add Rooms
+          </Button>
+          <Button variant="ghost" onClick={() => { setRoomQuantities({}); setRoomPickerOpen(false) }} className="text-sm">Cancel</Button>
         </div>
       </Dialog>
     </div>

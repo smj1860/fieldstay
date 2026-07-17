@@ -21,6 +21,7 @@ export interface ChecklistSectionInput {
   id?: string
   name: string
   sort_order: number
+  room_template_id?: string | null
   items: ChecklistItemInput[]
 }
 
@@ -65,6 +66,23 @@ export async function saveChecklistTemplate(
     tmplId = data.id
   }
 
+  // Any client-supplied room_template_id must be confirmed to belong to
+  // this org before we link a section to it — same reasoning as the
+  // templateId check above.
+  const roomTemplateIds = [...new Set(
+    sections.map((s) => s.room_template_id).filter((id): id is string => !!id)
+  )]
+  if (roomTemplateIds.length > 0) {
+    const { data: ownedRooms } = await supabase
+      .from('room_templates')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .in('id', roomTemplateIds)
+    if ((ownedRooms?.length ?? 0) !== roomTemplateIds.length) {
+      return { error: 'One or more linked room templates were not found.' }
+    }
+  }
+
   // Delete all existing sections + items (full replace)
   await supabase
     .from('checklist_template_sections')
@@ -78,9 +96,11 @@ export async function saveChecklistTemplate(
       .from('checklist_template_sections')
       .insert(
         sections.map((section) => ({
-          template_id: tmplId,
-          name:        section.name,
-          sort_order:  section.sort_order,
+          template_id:      tmplId,
+          name:             section.name,
+          sort_order:       section.sort_order,
+          room_template_id: section.room_template_id ?? null,
+          room_synced_at:   section.room_template_id ? new Date().toISOString() : null,
         }))
       )
       .select('id')
