@@ -875,3 +875,149 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 - Inputs without a visible label → `aria-label` attribute required
 - Tab bars → `components/ui/Tabs.tsx`, not hand-rolled — it already has
   `role="tablist"`/`role="tab"`, `aria-selected`, and a visible focus ring
+
+---
+
+## Architectural Conventions & Standing Audit Checklist
+
+This is the consolidated list of things every self-audit pass on new or
+changed code runs through in this repo. Several of these are elaborated in
+full detail elsewhere in this file (linked below) — this section exists so
+the full set has one place to be checked against, instead of being
+re-derived from scratch each time. When in doubt, treat "did I check every
+item below" as part of the definition of done for any non-trivial change.
+
+### Data Integrity & Concurrency
+
+- **N+1 queries and loops** — never issue one query per iteration of a
+  loop (`for (const x of xs) { await supabase.from(...).select() }`).
+  Fetch every row needed in one query (`.in('id', ids)` or a join), build
+  an in-memory lookup, then iterate. This applies equally to Inngest
+  functions processing many tenants/records and to React Server
+  Components rendering lists.
+- **Dedup** — anything reachable more than once (a retried webhook, a
+  cron that re-runs, a step Inngest replays) needs an explicit dedup key,
+  not an assumption that it'll only ever run once:
+  - `owner_transactions` → `source_reference_id` checked first
+  - `notifications` → `dedupe_key` unique index (NULL = no protection needed)
+  - Generic provider webhooks → content-hash keyed row in `processed_webhooks`
+    (see `app/api/webhooks/[provider]/route.ts`) — not `payload.id`, whose
+    semantics vary by provider and aren't trustworthy as a dedup key on their own
+  - Anywhere else → `ON CONFLICT DO NOTHING` / a `UNIQUE` constraint the
+    write can safely collide against
+- **Idempotency** — related to dedup but distinct: a step that already ran
+  halfway (crashed mid-way, got retried) must be safe to run again without
+  double side effects. Every Inngest step that creates a record must check
+  for an existing one first (see Inngest Functions section above); this
+  matters even when a dedup key also exists, since the dedup key only
+  stops a second *identical* delivery, not a partially-applied first one.
+- **Concurrency / race conditions** — a load-then-decide-then-write
+  sequence (check something, then act on what you saw) is a TOCTOU risk
+  the moment two requests can run it at the same time — guard with a DB
+  constraint or atomic update (`UPDATE ... WHERE` with the precondition
+  in the `WHERE` clause), not just an application-level `if` before the
+  write. Async work that can complete out of order (two overlapping
+  refreshes, a stale closure winning a race against a newer one) needs an
+  explicit generation/version guard — see `refreshChecklistSubscription`'s
+  and `refreshAssetsSubscription`'s generation-token pattern in
+  `lib/dexie/context.tsx`.
+- **Foreign keys & referential integrity** — every reference column gets
+  a real `REFERENCES` constraint with a deliberately chosen `ON DELETE`
+  behavior (`CASCADE` / `SET NULL` / `RESTRICT`) — never left to default,
+  and never enforced only in application code, which doesn't catch rows
+  written by another path (a migration backfill, the Supabase dashboard,
+  a different service).
+- **Atomic multi-step writes** — when one logical action touches more
+  than one table (or an external system plus a table), either make it a
+  single transaction/RPC, or make every step idempotent and give the
+  overall flow an explicit cleanup/rollback path for a step that fails
+  partway through. Don't leave a half-committed sequence with no way back
+  — see the orphaned-Vault-secret fix in `lib/integrations/vault.ts`'s
+  pending-link claim flow and the vendor-connect-invite
+  orphan-on-email-failure fix (`lib/stripe/vendor-connect-invite.ts`) as
+  examples of exactly this failure mode being closed.
+
+### Security & Isolation
+
+- **Tenant isolation** — every query touching org-scoped data filters on
+  `org_id` (or the equivalent token scope) derived from
+  `requireOrgMember()`/the validated token — never trust an `org_id` a
+  client supplied directly. See Critical Security Rules #4.
+- **Row Level Security** — every table has RLS enabled with real
+  SELECT/INSERT/UPDATE/DELETE policies. See Critical Security Rules #2.
+  A Postgres `GRANT` to `authenticated`/`anon` is a separate prerequisite
+  RLS depends on but doesn't replace — Postgres checks the grant *before*
+  RLS ever evaluates, so a table can have perfect RLS policies and still
+  throw "permission denied for table X" on every query if the grant is
+  missing (this exact bug shipped and was fixed via
+  `supabase/migrations/20260710200000_grant_authenticated_missing_tables.sql`).
+- **IDOR (authorization by object ID)** — `requireOrgMember()` proves the
+  caller belongs to *an* org; it does not by itself prove the specific
+  object they're requesting by ID belongs to *their* org or *them*
+  specifically. Any lookup keyed by an ID from the request needs its own
+  ownership check, not just an org-membership check.
+- **Rate limiting on unauthenticated/token-guessable routes** — public
+  token routes (owner portal, vendor-connect, work-order public links)
+  and auth entry points (login/signup) need their own rate limiter (see
+  `lib/rate-limit.ts` and `proxy.ts`'s `rateLimiterForPathname()`) —
+  token entropy alone is not a substitute for throttling.
+- **Sensitive-data logging** — never log guest phone numbers, SMS body
+  content, `actual_cost`/financial specifics, Stripe tokens, or any
+  secret/API key. See Code Quality Standards and the "Things That Will
+  Break" table.
+- **Stale grants and permissions** — when narrowing or removing access,
+  check both the RLS policies *and* the raw Postgres `GRANT`s — a leftover
+  `anon`/`authenticated` grant on a table or column survives even after
+  the RLS policy itself looks correct, and won't show up just from
+  reading the policy SQL.
+- **Sanitization** — this codebase's XSS defense today depends entirely
+  on never introducing `dangerouslySetInnerHTML` (there are currently
+  zero uses of it anywhere in the app) — React's default JSX rendering
+  already escapes user/guest-generated text (guidebook content, notes
+  fields, checklist crew notes, guest messages). Adding raw-HTML
+  rendering for any of this content requires a real sanitization library
+  (e.g. DOMPurify) at that point — never ship it unsanitized. Similarly:
+  never build a query with raw string interpolation (`.rpc()` or SQL
+  built via template literals) — every current query goes through the
+  Supabase client's parameterized builder, which is what actually
+  prevents SQL injection here, not manual escaping. Validate and
+  normalize input at the boundary (the Server Action/Route Handler) —
+  format-check phone/email, enforce length limits, strip control
+  characters — rather than trusting it to already be clean by the time
+  it reaches a DB write.
+- **Audit logging** — security- and account-relevant actions should call
+  `logAuditEvent()` (or `logAuditEvents()` for more than one entry in a
+  loop — batches into a single insert instead of one round-trip per
+  entry, the same N+1 concern as above) from `lib/audit.ts`, using one of
+  the existing `AuditAction` values where it fits (`auth.*`, `team.*`,
+  `integration.*`, `billing.*`, `security.route.mismatch`, etc.) or a new
+  one added to that union. Covers things like: role/membership changes,
+  integration connect/disconnect/revoke, owner portal token access,
+  billing changes, account/data deletion, and anywhere a request lands on
+  a route it structurally shouldn't be able to reach (see
+  `app/crew/layout.tsx`'s `security.route.mismatch` log for a PM landing
+  on `/crew`). Never put PII or secrets in the `metadata` field — same
+  rule as the sensitive-data-logging item above; audit rows are meant to
+  be readable by staff investigating an incident, not a second place for
+  the same data that shouldn't be logged at all.
+
+### Code Quality
+
+- **Cognitive complexity ≤ 15, nesting depth ≤ 4** — see Code Quality
+  Standards above for the full detail; extract named helpers/predicates
+  and use guard clauses rather than nesting further.
+- **Silent failures** — a caught error must do something visible: log it
+  with real context (not just `console.error('failed')` with no detail),
+  surface it to the UI, or both. Distinguish "the query returned zero
+  rows" from "the query itself errored" — collapsing both into the same
+  empty-state UI hides real outages behind what looks like normal empty
+  data.
+- **Styling conventions** — see the Styling Conventions section above and
+  the "Things That Will Break" table for the full detail; CSS variables
+  only for color (Tailwind's own color utilities like `text-red-500`
+  count as hardcoded hex, not an exception), and reuse `components/ui/*`
+  primitives (`Button`, `Card`, `Badge`, `Dialog`, `Tabs`, etc.) instead of
+  hand-rolling an equivalent with raw Tailwind utilities — the latter
+  slips past `check:ui-classes` since that script only greps for literal
+  `btn-*`/`badge-*`/`card` class strings, not visually-equivalent
+  hand-rolled markup.

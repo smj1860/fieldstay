@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FieldStay — Offline</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #0D1F3C;
+      color: #FFFFFF;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    .wrap {
+      min-height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 32px 24px;
+    }
+    .brand {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 24px;
+    }
+    .brand .stay { color: #FCD116; }
+    h1 {
+      font-size: 18px;
+      margin: 0 0 8px;
+    }
+    p {
+      font-size: 14px;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.7);
+      max-width: 320px;
+      margin: 0;
+    }
+    button {
+      margin-top: 28px;
+      padding: 12px 24px;
+      border-radius: 12px;
+      border: none;
+      background: #FCD116;
+      color: #0D1F3C;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">Field<span class="stay">Stay</span></div>
+    <h1>You're offline</h1>
+    <p>
+      This page hasn't been loaded on this device yet, so there's nothing
+      cached to show. Already-visited pages and your synced data are
+      still available — try going back or reconnecting.
+    </p>
+    <button onclick="location.reload()">Try again</button>
+  </div>
+</body>
+</html>

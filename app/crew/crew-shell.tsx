@@ -57,6 +57,19 @@ export function CrewShell({
 
   async function handleLogout() {
     await closeDexieDb()
+    // Also clear the service worker's cached app shell — same "no residual
+    // data on a shared device after sign-out" principle as the Dexie
+    // delete above. The cached HTML can embed the signed-out user's own
+    // name/data (this layout renders it server-side), so a different crew
+    // member logging in next shouldn't see it, even briefly, before their
+    // own navigation repopulates the cache.
+    if (typeof caches !== 'undefined') {
+      try {
+        await Promise.all([caches.delete('fieldstay-shell-v1'), caches.delete('fieldstay-assets-v1')])
+      } catch (err) {
+        console.error('[crew-shell] Failed to clear service worker cache on logout:', err)
+      }
+    }
     const supabase = createClient()
     await supabase.auth.signOut()
     startTransition(() => router.push('/login?next=/crew'))

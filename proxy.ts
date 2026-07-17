@@ -79,6 +79,13 @@ const BYPASS_ROUTES = [
   '/manifest.webmanifest',       // kept for forward-compatibility
   '/sw.js',
 
+  // Service worker's offline fallback page (public/offline.html) — must be
+  // reachable with no session and no network round-trip capacity to spare,
+  // since it's served as the last resort when both the network and the
+  // cache miss for a navigation. Same reasoning as the manifest/sw.js
+  // bypasses above.
+  '/offline.html',
+
   // Theme init script — loaded via <Script strategy="beforeInteractive">
   // in app/layout.tsx on every page, including the logged-out login page.
   // Same failure mode as manifest.json/sw.js above: without this bypass,
