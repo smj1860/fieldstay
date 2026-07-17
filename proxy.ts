@@ -57,6 +57,12 @@ const BYPASS_ROUTES = [
   // The page handles both states internally via its own auth check.
   '/ownerrez',
 
+  // Hospitable integration landing page — same shape as /ownerrez above.
+  // Logged-out visitors need to reach it directly (marketing/ads traffic),
+  // and logged-in users need to reach it to connect their account. The
+  // page branches its own nav CTA via its own auth check (app/hospitable/page.tsx).
+  '/hospitable',
+
   // Next.js internals and static assets
   '/_next',
   '/favicon',
