@@ -27,23 +27,29 @@ Within a minute or two, your properties and bookings will begin appearing in Fie
 ## What Syncs When You Connect
 
 ### Properties
-All properties in your Hospitable account sync as active properties in FieldStay. Property name, address, check-in and check-out times, and bedroom count all come across automatically.
+All properties in your Hospitable account sync as active properties in
+FieldStay. Property name, address, check-in and check-out times, and
+bedroom count all come across automatically — along with your wifi network
+name and password, guest access instructions, cleaning fee, and key
+amenities and house rules (like whether smoking, pets, or events are
+allowed).
 
 ### Bookings
 Upcoming reservations sync with guest name, check-in and check-out dates, and channel source (Airbnb, Vrbo, direct, etc.). Turnovers are generated automatically between consecutive bookings.
 
 ### Crew Members
-If you have teammates set up in Hospitable (under Operations → Teammates), they sync into FieldStay as crew members automatically. Their name, email, phone number, and role are all carried across. Hospitable roles map to FieldStay roles as follows:
+If you have teammates set up in Hospitable (under Operations → Teammates),
+they sync into FieldStay as crew members automatically. Their name, email,
+phone number, and role are all carried across.
 
-| Hospitable Role | FieldStay Crew Role |
-|---|---|
-| Cleaning | Cleaning |
-| Laundry | Cleaning |
-| Maintenance | Maintenance |
-| Check-in / Check-out | Crew |
-| Concierge | General |
-| Manager | Manager |
-| Owner | Owner |
+FieldStay has four crew roles: Cleaning, Landscaping, Maintenance, and
+General. Hospitable's Cleaning, Laundry, and Maintenance service tags map
+directly (Laundry folds into Cleaning). Any other Hospitable service —
+Check-in/Check-out, Concierge, Manager, Owner, or anything else — comes
+across as General, but the original label isn't lost: it's carried into
+that crew member's **Specialty** field. A teammate tagged "Concierge" in
+Hospitable, for example, syncs in with role General and specialty
+"Concierge."
 
 ### Turnover Checklists
 Once properties sync, FieldStay applies your master turnover checklist template to each property automatically. Crew members will see their checklists the next time they open the crew app.
@@ -79,17 +85,21 @@ Disconnecting removes the OAuth tokens from FieldStay but does not delete your p
 
 ## Troubleshooting
 
+If something isn't syncing or showing up the way you expect, use **Trigger
+Resync** next to Hospitable in Settings → Integrations first. If that
+doesn't fix it, disconnect and reconnect.
+
 **Properties aren't showing up after connecting.**
-Wait two to three minutes and refresh the properties page. If they still don't appear, go to Settings → Integrations and check that Hospitable shows a Connected status. If it shows an error, disconnect and reconnect.
+Wait two to three minutes and refresh the properties page. If they still don't appear, go to Settings → Integrations and check that Hospitable shows a Connected status. If it shows an error, use Trigger Resync — if that doesn't help, disconnect and reconnect.
 
 **A booking I see in Hospitable isn't in FieldStay.**
-Bookings sync in real time via webhook. If a booking isn't appearing, check the date range on your FieldStay bookings page — the default filter shows upcoming bookings only. If the booking is upcoming and still missing, disconnect and reconnect Hospitable to trigger a fresh sync.
+Bookings sync in real time via webhook. If a booking isn't appearing, check the date range on your FieldStay bookings page — the default filter shows upcoming bookings only. If the booking is upcoming and still missing, use Trigger Resync next to Hospitable in Settings → Integrations to trigger a fresh sync.
 
 **My crew members from Hospitable didn't sync.**
 Hospitable teammate sync requires the `teammate:read` scope. This is now enabled for the FieldStay integration — if your crew still didn't appear, disconnect and reconnect Hospitable (a connection made before the scope was enabled needs to re-authorize to pick it up), then contact support if it still doesn't sync.
 
 **I added a new property in Hospitable but it isn't in FieldStay.**
-Property additions trigger a sync automatically. If the property doesn't appear within a few minutes, disconnect and reconnect Hospitable.
+Property additions trigger a sync automatically. If the property doesn't appear within a few minutes, use Trigger Resync next to Hospitable in Settings → Integrations.
 
 ---
 

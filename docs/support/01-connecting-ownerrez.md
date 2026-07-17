@@ -31,8 +31,12 @@ calculates preparation windows, flags same-day turnovers, and creates a guideboo
 configuration for each property.
 
 ## Troubleshooting
-- Properties didn't appear: wait 2–3 minutes and refresh, or click Sync on the
-  Turnovers dashboard to trigger a manual re-sync
+If something isn't syncing or showing up the way you expect, use **Trigger
+Resync** next to OwnerRez in Settings → Integrations first. If that doesn't
+fix it, disconnect and reconnect.
+
+- Properties didn't appear: wait 2–3 minutes and refresh, or use Trigger
+  Resync next to OwnerRez in Settings → Integrations
 - Error during authorization: make sure you're logged into the correct OwnerRez account
 - Bookings not showing: check the date filter on your FieldStay bookings
   page — the default view shows upcoming bookings only

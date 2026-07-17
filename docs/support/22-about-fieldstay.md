@@ -41,8 +41,8 @@ Scale your portfolio without watching your software bill scale with it.
 | Plan | Properties | Monthly Price |
 |---|---|---|
 | Starter | 1–15 | $199/month |
-| Growth | 16–50 | $379/month |
-| Portfolio | 51–100 | $599/month |
+| Growth | 16–50 | $479/month |
+| Portfolio | 51–100 | $799/month |
 | Enterprise | 100+ | Custom |
 
 Annual billing saves the equivalent of 2 months.

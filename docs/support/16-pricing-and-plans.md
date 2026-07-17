@@ -9,8 +9,8 @@ FieldStay is priced by the number of properties you manage. Every plan includes 
 | Plan | Properties | Monthly Price |
 |---|---|---|
 | Starter | 1–15 | $199/month |
-| Growth | 16–50 | $379/month |
-| Portfolio | 51–100 | $599/month |
+| Growth | 16–50 | $479/month |
+| Portfolio | 51–100 | $799/month |
 | Enterprise | 100+ | Custom pricing |
 
 Contact support@fieldstay.app for Enterprise pricing.
@@ -55,11 +55,13 @@ Credits apply automatically each billing cycle based on your active sponsor coun
 
 ---
 
-## Upgrading or Downgrading
+## Adding Properties Beyond Your Plan
 
-Plans adjust automatically when your property count crosses a tier boundary. If you add properties that push you into the next tier, your plan upgrades at your next billing date. If you reduce properties below a tier threshold, your plan adjusts at the next billing date.
-
-To manually change your plan, go to Settings → Billing → Change Plan, or contact support@fieldstay.app.
+FieldStay does not automatically upgrade your plan as you add properties.
+If you try to add a property that would put you over your current plan's
+limit, FieldStay blocks the addition and lets you know you've hit your
+limit. To add more properties, go to **Settings → Billing → Change Plan**
+and move up a tier — your new limit applies immediately.
 
 ---
 
