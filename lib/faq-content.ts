@@ -12,14 +12,14 @@ export interface FaqCategory {
 
 export const FAQ_CATEGORIES: FaqCategory[] = [
   {
-    id:    'ownerrez',
-    label: 'OwnerRez Sync',
+    id:    'pms-sync',
+    label: 'PMS Sync',
     items: [
       {
         id:       'or-connect',
-        question: 'How do I connect OwnerRez to FieldStay?',
+        question: 'How do I connect my PMS to FieldStay?',
         answer:
-          'Go to Settings → Integrations and click "Connect OwnerRez." You\'ll be redirected to authorize the connection in OwnerRez. Once approved, your properties and upcoming bookings sync automatically within a few minutes.',
+          'Go to Settings → Integrations and click "Connect" next to OwnerRez or Hospitable — whichever you use. You\'ll be redirected to authorize the connection with your PMS. Once approved, your properties and upcoming bookings sync automatically within a few minutes.',
       },
       {
         id:       'or-sync-time',
@@ -31,19 +31,19 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'or-no-properties',
         question: 'My properties didn\'t appear after connecting. What do I do?',
         answer:
-          'Wait 10 minutes and refresh the Properties page. If nothing appears, go to Settings → Integrations, disconnect OwnerRez, and reconnect. If the connection shows an error status after reconnecting, email support@fieldstay.app with your account email and we\'ll trace the webhook delivery.',
+          'Wait 10 minutes and refresh the Properties page. If nothing appears, go to Settings → Integrations, disconnect your PMS, and reconnect. If the connection shows an error status after reconnecting, email support@fieldstay.app with your account email and we\'ll trace the webhook delivery.',
       },
       {
         id:       'or-historical',
         question: 'Will historical bookings sync over, or only future ones?',
         answer:
-          'FieldStay syncs all active and upcoming bookings, plus bookings from the past 90 days. Older records are excluded to keep initial setup fast. All future booking changes sync in real time as OwnerRez sends webhook events.',
+          'FieldStay syncs all active and upcoming bookings, plus bookings from the past 90 days. Older records are excluded to keep initial setup fast. All future booking changes sync in real time as your PMS sends webhook events.',
       },
       {
         id:       'or-not-updating',
-        question: 'A booking changed in OwnerRez but it hasn\'t updated in FieldStay.',
+        question: 'A booking changed in my PMS but it hasn\'t updated in FieldStay.',
         answer:
-          'Booking changes arrive via OwnerRez webhooks, which typically deliver within 60 seconds of a change. If an update hasn\'t appeared after 10 minutes, check Settings → Integrations to confirm your connection shows "Active." Reconnecting will re-establish the webhook subscription if the status shows an error.',
+          'Booking changes arrive via your PMS\'s webhooks, which typically deliver within 60 seconds of a change. If an update hasn\'t appeared after 10 minutes, check Settings → Integrations to confirm your connection shows "Active." Reconnecting will re-establish the webhook subscription if the status shows an error.',
       },
     ],
   },
@@ -67,7 +67,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'crew-assignment',
         question: 'How are turnovers assigned after a guest checks out?',
         answer:
-          'When OwnerRez sends a checkout event, FieldStay creates a turnover automatically. You assign it from the Turnovers board. If you\'ve set a default crew member per property in Property Settings, assignment happens automatically with no manual step required.',
+          'When your connected PMS sends a checkout event, FieldStay creates a turnover automatically. You assign it from the Turnovers board. If you\'ve set a default crew member per property in Property Settings, assignment happens automatically with no manual step required.',
       },
       {
         id:       'crew-offline',
@@ -91,7 +91,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'billing-property-count',
         question: 'What counts as a property for billing?',
         answer:
-          'Each unique property unit synced from OwnerRez counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total.',
+          'Each unique property unit synced from your connected PMS (OwnerRez or Hospitable) counts as one property. A multi-unit building with 4 apartment units counts as 4. Archived or removed properties do not count toward your billing total.',
       },
       {
         id:       'billing-crew-seats',
@@ -139,7 +139,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'tech-security',
         question: 'Is my data secure?',
         answer:
-          'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation — no user can ever access another organization\'s data. OwnerRez access tokens are stored in an encrypted vault, never in the application database.',
+          'Yes. All data is encrypted in transit and at rest. Row-level security policies in the database enforce strict tenant isolation — no user can ever access another organization\'s data. PMS access tokens (OwnerRez, Hospitable) are stored in an encrypted vault, never in the application database.',
       },
       {
         id:       'tech-password',
