@@ -970,6 +970,36 @@ item below" as part of the definition of done for any non-trivial change.
   `anon`/`authenticated` grant on a table or column survives even after
   the RLS policy itself looks correct, and won't show up just from
   reading the policy SQL.
+- **Sanitization** — this codebase's XSS defense today depends entirely
+  on never introducing `dangerouslySetInnerHTML` (there are currently
+  zero uses of it anywhere in the app) — React's default JSX rendering
+  already escapes user/guest-generated text (guidebook content, notes
+  fields, checklist crew notes, guest messages). Adding raw-HTML
+  rendering for any of this content requires a real sanitization library
+  (e.g. DOMPurify) at that point — never ship it unsanitized. Similarly:
+  never build a query with raw string interpolation (`.rpc()` or SQL
+  built via template literals) — every current query goes through the
+  Supabase client's parameterized builder, which is what actually
+  prevents SQL injection here, not manual escaping. Validate and
+  normalize input at the boundary (the Server Action/Route Handler) —
+  format-check phone/email, enforce length limits, strip control
+  characters — rather than trusting it to already be clean by the time
+  it reaches a DB write.
+- **Audit logging** — security- and account-relevant actions should call
+  `logAuditEvent()` (or `logAuditEvents()` for more than one entry in a
+  loop — batches into a single insert instead of one round-trip per
+  entry, the same N+1 concern as above) from `lib/audit.ts`, using one of
+  the existing `AuditAction` values where it fits (`auth.*`, `team.*`,
+  `integration.*`, `billing.*`, `security.route.mismatch`, etc.) or a new
+  one added to that union. Covers things like: role/membership changes,
+  integration connect/disconnect/revoke, owner portal token access,
+  billing changes, account/data deletion, and anywhere a request lands on
+  a route it structurally shouldn't be able to reach (see
+  `app/crew/layout.tsx`'s `security.route.mismatch` log for a PM landing
+  on `/crew`). Never put PII or secrets in the `metadata` field — same
+  rule as the sensitive-data-logging item above; audit rows are meant to
+  be readable by staff investigating an incident, not a second place for
+  the same data that shouldn't be logged at all.
 
 ### Code Quality
 
