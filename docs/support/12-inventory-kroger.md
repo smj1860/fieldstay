@@ -41,9 +41,28 @@ To enable automatic cart building, connect your Kroger account:
 1. Go to **Settings → Integrations → Kroger**
 2. Click **Connect Kroger Account**
 3. Authorize FieldStay in Kroger
-4. Select your nearest Kroger store from the dropdown
+4. FieldStay automatically finds and connects your nearest Kroger-owned
+   store based on your first property's address — no selection needed.
+   You'll see the store name under Settings → Integrations → Kroger once
+   it's set.
 
 Kroger authorization lasts approximately 6 months. FieldStay will prompt you to reconnect if the token expires.
+
+---
+
+## Don't Live Near a "Kroger"?
+
+Kroger owns dozens of regional grocery chains under different names — if
+there's no store literally called "Kroger" near your property, you likely
+still have one nearby under a different banner. FieldStay automatically
+connects to whichever Kroger-owned store is closest, including:
+
+Ralphs · Fred Meyer · King Soopers · Smith's · Fry's · QFC · City Market ·
+Dillons · Baker's · Gerbes · Harris Teeter · Mariano's · Pick 'n Save ·
+Metro Market · Food 4 Less · Foods Co
+
+If one of these is near your property, the Kroger connection will find it
+automatically — no separate setup required.
 
 ---
 
@@ -77,6 +96,14 @@ Open the Kroger cart link from your email. From there you can:
 - Add items Kroger couldn't find automatically
 
 This is also where you apply any Kroger coupons or loyalty discounts before checkout.
+
+---
+
+## Troubleshooting
+
+If something isn't syncing or showing up the way you expect, use **Trigger
+Resync** next to Kroger in Settings → Integrations first. If that doesn't
+fix it, disconnect and reconnect.
 
 ---
 

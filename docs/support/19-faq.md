@@ -4,11 +4,11 @@ Common questions about FieldStay that don't fit neatly into a single feature gui
 
 ---
 
-## Does FieldStay work with property management systems other than OwnerRez?
+## Does FieldStay work with the PMS I already use?
 
-FieldStay currently integrates with **OwnerRez** as the primary PMS connection. A **Hostaway** integration is built and in the process of marketplace listing approval. **Hospitable** integration is in design. Other PMS platforms including Guesty, Lodgify, and Hostfully are on the roadmap.
-
-If you use a PMS not yet supported, you can still use FieldStay — properties and bookings can be entered manually, and the platform's crew, inventory, work order, and guidebook features all work without a PMS connection.
+FieldStay currently has integration partnerships with OwnerRez and
+Hospitable that will be live soon. We are always looking to add more
+integrations. If you use another PMS, let us know what you use.
 
 ---
 
