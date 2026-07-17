@@ -1012,3 +1012,12 @@ item below" as part of the definition of done for any non-trivial change.
   rows" from "the query itself errored" — collapsing both into the same
   empty-state UI hides real outages behind what looks like normal empty
   data.
+- **Styling conventions** — see the Styling Conventions section above and
+  the "Things That Will Break" table for the full detail; CSS variables
+  only for color (Tailwind's own color utilities like `text-red-500`
+  count as hardcoded hex, not an exception), and reuse `components/ui/*`
+  primitives (`Button`, `Card`, `Badge`, `Dialog`, `Tabs`, etc.) instead of
+  hand-rolling an equivalent with raw Tailwind utilities — the latter
+  slips past `check:ui-classes` since that script only greps for literal
+  `btn-*`/`badge-*`/`card` class strings, not visually-equivalent
+  hand-rolled markup.
