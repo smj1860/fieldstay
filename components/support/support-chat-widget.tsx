@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { MessageCircle }               from 'lucide-react'
 import { createClient }                from '@/lib/supabase/client'
 import { Button }                      from '@/components/ui/Button'
 
@@ -119,7 +120,9 @@ export function SupportChatWidget() {
   }
 
   return (
-    <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999 }}>
+    <div
+      className="fixed right-6 z-[9999] bottom-[calc(4rem+env(safe-area-inset-bottom)+0.75rem)] md:bottom-6"
+    >
       {open ? (
         <div
           style={{
@@ -297,11 +300,10 @@ export function SupportChatWidget() {
             justifyContent: 'center',
             boxShadow:      'var(--shadow-lg)',
             color:          'var(--text-inverse)',
-            fontSize:       '22px',
           }}
           aria-label="Open support chat"
         >
-          ?
+          <MessageCircle size={24} strokeWidth={2.25} />
         </button>
       )}
     </div>
