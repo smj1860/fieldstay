@@ -235,10 +235,22 @@ architecture — same order of complexity as what already exists in
 
 ### Phasing recommendation
 
-1. **Phase 0 (prerequisite, shared with any future offline work):** add
-   real `fetch`-event caching / app-shell precache to `public/sw.js`.
-   Nothing else in this feature matters if the installed app can't open
-   at all with no signal.
+1. **Phase 0 — done.** `public/sw.js` now has a real `fetch`-event
+   handler: network-first with cache fallback for navigations, cache-first
+   for immutable `/_next/static/` assets, and a branded `public/offline.html`
+   fallback for a URL that was never successfully visited on the device.
+   `caches.delete()` for both cache names was added to the crew app's
+   logout flow (`crew-shell.tsx`), mirroring `closeDexieDb()`'s "no
+   residual data on a shared device" principle. One real bug surfaced and
+   was fixed along the way: `/offline.html` needed its own entry in
+   `proxy.ts`'s `BYPASS_ROUTES` — as a new static file with no bypass, it
+   was being redirected to `/login` by the auth middleware, which defeats
+   the entire point of an offline fallback page. Verified end-to-end via
+   Playwright with real network-failure simulation (not `context.setOffline()`,
+   which didn't actually block this service worker's own `fetch()` calls
+   to localhost in this environment — route-based abort() was the
+   reliable way to test it). This groundwork benefits the crew app
+   immediately, not just this proposed feature.
 2. **Phase 1:** read-only offline — property selection settings page,
    new Dexie tables, sync helpers, shell/manifest/route tree. PM can
    view (not edit) maintenance schedules, inventory levels, and
