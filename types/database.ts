@@ -394,11 +394,12 @@ export interface ChecklistTemplateItem {
 // checklist_template_sections can be populated from. See
 // FUTURE_ADDITIONS.md #2 and 20260717120000_room_templates.sql.
 export interface RoomTemplate {
-  id:         string
-  org_id:     string
-  name:       string
-  created_at: string
-  updated_at: string
+  id:           string
+  org_id:       string
+  name:         string
+  auto_include: boolean
+  created_at:   string
+  updated_at:   string
 }
 
 export interface RoomTemplateItem {

@@ -96,6 +96,43 @@ export async function renameRoomTemplate(
   return {}
 }
 
+export async function setRoomTemplateAutoInclude(
+  roomTemplateId: string,
+  autoInclude: boolean
+): Promise<{ error?: string }> {
+  const { user, supabase, membership } = await requireOrgMember()
+
+  const roleError = assertCanManage(membership.role)
+  if (roleError) return { error: roleError }
+
+  const { data, error } = await supabase
+    .from('room_templates')
+    .update({ auto_include: autoInclude, updated_at: new Date().toISOString() })
+    .eq('id', roomTemplateId)
+    .eq('org_id', membership.org_id)
+    .select('id')
+    .maybeSingle()
+
+  if (error) {
+    console.error('[setRoomTemplateAutoInclude]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
+  if (!data) return { error: 'Room template not found.' }
+
+  await logAuditEvent({
+    orgId:      membership.org_id,
+    actorId:    user.id,
+    action:     'room_template.auto_include_changed',
+    targetType: 'room_template',
+    targetId:   roomTemplateId,
+    metadata:   { auto_include: autoInclude },
+  })
+
+  revalidatePath('/settings/room-templates')
+  revalidatePath('/properties')
+  return {}
+}
+
 export async function deleteRoomTemplate(
   roomTemplateId: string
 ): Promise<{ error?: string }> {

@@ -125,6 +125,7 @@ export type AuditAction =
   | 'room_template.renamed'
   | 'room_template.deleted'
   | 'room_template.items_updated'
+  | 'room_template.auto_include_changed'
   | 'inventory.item.deleted'
   | 'inventory.count_committed'
   | 'turnover.completed'

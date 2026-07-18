@@ -3,12 +3,14 @@
 import { useState, useTransition } from 'react'
 import { Plus, Trash2, ChevronUp, ChevronDown, ChevronRight, Camera, Check, Home } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import {
   createRoomTemplate,
   renameRoomTemplate,
   deleteRoomTemplate,
   saveRoomTemplateItems,
+  setRoomTemplateAutoInclude,
   type RoomTemplateItemInput,
 } from './actions'
 
@@ -22,6 +24,7 @@ interface ItemState {
 interface RoomState {
   id: string
   name: string
+  autoInclude: boolean
   items: ItemState[]
 }
 
@@ -38,11 +41,11 @@ export function RoomLibraryBuilder({
   initialRooms,
   canManage,
 }: {
-  initialRooms: Array<{ id: string; name: string; items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }> }>
+  initialRooms: Array<{ id: string; name: string; autoInclude: boolean; items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }> }>
   canManage: boolean
 }) {
   const [rooms, setRooms] = useState<RoomState[]>(() =>
-    initialRooms.map((r) => ({ id: r.id, name: r.name, items: r.items.map(toItemState) }))
+    initialRooms.map((r) => ({ id: r.id, name: r.name, autoInclude: r.autoInclude, items: r.items.map(toItemState) }))
   )
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [newRoomName, setNewRoomName] = useState('')
@@ -68,7 +71,7 @@ export function RoomLibraryBuilder({
         setError(result.error ?? 'Failed to create room template.')
         return
       }
-      setRooms((prev) => [...prev, { id: result.id!, name, items: [] }])
+      setRooms((prev) => [...prev, { id: result.id!, name, autoInclude: false, items: [] }])
       setExpanded((prev) => new Set(prev).add(result.id!))
       setNewRoomName('')
       setError(null)
@@ -77,6 +80,20 @@ export function RoomLibraryBuilder({
 
   const updateRoomName = (roomId: string, name: string) => {
     setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, name } : r)))
+  }
+
+  const toggleAutoInclude = (roomId: string) => {
+    const room = rooms.find((r) => r.id === roomId)
+    if (!room) return
+    const next = !room.autoInclude
+    setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, autoInclude: next } : r)))
+    startCreate(async () => {
+      const result = await setRoomTemplateAutoInclude(roomId, next)
+      if (result.error) {
+        setError(result.error)
+        setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, autoInclude: !next } : r)))
+      }
+    })
   }
 
   const addItem = (roomId: string) => {
@@ -138,6 +155,7 @@ export function RoomLibraryBuilder({
             saved={savedRoomId === room.id}
             onToggle={() => toggleExpanded(room.id)}
             onNameChange={(name) => updateRoomName(room.id, name)}
+            onToggleAutoInclude={() => toggleAutoInclude(room.id)}
             onAddItem={() => addItem(room.id)}
             onRemoveItem={(itemTempId) => removeItem(room.id, itemTempId)}
             onUpdateItem={(itemTempId, field, value) => updateItem(room.id, itemTempId, field, value)}
@@ -207,6 +225,7 @@ function RoomCard({
   saving,
   onToggle,
   onNameChange,
+  onToggleAutoInclude,
   onAddItem,
   onRemoveItem,
   onUpdateItem,
@@ -221,6 +240,7 @@ function RoomCard({
   saving: boolean
   onToggle: () => void
   onNameChange: (name: string) => void
+  onToggleAutoInclude: () => void
   onAddItem: () => void
   onRemoveItem: (itemTempId: string) => void
   onUpdateItem: (itemTempId: string, field: keyof ItemState, value: unknown) => void
@@ -240,6 +260,14 @@ function RoomCard({
       >
         <ChevronRight className={`w-4 h-4 flex-shrink-0 transition-transform text-muted-themed ${isOpen ? 'rotate-90' : ''}`} />
         <span className="text-sm font-semibold text-primary-themed flex-1">{room.name}</span>
+        {room.autoInclude && (
+          <span
+            className="px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0"
+            style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}
+          >
+            On every property
+          </span>
+        )}
         <span className="text-xs text-muted-themed">{room.items.length} task{room.items.length !== 1 ? 's' : ''}</span>
       </button>
 
@@ -253,6 +281,20 @@ function RoomCard({
               placeholder="Room name"
             />
           )}
+
+          <label className="flex items-start gap-2 cursor-pointer">
+            <Checkbox
+              checked={room.autoInclude}
+              onChange={onToggleAutoInclude}
+              disabled={!canManage}
+              className="mt-0.5"
+            />
+            <span className="text-xs text-muted-themed">
+              Automatically include this room on every property&apos;s checklist
+              (for whole-home walkthroughs, not opt-in rooms like bedrooms or
+              bathrooms — those get added per-property via the quantity picker).
+            </span>
+          </label>
 
           <div className="divide-y divide-themed border border-themed rounded-lg overflow-hidden">
             {room.items.map((item, ii) => (

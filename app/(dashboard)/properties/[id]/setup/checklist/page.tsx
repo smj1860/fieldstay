@@ -32,7 +32,7 @@ export default async function ChecklistPage({ params }: Props) {
       .neq('checklist_templates.property_id', property.id),
     supabase
       .from('room_templates')
-      .select(`id, name, room_template_items ( id, task, requires_photo, notes, sort_order )`)
+      .select(`id, name, auto_include, room_template_items ( id, task, requires_photo, notes, sort_order )`)
       .eq('org_id', membership.org_id)
       .order('name'),
   ])
@@ -63,8 +63,9 @@ export default async function ChecklistPage({ params }: Props) {
         otherProperties={otherProperties ?? []}
         sourceProperties={sourceProperties}
         roomTemplates={(roomTemplates ?? []).map((room) => ({
-          id:   room.id,
-          name: room.name,
+          id:          room.id,
+          name:        room.name,
+          autoInclude: room.auto_include,
           items: [...(room.room_template_items ?? [])]
             .sort((a, b) => a.sort_order - b.sort_order)
             .map((item) => ({

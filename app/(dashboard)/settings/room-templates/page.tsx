@@ -10,13 +10,14 @@ export default async function RoomTemplatesPage() {
 
   const { data: rooms } = await supabase
     .from('room_templates')
-    .select(`id, name, room_template_items ( id, task, requires_photo, notes, sort_order )`)
+    .select(`id, name, auto_include, room_template_items ( id, task, requires_photo, notes, sort_order )`)
     .eq('org_id', membership.org_id)
     .order('name')
 
   const roomsSorted = (rooms ?? []).map((room) => ({
-    id:   room.id as string,
-    name: room.name as string,
+    id:          room.id as string,
+    name:        room.name as string,
+    autoInclude: room.auto_include as boolean,
     items: [...(room.room_template_items ?? [])]
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((item) => ({

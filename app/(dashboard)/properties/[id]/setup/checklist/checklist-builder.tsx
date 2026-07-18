@@ -12,6 +12,7 @@ interface Section { tempId: string; id?: string; name: string; roomTemplateId?: 
 interface RoomTemplateOption {
   id: string
   name: string
+  autoInclude: boolean
   items: Array<{ task: string; requires_photo: boolean; notes: string | null }>
 }
 
@@ -99,6 +100,17 @@ function makeSectionFromRoom(room: RoomTemplateOption, label: string): Section {
   }
 }
 
+// Rooms flagged auto-include (e.g. "Whole Home") belong on every property's
+// checklist regardless of what the PM has picked — seed any missing ones in
+// alongside whatever sections the template/defaults already provide.
+function withAutoIncludeRooms(sections: Section[], roomTemplates: RoomTemplateOption[]): Section[] {
+  const missing = roomTemplates.filter(
+    (room) => room.autoInclude && !sections.some((s) => s.roomTemplateId === room.id)
+  )
+  if (missing.length === 0) return sections
+  return [...sections, ...missing.map((room) => makeSectionFromRoom(room, room.name))]
+}
+
 interface OtherProperty { id: string; name: string }
 interface SourceProperty { id: string; name: string; sectionCount: number }
 
@@ -115,7 +127,9 @@ export function ChecklistBuilder({
   sourceProperties?: SourceProperty[]
   roomTemplates?: RoomTemplateOption[]
 }) {
-  const [sections, setSections] = useState<Section[]>(() => buildInitialSections(template))
+  const [sections, setSections] = useState<Section[]>(() =>
+    withAutoIncludeRooms(buildInitialSections(template), roomTemplates)
+  )
   const [saving, startSave] = useTransition()
   const [completing, startComplete] = useTransition()
   const [broadcasting, startBroadcast] = useTransition()
@@ -227,10 +241,14 @@ export function ChecklistBuilder({
     setSections((p) => [...p, { tempId: makeId(), name: 'New Section', items: [] }])
   }
 
+  // Auto-include rooms (e.g. "Whole Home") aren't offered here — they're
+  // already seeded automatically and aren't a per-quantity, opt-in choice.
+  const pickerRoomTemplates = roomTemplates.filter((room) => !room.autoInclude)
+
   const applyRoomQuantities = () => {
     setSections((prev) => {
       const next = [...prev]
-      for (const room of roomTemplates) {
+      for (const room of pickerRoomTemplates) {
         const targetCount = roomQuantities[room.id] ?? 0
         if (targetCount <= 0) continue
         const currentCount = next.filter((s) => s.roomTemplateId === room.id).length
@@ -544,7 +562,7 @@ export function ChecklistBuilder({
         </div>
       ) : (
         <div className="flex gap-2">
-          {roomTemplates.length > 0 && (
+          {pickerRoomTemplates.length > 0 && (
             <Button
               type="button"
               variant="secondary"
@@ -705,7 +723,7 @@ export function ChecklistBuilder({
           them afterward (e.g. &quot;Primary Bedroom&quot;) if you&apos;d like.
         </p>
         <div className="space-y-3 max-h-72 overflow-y-auto">
-          {roomTemplates.map((room) => {
+          {pickerRoomTemplates.map((room) => {
             const existingCount = sections.filter((s) => s.roomTemplateId === room.id).length
             const qty = roomQuantities[room.id] ?? 0
             return (
