@@ -193,6 +193,27 @@ async function uploadChecklistInstanceConfirmation(
   if (!data || data.length === 0) throw new Error(`checklist_instances upload matched zero rows for id ${targetId}`)
 }
 
+async function uploadCrewWorkOrderChange(
+  _supabase: DexieSupabaseClient,
+  targetId: string,
+  payload: MutationPayload,
+): Promise<void> {
+  if (payload.status !== 'completed') {
+    throw new Error(`uploadCrewWorkOrderChange: unhandled status "${payload.status}"`)
+  }
+  // Routed through the existing Route Handler, not a direct table write —
+  // crew has no RLS UPDATE on work_orders by design (the route verifies
+  // assigned_crew_member_id explicitly via service role instead), and the
+  // route already fires the PM notification, audit log, and idempotent
+  // completion guard. Do not duplicate any of that logic here.
+  const res = await fetch(`/api/crew/work-orders/${targetId}/complete`, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ notes: typeof payload.notes === 'string' ? payload.notes : '' }),
+  })
+  if (!res.ok) throw new Error(`Failed to complete work order ${targetId}`)
+}
+
 async function uploadWorkOrderReport(
   _supabase: DexieSupabaseClient,
   targetId: string,
@@ -346,6 +367,7 @@ const UPLOAD_HANDLERS: Record<string, UploadHandler> = {
   'property_assets:PATCH':          uploadPropertyAssetPhotoUpdate,
   'crew_availability:PUT':          uploadCrewAvailability,
   'crew_availability:PATCH':        uploadCrewAvailability,
+  'crew_work_orders:PATCH':         uploadCrewWorkOrderChange,
 }
 
 async function uploadOne(supabase: DexieSupabaseClient, mutation: MutationRow): Promise<void> {

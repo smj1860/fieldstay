@@ -170,6 +170,7 @@ export type MutationTable =
   | 'inventory_items'
   | 'crew_availability'
   | 'property_assets'
+  | 'crew_work_orders'
 
 export interface MutationRow {
   id?:        number
