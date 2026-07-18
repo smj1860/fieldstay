@@ -165,7 +165,7 @@ function DashboardSidebar({
         </div>
         {(!collapsed || mobile) && (
           <div className="min-w-0 flex-1">
-            <span className="font-display font-bold text-base leading-none"
+            <span className="font-display font-black text-base leading-none"
                   style={{ color: 'var(--chrome-text)' }}>
               FieldStay
             </span>

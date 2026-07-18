@@ -58,7 +58,7 @@ function PortalShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-accent-50 flex items-center justify-center p-4">
       <div className="bg-card-themed rounded-2xl shadow-[0_4px_24px_0_rgba(0,0,0,.10)] w-full max-w-md p-8">
         <div className="text-center mb-6">
-          <span className="text-brand-800 text-2xl font-bold tracking-tight">FieldStay</span>
+          <span className="text-brand-800 text-2xl font-black tracking-tight">FieldStay</span>
           <p className="text-accent-400 text-xs mt-1">Vendor Portal</p>
         </div>
         {children}

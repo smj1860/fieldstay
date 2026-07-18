@@ -1,19 +1,13 @@
 import type { Metadata, Viewport } from 'next'
 import Script                       from 'next/script'
-import { Syne, DM_Sans } from 'next/font/google'
+import { Inter } from 'next/font/google'
 import { SessionRefreshGuard } from '@/components/session-refresh-guard'
 import { CookieNotice } from '@/components/cookie-notice'
 import './globals.css'
 
-const syne = Syne({
+const inter = Inter({
   subsets:  ['latin'],
-  variable: '--font-syne',
-  display:  'swap',
-})
-
-const dmSans = DM_Sans({
-  subsets:  ['latin'],
-  variable: '--font-dm-sans',
+  variable: '--font-inter',
   display:  'swap',
 })
 
@@ -41,7 +35,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning
-          className={`${syne.variable} ${dmSans.variable}`}>
+          className={inter.variable}>
       <head>
         {/*
           Theme init — loaded from static file to avoid requiring

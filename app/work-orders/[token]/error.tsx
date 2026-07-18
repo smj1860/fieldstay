@@ -17,7 +17,7 @@ export default function WorkOrderPortalError({
   return (
     <div className="min-h-screen bg-accent-50 flex items-center justify-center p-4">
       <div className="bg-card-themed rounded-2xl shadow-[0_4px_24px_0_rgba(0,0,0,.10)] w-full max-w-md p-8 text-center">
-        <span className="text-brand-800 text-2xl font-bold tracking-tight block mb-1">FieldStay</span>
+        <span className="text-brand-800 text-2xl font-black tracking-tight block mb-1">FieldStay</span>
         <p className="text-accent-400 text-xs mb-6">Vendor Portal</p>
         <p className="text-primary-themed font-semibold mb-1">We couldn&apos;t load this work order.</p>
         <p className="text-muted-themed text-sm mb-6">

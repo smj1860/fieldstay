@@ -57,7 +57,7 @@ export default async function HospitablePage() {
 
           {/* Nav */}
           <nav className="flex items-center justify-between py-5">
-            <span className="text-xl font-bold">
+            <span className="text-xl font-black">
               <span className="text-white">Field</span>
               <span className="text-gold-300">Stay</span>
             </span>

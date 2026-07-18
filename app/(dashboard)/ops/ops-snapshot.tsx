@@ -214,7 +214,7 @@ function TurnoverCard({
         onBlur={(e)      => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-card)'   }}
       >
         <p className="font-semibold text-sm mb-1.5 truncate"
-           style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-syne)' }}>
+           style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-inter)' }}>
           {propertyName}
         </p>
 
