@@ -2,9 +2,10 @@
 
 import { useState, useTransition, useRef } from 'react'
 import { saveChecklistTemplate, completeChecklistStep, broadcastChecklistTemplate, cloneChecklistFromProperty } from './actions'
-import { Plus, Trash2, ChevronUp, ChevronDown, Camera, Check, ClipboardList, AlertTriangle, Upload, Home, Link2, Minus } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, ChevronRight, Camera, Check, ClipboardList, AlertTriangle, Upload, Home, Link2, Minus } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
+import { Checkbox } from '@/components/ui/Checkbox'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
 interface Section { tempId: string; id?: string; name: string; roomTemplateId?: string | null; items: Item[] }
@@ -137,6 +138,7 @@ export function ChecklistBuilder({
   const [error, setError] = useState<string | null>(null)
   const [roomPickerOpen, setRoomPickerOpen] = useState(false)
   const [roomQuantities, setRoomQuantities] = useState<Record<string, number>>({})
+  const [expandedRoomIds, setExpandedRoomIds] = useState<Set<string>>(new Set())
   const [broadcastModal, setBroadcastModal] = useState(false)
   const [broadcastTargets, setBroadcastTargets] = useState<Set<string>>(new Set())
   const [broadcastResult, setBroadcastResult] = useState<string | null>(null)
@@ -260,7 +262,21 @@ export function ChecklistBuilder({
       return next
     })
     setRoomQuantities({})
+    setExpandedRoomIds(new Set())
     setRoomPickerOpen(false)
+  }
+
+  const toggleRoomExpanded = (roomId: string) => {
+    setExpandedRoomIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(roomId)) next.delete(roomId)
+      else next.add(roomId)
+      return next
+    })
+  }
+
+  const setRoomQuantity = (roomId: string, qty: number) => {
+    setRoomQuantities((prev) => ({ ...prev, [roomId]: Math.max(0, qty) }))
   }
 
   const detachSectionFromRoom = (tempId: string) => {
@@ -716,44 +732,76 @@ export function ChecklistBuilder({
         </div>
       </Dialog>
 
-      <Dialog open={roomPickerOpen} onClose={() => setRoomPickerOpen(false)} title="Insert Rooms from Library" maxWidthClassName="max-w-sm">
+      <Dialog open={roomPickerOpen} onClose={() => setRoomPickerOpen(false)} title="Insert Rooms from Library" maxWidthClassName="max-w-lg">
         <p className="text-xs text-muted-themed mb-4">
-          Pick a quantity for each room type this property has. A section gets
-          added for each one, pre-filled with that room&apos;s tasks — rename
-          them afterward (e.g. &quot;Primary Bedroom&quot;) if you&apos;d like.
+          Check the room types this property has and set how many of each —
+          click a room&apos;s name to preview its checklist first. A section
+          gets added per room, pre-filled with its tasks — rename them
+          afterward (e.g. &quot;Primary Bedroom&quot;) if you&apos;d like.
         </p>
-        <div className="space-y-3 max-h-72 overflow-y-auto">
+        <div className="border border-themed rounded-lg divide-y divide-themed max-h-96 overflow-y-auto">
           {pickerRoomTemplates.map((room) => {
             const existingCount = sections.filter((s) => s.roomTemplateId === room.id).length
             const qty = roomQuantities[room.id] ?? 0
+            const isExpanded = expandedRoomIds.has(room.id)
             return (
-              <div key={room.id} className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-primary-themed truncate">{room.name}</p>
-                  {existingCount > 0 && (
-                    <p className="text-xs text-muted-themed">{existingCount} already on this property</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <Button
+              <div key={room.id}>
+                <div className="flex items-center gap-2 px-3 py-2.5">
+                  <Checkbox
+                    checked={qty > 0}
+                    onChange={(e) => setRoomQuantity(room.id, e.target.checked ? 1 : 0)}
+                    aria-label={`Include ${room.name}`}
+                  />
+                  <button
                     type="button"
-                    variant="ghost"
-                    onClick={() => setRoomQuantities((prev) => ({ ...prev, [room.id]: Math.max(0, (prev[room.id] ?? 0) - 1) }))}
-                    disabled={qty === 0}
-                    className="p-1.5 disabled:opacity-30"
+                    onClick={() => toggleRoomExpanded(room.id)}
+                    className="flex-1 min-w-0 flex items-center gap-1.5 text-left"
                   >
-                    <Minus className="w-3.5 h-3.5" />
-                  </Button>
-                  <span className="w-6 text-center text-sm font-semibold text-primary-themed">{qty}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setRoomQuantities((prev) => ({ ...prev, [room.id]: (prev[room.id] ?? 0) + 1 }))}
-                    className="p-1.5"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </Button>
+                    <ChevronRight className={`w-3.5 h-3.5 flex-shrink-0 transition-transform text-muted-themed ${isExpanded ? 'rotate-90' : ''}`} />
+                    <span className="min-w-0">
+                      <span className="text-sm font-medium text-primary-themed truncate block">{room.name}</span>
+                      {existingCount > 0 && (
+                        <span className="text-xs text-muted-themed block">{existingCount} already on this property</span>
+                      )}
+                    </span>
+                  </button>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setRoomQuantity(room.id, qty - 1)}
+                      disabled={qty === 0}
+                      className="p-1 disabled:opacity-30"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </Button>
+                    <input
+                      type="number"
+                      min={0}
+                      value={qty}
+                      onChange={(e) => setRoomQuantity(room.id, parseInt(e.target.value, 10) || 0)}
+                      aria-label={`Quantity for ${room.name}`}
+                      className="w-12 text-center text-sm font-semibold text-primary-themed bg-transparent border border-themed rounded focus:outline-none focus:border-[var(--accent-gold)]"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setRoomQuantity(room.id, qty + 1)}
+                      className="p-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
                 </div>
+                {isExpanded && (
+                  <div className="pl-9 pr-3 pb-3">
+                    <ul className="text-xs text-muted-themed list-disc list-inside space-y-1">
+                      {room.items.map((item) => (
+                        <li key={item.task}>{item.task}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -766,7 +814,13 @@ export function ChecklistBuilder({
           >
             Add Rooms
           </Button>
-          <Button variant="ghost" onClick={() => { setRoomQuantities({}); setRoomPickerOpen(false) }} className="text-sm">Cancel</Button>
+          <Button
+            variant="ghost"
+            onClick={() => { setRoomQuantities({}); setExpandedRoomIds(new Set()); setRoomPickerOpen(false) }}
+            className="text-sm"
+          >
+            Cancel
+          </Button>
         </div>
       </Dialog>
     </div>
