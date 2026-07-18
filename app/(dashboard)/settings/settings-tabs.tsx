@@ -28,7 +28,7 @@ import { getOrgSmsTemplates, saveOrgSmsTemplate, resetOrgSmsTemplate } from './a
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Team', 'Audit Log', 'Account', 'Legal'] as const
+const TABS = ['Organization', 'Billing', 'Security', 'Notifications', 'Room Templates', 'Team', 'Audit Log', 'Account', 'Legal'] as const
 type Tab = typeof TABS[number]
 
 const PLAN_INFO = {
@@ -114,6 +114,7 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }
       {activeTab === 'Billing'       && <BillingTab org={org} />}
       {activeTab === 'Security'      && <SecurityTab />}
       {activeTab === 'Notifications' && <NotificationsTab org={org} />}
+      {activeTab === 'Room Templates' && <RoomTemplatesTabRedirect />}
       {activeTab === 'Team'          && <TeamTabRedirect />}
       {activeTab === 'Audit Log'     && <AuditLogTabRedirect />}
       {activeTab === 'Account'       && <AccountTabRedirect />}
@@ -1007,6 +1008,14 @@ function SmsTemplatesCard() {
       </div>
     </Card>
   )
+}
+
+// ── Room Templates tab redirect ───────────────────────────────────────────────
+
+function RoomTemplatesTabRedirect() {
+  const router = useRouter()
+  useEffect(() => { router.push('/settings/room-templates') }, [router])
+  return null
 }
 
 // ── Team tab redirect ─────────────────────────────────────────────────────────

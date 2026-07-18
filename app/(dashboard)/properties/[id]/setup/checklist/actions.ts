@@ -1,5 +1,6 @@
 'use server'
 
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
@@ -21,7 +22,123 @@ export interface ChecklistSectionInput {
   id?: string
   name: string
   sort_order: number
+  room_template_id?: string | null
   items: ChecklistItemInput[]
+}
+
+// A client-supplied templateId must be confirmed to belong to this org
+// before we delete/replace its sections — the id alone is not proof of
+// ownership. Creates the template if none was passed in.
+async function resolveTemplateId(
+  supabase: SupabaseClient,
+  propertyId: string,
+  orgId: string,
+  templateId: string | null
+): Promise<{ id?: string; error?: string }> {
+  if (templateId) {
+    const { data: template } = await supabase
+      .from('checklist_templates')
+      .select('id')
+      .eq('id', templateId)
+      .eq('org_id', orgId)
+      .maybeSingle()
+    if (!template) return { error: 'Checklist template not found' }
+    return { id: templateId }
+  }
+
+  const { data, error } = await supabase
+    .from('checklist_templates')
+    .insert({
+      org_id:      orgId,
+      property_id: propertyId,
+      name:        'Standard Turnover',
+      is_default:  true,
+    })
+    .select('id')
+    .single()
+  if (error) {
+    console.error('[saveChecklistTemplate]', error)
+    return { error: 'Operation failed. Please try again.' }
+  }
+  return { id: data.id }
+}
+
+// Any client-supplied room_template_id must be confirmed to belong to this
+// org before we link a section to it — same reasoning as resolveTemplateId.
+async function validateRoomTemplateIds(
+  supabase: SupabaseClient,
+  orgId: string,
+  sections: ChecklistSectionInput[]
+): Promise<string | null> {
+  const roomTemplateIds = [...new Set(
+    sections.map((s) => s.room_template_id).filter((id): id is string => !!id)
+  )]
+  if (roomTemplateIds.length === 0) return null
+
+  const { data: ownedRooms } = await supabase
+    .from('room_templates')
+    .select('id')
+    .eq('org_id', orgId)
+    .in('id', roomTemplateIds)
+  if ((ownedRooms?.length ?? 0) !== roomTemplateIds.length) {
+    return 'One or more linked room templates were not found.'
+  }
+  return null
+}
+
+function buildItemRows(tmplId: string, sectionId: string, section: ChecklistSectionInput) {
+  return section.items.map((item) => ({
+    section_id:     sectionId,
+    template_id:    tmplId,
+    task:           item.task,
+    requires_photo: item.requires_photo,
+    notes:          item.notes || null,
+    sort_order:     item.sort_order,
+  }))
+}
+
+// Full replace of a template's sections + items — batched into two
+// round-trips (all sections, then all items) instead of one insert pair
+// per section.
+async function replaceSections(
+  supabase: SupabaseClient,
+  tmplId: string,
+  sections: ChecklistSectionInput[]
+): Promise<string | null> {
+  await supabase
+    .from('checklist_template_sections')
+    .delete()
+    .eq('template_id', tmplId)
+
+  if (sections.length === 0) return null
+
+  const { data: sectionRows, error: se } = await supabase
+    .from('checklist_template_sections')
+    .insert(
+      sections.map((section) => ({
+        template_id:      tmplId,
+        name:             section.name,
+        sort_order:       section.sort_order,
+        room_template_id: section.room_template_id ?? null,
+        room_synced_at:   section.room_template_id ? new Date().toISOString() : null,
+      }))
+    )
+    .select('id')
+
+  if (se || !sectionRows || sectionRows.length !== sections.length) {
+    console.error('[saveChecklistTemplate] section insert failed', se)
+    return 'Failed to save checklist section. Please try again.'
+  }
+
+  const allItems = sections.flatMap((section, i) => buildItemRows(tmplId, sectionRows[i]!.id, section))
+  if (allItems.length === 0) return null
+
+  const { error: ie } = await supabase.from('checklist_template_items').insert(allItems)
+  if (ie) {
+    console.error('[saveChecklistTemplate] items insert failed', ie)
+    return 'Failed to save checklist items. Please try again.'
+  }
+  return null
 }
 
 export async function saveChecklistTemplate(
@@ -31,91 +148,22 @@ export async function saveChecklistTemplate(
 ): Promise<ChecklistState> {
   const { user, supabase, membership } = await requireOrgMember()
 
-  let tmplId = templateId
+  const resolved = await resolveTemplateId(supabase, propertyId, membership.org_id, templateId)
+  if (resolved.error || !resolved.id) return { error: resolved.error ?? 'Operation failed. Please try again.' }
+  const tmplId = resolved.id
 
-  // A client-supplied templateId must be confirmed to belong to this org
-  // before we delete/replace its sections — the id alone is not proof of
-  // ownership.
-  if (tmplId) {
-    const { data: template } = await supabase
-      .from('checklist_templates')
-      .select('id')
-      .eq('id', tmplId)
-      .eq('org_id', membership.org_id)
-      .maybeSingle()
-    if (!template) return { error: 'Checklist template not found' }
-  }
+  const roomError = await validateRoomTemplateIds(supabase, membership.org_id, sections)
+  if (roomError) return { error: roomError }
 
-  // Create template if none exists
-  if (!tmplId) {
-    const { data, error } = await supabase
-      .from('checklist_templates')
-      .insert({
-        org_id:      membership.org_id,
-        property_id: propertyId,
-        name:        'Standard Turnover',
-        is_default:  true,
-      })
-      .select('id')
-      .single()
-    if (error) {
-      console.error('[saveChecklistTemplate]', error)
-      return { error: 'Operation failed. Please try again.' }
-    }
-    tmplId = data.id
-  }
-
-  // Delete all existing sections + items (full replace)
-  await supabase
-    .from('checklist_template_sections')
-    .delete()
-    .eq('template_id', tmplId)
-
-  // Re-insert sections and items — batched into two round-trips (all
-  // sections, then all items) instead of one insert pair per section.
-  if (sections.length > 0) {
-    const { data: sectionRows, error: se } = await supabase
-      .from('checklist_template_sections')
-      .insert(
-        sections.map((section) => ({
-          template_id: tmplId,
-          name:        section.name,
-          sort_order:  section.sort_order,
-        }))
-      )
-      .select('id')
-
-    if (se || !sectionRows || sectionRows.length !== sections.length) {
-      console.error('[saveChecklistTemplate] section insert failed', se)
-      return { error: 'Failed to save checklist section. Please try again.' }
-    }
-
-    const allItems = sections.flatMap((section, i) =>
-      section.items.map((item) => ({
-        section_id:     sectionRows[i]!.id,
-        template_id:    tmplId!,
-        task:           item.task,
-        requires_photo: item.requires_photo,
-        notes:          item.notes || null,
-        sort_order:     item.sort_order,
-      }))
-    )
-
-    if (allItems.length > 0) {
-      const { error: ie } = await supabase.from('checklist_template_items').insert(allItems)
-      if (ie) {
-        console.error('[saveChecklistTemplate] items insert failed', ie)
-        return { error: 'Failed to save checklist items. Please try again.' }
-      }
-    }
-  }
+  const sectionsError = await replaceSections(supabase, tmplId, sections)
+  if (sectionsError) return { error: sectionsError }
 
   await logAuditEvent({
     orgId:      membership.org_id,
     actorId:    user.id,
     action:     'property.checklist_template.updated',
     targetType: 'checklist_template',
-    targetId:   tmplId ?? undefined,
+    targetId:   tmplId,
     metadata:   { property_id: propertyId, sections: sections.length },
   })
 

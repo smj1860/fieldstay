@@ -11,10 +11,10 @@ export default async function ChecklistPage({ params }: Props) {
   const { property, supabase } = await requireProperty(id)
   const { membership } = await requireOrgMember()
 
-  const [{ data: template }, { data: otherProperties }, { data: siblingChecklistSections }] = await Promise.all([
+  const [{ data: template }, { data: otherProperties }, { data: siblingChecklistSections }, { data: roomTemplates }] = await Promise.all([
     supabase
       .from('checklist_templates')
-      .select(`id, name, checklist_template_sections ( id, name, sort_order, checklist_template_items ( id, task, requires_photo, notes, sort_order ) )`)
+      .select(`id, name, checklist_template_sections ( id, name, sort_order, room_template_id, checklist_template_items ( id, task, requires_photo, notes, sort_order ) )`)
       .eq('property_id', property.id)
       .eq('is_default', true)
       .single(),
@@ -30,6 +30,11 @@ export default async function ChecklistPage({ params }: Props) {
       .select('template_id, checklist_templates!inner(property_id, properties!inner(name))')
       .eq('checklist_templates.org_id', membership.org_id)
       .neq('checklist_templates.property_id', property.id),
+    supabase
+      .from('room_templates')
+      .select(`id, name, auto_include, room_template_items ( id, task, requires_photo, notes, sort_order )`)
+      .eq('org_id', membership.org_id)
+      .order('name'),
   ])
 
   const sectionCountByProperty: Record<string, number> = {}
@@ -57,6 +62,18 @@ export default async function ChecklistPage({ params }: Props) {
         template={template ?? null}
         otherProperties={otherProperties ?? []}
         sourceProperties={sourceProperties}
+        roomTemplates={(roomTemplates ?? []).map((room) => ({
+          id:          room.id,
+          name:        room.name,
+          autoInclude: room.auto_include,
+          items: [...(room.room_template_items ?? [])]
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((item) => ({
+              task:           item.task,
+              requires_photo: item.requires_photo,
+              notes:          item.notes,
+            })),
+        }))}
       />
     </Card>
   )

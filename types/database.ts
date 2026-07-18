@@ -362,11 +362,21 @@ export interface ChecklistTemplate {
 }
 
 export interface ChecklistTemplateSection {
-  id:          string
-  template_id: string
-  name:        string
-  sort_order:  number
-  created_at:  string
+  id:                     string
+  template_id:            string
+  name:                   string
+  sort_order:             number
+  // Added by 20260604223345_add_checklist_template_broadcasting.sql — was
+  // missing from this interface even though the column has existed on the
+  // live table since then; read/written by lib/inngest/functions/checklist-broadcast.ts.
+  requires_section_photo: boolean
+  // Added by 20260717120000_room_templates.sql. NULL means a fully custom
+  // section (every section before this migration, and any hand-added one
+  // afterward) — non-null means this section's items were populated from
+  // that room_templates row and can be bulk-refreshed from it.
+  room_template_id:       string | null
+  room_synced_at:         string | null
+  created_at:             string
 }
 
 export interface ChecklistTemplateItem {
@@ -378,6 +388,28 @@ export interface ChecklistTemplateItem {
   notes:          string | null
   sort_order:     number
   created_at:     string
+}
+
+// Reusable, org-scoped room modules ("Standard Bedroom") a property's
+// checklist_template_sections can be populated from. See
+// FUTURE_ADDITIONS.md #2 and 20260717120000_room_templates.sql.
+export interface RoomTemplate {
+  id:           string
+  org_id:       string
+  name:         string
+  auto_include: boolean
+  created_at:   string
+  updated_at:   string
+}
+
+export interface RoomTemplateItem {
+  id:               string
+  room_template_id: string
+  task:             string
+  requires_photo:   boolean
+  notes:            string | null
+  sort_order:       number
+  created_at:       string
 }
 
 export interface Turnover {
@@ -1488,6 +1520,8 @@ export interface Database {
       checklist_templates:         { Row: ChecklistTemplate;        Insert: Partial<ChecklistTemplate>;        Update: Partial<ChecklistTemplate>;        Relationships: [] }
       checklist_template_sections: { Row: ChecklistTemplateSection; Insert: Partial<ChecklistTemplateSection>; Update: Partial<ChecklistTemplateSection>; Relationships: [] }
       checklist_template_items:    { Row: ChecklistTemplateItem;    Insert: Partial<ChecklistTemplateItem>;    Update: Partial<ChecklistTemplateItem>;    Relationships: [] }
+      room_templates:              { Row: RoomTemplate;             Insert: Partial<RoomTemplate>;             Update: Partial<RoomTemplate>;             Relationships: [] }
+      room_template_items:         { Row: RoomTemplateItem;         Insert: Partial<RoomTemplateItem>;         Update: Partial<RoomTemplateItem>;         Relationships: [] }
       turnovers:                   { Row: Turnover;                 Insert: Partial<Turnover>;                 Update: Partial<Turnover>;                 Relationships: [] }
       turnover_assignments:        { Row: TurnoverAssignment;       Insert: Partial<TurnoverAssignment>;       Update: Partial<TurnoverAssignment>;       Relationships: [] }
       checklist_instances:         { Row: ChecklistInstance;        Insert: Partial<ChecklistInstance>;        Update: Partial<ChecklistInstance>;        Relationships: [] }

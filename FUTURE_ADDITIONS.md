@@ -338,11 +338,12 @@ needs a pointer to a reusable module:
 
 ```sql
 CREATE TABLE room_templates (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id     uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  name       text NOT NULL,              -- 'Standard Bedroom'
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id       uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name         text NOT NULL,              -- 'Standard Bedroom'
+  auto_include boolean NOT NULL DEFAULT false, -- e.g. 'Whole Home' — seeded on every property automatically, not via the quantity picker
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE room_template_items (
@@ -388,6 +389,16 @@ everything else at 0. On save:
   one-off area not worth a shared module (a boat dock at one specific
   property) — that section just never gets a `room_template_id`,
   identical to how every section works today.
+
+**Auto-include rooms.** Some modules (a "Whole Home" walkthrough) belong
+on every property regardless of layout — not an opt-in quantity choice
+like Bedroom or Screen Porch. A room template flagged `auto_include =
+true` is excluded from the quantity-picker's list entirely and instead
+seeded automatically: the checklist-builder's initial-sections computation
+adds one section for any auto-include room not already present, on both a
+brand-new checklist and an existing one that predates the room being
+flagged. A PM can still detach/customize or delete that section like any
+other — "automatic" means "seeded by default," not "locked."
 
 ### Bulk push — reuse the existing pattern, don't build a new one
 
@@ -472,11 +483,14 @@ confirmed decoupled from template/section structure by the research above.
 
 ### Phasing
 
-1. **Phase 1** — schema, Room Library CRUD, and the property-setup
-   quantity-picker (create/link/populate sections from modules on save).
-   Fully additive; existing properties untouched. This alone delivers
-   the core ask: pick rooms and quantities, checklist populates, same
-   downstream infrastructure.
+1. **Phase 1 (done)** — schema, Room Library CRUD, the property-setup
+   quantity-picker (create/link/populate sections from modules on save),
+   and the `auto_include` flag for rooms that belong on every property
+   automatically. Fully additive; existing properties untouched. Seeded
+   with the org's 14 standard modules (Bedroom, Bathroom, Kitchen, Laundry
+   Room, Common Spaces, Dining Room, Breakfast Room, Office, Screen Porch,
+   Patio/Deck, Pool, Pool House, Garage, and Whole Home — the last one
+   `auto_include = true`).
 2. **Phase 2** — the per-room bulk-push action (adapted
    `apply-master-checklist.ts`), "Apply to Properties" button on each
    room template.
