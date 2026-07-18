@@ -497,3 +497,188 @@ confirmed decoupled from template/section structure by the research above.
 3. **Phase 3** — retire the org-wide master checklist: default-room-
    quantities preset for new-property auto-seed, and a decision on
    migrating vs. freezing existing orgs' `org_master_checklist_items` data.
+
+---
+
+## 3. Offline-capable vendor work order completion
+
+**Concept:** a vendor technician standing at a property with no signal
+should be able to open a work order they're already on, build out line
+items, attach photos, and mark it complete — with everything surviving a
+dead connection and syncing automatically once signal returns, so nothing
+falls through the cracks from a tech forgetting to go back and finish the
+paperwork. **Invoicing/payment is explicitly out of scope** — this is
+about the work-order-completion step only; whatever currently happens
+after completion (invoice creation, Stripe payout) should keep firing
+exactly as it does today, just reliably even when the completion itself
+happened offline.
+
+### The load-bearing fact that shapes everything else
+
+**Vendors have no persistent identity of any kind.** No `user_id`, no
+Supabase Auth session, no `organization_members` row — `member_role` has
+no `vendor` value, and `Vendor` (`types/database.ts:321`) has no auth
+link field at all. Every vendor interaction is an anonymous, single-token,
+single-work-order session: a 64-char `completion_token`
+(`work_orders.completion_token`, 30-day TTL) minted per-dispatch, matched
+server-side via `createServiceClient()` (RLS bypass, since there's no
+session to scope RLS to). There is no vendor login and no "vendor's
+queue" — each dispatch is its own isolated link to exactly one WO.
+
+This means **the crew PWA's offline stack is not a direct precedent to
+extend** — it's a pattern to borrow the shape of, not code to reuse
+as-is. `getDexieDb(userId)` bakes the user id straight into the IndexedDB
+database name (`fieldstay-crew-${userId}`); there is no equivalent stable
+identity for a vendor to key off, except the token itself. A vendor
+offline store needs to be keyed **per-token** (one local database/scope
+per work-order dispatch), not per-user. Practically: a vendor reopening
+the same link on the same device continues from local cache correctly;
+switching devices starts fresh (no cross-device vendor account to sync
+against) — almost certainly fine, since one WO is worked by one tech on
+one device.
+
+### Which live flow this actually is (don't scope against the wrong one)
+
+There are **two parallel vendor-facing systems** in the codebase today,
+and only one is reachable:
+
+- **`app/work-orders/[token]/page.tsx` + `vendor-portal.tsx`** — the real,
+  live flow. Dispatched by `dispatchWorkOrderToVendor`
+  (`app/actions/work-order-public.ts`), keyed on `completion_token`.
+  Completion is a **single atomic submit**: the vendor builds line items
+  as local React state, then one `POST /api/work-orders/[token]/complete`
+  call sends everything at once. **No photo upload exists on this path
+  at all today.**
+- **`app/(public)/wo/[token]`** — a richer-looking flow with photo upload
+  and a sign-off flow (`submitWorkOrderSignOff`), keyed on
+  `work_orders.public_token`. **Nothing in the codebase ever writes
+  `public_token`** — this route is unreachable in production. It's
+  forward-scaffolding for a documented future "TradeSuite" standalone
+  product (`FIELDSTAY_MASTER_ROADMAP.md`, P11, July 2026), not something
+  vendors use today. **Leave it alone** — scope this feature against the
+  live `completion_token` flow only, and don't accidentally build against
+  the dead one.
+
+### What "offline" actually needs to change about the completion model
+
+Today's completion is "fill out the whole form once, submit once, done"
+— not an incremental multi-step save. Recommended approach: keep that
+shape rather than inventing a real-time incremental-sync API surface.
+Make the **session itself** local-first (line items, notes, and photos
+accumulate in local storage while the tech works, survives the tab dying
+or losing signal mid-edit), and only the final "mark complete" tap
+triggers a sync-and-submit — which itself needs to be queued/retried if
+offline at that exact moment. This matches the literal ask ("fill out the
+line items, mark it complete... it will sync") without requiring the
+server to accept partial/incremental WO state, and sidesteps a real gap
+found in the schema: `work_order_line_items` has **no dedup/uniqueness
+constraint** — a naive retry-on-resync of an incremental-save API would
+risk duplicate line items, whereas a single idempotent final-submit call
+(with a client-generated idempotency key, same pattern already used for
+`work-order-reports`) avoids that entirely.
+
+### What's reusable from the crew PWA (pattern, not literal code)
+
+- **The outbox shape** (`lib/dexie/syncService.ts`) — a local queue table,
+  drained strictly in insertion order, retry-with-dead-letter thresholds
+  (`retryCount &gt;= 3` → skip and continue draining, `&gt;= 5` → mark
+  `failed` but keep the row so nothing vanishes silently). Directly
+  applicable to queuing the final completion submit when it's attempted
+  offline.
+- **The generation-token race guard** (`lib/dexie/context.tsx`'s
+  `refreshChecklistSubscription`/`refreshAssetsSubscription`) — needed if
+  more than one trigger (a retry timer, an `online` event, a manual
+  "retry now" tap) could attempt to sync the same local draft
+  concurrently; increment-before-await, check-after-await prevents a
+  stale attempt from clobbering a newer one.
+- **The two-store photo pipeline** (`lib/dexie/photo-queue.ts` +
+  `photo-sync.ts`) — compress-then-store-locally, upload-later, tracked
+  via a separate metadata row. Needs a new `ALLOWED_TARGETS` entry for
+  `work_order_photos` and **client-generated `crypto.randomUUID()`
+  storage paths** — `work_order_photos.storage_path` has a **global**
+  unique index (not scoped per WO), so a naive path scheme risks a real
+  collision across queued offline photos.
+- **`components/pwa/install-banner.tsx`** — generic, no crew-specific
+  coupling, usable as-is if the vendor page should be installable.
+- **`proxy.ts`'s bypass-list pattern** — a new manifest/service-worker
+  registration point for the vendor route will need its own bypass
+  entries, same as `/offline.html` needed one.
+
+### What's genuinely new (nothing to extend)
+
+- **Per-token local storage scope** — a new IndexedDB keying scheme,
+  since `getDexieDb(userId)` has no vendor equivalent.
+- **Service worker registration + a manifest for the vendor route** —
+  `public/sw.js`'s fetch handler is already origin-wide, but nothing
+  registers it on `/work-orders/[token]` today (registration only
+  happens inside `crew-shell.tsx` and the PM dashboard's push-notification
+  hook, neither of which a vendor's cold link-click ever mounts). Needs
+  its own registration call and its own manifest (mirroring
+  `dashboard-manifest.json`'s shape) if installability is desired.
+- **Photo upload on the live vendor flow, period** — doesn't exist there
+  today at all. Needs a new service-role Route Handler for the insert
+  (RLS on `work_order_photos_insert` requires org membership vendors
+  don't have — same reasoning as the existing completion route already
+  using `createServiceClient()`).
+- **An idempotency key on the completion submit** — a client-generated
+  UUID sent with the offline-queued request and checked server-side,
+  closing the line-item-duplication gap noted above. Mirrors the
+  client-generated report ID fix already applied to work-order-reports
+  elsewhere in this codebase.
+
+### Side effects that must still fire correctly once synced (not touched, just preserved)
+
+- Line items present → `work-order/invoice-submitted` → creates the
+  `work_order_invoices` row (already idempotent via
+  `upsert(onConflict:'work_order_id', ignoreDuplicates:true)`) → PM gets
+  an "invoice ready" email. **This is the one hard dependency into the
+  out-of-scope payment chain** — an offline-synced completion with line
+  items must still trigger this, exactly once, or the vendor is never
+  paid, even though the payment UX itself isn't part of this feature.
+- No line items → `work-order/completed-via-portal` → PM notification
+  only (confirmed: **no `owner_transactions` expense entry gets created
+  in this branch today** — a pre-existing quirk, not something to "fix"
+  as an incidental side effect of this work).
+- Linked to a turnover → cascades `turnover/completed` as it does today.
+
+### Open questions to decide before/during implementation (not solved here)
+
+- **Vendor compliance re-check at sync time.** Nothing today — online or
+  offline — re-checks `grace_period`/`hard_blocked` status at completion
+  time (only WO *creation* gates on it, client-side only). A vendor who
+  goes `hard_blocked` while working offline isn't blocked from completing
+  today either way; decide whether this feature should add that check or
+  explicitly leave the existing gap as-is.
+- **Token expiry during an extended offline stretch.** `completion_token`
+  has a flat 30-day TTL; a vendor offline for a long remote job could
+  resurface post-expiry to a hard 410. Decide: extend the TTL, add a
+  grace-sync window, or surface a clear "link expired, contact your PM"
+  error while keeping the locally-captured draft intact (not deleted) so
+  a PM-reissued fresh link could re-import it.
+- **PM visibility into late/offline syncs.** Worth a notification (reuse
+  the existing `notifications` table + `dedupe_key` pattern) when a WO
+  completion syncs meaningfully after its actual completion timestamp, so
+  a PM isn't surprised by a silent multi-day gap.
+- **Rate limiting.** The completion route is IP-rate-limited (20/min,
+  `workOrderRatelimit`), not token-rate-limited. Unlikely to matter for
+  one vendor's one WO, but a burst of several queued photo uploads plus
+  the final submit firing in quick succession on reconnect is worth a
+  sanity check against the limiter.
+
+### Suggested phasing
+
+1. **Phase 1 — durable local draft, no server API changes.** Make the
+   in-progress form itself resilient: line items/notes typed while
+   offline survive a dead tab or lost signal, via a per-token local store.
+   The final submit still assumes connectivity at the moment it's tapped.
+   This alone fixes the most common failure mode (losing in-progress work
+   to a closed tab or dead battery) without touching the completion API.
+2. **Phase 2 — true offline submission.** Queue the final "mark complete"
+   action itself when tapped offline (outbox-style), auto-retry on
+   reconnect, with the client-generated idempotency key to prevent
+   duplicate line-item inserts on retry.
+3. **Phase 3 — offline photo capture.** Net-new capability on the live
+   vendor portal: compress-and-queue-locally, upload-later, using the
+   crew PWA's two-store pattern and collision-safe UUID storage paths.
+4. **Phase 4 (optional) — PM-facing visibility** into late/offline syncs,
+   plus resolving the token-expiry-while-offline question.
