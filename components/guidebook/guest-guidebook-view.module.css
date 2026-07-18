@@ -47,7 +47,7 @@
 .stub + .stub::before { content: ''; position: absolute; left: 0; top: 20px; bottom: 20px; border-left: 1px dashed var(--border); }
 .stubLabel { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 5px; }
 .stubLabel svg { width: 12px; height: 12px; }
-.stubValue { font-family: var(--font-syne); font-size: 22px; font-weight: 700; margin: 0; }
+.stubValue { font-family: var(--font-inter); font-size: 22px; font-weight: 700; margin: 0; }
 
 .sectionHead { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
 .iconBadge { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; }
@@ -55,5 +55,5 @@
 .headLine { flex: 1; height: 1px; }
 
 .sponsorCard { border-radius: 14px; padding: 16px; }
-.sponsorName { font-family: var(--font-syne); font-size: 16px; font-weight: 700; margin: 0 0 5px; }
+.sponsorName { font-family: var(--font-inter); font-size: 16px; font-weight: 700; margin: 0 0 5px; }
 .offerBadge { display: inline-block; border-radius: 9px; padding: 7px 11px; margin: 0 0 10px; }

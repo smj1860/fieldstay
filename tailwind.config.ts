@@ -59,8 +59,8 @@ const config: Config = {
         'dark-lg':   '0 8px 32px rgba(0,0,0,0.5)',
       },
       fontFamily: {
-        display: ['var(--font-syne)', 'sans-serif'],
-        sans:    ['var(--font-dm-sans)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['var(--font-inter)', 'sans-serif'],
+        sans:    ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
     },
   },

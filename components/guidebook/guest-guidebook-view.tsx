@@ -144,7 +144,7 @@ export function GuestGuidebookView({
                     </div>
                   )}
                 </div>
-                <h1 style={{ fontFamily: 'var(--font-syne)', fontWeight: 800, fontSize: '30px', lineHeight: 1.08, letterSpacing: '-0.01em', margin: '0 0 4px', textShadow: '0 2px 16px rgba(0,0,0,0.5)' }}>
+                <h1 style={{ fontFamily: 'var(--font-inter)', fontWeight: 800, fontSize: '30px', lineHeight: 1.2, letterSpacing: '-0.01em', margin: '0 0 4px', textShadow: '0 2px 16px rgba(0,0,0,0.5)' }}>
                   {property.name}
                 </h1>
                 <p style={{ fontSize: '13px', color: MUTED, margin: 0, textTransform: 'capitalize' }}>

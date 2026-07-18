@@ -13,7 +13,7 @@ export function HomepageContent() {
 
       {/* ── Nav ──────────────────────────────────────────────────────────── */}
       <nav className="sticky top-0 z-50 flex items-center justify-between px-8 h-16 bg-brand-800">
-        <span className="font-display text-xl font-bold tracking-tight text-white">
+        <span className="font-display text-xl font-black tracking-tight text-white">
           Field<span className="text-gold-300">Stay</span>
         </span>
         <div className="flex items-center gap-2">
@@ -44,17 +44,17 @@ export function HomepageContent() {
         </div>
 
         {/* Headline */}
-        <h1 className="font-display mx-auto mb-5 font-bold leading-[1.08] tracking-tight text-white"
+        <h1 className="font-display mx-auto mb-5 font-bold leading-[1.2] tracking-tight text-white"
             style={{ fontSize: 'clamp(36px, 5vw, 54px)', maxWidth: 720, letterSpacing: '-1.5px' }}>
-          The operations platform for{' '}
-          <span className="text-gold-300">10–100 property STR portfolios.</span>
+          The STR industry is stressful. FieldStay exists with one mission:{' '}
+          <span className="text-gold-300">make your day less stressful.</span>
         </h1>
 
         {/* Subhead */}
         <p className="mx-auto mb-9 text-white/62" style={{ fontSize: 18, maxWidth: 580, lineHeight: 1.65 }}>
-          FieldStay runs your turnovers, crew, vendor work orders, and asset
-          health from one system — including a crew app that works with zero
-          cell signal.
+          Automated turnovers. A crew app that works offline. A guest
+          guidebook that pays you back every month. Just a few ways we make
+          your day less stressful.
         </p>
 
         {/* CTA */}
@@ -94,7 +94,7 @@ export function HomepageContent() {
           <p className="text-xs font-bold uppercase tracking-widest mb-3 text-brand-800">
             Sound familiar?
           </p>
-          <h2 className="font-display font-bold mb-2 tracking-tight text-brand-800"
+          <h2 className="font-display font-bold leading-[1.2] mb-2 tracking-tight text-brand-800"
               style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
             Managing properties today is chaotic.
           </h2>
@@ -145,7 +145,7 @@ export function HomepageContent() {
       <section className="px-8 py-20" style={{ background: '#fff' }}>
         <div className="mx-auto" style={{ maxWidth: 960 }}>
           <div className="text-center mb-14">
-            <h2 className="font-display font-bold mb-3 tracking-tight text-brand-800"
+            <h2 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-brand-800"
                 style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
               Built for every part of the operation.
             </h2>
@@ -163,7 +163,7 @@ export function HomepageContent() {
               <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 Crew Mobile App
               </span>
-              <h3 className="font-display font-bold mb-3 tracking-tight text-gray-900"
+              <h3 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-gray-900"
                   style={{ fontSize: 20, letterSpacing: '-0.3px' }}>
                 Your crew has to work fast even without a signal. Their app should too.
               </h3>
@@ -180,7 +180,7 @@ export function HomepageContent() {
               <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 Intelligent Scheduling
               </span>
-              <h3 className="font-display font-bold mb-3 tracking-tight text-gray-900"
+              <h3 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-gray-900"
                   style={{ fontSize: 20, letterSpacing: '-0.3px' }}>
                 Suggested crew assignment that gets smarter every turnover.
               </h3>
@@ -198,7 +198,7 @@ export function HomepageContent() {
               <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 Vendor Portal
               </span>
-              <h3 className="font-display font-bold mb-3 tracking-tight text-gray-900"
+              <h3 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-gray-900"
                   style={{ fontSize: 20, letterSpacing: '-0.3px' }}>
                 Dispatch a work order. Get an invoice back — no login required.
               </h3>
@@ -216,7 +216,7 @@ export function HomepageContent() {
               <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 Asset Health
               </span>
-              <h3 className="font-display font-bold mb-3 tracking-tight text-gray-900"
+              <h3 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-gray-900"
                   style={{ fontSize: 20, letterSpacing: '-0.3px' }}>
                 Know which water heater fails next — before it does.
               </h3>
@@ -235,7 +235,7 @@ export function HomepageContent() {
               <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-4 bg-brand-50 text-brand-800">
                 RepuGuard
               </span>
-              <h3 className="font-display font-bold mb-3 tracking-tight text-gray-900"
+              <h3 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-gray-900"
                   style={{ fontSize: 20, letterSpacing: '-0.3px' }}>
                 A professional review response that sounds as authentic as you. One click to post.
               </h3>
@@ -257,7 +257,7 @@ export function HomepageContent() {
             <span className="inline-block rounded-full px-3 py-1 text-xs font-bold uppercase tracking-widest mb-5 bg-gold-300/15 text-gold-300 border border-gold-300/30">
               Guest Guidebook
             </span>
-            <h3 className="font-display font-bold mb-4 tracking-tight text-white"
+            <h3 className="font-display font-bold leading-[1.2] mb-4 tracking-tight text-white"
                 style={{ fontSize: 'clamp(22px, 3vw, 28px)', letterSpacing: '-0.5px', maxWidth: 680 }}>
               Not just another guidebook. A guest experience tool with a personal touch — and we&apos;ll pay you to use it.*
             </h3>
@@ -279,7 +279,7 @@ export function HomepageContent() {
       {/* ── How it works ─────────────────────────────────────────────────── */}
       <section className="px-8 py-20 text-center bg-brand-800">
         <div className="mx-auto" style={{ maxWidth: 800 }}>
-          <h2 className="font-display font-bold mb-3 tracking-tight text-white"
+          <h2 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-white"
               style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
             Up and running in minutes.
           </h2>
@@ -324,12 +324,17 @@ export function HomepageContent() {
       <section className="px-8 py-20" style={{ background: '#F8F9FA' }}>
         <div className="mx-auto" style={{ maxWidth: 900 }}>
           <div className="text-center mb-10">
-            <h2 className="font-display font-bold mb-2 tracking-tight text-brand-800"
+            <h2 className="font-display font-bold leading-[1.2] mb-2 tracking-tight text-brand-800"
                 style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
-              Simple, transparent pricing.
+              We do business differently.
             </h2>
-            <p className="text-sm text-gray-500">
-              Full software on every plan. No features gated by tier.
+            <p className="text-sm text-gray-500 mb-4">
+              Simple, transparent pricing.
+            </p>
+            <p className="text-sm text-gray-600 mx-auto" style={{ maxWidth: 480 }}>
+              Most STR software makes you pay per property and gates parts of
+              the software behind higher tiers. It doesn&apos;t have to be
+              that way. Flat tier pricing. All the features, no gates.
             </p>
           </div>
 
@@ -508,7 +513,7 @@ export function HomepageContent() {
 
       {/* ── Bottom CTA ───────────────────────────────────────────────────── */}
       <section className="px-8 py-20 text-center bg-gold-300">
-        <h2 className="font-display font-bold mb-3 tracking-tight text-brand-800"
+        <h2 className="font-display font-bold leading-[1.2] mb-3 tracking-tight text-brand-800"
             style={{ fontSize: 'clamp(28px, 4vw, 38px)', letterSpacing: '-1px' }}>
           See your first turnover automate itself today.
         </h2>
@@ -527,7 +532,7 @@ export function HomepageContent() {
 
       {/* ── Footer ───────────────────────────────────────────────────────── */}
       <footer className="flex items-center justify-between px-8 py-7 bg-brand-900">
-        <span className="font-display font-bold text-base text-white">
+        <span className="font-display font-black text-base text-white">
           Field<span className="text-gold-300">Stay</span>
         </span>
         <div className="flex items-center gap-6">

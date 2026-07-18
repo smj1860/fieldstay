@@ -64,7 +64,7 @@ export default async function CrewInvitePage({ params }: Props) {
     <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white tracking-tight">FieldStay</h1>
+          <h1 className="text-3xl font-black text-white tracking-tight">FieldStay</h1>
           <p className="text-brand-200 text-sm mt-1">Crew App</p>
         </div>
         <div className="bg-card-themed rounded-2xl shadow-lg p-8">
