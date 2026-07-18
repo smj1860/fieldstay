@@ -37,13 +37,90 @@ function toItemState(item: { task: string; requires_photo: boolean; notes: strin
   return { tempId: makeId(), task: item.task, requires_photo: item.requires_photo, notes: item.notes }
 }
 
+// Pure list-transform helpers, kept at module scope rather than nested
+// inside the component's event handlers — nesting them there would stack
+// another two levels of function-in-function on top (component -> handler
+// -> setRooms callback -> prev.map callback -> this callback) and trip the
+// "functions nested more than 4 deep" check.
+function renameRoomInList(rooms: RoomState[], roomId: string, name: string): RoomState[] {
+  return rooms.map((r) => (r.id === roomId ? { ...r, name } : r))
+}
+
+function setRoomAutoIncludeInList(rooms: RoomState[], roomId: string, autoInclude: boolean): RoomState[] {
+  return rooms.map((r) => (r.id === roomId ? { ...r, autoInclude } : r))
+}
+
+function addItemToRoom(rooms: RoomState[], roomId: string): RoomState[] {
+  return rooms.map((r) =>
+    r.id === roomId
+      ? { ...r, items: [...r.items, { tempId: makeId(), task: '', requires_photo: false, notes: '' }] }
+      : r
+  )
+}
+
+function filterOutItem(items: ItemState[], itemTempId: string): ItemState[] {
+  return items.filter((i) => i.tempId !== itemTempId)
+}
+
+function removeItemFromRoom(rooms: RoomState[], roomId: string, itemTempId: string): RoomState[] {
+  return rooms.map((r) => (r.id === roomId ? { ...r, items: filterOutItem(r.items, itemTempId) } : r))
+}
+
+function mapUpdatedItem(items: ItemState[], itemTempId: string, field: keyof ItemState, value: unknown): ItemState[] {
+  return items.map((i) => (i.tempId === itemTempId ? { ...i, [field]: value } : i))
+}
+
+function updateItemInRoom(
+  rooms: RoomState[],
+  roomId: string,
+  itemTempId: string,
+  field: keyof ItemState,
+  value: unknown
+): RoomState[] {
+  return rooms.map((r) => (r.id === roomId ? { ...r, items: mapUpdatedItem(r.items, itemTempId, field, value) } : r))
+}
+
+function reorderItems(items: ItemState[], itemTempId: string, dir: -1 | 1): ItemState[] {
+  const idx = items.findIndex((i) => i.tempId === itemTempId)
+  const swap = idx + dir
+  if (swap < 0 || swap >= items.length) {
+    return items
+  }
+  const next = [...items]
+  ;[next[idx], next[swap]] = [next[swap], next[idx]]
+  return next
+}
+
+function moveItemInRoom(rooms: RoomState[], roomId: string, itemTempId: string, dir: -1 | 1): RoomState[] {
+  return rooms.map((r) => (r.id === roomId ? { ...r, items: reorderItems(r.items, itemTempId, dir) } : r))
+}
+
+function removeRoomFromList(rooms: RoomState[], roomId: string): RoomState[] {
+  return rooms.filter((r) => r.id !== roomId)
+}
+
+function buildItemsPayload(items: ItemState[]): RoomTemplateItemInput[] {
+  return items.map((item, i) => ({
+    task:           item.task,
+    requires_photo: item.requires_photo,
+    notes:          item.notes,
+    sort_order:     i,
+  }))
+}
+
+function saveButtonLabel(saving: boolean, saved: boolean) {
+  if (saving) return 'Saving…'
+  if (saved) return <><Check className="w-4 h-4" /> Saved</>
+  return 'Save Room'
+}
+
 export function RoomLibraryBuilder({
   initialRooms,
   canManage,
-}: {
+}: Readonly<{
   initialRooms: Array<{ id: string; name: string; autoInclude: boolean; items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }> }>
   canManage: boolean
-}) {
+}>) {
   const [rooms, setRooms] = useState<RoomState[]>(() =>
     initialRooms.map((r) => ({ id: r.id, name: r.name, autoInclude: r.autoInclude, items: r.items.map(toItemState) }))
   )
@@ -79,55 +156,60 @@ export function RoomLibraryBuilder({
   }
 
   const updateRoomName = (roomId: string, name: string) => {
-    setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, name } : r)))
+    setRooms((prev) => renameRoomInList(prev, roomId, name))
   }
 
   const toggleAutoInclude = (roomId: string) => {
     const room = rooms.find((r) => r.id === roomId)
     if (!room) return
     const next = !room.autoInclude
-    setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, autoInclude: next } : r)))
+    setRooms((prev) => setRoomAutoIncludeInList(prev, roomId, next))
     startCreate(async () => {
       const result = await setRoomTemplateAutoInclude(roomId, next)
       if (result.error) {
         setError(result.error)
-        setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, autoInclude: !next } : r)))
+        setRooms((prev) => setRoomAutoIncludeInList(prev, roomId, !next))
       }
     })
   }
 
   const addItem = (roomId: string) => {
-    setRooms((prev) => prev.map((r) =>
-      r.id === roomId
-        ? { ...r, items: [...r.items, { tempId: makeId(), task: '', requires_photo: false, notes: '' }] }
-        : r
-    ))
+    setRooms((prev) => addItemToRoom(prev, roomId))
   }
 
   const removeItem = (roomId: string, itemTempId: string) => {
-    setRooms((prev) => prev.map((r) =>
-      r.id === roomId ? { ...r, items: r.items.filter((i) => i.tempId !== itemTempId) } : r
-    ))
+    setRooms((prev) => removeItemFromRoom(prev, roomId, itemTempId))
   }
 
   const updateItem = (roomId: string, itemTempId: string, field: keyof ItemState, value: unknown) => {
-    setRooms((prev) => prev.map((r) =>
-      r.id === roomId
-        ? { ...r, items: r.items.map((i) => (i.tempId === itemTempId ? { ...i, [field]: value } : i)) }
-        : r
-    ))
+    setRooms((prev) => updateItemInRoom(prev, roomId, itemTempId, field, value))
   }
 
   const moveItem = (roomId: string, itemTempId: string, dir: -1 | 1) => {
-    setRooms((prev) => prev.map((r) => {
-      if (r.id !== roomId) return r
-      const idx = r.items.findIndex((i) => i.tempId === itemTempId)
-      const next = [...r.items]
-      const swap = idx + dir
-      if (swap < 0 || swap >= next.length) return r
-      ;[next[idx], next[swap]] = [next[swap], next[idx]]
-      return { ...r, items: next }
-    }))
+    setRooms((prev) => moveItemInRoom(prev, roomId, itemTempId, dir))
+  }
+
+  const handleSaveRoom = (room: RoomState, nameChanged: boolean) => {
+    startCreate(async () => {
+      setError(null)
+      if (nameChanged) {
+        const renameResult = await renameRoomTemplate(room.id, room.name)
+        if (renameResult.error) { setError(renameResult.error); return }
+      }
+      const itemsResult = await saveRoomTemplateItems(room.id, buildItemsPayload(room.items))
+      if (itemsResult.error) { setError(itemsResult.error); return }
+      setSavedRoomId(room.id)
+      setTimeout(() => setSavedRoomId(null), 2000)
+    })
+  }
+
+  const handleDeleteRoom = (roomId: string) => {
+    startCreate(async () => {
+      setError(null)
+      const result = await deleteRoomTemplate(roomId)
+      if (result.error) { setError(result.error); return }
+      setRooms((prev) => removeRoomFromList(prev, roomId))
+    })
   }
 
   return (
@@ -160,35 +242,8 @@ export function RoomLibraryBuilder({
             onRemoveItem={(itemTempId) => removeItem(room.id, itemTempId)}
             onUpdateItem={(itemTempId, field, value) => updateItem(room.id, itemTempId, field, value)}
             onMoveItem={(itemTempId, dir) => moveItem(room.id, itemTempId, dir)}
-            onSave={(nameChanged) => {
-              startCreate(async () => {
-                setError(null)
-                if (nameChanged) {
-                  const renameResult = await renameRoomTemplate(room.id, room.name)
-                  if (renameResult.error) { setError(renameResult.error); return }
-                }
-                const itemsResult = await saveRoomTemplateItems(
-                  room.id,
-                  room.items.map((item, i): RoomTemplateItemInput => ({
-                    task:           item.task,
-                    requires_photo: item.requires_photo,
-                    notes:          item.notes,
-                    sort_order:     i,
-                  }))
-                )
-                if (itemsResult.error) { setError(itemsResult.error); return }
-                setSavedRoomId(room.id)
-                setTimeout(() => setSavedRoomId(null), 2000)
-              })
-            }}
-            onDelete={() => {
-              startCreate(async () => {
-                setError(null)
-                const result = await deleteRoomTemplate(room.id)
-                if (result.error) { setError(result.error); return }
-                setRooms((prev) => prev.filter((r) => r.id !== room.id))
-              })
-            }}
+            onSave={(nameChanged) => handleSaveRoom(room, nameChanged)}
+            onDelete={() => handleDeleteRoom(room.id)}
             saving={creating}
           />
         )
@@ -232,7 +287,7 @@ function RoomCard({
   onMoveItem,
   onSave,
   onDelete,
-}: {
+}: Readonly<{
   room: RoomState
   isOpen: boolean
   canManage: boolean
@@ -247,7 +302,7 @@ function RoomCard({
   onMoveItem: (itemTempId: string, dir: -1 | 1) => void
   onSave: (nameChanged: boolean) => void
   onDelete: () => void
-}) {
+}>) {
   const [initialName] = useState(room.name)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -314,6 +369,7 @@ function RoomCard({
                   className="flex-1 text-sm text-primary-themed bg-transparent focus:outline-none placeholder:text-[var(--text-muted)] border-b border-[color:var(--border)] focus:border-[var(--accent-gold)] transition-colors"
                 />
                 <button
+                  type="button"
                   onClick={() => onUpdateItem(item.tempId, 'requires_photo', !item.requires_photo)}
                   title="Require photo"
                   className={item.requires_photo ? 'p-1 rounded transition-colors' : 'p-1 rounded transition-colors text-muted-themed hover:text-secondary-themed'}
@@ -321,7 +377,7 @@ function RoomCard({
                 >
                   <Camera className="w-4 h-4" />
                 </button>
-                <button onClick={() => onRemoveItem(item.tempId)} className="text-muted-themed hover:text-red-500 transition-colors p-1">
+                <button type="button" onClick={() => onRemoveItem(item.tempId)} className="text-muted-themed hover:text-red-500 transition-colors p-1">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -329,6 +385,7 @@ function RoomCard({
           </div>
 
           <button
+            type="button"
             onClick={onAddItem}
             className="w-full flex items-center justify-center gap-2 py-2 text-sm text-muted-themed hover:text-[var(--accent-gold)] hover:bg-[var(--accent-gold-dim)] rounded-lg transition-colors border border-dashed border-themed"
           >
@@ -343,7 +400,7 @@ function RoomCard({
                 disabled={saving}
                 className="text-sm inline-flex items-center gap-1.5"
               >
-                {saving ? 'Saving…' : saved ? <><Check className="w-4 h-4" /> Saved</> : 'Save Room'}
+                {saveButtonLabel(saving, saved)}
               </Button>
 
               {confirmDelete ? (
