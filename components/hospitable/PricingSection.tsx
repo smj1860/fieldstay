@@ -96,10 +96,15 @@ export default function PricingSection({ isLoggedIn }: Readonly<PricingSectionPr
     <div>
       <div className="text-center mb-10">
         <h2 className="text-3xl font-bold mb-3 text-[#0a1628] font-display">
-          Simple, transparent pricing
+          We do business differently.
         </h2>
-        <p className="text-gray-500 mb-6">
-          Full platform on every plan. 14-day free trial. No credit card required.
+        <p className="text-gray-500 mb-2">
+          Simple, transparent pricing. 14-day free trial, no credit card required.
+        </p>
+        <p className="text-gray-600 text-sm mx-auto mb-6" style={{ maxWidth: 480 }}>
+          Most STR software makes you pay per property and gates parts of
+          the software behind higher tiers. It doesn&apos;t have to be that
+          way. Flat tier pricing. All the features, no gates.
         </p>
 
         {/* Monthly / Annual toggle */}
