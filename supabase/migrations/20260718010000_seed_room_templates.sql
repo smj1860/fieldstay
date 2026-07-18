@@ -1,6 +1,6 @@
 -- Seeds the 14 standard room-turnover templates (see FUTURE_ADDITIONS.md #2)
 -- into room_templates / room_template_items for the org that
--- sjones@lakemartindelivery.com belongs to. "Whole Home" is flagged
+-- stephen@fieldstay.app belongs to. "Whole Home" is flagged
 -- auto_include = true so it's seeded onto every property's checklist
 -- automatically instead of via the PM's opt-in quantity picker.
 --
@@ -16,12 +16,12 @@ begin
   select om.org_id into v_org_id
   from public.organization_members om
   join auth.users u on u.id = om.user_id
-  where u.email = 'sjones@lakemartindelivery.com'
+  where u.email = 'stephen@fieldstay.app'
     and om.invite_accepted_at is not null
   limit 1;
 
   if v_org_id is null then
-    raise exception 'No accepted organization_members row found for sjones@lakemartindelivery.com';
+    raise exception 'No accepted organization_members row found for stephen@fieldstay.app';
   end if;
 
   -- 1. Bedroom
