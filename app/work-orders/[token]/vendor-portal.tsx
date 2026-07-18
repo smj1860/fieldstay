@@ -1,9 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap, BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import {
+  saveVendorWoDraft,
+  loadVendorWoDraft,
+  submitVendorWoCompletion,
+  retryVendorWoSubmission,
+  retryFailedVendorWoSubmission,
+  getVendorWoSubmissionState,
+} from '@/lib/dexie/vendorWoSyncService'
+import type { VendorWoMutationRow } from '@/lib/dexie/vendorWoSchema'
 
 interface WorkOrderInfo {
   id:             string
@@ -196,6 +205,8 @@ export function VendorPortal({
   const [notes,       setNotes]       = useState('')
   const [submitting,  setSubmitting]  = useState(false)
   const [success,     setSuccess]     = useState(false)
+  const [queued,      setQueued]      = useState(false)
+  const [deadLetterReason, setDeadLetterReason] = useState<VendorWoMutationRow['terminalReason'] | 'generic' | null>(null)
   const [error,       setError]       = useState<string | null>(null)
   const [lineItems,   setLineItems]   = useState<LineItemInput[]>([
     { type: 'labor',    description: 'Labor', quantity: 1, unitCost: '' },
@@ -203,6 +214,69 @@ export function VendorPortal({
   ])
 
   const alreadyDone = workOrder.status === 'completed' || workOrder.status === 'cancelled'
+
+  // Recover an in-progress draft, and restore the correct screen if a
+  // completion was already queued (or dead-lettered) in a prior session —
+  // reopening this same link after a closed tab, crashed browser, or dead
+  // phone battery shouldn't drop the vendor back onto a blank form when
+  // their work is already saved and either syncing or needs attention.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const draft = await loadVendorWoDraft(token)
+      if (!cancelled && draft) {
+        setNotes(draft.notes)
+        if (draft.lineItems.length > 0) setLineItems(draft.lineItems)
+      }
+
+      const state = await getVendorWoSubmissionState(token)
+      if (cancelled || !state) return
+      if (state.failed) {
+        setDeadLetterReason(state.terminalReason ?? 'generic')
+      } else {
+        setQueued(true)
+        setSuccess(true)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [token])
+
+  // Debounced local autosave — durable against the tab closing mid-entry,
+  // independent of whether the device currently has a connection.
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      void saveVendorWoDraft(token, notes, lineItems)
+    }, 500)
+    return () => clearTimeout(timeout)
+  }, [token, notes, lineItems])
+
+  // Mirrors DexieProvider's 'online' handler in lib/dexie/context.tsx —
+  // without this, a queued-but-not-yet-drained submission only retries
+  // when the vendor manually taps Retry or reloads the page. This is what
+  // actually makes "it'll go through the second you're back in range" true
+  // rather than requiring the vendor to notice and act on it themselves.
+  // Harmless no-op if nothing has been submitted yet.
+  useEffect(() => {
+    const onlineHandler = () => {
+      void retryVendorWoSubmission(token).then(async () => {
+        const state = await getVendorWoSubmissionState(token)
+        if (!state) { setQueued(false); return }
+        if (state.failed) setDeadLetterReason(state.terminalReason ?? 'generic')
+        else setQueued(true)
+      })
+    }
+    window.addEventListener('online', onlineHandler)
+    return () => window.removeEventListener('online', onlineHandler)
+  }, [token])
+
+  const handleManualRetry = () => {
+    void retryFailedVendorWoSubmission(token).then(async () => {
+      const state = await getVendorWoSubmissionState(token)
+      if (!state) { setDeadLetterReason(null); setQueued(false); setSuccess(false); return }
+      if (state.failed) setDeadLetterReason(state.terminalReason ?? 'generic')
+      else { setDeadLetterReason(null); setQueued(true); setSuccess(true) }
+    })
+  }
 
   const subtotal = lineItems.reduce((sum, item) => {
     const cost = parseFloat(item.unitCost) || 0
@@ -249,30 +323,24 @@ export function VendorPortal({
     setError(null)
 
     try {
-      const res = await fetch(`/api/work-orders/${token}/complete`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          notes,
-          lineItems: validItems.map((item) => ({
-            line_type:   item.type,
-            description: item.description.trim(),
-            quantity:    item.quantity,
-            unit_cost:   parseFloat(item.unitCost),
-            line_total:  parseFloat(item.unitCost) * item.quantity,
-          })),
-          subtotal,
-        }),
-      })
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setError(body.error ?? 'Something went wrong. Please try again.')
-      } else {
-        setSuccess(true)
-      }
+      const { synced } = await submitVendorWoCompletion(
+        token,
+        notes,
+        validItems.map((item) => ({
+          line_type:   item.type,
+          description: item.description.trim(),
+          quantity:    item.quantity,
+          unit_cost:   parseFloat(item.unitCost),
+          line_total:  parseFloat(item.unitCost) * item.quantity,
+        })),
+        subtotal,
+      )
+      setQueued(!synced)
+      setSuccess(true)
     } catch {
-      setError('Network error. Please check your connection and try again.')
+      // A local IndexedDB failure, not a network failure — the submission
+      // still queues and retries in the background even on a network error.
+      setError('Could not save this locally. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -329,6 +397,37 @@ export function VendorPortal({
     </div>
   )
 
+  // ── State: submission stuck (dead-lettered) ──────────────────────────────
+  if (deadLetterReason) {
+    const message = deadLetterReason === 'closed'
+      ? 'This work order was already closed through another link before your completion could reach the server — no action needed on your end. Contact the property manager if that seems wrong.'
+      : deadLetterReason === 'expired'
+      ? 'Your link expired before this could be submitted. Your entries are still saved on this device — contact the property manager for a new link.'
+      : "This couldn't be submitted after several attempts. Your entries are still saved on this device."
+    return shell(
+      <div style={{ textAlign: 'center', padding: '8px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+          <AlertTriangle style={{ width: 48, height: 48, color: '#b45309' }} />
+        </div>
+        <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
+          {deadLetterReason === 'generic' ? "Didn't Sync" : 'Not Submitted'}
+        </h2>
+        <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: '0 0 16px' }}>
+          {message}
+        </p>
+        {deadLetterReason === 'generic' && (
+          <button
+            type="button"
+            onClick={handleManualRetry}
+            style={{ backgroundColor: '#FF6B00', color: '#ffffff', border: 'none', borderRadius: 10, padding: '12px 20px', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+          >
+            Retry Now
+          </button>
+        )}
+      </div>
+    )
+  }
+
   // ── State: already done ──────────────────────────────────────────────────
   if (success) {
     return shell(
@@ -337,11 +436,12 @@ export function VendorPortal({
           <CheckCircle2 style={{ width: 48, height: 48, color: '#16a34a' }} />
         </div>
         <h2 style={{ fontSize: 18, fontWeight: 700, color: '#0f172a', margin: '0 0 8px' }}>
-          Invoice Submitted!
+          {queued ? 'Saved' : 'Invoice Submitted!'}
         </h2>
         <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.6, margin: 0 }}>
-          Your invoice has been sent to the property manager.
-          Payment will be deposited to your Stripe payout account once approved.
+          {queued
+            ? "This will finish submitting the moment you're back in range — no need to do anything else."
+            : 'Your invoice has been sent to the property manager. Payment will be deposited to your Stripe payout account once approved.'}
         </p>
       </div>
     )

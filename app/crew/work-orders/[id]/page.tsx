@@ -2,7 +2,8 @@
 
 import { useEffect, useState }     from 'react'
 import { useLiveQuery }            from 'dexie-react-hooks'
-import { useDexieDb }              from '@/lib/dexie/context'
+import { useDexieDb, useDexieUserId } from '@/lib/dexie/context'
+import { completeWorkOrder, retryFailedMutation } from '@/lib/dexie/helpers'
 import { useRouter }              from 'next/navigation'
 import { ArrowLeft, Wrench, CheckCircle2, Check } from 'lucide-react'
 import type { PropertyRow } from '@/lib/dexie/schema'
@@ -16,6 +17,7 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
   const [notes, setNotes]         = useState('')
   const [done, setDone]           = useState(false)
   const db     = useDexieDb()
+  const userId = useDexieUserId()
   const router = useRouter()
 
   useEffect(() => {
@@ -32,23 +34,25 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
     db.properties.get(wo.property_id).then((p) => setProperty(p ?? null))
   }, [wo?.property_id, db])
 
+  const syncFailed = useLiveQuery(
+    () => id
+      ? db.mutations.where('targetId').equals(id)
+          .filter((m) => m.table === 'crew_work_orders' && !!m.failed)
+          .first()
+      : undefined,
+    [id, db]
+  )
+
   async function handleComplete() {
     if (!id) return
     setCompleting(true)
     setCompleteError(null)
     try {
-      const res = await fetch(`/api/crew/work-orders/${id}/complete`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ notes }),
-      })
-      if (!res.ok) throw new Error('Failed to mark complete')
+      await completeWorkOrder(userId, id, notes)
       setDone(true)
-      // Update local Dexie record so it drops off the home page immediately
-      await db.crew_work_orders.update(id, { status: 'completed' })
     } catch {
       setCompleting(false)
-      setCompleteError('Something went wrong. Please check your connection and try again.')
+      setCompleteError('Something went wrong saving that locally. Please try again.')
     }
   }
 
@@ -59,6 +63,19 @@ export default function CrewWorkOrderPage({ params }: { params: Promise<{ id: st
       <CheckCircle2 className="w-10 h-10 mx-auto mb-4" style={{ color: 'var(--accent-green)' }} />
       <h2 className="font-bold text-primary-themed text-lg mb-2">Work Complete</h2>
       <p className="text-sm text-muted-themed mb-6">Your PM has been notified.</p>
+      {syncFailed && (
+        <div className="rounded-xl p-3 mb-4 text-left border" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red-dim)' }}>
+          <p className="text-sm font-bold mb-1" style={{ color: 'var(--accent-red)' }}>Didn&apos;t sync yet</p>
+          <p className="text-xs text-secondary-themed mb-2">This completion hasn&apos;t reached the server. It&apos;ll keep retrying, or tap below.</p>
+          <button
+            onClick={() => void retryFailedMutation(userId, 'crew_work_orders', id!)}
+            className="text-xs font-semibold underline"
+            style={{ color: 'var(--accent-red)' }}
+          >
+            Retry now
+          </button>
+        </div>
+      )}
       <button
         onClick={() => router.push('/crew')}
         className="text-sm font-semibold text-brand-600 underline"

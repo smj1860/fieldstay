@@ -198,6 +198,28 @@ export async function completeTurnover(userId: string, turnoverId: string): Prom
   })
 }
 
+/**
+ * Marks a crew-assigned work order completed locally and queues the
+ * mutation. SyncEngine routes this through
+ * /api/crew/work-orders/[id]/complete so the PM notification, audit log,
+ * and idempotent completion guard all still fire once the mutation drains
+ * — including for a completion that happened while fully offline.
+ */
+export async function completeWorkOrder(
+  userId: string,
+  workOrderId: string,
+  notes: string,
+): Promise<void> {
+  const db = getDexieDb(userId)
+
+  await db.crew_work_orders.update(workOrderId, { status: 'completed' })
+
+  await enqueueMutation(userId, 'crew_work_orders', workOrderId, 'PATCH', {
+    status: 'completed',
+    notes,
+  })
+}
+
 /** Updates an inventory item's on-hand quantity locally and queues the mutation. */
 export async function updateInventoryQuantity(
   userId: string,
