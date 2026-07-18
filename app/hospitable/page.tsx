@@ -101,10 +101,10 @@ export default async function HospitablePage() {
               <p className="text-white/52 text-lg leading-relaxed mb-8">
                 Connect your Hospitable account and every property, booking, and
                 teammate syncs in automatically — then FieldStay takes over the
-                ground operations Hospitable was never built for: offline-ready
-                turnovers, crew checklists, asset health tracking, capital
-                planning, and a vendor portal your contractors can use without
-                ever creating a login.
+                field operations layer: offline-ready turnovers, crew
+                checklists, asset health tracking, capital planning, and a
+                vendor portal your contractors can use without ever creating
+                a login.
               </p>
               <div className="flex flex-wrap gap-5">
                 {[
