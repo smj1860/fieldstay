@@ -75,18 +75,17 @@ export default async function HospitablePage() {
             )}
           </nav>
 
-          {/* Hospitable Partner Badge */}
+          {/* Hospitable Partner Badge — small white pill, true badge scale.
+              White background is required, not a style choice: the lockup
+              image has an opaque white background with dark navy text and
+              needs a light backdrop to be legible. */}
           <div className="flex justify-center mt-6 mb-10">
-            <div className="flex items-center gap-2 bg-brand-panel border border-brand-panelBorder rounded-full px-4 py-2">
-              <span
-                className="text-white text-xs font-bold px-2 py-0.5 rounded"
-                style={{ background: '#0F766E' }}
-              >
-                HB
-              </span>
-              <span className="text-xs font-semibold tracking-widest text-white/58 uppercase">
-                Hospitable Integration Partner
-              </span>
+            <div className="bg-white rounded-full px-4 py-2 shadow-lg">
+              <img
+                src="/hospitable-fieldstay-lockup.png"
+                alt="Hospitable and FieldStay partnership"
+                className="h-4 w-auto"
+              />
             </div>
           </div>
 
