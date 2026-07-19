@@ -28,10 +28,25 @@ export default async function globalTeardown() {
   ]
   await Promise.all(ops)
 
-  // Sequential — properties FK-constrained after bookings/work_orders
+  // Sequential — properties FK-constrained after bookings/work_orders.
+  // Deleting properties cascades to turnovers, turnover_assignments,
+  // checklist_instances, and checklist_instance_items (all ON DELETE
+  // CASCADE), so the 22-crew-logout-guard.spec.ts seed data needs no
+  // explicit cleanup of its own here.
   await supabase.from('crew_members').delete().eq('org_id', orgId).like('name', '[E2E]%')
   await supabase.from('vendors')     .delete().eq('org_id', orgId).like('name', '[E2E]%')
   await supabase.from('properties')  .delete().eq('org_id', orgId).like('name', '[E2E]%')
+
+  // Deleting the crew_members row above doesn't touch auth.users — remove
+  // the E2E crew login separately so repeated runs don't accumulate users.
+  const crewEmail = process.env.E2E_CREW_EMAIL
+  if (crewEmail) {
+    const { data: users } = await supabase.auth.admin.listUsers()
+    const crewAuthUser = users.users.find((u) => u.email === crewEmail)
+    if (crewAuthUser) {
+      await supabase.auth.admin.deleteUser(crewAuthUser.id)
+    }
+  }
 
   console.log('✔ E2E global teardown complete')
 }
