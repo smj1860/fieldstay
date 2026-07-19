@@ -136,6 +136,8 @@ export type AuditAction =
   | 'booking.guest_pii_anonymized'
   | 'sms.optin_phone_anonymized'
   | 'property.door_code.viewed'
+  | 'org.default_room_templates_seeded'
+  | 'org.bedroom_bathroom_mapping_changed'
 
 interface AuditParams {
   orgId?:         string

@@ -1,7 +1,8 @@
 import 'server-only'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { CLEANING_CATALOG } from './standard-catalog'
+import type { RoomTemplateItem } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
+import { seedDefaultRoomTemplatesIfNeeded } from './seed-default-room-templates'
 
 /**
  * Applies the org's master checklist to a single property.
@@ -9,8 +10,12 @@ import { logAuditEvent } from '@/lib/audit'
  * Creates the default template if it doesn't exist, then replaces all
  * sections and items (delete-then-insert) to avoid duplicates on re-apply.
  *
- * Uses the org's saved master items when available; falls back to
- * CLEANING_CATALOG when no master checklist has been configured yet.
+ * Composed exclusively from the org's room template library:
+ * `auto_include` templates (Whole Home, Kitchen, Living Room by default,
+ * plus anything else the PM has flagged) + one section per bedroom/bathroom
+ * from the org's mapped templates. No flat-catalog fallback — see
+ * seedDefaultRoomTemplatesIfNeeded, which guarantees every org has a real
+ * room template library before this function's composition step runs.
  *
  * Does NOT overwrite an existing default template unless `force` is true.
  * The explicit "Apply to All Properties" button passes force=true; the
@@ -40,38 +45,147 @@ async function markChecklistStepComplete(propertyId: string, supabase: SupabaseC
     .eq('id', propertyId)
 }
 
+interface ComposedSection {
+  name:           string
+  roomTemplateId: string | null
+  items:          Array<{ task: string; requires_photo: boolean; notes: string | null; sort_order: number }>
+}
+
+interface RoomTemplateRow {
+  id:           string
+  name:         string
+  auto_include: boolean
+}
+
+function toComposedItems(
+  templateId:      string,
+  itemsByTemplate: Map<string, RoomTemplateItem[]>,
+): ComposedSection['items'] {
+  return (itemsByTemplate.get(templateId) ?? []).map((i) => ({
+    task: i.task, requires_photo: i.requires_photo, notes: i.notes, sort_order: i.sort_order,
+  }))
+}
+
+// Extracted to a named helper (rather than a closure inside
+// composeFromRoomTemplates) to keep that function's cognitive complexity
+// down — same reasoning already applied to room-library-builder.tsx's own
+// closures in this codebase.
+//
+// NOTE: this deliberately does NOT guard against a template that's both
+// auto_include and mapped as bedroom/bathroom — that combination adds one
+// auto_include section plus N/M counted ones for the same room, which is a
+// PM configuration choice, not a bug this function needs to prevent.
+function addCountedSections(
+  sections:        ComposedSection[],
+  roomTemplates:   RoomTemplateRow[],
+  itemsByTemplate: Map<string, RoomTemplateItem[]>,
+  templateId:      string | null | undefined,
+  count:           number,
+): void {
+  if (!templateId || count <= 0) return
+  const room = roomTemplates.find((r) => r.id === templateId)
+  if (!room) return
+
+  for (let i = 1; i <= count; i++) {
+    const label = count > 1 ? `${room.name} ${i}` : room.name
+    sections.push({ name: label, roomTemplateId: room.id, items: toComposedItems(room.id, itemsByTemplate) })
+  }
+}
+
+/**
+ * Builds checklist sections from the org's room template library: one
+ * section per auto_include room, plus N sections from the bedroom-mapped
+ * template (N = properties.bedrooms) and M from the bathroom-mapped
+ * template (M = properties.bathrooms, treating null as 0). Can only
+ * return an empty array if the org has zero room templates at all — after
+ * seedDefaultRoomTemplatesIfNeeded's seed, that should never happen for an
+ * org that's had it run at least once successfully.
+ */
+async function composeFromRoomTemplates(
+  orgId:      string,
+  bedrooms:   number,
+  bathrooms:  number | null,
+  supabase:   SupabaseClient,
+): Promise<ComposedSection[]> {
+  const { data: org, error: orgErr } = await supabase
+    .from('organizations')
+    .select('bedroom_room_template_id, bathroom_room_template_id')
+    .eq('id', orgId)
+    .single()
+  if (orgErr) console.error('[composeFromRoomTemplates] organizations fetch failed:', orgErr)
+
+  const { data: roomTemplates, error: roomsErr } = await supabase
+    .from('room_templates')
+    .select('id, name, auto_include')
+    .eq('org_id', orgId)
+  if (roomsErr) console.error('[composeFromRoomTemplates] room_templates fetch failed:', roomsErr)
+
+  const templateIds = new Set(
+    [
+      ...(roomTemplates ?? []).filter((r) => r.auto_include).map((r) => r.id as string),
+      org?.bedroom_room_template_id,
+      org?.bathroom_room_template_id,
+    ].filter((id): id is string => !!id)
+  )
+  if (templateIds.size === 0) return []
+
+  const { data: items, error: itemsErr } = await supabase
+    .from('room_template_items')
+    .select('room_template_id, task, requires_photo, notes, sort_order')
+    .in('room_template_id', [...templateIds])
+    .order('sort_order')
+  if (itemsErr) console.error('[composeFromRoomTemplates] room_template_items fetch failed:', itemsErr)
+
+  const itemsByTemplate = new Map<string, RoomTemplateItem[]>()
+  for (const item of (items ?? []) as RoomTemplateItem[]) {
+    const list = itemsByTemplate.get(item.room_template_id) ?? []
+    list.push(item)
+    itemsByTemplate.set(item.room_template_id, list)
+  }
+
+  const rooms: RoomTemplateRow[] = (roomTemplates ?? []) as RoomTemplateRow[]
+  const sections: ComposedSection[] = []
+
+  for (const room of rooms.filter((r) => r.auto_include)) {
+    sections.push({ name: room.name, roomTemplateId: room.id, items: toComposedItems(room.id, itemsByTemplate) })
+  }
+
+  // Same numbering convention as the manual "Insert Rooms from Library"
+  // picker in checklist-builder.tsx's applyRoomQuantities.
+  addCountedSections(sections, rooms, itemsByTemplate, org?.bedroom_room_template_id, bedrooms)
+  addCountedSections(sections, rooms, itemsByTemplate, org?.bathroom_room_template_id, bathrooms ?? 0)
+
+  return sections
+}
+
 export async function applyMasterChecklistToProperty(
   propertyId: string,
   orgId:      string,
   supabase:   SupabaseClient,
   { force = false, actorId }: { force?: boolean; actorId?: string } = {},
 ): Promise<void> {
-  // Fetch master items for this org
-  const { data: masterItems } = await supabase
-    .from('org_master_checklist_items')
-    .select('section, task, sort_order, source')
+  await seedDefaultRoomTemplatesIfNeeded(orgId)
+
+  const { data: property } = await supabase
+    .from('properties')
+    .select('bedrooms, bathrooms')
+    .eq('id', propertyId)
     .eq('org_id', orgId)
-    .order('section')
-    .order('sort_order')
+    .single()
 
-  // Build catalog rows from master items or CLEANING_CATALOG fallback
-  type CatalogRow = { section: string; task: string; sort_order: number }
-  let catalogRows: CatalogRow[]
+  const composed = property
+    ? await composeFromRoomTemplates(orgId, property.bedrooms, property.bathrooms, supabase)
+    : []
 
-  if (masterItems?.length) {
-    catalogRows = masterItems.map((i) => ({
-      section:    i.section as string,
-      task:       i.task as string,
-      sort_order: i.sort_order as number,
-    }))
-  } else {
-    let order = 0
-    catalogRows = Object.entries(CLEANING_CATALOG).flatMap(([section, tasks]) =>
-      tasks.map((task) => ({ section, task, sort_order: order++ }))
+  if (composed.length === 0) {
+    // Defensive backstop only — see the doc comment above
+    // composeFromRoomTemplates. No flat-catalog fallback anymore; a later
+    // apply call retries the seed and succeeds once whatever failed clears.
+    console.error(
+      `[applyMasterChecklistToProperty] no composed sections for property ${propertyId}, org ${orgId} — seed may have failed`
     )
+    return
   }
-
-  if (!catalogRows.length) return
 
   // Check whether this property already has a default template
   const { data: existingTemplate } = await supabase
@@ -101,14 +215,8 @@ export async function applyMasterChecklistToProperty(
 
     if (existingSections?.length) {
       const sectionIds = existingSections.map((s) => s.id as string)
-      await supabase
-        .from('checklist_template_items')
-        .delete()
-        .in('section_id', sectionIds)
-      await supabase
-        .from('checklist_template_sections')
-        .delete()
-        .eq('template_id', templateId)
+      await supabase.from('checklist_template_items').delete().in('section_id', sectionIds)
+      await supabase.from('checklist_template_sections').delete().eq('template_id', templateId)
     }
   } else {
     const { data: newTemplate } = await supabase
@@ -121,32 +229,38 @@ export async function applyMasterChecklistToProperty(
     templateId = newTemplate.id as string
   }
 
-  // Insert sections and items
-  const sectionNames = [...new Set(catalogRows.map((r) => r.section))]
-
-  for (const sectionName of sectionNames) {
-    const sectionItems = catalogRows.filter((r) => r.section === sectionName)
+  // Insert sections and items directly from `composed` — one section per
+  // entry, in order. No name-based grouping/deduplication here — two
+  // "Bedroom 1" sections from two different templates must stay distinct,
+  // never merged just because they share a label.
+  for (let i = 0; i < composed.length; i++) {
+    const section = composed[i]
 
     const { data: sectionRow, error: sectionErr } = await supabase
       .from('checklist_template_sections')
-      .insert({ template_id: templateId, name: sectionName, sort_order: sectionNames.indexOf(sectionName) })
+      .insert({
+        template_id:       templateId,
+        name:              section.name,
+        room_template_id:  section.roomTemplateId,
+        sort_order:        i,
+      })
       .select('id')
       .single()
 
     if (sectionErr || !sectionRow) {
       throw new Error(
-        `Failed to insert checklist section "${sectionName}" for property ${propertyId}: ` +
+        `Failed to insert checklist section "${section.name}" for property ${propertyId}: ` +
         (sectionErr?.message ?? 'no row returned')
       )
     }
 
     await supabase.from('checklist_template_items').insert(
-      sectionItems.map((item) => ({
+      section.items.map((item) => ({
         section_id:     sectionRow.id,
         template_id:    templateId,
         task:           item.task,
-        requires_photo: false,
-        notes:          null,
+        requires_photo: item.requires_photo,
+        notes:          item.notes,
         sort_order:     item.sort_order,
       }))
     )
@@ -156,15 +270,12 @@ export async function applyMasterChecklistToProperty(
 
   if (actorId) {
     await logAuditEvent({
-      orgId,
-      actorId,
+      orgId, actorId,
       action:     'checklist.master_applied',
       targetType: 'property',
       targetId:   propertyId,
-      metadata:   { template_id: templateId, task_count: catalogRows.length },
+      metadata:   { template_id: templateId, section_count: composed.length },
     }).catch((err: unknown) => {
-      // Non-fatal: log failure but don't throw — the checklist was applied
-      // successfully and the audit miss should not roll back the operation.
       console.error('[applyMasterChecklistToProperty] audit log failed:', err)
     })
   }

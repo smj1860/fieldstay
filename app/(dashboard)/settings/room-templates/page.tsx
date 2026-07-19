@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { requireOrgMember } from '@/lib/auth'
+import { getRoomTemplatesForOrg } from '@/lib/room-templates/get-room-templates'
 import { RoomLibraryBuilder } from './room-library-builder'
 
 export const metadata: Metadata = { title: 'Room Templates — FieldStay' }
@@ -8,25 +9,14 @@ export const metadata: Metadata = { title: 'Room Templates — FieldStay' }
 export default async function RoomTemplatesPage() {
   const { supabase, membership } = await requireOrgMember()
 
-  const { data: rooms } = await supabase
-    .from('room_templates')
-    .select(`id, name, auto_include, room_template_items ( id, task, requires_photo, notes, sort_order )`)
-    .eq('org_id', membership.org_id)
-    .order('name')
-
-  const roomsSorted = (rooms ?? []).map((room) => ({
-    id:          room.id as string,
-    name:        room.name as string,
-    autoInclude: room.auto_include as boolean,
-    items: [...(room.room_template_items ?? [])]
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map((item) => ({
-        id:             item.id as string,
-        task:           item.task as string,
-        requires_photo: item.requires_photo as boolean,
-        notes:          (item.notes as string | null) ?? '',
-      })),
-  }))
+  const [roomsSorted, { data: org }] = await Promise.all([
+    getRoomTemplatesForOrg(supabase, membership.org_id),
+    supabase
+      .from('organizations')
+      .select('bedroom_room_template_id, bathroom_room_template_id')
+      .eq('id', membership.org_id)
+      .single(),
+  ])
 
   return (
     <div>
@@ -48,7 +38,12 @@ export default async function RoomTemplatesPage() {
         </p>
       </div>
 
-      <RoomLibraryBuilder initialRooms={roomsSorted} canManage={membership.role !== 'viewer' && membership.role !== 'crew'} />
+      <RoomLibraryBuilder
+        initialRooms={roomsSorted}
+        canManage={membership.role !== 'viewer' && membership.role !== 'crew'}
+        initialBedroomRoomTemplateId={org?.bedroom_room_template_id ?? null}
+        initialBathroomRoomTemplateId={org?.bathroom_room_template_id ?? null}
+      />
     </div>
   )
 }

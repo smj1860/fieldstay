@@ -102,6 +102,9 @@ export interface Organization {
   trial_ends_at:                string | null
   max_properties:               number
   onboarding_steps_completed:   Record<string, boolean>
+  bedroom_room_template_id:        string | null
+  bathroom_room_template_id:       string | null
+  default_room_templates_seeded_at: string | null
   preferred_retailer:           string | null
   kroger_location_name:         string | null
   auto_assign_mode:             AutoAssignMode

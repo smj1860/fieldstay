@@ -6,6 +6,7 @@ import { Plus, Trash2, ChevronUp, ChevronDown, ChevronRight, Camera, Check, Clip
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
+import { InlineAlert } from '@/components/ui/InlineAlert'
 
 interface Item { tempId: string; id?: string; task: string; requires_photo: boolean; notes: string }
 interface Section { tempId: string; id?: string; name: string; roomTemplateId?: string | null; items: Item[] }
@@ -115,18 +116,40 @@ function withAutoIncludeRooms(sections: Section[], roomTemplates: RoomTemplateOp
 interface OtherProperty { id: string; name: string }
 interface SourceProperty { id: string; name: string; sectionCount: number }
 
+// Named classification helper instead of a chained ternary — CLAUDE.md
+// bans chained ternaries, and "== null"/"!= null" loose checks, so this
+// distinguishes undefined (prop not passed — no caller other than this
+// page's ChecklistPage does today) from an actual null (the PMS hasn't
+// synced a bathroom count for this property yet) via strict equality.
+function bedroomBathroomWarningText(
+  bedrooms:  number | undefined,
+  bathrooms: number | null | undefined,
+): string | null {
+  const zeroBedrooms     = bedrooms === 0
+  const noBathroomCount  = bathrooms === null
+
+  if (zeroBedrooms && noBathroomCount) return 'This property shows 0 bedrooms and no bathroom count.'
+  if (zeroBedrooms) return 'This property shows 0 bedrooms.'
+  if (noBathroomCount) return 'This property has no bathroom count listed.'
+  return null
+}
+
 export function ChecklistBuilder({
   propertyId,
   template,
   otherProperties = [],
   sourceProperties = [],
   roomTemplates = [],
+  propertyBedrooms,
+  propertyBathrooms,
 }: {
   propertyId: string
   template: { id: string; name: string; checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; room_template_id?: string | null; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null
   otherProperties?: OtherProperty[]
   sourceProperties?: SourceProperty[]
   roomTemplates?: RoomTemplateOption[]
+  propertyBedrooms?: number
+  propertyBathrooms?: number | null
 }) {
   const [sections, setSections] = useState<Section[]>(() =>
     withAutoIncludeRooms(buildInitialSections(template), roomTemplates)
@@ -382,10 +405,22 @@ export function ChecklistBuilder({
     })
   }
 
+  const bedroomBathroomWarning = bedroomBathroomWarningText(propertyBedrooms, propertyBathrooms)
+
   return (
     <div className="space-y-4" suppressHydrationWarning>
-      {error && (
-        <div className="border text-sm rounded-lg px-4 py-3" style={{ background: 'var(--accent-red-dim)', borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}>{error}</div>
+      {error && <InlineAlert tone="error">{error}</InlineAlert>}
+
+      {bedroomBathroomWarning && (
+        <InlineAlert tone="error">
+          <p className="font-semibold mb-1">Double-check bedroom/bathroom count</p>
+          <p>
+            {bedroomBathroomWarning} If that&apos;s not right, it usually means
+            the count didn&apos;t come through from your PMS yet — check
+            Property Details, or just add the section(s) below yourself with
+            &quot;Insert Rooms from Library.&quot;
+          </p>
+        </InlineAlert>
       )}
 
       {/* Global photo requirement toggle */}
