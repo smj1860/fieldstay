@@ -142,7 +142,7 @@ export function ChecklistBuilder({
   roomTemplates = [],
   propertyBedrooms,
   propertyBathrooms,
-}: {
+}: Readonly<{
   propertyId: string
   template: { id: string; name: string; checklist_template_sections?: Array<{ id: string; name: string; sort_order: number; room_template_id?: string | null; checklist_template_items?: Array<{ id: string; task: string; requires_photo: boolean; notes: string | null; sort_order: number }> }> } | null
   otherProperties?: OtherProperty[]
@@ -150,7 +150,7 @@ export function ChecklistBuilder({
   roomTemplates?: RoomTemplateOption[]
   propertyBedrooms?: number
   propertyBathrooms?: number | null
-}) {
+}>) {
   const [sections, setSections] = useState<Section[]>(() =>
     withAutoIncludeRooms(buildInitialSections(template), roomTemplates)
   )

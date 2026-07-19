@@ -108,6 +108,17 @@ const SEED_TEMPLATES: SeedTemplate[] = [
  * only partially succeeded last time correctly finishes the job this time
  * instead of being permanently skipped.
  *
+ * The bedroom/bathroom mapping columns are only ever backfilled from a
+ * template that was genuinely CREATED by this call, never from one that
+ * already existed (see upsertOneSeedTemplate's `created` flag) — earlier,
+ * this checked bedroom_room_template_id itself as the "fully seeded"
+ * signal, which meant a PM who later cleared that mapping via Settings
+ * (a legitimate, supported action) had it silently reset back to the
+ * seeded template the next time any property's checklist was applied
+ * anywhere. Template existence, not the mapping column, is the real
+ * completion signal — the mapping is a separate, PM-owned setting once
+ * seeding has actually finished.
+ *
  * Known, accepted risk: the item-count-then-insert step below is a
  * load-then-write sequence, not backed by a DB constraint (room_template_items
  * has no natural unique key to upsert against without risking collision
@@ -125,16 +136,26 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
 
   const { data: org } = await supabase
     .from('organizations')
-    .select('default_room_templates_seeded_at, bedroom_room_template_id')
+    .select('default_room_templates_seeded_at')
     .eq('id', orgId)
     .single()
 
-  // Fully seeded already (claimed AND the mapping actually landed) —
-  // nothing to do. Checking both, not just the claim flag, is what makes
-  // a previously-partial seed eligible to be finished on this call.
-  if (org?.default_room_templates_seeded_at && org?.bedroom_room_template_id) return
+  if (org?.default_room_templates_seeded_at) {
+    // Claimed — but confirm all seed templates actually exist before
+    // trusting the claim, so a genuinely partial seed (a transient
+    // failure left only some of them created) still gets finished here
+    // rather than being permanently skipped. Template existence, not the
+    // bedroom/bathroom mapping columns, is what answers "did this
+    // finish" — see the doc comment above for why the mapping can't be
+    // used for this anymore.
+    const { count } = await supabase
+      .from('room_templates')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .in('name', SEED_TEMPLATES.map((t) => t.name))
 
-  if (!org?.default_room_templates_seeded_at) {
+    if ((count ?? 0) >= SEED_TEMPLATES.length) return
+  } else {
     // Best-effort race guard for the common case (two truly concurrent
     // callers) — not load-bearing for correctness on its own, since
     // everything below is independently idempotent regardless of who
@@ -146,19 +167,24 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
       .is('default_room_templates_seeded_at', null)
   }
 
-  const createdIds = await upsertSeedTemplates(supabase, orgId)
+  const results = await upsertSeedTemplates(supabase, orgId)
 
-  if (createdIds['Bedroom'] || createdIds['Bathroom']) {
-    await supabase
-      .from('organizations')
-      .update({
-        bedroom_room_template_id:  createdIds['Bedroom']  ?? null,
-        bathroom_room_template_id: createdIds['Bathroom'] ?? null,
-      })
-      .eq('id', orgId)
+  // Only backfill from a template genuinely created THIS call — never
+  // from one that already existed, whether because seeding had already
+  // fully completed or because a PM cleared just one side of the
+  // mapping. Re-deriving an existing template's id here would silently
+  // overwrite whatever the PM currently has that mapping set to.
+  const mappingUpdates: Record<string, string> = {}
+  if (results['Bedroom']?.created)  mappingUpdates.bedroom_room_template_id  = results['Bedroom'].id
+  if (results['Bathroom']?.created) mappingUpdates.bathroom_room_template_id = results['Bathroom'].id
+
+  if (Object.keys(mappingUpdates).length > 0) {
+    await supabase.from('organizations').update(mappingUpdates).eq('id', orgId)
   }
 
-  if (Object.keys(createdIds).length > 0) {
+  const createdNames = Object.entries(results).filter(([, r]) => r.created).map(([name]) => name)
+
+  if (createdNames.length > 0) {
     // actorId is intentionally omitted (resolves to null on audit_events)
     // — this fires from automated sync paths as often as from a PM action,
     // and a null actor is the correct way to represent "the system did
@@ -168,7 +194,7 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
       action:     'org.default_room_templates_seeded',
       targetType: 'organization',
       targetId:   orgId,
-      metadata:   { created: Object.keys(createdIds) },
+      metadata:   { created: createdNames },
     }).catch((err: unknown) => {
       console.error('[seedDefaultRoomTemplatesIfNeeded] audit log failed:', err)
     })
@@ -177,28 +203,33 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 
+interface UpsertResult {
+  id:      string
+  created: boolean
+}
+
 // Extracted from seedDefaultRoomTemplatesIfNeeded to keep that function's
 // cognitive complexity down — one focused job (create-or-find each seed
 // template, seed its items if empty) per helper.
 async function upsertSeedTemplates(
   supabase: ServiceClient,
   orgId:    string,
-): Promise<Record<string, string>> {
-  const createdIds: Record<string, string> = {}
+): Promise<Record<string, UpsertResult>> {
+  const results: Record<string, UpsertResult> = {}
 
   for (const template of SEED_TEMPLATES) {
-    const roomId = await upsertOneSeedTemplate(supabase, orgId, template)
-    if (roomId) createdIds[template.name] = roomId
+    const result = await upsertOneSeedTemplate(supabase, orgId, template)
+    if (result) results[template.name] = result
   }
 
-  return createdIds
+  return results
 }
 
 async function upsertOneSeedTemplate(
   supabase: ServiceClient,
   orgId:    string,
   template: SeedTemplate,
-): Promise<string | null> {
+): Promise<UpsertResult | null> {
   const { data: room, error: upsertErr } = await supabase
     .from('room_templates')
     .upsert(
@@ -209,6 +240,10 @@ async function upsertOneSeedTemplate(
     .maybeSingle()
 
   let roomId = room?.id as string | undefined
+  // The upsert returns the row only on a genuine insert — ignoreDuplicates
+  // means a conflict resolves with no row, which is how "created" is
+  // distinguished from "already existed" below.
+  let created = !!roomId
 
   if (!roomId) {
     // ignoreDuplicates doesn't return the row on conflict — fetch the
@@ -221,6 +256,7 @@ async function upsertOneSeedTemplate(
       .eq('name', template.name)
       .maybeSingle()
     roomId = existing?.id as string | undefined
+    created = false
   }
 
   if (!roomId) {
@@ -248,5 +284,5 @@ async function upsertOneSeedTemplate(
     )
   }
 
-  return roomId
+  return { id: roomId, created }
 }

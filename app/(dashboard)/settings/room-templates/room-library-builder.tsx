@@ -115,6 +115,12 @@ function saveButtonLabel(saving: boolean, saved: boolean) {
   return 'Save Room'
 }
 
+function continueButtonLabel(continuing: boolean, propertyCount: number | undefined): string {
+  if (continuing) return 'Applying…'
+  if (propertyCount) return `Continue — apply to ${propertyCount} propert${propertyCount === 1 ? 'y' : 'ies'}`
+  return 'Continue'
+}
+
 export function RoomLibraryBuilder({
   initialRooms,
   canManage,
@@ -342,11 +348,7 @@ export function RoomLibraryBuilder({
       {continueAction && (
         <div className="flex justify-end pt-2">
           <Button onClick={handleContinue} disabled={continuing} className="inline-flex items-center gap-1.5">
-            {continuing
-              ? 'Applying…'
-              : continuePropertyCount
-              ? `Continue — apply to ${continuePropertyCount} propert${continuePropertyCount === 1 ? 'y' : 'ies'}`
-              : 'Continue'}
+            {continueButtonLabel(continuing, continuePropertyCount)}
           </Button>
         </div>
       )}
