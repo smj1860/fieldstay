@@ -421,8 +421,9 @@ function RoomCard({
             />
           )}
 
-          <label className="flex items-start gap-2 cursor-pointer">
+          <label htmlFor={`auto-include-${room.id}`} className="flex items-start gap-2 cursor-pointer">
             <Checkbox
+              id={`auto-include-${room.id}`}
               checked={room.autoInclude}
               onChange={onToggleAutoInclude}
               disabled={!canManage}

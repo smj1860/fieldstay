@@ -1,6 +1,11 @@
 import { inngest }                          from '@/lib/inngest/client'
 import { createServiceClient }              from '@/lib/supabase/server'
-import { applyMasterChecklistToProperty }   from '@/lib/checklists/apply-master-template'
+import { seedDefaultRoomTemplatesIfNeeded } from '@/lib/checklists/seed-default-room-templates'
+import {
+  applyMasterChecklistToProperty,
+  fetchOrgRoomTemplateData,
+  type OrgRoomTemplateData,
+} from '@/lib/checklists/apply-master-template'
 
 const BATCH_SIZE = 10
 
@@ -9,6 +14,20 @@ export const applyMasterChecklistJob = inngest.createFunction(
   { event: 'checklist/master-template.apply.requested' },
   async ({ event, step }) => {
     const { org_id, property_ids, triggered_by } = event.data
+
+    // Seeded + fetched once for the whole run, not once per property —
+    // every property in this batch shares the same org, so re-fetching
+    // the org's mapping/room-template/item rows per property (what
+    // applyMasterChecklistToProperty does by default) would be the same
+    // 2-3 queries repeated for every single property in the batch.
+    await step.run('seed-room-templates', async () => {
+      await seedDefaultRoomTemplatesIfNeeded(org_id)
+    })
+
+    const orgRoomData: OrgRoomTemplateData = await step.run('fetch-room-template-data', async () => {
+      const supabase = createServiceClient()
+      return fetchOrgRoomTemplateData(org_id, supabase)
+    })
 
     let applied = 0
 
@@ -37,8 +56,10 @@ export const applyMasterChecklistJob = inngest.createFunction(
             continue
           }
           await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
-            force:   true,
-            actorId: triggered_by,
+            force:    true,
+            actorId:  triggered_by,
+            orgRoomData,
+            skipSeed: true,
           })
           count++
         }

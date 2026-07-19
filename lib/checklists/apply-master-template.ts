@@ -57,18 +57,90 @@ interface RoomTemplateRow {
   auto_include: boolean
 }
 
+/**
+ * Everything composeSections() needs for one org, fetched once. Plain
+ * object (not a Map) for itemsByTemplate deliberately — the batch Inngest
+ * job (apply-master-checklist.ts) fetches this inside one step.run() and
+ * passes the result into per-property applyMasterChecklistToProperty()
+ * calls in later steps; Inngest persists a step's return value for replay,
+ * and a Map doesn't survive that JSON round-trip (it serializes to `{}`).
+ */
+export interface OrgRoomTemplateData {
+  bedroomRoomTemplateId:  string | null
+  bathroomRoomTemplateId: string | null
+  roomTemplates:          RoomTemplateRow[]
+  itemsByTemplate:        Record<string, RoomTemplateItem[]>
+}
+
+/**
+ * Fetches the org's full room-template composition context in 2 queries
+ * (organizations + room_templates, then room_template_items for whatever
+ * templates matter) — extracted from composeSections() so a caller
+ * applying the checklist to many properties in the same org (a batch
+ * "Apply to All Properties" run) can fetch this once instead of once per
+ * property, which composeSections() used to do internally.
+ */
+export async function fetchOrgRoomTemplateData(
+  orgId:      string,
+  supabase:   SupabaseClient,
+): Promise<OrgRoomTemplateData> {
+  const { data: org, error: orgErr } = await supabase
+    .from('organizations')
+    .select('bedroom_room_template_id, bathroom_room_template_id')
+    .eq('id', orgId)
+    .single()
+  if (orgErr) console.error('[fetchOrgRoomTemplateData] organizations fetch failed:', orgErr)
+
+  const { data: roomTemplates, error: roomsErr } = await supabase
+    .from('room_templates')
+    .select('id, name, auto_include')
+    .eq('org_id', orgId)
+  if (roomsErr) console.error('[fetchOrgRoomTemplateData] room_templates fetch failed:', roomsErr)
+
+  const rooms: RoomTemplateRow[] = (roomTemplates ?? []) as RoomTemplateRow[]
+  const bedroomRoomTemplateId  = (org?.bedroom_room_template_id  as string | null) ?? null
+  const bathroomRoomTemplateId = (org?.bathroom_room_template_id as string | null) ?? null
+
+  const templateIds = new Set(
+    [
+      ...rooms.filter((r) => r.auto_include).map((r) => r.id),
+      bedroomRoomTemplateId,
+      bathroomRoomTemplateId,
+    ].filter((id): id is string => !!id)
+  )
+
+  const itemsByTemplate: Record<string, RoomTemplateItem[]> = {}
+
+  if (templateIds.size > 0) {
+    const { data: items, error: itemsErr } = await supabase
+      .from('room_template_items')
+      .select('room_template_id, task, requires_photo, notes, sort_order')
+      .in('room_template_id', [...templateIds])
+      .order('sort_order')
+    if (itemsErr) console.error('[fetchOrgRoomTemplateData] room_template_items fetch failed:', itemsErr)
+
+    for (const item of (items ?? []) as RoomTemplateItem[]) {
+      const list = itemsByTemplate[item.room_template_id] ?? []
+      list.push(item)
+      itemsByTemplate[item.room_template_id] = list
+    }
+  }
+
+  return { bedroomRoomTemplateId, bathroomRoomTemplateId, roomTemplates: rooms, itemsByTemplate }
+}
+
 function toComposedItems(
   templateId:      string,
-  itemsByTemplate: Map<string, RoomTemplateItem[]>,
+  itemsByTemplate: Record<string, RoomTemplateItem[]>,
 ): ComposedSection['items'] {
-  return (itemsByTemplate.get(templateId) ?? []).map((i) => ({
+  return (itemsByTemplate[templateId] ?? []).map((i) => ({
     task: i.task, requires_photo: i.requires_photo, notes: i.notes, sort_order: i.sort_order,
   }))
 }
 
 // Extracted to a named helper (rather than a closure inside
-// composeFromRoomTemplates) to keep that function's cognitive complexity
-// down — same reasoning already applied to room-library-builder.tsx's own
+// composeSections) to keep that function's cognitive complexity down —
+// same reasoning already applied to room-library-builder.tsx's own
 // closures in this codebase.
 //
 // NOTE: this deliberately does NOT guard against a template that's both
@@ -78,7 +150,7 @@ function toComposedItems(
 function addCountedSections(
   sections:        ComposedSection[],
   roomTemplates:   RoomTemplateRow[],
-  itemsByTemplate: Map<string, RoomTemplateItem[]>,
+  itemsByTemplate: Record<string, RoomTemplateItem[]>,
   templateId:      string | null | undefined,
   count:           number,
 ): void {
@@ -93,57 +165,25 @@ function addCountedSections(
 }
 
 /**
- * Builds checklist sections from the org's room template library: one
- * section per auto_include room, plus N sections from the bedroom-mapped
- * template (N = properties.bedrooms) and M from the bathroom-mapped
- * template (M = properties.bathrooms, treating null as 0). Can only
- * return an empty array if the org has zero room templates at all — after
- * seedDefaultRoomTemplatesIfNeeded's seed, that should never happen for an
- * org that's had it run at least once successfully.
+ * Builds checklist sections from an already-fetched org room-template
+ * library: one section per auto_include room, plus N sections from the
+ * bedroom-mapped template (N = properties.bedrooms) and M from the
+ * bathroom-mapped template (M = properties.bathrooms, treating null as
+ * 0). Can only return an empty array if the org has zero room templates
+ * at all — after seedDefaultRoomTemplatesIfNeeded's seed, that should
+ * never happen for an org that's had it run at least once successfully.
+ * Pure/synchronous — no I/O — since fetchOrgRoomTemplateData() already
+ * did the fetching.
  */
-async function composeFromRoomTemplates(
-  orgId:      string,
-  bedrooms:   number,
-  bathrooms:  number | null,
-  supabase:   SupabaseClient,
-): Promise<ComposedSection[]> {
-  const { data: org, error: orgErr } = await supabase
-    .from('organizations')
-    .select('bedroom_room_template_id, bathroom_room_template_id')
-    .eq('id', orgId)
-    .single()
-  if (orgErr) console.error('[composeFromRoomTemplates] organizations fetch failed:', orgErr)
+function composeSections(
+  orgRoomData: OrgRoomTemplateData,
+  bedrooms:    number,
+  bathrooms:   number | null,
+): ComposedSection[] {
+  const { roomTemplates: rooms, itemsByTemplate, bedroomRoomTemplateId, bathroomRoomTemplateId } = orgRoomData
 
-  const { data: roomTemplates, error: roomsErr } = await supabase
-    .from('room_templates')
-    .select('id, name, auto_include')
-    .eq('org_id', orgId)
-  if (roomsErr) console.error('[composeFromRoomTemplates] room_templates fetch failed:', roomsErr)
+  if (rooms.length === 0) return []
 
-  const templateIds = new Set(
-    [
-      ...(roomTemplates ?? []).filter((r) => r.auto_include).map((r) => r.id as string),
-      org?.bedroom_room_template_id,
-      org?.bathroom_room_template_id,
-    ].filter((id): id is string => !!id)
-  )
-  if (templateIds.size === 0) return []
-
-  const { data: items, error: itemsErr } = await supabase
-    .from('room_template_items')
-    .select('room_template_id, task, requires_photo, notes, sort_order')
-    .in('room_template_id', [...templateIds])
-    .order('sort_order')
-  if (itemsErr) console.error('[composeFromRoomTemplates] room_template_items fetch failed:', itemsErr)
-
-  const itemsByTemplate = new Map<string, RoomTemplateItem[]>()
-  for (const item of (items ?? []) as RoomTemplateItem[]) {
-    const list = itemsByTemplate.get(item.room_template_id) ?? []
-    list.push(item)
-    itemsByTemplate.set(item.room_template_id, list)
-  }
-
-  const rooms: RoomTemplateRow[] = (roomTemplates ?? []) as RoomTemplateRow[]
   const sections: ComposedSection[] = []
 
   for (const room of rooms.filter((r) => r.auto_include)) {
@@ -152,8 +192,8 @@ async function composeFromRoomTemplates(
 
   // Same numbering convention as the manual "Insert Rooms from Library"
   // picker in checklist-builder.tsx's applyRoomQuantities.
-  addCountedSections(sections, rooms, itemsByTemplate, org?.bedroom_room_template_id, bedrooms)
-  addCountedSections(sections, rooms, itemsByTemplate, org?.bathroom_room_template_id, bathrooms ?? 0)
+  addCountedSections(sections, rooms, itemsByTemplate, bedroomRoomTemplateId, bedrooms)
+  addCountedSections(sections, rooms, itemsByTemplate, bathroomRoomTemplateId, bathrooms ?? 0)
 
   return sections
 }
@@ -162,9 +202,24 @@ export async function applyMasterChecklistToProperty(
   propertyId: string,
   orgId:      string,
   supabase:   SupabaseClient,
-  { force = false, actorId }: { force?: boolean; actorId?: string } = {},
+  {
+    force = false,
+    actorId,
+    orgRoomData,
+    skipSeed = false,
+  }: {
+    force?:       boolean
+    actorId?:     string
+    // Pass this (and skipSeed) when applying to many properties in the
+    // same org in one run — see apply-master-checklist.ts, which fetches
+    // this once for the whole batch instead of once per property.
+    orgRoomData?: OrgRoomTemplateData
+    skipSeed?:    boolean
+  } = {},
 ): Promise<void> {
-  await seedDefaultRoomTemplatesIfNeeded(orgId)
+  if (!skipSeed) {
+    await seedDefaultRoomTemplatesIfNeeded(orgId)
+  }
 
   const { data: property } = await supabase
     .from('properties')
@@ -173,13 +228,15 @@ export async function applyMasterChecklistToProperty(
     .eq('org_id', orgId)
     .single()
 
-  const composed = property
-    ? await composeFromRoomTemplates(orgId, property.bedrooms, property.bathrooms, supabase)
-    : []
+  let composed: ComposedSection[] = []
+  if (property) {
+    const resolvedOrgRoomData = orgRoomData ?? await fetchOrgRoomTemplateData(orgId, supabase)
+    composed = composeSections(resolvedOrgRoomData, property.bedrooms, property.bathrooms)
+  }
 
   if (composed.length === 0) {
     // Defensive backstop only — see the doc comment above
-    // composeFromRoomTemplates. No flat-catalog fallback anymore; a later
+    // composeSections. No flat-catalog fallback anymore; a later
     // apply call retries the seed and succeeds once whatever failed clears.
     console.error(
       `[applyMasterChecklistToProperty] no composed sections for property ${propertyId}, org ${orgId} — seed may have failed`
