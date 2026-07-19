@@ -43,6 +43,7 @@ export interface WorkOrderDetailData {
   actual_cost:             number | null
   access_notes:            string | null
   completion_notes:        string | null
+  completed_by_name:       string | null
   invoice_reference:       string | null
   invoiceStatus?:          'pending_payment' | 'paid' | 'cancelled' | null
   invoiceId?:              string | null
@@ -546,12 +547,26 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
               </p>
             )}
 
+            {/* Completed by (vendor portal technician name) */}
+            {wo.completed_by_name && (
+              <p className="text-sm mt-1 pt-3 leading-relaxed"
+                 style={{
+                   color:       'var(--text-muted)',
+                   borderTop:   '1px solid var(--border)',
+                 }}>
+                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
+                  Completed by:{' '}
+                </span>
+                {wo.completed_by_name}
+              </p>
+            )}
+
             {/* Completion notes */}
             {wo.completion_notes && (
               <p className="text-sm mt-1 pt-3 leading-relaxed"
                  style={{
                    color:       'var(--text-muted)',
-                   borderTop:   '1px solid var(--border)',
+                   borderTop:   wo.completed_by_name ? 'none' : '1px solid var(--border)',
                  }}>
                 <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
                   Notes:{' '}

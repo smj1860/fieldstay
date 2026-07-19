@@ -76,7 +76,8 @@ export async function POST(
 
   // Parse body — supports both JSON (new line items flow) and FormData (legacy)
   const contentType = request.headers.get('content-type') ?? ''
-  let notes:     string | null            = null
+  let notes:           string | null      = null
+  let completedByName: string | null      = null
   let lineItemsPayload: {
     line_type:   string
     description: string
@@ -88,12 +89,18 @@ export async function POST(
 
   if (contentType.includes('application/json')) {
     const body = await request.json().catch(() => ({}))
-    notes          = typeof body.notes === 'string' ? body.notes.trim() || null : null
+    notes            = typeof body.notes === 'string' ? body.notes.trim() || null : null
+    completedByName  = typeof body.completedByName === 'string' ? body.completedByName.trim() || null : null
     lineItemsPayload = Array.isArray(body.lineItems) ? body.lineItems : []
-    subtotal       = typeof body.subtotal === 'number' ? body.subtotal : 0
+    subtotal         = typeof body.subtotal === 'number' ? body.subtotal : 0
   } else {
-    const formData = await request.formData()
-    notes          = (formData.get('notes') as string | null)?.trim() || null
+    const formData   = await request.formData()
+    notes            = (formData.get('notes') as string | null)?.trim() || null
+    completedByName  = (formData.get('completedByName') as string | null)?.trim() || null
+  }
+
+  if (!completedByName) {
+    return NextResponse.json({ error: 'Technician name is required' }, { status: 400 })
   }
 
   // Sanity bound on the submitted total — catches a typo (an extra zero) or
@@ -116,10 +123,11 @@ export async function POST(
   const { data: claimed } = await supabase
     .from('work_orders')
     .update({
-      status:           'completed',
-      completed_date:   new Date().toISOString().split('T')[0],
-      completion_notes: notes,
-      actual_cost:      subtotal > 0 ? subtotal : undefined,
+      status:            'completed',
+      completed_date:    new Date().toISOString().split('T')[0],
+      completion_notes:  notes,
+      completed_by_name: completedByName,
+      actual_cost:       subtotal > 0 ? subtotal : undefined,
     })
     .eq('id', workOrder.id)
     .in('status', ['pending', 'assigned', 'in_progress'])

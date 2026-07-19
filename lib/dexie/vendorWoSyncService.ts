@@ -53,12 +53,13 @@ function getVendorSyncEngine(token: string): OutboxEngine<VendorWoMutationRow> {
 
 /** Debounced local persistence of in-progress line items/notes — call on every field change. */
 export async function saveVendorWoDraft(
-  token:     string,
-  notes:     string,
-  lineItems: VendorWoDraftRow['lineItems'],
+  token:           string,
+  notes:           string,
+  completedByName: string,
+  lineItems:       VendorWoDraftRow['lineItems'],
 ): Promise<void> {
   const db = getVendorWoDb(token)
-  await db.drafts.put({ token, notes, lineItems, updatedAt: new Date().toISOString() })
+  await db.drafts.put({ token, notes, completedByName, lineItems, updatedAt: new Date().toISOString() })
 }
 
 export async function loadVendorWoDraft(token: string): Promise<VendorWoDraftRow | undefined> {
@@ -87,10 +88,11 @@ export async function getVendorWoSubmissionState(token: string): Promise<VendorW
  * server-side when it might not be.
  */
 export async function submitVendorWoCompletion(
-  token:     string,
-  notes:     string,
-  lineItems: VendorLineItemSubmission[],
-  subtotal:  number,
+  token:           string,
+  notes:           string,
+  completedByName: string,
+  lineItems:       VendorLineItemSubmission[],
+  subtotal:        number,
 ): Promise<{ synced: boolean }> {
   const db = getVendorWoDb(token)
 
@@ -108,7 +110,7 @@ export async function submitVendorWoCompletion(
 
   await db.mutations.add({
     token,
-    payload:    { notes, lineItems, subtotal },
+    payload:    { notes, completedByName, lineItems, subtotal },
     createdAt:  new Date().toISOString(),
     retryCount: 0,
   })

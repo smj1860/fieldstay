@@ -682,6 +682,7 @@ export interface WorkOrder {
   completion_token:            string | null
   completion_token_expires_at: string | null
   completion_notes:            string | null
+  completed_by_name:           string | null
   invoice_reference:           string | null
   quote_token:                 string | null
   quote_token_expires_at:      string | null

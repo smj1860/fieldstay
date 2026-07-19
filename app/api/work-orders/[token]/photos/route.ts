@@ -80,6 +80,8 @@ export async function POST(
     return NextResponse.json({ error: `Maximum ${MAX_PHOTOS} photos allowed` }, { status: 400 })
   }
 
+  const uploadedBy = (formData.get('uploadedBy') as string | null)?.trim() || 'vendor-portal'
+
   // Count against the running total for this WO, not just this request —
   // a vendor uploading one-at-a-time could otherwise exceed MAX_PHOTOS
   // across several calls.
@@ -122,7 +124,7 @@ export async function POST(
       .insert({
         work_order_id: workOrder.id,
         storage_path:  path,
-        uploaded_by:   'vendor-portal',
+        uploaded_by:   uploadedBy,
       })
       .select('id, storage_path')
       .single()

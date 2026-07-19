@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap, BookOpen, Camera, X, Loader2, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -12,7 +13,15 @@ import {
   retryFailedVendorWoSubmission,
   getVendorWoSubmissionState,
 } from '@/lib/dexie/vendorWoSyncService'
-import type { VendorWoMutationRow } from '@/lib/dexie/vendorWoSchema'
+import { getVendorWoDb } from '@/lib/dexie/vendorWoSchema'
+import type { VendorWoMutationRow, VendorPendingPhotoRow } from '@/lib/dexie/vendorWoSchema'
+import { getVendorPendingPhotoBlob } from '@/lib/dexie/vendorPhotoQueue'
+import {
+  queueVendorPhotoUpload,
+  retryVendorPhotoUpload,
+  removeVendorPendingPhoto,
+  processPendingVendorPhotoUploads,
+} from '@/lib/dexie/vendorWoPhotoSync'
 
 interface WorkOrderInfo {
   id:             string
@@ -65,14 +74,10 @@ const MAX_PHOTO_BYTES = 10 * 1024 * 1024  // 10 MB
 const MAX_SUBTOTAL    = 1_000_000
 const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
 
-interface PendingPhoto {
-  id:         string
-  file:       File
-  previewUrl: string
-  status:     'uploading' | 'uploaded' | 'error'
-  serverId?:  string
-  error?:     string
-}
+// Stable empty-array reference for useLiveQuery's loading state — avoids
+// a fresh `[]` literal on every render that would otherwise widen the
+// backfill effect's dependency beyond what actually changed.
+const EMPTY_PENDING_PHOTOS: VendorPendingPhotoRow[] = []
 
 // ── Shared layout wrapper ─────────────────────────────────────────────────────
 
@@ -217,6 +222,7 @@ export function VendorPortal({
   vendorChargesEnabled: boolean
 }) {
   const [notes,       setNotes]       = useState('')
+  const [technicianName, setTechnicianName] = useState('')
   const [submitting,  setSubmitting]  = useState(false)
   const [success,     setSuccess]     = useState(false)
   const [queued,      setQueued]      = useState(false)
@@ -226,8 +232,52 @@ export function VendorPortal({
     { type: 'labor',    description: 'Labor', quantity: 1, unitCost: '' },
     { type: 'material', description: '',      quantity: 1, unitCost: '' },
   ])
-  const [photos, setPhotos] = useState<PendingPhoto[]>([])
   const photoInputRef = useRef<HTMLInputElement>(null)
+
+  // Preview object URLs, keyed by pendingPhotos row id — state (not a ref)
+  // because it's read during render. seenPreviewIds tracks which rows have
+  // already had a preview attempted (set eagerly at selection time, or
+  // lazily backfilled after a reload) so the backfill effect below never
+  // re-reads the same blob out of IndexedDB on every unrelated queue update.
+  const [previewUrls, setPreviewUrls] = useState<Record<number, string>>({})
+  const seenPreviewIds = useRef<Set<number>>(new Set())
+  const previewUrlsRef = useRef<Record<number, string>>({})
+  useEffect(() => { previewUrlsRef.current = previewUrls }, [previewUrls])
+
+  // Reactive read of the local photo queue — updates automatically as
+  // queueVendorPhotoUpload()/processPendingVendorPhotoUploads() mutate the
+  // underlying Dexie table, no manual refetch needed.
+  const pendingPhotos = useLiveQuery(
+    () => getVendorWoDb(token).pendingPhotos.where('token').equals(token).sortBy('id'),
+    [token],
+  ) ?? EMPTY_PENDING_PHOTOS
+
+  // Lazily backfills a preview for any row that hasn't had one attempted
+  // yet (the reload case — the queue survived a hard refresh, but
+  // in-memory object URLs didn't). A row whose blob was already deleted
+  // after a successful upload has nothing left to preview and falls back
+  // to a placeholder tile instead.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      for (const row of pendingPhotos) {
+        const id = row.id as number
+        if (seenPreviewIds.current.has(id) || row.status === 'uploaded') continue
+        seenPreviewIds.current.add(id)
+        const blob = await getVendorPendingPhotoBlob(token, row.blobKey)
+        if (cancelled || !blob) continue
+        const url = URL.createObjectURL(blob)
+        setPreviewUrls((prev) => ({ ...prev, [id]: url }))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [token, pendingPhotos])
+
+  useEffect(() => {
+    return () => {
+      for (const url of Object.values(previewUrlsRef.current)) URL.revokeObjectURL(url)
+    }
+  }, [])
 
   const alreadyDone = workOrder.status === 'completed' || workOrder.status === 'cancelled'
 
@@ -242,17 +292,24 @@ export function VendorPortal({
       const draft = await loadVendorWoDraft(token)
       if (!cancelled && draft) {
         setNotes(draft.notes)
+        setTechnicianName(draft.completedByName ?? '')
         if (draft.lineItems.length > 0) setLineItems(draft.lineItems)
       }
 
       const state = await getVendorWoSubmissionState(token)
-      if (cancelled || !state) return
-      if (state.failed) {
-        setDeadLetterReason(state.terminalReason ?? 'generic')
-      } else {
-        setQueued(true)
-        setSuccess(true)
+      if (!cancelled && state) {
+        if (state.failed) {
+          setDeadLetterReason(state.terminalReason ?? 'generic')
+        } else {
+          setQueued(true)
+          setSuccess(true)
+        }
       }
+
+      // Resume any photo uploads left mid-flight from a prior session —
+      // e.g. the tab closed or the device lost power before a queued
+      // photo could reach the server.
+      void processPendingVendorPhotoUploads(token)
     })()
     return () => { cancelled = true }
   }, [token])
@@ -261,10 +318,10 @@ export function VendorPortal({
   // independent of whether the device currently has a connection.
   useEffect(() => {
     const timeout = setTimeout(() => {
-      void saveVendorWoDraft(token, notes, lineItems)
+      void saveVendorWoDraft(token, notes, technicianName, lineItems)
     }, 500)
     return () => clearTimeout(timeout)
-  }, [token, notes, lineItems])
+  }, [token, notes, technicianName, lineItems])
 
   // Mirrors DexieProvider's 'online' handler in lib/dexie/context.tsx —
   // without this, a queued-but-not-yet-drained submission only retries
@@ -280,6 +337,7 @@ export function VendorPortal({
         if (state.failed) setDeadLetterReason(state.terminalReason ?? 'generic')
         else setQueued(true)
       })
+      void processPendingVendorPhotoUploads(token)
     }
     window.addEventListener('online', onlineHandler)
     return () => window.removeEventListener('online', onlineHandler)
@@ -313,47 +371,25 @@ export function VendorPortal({
     ))
   }
 
-  // Photos upload eagerly as soon as they're selected, one request per
-  // file — by the time the vendor taps Submit they're already durable rows
-  // in work_order_photos, decoupled entirely from the completion
-  // submission (which can queue offline; a File blob can't).
-  async function uploadPhoto(photo: PendingPhoto) {
-    const body = new FormData()
-    body.append('photos', photo.file)
-
-    try {
-      const res = await fetch(`/api/work-orders/${token}/photos`, { method: 'POST', body })
-      if (!res.ok) {
-        const resBody = await res.json().catch(() => ({}))
-        setPhotos((prev) => prev.map((p) =>
-          p.id === photo.id ? { ...p, status: 'error', error: resBody.error ?? 'Upload failed' } : p
-        ))
-        return
-      }
-      const resBody = await res.json()
-      const uploadedId = resBody.uploaded?.[0]?.id as string | undefined
-      setPhotos((prev) => prev.map((p) =>
-        p.id === photo.id ? { ...p, status: 'uploaded', serverId: uploadedId } : p
-      ))
-    } catch {
-      setPhotos((prev) => prev.map((p) =>
-        p.id === photo.id ? { ...p, status: 'error', error: 'Network error — check your connection.' } : p
-      ))
-    }
-  }
-
-  function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+  // Photos are queued locally the moment they're selected — durable in
+  // IndexedDB across a hard reload or dead battery, and synced in the
+  // background independently of the completion submission (which has its
+  // own separate outbox). See lib/dexie/vendorWoPhotoSync.ts.
+  async function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
     e.target.value = ''
     if (files.length === 0) return
 
-    const room = MAX_PHOTOS - photos.length
+    const room = MAX_PHOTOS - pendingPhotos.length
     if (room <= 0) {
       setError(`You can attach up to ${MAX_PHOTOS} photos.`)
       return
     }
 
-    const accepted: PendingPhoto[] = []
+    if (files.length > room) {
+      setError(`Only ${room} more photo${room === 1 ? '' : 's'} can be added (max ${MAX_PHOTOS}).`)
+    }
+
     for (const file of files.slice(0, room)) {
       if (file.size > MAX_PHOTO_BYTES) {
         setError('Each photo must be under 10 MB.')
@@ -363,41 +399,25 @@ export function VendorPortal({
         setError('Only JPEG, PNG, WebP, or HEIC photos are accepted.')
         continue
       }
-      accepted.push({
-        id:         crypto.randomUUID(),
-        file,
-        previewUrl: URL.createObjectURL(file),
-        status:     'uploading',
-      })
-    }
-
-    if (files.length > room) {
-      setError(`Only ${room} more photo${room === 1 ? '' : 's'} can be added (max ${MAX_PHOTOS}).`)
-    }
-
-    setPhotos((prev) => [...prev, ...accepted])
-    for (const photo of accepted) void uploadPhoto(photo)
-  }
-
-  function removePhoto(id: string) {
-    const target = photos.find((p) => p.id === id)
-    if (!target) return
-    URL.revokeObjectURL(target.previewUrl)
-    setPhotos((prev) => prev.filter((p) => p.id !== id))
-    if (target.serverId) {
-      fetch(`/api/work-orders/${token}/photos`, {
-        method:  'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ photoId: target.serverId }),
-      }).catch((err) => console.error('[vendor-portal] photo delete failed', err))
+      const previewUrl = URL.createObjectURL(file)
+      const id = await queueVendorPhotoUpload(token, file, technicianName.trim() || 'vendor-portal')
+      seenPreviewIds.current.add(id)
+      setPreviewUrls((prev) => ({ ...prev, [id]: previewUrl }))
     }
   }
 
-  function retryPhoto(id: string) {
-    const target = photos.find((p) => p.id === id)
-    if (!target) return
-    setPhotos((prev) => prev.map((p) => p.id === id ? { ...p, status: 'uploading', error: undefined } : p))
-    void uploadPhoto(target)
+  function removePhoto(id: number) {
+    setPreviewUrls((prev) => {
+      const url = prev[id]
+      if (url) URL.revokeObjectURL(url)
+      const { [id]: _removed, ...rest } = prev
+      return rest
+    })
+    void removeVendorPendingPhoto(token, id)
+  }
+
+  function retryPhoto(id: number) {
+    void retryVendorPhotoUpload(token, id)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -406,6 +426,11 @@ export function VendorPortal({
     const validItems = lineItems.filter(
       (item) => item.description.trim() && (parseFloat(item.unitCost) || 0) > 0
     )
+
+    if (!technicianName.trim()) {
+      setError('Enter the name of the technician who completed this work.')
+      return
+    }
 
     if (validItems.length === 0) {
       setError('Add at least one line item with a description and cost.')
@@ -434,6 +459,7 @@ export function VendorPortal({
       const { synced } = await submitVendorWoCompletion(
         token,
         notes,
+        technicianName.trim(),
         validItems.map((item) => ({
           line_type:   item.type,
           description: item.description.trim(),
@@ -645,6 +671,24 @@ export function VendorPortal({
       )}
 
       <form onSubmit={handleSubmit}>
+        {/* Technician name */}
+        <label htmlFor="technician-name" style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+          Technician Name <span style={{ color: '#ef4444' }}>*</span>
+        </label>
+        <input
+          id="technician-name"
+          type="text"
+          required
+          value={technicianName}
+          onChange={(e) => setTechnicianName(e.target.value)}
+          placeholder="Who completed this work?"
+          style={{
+            width: '100%', fontSize: 13, padding: '10px 12px', marginBottom: 16,
+            border: '1px solid #d1d5db', borderRadius: 8,
+            color: '#374151', boxSizing: 'border-box',
+          }}
+        />
+
         {/* Line items */}
         <p style={{ fontSize: 13, fontWeight: 700, color: '#374151', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Invoice Line Items
@@ -780,49 +824,59 @@ export function VendorPortal({
           style={{ display: 'none' }}
         />
 
-        {photos.length > 0 && (
+        {pendingPhotos.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 8, marginBottom: 10 }}>
-            {photos.map((photo) => (
-              <div key={photo.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
-                {/* eslint-disable-next-line @next/next/no-img-element -- a local blob: object URL preview, not a remote asset next/image would optimize */}
-                <img
-                  src={photo.previewUrl}
-                  alt="Completion attachment"
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: photo.status === 'error' ? 0.4 : 1 }}
-                />
-                {photo.status === 'uploading' && (
-                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Loader2 className="animate-spin" style={{ width: 18, height: 18, color: '#fff' }} />
-                  </div>
-                )}
-                {photo.status === 'error' && (
+            {pendingPhotos.map((photo) => {
+              const id         = photo.id as number
+              const previewUrl = previewUrls[id]
+              return (
+                <div key={id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
+                  {previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- a local blob: object URL preview, not a remote asset next/image would optimize
+                    <img
+                      src={previewUrl}
+                      alt="Completion attachment"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: photo.status === 'failed' ? 0.4 : 1 }}
+                    />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <CheckCircle2 style={{ width: 20, height: 20, color: '#16a34a' }} />
+                    </div>
+                  )}
+                  {photo.status === 'pending' && (
+                    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Loader2 className="animate-spin" style={{ width: 18, height: 18, color: '#fff' }} />
+                    </div>
+                  )}
+                  {photo.status === 'failed' && (
+                    <button
+                      type="button"
+                      onClick={() => retryPhoto(id)}
+                      title="Upload failed — tap to retry"
+                      style={{ position: 'absolute', inset: 0, background: 'rgba(185,28,28,0.55)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                    >
+                      <RotateCw style={{ width: 18, height: 18, color: '#fff' }} />
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={() => retryPhoto(photo.id)}
-                    title={photo.error ?? 'Upload failed — tap to retry'}
-                    style={{ position: 'absolute', inset: 0, background: 'rgba(185,28,28,0.55)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                    onClick={() => removePhoto(id)}
+                    aria-label="Remove photo"
+                    style={{
+                      position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: 999,
+                      background: 'rgba(15,23,42,0.75)', border: 'none', color: '#fff',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0,
+                    }}
                   >
-                    <RotateCw style={{ width: 18, height: 18, color: '#fff' }} />
+                    <X style={{ width: 12, height: 12 }} />
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => removePhoto(photo.id)}
-                  aria-label="Remove photo"
-                  style={{
-                    position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: 999,
-                    background: 'rgba(15,23,42,0.75)', border: 'none', color: '#fff',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0,
-                  }}
-                >
-                  <X style={{ width: 12, height: 12 }} />
-                </button>
-              </div>
-            ))}
+                </div>
+              )
+            })}
           </div>
         )}
 
-        {photos.length < MAX_PHOTOS && (
+        {pendingPhotos.length < MAX_PHOTOS && (
           <button
             type="button"
             onClick={() => photoInputRef.current?.click()}
