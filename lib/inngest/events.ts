@@ -388,6 +388,21 @@ export type FieldStayEvents = {
     }
   }
 
+  'work-order/signed-off': {
+    data: {
+      workOrderId:     string
+      woNumber:        string
+      title:           string
+      signOffNotes:    string | null
+      signedOffAt:     string
+      propertyName:    string
+      propertyAddress: string
+      orgId:           string
+      orgName:         string
+      vendorEmail:     string | null
+    }
+  }
+
   'work-order/vendor.assigned': {
     data: {
       workOrderId: string

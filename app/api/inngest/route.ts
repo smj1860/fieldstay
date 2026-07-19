@@ -106,8 +106,8 @@ import { vendorComplianceExpiryCheck }      from '@/lib/inngest/functions/cron/v
 import { notifyVendorComplianceExpiring }   from '@/lib/inngest/functions/notify-vendor-compliance-expiring'
 import { vendorComplianceGraceCheck }       from '@/lib/inngest/functions/cron/vendor-compliance-grace-check'
 
-// Work order public dispatch
-import { workOrderDispatch } from '@/lib/inngest/functions/work-order-dispatch'
+// Work order public dispatch + sign-off
+import { workOrderDispatch, workOrderSignedOff } from '@/lib/inngest/functions/work-order-dispatch'
 
 // Work order vendor assignment → dispatch
 import { handleWorkOrderVendorAssigned } from '@/lib/inngest/functions/work-order-vendor-assigned'
@@ -266,6 +266,7 @@ export const { GET, POST, PUT } = serve({
 
     // Work order public dispatch
     workOrderDispatch,
+    workOrderSignedOff,
     handleWorkOrderVendorAssigned,
     handleWorkOrderCrewAssigned,
     handleWorkOrderCrewCompleted,

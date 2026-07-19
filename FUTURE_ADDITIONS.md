@@ -551,17 +551,13 @@ and only one is reachable:
   at all today.**
 - **`app/(public)/wo/[token]`** — a richer-looking flow with photo upload
   and a sign-off flow (`submitWorkOrderSignOff`), keyed on
-  `work_orders.public_token`. **Nothing in the codebase ever wrote
-  `public_token`** — this route was unreachable in production, forward-
-  scaffolding for a documented future "TradeSuite" standalone product
-  (`FIELDSTAY_MASTER_ROADMAP.md`, P11, July 2026). Removed entirely
-  (2026-07-19): the route, `getWorkOrderByToken`/`submitWorkOrderSignOff`,
-  the `work-order/signed-off` Inngest event + handler, and the `/wo/`
-  entries in `proxy.ts`/`session-refresh-guard.tsx`. `dispatchWorkOrderToVendor`
-  (the live `completion_token` flow) was untouched. The `public_token`-
-  family columns on `work_orders` were deliberately left in the schema —
-  removing them is a separate, more sensitive migration decision, not
-  bundled into this cleanup.
+  `work_orders.public_token`. **Nothing in the codebase ever writes
+  `public_token`** — this route is unreachable in production. It's
+  forward-scaffolding for a documented future "TradeSuite" standalone
+  product (`FIELDSTAY_MASTER_ROADMAP.md`, P11, July 2026), not something
+  vendors use today. **Leave it alone** — scope this feature against the
+  live `completion_token` flow only, and don't accidentally build against
+  the dead one.
 
 ### What "offline" actually needs to change about the completion model
 
