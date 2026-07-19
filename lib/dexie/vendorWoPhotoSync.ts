@@ -18,11 +18,16 @@ const MAX_RETRIES = 5
 // upload. Neither can ever succeed no matter how many times it's retried.
 class TerminalPhotoError extends Error {}
 
+const EXT_BY_MIME: Record<string, string> = {
+  'image/png':  'png',
+  'image/webp': 'webp',
+}
+
 async function uploadOnePhoto(token: string, row: VendorPendingPhotoRow): Promise<string> {
   const blob = await getVendorPendingPhotoBlob(token, row.blobKey)
   if (!blob) throw new TerminalPhotoError('Queued photo is no longer available locally')
 
-  const ext  = row.mimeType === 'image/png' ? 'png' : row.mimeType === 'image/webp' ? 'webp' : 'jpg'
+  const ext  = EXT_BY_MIME[row.mimeType] ?? 'jpg'
   const body = new FormData()
   body.append('photos', blob, `photo.${ext}`)
   body.append('uploadedBy', row.uploadedBy)
