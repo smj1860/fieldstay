@@ -4,7 +4,6 @@ import { render }              from '@react-email/render'
 import WorkOrderDispatchEmail  from '@/emails/WorkOrderDispatch'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
-import { getPmMembers, createPmNotification } from '@/lib/inngest/helpers'
 
 export const workOrderDispatch = inngest.createFunction(
   {
@@ -129,96 +128,5 @@ export const workOrderDispatch = inngest.createFunction(
     })
 
     return { dispatched: true, vendorEmail, woNumber }
-  }
-)
-
-export const workOrderSignedOff = inngest.createFunction(
-  {
-    id:      'work-order-signed-off',
-    name:    'Notify PM of Work Order Sign-Off',
-    retries: 3,
-  },
-  { event: 'work-order/signed-off' },
-
-  async ({ event, step }) => {
-    const {
-      workOrderId, woNumber, signOffNotes, signedOffAt,
-      propertyName, orgId,
-    } = event.data
-
-    // ── Step 1: Find PM email from org owner/admin/manager ───────────────
-    const pmEmail = await step.run('find-pm-email', async () => {
-      const supabase = createServiceClient()
-      const [member] = await getPmMembers(supabase, orgId, { roles: ['owner', 'admin', 'manager'], limit: 1 })
-      if (!member) return null
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', member.userId)
-        .single()
-
-      return {
-        email:    member.email,
-        fullName: profile?.full_name ?? 'Property Manager',
-      }
-    })
-
-    if (!pmEmail?.email) {
-      return { skipped: 'No PM email address found' }
-    }
-
-    // ── Step 2: Notify PM ─────────────────────────────────────────────────
-    await step.run('notify-pm', async () => {
-      const supabase = createServiceClient()
-      await createPmNotification(supabase, {
-        orgId,
-        type:      'work_order_complete',
-        title:     `✓ Work Complete — ${woNumber} · ${propertyName}`,
-        subtitle:  signOffNotes ? `Signed off — ${signOffNotes}` : 'Vendor signed off with no notes',
-        href:      `/maintenance/${workOrderId}`,
-        severity:  'green',
-        dedupeKey: `work-order-signed-off-pm-${workOrderId}`,
-      })
-    })
-
-    // ── Step 3: Log sign-off to communication_logs ────────────────────────
-    await step.run('log-signoff', async () => {
-      const supabase = createServiceClient()
-
-      const { data: wo } = await supabase
-        .from('work_orders')
-        .select('org_id, vendor_id, property_id')
-        .eq('id', workOrderId)
-        .single()
-
-      if (!wo) return { skipped: true }
-
-      const subject  = `Work Order Signed Off — ${woNumber}`
-      const dedupKey = `wo-signoff:${workOrderId}`
-
-      const { error } = await supabase.from('communication_logs').insert({
-        org_id:          wo.org_id,
-        channel:         'note',
-        recipient_type:  'vendor',
-        vendor_id:       wo.vendor_id ?? null,
-        work_order_id:   workOrderId,
-        property_id:     wo.property_id,
-        subject,
-        body:            signOffNotes
-                           ? `Vendor signed off. Notes: ${signOffNotes}`
-                           : 'Vendor signed off with no notes.',
-        source:          'system',
-        communicated_at: signedOffAt,
-        dedup_key:       dedupKey,
-      })
-
-      if (error) {
-        if (error.code === '23505') return { logged: false, alreadyExisted: true }
-        throw error
-      }
-    })
-
-    return { notified: true, pmEmail: pmEmail.email, woNumber }
   }
 )

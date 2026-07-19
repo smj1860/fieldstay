@@ -23,7 +23,6 @@ const TOKEN_ROUTES = [
   '/owner/',
   '/work-orders/',
   '/api/work-orders',
-  '/wo/',
   '/vendor-connect/',
   '/api/vendor-connect',
 ]
@@ -108,7 +107,6 @@ const BYPASS_ROUTES = [
 // Each guessable-token surface gets its own limiter/prefix so hammering
 // one doesn't throttle another.
 function rateLimiterForPathname(pathname: string) {
-  if (pathname.startsWith('/wo/'))               return workOrderRatelimit
   if (pathname.startsWith('/work-orders/'))       return workOrderRatelimit
   if (pathname.startsWith('/api/work-orders'))    return workOrderRatelimit
   if (pathname.startsWith('/vendor-connect/'))    return vendorConnectRatelimit
