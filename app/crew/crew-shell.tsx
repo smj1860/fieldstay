@@ -6,7 +6,7 @@ import { CalendarCheck, CalendarDays, MessageSquare, LogOut, Bell, X, HelpCircle
 import { useLiveQuery }             from 'dexie-react-hooks'
 import { DexieProvider, useDexieDb } from '@/lib/dexie/context'
 import { CrewContext }              from '@/lib/crew/crew-context'
-import { closeDexieDb }             from '@/lib/dexie/schema'
+import { closeDexieDb, getDexieDb } from '@/lib/dexie/schema'
 import { getSyncEngine }            from '@/lib/dexie/syncService'
 import { processPendingPhotoUploads } from '@/lib/dexie/photo-sync'
 import { createClient }             from '@/lib/supabase/client'
@@ -54,8 +54,73 @@ export function CrewShell({
   const [swReg, setSwReg]               = useState<ServiceWorkerRegistration | null>(null)
   const [notifVisible, setNotifVisible] = useState(false)
   const [showInfo, setShowInfo]         = useState(false)
+  const [loggingOut, setLoggingOut]             = useState(false)
+  const [unsyncedCount, setUnsyncedCount]       = useState(0)
+  const [showUnsyncedWarning, setShowUnsyncedWarning] = useState(false)
 
-  async function handleLogout() {
+  /**
+   * performLogout() deletes all local Dexie/photo-queue storage for this
+   * device (see below) — anything still sitting in the offline outbox at
+   * that moment is gone for good, not just delayed. requestLogout() checks
+   * for that first: if there's a connection, it gives any queued work one
+   * last bounded chance to drain, then re-checks. If anything is still
+   * unsynced after that, it blocks with a confirmation instead of wiping
+   * silently.
+   *
+   * NOTE: this intentionally does NOT, and cannot, cover crew messages.
+   * Sending a message (sendMessageToPM in
+   * app/(dashboard)/messages/actions.ts) is a live Server Action call, not
+   * a queued Dexie mutation — unlike checklist/inventory/turnover/work
+   * order writes, a message that fails to send is never written to
+   * db.mutations in the first place, so there's nothing here for this
+   * count to catch. Messages are the one crew-facing action that isn't
+   * offline-safe today. If that ever changes, route it through
+   * enqueueMutation (lib/dexie/syncService.ts) like everything else does,
+   * and it'll automatically be covered by this same count.
+   */
+  async function requestLogout() {
+    if (loggingOut) return
+    setLoggingOut(true)
+    try {
+      if (navigator.onLine) {
+        const supabase = createClient()
+        // Best-effort final flush, bounded so a hung request can't leave
+        // the logout button stuck. Whatever doesn't finish in time simply
+        // stays in the pending count checked right below.
+        await Promise.race([
+          Promise.all([
+            getSyncEngine(userId).processOutbox(),
+            processPendingPhotoUploads(supabase, userId),
+          ]),
+          new Promise<void>((resolve) => setTimeout(resolve, 4000)),
+        ])
+      }
+
+      const db = getDexieDb(userId)
+      const [mutationCount, photoCount] = await Promise.all([
+        db.mutations.count(),
+        db.pending_photo_uploads.count(),
+      ])
+      // Deliberately counts ALL rows, not just ones still under the retry
+      // budget — a dead-lettered (failed: true) mutation is exactly the
+      // case this guard exists for: it will never drain on its own, so
+      // it's just as much at risk of being silently lost on logout as one
+      // still actively retrying.
+      const pending = mutationCount + photoCount
+
+      if (pending > 0) {
+        setUnsyncedCount(pending)
+        setShowUnsyncedWarning(true)
+        return
+      }
+
+      await performLogout()
+    } finally {
+      setLoggingOut(false)
+    }
+  }
+
+  async function performLogout() {
     await closeDexieDb()
     // Also clear the service worker's cached app shell — same "no residual
     // data on a shared device after sign-out" principle as the Dexie
@@ -173,8 +238,8 @@ export function CrewShell({
           <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
             <SyncStatus />
             <button
-              onClick={handleLogout}
-              disabled={isPending}
+              onClick={requestLogout}
+              disabled={isPending || loggingOut}
               aria-label="Log out"
               className="text-brand-200 hover:text-white transition-colors disabled:opacity-50"
             >
@@ -184,6 +249,50 @@ export function CrewShell({
         </header>
 
         {showInfo && <CrewFaqPanel onClose={() => setShowInfo(false)} />}
+
+        {showUnsyncedWarning && (
+          <Dialog
+            open
+            onClose={() => setShowUnsyncedWarning(false)}
+            title="Unsynced work on this device"
+            mobileSheet
+            maxWidthClassName="max-w-sm"
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <span
+                className="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+              >
+                <WifiOff className="w-5 h-5" />
+              </span>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {unsyncedCount} item{unsyncedCount !== 1 ? 's' : ''} haven&rsquo;t reached FieldStay yet
+              </p>
+            </div>
+            <p className="text-sm leading-relaxed mb-4" style={{ color: 'var(--text-secondary)' }}>
+              Logging out clears everything saved on this device. This work is
+              only here, not on FieldStay&rsquo;s servers yet &mdash; if you log out
+              now, it will be lost. Stay logged in until you have signal and it
+              finishes syncing.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setShowUnsyncedWarning(false)}
+                className="w-full py-3 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+              >
+                Stay Logged In
+              </button>
+              <button
+                onClick={() => { setShowUnsyncedWarning(false); void performLogout() }}
+                className="w-full py-3 rounded-xl text-sm font-semibold"
+                style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+              >
+                Log Out Anyway
+              </button>
+            </div>
+          </Dialog>
+        )}
 
         <InstallBanner />
 
@@ -422,5 +531,49 @@ const FAQ_ITEMS = [
   {
     q: 'Why does inventory accuracy matter so much?',
     a: 'The numbers you enter are used to fill an actual shopping cart or generate a purchase order to restock the property. An inaccurate count means either too much is ordered (waste) or not enough (the next guest arrives to find empty shelves). Your count is the direct input to that process.',
+  },
+  {
+    q: 'Exactly what saves when I don’t have signal?',
+    a: 'Checklist taps, crew notes, photos, inventory counts, starting or completing a turnover, completing a work order, and time-off requests all save to your phone instantly and sync automatically once you’re back online. Messages to your operations team are the one exception — those need a live connection to send (see the messaging question below).',
+  },
+  {
+    q: 'How do I know if something hasn’t synced yet?',
+    a: 'An "Offline" pill appears at the top of the screen whenever your phone has no connection — that’s expected and nothing to worry about. If you see a red "Confirmation didn’t sync — check your connection" message with a Retry button, that means the app already tried several times on its own and needs you to tap Retry once you’re back in range.',
+  },
+  {
+    q: 'Do I need to keep the app open for things to sync, or does it happen in the background?',
+    a: 'Keep the app open (or reopen it) once you’re back in coverage. It checks for a connection the moment you regain signal and again every 30 seconds while it’s open, but it doesn’t sync while fully closed in the background. If you finish a job with no signal, open the app again once you’re somewhere with service.',
+  },
+  {
+    q: 'Will I lose my work if I close the app, restart my phone, or it crashes while I’m offline?',
+    a: 'No — everything is saved to your phone as you go, not just held in memory. Reopening the app picks up right where you left off. The one thing that does clear your saved work is logging out, so don’t log out until you’re confident everything has synced.',
+  },
+  {
+    q: 'Can I log out while I still have unsynced work?',
+    a: 'The app will warn you first. If you try to log out with anything still unsynced, it’ll show you how many items and ask you to confirm — logging out anyway clears everything saved on that device, including anything that hasn’t synced yet. If you’re not sure, stay logged in until you’re somewhere with better signal and try again.',
+  },
+  {
+    q: 'I finished a turnover on my phone — can I check it on a different phone or tablet later?',
+    a: 'Not until it syncs. Offline work is saved to the specific device you entered it on, so it won’t show up anywhere else — including your PM’s dashboard — until that device gets a connection and pushes it up.',
+  },
+  {
+    q: 'My coworker and I are splitting a turnover. If one of us has no signal, will we see each other’s checklist taps?',
+    a: 'Not in real time — you’ll each only see what’s on your own phone until the offline one reconnects. The moment it does, it automatically pulls the latest state, so nothing gets lost, it just catches up rather than updating live.',
+  },
+  {
+    q: 'Will I get notified if I’m assigned a new job while I’m offline?',
+    a: 'No, notifications need a connection to arrive. You’ll see any new assignment the moment your phone reconnects — it’s not lost, just delayed until then.',
+  },
+  {
+    q: 'I tried to message my operations team with no signal and it doesn’t look like it sent — why?',
+    a: 'Messages need a live connection at the moment you hit send — unlike checklists and inventory, they’re not saved and auto-retried in the background. If you’re not sure a message went through, don’t assume it queued itself — send it again once you have signal.',
+  },
+  {
+    q: 'I just got to a property with no signal and a screen won’t load / shows an error page — what happened?',
+    a: 'Each screen needs to load once while you have signal before it’s available offline. If you head straight to a dead zone without opening the app first, a page you haven’t visited yet on that device may not load. Open the app and tap into your assignments while you still have service — at the office, in the driveway, wherever — before you lose signal for the day.',
+  },
+  {
+    q: 'Will taking a lot of photos while offline fill up my phone’s storage?',
+    a: 'The app automatically resizes and compresses every photo before saving it, so a full day of checklist and asset photos takes up far less space than the originals would. You don’t need to manage this yourself.',
   },
 ]
