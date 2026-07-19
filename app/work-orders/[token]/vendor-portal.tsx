@@ -79,6 +79,16 @@ const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image
 // backfill effect's dependency beyond what actually changed.
 const EMPTY_PENDING_PHOTOS: VendorPendingPhotoRow[] = []
 
+function getDeadLetterMessage(reason: VendorWoMutationRow['terminalReason'] | 'generic'): string {
+  if (reason === 'closed') {
+    return 'This work order was already closed through another link before your completion could reach the server — no action needed on your end. Contact the property manager if that seems wrong.'
+  }
+  if (reason === 'expired') {
+    return 'Your link expired before this could be submitted. Your entries are still saved on this device — contact the property manager for a new link.'
+  }
+  return "This couldn't be submitted after several attempts. Your entries are still saved on this device."
+}
+
 // ── Shared layout wrapper ─────────────────────────────────────────────────────
 
 function PortalShell({ children }: { children: React.ReactNode }) {
@@ -339,8 +349,8 @@ export function VendorPortal({
       })
       void processPendingVendorPhotoUploads(token)
     }
-    window.addEventListener('online', onlineHandler)
-    return () => window.removeEventListener('online', onlineHandler)
+    globalThis.addEventListener('online', onlineHandler)
+    return () => globalThis.removeEventListener('online', onlineHandler)
   }, [token])
 
   const handleManualRetry = () => {
@@ -406,14 +416,22 @@ export function VendorPortal({
     }
   }
 
-  function removePhoto(id: number) {
+  // Only clears the local preview once the removal is actually confirmed —
+  // an already-uploaded photo's server-side delete can fail (offline,
+  // rejected), in which case the row is deliberately left in place so the
+  // vendor isn't shown a "removed" photo that's still live server-side.
+  async function removePhoto(id: number) {
+    const removed = await removeVendorPendingPhoto(token, id)
+    if (!removed) {
+      setError('Could not remove this photo — please try again.')
+      return
+    }
     setPreviewUrls((prev) => {
       const url = prev[id]
       if (url) URL.revokeObjectURL(url)
       const { [id]: _removed, ...rest } = prev
       return rest
     })
-    void removeVendorPendingPhoto(token, id)
   }
 
   function retryPhoto(id: number) {
@@ -533,11 +551,7 @@ export function VendorPortal({
 
   // ── State: submission stuck (dead-lettered) ──────────────────────────────
   if (deadLetterReason) {
-    const message = deadLetterReason === 'closed'
-      ? 'This work order was already closed through another link before your completion could reach the server — no action needed on your end. Contact the property manager if that seems wrong.'
-      : deadLetterReason === 'expired'
-      ? 'Your link expired before this could be submitted. Your entries are still saved on this device — contact the property manager for a new link.'
-      : "This couldn't be submitted after several attempts. Your entries are still saved on this device."
+    const message = getDeadLetterMessage(deadLetterReason)
     return shell(
       <div style={{ textAlign: 'center', padding: '8px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>

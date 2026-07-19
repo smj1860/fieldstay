@@ -149,6 +149,16 @@ export async function DELETE(
 ) {
   const { token } = await params
 
+  try {
+    const ip = extractClientIp(request) ?? 'unknown'
+    const { success } = await workOrderRatelimit.limit(`wo-photo:${ip}`)
+    if (!success) {
+      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
+    }
+  } catch (rlErr) {
+    console.error('[work-orders/photos] rate limit check failed', rlErr)
+  }
+
   const loaded = await loadOpenWorkOrder(token)
   if ('error' in loaded) return loaded.error
   const { supabase, workOrder } = loaded
@@ -170,8 +180,17 @@ export async function DELETE(
     return NextResponse.json({ error: 'Photo not found' }, { status: 404 })
   }
 
-  await supabase.storage.from('work-order-photos').remove([photo.storage_path])
-  await supabase.from('work_order_photos').delete().eq('id', photo.id)
+  const { error: storageErr } = await supabase.storage.from('work-order-photos').remove([photo.storage_path])
+  if (storageErr) {
+    console.error('[work-orders/photos] failed to remove storage object', storageErr)
+    return NextResponse.json({ error: 'Failed to delete photo. Please try again.' }, { status: 500 })
+  }
+
+  const { error: deleteErr } = await supabase.from('work_order_photos').delete().eq('id', photo.id)
+  if (deleteErr) {
+    console.error('[work-orders/photos] failed to delete photo row', deleteErr)
+    return NextResponse.json({ error: 'Failed to delete photo. Please try again.' }, { status: 500 })
+  }
 
   return NextResponse.json({ success: true })
 }

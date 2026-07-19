@@ -12,7 +12,7 @@ import { useEffect } from 'react'
 // this is caching-only.
 export function RegisterServiceWorker() {
   useEffect(() => {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
+    if (!('serviceWorker' in navigator)) return
     navigator.serviceWorker.register('/sw.js').catch((err) => {
       console.error('[work-orders] service worker registration failed:', err)
     })
