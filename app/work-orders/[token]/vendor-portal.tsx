@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap, BookOpen } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { CheckCircle2, AlertTriangle, Clock, Calendar, Wrench, DollarSign, Check, Zap, BookOpen, Camera, X, Loader2, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import {
@@ -58,6 +58,20 @@ const PRIORITY_STYLES: Record<string, { bg: string; text: string }> = {
   medium: { bg: '#dbeafe', text: '#1d4ed8' },
   high:   { bg: '#fef3c7', text: '#b45309' },
   urgent: { bg: '#fee2e2', text: '#b91c1c' },
+}
+
+const MAX_PHOTOS      = 5
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024  // 10 MB
+const MAX_SUBTOTAL    = 1_000_000
+const ALLOWED_MIME    = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic'])
+
+interface PendingPhoto {
+  id:         string
+  file:       File
+  previewUrl: string
+  status:     'uploading' | 'uploaded' | 'error'
+  serverId?:  string
+  error?:     string
 }
 
 // ── Shared layout wrapper ─────────────────────────────────────────────────────
@@ -212,6 +226,8 @@ export function VendorPortal({
     { type: 'labor',    description: 'Labor', quantity: 1, unitCost: '' },
     { type: 'material', description: '',      quantity: 1, unitCost: '' },
   ])
+  const [photos, setPhotos] = useState<PendingPhoto[]>([])
+  const photoInputRef = useRef<HTMLInputElement>(null)
 
   const alreadyDone = workOrder.status === 'completed' || workOrder.status === 'cancelled'
 
@@ -297,6 +313,93 @@ export function VendorPortal({
     ))
   }
 
+  // Photos upload eagerly as soon as they're selected, one request per
+  // file — by the time the vendor taps Submit they're already durable rows
+  // in work_order_photos, decoupled entirely from the completion
+  // submission (which can queue offline; a File blob can't).
+  async function uploadPhoto(photo: PendingPhoto) {
+    const body = new FormData()
+    body.append('photos', photo.file)
+
+    try {
+      const res = await fetch(`/api/work-orders/${token}/photos`, { method: 'POST', body })
+      if (!res.ok) {
+        const resBody = await res.json().catch(() => ({}))
+        setPhotos((prev) => prev.map((p) =>
+          p.id === photo.id ? { ...p, status: 'error', error: resBody.error ?? 'Upload failed' } : p
+        ))
+        return
+      }
+      const resBody = await res.json()
+      const uploadedId = resBody.uploaded?.[0]?.id as string | undefined
+      setPhotos((prev) => prev.map((p) =>
+        p.id === photo.id ? { ...p, status: 'uploaded', serverId: uploadedId } : p
+      ))
+    } catch {
+      setPhotos((prev) => prev.map((p) =>
+        p.id === photo.id ? { ...p, status: 'error', error: 'Network error — check your connection.' } : p
+      ))
+    }
+  }
+
+  function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    if (files.length === 0) return
+
+    const room = MAX_PHOTOS - photos.length
+    if (room <= 0) {
+      setError(`You can attach up to ${MAX_PHOTOS} photos.`)
+      return
+    }
+
+    const accepted: PendingPhoto[] = []
+    for (const file of files.slice(0, room)) {
+      if (file.size > MAX_PHOTO_BYTES) {
+        setError('Each photo must be under 10 MB.')
+        continue
+      }
+      if (!ALLOWED_MIME.has(file.type)) {
+        setError('Only JPEG, PNG, WebP, or HEIC photos are accepted.')
+        continue
+      }
+      accepted.push({
+        id:         crypto.randomUUID(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+        status:     'uploading',
+      })
+    }
+
+    if (files.length > room) {
+      setError(`Only ${room} more photo${room === 1 ? '' : 's'} can be added (max ${MAX_PHOTOS}).`)
+    }
+
+    setPhotos((prev) => [...prev, ...accepted])
+    for (const photo of accepted) void uploadPhoto(photo)
+  }
+
+  function removePhoto(id: string) {
+    const target = photos.find((p) => p.id === id)
+    if (!target) return
+    URL.revokeObjectURL(target.previewUrl)
+    setPhotos((prev) => prev.filter((p) => p.id !== id))
+    if (target.serverId) {
+      fetch(`/api/work-orders/${token}/photos`, {
+        method:  'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ photoId: target.serverId }),
+      }).catch((err) => console.error('[vendor-portal] photo delete failed', err))
+    }
+  }
+
+  function retryPhoto(id: string) {
+    const target = photos.find((p) => p.id === id)
+    if (!target) return
+    setPhotos((prev) => prev.map((p) => p.id === id ? { ...p, status: 'uploading', error: undefined } : p))
+    void uploadPhoto(target)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -311,6 +414,11 @@ export function VendorPortal({
 
     if (subtotal <= 0) {
       setError('Invoice total must be greater than $0.')
+      return
+    }
+
+    if (subtotal > MAX_SUBTOTAL) {
+      setError(`Invoice total must be under $${MAX_SUBTOTAL.toLocaleString()}. Please check your entries.`)
       return
     }
 
@@ -656,6 +764,77 @@ export function VendorPortal({
           <p style={{ fontSize: 12, color: '#b45309', backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '8px 10px', marginBottom: 12, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
             <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 1 }} /> Total exceeds the Not-to-Exceed amount of ${workOrder.nte_amount.toFixed(2)}. Contact the PM before submitting.
           </p>
+        )}
+
+        {/* Photos */}
+        <p style={{ fontSize: 13, fontWeight: 700, color: '#374151', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Photos <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 'normal', color: '#9ca3af' }}>(optional, up to {MAX_PHOTOS})</span>
+        </p>
+
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic"
+          multiple
+          onChange={handlePhotoSelect}
+          style={{ display: 'none' }}
+        />
+
+        {photos.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 8, marginBottom: 10 }}>
+            {photos.map((photo) => (
+              <div key={photo.id} style={{ position: 'relative', aspectRatio: '1', borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- a local blob: object URL preview, not a remote asset next/image would optimize */}
+                <img
+                  src={photo.previewUrl}
+                  alt="Completion attachment"
+                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: photo.status === 'error' ? 0.4 : 1 }}
+                />
+                {photo.status === 'uploading' && (
+                  <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Loader2 className="animate-spin" style={{ width: 18, height: 18, color: '#fff' }} />
+                  </div>
+                )}
+                {photo.status === 'error' && (
+                  <button
+                    type="button"
+                    onClick={() => retryPhoto(photo.id)}
+                    title={photo.error ?? 'Upload failed — tap to retry'}
+                    style={{ position: 'absolute', inset: 0, background: 'rgba(185,28,28,0.55)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+                  >
+                    <RotateCw style={{ width: 18, height: 18, color: '#fff' }} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePhoto(photo.id)}
+                  aria-label="Remove photo"
+                  style={{
+                    position: 'absolute', top: 2, right: 2, width: 20, height: 20, borderRadius: 999,
+                    background: 'rgba(15,23,42,0.75)', border: 'none', color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0,
+                  }}
+                >
+                  <X style={{ width: 12, height: 12 }} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {photos.length < MAX_PHOTOS && (
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            style={{
+              fontSize: 13, color: '#FF6B00', background: 'none',
+              border: '1px dashed #fed7aa', borderRadius: 6,
+              padding: '6px 12px', cursor: 'pointer', marginBottom: 16, width: '100%',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}
+          >
+            <Camera style={{ width: 14, height: 14 }} /> Add photos
+          </button>
         )}
 
         {/* Completion notes */}

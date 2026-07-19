@@ -96,6 +96,12 @@ export async function POST(
     notes          = (formData.get('notes') as string | null)?.trim() || null
   }
 
+  // Sanity bound on the submitted total — catches a typo (an extra zero) or
+  // a malicious payload before it becomes actual_cost/an invoice amount.
+  if (subtotal > 1_000_000) {
+    return NextResponse.json({ error: 'Invoice total must be under $1,000,000. Please check your entries.' }, { status: 400 })
+  }
+
   // Validate line items if provided
   const VALID_LINE_TYPES = new Set(['labor', 'material', 'equipment', 'subcontractor', 'other'])
   const safeLineItems = lineItemsPayload.filter((item) =>
