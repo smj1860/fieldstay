@@ -24,6 +24,7 @@ import { revokeIntegrationToken, findUserByExternalId } from '@/lib/integrations
 import { logAuditEvent }                             from '@/lib/audit'
 import { createServiceClient }                       from '@/lib/supabase/server'
 import { inngest }                                   from '@/lib/inngest/client'
+import { reportError }                               from '@/lib/observability/report-error'
 import type { WebhookVerificationResult }            from '@/lib/integrations/webhook-verification'
 
 export async function POST(
@@ -53,6 +54,7 @@ export async function POST(
     verification = await providerAdapter.validateWebhook(clonedForValidation)
   } catch (err) {
     console.error(`[Webhook:${providerId}] Validation error:`, err)
+    reportError(err, { site: 'webhook.provider.validate', extra: { provider: providerId } })
     // Fail closed — if we can't validate, reject
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -91,6 +93,7 @@ export async function POST(
     try {
       if (!externalUserId) {
         console.error(`[Webhook:${providerId}] Revocation event missing user_id`)
+        reportError(new Error('Revocation webhook missing user_id'), { site: 'webhook.provider.revocation_missing_user_id', extra: { provider: providerId } })
       } else {
         const appUserId = await findUserByExternalId(providerId, externalUserId)
 
@@ -142,6 +145,10 @@ export async function POST(
             console.warn(
               `[Webhook:${providerId}] Revoked connection has no org_id — cannot notify PM for user ${appUserId}`
             )
+            reportError(new Error('Revoked integration connection has no org_id'), {
+              site:  'webhook.provider.revocation_missing_org_id',
+              extra: { provider: providerId, app_user_id: appUserId },
+            })
           }
         } else {
           console.warn(
@@ -153,6 +160,7 @@ export async function POST(
     } catch (err) {
       // Log but don't return 500 — OwnerRez must get a 200 or it will retry infinitely
       console.error(`[Webhook:${providerId}] Failed to process revocation:`, err)
+      reportError(err, { site: 'webhook.provider.revocation_processing', extra: { provider: providerId } })
     }
 
     // Return 200 immediately after revocation
@@ -203,6 +211,7 @@ export async function POST(
       }
       // Non-fatal dedup failure — log and continue to avoid losing the event
       console.error(`[Webhook:${providerId}] Dedup insert failed: ${dedupErr.message}`)
+      reportError(new Error(dedupErr.message), { site: 'webhook.provider.dedup_insert', extra: { provider: providerId } })
     }
   }
 
@@ -236,6 +245,7 @@ export async function POST(
   } catch (err) {
     // Again: log, don't 500 — provider is not responsible for our processing errors
     console.error(`[Webhook:${providerId}] Handler threw for action "${action}":`, err)
+    reportError(err, { site: 'webhook.provider.handler', extra: { provider: providerId, action: safeAction } })
   }
 
   return NextResponse.json({ received: true }, { status: 200 })

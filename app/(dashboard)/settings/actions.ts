@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 import type { ContactPref, VendorSpecialty, CrewRole } from '@/types/database'
 import { renderCrewInviteEmail } from '@/emails/crew-invite'
 import { renderSmsBody } from '@/lib/sms/templates'
@@ -39,6 +40,7 @@ export async function updateOrgSettings(
 
   if (error) {
     console.error('[updateOrgSettings]', error)
+    reportError(error, { site: 'serverAction.settings.updateOrgSettings', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -75,6 +77,7 @@ export async function updateSlackWebhook(
 
   if (error) {
     console.error('[updateSlackWebhook]', error)
+    reportError(error, { site: 'serverAction.settings.updateSlackWebhook', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -111,6 +114,7 @@ export async function changePassword(
 
   if (error) {
     console.error('[changePassword]', error)
+    reportError(error, { site: 'serverAction.settings.changePassword', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -145,6 +149,7 @@ export async function updateNotificationPrefs(
   const { error } = await supabase.auth.updateUser({ data: { notification_prefs: prefs } })
   if (error) {
     console.error('[updateNotificationPrefs]', error)
+    reportError(error, { site: 'serverAction.settings.updateNotificationPrefs' })
     return { error: 'Operation failed. Please try again.' }
   }
   return { success: true }
@@ -183,6 +188,7 @@ export async function addCrewMember(
 
   if (error) {
     console.error('[addCrewMember]', error)
+    reportError(error, { site: 'serverAction.settings.addCrewMember', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -249,6 +255,7 @@ export async function updateCrewMember(
 
   if (error) {
     console.error('[updateCrewMember]', error)
+    reportError(error, { site: 'serverAction.settings.updateCrewMember', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -332,6 +339,7 @@ export async function bulkImportCrew(
   const { error } = await supabase.from('crew_members').insert(records)
   if (error) {
     console.error('[bulkImportCrew]', error)
+    reportError(error, { site: 'serverAction.settings.bulkImportCrew', orgId: membership.org_id })
     return { imported: 0, skipped, error: 'Operation failed. Please try again.' }
   }
 
@@ -387,6 +395,7 @@ export async function addVendor(
 
   if (error) {
     console.error('[addVendor]', error)
+    reportError(error, { site: 'serverAction.settings.addVendor', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -455,6 +464,7 @@ export async function updateVendor(
 
   if (error) {
     console.error('[updateVendor]', error)
+    reportError(error, { site: 'serverAction.settings.updateVendor', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -551,6 +561,7 @@ export async function bulkImportVendors(
   const { error } = await supabase.from('vendors').insert(records)
   if (error) {
     console.error('[bulkImportVendors]', error)
+    reportError(error, { site: 'serverAction.settings.bulkImportVendors', orgId: membership.org_id })
     return { imported: 0, skipped, error: 'Operation failed. Please try again.' }
   }
 
@@ -650,6 +661,7 @@ export async function inviteCrewMember(
 
     if (emailError) {
       console.error('[inviteCrewMember] email send failed')
+      reportError(emailError, { site: 'serverAction.settings.inviteCrewMember', orgId: membership.org_id })
       // Release the claim so a retry isn't blocked by the window above
       await supabase
         .from('crew_members')
@@ -676,6 +688,7 @@ export async function inviteCrewMember(
         await sendSMS(e164, smsBody)
       } catch (smsErr) {
         console.error('[inviteCrewMember] SMS failed (non-fatal):', smsErr)
+        reportError(smsErr, { site: 'serverAction.settings.inviteCrewMember.inner', orgId: membership.org_id })
       }
     }
   }
@@ -711,6 +724,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
 
   if (queryError) {
     console.error('[inviteAllUninvitedCrew] query failed')
+    reportError(queryError, { site: 'serverAction.settings.inviteAllUninvitedCrew', orgId: membership.org_id })
     return { sent: 0, error: 'Failed to load crew members. Please try again.' }
   }
 
@@ -778,6 +792,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
           if (result.sent) delivered = true
         } catch (smsErr) {
           console.error('[inviteAllUninvitedCrew] SMS failed (non-fatal):', smsErr)
+          reportError(smsErr, { site: 'serverAction.settings.inviteAllUninvitedCrew.inner', orgId: membership.org_id })
         }
       }
     }
@@ -823,6 +838,7 @@ export async function updateAutoAssignMode(
 
   if (error) {
     console.error('[updateAutoAssignMode]', error)
+    reportError(error, { site: 'serverAction.settings.updateAutoAssignMode', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -851,6 +867,7 @@ export async function updateVendorAutoAssignMode(
 
   if (error) {
     console.error('[updateVendorAutoAssignMode]', error)
+    reportError(error, { site: 'serverAction.settings.updateVendorAutoAssignMode', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -877,6 +894,7 @@ export async function updateCommsRetention(days: number): Promise<SettingsAction
 
   if (error) {
     console.error('[updateCommsRetention]', error)
+    reportError(error, { site: 'serverAction.settings.updateCommsRetention', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -967,6 +985,7 @@ export async function saveOrgSmsTemplate(
 
   if (error) {
     console.error('[saveOrgSmsTemplate]', error)
+    reportError(error, { site: 'serverAction.settings.saveOrgSmsTemplate', orgId: membership.org_id })
     return { error: 'Failed to save template. Please try again.' }
   }
 
@@ -987,6 +1006,7 @@ export async function resetOrgSmsTemplate(
 
   if (error) {
     console.error('[resetOrgSmsTemplate]', error)
+    reportError(error, { site: 'serverAction.settings.resetOrgSmsTemplate', orgId: membership.org_id })
     return { error: 'Failed to reset template.' }
   }
 

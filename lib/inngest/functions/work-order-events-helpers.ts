@@ -5,6 +5,7 @@ import WorkOrderDispatchEmail from '@/emails/WorkOrderDispatch'
 import { resend, FROM } from '@/lib/resend/client'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
+import { reportError } from '@/lib/observability/report-error'
 import { randomBytes } from 'crypto'
 
 /**
@@ -253,5 +254,6 @@ export async function sendVendorDispatchSms(
     await sendSMS(e164, smsBody)
   } catch (smsErr) {
     console.error('[WO dispatch-to-vendor] SMS failed (non-fatal):', smsErr)
+    reportError(smsErr, { site: 'inngest.work-order-dispatch.sms', orgId })
   }
 }

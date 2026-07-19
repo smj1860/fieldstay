@@ -9,6 +9,7 @@ import {
   getBestPrice,
 } from '@/lib/kroger/client'
 import { getValidKrogerToken }             from '@/lib/integrations/providers/kroger-token'
+import { reportError }                     from '@/lib/observability/report-error'
 import { NonRetriableError }               from 'inngest'
 import { resend, FROM }                    from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
@@ -158,6 +159,7 @@ export const buildShoppingCart = inngest.createFunction(
             .eq('org_id', org_id)
         }
         console.error('Kroger token refresh failed — falling back to list-only:', err instanceof Error ? err.message : err)
+        reportError(err, { site: 'inngest.build-shopping-cart.kroger_token_refresh', orgId: org_id })
         return null
       }
     })

@@ -5,6 +5,7 @@ import { createServiceClient }       from '@/lib/supabase/server'
 import { logAuditEvent }             from '@/lib/audit'
 import { revokeIntegrationToken }    from '@/lib/integrations/vault'
 import { stripe }                    from '@/lib/stripe/client'
+import { reportError }               from '@/lib/observability/report-error'
 
 export async function DELETE(request: NextRequest) {
   const cookieStore = await cookies()
@@ -72,6 +73,7 @@ export async function DELETE(request: NextRequest) {
           // Abort the deletion — a swallowed failure leaves an active Stripe
           // subscription with no FieldStay account to manage it (billing leak).
           console.error(`[Account:${user.id}] Stripe cancel failed:`, err)
+          reportError(err, { site: 'route.account.delete.stripe_cancel', orgId })
           return NextResponse.json(
             {
               error: 'Unable to cancel your subscription at this time. Please try again in a few minutes, or contact support at support@fieldstay.app if the issue persists.',
@@ -86,6 +88,7 @@ export async function DELETE(request: NextRequest) {
         } catch (err) {
           // Abort the deletion — same billing-leak risk as the main subscription.
           console.error(`[Account:${user.id}] RepuGuard Stripe cancel failed:`, err)
+          reportError(err, { site: 'route.account.delete.repuguard_stripe_cancel', orgId })
           return NextResponse.json(
             {
               error: 'Unable to cancel your subscription at this time. Please try again in a few minutes, or contact support at support@fieldstay.app if the issue persists.',
@@ -107,9 +110,10 @@ export async function DELETE(request: NextRequest) {
       orgId:   orgId,
       actorId: user.id,
       action:  'account.deleted',
-    }).catch(err =>
+    }).catch(err => {
       console.error(`[Account:${user.id}] audit log failed for ${orgId}:`, err)
-    )
+      reportError(err, { site: 'route.account.delete.audit_log', orgId })
+    })
   }
 
   // Revoke integration tokens — user-level, done once after per-org cleanup
@@ -123,6 +127,10 @@ export async function DELETE(request: NextRequest) {
       await revokeIntegrationToken(user.id, conn.provider_id as string)
     } catch (err) {
       console.error(`[Account:${user.id}] vault revoke failed for ${conn.provider_id}:`, err)
+      reportError(err, {
+        site: 'route.account.delete.vault_revoke',
+        extra: { provider_id: conn.provider_id as string },
+      })
     }
   }
 

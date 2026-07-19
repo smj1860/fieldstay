@@ -2,6 +2,7 @@ import { NextRequest, NextResponse }  from 'next/server'
 import { stripe }                     from '@/lib/stripe/client'
 import { createServiceClient }        from '@/lib/supabase/server'
 import { logAuditEvent }              from '@/lib/audit'
+import { reportError }                from '@/lib/observability/report-error'
 
 /**
  * POST /api/webhooks/stripe-connect
@@ -30,6 +31,7 @@ export async function POST(request: NextRequest) {
     )
   } catch (err) {
     console.error('[stripe-connect-webhook] signature verification failed:', err)
+    reportError(err, { site: 'webhook.stripe-connect.signature_verification' })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
 
@@ -46,6 +48,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true })
     }
     console.error('[stripe-connect-webhook] dedup insert failed (non-fatal):', dedupErr.message)
+    reportError(new Error(dedupErr.message), { site: 'webhook.stripe-connect.dedup_insert', extra: { stripe_event_id: event.id } })
   }
 
   switch (event.type) {

@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { parseLocalDate } from '@/lib/utils/date-validation'
+import { reportError } from '@/lib/observability/report-error'
 
 // A real per-booking total from the PMS beats the avg_nightly_rate estimate —
 // only a positive, present value counts as "real"; 0 or a missing figure
@@ -39,6 +40,11 @@ export const handleBookingConfirmed = inngest.createFunction(
           checkin_date:  booking.checkin_date,
           checkout_date: booking.checkout_date,
           error: String(err),
+        })
+        reportError(err, {
+          site:  'inngest.booking-confirmed.invalid_date',
+          orgId: org_id,
+          extra: { booking_id },
         })
         return { skipped: true, reason: 'invalid_date' }
       }

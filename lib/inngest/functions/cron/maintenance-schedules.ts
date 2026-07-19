@@ -4,6 +4,7 @@ import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { logAuditEvent } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 import {
   createMaintenanceWorkOrder,
   computeVacancyGaps,
@@ -102,6 +103,11 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
             next_due_date: schedule.next_due_date,
             error:         String(err),
           })
+          reportError(err, {
+            site:  'inngest.maintenance-cron.invalid_due_date',
+            orgId: schedule.org_id,
+            extra: { schedule_id: schedule.id },
+          })
           return
         }
         const daysUntilDue = Math.round((dueDate.getTime() - today.getTime()) / 86_400_000)
@@ -165,6 +171,11 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
             schedule_id:   schedule.id,
             next_due_date: schedule.next_due_date,
             error:         String(err),
+          })
+          reportError(err, {
+            site:  'inngest.maintenance-cron.invalid_due_date_overdue',
+            orgId: schedule.org_id,
+            extra: { schedule_id: schedule.id },
           })
           return
         }

@@ -7,6 +7,7 @@ import { geocodeZip } from '@/lib/geocoding'
 import { calculateHealthScore } from '@/lib/assets/health-score'
 import { logAuditEvent } from '@/lib/audit'
 import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
+import { reportError } from '@/lib/observability/report-error'
 import type { AssetType } from '@/types/database'
 
 export type PropertyActionState = {
@@ -321,6 +322,7 @@ async function fireManualLookup(
     })
   } catch (err) {
     console.error('[fireManualLookup]', err)
+    reportError(err, { site: 'serverAction.properties.fireManualLookup', orgId })
   }
 }
 
@@ -428,6 +430,7 @@ export async function createAsset(
     return { success: true }
   } catch (err) {
     console.error('[createAsset]', err)
+    reportError(err, { site: 'serverAction.properties.createAsset' })
     return { error: 'Failed to save asset' }
   }
 }
@@ -491,6 +494,7 @@ export async function updateAsset(
     return { success: true }
   } catch (err) {
     console.error('[updateAsset]', err)
+    reportError(err, { site: 'serverAction.properties.updateAsset' })
     return { error: 'Failed to update asset' }
   }
 }
@@ -516,6 +520,7 @@ export async function deactivateAsset(assetId: string): Promise<{ error?: string
     return {}
   } catch (err) {
     console.error('[deactivateAsset]', err)
+    reportError(err, { site: 'serverAction.properties.deactivateAsset' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -606,12 +611,14 @@ export async function bulkImportAssets(
       if (lookupEvents.length > 0) await inngest.send(lookupEvents)
     } catch (err) {
       console.error('[bulkImportAssets] manual lookup dispatch failed', err)
+      reportError(err, { site: 'serverAction.properties.bulkImportAssets.inner', orgId: membership.org_id })
     }
 
     revalidatePath('/assets')
     return { imported: rows.length }
   } catch (err) {
     console.error('[bulkImportAssets]', err)
+    reportError(err, { site: 'serverAction.properties.bulkImportAssets' })
     return { imported: 0, error: 'Import failed — please try again' }
   }
 }

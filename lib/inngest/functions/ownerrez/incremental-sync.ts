@@ -30,6 +30,7 @@ import { createServiceClient }          from '@/lib/supabase/server'
 import { OwnerRezApiClient, getRedis }  from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { logAuditEvent }                from '@/lib/audit'
+import { reportError }                  from '@/lib/observability/report-error'
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { createPmNotification }         from '@/lib/inngest/helpers'
 import { findMaintenanceCandidatesForWindow } from '@/lib/maintenance/vacancy-suggestions'
@@ -214,6 +215,10 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                   `[OwnerRez sync] Property lookup failed for org ${conn.org_id} — ` +
                   `skipping booking upsert to prevent property_id null overwrite`,
                   propsLookupError?.message
+                )
+                reportError(
+                  new Error(propsLookupError?.message ?? 'Property lookup returned no data'),
+                  { site: 'inngest.ownerrez-incremental-sync.property_lookup', orgId: conn.org_id },
                 )
                 return
               }

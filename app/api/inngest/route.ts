@@ -154,6 +154,9 @@ import { guidebookStayExtensionHandler }    from '@/lib/inngest/functions/guideb
 // Support bot — human escalation
 import { handleSupportEscalation } from '@/lib/inngest/functions/support-conversation-escalated'
 
+// Grafana Cloud metrics snapshot
+import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -303,5 +306,8 @@ export const { GET, POST, PUT } = serve({
 
     // Support bot — human escalation
     handleSupportEscalation,
+
+    // Grafana Cloud metrics snapshot
+    metricsSnapshot,
   ],
 })

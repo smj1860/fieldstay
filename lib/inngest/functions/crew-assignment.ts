@@ -4,6 +4,7 @@ import { resend, FROM }        from '@/lib/resend/client'
 import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderSmsBody }       from '@/lib/sms/templates'
 import { escapeHtml }          from '@/lib/utils/html'
+import { reportError }         from '@/lib/observability/report-error'
 
 /**
  * Triggered when one or more turnovers are assigned to a crew member via
@@ -151,6 +152,7 @@ export const handleCrewAssigned = inngest.createFunction(
           await sendSMS(e164, smsBody)
         } catch (smsErr) {
           console.error('[handleCrewAssigned] SMS failed (non-fatal):', smsErr)
+          reportError(smsErr, { site: 'inngest.crew-assigned.sms', orgId: org_id, extra: { crew_member_id } })
           return { sent: false, reason: 'send-failed' }
         }
         return { sent: true }

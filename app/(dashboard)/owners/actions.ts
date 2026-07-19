@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 import { sendOwnerPortalEmail } from '@/lib/resend/client'
 import type { TxnCategory } from '@/types/database'
 
@@ -48,6 +49,7 @@ export async function addPropertyOwner(
 
   if (error) {
     console.error('[addPropertyOwner]', error)
+    reportError(error, { site: 'serverAction.owners.addPropertyOwner', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -84,6 +86,7 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
 
   if (error) {
     console.error('[generatePortalToken]', error)
+    reportError(error, { site: 'serverAction.owners.generatePortalToken', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -119,6 +122,7 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
     } catch (emailErr) {
       // Non-fatal: token saved. PM can still copy the link manually.
       console.error('[generatePortalToken] email send failed (non-fatal):', emailErr)
+      reportError(emailErr, { site: 'serverAction.owners.generatePortalToken.inner', orgId: membership.org_id })
     }
   }
 
@@ -171,6 +175,7 @@ export async function generateCombinedPortalToken(ownerIds: string[]): Promise<O
 
   if (error) {
     console.error('[generateCombinedPortalToken]', error)
+    reportError(error, { site: 'serverAction.owners.generateCombinedPortalToken', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -232,6 +237,7 @@ export async function addOwnerTransaction(
 
   if (error) {
     console.error('[addOwnerTransaction]', error)
+    reportError(error, { site: 'serverAction.owners.addOwnerTransaction', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -264,6 +270,7 @@ export async function toggleTransactionVisibility(
 
   if (error) {
     console.error('[toggleTransactionVisibility]', error)
+    reportError(error, { site: 'serverAction.owners.toggleTransactionVisibility', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -303,6 +310,7 @@ export async function revokeOwnerPortalToken(ownerId: string): Promise<OwnersAct
 
   if (error) {
     console.error('[revokeOwnerPortalToken]', error)
+    reportError(error, { site: 'serverAction.owners.revokeOwnerPortalToken', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -369,6 +377,7 @@ export async function toggleCapitalPlanSharing(
 
   if (error) {
     console.error('[toggleCapitalPlanSharing]', error)
+    reportError(error, { site: 'serverAction.owners.toggleCapitalPlanSharing', orgId: membership.org_id })
     return { error: 'Update failed' }
   }
 
