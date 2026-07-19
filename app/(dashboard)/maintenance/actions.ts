@@ -6,6 +6,7 @@ import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 import type { WoStatus, WoCategory, ScheduleFrequency, ScheduleType, VendorSpecialty } from '@/types/database'
 import { PriorityLevelSchema, WoStatusSchema, WoCategorySchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -81,6 +82,7 @@ async function trackVendorAssignmentAgainstSuggestions(
   } catch (err) {
     // Suggestion-state/outcome tracking must never break the actual assignment
     console.error('[trackVendorAssignmentAgainstSuggestions]', err)
+    reportError(err, { site: 'serverAction.maintenance.trackVendorAssignmentAgainstSuggestions', orgId })
   }
 }
 
@@ -1070,6 +1072,7 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
     // still needs to be visible, or the vendor-score learning loop silently
     // starves with zero operator signal.
     console.error('[acceptVendorSuggestion] outcome recording failed:', err)
+    reportError(err, { site: 'serverAction.maintenance.acceptVendorSuggestion', orgId: membership.org_id })
   }
 
   // Dispatch is gated inside this handler on the WO's own portal_enabled
@@ -1130,6 +1133,7 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
       // failure still needs to be visible, or the vendor-score learning
       // loop silently starves with zero operator signal.
       console.error('[dismissVendorSuggestion] outcome recording failed:', err)
+      reportError(err, { site: 'serverAction.maintenance.dismissVendorSuggestion', orgId: membership.org_id })
     }
   }
 
@@ -1588,6 +1592,7 @@ export async function updateMaintenanceScheduleItem(
     return { success: true }
   } catch (err) {
     console.error('[updateMaintenanceScheduleItem]', err)
+    reportError(err, { site: 'serverAction.maintenance.updateMaintenanceScheduleItem' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1631,6 +1636,7 @@ export async function duplicateMaintenanceScheduleItem(
     return { success: true }
   } catch (err) {
     console.error('[duplicateMaintenanceScheduleItem]', err)
+    reportError(err, { site: 'serverAction.maintenance.duplicateMaintenanceScheduleItem' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1660,6 +1666,7 @@ export async function removeMaintenanceScheduleItem(
     return { success: true }
   } catch (err) {
     console.error('[removeMaintenanceScheduleItem]', err)
+    reportError(err, { site: 'serverAction.maintenance.removeMaintenanceScheduleItem' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1709,6 +1716,7 @@ export async function addCatalogItemToProperty(
     return { success: true }
   } catch (err) {
     console.error('[addCatalogItemToProperty]', err)
+    reportError(err, { site: 'serverAction.maintenance.addCatalogItemToProperty' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1752,6 +1760,7 @@ export async function addCustomMaintenanceItem(
     return { success: true }
   } catch (err) {
     console.error('[addCustomMaintenanceItem]', err)
+    reportError(err, { site: 'serverAction.maintenance.addCustomMaintenanceItem' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1819,6 +1828,7 @@ export async function recordMaintenanceCompletion(
     return { success: true, nextDueDate: nextDueDateStr }
   } catch (err) {
     console.error('[recordMaintenanceCompletion]', err)
+    reportError(err, { site: 'serverAction.maintenance.recordMaintenanceCompletion' })
     return { error: 'Operation failed. Please try again.' }
   }
 }

@@ -4,6 +4,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
 import { isTimestampFresh } from '@/lib/integrations/webhook-verification'
+import { reportError } from '@/lib/observability/report-error'
 
 // ── Signature verification ────────────────────────────────────────────────────
 // Telnyx signs webhooks with ed25519. The signed payload is `timestamp|rawBody`.
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
   // ── Verify signature before processing any payload ──────────────────────────
   if (!verifyTelnyxSignature(rawBody, signature, timestamp)) {
     console.error('[Telnyx webhook] Signature verification failed (invalid signature or stale timestamp)')
+    reportError(new Error('Telnyx webhook signature verification failed'), { site: 'webhook.telnyx.signature_verification' })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
@@ -98,9 +100,10 @@ export async function POST(req: NextRequest) {
         action:     'sms.consent.revoked',
         targetType: 'guidebook_guest_sms_optin',
         metadata:   { reason: text },
-      }).catch(err =>
+      }).catch(err => {
         console.error('[Telnyx] audit log failed:', err)
-      )
+        reportError(err, { site: 'webhook.telnyx.audit_log.opt_out', orgId: row.org_id ?? undefined })
+      })
     }
   } else if (text === 'START' || text === 'YES' || text === 'UNSTOP') {
     const { data: updated } = await supabase
@@ -116,9 +119,10 @@ export async function POST(req: NextRequest) {
         action:     'sms.consent.restored',
         targetType: 'guidebook_guest_sms_optin',
         metadata:   { reason: text },
-      }).catch(err =>
+      }).catch(err => {
         console.error('[Telnyx] audit log failed:', err)
-      )
+        reportError(err, { site: 'webhook.telnyx.audit_log.opt_in', orgId: row.org_id ?? undefined })
+      })
     }
   }
 

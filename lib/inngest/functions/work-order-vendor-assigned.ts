@@ -8,6 +8,7 @@ import { createPmNotification } from '@/lib/inngest/helpers'
 import { renderSmsBody }        from '@/lib/sms/templates'
 import { randomBytes }          from 'crypto'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
+import { reportError }          from '@/lib/observability/report-error'
 
 export const handleWorkOrderVendorAssigned = inngest.createFunction(
   { id: 'work-order-vendor-assigned', name: 'Work Order: Vendor Assigned', retries: 2 },
@@ -211,6 +212,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
           await sendSMS(e164, smsBody)
         } catch (smsErr) {
           console.error('[WO vendor-assigned] SMS failed (non-fatal):', smsErr)
+          reportError(smsErr, { site: 'inngest.work-order-vendor-assigned.sms', orgId })
           return { sent: false, reason: 'send-failed' }
         }
         return { sent: true }

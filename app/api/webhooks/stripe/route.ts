@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { stripe } from '@/lib/stripe/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { reportError } from '@/lib/observability/report-error'
 import { handleWorkOrderInvoicePaid } from './handlers/work-order-invoice'
 import {
   handleSponsorCheckoutCompleted,
@@ -35,6 +36,7 @@ export async function POST(request: NextRequest) {
     )
   } catch (err) {
     console.error('Stripe webhook signature verification failed:', err)
+    reportError(err, { site: 'webhook.stripe.signature_verification' })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
 
@@ -49,6 +51,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true })
     }
     console.error('[Stripe] dedup insert failed (non-fatal):', dedupErr.message)
+    reportError(new Error(dedupErr.message), { site: 'webhook.stripe.dedup_insert', extra: { stripe_event_id: event.id } })
   }
 
   switch (event.type) {
@@ -70,6 +73,10 @@ export async function POST(request: NextRequest) {
           '[Stripe] checkout.session.completed missing org_id or customer',
           { sessionId: session.id }
         )
+        reportError(new Error('checkout.session.completed missing org_id or customer'), {
+          site:  'webhook.stripe.checkout_session_completed',
+          extra: { stripe_session_id: session.id },
+        })
       }
       break
     }

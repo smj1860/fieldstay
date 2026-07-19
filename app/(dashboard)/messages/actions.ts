@@ -5,6 +5,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { sendPushToUser } from '@/lib/push/send-push'
+import { reportError } from '@/lib/observability/report-error'
 import type { Message } from '@/types/database'
 
 export interface MessageActionResult {
@@ -76,6 +77,7 @@ export async function sendMessageToCrew(
     return { success: true, message }
   } catch (err) {
     console.error('[sendMessageToCrew]', err)
+    reportError(err, { site: 'serverAction.messages.sendMessageToCrew' })
     return { success: false, error: 'Failed to send message' }
   }
 }
@@ -145,6 +147,7 @@ export async function sendMessageToPM(content: string): Promise<MessageActionRes
     return { success: true }
   } catch (err) {
     console.error('[sendMessageToPM]', err)
+    reportError(err, { site: 'serverAction.messages.sendMessageToPM' })
     return { success: false, error: 'Failed to send message' }
   }
 }
@@ -190,6 +193,7 @@ export async function sendGroupMessage(
     return {}
   } catch (err) {
     console.error('[sendGroupMessage]', err)
+    reportError(err, { site: 'serverAction.messages.sendGroupMessage' })
     return { error: 'Failed to send group message' }
   }
 }
@@ -216,6 +220,7 @@ export async function markConversationRead(otherUserId: string): Promise<Message
     return { success: true }
   } catch (err) {
     console.error('[markConversationRead]', err)
+    reportError(err, { site: 'serverAction.messages.markConversationRead' })
     return { success: false, error: 'Failed to mark messages read' }
   }
 }
@@ -246,5 +251,6 @@ async function postToSlack(
     })
   } catch (err) {
     console.error('[postToSlack]', err)
+    reportError(err, { site: 'serverAction.messages.postToSlack', orgId })
   }
 }

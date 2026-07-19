@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 import type { InventoryCategory } from '@/types/database'
 
 export type InventoryActionState = { error?: string; success?: boolean }
@@ -24,6 +25,7 @@ export async function updateParLevel(
 
   if (error) {
     console.error('[updateParLevel]', error)
+    reportError(error, { site: 'serverAction.inventory.updateParLevel', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -85,6 +87,7 @@ export async function addInventoryItems(
   const { error } = await supabase.from('inventory_items').insert(rows)
   if (error) {
     console.error('[addInventoryItems]', error)
+    reportError(error, { site: 'serverAction.inventory.addInventoryItems', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -129,6 +132,7 @@ export async function submitInventoryCount(
 
   if (countError || !count) {
     console.error('[submitInventoryCount]', countError)
+    reportError(countError, { site: 'serverAction.inventory.submitInventoryCount', orgId: membership.org_id })
     return { error: 'Failed to create inventory count. Please try again.' }
   }
 
@@ -157,6 +161,7 @@ export async function submitInventoryCount(
 
     if (itemsError) {
       console.error('[submitInventoryCount] items insert', itemsError)
+      reportError(itemsError, { site: 'serverAction.inventory.submitInventoryCount.items', orgId: membership.org_id })
       return { error: 'Failed to record inventory count items. Please try again.' }
     }
 
@@ -227,6 +232,7 @@ export async function createOrGetTemplate(): Promise<{
       .single()
     if (fetchErr || !existing) {
       console.error('[createOrGetTemplate]', fetchErr)
+      reportError(fetchErr, { site: 'serverAction.inventory.createOrGetTemplate', orgId: membership.org_id })
       return { error: 'Template not found' }
     }
     return { template: { ...existing, inventory_template_items: null } }
@@ -257,6 +263,7 @@ export async function addTemplateItem(
 
   if (error) {
     console.error('[addTemplateItem]', error)
+    reportError(error, { site: 'serverAction.inventory.addTemplateItem' })
     return { error: 'Operation failed. Please try again.' }
   }
   revalidatePath('/inventory')
@@ -290,6 +297,7 @@ export async function bulkAddTemplateItems(
 
   if (error) {
     console.error('[bulkAddTemplateItems]', error)
+    reportError(error, { site: 'serverAction.inventory.bulkAddTemplateItems' })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -319,6 +327,7 @@ export async function updateTemplateItemBrand(
 
   if (error) {
     console.error('[updateTemplateItemBrand]', error)
+    reportError(error, { site: 'serverAction.inventory.updateTemplateItemBrand', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
   revalidatePath('/inventory')
@@ -344,6 +353,7 @@ export async function removeTemplateItem(itemId: string): Promise<{ error?: stri
 
   if (error) {
     console.error('[removeTemplateItem]', error)
+    reportError(error, { site: 'serverAction.inventory.removeTemplateItem', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
   revalidatePath('/inventory')
@@ -408,7 +418,10 @@ export async function applyTemplateToProperties(
     .eq('template_id', templateId)
 
   if (itemsErr || !items?.length) {
-    if (itemsErr) console.error('[applyTemplateToProperties]', itemsErr)
+    if (itemsErr) {
+      console.error('[applyTemplateToProperties]', itemsErr)
+      reportError(itemsErr, { site: 'serverAction.inventory.applyTemplateToProperties', orgId: membership.org_id })
+    }
     return { error: 'No items in template', applied: 0 }
   }
 
@@ -496,6 +509,7 @@ export async function bulkAddTemplateItemsFromCSV(
   const { error } = await supabase.from('inventory_template_items').insert(toInsert)
   if (error) {
     console.error('[bulkAddTemplateItemsFromCSV]', error)
+    reportError(error, { site: 'serverAction.inventory.bulkAddTemplateItemsFromCSV' })
     return { error: 'Operation failed. Please try again.', added: 0 }
   }
 
@@ -556,6 +570,7 @@ export async function approveInventoryCount(draftId: string): Promise<{ error?: 
 
   if (approveError || !approved) {
     console.error('[approveInventoryCount]', approveError)
+    reportError(approveError, { site: 'serverAction.inventory.approveInventoryCount', orgId: membership.org_id })
     return { error: 'Draft not found' }
   }
 
@@ -576,6 +591,7 @@ export async function rejectInventoryCount(draftId: string): Promise<{ error?: s
 
   if (error || !rejected) {
     console.error('[rejectInventoryCount]', error)
+    reportError(error, { site: 'serverAction.inventory.rejectInventoryCount', orgId: membership.org_id })
     return { error: 'Draft not found' }
   }
 
@@ -606,6 +622,7 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
 
   if (error) {
     console.error('[generateAggregatedPurchaseList]', error)
+    reportError(error, { site: 'serverAction.inventory.generateAggregatedPurchaseList', orgId: membership.org_id })
     return { items: [], error: 'Operation failed. Please try again.' }
   }
 
@@ -660,6 +677,7 @@ export async function updatePurchaseOrderStatus(
 
   if (error || !updated) {
     console.error('[updatePurchaseOrderStatus]', error)
+    reportError(error, { site: 'serverAction.inventory.updatePurchaseOrderStatus', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -709,6 +727,7 @@ export async function triggerShoppingCart(
     return { success: true }
   } catch (err) {
     console.error('[triggerShoppingCart]', err)
+    reportError(err, { site: 'serverAction.inventory.triggerShoppingCart', orgId: membership.org_id })
     return { success: false, error: 'Failed to start cart build. Try again.' }
   }
 }

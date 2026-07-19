@@ -5,6 +5,7 @@ import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { reportError } from '@/lib/observability/report-error'
 
 export type TurnoverActionState = { error?: string; success?: boolean; warning?: string }
 
@@ -71,6 +72,7 @@ async function trackAssignmentAgainstSuggestions(
   } catch (err) {
     // Suggestion-state/outcome tracking must never break the actual assignment
     console.error('[trackAssignmentAgainstSuggestions]', err)
+    reportError(err, { site: 'serverAction.turnovers.trackAssignmentAgainstSuggestions', orgId })
   }
 }
 
@@ -129,6 +131,7 @@ export async function assignCrew(
   )
   if (assignError) {
     console.error('[assignCrew]', assignError)
+    reportError(assignError, { site: 'serverAction.turnovers.assignCrew', orgId: membership.org_id })
     return { error: 'Failed to assign crew. Please try again.' }
   }
 
@@ -202,6 +205,7 @@ export async function assignCrew(
   } catch (err) {
     // Push failure must never break the assignment
     console.error('[push] failed to notify crew member:', err)
+    reportError(err, { site: 'serverAction.turnovers.assignCrew.inner', orgId: membership.org_id })
   }
 
   revalidatePath('/turnovers')
@@ -287,6 +291,7 @@ export async function updateTurnoverStatus(
 
   if (error) {
     console.error('[updateTurnoverStatus]', error)
+    reportError(error, { site: 'serverAction.turnovers.updateTurnoverStatus', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -400,6 +405,7 @@ export async function createManualTurnover(
 
   if (error) {
     console.error('[createManualTurnover]', error)
+    reportError(error, { site: 'serverAction.turnovers.createManualTurnover', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -467,6 +473,7 @@ export async function addCrewToTurnover(
         return { success: true }
       }
       console.error('[addCrewToTurnover]', insertError)
+      reportError(insertError, { site: 'serverAction.turnovers.addCrewToTurnover', orgId: membership.org_id })
       return { error: 'Failed to assign crew. Please try again.' }
     }
   }
@@ -625,6 +632,7 @@ export async function bulkUpdateTurnoverStatus(
 
   if (error) {
     console.error('[bulkUpdateTurnoverStatus]', error)
+    reportError(error, { site: 'serverAction.turnovers.bulkUpdateTurnoverStatus', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -670,6 +678,7 @@ export async function archiveTurnover(
 
   if (error) {
     console.error('[archiveTurnover]', error)
+    reportError(error, { site: 'serverAction.turnovers.archiveTurnover', orgId: membership.org_id })
     return { error: 'Failed to archive turnover.' }
   }
 
@@ -700,6 +709,7 @@ export async function unarchiveTurnover(
 
   if (error) {
     console.error('[unarchiveTurnover]', error)
+    reportError(error, { site: 'serverAction.turnovers.unarchiveTurnover', orgId: membership.org_id })
     return { error: 'Failed to unarchive.' }
   }
 
@@ -725,6 +735,7 @@ export async function triggerManualSync(): Promise<TurnoverActionState> {
     return { success: true }
   } catch (err) {
     console.error('[triggerManualSync]', err)
+    reportError(err, { site: 'serverAction.turnovers.triggerManualSync' })
     return { error: 'Could not start the calendar sync. Try again in a moment.' }
   }
 }
@@ -752,6 +763,7 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
   )
   if (assignError) {
     console.error('[acceptSuggestion]', assignError)
+    reportError(assignError, { site: 'serverAction.turnovers.acceptSuggestion', orgId: membership.org_id })
     return { error: 'Failed to accept suggestion. Please try again.' }
   }
 
@@ -817,6 +829,7 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
 
   if (error) {
     console.error('[dismissSuggestion]', error)
+    reportError(error, { site: 'serverAction.turnovers.dismissSuggestion', orgId: membership.org_id })
     return { error: 'Operation failed. Please try again.' }
   }
 
@@ -903,6 +916,7 @@ export async function rateTurnoverCompletion(
 
   if (error) {
     console.error('[rateTurnoverCompletion]', error)
+    reportError(error, { site: 'serverAction.turnovers.rateTurnoverCompletion', orgId: membership.org_id })
     return { error: 'Failed to save rating. Please try again.' }
   }
 
