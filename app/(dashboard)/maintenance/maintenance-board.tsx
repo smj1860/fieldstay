@@ -51,6 +51,7 @@ interface WorkOrderRow {
   portal_enabled: boolean
   completion_token: string | null
   completion_notes: string | null
+  completed_by_name: string | null
   invoice_reference: string | null
   vendor_acknowledged_at: string | null
   vendor_acknowledged_by: string | null
@@ -184,6 +185,7 @@ function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
     actual_cost:            wo.actual_cost,
     access_notes:           wo.access_notes,
     completion_notes:       wo.completion_notes,
+    completed_by_name:      wo.completed_by_name,
     invoice_reference:      wo.invoice_reference,
     invoiceStatus:          invoice?.status ?? null,
     invoiceId:              invoice?.id ?? null,
@@ -374,6 +376,7 @@ function WorkOrderCard({
               <span className="flex items-center gap-1">
                 <User className="w-3 h-3" />
                 {vendor.name}
+                {wo.status === 'completed' && wo.completed_by_name && ` (${wo.completed_by_name})`}
               </span>
             )}
             {wo.scheduled_date && (
@@ -2015,6 +2018,7 @@ export function MaintenanceBoard({
                         {vend && (
                           <p className="text-xs mt-1 truncate" style={{ color: 'var(--text-muted)' }}>
                             {vend.name}
+                            {wo.completed_by_name && ` (${wo.completed_by_name})`}
                           </p>
                         )}
                         {wo.scheduled_date && (

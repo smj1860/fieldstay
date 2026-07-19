@@ -1852,7 +1852,7 @@ export async function fetchArchivedWorkOrders() {
       wo_number, title, description, category, priority, status, source,
       scheduled_date, completed_date,
       estimated_cost, nte_amount, actual_cost,
-      access_notes, completion_notes, invoice_reference,
+      access_notes, completion_notes, completed_by_name, invoice_reference,
       portal_enabled, completion_token,
       vendor_acknowledged_at, vendor_acknowledged_by,
       completion_verified_at, completion_verified_by,
