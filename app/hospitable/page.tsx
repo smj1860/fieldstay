@@ -80,11 +80,11 @@ export default async function HospitablePage() {
               image has an opaque white background with dark navy text and
               needs a light backdrop to be legible. */}
           <div className="flex justify-center mt-6 mb-10">
-            <div className="bg-white rounded-full px-4 py-2 shadow-lg">
+            <div className="bg-white rounded-full px-5 py-2.5 shadow-lg">
               <img
                 src="/hospitable-fieldstay-lockup.png"
                 alt="Hospitable and FieldStay partnership"
-                className="h-4 w-auto"
+                className="h-5 w-auto"
               />
             </div>
           </div>

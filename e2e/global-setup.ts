@@ -140,7 +140,135 @@ export default async function globalSetup(_config: FullConfig) {
     is_active:      true,
   })
 
+  // ── 3. Seed a crew login + an assigned turnover/checklist item ───────────
+  // Used by e2e/specs/22-crew-logout-guard.spec.ts to exercise the crew PWA
+  // logout guard, which needs a real crew Supabase Auth session (the PM
+  // storageState above doesn't pass the CrewLayout guard) and a checklist
+  // item it can tick while offline to queue an unsynced Dexie mutation.
+  await seedCrewLoginAndAssignment(supabase, baseUrl, orgId, seedProperty.id)
+
   console.log(`✔ E2E global setup complete — org: ${orgId}`)
+}
+
+async function seedCrewLoginAndAssignment(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase:   SupabaseClient<any>,
+  baseUrl:    string,
+  orgId:      string,
+  propertyId: string,
+): Promise<void> {
+  const crewEmail    = process.env.E2E_CREW_EMAIL
+  const crewPassword = process.env.E2E_CREW_PASSWORD
+
+  if (!crewEmail || !crewPassword) {
+    throw new Error(
+      'E2E_CREW_EMAIL and E2E_CREW_PASSWORD must be set in e2e/.env.e2e'
+    )
+  }
+
+  // Reuse the auth user across runs rather than erroring on "already
+  // registered" — this account is test-only and never has other state
+  // attached to it beyond what this function seeds fresh each run.
+  const { data: existingUsers } = await supabase.auth.admin.listUsers()
+  let crewAuthUser = existingUsers.users.find((u) => u.email === crewEmail)
+
+  if (!crewAuthUser) {
+    const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+      email:         crewEmail,
+      password:      crewPassword,
+      email_confirm: true,
+    })
+    if (createErr || !created.user) {
+      throw new Error(`Failed to create E2E crew auth user: ${createErr?.message}`)
+    }
+    crewAuthUser = created.user
+  }
+
+  const { data: crewMember, error: crewErr } = await supabase
+    .from('crew_members')
+    .insert({
+      org_id:             orgId,
+      user_id:            crewAuthUser.id,
+      name:               '[E2E] Logout Guard Crew',
+      email:              crewEmail,
+      role:               'cleaning',
+      specialty:          'cleaning',
+      is_active:          true,
+      invite_accepted_at: new Date().toISOString(),
+    })
+    .select('id')
+    .single()
+
+  if (crewErr || !crewMember) {
+    throw new Error(`Failed to seed E2E crew member: ${crewErr?.message}`)
+  }
+
+  const checkout = new Date(Date.now() + 2 * 60 * 60 * 1000) // 2h from now
+  const checkin  = new Date(Date.now() + 26 * 60 * 60 * 1000) // next day
+
+  const { data: turnover, error: turnoverErr } = await supabase
+    .from('turnovers')
+    .insert({
+      org_id:            orgId,
+      property_id:       propertyId,
+      checkout_datetime: checkout.toISOString(),
+      checkin_datetime:  checkin.toISOString(),
+      status:            'assigned',
+      priority:          'medium',
+      auto_generated:    false,
+    })
+    .select('id')
+    .single()
+
+  if (turnoverErr || !turnover) {
+    throw new Error(`Failed to seed E2E turnover: ${turnoverErr?.message}`)
+  }
+
+  await supabase.from('turnover_assignments').insert({
+    turnover_id:    turnover.id,
+    crew_member_id: crewMember.id,
+    org_id:         orgId,
+    property_id:    propertyId,
+  })
+
+  const { data: instance, error: instanceErr } = await supabase
+    .from('checklist_instances')
+    .insert({
+      turnover_id:       turnover.id,
+      org_id:            orgId,
+      template_snapshot: {},
+      status:            'not_started',
+    })
+    .select('id')
+    .single()
+
+  if (instanceErr || !instance) {
+    throw new Error(`Failed to seed E2E checklist instance: ${instanceErr?.message}`)
+  }
+
+  await supabase.from('checklist_instance_items').insert({
+    instance_id:     instance.id,
+    turnover_id:     turnover.id,
+    section_name:    '[E2E] Kitchen',
+    task:            '[E2E] Wipe kitchen counters',
+    requires_photo:  false,
+    is_completed:    false,
+    sort_order:      0,
+  })
+
+  // ── Capture a crew storageState the same way pm.json is captured above ──
+  const browser = await chromium.launch()
+  const page    = await browser.newPage()
+
+  await page.goto(`${baseUrl}/login?next=/crew`)
+  await page.waitForSelector('#email')
+  await page.fill('#email',    crewEmail)
+  await page.fill('#password', crewPassword)
+  await page.click('button[type="submit"]')
+
+  await page.waitForURL('**/crew', { timeout: 15_000 })
+  await page.context().storageState({ path: 'e2e/.auth/crew.json' })
+  await browser.close()
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
