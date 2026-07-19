@@ -11,6 +11,7 @@ import {
   deleteRoomTemplate,
   saveRoomTemplateItems,
   setRoomTemplateAutoInclude,
+  setBedroomBathroomMapping,
   type RoomTemplateItemInput,
 } from './actions'
 
@@ -114,12 +115,26 @@ function saveButtonLabel(saving: boolean, saved: boolean) {
   return 'Save Room'
 }
 
+function continueButtonLabel(continuing: boolean, propertyCount: number | undefined): string {
+  if (continuing) return 'Applying…'
+  if (propertyCount) return `Continue — apply to ${propertyCount} propert${propertyCount === 1 ? 'y' : 'ies'}`
+  return 'Continue'
+}
+
 export function RoomLibraryBuilder({
   initialRooms,
   canManage,
+  initialBedroomRoomTemplateId = null,
+  initialBathroomRoomTemplateId = null,
+  continueAction,
+  continuePropertyCount,
 }: Readonly<{
   initialRooms: Array<{ id: string; name: string; autoInclude: boolean; items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }> }>
   canManage: boolean
+  initialBedroomRoomTemplateId?: string | null
+  initialBathroomRoomTemplateId?: string | null
+  continueAction?: () => Promise<void>
+  continuePropertyCount?: number
 }>) {
   const [rooms, setRooms] = useState<RoomState[]>(() =>
     initialRooms.map((r) => ({ id: r.id, name: r.name, autoInclude: r.autoInclude, items: r.items.map(toItemState) }))
@@ -129,6 +144,11 @@ export function RoomLibraryBuilder({
   const [creating, startCreate] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [savedRoomId, setSavedRoomId] = useState<string | null>(null)
+  const [bedroomRoomTemplateId, setBedroomRoomTemplateId] = useState<string | null>(initialBedroomRoomTemplateId)
+  const [bathroomRoomTemplateId, setBathroomRoomTemplateId] = useState<string | null>(initialBathroomRoomTemplateId)
+  const [mappingSaving, setMappingSaving] = useState(false)
+  const [mappingError, setMappingError] = useState<string | null>(null)
+  const [continuing, startContinue] = useTransition()
 
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
@@ -212,9 +232,65 @@ export function RoomLibraryBuilder({
     })
   }
 
+  async function updateMapping(bedroom: string | null, bathroom: string | null) {
+    setBedroomRoomTemplateId(bedroom)
+    setBathroomRoomTemplateId(bathroom)
+    setMappingSaving(true)
+    setMappingError(null)
+    const result = await setBedroomBathroomMapping(bedroom, bathroom)
+    setMappingSaving(false)
+    if (result.error) setMappingError(result.error)
+  }
+
+  function handleContinue() {
+    if (!continueAction) return
+    startContinue(async () => { await continueAction() })
+  }
+
   return (
     <div className="space-y-4">
       {error && <InlineAlert tone="error">{error}</InlineAlert>}
+
+      <div className="border border-themed rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-primary-themed mb-1">Bedroom &amp; Bathroom Mapping</h3>
+        <p className="text-xs text-muted-themed mb-3">
+          We automatically add this many sections per property, based on the
+          bedroom/bathroom count from your PMS.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="bedroom-room-template" className="text-xs font-medium text-secondary-themed">
+              Bedroom template
+            </label>
+            <select
+              id="bedroom-room-template"
+              value={bedroomRoomTemplateId ?? ''}
+              onChange={(e) => void updateMapping(e.target.value || null, bathroomRoomTemplateId)}
+              disabled={mappingSaving || !canManage}
+              className="input mt-1 w-full text-sm"
+            >
+              <option value="">Not set</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="bathroom-room-template" className="text-xs font-medium text-secondary-themed">
+              Bathroom template
+            </label>
+            <select
+              id="bathroom-room-template"
+              value={bathroomRoomTemplateId ?? ''}
+              onChange={(e) => void updateMapping(bedroomRoomTemplateId, e.target.value || null)}
+              disabled={mappingSaving || !canManage}
+              className="input mt-1 w-full text-sm"
+            >
+              <option value="">Not set</option>
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </div>
+        </div>
+        {mappingError && <InlineAlert tone="error" className="mt-3">{mappingError}</InlineAlert>}
+      </div>
 
       {rooms.length === 0 && (
         <div className="border border-dashed border-themed rounded-xl p-8 text-center">
@@ -265,6 +341,14 @@ export function RoomLibraryBuilder({
             className="inline-flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" /> Add Room Template
+          </Button>
+        </div>
+      )}
+
+      {continueAction && (
+        <div className="flex justify-end pt-2">
+          <Button onClick={handleContinue} disabled={continuing} className="inline-flex items-center gap-1.5">
+            {continueButtonLabel(continuing, continuePropertyCount)}
           </Button>
         </div>
       )}
@@ -337,8 +421,9 @@ function RoomCard({
             />
           )}
 
-          <label className="flex items-start gap-2 cursor-pointer">
+          <label htmlFor={`auto-include-${room.id}`} className="flex items-start gap-2 cursor-pointer">
             <Checkbox
+              id={`auto-include-${room.id}`}
               checked={room.autoInclude}
               onChange={onToggleAutoInclude}
               disabled={!canManage}

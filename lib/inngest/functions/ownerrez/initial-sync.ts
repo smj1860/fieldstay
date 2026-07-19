@@ -21,7 +21,12 @@ import {
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
 import { logAuditEvent }        from '@/lib/audit'
-import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
+import {
+  applyMasterChecklistToProperty,
+  fetchOrgRoomTemplateData,
+  type OrgRoomTemplateData,
+} from '@/lib/checklists/apply-master-template'
+import { seedDefaultRoomTemplatesIfNeeded } from '@/lib/checklists/seed-default-room-templates'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
 import {
   seedPresentAssetsFromAmenities,
@@ -334,12 +339,33 @@ export const ownerRezInitialSync = inngest.createFunction(
           .map((p) => p.id as string)
       })
 
+      // Seeded + fetched once for the whole sync run, not once per
+      // property — applyMasterChecklistToProperty's default behavior is
+      // to re-fetch the org's seed-check/mapping/room-templates/items on
+      // every call, which is identical data for every property being
+      // synced here. Only bothers with either step when there's actually
+      // at least one property that needs it.
+      let ownerRezOrgRoomData: OrgRoomTemplateData | undefined
+
+      if (propertiesNeedingChecklist.length > 0) {
+        await step.run('seed-room-templates', async () => {
+          await seedDefaultRoomTemplatesIfNeeded(org_id)
+        })
+
+        ownerRezOrgRoomData = await step.run('fetch-room-template-data', async () => {
+          const supabase = createServiceClient()
+          return fetchOrgRoomTemplateData(org_id, supabase)
+        })
+      }
+
       for (const propertyId of propertiesNeedingChecklist) {
         await step.run(`apply-checklist-${propertyId}`, async () => {
           const supabase = createServiceClient()
           await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
-            force:   false,
-            actorId: user_id,
+            force:       false,
+            actorId:     user_id,
+            orgRoomData: ownerRezOrgRoomData,
+            skipSeed:    true,
           })
         })
       }

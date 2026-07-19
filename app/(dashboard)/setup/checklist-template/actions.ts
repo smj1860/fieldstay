@@ -57,13 +57,25 @@ export async function applyMasterChecklistToProperties(
 ): Promise<{ error?: string; queued: number }> {
   const { supabase, membership, user } = await requireOrgMember()
 
-  const { data: masterItems } = await supabase
-    .from('org_master_checklist_items')
-    .select('id')
-    .eq('org_id', membership.org_id)
-    .limit(1)
+  const [{ data: org }, { data: anyRoomTemplate }] = await Promise.all([
+    supabase
+      .from('organizations')
+      .select('bedroom_room_template_id, bathroom_room_template_id')
+      .eq('id', membership.org_id)
+      .single(),
+    supabase
+      .from('room_templates')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .limit(1),
+  ])
 
-  if (!masterItems?.length) return { error: 'No master checklist items found. Build your checklist first.', queued: 0 }
+  const hasRoomTemplateConfig =
+    !!org?.bedroom_room_template_id || !!org?.bathroom_room_template_id || !!anyRoomTemplate?.length
+
+  if (!hasRoomTemplateConfig) {
+    return { error: 'No room templates found. Build your room library first.', queued: 0 }
+  }
 
   await inngest.send({
     name: 'checklist/master-template.apply.requested',

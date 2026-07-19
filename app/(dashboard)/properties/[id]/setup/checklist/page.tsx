@@ -62,6 +62,8 @@ export default async function ChecklistPage({ params }: Props) {
         template={template ?? null}
         otherProperties={otherProperties ?? []}
         sourceProperties={sourceProperties}
+        propertyBedrooms={property.bedrooms}
+        propertyBathrooms={property.bathrooms}
         roomTemplates={(roomTemplates ?? []).map((room) => ({
           id:          room.id,
           name:        room.name,

@@ -27,7 +27,12 @@ import {
   hospitableTeammatesToCrewRows,
 } from '@/lib/integrations/providers/hospitable'
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
-import { applyMasterChecklistToProperty } from '@/lib/checklists/apply-master-template'
+import {
+  applyMasterChecklistToProperty,
+  fetchOrgRoomTemplateData,
+  type OrgRoomTemplateData,
+} from '@/lib/checklists/apply-master-template'
+import { seedDefaultRoomTemplatesIfNeeded } from '@/lib/checklists/seed-default-room-templates'
 import { generateTurnoversForProperty }   from '@/lib/turnovers/generator'
 import {
   ensureGuidebookConfiguration,
@@ -80,10 +85,32 @@ export const hospInitialSync = inngest.createFunction(
       // ── 3. Apply master checklist to new properties ───────────────────────
       const propertyIds = Object.values(propertyIdMap as Record<string, string>)
 
+      // Seeded + fetched once for the whole sync run, not once per
+      // property — applyMasterChecklistToProperty's default behavior is
+      // to re-fetch the org's seed-check/mapping/room-templates/items on
+      // every call, which is identical data for every property being
+      // synced here. Only bothers with either step when there's actually
+      // at least one property that needs it.
+      let hospitableOrgRoomData: OrgRoomTemplateData | undefined
+
+      if (propertyIds.length > 0) {
+        await step.run('seed-room-templates', async () => {
+          await seedDefaultRoomTemplatesIfNeeded(org_id)
+        })
+
+        hospitableOrgRoomData = await step.run('fetch-room-template-data', async () => {
+          const supabase = createServiceClient()
+          return fetchOrgRoomTemplateData(org_id, supabase)
+        })
+      }
+
       for (const propertyId of propertyIds) {
         await step.run(`apply-master-checklist-${propertyId}`, async () => {
           const supabase = createServiceClient()
-          await applyMasterChecklistToProperty(propertyId, org_id, supabase)
+          await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
+            orgRoomData: hospitableOrgRoomData,
+            skipSeed:    true,
+          })
         })
       }
 
