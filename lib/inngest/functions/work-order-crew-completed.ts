@@ -1,12 +1,17 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { createPmNotification } from '@/lib/inngest/helpers'
+import { incrementCounter }    from '@/lib/observability/metrics'
 
 export const handleWorkOrderCrewCompleted = inngest.createFunction(
   { id: 'work-order-crew-completed', name: 'Work Order: Crew Marked Complete', retries: 2 },
   { event: 'work-order/crew.completed' },
   async ({ event, step }) => {
     const { workOrderId, orgId, crewMemberId, notes } = event.data
+
+    await step.run('emit-completion-metric', async () => {
+      await incrementCounter('fieldstay_work_orders_completed_by_crew_total', { org_id: orgId })
+    })
 
     const context = await step.run('fetch-context', async () => {
       const supabase = createServiceClient()

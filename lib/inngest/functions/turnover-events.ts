@@ -7,6 +7,7 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import type { AssetType } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
+import { incrementCounter } from '@/lib/observability/metrics'
 
 // Durations beyond this are treated as tracking errors (e.g. a checklist item
 // completed a day late) and excluded from the auto-assignment learning loop.
@@ -128,6 +129,10 @@ export const handleTurnoverCompleted = inngest.createFunction(
     const workflowId = crypto.randomUUID()
 
     logger.info('turnover-completed start', { workflowId, turnover_id })
+
+    await step.run('emit-completion-metric', async () => {
+      await incrementCounter('fieldstay_turnovers_completed_total', { org_id })
+    })
 
     await step.run('notify-pm-of-completion', async () => {
       const supabase = createServiceClient()
