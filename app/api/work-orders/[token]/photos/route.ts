@@ -25,6 +25,19 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/heic': 'heic',
 }
 
+async function checkPhotoRateLimit(request: NextRequest): Promise<NextResponse | null> {
+  try {
+    const ip = extractClientIp(request) ?? 'unknown'
+    const { success } = await workOrderRatelimit.limit(`wo-photo:${ip}`)
+    if (!success) {
+      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
+    }
+  } catch (rlErr) {
+    console.error('[work-orders/photos] rate limit check failed', rlErr)
+  }
+  return null
+}
+
 async function loadOpenWorkOrder(token: string) {
   const supabase = createServiceClient()
 
@@ -57,15 +70,8 @@ export async function POST(
 ) {
   const { token } = await params
 
-  try {
-    const ip = extractClientIp(request) ?? 'unknown'
-    const { success } = await workOrderRatelimit.limit(`wo-photo:${ip}`)
-    if (!success) {
-      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
-    }
-  } catch (rlErr) {
-    console.error('[work-orders/photos] rate limit check failed', rlErr)
-  }
+  const rateLimited = await checkPhotoRateLimit(request)
+  if (rateLimited) return rateLimited
 
   const loaded = await loadOpenWorkOrder(token)
   if ('error' in loaded) return loaded.error
@@ -149,15 +155,8 @@ export async function DELETE(
 ) {
   const { token } = await params
 
-  try {
-    const ip = extractClientIp(request) ?? 'unknown'
-    const { success } = await workOrderRatelimit.limit(`wo-photo:${ip}`)
-    if (!success) {
-      return NextResponse.json({ error: 'Too many requests. Please try again in a minute.' }, { status: 429 })
-    }
-  } catch (rlErr) {
-    console.error('[work-orders/photos] rate limit check failed', rlErr)
-  }
+  const rateLimited = await checkPhotoRateLimit(request)
+  if (rateLimited) return rateLimited
 
   const loaded = await loadOpenWorkOrder(token)
   if ('error' in loaded) return loaded.error
