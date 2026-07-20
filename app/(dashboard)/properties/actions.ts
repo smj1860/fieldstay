@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
+import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { geocodeZip } from '@/lib/geocoding'
 import { calculateHealthScore } from '@/lib/assets/health-score'
@@ -22,104 +22,112 @@ export async function createProperty(
   _prev: PropertyActionState | null,
   formData: FormData
 ): Promise<PropertyActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  const name          = (formData.get('name') as string)?.trim()
-  const address       = (formData.get('address') as string)?.trim()
-  const city          = (formData.get('city') as string)?.trim()
-  const state         = (formData.get('state') as string)?.trim()
-  const zip           = (formData.get('zip') as string)?.trim()
-  const property_type = formData.get('property_type') as string || 'house'
-  const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
-  const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
-  const max_guests    = parseInt(formData.get('max_guests') as string) || 2
-  const checkin_time  = (formData.get('checkin_time') as string) || '15:00'
-  const checkout_time = (formData.get('checkout_time') as string) || '11:00'
-  const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
-  const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
-  const door_code        = (formData.get('door_code') as string)?.trim() || null
-  const internal_notes   = (formData.get('internal_notes') as string)?.trim() || null
-  const avg_nightly_rate = formData.get('avg_nightly_rate')
-    ? parseFloat(formData.get('avg_nightly_rate') as string)
-    : null
+    const name          = (formData.get('name') as string)?.trim()
+    const address       = (formData.get('address') as string)?.trim()
+    const city          = (formData.get('city') as string)?.trim()
+    const state         = (formData.get('state') as string)?.trim()
+    const zip           = (formData.get('zip') as string)?.trim()
+    const property_type = formData.get('property_type') as string || 'house'
+    const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
+    const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
+    const max_guests    = parseInt(formData.get('max_guests') as string) || 2
+    const checkin_time  = (formData.get('checkin_time') as string) || '15:00'
+    const checkout_time = (formData.get('checkout_time') as string) || '11:00'
+    const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
+    const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
+    const door_code        = (formData.get('door_code') as string)?.trim() || null
+    const internal_notes   = (formData.get('internal_notes') as string)?.trim() || null
+    const avg_nightly_rate = formData.get('avg_nightly_rate')
+      ? parseFloat(formData.get('avg_nightly_rate') as string)
+      : null
 
-  if (!name) return { error: 'Property name is required' }
+    if (!name) return { error: 'Property name is required' }
 
-  // Check plan property limit
-  const { count } = await supabase
-    .from('properties')
-    .select('id', { count: 'exact', head: true })
-    .eq('org_id', membership.org_id)
-    .eq('is_active', true)
+    // Check plan property limit
+    const { count } = await supabase
+      .from('properties')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
 
-  if ((count ?? 0) >= membership.org.max_properties) {
-    return {
-      error: `Your plan allows up to ${membership.org.max_properties} properties. Upgrade to add more.`,
+    if ((count ?? 0) >= membership.org.max_properties) {
+      return {
+        error: `Your plan allows up to ${membership.org.max_properties} properties. Upgrade to add more.`,
+      }
     }
-  }
 
-  const { data: property, error } = await supabase
-    .from('properties')
-    .insert({
-      org_id:         membership.org_id,
-      name,
-      address:        address || null,
-      city:           city || null,
-      state:          state || null,
-      zip:            zip || null,
-      property_type,
-      bedrooms,
-      bathrooms,
-      max_guests,
-      checkin_time,
-      checkout_time,
-      wifi_name,
-      wifi_password,
-      internal_notes,
-      avg_nightly_rate,
-      setup_steps_completed: { details: true },
+    const { data: property, error } = await supabase
+      .from('properties')
+      .insert({
+        org_id:         membership.org_id,
+        name,
+        address:        address || null,
+        city:           city || null,
+        state:          state || null,
+        zip:            zip || null,
+        property_type,
+        bedrooms,
+        bathrooms,
+        max_guests,
+        checkin_time,
+        checkout_time,
+        wifi_name,
+        wifi_password,
+        internal_notes,
+        avg_nightly_rate,
+        setup_steps_completed: { details: true },
+      })
+      .select('id')
+      .single()
+
+    if (error) {
+      console.error('[createProperty]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    if (door_code) {
+      await supabase.rpc('store_property_door_code', {
+        p_property_id: property.id,
+        p_org_id:      membership.org_id,
+        p_door_code:   door_code,
+      })
+    }
+
+    if (zip) {
+      const coords = await geocodeZip(zip)
+      if (coords) {
+        await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', property.id)
+      } else {
+        console.warn('[createProperty] geocodeZip returned null for zip:', zip)
+      }
+    }
+
+    await applyMasterChecklistToProperty(property.id, membership.org_id, supabase, {
+      force:   false,
+      actorId: user.id,
     })
-    .select('id')
-    .single()
 
-  if (error) {
-    console.error('[createProperty]', error)
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.created',
+      targetType: 'property',
+      targetId:   property.id,
+      metadata:   { name },
+    })
+
+    revalidatePath('/properties')
+    redirect(`/properties/${property.id}/setup/details`)
+  } catch (err) {
+    // redirect() throws internally — let that propagate so navigation
+    // actually happens; only genuine failures fall through below.
+    unstable_rethrow(err)
+    console.error('[createProperty]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  if (door_code) {
-    await supabase.rpc('store_property_door_code', {
-      p_property_id: property.id,
-      p_org_id:      membership.org_id,
-      p_door_code:   door_code,
-    })
-  }
-
-  if (zip) {
-    const coords = await geocodeZip(zip)
-    if (coords) {
-      await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', property.id)
-    } else {
-      console.warn('[createProperty] geocodeZip returned null for zip:', zip)
-    }
-  }
-
-  await applyMasterChecklistToProperty(property.id, membership.org_id, supabase, {
-    force:   false,
-    actorId: user.id,
-  })
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'property.created',
-    targetType: 'property',
-    targetId:   property.id,
-    metadata:   { name },
-  })
-
-  revalidatePath('/properties')
-  redirect(`/properties/${property.id}/setup/details`)
 }
 
 // ── Update ───────────────────────────────────────────────────
@@ -129,75 +137,80 @@ export async function updateProperty(
   _prev: PropertyActionState | null,
   formData: FormData
 ): Promise<PropertyActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  const name          = (formData.get('name') as string)?.trim()
-  const address       = (formData.get('address') as string)?.trim()
-  const city          = (formData.get('city') as string)?.trim()
-  const state         = (formData.get('state') as string)?.trim()
-  const zip           = (formData.get('zip') as string)?.trim()
-  const property_type = formData.get('property_type') as string || 'house'
-  const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
-  const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
-  const max_guests    = parseInt(formData.get('max_guests') as string) || 2
-  const checkin_time  = (formData.get('checkin_time') as string) || '15:00'
-  const checkout_time = (formData.get('checkout_time') as string) || '11:00'
-  const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
-  const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
-  const door_code     = (formData.get('door_code') as string)?.trim() || null
-  const internal_notes = (formData.get('internal_notes') as string)?.trim() || null
+    const name          = (formData.get('name') as string)?.trim()
+    const address       = (formData.get('address') as string)?.trim()
+    const city          = (formData.get('city') as string)?.trim()
+    const state         = (formData.get('state') as string)?.trim()
+    const zip           = (formData.get('zip') as string)?.trim()
+    const property_type = formData.get('property_type') as string || 'house'
+    const bedrooms      = parseInt(formData.get('bedrooms') as string) || 1
+    const bathrooms     = parseFloat(formData.get('bathrooms') as string) || 1
+    const max_guests    = parseInt(formData.get('max_guests') as string) || 2
+    const checkin_time  = (formData.get('checkin_time') as string) || '15:00'
+    const checkout_time = (formData.get('checkout_time') as string) || '11:00'
+    const wifi_name     = (formData.get('wifi_name') as string)?.trim() || null
+    const wifi_password = (formData.get('wifi_password') as string)?.trim() || null
+    const door_code     = (formData.get('door_code') as string)?.trim() || null
+    const internal_notes = (formData.get('internal_notes') as string)?.trim() || null
 
-  if (!name) return { error: 'Property name is required' }
+    if (!name) return { error: 'Property name is required' }
 
-  const { data: existing } = await supabase
-    .from('properties')
-    .select('zip')
-    .eq('id', propertyId)
-    .eq('org_id', membership.org_id)
-    .single()
+    const { data: existing } = await supabase
+      .from('properties')
+      .select('zip')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
 
-  const { error } = await supabase
-    .from('properties')
-    .update({
-      name, address: address || null, city: city || null,
-      state: state || null, zip: zip || null,
-      property_type, bedrooms, bathrooms, max_guests,
-      checkin_time, checkout_time, wifi_name,
-      wifi_password, internal_notes,
+    const { error } = await supabase
+      .from('properties')
+      .update({
+        name, address: address || null, city: city || null,
+        state: state || null, zip: zip || null,
+        property_type, bedrooms, bathrooms, max_guests,
+        checkin_time, checkout_time, wifi_name,
+        wifi_password, internal_notes,
+      })
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+
+    if (error) {
+      console.error('[updateProperty]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await supabase.rpc('store_property_door_code', {
+      p_property_id: propertyId,
+      p_org_id:      membership.org_id,
+      p_door_code:   door_code,
     })
-    .eq('id', propertyId)
-    .eq('org_id', membership.org_id)
 
-  if (error) {
-    console.error('[updateProperty]', error)
+    if (zip && zip !== (existing?.zip ?? '')) {
+      const coords = await geocodeZip(zip)
+      if (coords) {
+        await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', propertyId)
+      } else {
+        console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
+      }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.updated',
+      targetType: 'property',
+      targetId:   propertyId,
+    })
+
+    revalidatePath(`/properties/${propertyId}`)
+    return { success: true }
+  } catch (err) {
+    console.error('[updateProperty]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await supabase.rpc('store_property_door_code', {
-    p_property_id: propertyId,
-    p_org_id:      membership.org_id,
-    p_door_code:   door_code,
-  })
-
-  if (zip && zip !== (existing?.zip ?? '')) {
-    const coords = await geocodeZip(zip)
-    if (coords) {
-      await supabase.from('properties').update({ lat: coords.lat, lng: coords.lng }).eq('id', propertyId)
-    } else {
-      console.warn('[updateProperty] geocodeZip returned null for zip:', zip)
-    }
-  }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'property.updated',
-    targetType: 'property',
-    targetId:   propertyId,
-  })
-
-  revalidatePath(`/properties/${propertyId}`)
-  return { success: true }
 }
 
 // ── Door code reveal ───────────────────────────────────────────
@@ -211,37 +224,42 @@ export async function updateProperty(
 export async function revealPropertyDoorCode(
   propertyId: string
 ): Promise<{ doorCode: string | null } | { error: string }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const { data: property } = await supabase
-    .from('properties')
-    .select('id, door_code_secret_id')
-    .eq('id', propertyId)
-    .eq('org_id', membership.org_id)
-    .single()
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id, door_code_secret_id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
 
-  if (!property) return { error: 'Property not found' }
-  if (!property.door_code_secret_id) return { doorCode: null }
+    if (!property) return { error: 'Property not found' }
+    if (!property.door_code_secret_id) return { doorCode: null }
 
-  const { data: doorCode, error } = await supabase.rpc('read_property_door_code', {
-    p_property_id: propertyId,
-    p_org_id:      membership.org_id,
-  })
+    const { data: doorCode, error } = await supabase.rpc('read_property_door_code', {
+      p_property_id: propertyId,
+      p_org_id:      membership.org_id,
+    })
 
-  if (error) {
-    console.error('[revealPropertyDoorCode]', error)
+    if (error) {
+      console.error('[revealPropertyDoorCode]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.door_code.viewed',
+      targetType: 'property',
+      targetId:   propertyId,
+    })
+
+    return { doorCode: (doorCode as string | null) ?? null }
+  } catch (err) {
+    console.error('[revealPropertyDoorCode]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'property.door_code.viewed',
-    targetType: 'property',
-    targetId:   propertyId,
-  })
-
-  return { doorCode: (doorCode as string | null) ?? null }
 }
 
 // ── Mark step complete ────────────────────────────────────────
@@ -250,49 +268,54 @@ export async function markStepComplete(
   propertyId: string,
   step: string
 ): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  try {
+    const { supabase, membership } = await requireOrgMember()
 
-  // Fetch current steps
-  const { data } = await supabase
-    .from('properties')
-    .select('setup_steps_completed')
-    .eq('id', propertyId)
-    .eq('org_id', membership.org_id)
-    .single()
-
-  const current = (data?.setup_steps_completed as Record<string, boolean>) ?? {}
-  const updated  = { ...current, [step]: true }
-
-  await supabase
-    .from('properties')
-    .update({ setup_steps_completed: updated })
-    .eq('id', propertyId)
-    .eq('org_id', membership.org_id)
-
-  const allSteps = ['details', 'ical', 'inventory', 'messages', 'checklist', 'maintenance', 'crew']
-  const isFullySetup = allSteps.every((s) => updated[s] === true)
-
-  if (isFullySetup) {
-    const { data: props } = await supabase
+    // Fetch current steps
+    const { data } = await supabase
       .from('properties')
-      .select('id, setup_steps_completed')
+      .select('setup_steps_completed')
+      .eq('id', propertyId)
       .eq('org_id', membership.org_id)
-      .eq('is_active', true)
+      .single()
 
-    const fullyConfigured = (props ?? []).filter((p) => {
-      const steps = p.setup_steps_completed as Record<string, boolean>
-      return allSteps.every((s) => steps?.[s] === true)
-    })
+    const current = (data?.setup_steps_completed as Record<string, boolean>) ?? {}
+    const updated  = { ...current, [step]: true }
 
-    if (fullyConfigured.length === 2) {
-      await supabase.from('org_milestones').upsert(
-        { org_id: membership.org_id, milestone: 'second_property_configured' },
-        { onConflict: 'org_id,milestone', ignoreDuplicates: true }
-      )
+    await supabase
+      .from('properties')
+      .update({ setup_steps_completed: updated })
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+
+    const allSteps = ['details', 'ical', 'inventory', 'messages', 'checklist', 'maintenance', 'crew']
+    const isFullySetup = allSteps.every((s) => updated[s] === true)
+
+    if (isFullySetup) {
+      const { data: props } = await supabase
+        .from('properties')
+        .select('id, setup_steps_completed')
+        .eq('org_id', membership.org_id)
+        .eq('is_active', true)
+
+      const fullyConfigured = (props ?? []).filter((p) => {
+        const steps = p.setup_steps_completed as Record<string, boolean>
+        return allSteps.every((s) => steps?.[s] === true)
+      })
+
+      if (fullyConfigured.length === 2) {
+        await supabase.from('org_milestones').upsert(
+          { org_id: membership.org_id, milestone: 'second_property_configured' },
+          { onConflict: 'org_id,milestone', ignoreDuplicates: true }
+        )
+      }
     }
-  }
 
-  revalidatePath(`/properties/${propertyId}`)
+    revalidatePath(`/properties/${propertyId}`)
+  } catch (err) {
+    console.error('[markStepComplete]', err)
+    throw err
+  }
 }
 
 // ── Asset CRUD ───────────────────────────────────────────────
@@ -626,22 +649,32 @@ export async function bulkImportAssets(
 // ── Archive ──────────────────────────────────────────────────
 
 export async function archiveProperty(propertyId: string): Promise<void> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  await supabase
-    .from('properties')
-    .update({ is_active: false })
-    .eq('id', propertyId)
-    .eq('org_id', membership.org_id)
+    await supabase
+      .from('properties')
+      .update({ is_active: false })
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'property.archived',
-    targetType: 'property',
-    targetId:   propertyId,
-  })
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.archived',
+      targetType: 'property',
+      targetId:   propertyId,
+    })
 
-  revalidatePath('/properties')
-  redirect('/properties')
+    revalidatePath('/properties')
+    redirect('/properties')
+  } catch (err) {
+    // redirect() throws internally — let that propagate so navigation
+    // actually happens; only genuine failures fall through below. The
+    // caller (details-form.tsx) surfaces e.message directly to the PM,
+    // so throw a generic message rather than the raw error.
+    unstable_rethrow(err)
+    console.error('[archiveProperty]', err)
+    throw new Error('Failed to archive property. Please try again.')
+  }
 }
