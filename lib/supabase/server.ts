@@ -93,3 +93,12 @@ export function adminFetch(path: string, init?: RequestInit) {
     },
   })
 }
+
+/**
+ * Shared type for helper functions that accept either client — createClient()
+ * and createServiceClient() both call @supabase/ssr's createServerClient()
+ * with the same omitted <Database> generic (see the note above), so their
+ * return types are structurally identical. Several files independently
+ * redeclared this as `SupabaseClient<any>`; use this instead.
+ */
+export type DBClient = Awaited<ReturnType<typeof createClient>> | ReturnType<typeof createServiceClient>

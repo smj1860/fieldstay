@@ -25,11 +25,8 @@
 // ============================================================
 
 import Anthropic from '@anthropic-ai/sdk'
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { DBClient } from '@/lib/supabase/server'
 import type { AssetType } from '@/types/database'
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DBClient = SupabaseClient<any>
 
 const MODEL = 'claude-haiku-4-5-20251001'
 

@@ -1,10 +1,7 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { DBClient } from '@/lib/supabase/server'
 import type { PriorityLevel } from '@/types/database'
 import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
 import { propertyLocalToUtc } from '@/lib/utils/timezone'
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DBClient = SupabaseClient<any>
 
 export interface GeneratedTurnover {
   id:                string
