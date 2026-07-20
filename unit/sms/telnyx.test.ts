@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildSponsorLine } from '@/lib/sms/telnyx'
+import { buildSponsorLine, buildRainAlertSMS } from '@/lib/sms/telnyx'
 
 describe('buildSponsorLine', () => {
   it('uses the custom message verbatim when offer_type is custom', () => {
@@ -32,5 +32,24 @@ describe('buildSponsorLine', () => {
   it('omits the distance suffix when distance is unavailable', () => {
     const result = buildSponsorLine('Lakeview Marina', 'none', null, null, null, null)
     expect(result).toBe('Try Lakeview Marina — a local favorite.')
+  })
+})
+
+describe('buildRainAlertSMS', () => {
+  it('includes the sponsor line when one is provided', () => {
+    const result = buildRainAlertSMS(
+      'Lakeview Cabin',
+      "Cozy Books Café has 15% off — just show this screen (0.3 mi away)."
+    )
+    expect(result).toBe(
+      "Heads up — rain expected near Lakeview Cabin today. Cozy Books Café has 15% off — just show this screen (0.3 mi away). Reply STOP to opt out."
+    )
+  })
+
+  it('falls back to the generic line when no sponsor line is given', () => {
+    const result = buildRainAlertSMS('Lakeview Cabin', null)
+    expect(result).toBe(
+      'Heads up — rain expected near Lakeview Cabin today. Check your guidebook for rainy-day recommendations. Reply STOP to opt out.'
+    )
   })
 })

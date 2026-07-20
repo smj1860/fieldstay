@@ -90,23 +90,37 @@ export const guidebookSmsMorningCron = inngest.createFunction(
 
         // Rain alert takes priority if precip >= 60% and rainy_day sponsor exists
         if (weather.precipitationProbability >= 60) {
-          const { data: rainySponsor } = await supabase
+          const { data: rainySponsors } = await supabase
             .from('guidebook_sponsors')
-            .select('id, business_name')
+            .select('id, org_id, business_name, offer_type, offer_value, offer_item, custom_offer_text, lat, lng, slot_type')
             .eq('org_id', optin.org_id)
             .eq('status', 'active')
             .eq('slot_type', 'rainy_day')
-            .limit(1)
-            .maybeSingle()
 
-          if (rainySponsor) {
+          const pickedRainy = pickNearestSponsor((rainySponsors ?? []) as GuidebookSponsor[], property.lat, property.lng)
+
+          if (pickedRainy) {
+            const { sponsor: rainySponsor, distanceMiles: rainyDistanceMi } = pickedRainy
+
             // Claim the slot atomically before sending — a retry of this
             // step after a successful send now finds the slot already
             // claimed and skips re-sending, instead of double-texting.
             const claimed = await claimDailySmsSlot(supabase, optin.id, 'last_morning_sms_date', todayDate)
             if (!claimed) return false
 
-            const rainBody = await renderSmsBody(optin.org_id, 'rain_alert', { property_name: property.name })
+            const rainOfferLine = buildSponsorLine(
+              rainySponsor.business_name,
+              rainySponsor.offer_type,
+              rainySponsor.offer_value,
+              rainySponsor.offer_item,
+              rainySponsor.custom_offer_text,
+              rainyDistanceMi
+            )
+
+            const rainBody = await renderSmsBody(optin.org_id, 'rain_alert', {
+              property_name: property.name,
+              offer_line:    rainOfferLine,
+            })
             const res = await sendSMS(optin.phone_e164, rainBody)
             if (!res.sent) {
               await releaseDailySmsSlot(supabase, optin.id, 'last_morning_sms_date')
