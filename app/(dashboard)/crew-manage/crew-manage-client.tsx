@@ -878,13 +878,13 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
         ) : inviteSent ? (
           <span className="text-xs font-medium inline-flex items-center gap-1" style={{ color: 'var(--accent-gold)' }}><Check className="w-3.5 h-3.5" /> Invite sent</span>
         ) : member.invite_sent_at ? (
-          <button onClick={handleInvite} disabled={inviting}
+          <button onClick={(e) => { e.stopPropagation(); handleInvite() }} disabled={inviting}
                   className="text-xs underline underline-offset-2 disabled:opacity-50"
                   style={{ color: 'var(--text-muted)' }}>
             {inviting ? 'Sending…' : 'Resend invite'}
           </button>
         ) : (
-          <Button variant="secondary" onClick={handleInvite} disabled={inviting}
+          <Button variant="secondary" onClick={(e) => { e.stopPropagation(); handleInvite() }} disabled={inviting}
                   className="text-xs px-2.5 py-1 disabled:opacity-50">
             {inviting ? 'Sending…' : 'Invite to app'}
           </Button>
@@ -893,10 +893,10 @@ function CrewRow({ member, onSelect }: { member: CrewMember; onSelect: (m: CrewM
       </td>
       <td className="py-2.5 text-right">
         <div className="flex items-center justify-end gap-1">
-          <Button variant="ghost" onClick={() => setEditing(true)} className="py-1 px-2 text-xs" title="Edit" aria-label={`Edit ${member.name}`}>
+          <Button variant="ghost" onClick={(e) => { e.stopPropagation(); setEditing(true) }} className="py-1 px-2 text-xs" title="Edit" aria-label={`Edit ${member.name}`}>
             <Pencil className="w-3.5 h-3.5" />
           </Button>
-          <Button variant="danger" onClick={handleDeactivate} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate" aria-label={`Deactivate ${member.name}`}>
+          <Button variant="danger" onClick={(e) => { e.stopPropagation(); handleDeactivate() }} disabled={deactivating} className="py-1 px-2 text-xs" title="Deactivate" aria-label={`Deactivate ${member.name}`}>
             {deactivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
           </Button>
         </div>

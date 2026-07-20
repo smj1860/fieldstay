@@ -43,13 +43,13 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby="dialog-title"
         className={[
-          'relative w-full bg-card-themed border-themed border shadow-dark-lg',
+          'relative w-full bg-card-themed border-themed border shadow-dark-lg flex flex-col max-h-[85vh]',
           mobileSheet
-            ? 'rounded-t-2xl p-6 pb-10 sm:rounded-2xl sm:pb-6'
-            : `rounded-2xl p-6 ${maxWidthClassName}`,
+            ? 'rounded-t-2xl sm:rounded-2xl'
+            : `rounded-2xl ${maxWidthClassName}`,
         ].join(' ')}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between p-6 pb-4 flex-shrink-0">
           <h2 id="dialog-title" className="text-lg font-bold text-primary-themed">
             {title}
           </h2>
@@ -63,7 +63,9 @@ export function Dialog({
             <X className="w-4 h-4" />
           </Button>
         </div>
-        {children}
+        <div className={`overflow-y-auto min-h-0 px-6 ${mobileSheet ? 'pb-10 sm:pb-6' : 'pb-6'}`}>
+          {children}
+        </div>
       </div>
     </div>,
     document.body
