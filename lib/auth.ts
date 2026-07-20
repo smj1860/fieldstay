@@ -1,6 +1,7 @@
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import type { MemberRole } from '@/types/database'
+import { logAuditEvent } from '@/lib/audit'
 
 export interface OrgMembership {
   org_id: string
@@ -101,6 +102,31 @@ export async function getOrgMembership(userId: string, orgId: string) {
     .eq('org_id', orgId)
     .single()
   return data ?? null
+}
+
+/**
+ * Verify the current user is a FieldStay platform admin (platform_staff
+ * with role = 'admin') — independent of any organization_members role,
+ * since a platform admin isn't necessarily a member of any given org.
+ * Redirects to /ops rather than a 404/403 page, so the admin panel's
+ * existence isn't signalled to a logged-in non-admin who guesses the URL.
+ */
+export async function requirePlatformAdmin() {
+  const { user, supabase } = await requireAuth()
+
+  const { data } = await supabase.rpc('is_platform_staff_admin')
+  if (!data) {
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'security.route.mismatch',
+      targetType: 'route',
+      targetId:   '/admin',
+      metadata:   { reason: 'non_platform_admin_reached_admin_app' },
+    })
+    redirect('/ops')
+  }
+
+  return { user, supabase }
 }
 
 /**
