@@ -266,7 +266,7 @@ async function seedCrewLoginAndAssignment(
   await page.fill('#password', crewPassword)
   await page.click('button[type="submit"]')
 
-  await page.waitForURL('**/crew', { timeout: 15_000 })
+  await page.waitForURL((url) => url.pathname === '/crew', { timeout: 15_000 })
   await page.context().storageState({ path: 'e2e/.auth/crew.json' })
   await browser.close()
 }

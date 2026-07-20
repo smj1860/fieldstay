@@ -6,7 +6,6 @@ import WorkOrderDispatchEmail   from '@/emails/WorkOrderDispatch'
 import { resend, FROM }         from '@/lib/resend/client'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { renderSmsBody }        from '@/lib/sms/templates'
-import { randomBytes }          from 'crypto'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { reportError }          from '@/lib/observability/report-error'
 
@@ -84,7 +83,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
       if (wo.completion_token) return wo.completion_token
 
       const supabase  = createServiceClient()
-      const newToken  = randomBytes(32).toString('hex')
+      const newToken  = crypto.randomUUID()
       const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
 
       const { error } = await supabase

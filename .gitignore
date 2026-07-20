@@ -34,6 +34,7 @@ yarn-error.log*
 
 # Playwright
 e2e/.auth/pm.json
+e2e/.auth/crew.json
 e2e/.auth/context.json
 e2e/.env.e2e
 playwright-report/

@@ -51,7 +51,7 @@ export default async function CrewLayout({
         reason: 'non_crew_user_reached_crew_app',
       },
     })
-    redirect('/dashboard')
+    redirect('/ops')
   }
   // ── End PM guard ───────────────────────────────────────────────────────────
 
