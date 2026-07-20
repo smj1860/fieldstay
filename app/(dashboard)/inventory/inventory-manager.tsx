@@ -165,11 +165,18 @@ const CATEGORY_ORDER: InventoryCategory[] = [
 // ── Inline par-level editor ───────────────────────────────────────────────────
 
 function ParLevelEditor({ item }: { item: InventoryItem }) {
-  const [editing, setEditing] = useState(false)
-  const [value, setValue]     = useState(String(item.par_level))
-  const [saving, setSaving]   = useState(false)
-  const [error, setError]     = useState<string | null>(null)
+  const [editing, setEditing]     = useState(false)
+  const [value, setValue]         = useState(String(item.par_level))
+  const [saving, setSaving]       = useState(false)
+  const [error, setError]         = useState<string | null>(null)
+  const [justSaved, setJustSaved] = useState(false)
   const router = useRouter()
+
+  useEffect(() => {
+    if (!justSaved) return
+    const timer = setTimeout(() => setJustSaved(false), 2000)
+    return () => clearTimeout(timer)
+  }, [justSaved])
 
   const handleSave = async () => {
     const n = parseFloat(value)
@@ -179,7 +186,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
     const res = await updateParLevel(item.id, n)
     setSaving(false)
     if (res.error) setError(res.error)
-    else { setEditing(false); router.refresh() }
+    else { setEditing(false); setJustSaved(true); router.refresh() }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -191,9 +198,13 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
     return (
       <button
         onClick={() => setEditing(true)}
-        className="text-sm text-secondary-themed hover:text-primary-themed hover:underline tabular-nums"
+        className={cn(
+          'input py-0.5 px-1.5 w-14 text-sm text-right tabular-nums font-medium cursor-pointer transition-colors flex items-center justify-end gap-1',
+          justSaved ? 'text-[var(--accent-green)] border-[var(--accent-green)]' : 'hover:border-[var(--border-strong)]'
+        )}
         title="Click to edit par level"
       >
+        {justSaved && <Check className="w-3 h-3 flex-shrink-0" />}
         {Number.isInteger(item.par_level) ? item.par_level : item.par_level.toFixed(1)}
       </button>
     )
@@ -670,70 +681,87 @@ function CategoryRows({
   pendingCounts: Record<string, number>
   onQuantityEdit: (id: string, qty: number) => void
 }) {
+  const [collapsed, setCollapsed] = useState(false)
+
   return (
     <>
-      <div className="px-5 py-1.5 bg-canvas-themed">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        className="w-full flex items-center gap-1.5 px-5 py-1.5 bg-canvas-themed text-left"
+        aria-expanded={!collapsed}
+      >
+        <ChevronDown
+          className={cn(
+            'w-3.5 h-3.5 text-muted-themed transition-transform flex-shrink-0',
+            collapsed && '-rotate-90'
+          )}
+        />
         <span className="text-xs font-semibold text-muted-themed uppercase tracking-wide">
           {INVENTORY_CATEGORY_LABELS[category]}
         </span>
-      </div>
+      </button>
 
-      {/* Mobile card layout */}
-      <div className="md:hidden p-3 space-y-2">
-        {items.map((item) => (
-          <InventoryItemCard
-            key={`${item.id}-${item.current_quantity}`}
-            id={item.id}
-            name={item.name}
-            category={item.category}
-            unit={item.unit}
-            parLevel={item.par_level}
-            currentQuantity={pendingCounts[item.id] ?? item.current_quantity}
-            uncounted={!item.first_count_recorded_at}
-            variant="pm"
-            onQuantityChange={onQuantityEdit}
-          />
-        ))}
-      </div>
-
-      {/* Desktop table rows */}
-      <div className="hidden md:contents">
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2.5 items-center text-sm"
-            style={{
-              background: getStockStatus(item) === 'critical' ? 'var(--accent-red-dim)'
-                        : getStockStatus(item) === 'low'      ? 'var(--accent-amber-dim)'
-                        : undefined,
-            }}
-          >
-            <div className="min-w-0">
-              <span className="font-medium text-primary-themed truncate block">{item.name}</span>
-              {item.notes && (
-                <span className="text-xs text-muted-themed truncate block">{item.notes}</span>
-              )}
-            </div>
-            <div className="text-right">
-              <Input
-                type="number"
-                min={0}
-                value={pendingCounts[item.id] ?? item.current_quantity}
-                onChange={(e) => onQuantityEdit(item.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
-                aria-label={`${item.name} current count`}
-                className="py-0.5 px-1.5 w-14 text-sm text-right tabular-nums font-medium"
+      {!collapsed && (
+        <>
+          {/* Mobile card layout */}
+          <div className="md:hidden p-3 space-y-2">
+            {items.map((item) => (
+              <InventoryItemCard
+                key={`${item.id}-${item.current_quantity}`}
+                id={item.id}
+                name={item.name}
+                category={item.category}
+                unit={item.unit}
+                parLevel={item.par_level}
+                currentQuantity={pendingCounts[item.id] ?? item.current_quantity}
+                uncounted={!item.first_count_recorded_at}
+                variant="pm"
+                onQuantityChange={onQuantityEdit}
               />
-            </div>
-            <div className="text-right">
-              <ParLevelEditor item={item} />
-            </div>
-            <div className="text-right text-muted-themed text-xs">{item.unit}</div>
-            <div className="text-right">
-              <StockBadge item={item} />
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
+
+          {/* Desktop table rows */}
+          <div className="hidden md:contents">
+            {items.map((item) => (
+              <div
+                key={item.id}
+                className="grid grid-cols-[1fr_72px_72px_90px_110px] gap-2 px-5 py-2.5 items-center text-sm"
+                style={{
+                  background: getStockStatus(item) === 'critical' ? 'var(--accent-red-dim)'
+                            : getStockStatus(item) === 'low'      ? 'var(--accent-amber-dim)'
+                            : undefined,
+                }}
+              >
+                <div className="min-w-0">
+                  <span className="font-medium text-primary-themed truncate block">{item.name}</span>
+                  {item.notes && (
+                    <span className="text-xs text-muted-themed truncate block">{item.notes}</span>
+                  )}
+                </div>
+                <div className="text-right">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={pendingCounts[item.id] ?? item.current_quantity}
+                    onChange={(e) => onQuantityEdit(item.id, Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    aria-label={`${item.name} current count`}
+                    className="py-0.5 px-1.5 w-14 text-sm text-right tabular-nums font-medium"
+                  />
+                </div>
+                <div className="text-right">
+                  <ParLevelEditor item={item} />
+                </div>
+                <div className="text-right text-muted-themed text-xs">{item.unit}</div>
+                <div className="text-right">
+                  <StockBadge item={item} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </>
   )
 }
