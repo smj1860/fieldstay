@@ -166,20 +166,15 @@ export default function PricingSection({ isLoggedIn }: Readonly<PricingSectionPr
                         plan.highlight ? "text-white" : "text-[#0a1628]"
                       }`}
                     >
-                      ${annual ? Math.round(plan.annual! / 12) : plan.monthly}
+                      ${annual ? plan.annual!.toLocaleString() : plan.monthly}
                     </span>
                     <span
                       className={`mb-1 text-sm ${
                         plan.highlight ? "text-white/52" : "text-gray-500"
                       }`}
                     >
-                      /mo
+                      {annual ? '/yr' : '/mo'}
                     </span>
-                    {annual && (
-                      <span className="text-xs text-[#4ade80] mb-1 ml-1">
-                        billed ${plan.annual!.toLocaleString()}/yr
-                      </span>
-                    )}
                   </>
                 ) : (
                   <span className="text-3xl font-bold text-gold-300">
@@ -187,12 +182,6 @@ export default function PricingSection({ isLoggedIn }: Readonly<PricingSectionPr
                   </span>
                 )}
               </div>
-
-              {annual && plan.annualSavings && (
-                <div className="text-xs text-[#4ade80] mb-2">
-                  Save ${plan.annualSavings.toLocaleString()}/yr
-                </div>
-              )}
 
               <p
                 className={`text-sm ${
