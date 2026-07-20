@@ -16,8 +16,7 @@ const nextConfig: NextConfig = {
     // Turbopack's dev-mode hydration relies on inline <script> tags and
     // eval()-based module wrapping — a strict script-src blocks React from
     // ever mounting under `next dev` (self.__next_r invariant, page never
-    // hydrates). Production builds don't need either, so this only relaxes
-    // the dev server, never a deployed build.
+    // hydrates).
     const isDev = process.env.NODE_ENV !== 'production'
 
     return [
@@ -31,13 +30,19 @@ const nextConfig: NextConfig = {
               // Locked-down default — no blanket https: source
               "default-src 'self'",
 
-              // Scripts: no 'unsafe-inline'/'unsafe-eval' in production —
-              // inline theme script is a static file; wasm-unsafe-eval
-              // required by Supabase JS client. Dev mode needs both relaxed
-              // for Turbopack's hydration script and HMR to work at all.
+              // TEMPORARY: 'unsafe-inline' restored in production —
+              // Next.js App Router emits inline <script>self.__next_f.push()
+              // </script> tags in production (not just dev/Turbopack) to
+              // stream the RSC/hydration payload. Without 'unsafe-inline'
+              // those are CSP-blocked, so the client never receives the data
+              // needed to hydrate or resolve a Suspense boundary — this was
+              // breaking hydration app-wide, not just on any one page.
+              // 'unsafe-eval' stays dev-only (Turbopack HMR/eval-based module
+              // wrapping). Follow-up: replace this with a per-request nonce
+              // generated in proxy.ts so we don't need a blanket 'unsafe-inline'.
               isDev
                 ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
-                : "script-src 'self' 'wasm-unsafe-eval'",
+                : "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
 
               // Styles: 'unsafe-inline' required for the codebase's established
               // style={{ ... }} convention with CSS variables. Inline styles
