@@ -31,8 +31,8 @@ Every vendor has a compliance status based on their document expiration dates:
 |---|---|---|
 | Compliant | All documents valid | Work orders dispatch normally |
 | Expiring Soon | A document expires within 30 days | Warning shown, dispatch still allowed |
-| Grace Period | A document expired 1–30 days ago | Requires your acknowledgment before dispatch |
-| Hard Blocked | A document expired 31+ days ago | Cannot be assigned to work orders |
+| Grace Period | A document expired 1–45 days ago | Requires your acknowledgment before dispatch |
+| Hard Blocked | A document expired 46+ days ago | Cannot be assigned to work orders |
 
 ---
 
@@ -52,7 +52,7 @@ FieldStay sends email notifications at:
 - 7 days before expiration
 - On the expiration date
 - 14 days after expiration
-- 30 days after expiration (vendor moves to Hard Blocked at 31 days)
+- 30 days after expiration (vendor moves to Hard Blocked at 46 days)
 
 Both you and the vendor receive these notifications so they can take action on their end.
 

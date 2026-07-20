@@ -227,8 +227,8 @@ vendor_compliance_documents — COI, licenses, bonding. Has expiry_date,
                               first_warned_at, hard_blocked_at
 vendor_compliance_status    — VIEW. compliance_status:
                               compliant|expiring_soon|grace_period|hard_blocked
-                              grace_period = expired 1–30 days (soft warn + ack)
-                              hard_blocked = expired 31+ days (no WO assignment)
+                              grace_period = expired 1–45 days (soft warn + ack)
+                              hard_blocked = expired 46+ days (no WO assignment)
 ```
 
 ### Asset Health

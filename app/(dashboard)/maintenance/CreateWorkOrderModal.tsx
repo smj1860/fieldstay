@@ -367,7 +367,7 @@ export function CreateWorkOrderModal({
                     <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
                       <ShieldOff className="w-3.5 h-3.5 flex-shrink-0" />
-                      This vendor has expired compliance documents (31+ days). Assignment is blocked.
+                      This vendor has expired compliance documents (46+ days). Assignment is blocked.
                     </div>
                   )}
                   {selectedCompliance === 'grace_period' && (

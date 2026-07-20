@@ -110,7 +110,7 @@ If the offline state persists only at a specific property, the property's WiFi m
 **Check first:**
 - Does the vendor have an email address on file? Go to Vendors → [Vendor Name] and confirm an email address is listed.
 - Is the vendor's portal feature enabled? Some vendors may have portal access disabled.
-- Is the vendor Hard Blocked for compliance? A vendor with an expired COI over 31 days cannot be assigned to work orders.
+- Is the vendor Hard Blocked for compliance? A vendor with an expired COI over 46 days cannot be assigned to work orders.
 
 **Fix:**
 Confirm the vendor's email in their profile, then go to the work order and click **Resend Dispatch**. Check the vendor's spam folder — dispatch emails come from no-reply@fieldstay.app.

@@ -307,14 +307,14 @@ No Google API integration needed until 2027.
 - `asset_type_standards` — 21 asset types with lifespan + replacement cost ranges
 - `property_assets` — asset ledger with health score cache, CapEx fields, warranty tracking
 - `vendor_compliance_documents` — COI, licenses, bonding with expiry tracking
-- `vendor_compliance_status` view — 4-state compliance gate: `compliant`, `expiring_soon`, `grace_period` (days 1–30), `hard_blocked` (day 31+)
+- `vendor_compliance_status` view — 4-state compliance gate: `compliant`, `expiring_soon`, `grace_period` (days 1–45), `hard_blocked` (day 46+)
 - `asset_depreciation_entries` — annual MACRS depreciation records
 - `work_orders.asset_id` — links WOs to tracked assets (repair history for health score)
 - `vendors.lat` + `lng` + `service_zip` + `service_radius_miles`
 - `vendor_compliance_documents.first_warned_at` + `hard_blocked_at` (audit trail)
 
 ### 8B — Locked Decisions
-- **Compliance gate:** Soft warn + PM acknowledgment (days 1–30). Hard block day 31+. Acknowledgment is timestamped and logged.
+- **Compliance gate:** Soft warn + PM acknowledgment (days 1–45). Hard block day 46+. Acknowledgment is timestamped and logged.
 - **Feature access:** No gating. All plans. Full platform on day one.
 - **Depreciation scope:** Capital assets only (5-year and 15-year MACRS). IRS Publication 946 + Section 179.
 - **Reports:** Carry disclaimer "For use with IRS Pub 946. Review with your CPA before filing."
@@ -342,7 +342,7 @@ No Google API integration needed until 2027.
 | 8.9 | Vendor detail page: compliance document upload (Supabase Storage) | 🔧 |
 | 8.10 | WO assignment form: compliance gate check via `vendor_compliance_status` view | 🔧 |
 | 8.11 | Grace period warning modal with PM acknowledgment (logs timestamp) | 🔧 |
-| 8.12 | Hard block UI: vendor grayed out with "COI expired 31+ days" badge | 🔧 |
+| 8.12 | Hard block UI: vendor grayed out with "COI expired 46+ days" badge | 🔧 |
 | 8.13 | Inngest: COI expiry escalation ladder — 30d / 14d / 7d / expiry day / +14d / +30d | 🔧 |
 | 8.14 | Vendor geocoding on create/update (Mapbox, same pattern as properties) | 🔧 |
 | 8.15 | Vendor list: distance-from-property shown on WO assignment | 🔧 |
