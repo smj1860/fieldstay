@@ -11,6 +11,7 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { buttonVariantClass } from '@/components/ui/Button'
 import { DoorCodeReveal } from './door-code-reveal'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { MaintenanceSchedule, MaintenanceCatalogItem } from '@/types/database'
 import type { Metadata } from 'next'
 
@@ -124,8 +125,8 @@ export default async function PropertyDetailPage({ params }: Props) {
   const completedLog = recentWOs?.filter((wo) => wo.status === 'completed') ?? []
 
   const invoiceHistory: InvoiceHistoryRow[] = (invoiceRows ?? []).map((inv) => {
-    const wo     = Array.isArray(inv.work_orders) ? inv.work_orders[0] : inv.work_orders
-    const vendor = wo ? (Array.isArray(wo.vendors) ? wo.vendors[0] : wo.vendors) : null
+    const wo     = unwrapJoin(inv.work_orders)
+    const vendor = wo ? unwrapJoin(wo.vendors) : null
     return {
       id:            inv.id,
       workOrderId:   inv.work_order_id,
@@ -302,7 +303,7 @@ export default async function PropertyDetailPage({ params }: Props) {
             <p className="text-xs font-semibold text-muted-themed uppercase tracking-wide mb-2">Recent Completed</p>
             <div className="space-y-1">
               {completedLog.slice(0, 5).map((wo) => {
-                const vendor = Array.isArray(wo.vendors) ? wo.vendors[0] : wo.vendors
+                const vendor = unwrapJoin(wo.vendors)
                 const cost   = wo.actual_cost ?? wo.estimated_cost
                 return (
                   <Link key={wo.id} href={`/maintenance/${wo.id}`}

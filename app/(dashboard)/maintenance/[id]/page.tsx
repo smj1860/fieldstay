@@ -4,6 +4,7 @@ import Link                               from 'next/link'
 import { ChevronLeft }                    from 'lucide-react'
 import { WorkOrderDetail }                from '@/components/work-orders/work-order-detail'
 import type { WorkOrderDetailData }       from '@/components/work-orders/work-order-detail'
+import { unwrapJoin }                     from '@/lib/utils/supabase-joins'
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -69,9 +70,9 @@ export default async function WorkOrderPage({ params }: Props) {
 
   if (!wo) notFound()
 
-  const property        = Array.isArray(wo.properties)        ? wo.properties[0]        : wo.properties
-  const vendor           = Array.isArray(wo.vendors)           ? wo.vendors[0]           : wo.vendors
-  const reportedByCrew   = Array.isArray(wo.reported_by_crew)  ? wo.reported_by_crew[0]  : wo.reported_by_crew
+  const property        = unwrapJoin(wo.properties)
+  const vendor           = unwrapJoin(wo.vendors)
+  const reportedByCrew   = unwrapJoin(wo.reported_by_crew)
 
   const workOrderData: WorkOrderDetailData = {
     id:                     wo.id,

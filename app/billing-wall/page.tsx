@@ -1,6 +1,7 @@
 import { redirect }     from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { buttonVariantClass } from '@/components/ui/Button'
+import { unwrapJoin }   from '@/lib/utils/supabase-joins'
 
 export default async function BillingWallPage() {
   const supabase = await createClient()
@@ -16,9 +17,7 @@ export default async function BillingWallPage() {
 
   if (!row) redirect('/login')
 
-  const org = Array.isArray(row.organizations)
-    ? row.organizations[0]
-    : row.organizations
+  const org = unwrapJoin(row.organizations)
 
   const planStatus  = org?.plan_status  ?? 'cancelled'
   const trialEndsAt = org?.trial_ends_at ?? null

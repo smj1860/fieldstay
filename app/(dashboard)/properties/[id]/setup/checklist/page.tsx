@@ -1,6 +1,7 @@
 import { requireProperty, requireOrgMember } from '@/lib/auth'
 import { ChecklistBuilder } from './checklist-builder'
 import { Card } from '@/components/ui/Card'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Turnover Checklist' }
@@ -40,10 +41,10 @@ export default async function ChecklistPage({ params }: Props) {
   const sectionCountByProperty: Record<string, number> = {}
   const propNameByProperty: Record<string, string> = {}
   for (const row of siblingChecklistSections ?? []) {
-    const tmpl = Array.isArray(row.checklist_templates) ? row.checklist_templates[0] : row.checklist_templates
+    const tmpl = unwrapJoin(row.checklist_templates)
     if (!tmpl?.property_id) continue
     sectionCountByProperty[tmpl.property_id] = (sectionCountByProperty[tmpl.property_id] ?? 0) + 1
-    const p = Array.isArray(tmpl.properties) ? tmpl.properties[0] : tmpl.properties
+    const p = unwrapJoin(tmpl.properties)
     if (p?.name) propNameByProperty[tmpl.property_id] = p.name
   }
   const sourceProperties = Object.entries(sectionCountByProperty)

@@ -8,6 +8,7 @@ import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/
 import type { AssetType } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { incrementCounter } from '@/lib/observability/metrics'
+import { unwrapJoin, unwrapJoinArray } from '@/lib/utils/supabase-joins'
 
 // Durations beyond this are treated as tracking errors (e.g. a checklist item
 // completed a day late) and excluded from the auto-assignment learning loop.
@@ -64,19 +65,13 @@ export const handleTurnoverCreated = inngest.createFunction(
 
     // ── Notify already-assigned crew (if any) ───────────────────────────────
 
-    const assignments = Array.isArray(turnover.turnover_assignments)
-      ? turnover.turnover_assignments
-      : turnover.turnover_assignments
-        ? [turnover.turnover_assignments]
-        : []
+    const assignments = unwrapJoinArray(turnover.turnover_assignments)
 
     if (assignments.length > 0) {
       await step.run('notify-assigned-crew', async () => {
         await Promise.all(
           assignments.map(async (assignment) => {
-            const crew = Array.isArray(assignment.crew_members)
-              ? assignment.crew_members[0]
-              : assignment.crew_members
+            const crew = unwrapJoin(assignment.crew_members)
 
             if (!crew?.email) return
 

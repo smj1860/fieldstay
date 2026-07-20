@@ -5,6 +5,7 @@ import { formatPropertyDateTime } from '@/lib/utils/timezone'
 import { renderSmsBody }       from '@/lib/sms/templates'
 import { escapeHtml }          from '@/lib/utils/html'
 import { reportError }         from '@/lib/observability/report-error'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 /**
  * Triggered when one or more turnovers are assigned to a crew member via
@@ -61,7 +62,7 @@ export const handleCrewAssigned = inngest.createFunction(
       await step.run('send-assignment-email', async () => {
         const rows = turnovers
           .map(t => {
-            const prop        = Array.isArray(t.properties) ? t.properties[0] : t.properties
+            const prop        = unwrapJoin(t.properties)
             const windowHours = Math.round((t.window_minutes ?? 0) / 60)
             const tz          = prop?.timezone ?? 'America/Chicago'
             return `
@@ -76,7 +77,7 @@ export const handleCrewAssigned = inngest.createFunction(
           .join('')
 
         const subject = turnovers.length === 1
-          ? `Turnover assigned — ${(Array.isArray(turnovers[0]!.properties) ? turnovers[0]!.properties[0] : turnovers[0]!.properties)?.name ?? 'Property'}`
+          ? `Turnover assigned — ${unwrapJoin(turnovers[0]!.properties)?.name ?? 'Property'}`
           : `${turnovers.length} turnovers assigned to you`
 
         await resend.emails.send(
@@ -124,7 +125,7 @@ export const handleCrewAssigned = inngest.createFunction(
           .single()
 
         const smsRows = turnovers.map((t) => {
-          const prop = Array.isArray(t.properties) ? t.properties[0] : t.properties
+          const prop = unwrapJoin(t.properties)
           return {
             propertyName:     (prop as { name: string } | null)?.name ?? 'Property',
             checkoutDatetime: t.checkout_datetime,

@@ -5,6 +5,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import { sendOwnerPortalEmail } from '@/lib/resend/client'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { TxnCategory } from '@/types/database'
 
 export type OwnersActionState = { error?: string; success?: boolean; token?: string }
@@ -110,11 +111,9 @@ export async function generatePortalToken(ownerId: string): Promise<OwnersAction
 
     const ownerEmail    = ownerData?.email ?? null
     const ownerName     = ownerData?.name ?? 'Property Owner'
-    const propertyRaw   = Array.isArray(ownerData?.properties)
-      ? ownerData?.properties[0] : ownerData?.properties
+    const propertyRaw   = unwrapJoin(ownerData?.properties)
     const propertyName  = propertyRaw?.name ?? 'your property'
-    const orgRaw        = Array.isArray(ownerData?.organizations)
-      ? ownerData?.organizations[0] : ownerData?.organizations
+    const orgRaw        = unwrapJoin(ownerData?.organizations)
     const orgName       = orgRaw?.name ?? 'Your property manager'
 
     if (ownerEmail) {

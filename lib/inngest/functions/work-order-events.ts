@@ -7,6 +7,7 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import { stripe } from '@/lib/stripe/client'
 import { renderVendorConnectInviteEmail } from '@/lib/resend/emails/vendor-connect-invite'
 import { logAuditEvent } from '@/lib/audit'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { loadDispatchContext, sendVendorDispatchEmail, sendVendorDispatchSms } from './work-order-events-helpers'
 
 // ── Work Order Created ────────────────────────────────────────────────────────
@@ -360,8 +361,8 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
 
       if (!wo) return
 
-      const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
-      const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+      const vendor   = unwrapJoin(wo.vendors)
+      const property = unwrapJoin(wo.properties)
       const photos   = Array.isArray(wo.work_order_photos) ? wo.work_order_photos : []
 
       // Expense posting is owned by handleWorkOrderCompleted / logActualCost —
@@ -417,8 +418,8 @@ export const handleWorkOrderOverdue = inngest.createFunction(
         return
       }
 
-      const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
-      const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+      const vendor   = unwrapJoin(wo.vendors)
+      const property = unwrapJoin(wo.properties)
 
       await resend.emails.send(
         {
@@ -474,9 +475,9 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
 
       if (!qr?.quote_token) return
 
-      const wo       = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
-      const vendor   = Array.isArray(qr.vendors)     ? qr.vendors[0]     : qr.vendors
-      const property = wo && (Array.isArray(wo.properties) ? wo.properties[0] : wo.properties)
+      const wo       = unwrapJoin(qr.work_orders)
+      const vendor   = unwrapJoin(qr.vendors)
+      const property = wo && unwrapJoin(wo.properties)
 
       if (!vendor?.email) {
         logger.warn(`Quote request ${quote_request_id}: vendor has no email`)
@@ -541,8 +542,8 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
 
       if (!wo) return
 
-      const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
-      const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+      const vendor   = unwrapJoin(wo.vendors)
+      const property = unwrapJoin(wo.properties)
 
       await createPmNotification(supabase, {
         orgId:     org_id,

@@ -1,5 +1,6 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 const ALPHA_PRIOR = 2  // prior: assume "probably clean"
 const BETA_PRIOR  = 1  // prior: with small upward bias on flag probability
@@ -43,13 +44,11 @@ export const computeChecklistSignals = inngest.createFunction(
     const groups = new Map<string, ItemRow[]>()
 
     for (const item of items) {
-      const inst = Array.isArray(item.checklist_instances)
-        ? item.checklist_instances[0]
-        : item.checklist_instances
+      const inst = unwrapJoin(item.checklist_instances)
       if (!inst) continue
 
       const turnoversRaw = (inst as unknown as { turnovers: { org_id: string } | { org_id: string }[] }).turnovers
-      const tvo = Array.isArray(turnoversRaw) ? turnoversRaw[0] : turnoversRaw
+      const tvo = unwrapJoin(turnoversRaw)
       if (!tvo?.org_id) continue
 
       const key = `${(inst as { property_id: string }).property_id}|${item.section_name}|${item.task}|${tvo.org_id}`

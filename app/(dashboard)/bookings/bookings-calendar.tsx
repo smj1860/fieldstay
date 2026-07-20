@@ -7,6 +7,7 @@ import type { Id, TimelineItemBase } from 'react-calendar-timeline'
 import dayjs from 'dayjs'
 import { ExternalLink } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { useToast } from '@/components/dashboard-toast-provider'
 import { Dialog } from '@/components/ui/Dialog'
 import { updateBookingDates } from './calendar-actions'
@@ -104,8 +105,7 @@ function bookingTitle(b: BookingRow): string {
 }
 
 function getTurnover(b: BookingRow): { id: string; status: string } | null {
-  if (!b.turnovers) return null
-  return Array.isArray(b.turnovers) ? (b.turnovers[0] ?? null) : b.turnovers
+  return unwrapJoin(b.turnovers)
 }
 
 // Mirrors bookings-client.tsx's TURNOVER_STATUS_COLORS exactly — same

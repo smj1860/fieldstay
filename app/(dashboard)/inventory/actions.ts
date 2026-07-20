@@ -5,6 +5,7 @@ import { requireOrgMember, requireOrgRole } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { InventoryCategory } from '@/types/database'
 
 export type InventoryActionState = { error?: string; success?: boolean }
@@ -716,9 +717,7 @@ export async function generateAggregatedPurchaseList(): Promise<{ items: Aggrega
       }
       const needed = Math.max(0, (item.par_level ?? 0) - (item.current_quantity ?? 0))
       grouped[key]!.totalNeeded += needed
-      const pName = Array.isArray(item.property)
-        ? (item.property[0] as { name: string } | undefined)?.name ?? '—'
-        : (item.property as { name: string } | null)?.name ?? '—'
+      const pName = unwrapJoin(item.property as { name: string } | { name: string }[] | null)?.name ?? '—'
       grouped[key]!.properties.push({ name: pName, needed })
     }
 

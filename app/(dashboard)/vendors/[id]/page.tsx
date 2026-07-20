@@ -8,6 +8,7 @@ import { formatDate } from '@/lib/utils'
 import type { Metadata } from 'next'
 import { CheckCircle2, AlertTriangle, Ban, Star } from 'lucide-react'
 import { Card } from '@/components/ui/Card'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export const metadata: Metadata = { title: 'Vendor' }
 
@@ -103,8 +104,8 @@ export default async function VendorDetailPage({ params }: Props) {
   const totalSpend   = completedWOs.reduce((s, w) => s + (w.actual_cost ?? 0), 0)
 
   const invoiceHistory: InvoiceHistoryRow[] = (invoiceRows ?? []).map((inv) => {
-    const wo       = Array.isArray(inv.work_orders) ? inv.work_orders[0] : inv.work_orders
-    const property = wo ? (Array.isArray(wo.properties) ? wo.properties[0] : wo.properties) : null
+    const wo       = unwrapJoin(inv.work_orders)
+    const property = wo ? unwrapJoin(wo.properties) : null
     return {
       id:            inv.id,
       workOrderId:   inv.work_order_id,

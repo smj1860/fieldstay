@@ -10,6 +10,7 @@ import {
   Check, Sparkles,
 } from 'lucide-react'
 import { cn, formatDate, WO_STATUS_LABELS } from '@/lib/utils'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import {
   createWorkOrderFromSchedule,
   createMaintenanceSchedule, updateMaintenanceSchedule, deleteMaintenanceSchedule,
@@ -157,15 +158,10 @@ interface TemplateRow {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getJoined<T>(val: T | T[] | null): T | null {
-  if (!val) return null
-  return Array.isArray(val) ? val[0] ?? null : val
-}
-
 function toWorkOrderDetailData(wo: WorkOrderRow): WorkOrderDetailData {
-  const prop    = getJoined(wo.properties)
-  const vend    = getJoined(wo.vendors)
-  const invoice = getJoined(wo.work_order_invoices ?? null)
+  const prop    = unwrapJoin(wo.properties)
+  const vend    = unwrapJoin(wo.vendors)
+  const invoice = unwrapJoin(wo.work_order_invoices ?? null)
 
   return {
     id:                     wo.id,
@@ -304,8 +300,8 @@ function WorkOrderCard({
   isSelected: boolean
   onToggle: () => void
 }) {
-  const property = getJoined(wo.properties)
-  const vendor   = getJoined(wo.vendors)
+  const property = unwrapJoin(wo.properties)
+  const vendor   = unwrapJoin(wo.vendors)
 
   const [accepting,  startAccept]  = useTransition()
   const [dismissing, startDismiss] = useTransition()
@@ -758,7 +754,7 @@ function SchedulesSection({
               </thead>
               <tbody className="divide-y divide-themed">
                 {schedules.map((s) => {
-                  const property  = getJoined(s.properties)
+                  const property  = unwrapJoin(s.properties)
                   const isOverdue = s.next_due_date && new Date(s.next_due_date) < new Date()
                   return (
                     <tr key={s.id} className="hover:bg-canvas-themed transition-colors">
@@ -1981,8 +1977,8 @@ export function MaintenanceBoard({
                     </div>
                   )}
                   {colWOs.map((wo) => {
-                    const prop = getJoined(wo.properties)
-                    const vend = getJoined(wo.vendors)
+                    const prop = unwrapJoin(wo.properties)
+                    const vend = unwrapJoin(wo.vendors)
                     return (
                       <button
                         key={wo.id}

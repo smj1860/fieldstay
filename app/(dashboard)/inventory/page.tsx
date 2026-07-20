@@ -1,6 +1,7 @@
 import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { InventoryManager } from './inventory-manager'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 import type { CartBuildResult } from '@/lib/kroger/types'
 
@@ -90,9 +91,7 @@ export default async function InventoryPage() {
 
   const normalizedAllInventoryItems = (allInventoryItemsRaw ?? []).map((item) => ({
     ...item,
-    property: Array.isArray(item.property)
-      ? (item.property[0] ?? null)
-      : (item.property ?? null),
+    property: unwrapJoin(item.property),
   }))
 
   const items = normalizedAllInventoryItems

@@ -2,6 +2,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
 import { renderVendorInvoicePaidEmail } from '@/lib/resend/emails/vendor-invoice-paid'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 // Fired by app/api/webhooks/stripe/route.ts on checkout.session.completed for
 // a work order invoice — this was previously emitted with zero subscribers,
@@ -53,8 +54,8 @@ export const handleWorkOrderInvoicePaid = inngest.createFunction(
         return
       }
 
-      const vendor   = Array.isArray(wo.vendors)    ? wo.vendors[0]    : wo.vendors
-      const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+      const vendor   = unwrapJoin(wo.vendors)
+      const property = unwrapJoin(wo.properties)
 
       if (!vendor?.email) {
         logger.warn(`[invoice-paid] no vendor email for work order ${work_order_id}`)

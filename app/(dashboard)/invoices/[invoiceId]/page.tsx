@@ -3,6 +3,7 @@ import { requireOrgMember }    from '@/lib/auth'
 import type { Metadata }       from 'next'
 import { PayInvoiceButton }    from './pay-button'
 import { Check } from 'lucide-react'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 export const metadata: Metadata = { title: 'Invoice — FieldStay' }
 
@@ -65,9 +66,9 @@ export default async function InvoicePage({
     .eq('vendor_submitted', true)
     .order('sort_order', { ascending: true })
 
-  const wo       = Array.isArray(invoice.work_orders)   ? invoice.work_orders[0]   : invoice.work_orders
-  const vendor   = Array.isArray(invoice.vendors)        ? invoice.vendors[0]        : invoice.vendors
-  const property = Array.isArray(invoice.properties)     ? invoice.properties[0]     : invoice.properties
+  const wo       = unwrapJoin(invoice.work_orders)
+  const vendor   = unwrapJoin(invoice.vendors)
+  const property = unwrapJoin(invoice.properties)
 
   const isPaid      = invoice.status === 'paid'   || paid === 'true'
   const isCancelled = invoice.status === 'cancelled' || cancelled === 'true'

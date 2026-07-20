@@ -4,6 +4,7 @@ import { resend, FROM }                    from '@/lib/resend/client'
 import { getPmEmails, diffDigestSnapshot } from '@/lib/inngest/helpers'
 import { missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import { renderDailyWrapUpEmail }          from '@/lib/resend/emails/daily-wrapup'
+import { unwrapJoin, unwrapJoinArray }     from '@/lib/utils/supabase-joins'
 import type { AssetType } from '@/types/database'
 
 const MS_PER_DAY = 86_400_000
@@ -73,9 +74,9 @@ export const dailyWrapUp = inngest.createFunction(
           .neq('status', 'cancelled')
 
         const tomorrowSection = (turnoversTomorrow ?? []).map((t) => {
-          const property = Array.isArray(t.properties) ? t.properties[0] : t.properties
-          const assignment = Array.isArray(t.turnover_assignments) ? t.turnover_assignments[0] : t.turnover_assignments
-          const crew = assignment ? (Array.isArray(assignment.crew_members) ? assignment.crew_members[0] : assignment.crew_members) : null
+          const property = unwrapJoin(t.properties)
+          const assignment = unwrapJoin(t.turnover_assignments)
+          const crew = unwrapJoin(assignment?.crew_members)
           return {
             property: property?.name ?? 'Property',
             time:     new Date(t.checkout_datetime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
@@ -153,7 +154,7 @@ export const dailyWrapUp = inngest.createFunction(
             .order('health_score', { ascending: true })
             .limit(10)
           assetHealthSection = (scores ?? []).map((s) => {
-            const property = Array.isArray(s.properties) ? s.properties[0] : s.properties
+            const property = unwrapJoin(s.properties)
             return { propertyName: property?.name ?? 'Property', score: s.health_score as number }
           })
         }
@@ -171,7 +172,7 @@ export const dailyWrapUp = inngest.createFunction(
           (expiringDocs ?? []).map((d) => d.id)
         )
         const complianceSection = (expiringDocs ?? []).map((d) => {
-          const vendor = Array.isArray(d.vendors) ? d.vendors[0] : d.vendors
+          const vendor = unwrapJoin(d.vendors)
           return {
             vendorName: vendor?.name ?? 'Vendor',
             docType:    d.document_type as string,
@@ -197,11 +198,11 @@ export const dailyWrapUp = inngest.createFunction(
 
         const maintenanceSection = {
           due: (dueSchedules ?? []).map((s) => {
-            const property = Array.isArray(s.properties) ? s.properties[0] : s.properties
+            const property = unwrapJoin(s.properties)
             return { name: s.name as string, property: property?.name ?? 'Property' }
           }),
           unassigned: (unassignedWOs ?? []).map((wo) => {
-            const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+            const property = unwrapJoin(wo.properties)
             return {
               woNumber:  wo.wo_number ?? '',
               title:     wo.title as string,
@@ -220,8 +221,8 @@ export const dailyWrapUp = inngest.createFunction(
           .gte('created_at', since24h)
 
         const escalationSection = (escalations ?? []).map((e) => {
-          const wo = Array.isArray(e.work_orders) ? e.work_orders[0] : e.work_orders
-          const property = wo ? (Array.isArray(wo.properties) ? wo.properties[0] : wo.properties) : null
+          const wo = unwrapJoin(e.work_orders)
+          const property = unwrapJoin(wo?.properties)
           return { woNumber: wo?.wo_number ?? '', title: wo?.title ?? '', property: property?.name ?? 'Property' }
         })
 
@@ -261,7 +262,7 @@ export const dailyWrapUp = inngest.createFunction(
                 (new Date(next.checkin_date).getTime() - new Date(current.checkout_date).getTime()) / MS_PER_DAY
               )
               if (gapDays >= 3) {
-                const property = Array.isArray(current.properties) ? current.properties[0] : current.properties
+                const property = unwrapJoin(current.properties)
                 vacancySection.push({
                   propertyName: property?.name ?? 'Property',
                   gapDays,
@@ -284,7 +285,7 @@ export const dailyWrapUp = inngest.createFunction(
 
         const repeatGroups: Record<string, { propertyName: string; category: string; count: number }> = {}
         for (const wo of recentWOs ?? []) {
-          const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+          const property = unwrapJoin(wo.properties)
           const key = `${wo.property_id}:${wo.category}`
           if (!repeatGroups[key]) {
             repeatGroups[key] = { propertyName: property?.name ?? 'Property', category: wo.category as string, count: 0 }
@@ -303,11 +304,11 @@ export const dailyWrapUp = inngest.createFunction(
 
         const unassignedTurnoverSection = (unassignedTurnovers ?? [])
           .filter((t) => {
-            const assignments = Array.isArray(t.turnover_assignments) ? t.turnover_assignments : (t.turnover_assignments ? [t.turnover_assignments] : [])
+            const assignments = unwrapJoinArray(t.turnover_assignments)
             return assignments.length === 0
           })
           .map((t) => {
-            const property = Array.isArray(t.properties) ? t.properties[0] : t.properties
+            const property = unwrapJoin(t.properties)
             return { property: property?.name ?? 'Property', checkout: t.checkout_datetime }
           })
 
@@ -342,7 +343,7 @@ export const dailyWrapUp = inngest.createFunction(
           .gte('created_at', now.toISOString().split('T')[0] + 'T00:00:00.000Z')
 
         const inventorySection = (pendingPOs ?? []).map((po) => {
-          const property = Array.isArray(po.properties) ? po.properties[0] : po.properties
+          const property = unwrapJoin(po.properties)
           const items = Array.isArray(po.purchase_order_items) ? po.purchase_order_items : []
           return {
             property: property?.name ?? 'Property',

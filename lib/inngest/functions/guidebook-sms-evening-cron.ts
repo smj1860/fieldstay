@@ -5,6 +5,7 @@ import { distanceMiles } from '@/lib/geocoding'
 import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { GuidebookSponsor } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
@@ -36,7 +37,7 @@ export const guidebookSmsEveningCron = inngest.createFunction(
 
       // Filter to guests currently in their stay; exclude checkout day (no dinner nudge)
       return (data ?? []).filter((o) => {
-        const booking = Array.isArray(o.bookings) ? o.bookings[0] : o.bookings
+        const booking = unwrapJoin(o.bookings)
         if (!booking) return false
         return booking.checkin_date <= todayDate && booking.checkout_date > todayDate
       })

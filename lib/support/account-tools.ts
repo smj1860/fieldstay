@@ -1,5 +1,6 @@
 import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 /**
  * Account-specific data tools for the support bot.
@@ -63,7 +64,7 @@ export async function getRecentTurnovers(orgId: string) {
   return {
     count: data?.length ?? 0,
     turnovers: (data ?? []).map((t) => ({
-      property:    Array.isArray(t.properties) ? t.properties[0]?.name : (t.properties as { name: string } | null)?.name,
+      property:    unwrapJoin(t.properties)?.name,
       status:      t.status,
       checkout:    t.checkout_datetime,
       checkin:     t.checkin_datetime,
@@ -84,9 +85,7 @@ export async function getIntegrationStatus(orgId: string) {
 
   return {
     connections: (data ?? []).map((c) => ({
-      provider:    Array.isArray(c.integration_providers)
-        ? c.integration_providers[0]?.display_name ?? c.provider_id
-        : (c.integration_providers as { display_name: string } | null)?.display_name ?? c.provider_id,
+      provider:    unwrapJoin(c.integration_providers)?.display_name ?? c.provider_id,
       status:      c.status,
       lastUsedAt:  c.last_used_at,
       connectedAt: c.connected_at,
@@ -114,7 +113,7 @@ export async function getRecentPurchaseOrders(orgId: string) {
   return {
     count: data?.length ?? 0,
     orders: (data ?? []).map((po) => ({
-      property:    Array.isArray(po.properties) ? po.properties[0]?.name : (po.properties as { name: string } | null)?.name,
+      property:    unwrapJoin(po.properties)?.name,
       createdAt:   po.created_at,
       emailSent:   po.order_email_sent,
       sameDayFlip: po.is_same_day_flip,
