@@ -11,11 +11,10 @@ export default async function InventoryPage() {
 
   const [
     { data: properties },
-    { data: items },
+    { data: allInventoryItemsRaw },
     { data: purchaseOrders },
     { data: catalogItems },
     { data: recentCounts },
-    { data: allInventoryItems },
     { data: templates },
     { data: pendingDrafts },
   ] = await Promise.all([
@@ -25,11 +24,16 @@ export default async function InventoryPage() {
       .eq('org_id', membership.org_id)
       .eq('is_active', true)
       .order('name'),
+    // Fetched once, unfiltered by is_active, with the superset of columns
+    // both `items` (active-only) and `allInventoryItems` (all statuses,
+    // portfolio-wide) need — the two used to be separate queries against
+    // the same table, fetching up to ~2,500 rows twice per page load.
     supabase
       .from('inventory_items')
-      .select('*')
+      .select('*, property:properties(name)')
       .eq('org_id', membership.org_id)
-      .eq('is_active', true)
+      .order('property_id')
+      .order('category')
       .order('name'),
     supabase
       .from('purchase_orders')
@@ -54,13 +58,6 @@ export default async function InventoryPage() {
       .eq('org_id', membership.org_id)
       .order('submitted_at', { ascending: false })
       .limit(50),
-    supabase
-      .from('inventory_items')
-      .select('id, name, category, unit, par_level, current_quantity, first_count_recorded_at, preferred_brand, property_id, property:properties(name)')
-      .eq('org_id', membership.org_id)
-      .order('property_id')
-      .order('category')
-      .order('name'),
     supabase
       .from('inventory_templates')
       .select('id, name, inventory_template_items(id, name, category, unit, par_level, notes, sort_order, preferred_brand)')
@@ -91,12 +88,16 @@ export default async function InventoryPage() {
   const template  = templates?.[0] ?? null
   const cartData  = (cartMilestone?.value ?? null) as (CartBuildResult & { built_at: string; location_name: string }) | null
 
-  const normalizedAllInventoryItems = (allInventoryItems ?? []).map((item) => ({
+  const normalizedAllInventoryItems = (allInventoryItemsRaw ?? []).map((item) => ({
     ...item,
     property: Array.isArray(item.property)
       ? (item.property[0] ?? null)
       : (item.property ?? null),
   }))
+
+  const items = normalizedAllInventoryItems
+    .filter((item) => item.is_active)
+    .sort((a, b) => a.name.localeCompare(b.name))
 
   const admin = createServiceClient()
   const { data: krogerConnection } = await admin
