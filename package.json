@@ -26,7 +26,7 @@
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
     "@sentry/nextjs": "^10.65.0",
-    "@supabase/ssr": "^0.10.3",
+    "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
