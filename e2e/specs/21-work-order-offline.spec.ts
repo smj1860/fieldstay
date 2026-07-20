@@ -98,7 +98,7 @@ test.describe('Work order offline support', () => {
     const { data: vendor } = await supabase
       .from('vendors').select('id').eq('org_id', ctx.orgId).eq('name', '[E2E] Reliable Plumbing Co.').single()
 
-    const token = crypto.randomBytes(32).toString('hex')
+    const token = crypto.randomUUID()
     const { data: wo, error: woErr } = await supabase.from('work_orders').insert({
       org_id:                      ctx.orgId,
       property_id:                 property!.id,
@@ -153,7 +153,7 @@ test.describe('Work order offline support', () => {
     const { data: vendor } = await supabase
       .from('vendors').select('id').eq('org_id', ctx.orgId).eq('name', '[E2E] Reliable Plumbing Co.').single()
 
-    const token = crypto.randomBytes(32).toString('hex')
+    const token = crypto.randomUUID()
     const { data: wo, error: woErr } = await supabase.from('work_orders').insert({
       org_id:                      ctx.orgId,
       property_id:                 property!.id,
