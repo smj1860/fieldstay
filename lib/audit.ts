@@ -138,6 +138,12 @@ export type AuditAction =
   | 'property.door_code.viewed'
   | 'org.default_room_templates_seeded'
   | 'org.bedroom_bathroom_mapping_changed'
+  | 'platform_admin.seed_template.created'
+  | 'platform_admin.seed_template.updated'
+  | 'platform_admin.seed_template.deleted'
+  | 'platform_admin.inventory_catalog_item.created'
+  | 'platform_admin.inventory_catalog_item.updated'
+  | 'platform_admin.inventory_catalog_item.deleted'
 
 interface AuditParams {
   orgId?:         string

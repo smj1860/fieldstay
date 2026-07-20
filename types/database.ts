@@ -415,6 +415,31 @@ export interface RoomTemplateItem {
   created_at:       string
 }
 
+export interface PlatformStaff {
+  user_id:    string
+  role:       'support' | 'admin'
+  created_at: string
+}
+
+export interface PlatformSeedRoomTemplate {
+  id:           string
+  name:         string
+  auto_include: boolean
+  sort_order:   number
+  created_at:   string
+  updated_at:   string
+}
+
+export interface PlatformSeedRoomTemplateItem {
+  id:                              string
+  platform_seed_room_template_id: string
+  task:                            string
+  requires_photo:                  boolean
+  notes:                           string | null
+  sort_order:                      number
+  created_at:                      string
+}
+
 export interface Turnover {
   id:                    string
   property_id:           string
@@ -1526,6 +1551,9 @@ export interface Database {
       checklist_template_items:    { Row: ChecklistTemplateItem;    Insert: Partial<ChecklistTemplateItem>;    Update: Partial<ChecklistTemplateItem>;    Relationships: [] }
       room_templates:              { Row: RoomTemplate;             Insert: Partial<RoomTemplate>;             Update: Partial<RoomTemplate>;             Relationships: [] }
       room_template_items:         { Row: RoomTemplateItem;         Insert: Partial<RoomTemplateItem>;         Update: Partial<RoomTemplateItem>;         Relationships: [] }
+      platform_staff:                      { Row: PlatformStaff;                 Insert: Partial<PlatformStaff>;                 Update: Partial<PlatformStaff>;                 Relationships: [] }
+      platform_seed_room_templates:       { Row: PlatformSeedRoomTemplate;      Insert: Partial<PlatformSeedRoomTemplate>;      Update: Partial<PlatformSeedRoomTemplate>;      Relationships: [] }
+      platform_seed_room_template_items:  { Row: PlatformSeedRoomTemplateItem;  Insert: Partial<PlatformSeedRoomTemplateItem>;  Update: Partial<PlatformSeedRoomTemplateItem>;  Relationships: [] }
       turnovers:                   { Row: Turnover;                 Insert: Partial<Turnover>;                 Update: Partial<Turnover>;                 Relationships: [] }
       turnover_assignments:        { Row: TurnoverAssignment;       Insert: Partial<TurnoverAssignment>;       Update: Partial<TurnoverAssignment>;       Relationships: [] }
       checklist_instances:         { Row: ChecklistInstance;        Insert: Partial<ChecklistInstance>;        Update: Partial<ChecklistInstance>;        Relationships: [] }

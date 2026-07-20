@@ -2,83 +2,47 @@ import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 
+type ServiceClient = ReturnType<typeof createServiceClient>
+
+interface SeedTask {
+  task:          string
+  requiresPhoto: boolean
+  notes:         string | null
+}
+
 interface SeedTemplate {
   name:        string
   autoInclude: boolean
-  tasks:       string[]
+  tasks:       SeedTask[]
 }
 
-// Standalone content — not sourced from CLEANING_CATALOG/
-// org_master_checklist_items, which this feature replaces rather than
-// reads from.
-const SEED_TEMPLATES: SeedTemplate[] = [
-  {
-    name: 'Kitchen', autoInclude: true,
-    tasks: [
-      'Wipe down all countertops and backsplash',
-      'Clean stovetop and burners',
-      'Wipe down oven interior and exterior',
-      'Clean microwave inside and out',
-      'Wipe exterior of refrigerator; clean inside and remove any old food',
-      'Wash, dry, and put away any dishes; run dishwasher if needed',
-      'Empty trash and replace liner',
-      'Wipe cabinet fronts and handles',
-      'Sweep and mop floor',
-      'Restock dish soap, sponge, and paper towels',
-    ],
-  },
-  {
-    name: 'Living Room', autoInclude: true,
-    tasks: [
-      'Dust all surfaces, shelves, and electronics',
-      'Vacuum or sweep and mop floor',
-      'Fluff and straighten couch cushions and throw pillows',
-      'Fold and neatly arrange any throw blankets',
-      'Wipe down coffee table and end tables',
-      'Check under and between furniture cushions for anything a guest left behind',
-      'Empty trash',
-      'Straighten remotes and check/replace batteries if needed',
-    ],
-  },
-  {
-    name: 'Whole Home', autoInclude: true,
-    tasks: [
-      'Check all windows are closed and locked',
-      'Turn off all lights',
-      'Set thermostat to the standard vacant temperature',
-      'Empty all trash cans throughout the property, not just kitchen/bathrooms',
-      'Confirm smoke and CO detectors are present and not beeping low-battery',
-      'Walk every room and take photos for the condition record',
-      'Lock all doors on exit',
-      'Report any damage, missing items, or maintenance issues found',
-    ],
-  },
-  {
-    name: 'Bedroom', autoInclude: false,
-    tasks: [
-      'Strip all bed linens and pillowcases',
-      'Make bed with fresh linens',
-      'Dust all furniture surfaces',
-      'Vacuum floor and under bed',
-      'Empty trash',
-      'Check closet and dresser drawers for anything a guest left behind',
-      'Restock extra blankets/pillows if the property provides them',
-    ],
-  },
-  {
-    name: 'Bathroom', autoInclude: false,
-    tasks: [
-      'Scrub toilet bowl, seat, and base',
-      'Clean sink, faucet, and countertop',
-      'Wipe mirror',
-      'Scrub shower/tub and glass doors',
-      'Sweep and mop floor',
-      'Empty trash and replace liner',
-      'Restock toilet paper, hand soap, and shampoo/conditioner',
-      'Replace bath mat if provided',
-    ],
-  },
-]
+// Content lives in platform_seed_room_templates/platform_seed_room_template_items
+// (see supabase/migrations/20260720120100_platform_seed_room_templates.sql),
+// editable by a platform admin at /admin/seed-templates without a code
+// deploy — not sourced from CLEANING_CATALOG/org_master_checklist_items,
+// which this feature replaces rather than reads from.
+async function fetchPlatformSeedTemplates(supabase: ServiceClient): Promise<SeedTemplate[]> {
+  const { data, error } = await supabase
+    .from('platform_seed_room_templates')
+    .select(`
+      name, auto_include, sort_order,
+      platform_seed_room_template_items ( task, requires_photo, notes, sort_order )
+    `)
+    .order('sort_order')
+
+  if (error) {
+    console.error('[seedDefaultRoomTemplatesIfNeeded] failed to fetch platform seed templates:', error)
+    return []
+  }
+
+  return (data ?? []).map((t) => ({
+    name:        t.name,
+    autoInclude: t.auto_include,
+    tasks: [...(t.platform_seed_room_template_items ?? [])]
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((i) => ({ task: i.task, requiresPhoto: i.requires_photo, notes: i.notes })),
+  }))
+}
 
 /**
  * Auto-creates Whole Home, Kitchen, Living Room, Bedroom, and Bathroom room
@@ -134,6 +98,14 @@ const SEED_TEMPLATES: SeedTemplate[] = [
 export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<void> {
   const supabase = createServiceClient()
 
+  const seedTemplates = await fetchPlatformSeedTemplates(supabase)
+  if (seedTemplates.length === 0) {
+    // Nothing configured platform-side yet — e.g. a fresh environment
+    // before a platform admin has visited /admin/seed-templates, or that
+    // migration hasn't run here. Nothing to seed.
+    return
+  }
+
   const { data: org } = await supabase
     .from('organizations')
     .select('default_room_templates_seeded_at')
@@ -152,9 +124,9 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
       .from('room_templates')
       .select('id', { count: 'exact', head: true })
       .eq('org_id', orgId)
-      .in('name', SEED_TEMPLATES.map((t) => t.name))
+      .in('name', seedTemplates.map((t) => t.name))
 
-    if ((count ?? 0) >= SEED_TEMPLATES.length) return
+    if ((count ?? 0) >= seedTemplates.length) return
   } else {
     // Best-effort race guard for the common case (two truly concurrent
     // callers) — not load-bearing for correctness on its own, since
@@ -167,7 +139,7 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
       .is('default_room_templates_seeded_at', null)
   }
 
-  const results = await upsertSeedTemplates(supabase, orgId)
+  const results = await upsertSeedTemplates(supabase, orgId, seedTemplates)
 
   // Only backfill from a template genuinely created THIS call — never
   // from one that already existed, whether because seeding had already
@@ -201,8 +173,6 @@ export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<v
   }
 }
 
-type ServiceClient = ReturnType<typeof createServiceClient>
-
 interface UpsertResult {
   id:      string
   created: boolean
@@ -212,12 +182,13 @@ interface UpsertResult {
 // cognitive complexity down — one focused job (create-or-find each seed
 // template, seed its items if empty) per helper.
 async function upsertSeedTemplates(
-  supabase: ServiceClient,
-  orgId:    string,
+  supabase:      ServiceClient,
+  orgId:         string,
+  seedTemplates: SeedTemplate[],
 ): Promise<Record<string, UpsertResult>> {
   const results: Record<string, UpsertResult> = {}
 
-  for (const template of SEED_TEMPLATES) {
+  for (const template of seedTemplates) {
     const result = await upsertOneSeedTemplate(supabase, orgId, template)
     if (result) results[template.name] = result
   }
@@ -274,11 +245,11 @@ async function upsertOneSeedTemplate(
 
   if (!count) {
     await supabase.from('room_template_items').insert(
-      template.tasks.map((task, i) => ({
+      template.tasks.map((t, i) => ({
         room_template_id: roomId,
-        task,
-        requires_photo:    false,
-        notes:             null,
+        task:              t.task,
+        requires_photo:    t.requiresPhoto,
+        notes:             t.notes,
         sort_order:        i,
       }))
     )
