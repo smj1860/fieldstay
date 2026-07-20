@@ -7,8 +7,9 @@ import { logAuditEvent, logAuditEvents } from '@/lib/audit'
  * cron-vendor-compliance-expiry-check so that day's first_warned_at
  * updates have already landed.
  *
- * The vendor_compliance_status view (migration 20260606051120) computes
- * grace_period / hard_blocked purely from expiry_date, so those statuses
+ * The vendor_compliance_status view (migration 20260606051120, grace
+ * period widened to 45 days by 20260720170645) computes grace_period /
+ * hard_blocked purely from expiry_date, so those statuses
  * are always correct without a cron. But the *moments* a document enters
  * the grace period or crosses into hard-block were never recorded or
  * audited anywhere — this cron closes that gap:
@@ -18,7 +19,7 @@ import { logAuditEvent, logAuditEvents } from '@/lib/audit'
  *     only fires once per document (same idempotency principle as the
  *     first_warned_at gate, computed over a single day instead of a
  *     boolean column).
- *  b. Documents where expiry_date <= CURRENT_DATE - 31 and
+ *  b. Documents where expiry_date <= CURRENT_DATE - 46 and
  *     hard_blocked_at IS NULL just crossed into hard-block territory.
  *     hard_blocked_at is set atomically (idempotent update-then-check
  *     gate, mirroring first_warned_at in the expiry-check cron) so a
@@ -66,11 +67,11 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
 
     logger.info(`Found ${graceDocs.length} compliance document(s) entering the grace period`)
 
-    // ── b. Hard block crossing (expiry_date <= today - 31, not yet recorded) ─
+    // ── b. Hard block crossing (expiry_date <= today - 46, not yet recorded) ─
 
     const hardBlockCandidates = await step.run('find-hard-block-candidates', async () => {
       const supabase  = createServiceClient()
-      const cutoff    = new Date(Date.now() - 31 * 86_400_000).toISOString().split('T')[0]
+      const cutoff    = new Date(Date.now() - 46 * 86_400_000).toISOString().split('T')[0]
 
       const { data } = await supabase
         .from('vendor_compliance_documents')

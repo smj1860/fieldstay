@@ -52,8 +52,8 @@ Before a work order can be dispatched to a vendor, FieldStay checks their compli
 
 - **Compliant** — valid COI and licenses on file, dispatch proceeds normally
 - **Expiring Soon** — COI expires within 30 days, you'll see a warning but can still dispatch
-- **Grace Period** — COI has expired 1–30 days ago, requires acknowledgment before dispatch
-- **Hard Blocked** — COI expired 31+ days ago, vendor cannot be assigned until documents are updated
+- **Grace Period** — COI has expired 1–45 days ago, requires acknowledgment before dispatch
+- **Hard Blocked** — COI expired 46+ days ago, vendor cannot be assigned until documents are updated
 
 Add and manage vendor compliance documents under **Vendors → [Vendor Name] → Compliance**.
 
