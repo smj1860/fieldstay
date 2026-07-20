@@ -4,6 +4,67 @@ import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
 } from '@/lib/rate-limit'
 
+// ── Content Security Policy ────────────────────────────────────────────────
+// Generated fresh per request so script-src can carry a per-request nonce
+// instead of a blanket 'unsafe-inline' — Next.js automatically stamps that
+// nonce onto the inline <script>self.__next_f.push()</script> tags it uses
+// in production to stream the RSC/hydration payload, once it sees a
+// 'nonce-...' source in the response's CSP header. This must be the only
+// place the app sets this header — a second static CSP (e.g. in
+// next.config.ts) would make the browser enforce the *intersection* of both,
+// silently dropping the nonce and reintroducing the hydration breakage this
+// replaces.
+function buildCsp(nonce: string, isDev: boolean) {
+  return [
+    // Locked-down default — no blanket https: source
+    "default-src 'self'",
+
+    // Scripts: nonce covers Next.js's own inline hydration scripts;
+    // wasm-unsafe-eval required by Supabase JS client. Dev mode additionally
+    // needs 'unsafe-eval' for Turbopack's eval()-based module wrapping/HMR.
+    isDev
+      ? `script-src 'self' 'nonce-${nonce}' 'unsafe-eval' 'wasm-unsafe-eval'`
+      : `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
+
+    // Styles: 'unsafe-inline' required for the codebase's established
+    // style={{ ... }} convention with CSS variables. Inline styles are CSS,
+    // not JS — no code-execution XSS risk from this directive.
+    "style-src 'self' 'unsafe-inline'",
+
+    // Images: data: for base64, blob: for canvas/crop/file preview
+    "img-src 'self' data: blob: https:",
+
+    // Fonts: self + Google Fonts CDN if used
+    "font-src 'self' data: https://fonts.gstatic.com",
+
+    // Frames: Stripe hosted elements only
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+
+    // Workers: blob: required for Supabase Realtime and some WASM usage
+    "worker-src 'self' blob:",
+
+    // API + WebSocket connections. Sentry ingest host added for client-side
+    // error/trace reporting (instrumentation-client.ts) — without this the
+    // browser SDK's own requests get silently blocked by this same CSP.
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511737962364928.ingest.us.sentry.io http://localhost:* ws://localhost:* wss://localhost:*",
+
+    // Object/media: locked down entirely
+    "object-src 'none'",
+    "media-src 'self'",
+
+    // Base URI: prevent base tag injection attacks
+    "base-uri 'self'",
+
+    // Form submissions: self only
+    "form-action 'self'",
+  ].join('; ')
+}
+
+function withCsp(response: NextResponse, nonce: string) {
+  response.headers.set('Content-Security-Policy', buildCsp(nonce, process.env.NODE_ENV !== 'production'))
+  return response
+}
+
 // ── Public routes ──────────────────────────────────────────────────────────
 // Unauthenticated users can access these. Authenticated users are redirected
 // away from most of them (except '/') to avoid showing the logged-out UI.
@@ -126,7 +187,12 @@ function rateLimiterForPathname(pathname: string) {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return NextResponse.next()
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
+  // Forwarded as a request header so Next.js's own script-tag rendering
+  // (and any Server Component that wants it) can read it via headers().
+  request.headers.set('x-nonce', nonce)
+
+  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return withCsp(NextResponse.next({ request }), nonce)
 
   // Rate limit unauthenticated token-guessable routes — guards against
   // token enumeration and request flooding.
@@ -143,7 +209,7 @@ export async function proxy(request: NextRequest) {
         await tokenRouteLimiter.limit(ip)
 
       if (!success) {
-        return new NextResponse(
+        return withCsp(new NextResponse(
           JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
           {
             status:  429,
@@ -155,7 +221,7 @@ export async function proxy(request: NextRequest) {
               'Retry-After':           String(Math.ceil((reset - Date.now()) / 1000)),
             },
           }
-        )
+        ), nonce)
       }
     } catch (err) {
       // If Redis is unavailable, fail open — don't take down these public
@@ -164,7 +230,7 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r)))  return NextResponse.next()
+  if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r)))  return withCsp(NextResponse.next({ request }), nonce)
 
   const { supabaseResponse, user } = await updateSession(request)
 
@@ -177,7 +243,7 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     url.searchParams.set('next', pathname)
-    return NextResponse.redirect(url)
+    return withCsp(NextResponse.redirect(url), nonce)
   }
 
   // Authenticated user hitting a public route → redirect into the app.
@@ -188,12 +254,12 @@ export async function proxy(request: NextRequest) {
     const next = request.nextUrl.searchParams.get('next') ?? ''
     url.pathname = next.startsWith('/crew') ? '/crew' : '/ops'
     url.search   = ''
-    return NextResponse.redirect(url)
+    return withCsp(NextResponse.redirect(url), nonce)
   }
 
   supabaseResponse.headers.set('x-pathname', pathname)
 
-  return supabaseResponse
+  return withCsp(supabaseResponse, nonce)
 }
 
 export const config = {
