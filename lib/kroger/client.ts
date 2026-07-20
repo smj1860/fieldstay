@@ -187,7 +187,7 @@ export async function findNearestKrogerStore(
 ): Promise<KrogerLocation | null> {
   const params = new URLSearchParams({
     'filter.zipCode.near':  zipCode,
-    'filter.radiusInMiles': '25',
+    'filter.radiusInMiles': '35',
     'filter.limit':         '1',
   })
 
