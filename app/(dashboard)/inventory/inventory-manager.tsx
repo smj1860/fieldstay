@@ -200,7 +200,14 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
   }
 
   return (
-    <div className="flex items-center gap-1">
+    <div
+      className="relative z-10 flex items-center gap-1 p-1.5 rounded-lg"
+      style={{
+        background:  'var(--bg-raised)',
+        border:      '1px solid var(--border-strong)',
+        boxShadow:   'var(--shadow-card)',
+      }}
+    >
       <Input
         type="number"
         min={0}
@@ -225,7 +232,7 @@ function ParLevelEditor({ item }: { item: InventoryItem }) {
       >
         Cancel
       </button>
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-red-600 whitespace-nowrap">{error}</span>}
     </div>
   )
 }
