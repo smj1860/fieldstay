@@ -21,3 +21,58 @@ jobs:
       - run: pnpm run lint
       - run: pnpm test
       - run: pnpm run build
+
+  # ── End-to-end (Playwright) ──────────────────────────────────────────────
+  # STATUS: wired but not yet enforced. `continue-on-error: true` below means
+  # this job can fail without failing the overall CI run or blocking merges,
+  # because none of the secrets it needs exist in this repo yet:
+  #
+  #   1. A dedicated Supabase project/branch for E2E, migrated and with an
+  #      E2E_PM_EMAIL account whose org has completed all 8 onboarding steps
+  #      and has plan_status = 'active' (or an unexpired trial) — see
+  #      e2e/global-setup.ts for the exact preconditions it checks.
+  #   2. The following repo secrets (Settings → Secrets and variables →
+  #      Actions), matching the names in .env.example:
+  #        NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  #        SUPABASE_SERVICE_ROLE_KEY, E2E_PM_EMAIL, E2E_PM_PASSWORD,
+  #        E2E_CREW_EMAIL, E2E_CREW_PASSWORD, plus enough of the
+  #        third-party keys (Stripe, Resend, Mapbox, Telnyx, VAPID) for the
+  #        specific flows the specs under e2e/specs/ actually exercise.
+  #
+  # Once those exist, remove `continue-on-error: true` and add this job as a
+  # required status check in the repo's branch protection settings to make
+  # it a real merge gate, per the launch-readiness audit's B2 finding.
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      NEXT_PUBLIC_SUPABASE_URL:      ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY:     ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      E2E_PM_EMAIL:                  ${{ secrets.E2E_PM_EMAIL }}
+      E2E_PM_PASSWORD:               ${{ secrets.E2E_PM_PASSWORD }}
+      E2E_CREW_EMAIL:                ${{ secrets.E2E_CREW_EMAIL }}
+      E2E_CREW_PASSWORD:             ${{ secrets.E2E_CREW_PASSWORD }}
+      STRIPE_SECRET_KEY:             ${{ secrets.STRIPE_SECRET_KEY }}
+      RESEND_API_KEY:                ${{ secrets.RESEND_API_KEY }}
+      MAPBOX_PUBLIC_TOKEN:           ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY:  ${{ secrets.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY:             ${{ secrets.VAPID_PRIVATE_KEY }}
+      INNGEST_EVENT_KEY:             ${{ secrets.INNGEST_EVENT_KEY }}
+      INNGEST_SIGNING_KEY:           ${{ secrets.INNGEST_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
