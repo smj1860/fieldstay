@@ -215,6 +215,23 @@
     padding-right: env(safe-area-inset-right);
   }
 
+  /* Native date input calendar icon — default browser icon renders
+     near-black and is nearly invisible against this app's dark UI.
+     color-scheme tells supporting browsers to theme native form controls
+     (including this icon) for a dark background; the filter is a
+     belt-and-suspenders fallback specifically for Chrome/Edge/Safari,
+     since color-scheme support for this exact icon varies by browser
+     version. Firefox does not support ::-webkit-calendar-picker-indicator
+     at all — its calendar icon isn't controllable via CSS the same way
+     and may still render dark there. */
+  input[type="date"] {
+    color-scheme: dark;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+
   /* Scrollbar */
   ::-webkit-scrollbar       { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: transparent; }

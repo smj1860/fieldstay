@@ -62,6 +62,16 @@ const config: Config = {
         display: ['var(--font-inter)', 'sans-serif'],
         sans:    ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
+      // Confirmed via side-by-side preview against real dashboard markup
+      // before shipping. Only these three sizes change — text-lg and up,
+      // and every spacing/padding/gap/rounded utility, are untouched.
+      // Do not bump html's root font-size instead of this — that was the
+      // rejected alternative (it would have scaled spacing too).
+      fontSize: {
+        xs:   ['13px', { lineHeight: '17px' }],
+        sm:   ['15px', { lineHeight: '21px' }],
+        base: ['17px', { lineHeight: '25px' }],
+      },
     },
   },
   plugins: [],
