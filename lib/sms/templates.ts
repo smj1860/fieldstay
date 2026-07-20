@@ -103,7 +103,10 @@ function renderDefault(
       )
 
     case 'rain_alert':
-      return buildRainAlertSMS(String(vars.property_name ?? ''))
+      return buildRainAlertSMS(
+        String(vars.property_name ?? ''),
+        vars.offer_line ? String(vars.offer_line) : null
+      )
 
     case 'stay_extension':
       return [

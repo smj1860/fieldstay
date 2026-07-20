@@ -158,8 +158,11 @@ export function buildEveningNudgeSMS(
   return offerLine ? `${base} ${offerLine} Reply STOP to opt out.` : `${base} Reply STOP to opt out.`
 }
 
-export function buildRainAlertSMS(propertyName: string): string {
-  return `Heads up — rain expected near ${propertyName} today. Check your guidebook for rainy-day recommendations. Reply STOP to opt out.`
+export function buildRainAlertSMS(propertyName: string, sponsorLine: string | null): string {
+  const base = `Heads up — rain expected near ${propertyName} today.`
+  return sponsorLine
+    ? `${base} ${sponsorLine} Reply STOP to opt out.`
+    : `${base} Check your guidebook for rainy-day recommendations. Reply STOP to opt out.`
 }
 
 export function buildVendorWorkOrderSMS(params: {
