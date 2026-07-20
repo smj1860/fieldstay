@@ -266,9 +266,14 @@ export function ChecklistBuilder({
     setSections((p) => [...p, { tempId: makeId(), name: 'New Section', items: [] }])
   }
 
-  // Auto-include rooms (e.g. "Whole Home") aren't offered here — they're
-  // already seeded automatically and aren't a per-quantity, opt-in choice.
-  const pickerRoomTemplates = roomTemplates.filter((room) => !room.autoInclude)
+  // Every room template in the org's library is offered here, including
+  // auto_include ones (Kitchen, Whole Home, Living Room) — a property
+  // whose checklist predates this org's auto-seed, or was built before an
+  // auto_include template existed, has no other way to add the missing
+  // one. applyRoomQuantities' own currentCount-vs-targetCount check
+  // already prevents adding a duplicate of a room that's already present,
+  // the same guard that already applies to Bedroom/Bathroom today.
+  const pickerRoomTemplates = roomTemplates
 
   const applyRoomQuantities = () => {
     setSections((prev) => {
