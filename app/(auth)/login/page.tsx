@@ -4,6 +4,7 @@ import { Suspense } from 'react'
 import { LoginForm } from './login-form'
 
 export const metadata: Metadata = { title: 'Log In' }
+export const dynamic = 'force-dynamic'
 
 function LoginFormSkeleton() {
   return (
