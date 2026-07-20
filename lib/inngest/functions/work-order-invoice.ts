@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
 import { getPmEmails }         from '@/lib/inngest/helpers'
 import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
   {
@@ -37,8 +38,8 @@ export const handleWorkOrderInvoiceSubmitted = inngest.createFunction(
         return
       }
 
-      const vendor   = Array.isArray(wo.vendors)   ? wo.vendors[0]   : wo.vendors
-      const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+      const vendor   = unwrapJoin(wo.vendors)
+      const property = unwrapJoin(wo.properties)
 
       const [pmEmail] = await getPmEmails(supabase, org_id)
       if (!pmEmail) {

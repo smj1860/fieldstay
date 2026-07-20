@@ -9,6 +9,7 @@ import { ReviewPrompt } from '@/components/review-prompt'
 import { NewPropertySetupPrompt } from '@/components/new-property-setup-prompt'
 import { calcOnboardingProgress, ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 import { getNotifications } from '@/lib/notifications'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export const metadata: Metadata = {
   manifest:   '/dashboard-manifest.json',
@@ -44,9 +45,7 @@ export default async function DashboardLayout({
 
   if (!membership) redirect('/onboarding')
 
-  const org = Array.isArray(membership.organizations)
-    ? membership.organizations[0]
-    : membership.organizations
+  const org = unwrapJoin(membership.organizations)
 
   const repuguardActive =
     org?.repuguard_status === 'trial' || org?.repuguard_status === 'active'

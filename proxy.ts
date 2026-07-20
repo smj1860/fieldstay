@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
-import { workOrderRatelimit, vendorConnectRatelimit } from '@/lib/rate-limit'
+import {
+  workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
+} from '@/lib/rate-limit'
 
 // ── Public routes ──────────────────────────────────────────────────────────
 // Unauthenticated users can access these. Authenticated users are redirected
@@ -26,6 +28,7 @@ const TOKEN_ROUTES = [
   '/wo/',
   '/vendor-connect/',
   '/api/vendor-connect',
+  '/g/',
 ]
 
 // ── Bypass routes ──────────────────────────────────────────────────────────
@@ -97,13 +100,15 @@ const BYPASS_ROUTES = [
   // Supabase auth callback (magic links, OAuth email confirmation)
   '/auth/callback',
 
-  // Guest-facing guidebook routes (media kit signup + guest guidebook pages).
-  // Intentionally public — guests and sponsors never have a FieldStay session.
-  '/g/',
-
   // Account deletion — handles its own auth verification server-side
   '/api/account/delete',
 ]
+
+// Guest-facing guidebook routes (media kit signup + guest guidebook pages,
+// see TOKEN_ROUTES above) are intentionally public — guests and sponsors
+// never have a FieldStay session — but still get rate-limited like every
+// other token-guessable route, so they're a TOKEN_ROUTES entry, not a
+// BYPASS_ROUTES one (bypass skips rate limiting entirely).
 
 // Each guessable-token surface gets its own limiter/prefix so hammering
 // one doesn't throttle another.
@@ -113,6 +118,8 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/api/work-orders'))    return workOrderRatelimit
   if (pathname.startsWith('/vendor-connect/'))    return vendorConnectRatelimit
   if (pathname.startsWith('/api/vendor-connect')) return vendorConnectRatelimit
+  if (pathname.startsWith('/owner/'))             return ownerPortalRatelimit
+  if (pathname.startsWith('/g/'))                 return guidebookRatelimit
   return null
 }
 
@@ -185,18 +192,6 @@ export async function proxy(request: NextRequest) {
   }
 
   supabaseResponse.headers.set('x-pathname', pathname)
-// Append Hospitable domains to CSP — next.config.ts headers are overridden
-// by supabaseResponse when middleware returns a custom response object.
- const csp = supabaseResponse.headers.get('Content-Security-Policy') ?? ''
- if (csp && !csp.includes('auth.hospitable.com')) {
-   supabaseResponse.headers.set(
-     'Content-Security-Policy',
-     csp.replace(
-       'connect-src ',
-       'connect-src https://auth.hospitable.com https://public.api.hospitable.com '
-     )
-   )
- }
 
   return supabaseResponse
 }

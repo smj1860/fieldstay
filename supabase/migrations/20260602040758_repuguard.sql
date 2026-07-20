@@ -54,12 +54,14 @@ ALTER TABLE public.organizations
 ALTER TABLE public.reviews          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.review_responses ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Org members can read their reviews" ON public.reviews;
 CREATE POLICY "Org members can read their reviews"
   ON public.reviews FOR SELECT
   USING (org_id IN (
     SELECT org_id FROM organization_members WHERE user_id = auth.uid()
   ));
 
+DROP POLICY IF EXISTS "Org members can manage their review responses" ON public.review_responses;
 CREATE POLICY "Org members can manage their review responses"
   ON public.review_responses FOR ALL
   USING (org_id IN (

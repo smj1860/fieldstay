@@ -24,7 +24,7 @@ created from a maintenance schedule, the right vendor is selected and notified.
 
 | Layer | Tool | Notes |
 |---|---|---|
-| Framework | Next.js 14+ App Router | Server Components, Server Actions, Route Handlers |
+| Framework | Next.js 16 App Router | Server Components, Server Actions, Route Handlers |
 | Hosting | Vercel | Edge runtime where applicable |
 | Database | Supabase (PostgreSQL) | RLS on every table, no exceptions |
 | Auth | Supabase Auth | `createServerClient` from `@supabase/ssr` |

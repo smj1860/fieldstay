@@ -24,151 +24,171 @@ export interface RoomTemplateItemInput {
 export async function createRoomTemplate(
   name: string
 ): Promise<{ id?: string; error?: string }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const roleError = assertCanManage(membership.role)
-  if (roleError) return { error: roleError }
+    const roleError = assertCanManage(membership.role)
+    if (roleError) return { error: roleError }
 
-  const trimmed = name.trim()
-  if (!trimmed) return { error: 'Room name is required.' }
+    const trimmed = name.trim()
+    if (!trimmed) return { error: 'Room name is required.' }
 
-  const { data, error } = await supabase
-    .from('room_templates')
-    .insert({ org_id: membership.org_id, name: trimmed })
-    .select('id')
-    .single()
+    const { data, error } = await supabase
+      .from('room_templates')
+      .insert({ org_id: membership.org_id, name: trimmed })
+      .select('id')
+      .single()
 
-  if (error || !data) {
-    console.error('[createRoomTemplate]', error)
+    if (error || !data) {
+      console.error('[createRoomTemplate]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'room_template.created',
+      targetType: 'room_template',
+      targetId:   data.id,
+      metadata:   { name: trimmed },
+    })
+
+    revalidatePath('/settings/room-templates')
+    return { id: data.id }
+  } catch (err) {
+    console.error('[createRoomTemplate]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'room_template.created',
-    targetType: 'room_template',
-    targetId:   data.id,
-    metadata:   { name: trimmed },
-  })
-
-  revalidatePath('/settings/room-templates')
-  return { id: data.id }
 }
 
 export async function renameRoomTemplate(
   roomTemplateId: string,
   name: string
 ): Promise<{ error?: string }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const roleError = assertCanManage(membership.role)
-  if (roleError) return { error: roleError }
+    const roleError = assertCanManage(membership.role)
+    if (roleError) return { error: roleError }
 
-  const trimmed = name.trim()
-  if (!trimmed) return { error: 'Room name is required.' }
+    const trimmed = name.trim()
+    if (!trimmed) return { error: 'Room name is required.' }
 
-  // A client-supplied id must be confirmed to belong to this org before we
-  // touch it — the id alone is not proof of ownership.
-  const { data, error } = await supabase
-    .from('room_templates')
-    .update({ name: trimmed, updated_at: new Date().toISOString() })
-    .eq('id', roomTemplateId)
-    .eq('org_id', membership.org_id)
-    .select('id')
-    .maybeSingle()
+    // A client-supplied id must be confirmed to belong to this org before we
+    // touch it — the id alone is not proof of ownership.
+    const { data, error } = await supabase
+      .from('room_templates')
+      .update({ name: trimmed, updated_at: new Date().toISOString() })
+      .eq('id', roomTemplateId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
-  if (error) {
-    console.error('[renameRoomTemplate]', error)
+    if (error) {
+      console.error('[renameRoomTemplate]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!data) return { error: 'Room template not found.' }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'room_template.renamed',
+      targetType: 'room_template',
+      targetId:   roomTemplateId,
+      metadata:   { name: trimmed },
+    })
+
+    revalidatePath('/settings/room-templates')
+    return {}
+  } catch (err) {
+    console.error('[renameRoomTemplate]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-  if (!data) return { error: 'Room template not found.' }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'room_template.renamed',
-    targetType: 'room_template',
-    targetId:   roomTemplateId,
-    metadata:   { name: trimmed },
-  })
-
-  revalidatePath('/settings/room-templates')
-  return {}
 }
 
 export async function setRoomTemplateAutoInclude(
   roomTemplateId: string,
   autoInclude: boolean
 ): Promise<{ error?: string }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const roleError = assertCanManage(membership.role)
-  if (roleError) return { error: roleError }
+    const roleError = assertCanManage(membership.role)
+    if (roleError) return { error: roleError }
 
-  const { data, error } = await supabase
-    .from('room_templates')
-    .update({ auto_include: autoInclude, updated_at: new Date().toISOString() })
-    .eq('id', roomTemplateId)
-    .eq('org_id', membership.org_id)
-    .select('id')
-    .maybeSingle()
+    const { data, error } = await supabase
+      .from('room_templates')
+      .update({ auto_include: autoInclude, updated_at: new Date().toISOString() })
+      .eq('id', roomTemplateId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
-  if (error) {
-    console.error('[setRoomTemplateAutoInclude]', error)
+    if (error) {
+      console.error('[setRoomTemplateAutoInclude]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!data) return { error: 'Room template not found.' }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'room_template.auto_include_changed',
+      targetType: 'room_template',
+      targetId:   roomTemplateId,
+      metadata:   { auto_include: autoInclude },
+    })
+
+    revalidatePath('/settings/room-templates')
+    revalidatePath('/properties')
+    return {}
+  } catch (err) {
+    console.error('[setRoomTemplateAutoInclude]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-  if (!data) return { error: 'Room template not found.' }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'room_template.auto_include_changed',
-    targetType: 'room_template',
-    targetId:   roomTemplateId,
-    metadata:   { auto_include: autoInclude },
-  })
-
-  revalidatePath('/settings/room-templates')
-  revalidatePath('/properties')
-  return {}
 }
 
 export async function deleteRoomTemplate(
   roomTemplateId: string
 ): Promise<{ error?: string }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const roleError = assertCanManage(membership.role)
-  if (roleError) return { error: roleError }
+    const roleError = assertCanManage(membership.role)
+    if (roleError) return { error: roleError }
 
-  // Deleting cascades room_template_items and SETs NULL any
-  // checklist_template_sections.room_template_id currently linked to it —
-  // those sections become normal independent sections, their items untouched.
-  const { data, error } = await supabase
-    .from('room_templates')
-    .delete()
-    .eq('id', roomTemplateId)
-    .eq('org_id', membership.org_id)
-    .select('id')
-    .maybeSingle()
+    // Deleting cascades room_template_items and SETs NULL any
+    // checklist_template_sections.room_template_id currently linked to it —
+    // those sections become normal independent sections, their items untouched.
+    const { data, error } = await supabase
+      .from('room_templates')
+      .delete()
+      .eq('id', roomTemplateId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
 
-  if (error) {
-    console.error('[deleteRoomTemplate]', error)
+    if (error) {
+      console.error('[deleteRoomTemplate]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!data) return { error: 'Room template not found.' }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'room_template.deleted',
+      targetType: 'room_template',
+      targetId:   roomTemplateId,
+    })
+
+    revalidatePath('/settings/room-templates')
+    return {}
+  } catch (err) {
+    console.error('[deleteRoomTemplate]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-  if (!data) return { error: 'Room template not found.' }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'room_template.deleted',
-    targetType: 'room_template',
-    targetId:   roomTemplateId,
-  })
-
-  revalidatePath('/settings/room-templates')
-  return {}
 }
 
 /**
@@ -194,52 +214,57 @@ export async function setBedroomBathroomMapping(
   bedroomRoomTemplateId:  string | null,
   bathroomRoomTemplateId: string | null
 ): Promise<{ error?: string }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const roleError = assertCanManage(membership.role)
-  if (roleError) return { error: roleError }
+    const roleError = assertCanManage(membership.role)
+    if (roleError) return { error: roleError }
 
-  const idsToVerify = [bedroomRoomTemplateId, bathroomRoomTemplateId].filter(
-    (id): id is string => id !== null
-  )
-  if (idsToVerify.length > 0) {
-    const { data: owned } = await supabase
-      .from('room_templates')
-      .select('id')
-      .eq('org_id', membership.org_id)
-      .in('id', idsToVerify)
-    if ((owned?.length ?? 0) !== idsToVerify.length) {
-      return { error: 'One or more room templates not found.' }
+    const idsToVerify = [bedroomRoomTemplateId, bathroomRoomTemplateId].filter(
+      (id): id is string => id !== null
+    )
+    if (idsToVerify.length > 0) {
+      const { data: owned } = await supabase
+        .from('room_templates')
+        .select('id')
+        .eq('org_id', membership.org_id)
+        .in('id', idsToVerify)
+      if ((owned?.length ?? 0) !== idsToVerify.length) {
+        return { error: 'One or more room templates not found.' }
+      }
     }
-  }
 
-  const serviceSupabase = createServiceClient()
-  const { error } = await serviceSupabase
-    .from('organizations')
-    .update({
-      bedroom_room_template_id:  bedroomRoomTemplateId,
-      bathroom_room_template_id: bathroomRoomTemplateId,
+    const serviceSupabase = createServiceClient()
+    const { error } = await serviceSupabase
+      .from('organizations')
+      .update({
+        bedroom_room_template_id:  bedroomRoomTemplateId,
+        bathroom_room_template_id: bathroomRoomTemplateId,
+      })
+      .eq('id', membership.org_id)
+
+    if (error) {
+      console.error('[setBedroomBathroomMapping]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org.bedroom_bathroom_mapping_changed',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+      metadata:   { bedroom_room_template_id: bedroomRoomTemplateId, bathroom_room_template_id: bathroomRoomTemplateId },
     })
-    .eq('id', membership.org_id)
 
-  if (error) {
-    console.error('[setBedroomBathroomMapping]', error)
+    revalidatePath('/settings/room-templates')
+    revalidatePath('/setup/checklist-template')
+    revalidatePath('/properties')
+    return {}
+  } catch (err) {
+    console.error('[setBedroomBathroomMapping]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'org.bedroom_bathroom_mapping_changed',
-    targetType: 'organization',
-    targetId:   membership.org_id,
-    metadata:   { bedroom_room_template_id: bedroomRoomTemplateId, bathroom_room_template_id: bathroomRoomTemplateId },
-  })
-
-  revalidatePath('/settings/room-templates')
-  revalidatePath('/setup/checklist-template')
-  revalidatePath('/properties')
-  return {}
 }
 
 // Full replace of one room's items — safe because nothing outside this
@@ -249,55 +274,60 @@ export async function saveRoomTemplateItems(
   roomTemplateId: string,
   items: RoomTemplateItemInput[]
 ): Promise<{ error?: string; saved: number }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const roleError = assertCanManage(membership.role)
-  if (roleError) return { error: roleError, saved: 0 }
+    const roleError = assertCanManage(membership.role)
+    if (roleError) return { error: roleError, saved: 0 }
 
-  const { data: room } = await supabase
-    .from('room_templates')
-    .select('id')
-    .eq('id', roomTemplateId)
-    .eq('org_id', membership.org_id)
-    .maybeSingle()
-  if (!room) return { error: 'Room template not found.', saved: 0 }
+    const { data: room } = await supabase
+      .from('room_templates')
+      .select('id')
+      .eq('id', roomTemplateId)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+    if (!room) return { error: 'Room template not found.', saved: 0 }
 
-  const { error: deleteError } = await supabase
-    .from('room_template_items')
-    .delete()
-    .eq('room_template_id', roomTemplateId)
+    const { error: deleteError } = await supabase
+      .from('room_template_items')
+      .delete()
+      .eq('room_template_id', roomTemplateId)
 
-  if (deleteError) {
-    console.error('[saveRoomTemplateItems] delete failed', deleteError)
+    if (deleteError) {
+      console.error('[saveRoomTemplateItems] delete failed', deleteError)
+      return { error: 'Operation failed. Please try again.', saved: 0 }
+    }
+
+    if (items.length > 0) {
+      const { error: insertError } = await supabase.from('room_template_items').insert(
+        items.map((item) => ({
+          room_template_id: roomTemplateId,
+          task:             item.task,
+          requires_photo:   item.requires_photo,
+          notes:            item.notes || null,
+          sort_order:       item.sort_order,
+        }))
+      )
+      if (insertError) {
+        console.error('[saveRoomTemplateItems] insert failed', insertError)
+        return { error: 'Failed to save tasks. Please try again.', saved: 0 }
+      }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'room_template.items_updated',
+      targetType: 'room_template',
+      targetId:   roomTemplateId,
+      metadata:   { saved: items.length },
+    })
+
+    revalidatePath('/settings/room-templates')
+    revalidatePath('/properties')
+    return { saved: items.length }
+  } catch (err) {
+    console.error('[saveRoomTemplateItems]', err)
     return { error: 'Operation failed. Please try again.', saved: 0 }
   }
-
-  if (items.length > 0) {
-    const { error: insertError } = await supabase.from('room_template_items').insert(
-      items.map((item) => ({
-        room_template_id: roomTemplateId,
-        task:             item.task,
-        requires_photo:   item.requires_photo,
-        notes:            item.notes || null,
-        sort_order:       item.sort_order,
-      }))
-    )
-    if (insertError) {
-      console.error('[saveRoomTemplateItems] insert failed', insertError)
-      return { error: 'Failed to save tasks. Please try again.', saved: 0 }
-    }
-  }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'room_template.items_updated',
-    targetType: 'room_template',
-    targetId:   roomTemplateId,
-    metadata:   { saved: items.length },
-  })
-
-  revalidatePath('/settings/room-templates')
-  revalidatePath('/properties')
-  return { saved: items.length }
 }

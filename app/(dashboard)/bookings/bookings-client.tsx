@@ -10,6 +10,7 @@ import {
   Search, Download, LayoutList,
 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { createBooking, cancelBooking, triggerSync } from './actions'
 import { BookingsCalendar } from './bookings-calendar'
 import { Dialog } from '@/components/ui/Dialog'
@@ -79,8 +80,7 @@ function getDateLabel(date: string): { label: string; urgent: boolean } {
 }
 
 function getTurnover(row: BookingRow): { id: string; status: string } | null {
-  if (!row.turnovers) return null
-  return Array.isArray(row.turnovers) ? (row.turnovers[0] ?? null) : row.turnovers
+  return unwrapJoin(row.turnovers)
 }
 
 // ── Source badges ─────────────────────────────────────────────────────────────
@@ -678,10 +678,7 @@ export function BookingsClient({
                 {checkinsToday.length} check-in{checkinsToday.length !== 1 ? 's' : ''} today
               </span>
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {checkinsToday.map((b) => b.properties
-                  ? (Array.isArray(b.properties) ? b.properties[0]?.name : b.properties.name)
-                  : '—'
-                ).join(', ')}
+                {checkinsToday.map((b) => unwrapJoin(b.properties)?.name ?? '—').join(', ')}
               </span>
             </div>
           )}

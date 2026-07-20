@@ -1,13 +1,10 @@
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { DBClient } from '@/lib/supabase/server'
 import type { AssetType } from '@/types/database'
 import {
   REQUIRED_ASSET_TYPES,
   ASSET_DISCOVERY_SECTION,
   discoveryTaskLabel,
 } from '@/lib/asset-discovery/config'
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DBClient = SupabaseClient<any>
 
 /**
  * Returns the required asset types that have not yet been discovered

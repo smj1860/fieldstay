@@ -27,23 +27,37 @@ COMMENT ON COLUMN work_orders.assigned_crew_member_id IS
 --    policies with no WITH CHECK clause (null qual). Consolidate to
 --    a clean set: one SELECT, one INSERT, one ALL for admin/manager/owner.
 -- ================================================================
-DROP POLICY IF EXISTS "Admins and managers can manage communication logs"   ON communication_logs;
-DROP POLICY IF EXISTS "Admins and managers can log communications"           ON communication_logs;
-DROP POLICY IF EXISTS "org members can insert comm logs"                     ON communication_logs;
-DROP POLICY IF EXISTS "Org members can view communication logs"              ON communication_logs;
-DROP POLICY IF EXISTS "Admins and managers manage communication logs"        ON communication_logs;
+-- Guard: communication_logs was created outside tracked migration history
+-- (dashboard DDL, backfilled later by the baseline schema snapshot), so a
+-- fresh replay reaches this file before the table exists.
+DO $$
+BEGIN
+  IF to_regclass('public.communication_logs') IS NULL THEN
+    RETURN;
+  END IF;
 
--- Authoritative replacement policies
-CREATE POLICY "comm_logs_select"
-  ON communication_logs
-  FOR SELECT
-  USING (org_id IN (SELECT get_user_org_ids()));
+  DROP POLICY IF EXISTS "Admins and managers can manage communication logs"   ON communication_logs;
+  DROP POLICY IF EXISTS "Admins and managers can log communications"           ON communication_logs;
+  DROP POLICY IF EXISTS "org members can insert comm logs"                     ON communication_logs;
+  DROP POLICY IF EXISTS "Org members can view communication logs"              ON communication_logs;
+  DROP POLICY IF EXISTS "Admins and managers manage communication logs"        ON communication_logs;
 
-CREATE POLICY "comm_logs_manage"
-  ON communication_logs
-  FOR ALL
-  USING (is_org_member(org_id, ARRAY['admin'::member_role, 'manager'::member_role]))
-  WITH CHECK (is_org_member(org_id, ARRAY['admin'::member_role, 'manager'::member_role]));
+  -- Authoritative replacement policies
+  EXECUTE $pol$
+    CREATE POLICY "comm_logs_select"
+      ON communication_logs
+      FOR SELECT
+      USING (org_id IN (SELECT get_user_org_ids()))
+  $pol$;
+
+  EXECUTE $pol$
+    CREATE POLICY "comm_logs_manage"
+      ON communication_logs
+      FOR ALL
+      USING (is_org_member(org_id, ARRAY['admin'::member_role, 'manager'::member_role]))
+      WITH CHECK (is_org_member(org_id, ARRAY['admin'::member_role, 'manager'::member_role]))
+  $pol$;
+END $$;
 
 -- ================================================================
 -- 3. Fix owner_transactions — explicitly add INSERT WITH CHECK

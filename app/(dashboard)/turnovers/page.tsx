@@ -1,5 +1,6 @@
 import { requireOrgMember } from '@/lib/auth'
 import { TurnoverBoard } from './turnover-board'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Turnovers' }
@@ -89,9 +90,7 @@ export default async function TurnoversPage() {
     stay_type: t.booking_id ? (stayTypeByBookingId[t.booking_id] ?? null) : null,
     turnover_assignments: t.turnover_assignments.map((a) => ({
       ...a,
-      crew_member: Array.isArray(a.crew_member)
-        ? (a.crew_member[0] ?? null)
-        : (a.crew_member ?? null),
+      crew_member: unwrapJoin(a.crew_member),
     })),
   }))
 

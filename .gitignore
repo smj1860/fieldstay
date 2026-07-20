@@ -3,6 +3,10 @@ node_modules/
 .pnp
 .pnp.js
 
+# pnpm is the canonical package manager (see packageManager in package.json) —
+# never commit an npm lockfile alongside pnpm-lock.yaml
+package-lock.json
+
 # Next.js
 .next/
 out/

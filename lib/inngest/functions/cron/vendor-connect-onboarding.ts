@@ -25,6 +25,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 const BATCH_SIZE = 25
 
@@ -92,9 +93,7 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
 
         for (const vendor of batch) {
           try {
-            const org = Array.isArray(vendor.organizations)
-              ? vendor.organizations[0]
-              : vendor.organizations
+            const org = unwrapJoin(vendor.organizations)
             const orgName = (org as { name?: string | null } | null)?.name ?? 'Your property manager'
 
             const { invited } = await ensureVendorConnectInvited({

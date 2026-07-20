@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, Clock } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 interface FeedRow {
   id: string
@@ -25,7 +26,7 @@ export function ChannelHealthTable({ feeds }: Readonly<{ feeds: FeedRow[] }>) {
   )
 
   const propertyName = (f: FeedRow) =>
-    Array.isArray(f.properties) ? f.properties[0]?.name : f.properties?.name
+    unwrapJoin(f.properties)?.name
 
   return (
     <div className="mt-8">

@@ -2,7 +2,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
+import { redirect, unstable_rethrow } from 'next/navigation'
 import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { inngest } from '@/lib/inngest/client'
@@ -146,84 +146,105 @@ export async function saveChecklistTemplate(
   templateId: string | null,
   sections: ChecklistSectionInput[]
 ): Promise<ChecklistState> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const resolved = await resolveTemplateId(supabase, propertyId, membership.org_id, templateId)
-  if (resolved.error || !resolved.id) return { error: resolved.error ?? 'Operation failed. Please try again.' }
-  const tmplId = resolved.id
+    const resolved = await resolveTemplateId(supabase, propertyId, membership.org_id, templateId)
+    if (resolved.error || !resolved.id) return { error: resolved.error ?? 'Operation failed. Please try again.' }
+    const tmplId = resolved.id
 
-  const roomError = await validateRoomTemplateIds(supabase, membership.org_id, sections)
-  if (roomError) return { error: roomError }
+    const roomError = await validateRoomTemplateIds(supabase, membership.org_id, sections)
+    if (roomError) return { error: roomError }
 
-  const sectionsError = await replaceSections(supabase, tmplId, sections)
-  if (sectionsError) return { error: sectionsError }
+    const sectionsError = await replaceSections(supabase, tmplId, sections)
+    if (sectionsError) return { error: sectionsError }
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'property.checklist_template.updated',
-    targetType: 'checklist_template',
-    targetId:   tmplId,
-    metadata:   { property_id: propertyId, sections: sections.length },
-  })
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.checklist_template.updated',
+      targetType: 'checklist_template',
+      targetId:   tmplId,
+      metadata:   { property_id: propertyId, sections: sections.length },
+    })
 
-  revalidatePath(`/properties/${propertyId}/setup/checklist`)
-  return { success: true }
+    revalidatePath(`/properties/${propertyId}/setup/checklist`)
+    return { success: true }
+  } catch (err) {
+    console.error('[saveChecklistTemplate]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
 }
 
 export async function completeChecklistStep(propertyId: string): Promise<void> {
-  await markStepComplete(propertyId, 'checklist')
-  redirect(`/properties/${propertyId}/setup/maintenance`)
+  try {
+    await markStepComplete(propertyId, 'checklist')
+    redirect(`/properties/${propertyId}/setup/maintenance`)
+  } catch (err) {
+    unstable_rethrow(err)
+    console.error('[completeChecklistStep]', err)
+    throw err
+  }
 }
 
 export async function broadcastChecklistTemplate(
   sourcePropertyId: string,
   targetPropertyIds: string[]
 ): Promise<{ broadcast: number; error?: string }> {
-  const { user, membership } = await requireOrgMember()
+  try {
+    const { user, membership } = await requireOrgMember()
 
-  if (!targetPropertyIds.length) return { broadcast: 0 }
+    if (!targetPropertyIds.length) return { broadcast: 0 }
 
-  await inngest.send({
-    name: 'checklist/template-broadcast',
-    data: {
-      org_id:              membership.org_id,
-      source_property_id:  sourcePropertyId,
-      target_property_ids: targetPropertyIds,
-      triggered_by:        user.id,
-    },
-  })
+    await inngest.send({
+      name: 'checklist/template-broadcast',
+      data: {
+        org_id:              membership.org_id,
+        source_property_id:  sourcePropertyId,
+        target_property_ids: targetPropertyIds,
+        triggered_by:        user.id,
+      },
+    })
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'property.checklist_template.updated',
-    targetType: 'property',
-    targetId:   sourcePropertyId,
-    metadata:   { broadcast_to: targetPropertyIds },
-  })
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.checklist_template.updated',
+      targetType: 'property',
+      targetId:   sourcePropertyId,
+      metadata:   { broadcast_to: targetPropertyIds },
+    })
 
-  revalidatePath('/properties')
-  return { broadcast: targetPropertyIds.length }
+    revalidatePath('/properties')
+    return { broadcast: targetPropertyIds.length }
+  } catch (err) {
+    console.error('[broadcastChecklistTemplate]', err)
+    return { broadcast: 0, error: 'Operation failed. Please try again.' }
+  }
 }
 
 export async function cloneChecklistFromProperty(
   sourcePropertyId: string,
   targetPropertyId: string,
 ): Promise<{ broadcast: number; error?: string }> {
-  const { user, membership } = await requireOrgMember()
+  try {
+    const { user, membership } = await requireOrgMember()
 
-  const result = await broadcastChecklistTemplate(sourcePropertyId, [targetPropertyId])
-  if (result.error) return result
+    const result = await broadcastChecklistTemplate(sourcePropertyId, [targetPropertyId])
+    if (result.error) return result
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'property.checklist.cloned',
-    targetType: 'property',
-    targetId:   targetPropertyId,
-    metadata:   { sourcePropertyId },
-  })
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.checklist.cloned',
+      targetType: 'property',
+      targetId:   targetPropertyId,
+      metadata:   { sourcePropertyId },
+    })
 
-  return result
+    return result
+  } catch (err) {
+    console.error('[cloneChecklistFromProperty]', err)
+    return { broadcast: 0, error: 'Operation failed. Please try again.' }
+  }
 }

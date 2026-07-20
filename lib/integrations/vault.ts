@@ -11,6 +11,7 @@
 
 import { createServiceClient } from '@/lib/supabase/server'
 import { randomBytes } from 'crypto'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 /** Service-role admin client, routed through the one central helper. */
 function getAdminClient() {
@@ -268,7 +269,7 @@ export async function claimPendingIntegrationLink(
     throw new Error(`[Vault] Failed to claim pending integration link: ${error.message}`)
   }
 
-  const row = Array.isArray(data) ? data[0] : data
+  const row = unwrapJoin(data)
   if (!row) return null
 
   return {

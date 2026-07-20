@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export interface NotificationItem {
   id:       string
@@ -73,8 +74,7 @@ interface VendorComplianceAlertRow {
 }
 
 function propertyName(p: { name: string } | { name: string }[] | null): string {
-  if (!p) return 'Property'
-  return Array.isArray(p) ? (p[0]?.name ?? 'Property') : p.name
+  return unwrapJoin(p)?.name ?? 'Property'
 }
 
 // Surfaces the operational alerts a PM needs to act on right now —

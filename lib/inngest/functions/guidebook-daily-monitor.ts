@@ -2,6 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { stripe } from '@/lib/stripe/client'
 import { getActiveSponsorCount } from '@/lib/guidebook/helpers'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export const guidebookDailyMonitor = inngest.createFunction(
   {
@@ -50,9 +51,7 @@ export const guidebookDailyMonitor = inngest.createFunction(
     // step, but the steps themselves fire concurrently instead of one at a time.
     const creditEvents = await Promise.all(
       activeOrgs.map((row) => {
-        const org = Array.isArray(row.organizations)
-          ? row.organizations[0]
-          : row.organizations
+        const org = unwrapJoin(row.organizations)
 
         if (!org?.stripe_subscription_id || !org.stripe_customer_id) return null
 

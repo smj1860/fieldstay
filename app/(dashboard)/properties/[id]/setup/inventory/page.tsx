@@ -1,6 +1,7 @@
 import { requireProperty } from '@/lib/auth'
 import { InventorySetup } from './inventory-setup'
 import { Card } from '@/components/ui/Card'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Inventory Setup' }
@@ -53,7 +54,7 @@ export default async function InventoryPage({ params }: Props) {
   const propertyNames: Record<string, string> = {}
   for (const row of siblingItems ?? []) {
     itemCountByProperty[row.property_id] = (itemCountByProperty[row.property_id] ?? 0) + 1
-    const p = Array.isArray(row.properties) ? row.properties[0] : row.properties
+    const p = unwrapJoin(row.properties)
     if (p?.name) propertyNames[row.property_id] = p.name
   }
   const sourceProperties = Object.entries(itemCountByProperty)

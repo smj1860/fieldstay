@@ -2,6 +2,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import type { MemberRole } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export interface OrgMembership {
   org_id: string
@@ -51,9 +52,7 @@ export async function requireOrgMember(): Promise<
 
   if (!row) redirect('/onboarding')
 
-  const orgData = Array.isArray(row.organizations)
-    ? row.organizations[0]
-    : row.organizations
+  const orgData = unwrapJoin(row.organizations)
 
   const membership: OrgMembership = {
     org_id: row.org_id,

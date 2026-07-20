@@ -19,6 +19,7 @@
 // ============================================================
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export type HealthStatus = 'healthy' | 'never_synced' | 'needs_attention' | 'needs_reconnect'
 
@@ -104,7 +105,7 @@ export async function getIntegrationHealth(orgId: string): Promise<IntegrationHe
   })
 
   const feedItems: IntegrationHealthItem[] = (feeds ?? []).map((f) => {
-    const property = Array.isArray(f.properties) ? f.properties[0] : f.properties
+    const property = unwrapJoin(f.properties)
     return {
       kind:        'ical_feed',
       id:          f.id,

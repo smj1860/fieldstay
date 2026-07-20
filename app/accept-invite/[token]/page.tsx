@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { AcceptForm }           from './accept-form'
 import { AlertTriangle }        from 'lucide-react'
+import { unwrapJoin }           from '@/lib/utils/supabase-joins'
 
 export default async function AcceptInvitePage({
   params,
@@ -42,9 +43,7 @@ export default async function AcceptInvitePage({
     )
   }
 
-  const orgData = Array.isArray(invite.organizations)
-    ? invite.organizations[0]
-    : invite.organizations
+  const orgData = unwrapJoin(invite.organizations)
   const orgName = (orgData as { name?: string } | null)?.name ?? 'your team'
 
   return (

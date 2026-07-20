@@ -6,6 +6,7 @@ import { CheckCircle2, Clock, User, ArrowLeft, Camera } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { TurnoverRating } from './turnover-rating'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Turnover Detail' }
@@ -57,9 +58,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
     existingRating = outcomes?.[0]?.pm_rating ?? null
   }
 
-  const checklistInstance = Array.isArray(turnover.checklist_instances)
-    ? turnover.checklist_instances[0]
-    : turnover.checklist_instances
+  const checklistInstance = unwrapJoin(turnover.checklist_instances)
 
   const checklistItems = checklistInstance
     ? Array.isArray((checklistInstance as { checklist_instance_items: unknown }).checklist_instance_items)
@@ -78,7 +77,7 @@ export default async function TurnoverDetailPage({ params }: Props) {
   const totalCount     = checklistItems.length
   const checklistPct   = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0
 
-  const incomingBooking = Array.isArray(turnover.bookings) ? turnover.bookings[0] : turnover.bookings
+  const incomingBooking = unwrapJoin(turnover.bookings)
 
   return (
     <div className="max-w-3xl">

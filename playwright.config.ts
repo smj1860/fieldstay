@@ -49,7 +49,7 @@ export default defineConfig({
   ...(
     !process.env.E2E_BASE_URL?.startsWith('http://localhost') ? {} : {
       webServer: {
-        command:          'npm run dev',
+        command:          'pnpm run dev',
         url:              'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
         timeout:          120_000,

@@ -3,6 +3,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { computeOccupancy } from '@/lib/owner-portal/occupancy'
 import type { TxnType } from '@/types/database'
 import type { CapExProjectionPayload } from '@/lib/inngest/functions/capex-projections'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 /**
  * Data loading for the owner portal page — extracted out of
@@ -137,9 +138,7 @@ export async function loadOwnerPortalData(
     .update({ last_accessed_at: new Date().toISOString() })
     .eq('id', portalToken.id)
 
-  const ownerRaw = Array.isArray(portalToken.property_owners)
-    ? portalToken.property_owners[0]
-    : portalToken.property_owners
+  const ownerRaw = unwrapJoin(portalToken.property_owners)
 
   if (!ownerRaw) return null
 
@@ -158,9 +157,7 @@ export async function loadOwnerPortalData(
     ])
   }
 
-  const property = Array.isArray(ownerRaw.properties)
-    ? ownerRaw.properties[0]
-    : ownerRaw.properties
+  const property = unwrapJoin(ownerRaw.properties)
 
   if (!property) return null
 

@@ -15,55 +15,60 @@ export interface MaintenanceScheduleInput {
 export async function saveMasterMaintenanceSchedules(
   items: MaintenanceScheduleInput[]
 ): Promise<{ error?: string; saved: number }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  // Full replace
-  await supabase
-    .from('org_master_maintenance_schedules')
-    .update({ is_active: false })
-    .eq('org_id', membership.org_id)
+    // Full replace
+    await supabase
+      .from('org_master_maintenance_schedules')
+      .update({ is_active: false })
+      .eq('org_id', membership.org_id)
 
-  if (items.length === 0) {
+    if (items.length === 0) {
+      await logAuditEvent({
+        orgId:      membership.org_id,
+        actorId:    user.id,
+        action:     'maintenance.template.updated',
+        targetType: 'organization',
+        targetId:   membership.org_id,
+        metadata:   { saved: 0 },
+      })
+      return { saved: 0 }
+    }
+
+    const { error } = await supabase
+      .from('org_master_maintenance_schedules')
+      .insert(
+        items.map((item) => ({
+          org_id:         membership.org_id,
+          title:          item.title,
+          description:    item.description,
+          frequency:      item.frequency,
+          specialty:      item.specialty,
+          estimated_cost: item.estimated_cost,
+          is_active:      true,
+        }))
+      )
+
+    if (error) {
+      console.error('[saveMasterMaintenanceSchedules]', error)
+      return { error: 'Operation failed. Please try again.', saved: 0 }
+    }
+
     await logAuditEvent({
       orgId:      membership.org_id,
       actorId:    user.id,
       action:     'maintenance.template.updated',
       targetType: 'organization',
       targetId:   membership.org_id,
-      metadata:   { saved: 0 },
+      metadata:   { saved: items.length },
     })
-    return { saved: 0 }
-  }
 
-  const { error } = await supabase
-    .from('org_master_maintenance_schedules')
-    .insert(
-      items.map((item) => ({
-        org_id:         membership.org_id,
-        title:          item.title,
-        description:    item.description,
-        frequency:      item.frequency,
-        specialty:      item.specialty,
-        estimated_cost: item.estimated_cost,
-        is_active:      true,
-      }))
-    )
-
-  if (error) {
-    console.error('[saveMasterMaintenanceSchedules]', error)
+    revalidatePath('/setup')
+    revalidatePath('/maintenance')
+    return { saved: items.length }
+  } catch (err) {
+    console.error('[saveMasterMaintenanceSchedules]', err)
     return { error: 'Operation failed. Please try again.', saved: 0 }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'maintenance.template.updated',
-    targetType: 'organization',
-    targetId:   membership.org_id,
-    metadata:   { saved: items.length },
-  })
-
-  revalidatePath('/setup')
-  revalidatePath('/maintenance')
-  return { saved: items.length }
 }

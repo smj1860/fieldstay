@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { VendorQuotePortal }   from '../vendor-portal'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 interface Props { params: Promise<{ token: string }> }
 
@@ -31,8 +32,8 @@ export default async function QuotePortalPage({ params }: Props) {
     )
   }
 
-  const wo       = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
-  const property = wo && (Array.isArray(wo.properties) ? wo.properties[0] : wo.properties)
+  const wo       = unwrapJoin(qr.work_orders)
+  const property = wo && unwrapJoin(wo.properties)
   const expired  = new Date(qr.quote_token_expires_at) < new Date()
 
   return (

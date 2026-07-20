@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChevronLeft }                 from 'lucide-react'
 import { createClient }                from '@/lib/supabase/client'
 import { cn }                          from '@/lib/utils'
+import { unwrapJoin }                  from '@/lib/utils/supabase-joins'
 
 interface ConversationRow {
   id:                string
@@ -141,7 +142,7 @@ export function SupportInboxClient({
 
   const selected = conversations.find(c => c.id === selectedId)
   const orgName  = (org: ConversationRow['organizations']) =>
-    Array.isArray(org) ? org[0]?.name : org?.name
+    unwrapJoin(org)?.name
 
   const roleBubble = (m: MessageRow) => {
     if (m.role === 'user') {
@@ -169,7 +170,7 @@ export function SupportInboxClient({
   }
 
   const feedbackCrewName = (crew: FeedbackRow['crew_members']) =>
-    Array.isArray(crew) ? crew[0]?.name : crew?.name
+    unwrapJoin(crew)?.name
 
   return (
     <>

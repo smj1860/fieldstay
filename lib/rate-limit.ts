@@ -68,6 +68,26 @@ export const vendorConnectRatelimit = new Ratelimit({
   prefix:    'rl:vendor-connect',
 })
 
+// Owner portal (/owner/[token]) — same rationale as workOrderRatelimit: a
+// UUID token makes brute-force impractical, but the route is unauthenticated
+// and serves financial P&L data, so it still needs its own throttle rather
+// than relying on token entropy alone.
+export const ownerPortalRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:owner-portal',
+})
+
+// Guest-facing guidebook routes (/g/*) — media kit signup, guest guidebook
+// view, and the SMS opt-in link. All unauthenticated and token-guessable.
+export const guidebookRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(30, '1 m'),
+  analytics: false,
+  prefix:    'rl:guidebook',
+})
+
 // Sign-off action — 5 submissions per 5 minutes per work order token
 // A contractor will never legitimately submit more than once
 export const signOffRatelimit = new Ratelimit({
