@@ -40,9 +40,11 @@ OWNERREZ_WEBHOOK_USER=
 OWNERREZ_WEBHOOK_PASSWORD=
 
 # Hostaway (API key — not OAuth)
-# Hospitable (OAuth2)
-# Both configured per-org through the integration registry; no global
-# client id/secret env vars — see Integration Registry below.
+# Hospitable (OAuth2) — HOSPITABLE_CLIENT_ID / HOSPITABLE_CLIENT_SECRET /
+# HOSPITABLE_WEBHOOK_SECRET ARE global env vars (see .env.example); every
+# org's OAuth flow uses the same registered app. lib/integrations/providers/
+# hospitable-token.ts and hospitable.ts both throw at runtime if unset.
+# See Integration Registry below for how per-org tokens are then stored.
 
 # Mapbox (geocoding — properties and vendors)
 MAPBOX_PUBLIC_TOKEN=
