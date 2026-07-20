@@ -2,7 +2,7 @@ import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { distanceMiles } from '@/lib/geocoding'
-import { sendSMS, formatOffer } from '@/lib/sms/telnyx'
+import { sendSMS, buildSponsorLine } from '@/lib/sms/telnyx'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { claimDailySmsSlot, releaseDailySmsSlot } from '@/lib/sms/optin-claim'
 import type { GuidebookSponsor } from '@/types/database'
@@ -119,15 +119,18 @@ export const guidebookSmsMorningCron = inngest.createFunction(
         const orgSponsors = sponsorsByOrg[optin.org_id] ?? []
         const morningBrews = orgSponsors.filter((s) => s.slot_type === 'morning_brew')
         const pool         = morningBrews.length > 0 ? morningBrews : orgSponsors.filter((s) => s.slot_type === 'general')
-        const sponsor      = pickNearestSponsor(pool, property.lat, property.lng)
+        const picked       = pickNearestSponsor(pool, property.lat, property.lng)
 
-        if (!sponsor) return false
+        if (!picked) return false
+        const { sponsor, distanceMiles: sponsorDistanceMi } = picked
 
-        const offerLine = formatOffer(
+        const offerLine = buildSponsorLine(
+          sponsor.business_name,
           sponsor.offer_type,
           sponsor.offer_value,
           sponsor.offer_item,
-          sponsor.custom_offer_text
+          sponsor.custom_offer_text,
+          sponsorDistanceMi
         )
 
         // Claim the slot atomically before sending — see rain-alert branch above.
@@ -158,9 +161,12 @@ function pickNearestSponsor(
   sponsors: GuidebookSponsor[],
   lat: number,
   lng: number
-): GuidebookSponsor | null {
+): { sponsor: GuidebookSponsor; distanceMiles: number | null } | null {
   const withCoords = sponsors.filter((s) => s.lat !== null && s.lng !== null)
-  if (withCoords.length === 0) return sponsors[0] ?? null
+  if (withCoords.length === 0) {
+    const fallback = sponsors[0]
+    return fallback ? { sponsor: fallback, distanceMiles: null } : null
+  }
 
   let nearest: GuidebookSponsor | null = null
   let nearestDist = Infinity
@@ -168,5 +174,5 @@ function pickNearestSponsor(
     const dist = distanceMiles(lat, lng, s.lat!, s.lng!)
     if (dist < nearestDist) { nearestDist = dist; nearest = s }
   }
-  return nearest
+  return nearest ? { sponsor: nearest, distanceMiles: nearestDist } : null
 }

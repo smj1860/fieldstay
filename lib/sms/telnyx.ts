@@ -49,6 +49,33 @@ export function formatOffer(
   }
 }
 
+/**
+ * Builds the sponsor line for morning/evening nudge SMS. A custom offer is
+ * sent verbatim — the sponsor owns that copy entirely. Every other offer
+ * type (including 'none') is wrapped in a default line that always names
+ * the business, since a bare discount — or a silent nudge — is useless to
+ * the guest without knowing who it's from.
+ */
+export function buildSponsorLine(
+  businessName:    string,
+  offerType:       GuidebookOfferType,
+  offerValue:      number | null,
+  offerItem:       string | null,
+  customOfferText: string | null,
+  distanceMiles:   number | null
+): string {
+  const locationSuffix = distanceMiles !== null ? ` (${distanceMiles.toFixed(1)} mi away)` : ''
+
+  if (offerType === 'custom') {
+    return customOfferText?.trim() || `Try ${businessName}${locationSuffix} — a local favorite.`
+  }
+
+  const offerLine = formatOffer(offerType, offerValue, offerItem, customOfferText)
+  return offerLine
+    ? `${businessName} has ${offerLine}${locationSuffix}.`
+    : `Try ${businessName}${locationSuffix} — a local favorite.`
+}
+
 interface SendSmsResult {
   sent:   boolean
   reason?: string

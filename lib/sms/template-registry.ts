@@ -83,7 +83,7 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     variables: [
       { token: '{{property_name}}', description: 'Property name',           example: 'Lakeside Lodge' },
       { token: '{{temperature}}',   description: 'Current temp in °F',      example: '72' },
-      { token: '{{offer_line}}',    description: 'Sponsor offer (may be empty)', example: '20% off at Sunrise Coffee — just show this screen' },
+      { token: '{{offer_line}}',    description: 'Sponsor line — always names the active sponsor; includes their offer or custom message plus distance when available', example: 'Sunrise Coffee has 20% off — just show this screen (0.4 mi away)' },
     ],
     defaultBody: 'Good morning! It\'s {{temperature}}°F at {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
   },
@@ -94,7 +94,7 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     audience:    'guest',
     variables: [
       { token: '{{property_name}}', description: 'Property name',                example: 'Lakeside Lodge' },
-      { token: '{{offer_line}}',    description: 'Sponsor offer (may be empty)', example: 'Free dessert at River Bistro — just show this screen' },
+      { token: '{{offer_line}}',    description: 'Sponsor line — always names the active sponsor; includes their offer or custom message plus distance when available', example: 'River Bistro has free dessert — just show this screen (0.8 mi away)' },
     ],
     defaultBody: 'Hope you\'re enjoying your stay at {{property_name}}! {{offer_line}} Reply STOP to opt out.',
   },
