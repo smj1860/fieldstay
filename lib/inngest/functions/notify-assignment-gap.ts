@@ -1,7 +1,7 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend, FROM }        from '@/lib/resend/client'
-import { escapeHtml }          from '@/lib/utils/html'
+import { renderPmAlert }       from '@/lib/resend/emails/pm-alert'
 import { getPmMembers, type PmMember } from '@/lib/inngest/helpers'
 
 export const notifyAssignmentGap = inngest.createFunction(
@@ -40,24 +40,12 @@ export const notifyAssignmentGap = inngest.createFunction(
             from:    FROM,
             to:      member.email,
             subject: `Action required — No crew available for ${context.propertyName} on ${dateStr}`,
-            html: `
-              <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-                <h2>Crew coverage gap</h2>
-                <p>
-                  ${escapeHtml(context.propertyName)} has a turnover scheduled for
-                  <strong>${dateStr}</strong> with no available crew member to
-                  auto-assign (needed ${crew_needed}, found ${crew_found}).
-                </p>
-                <p>This turnover is unassigned and waiting on manual assignment.</p>
-                <p>
-                  <a href="${appUrl}/turnovers/${turnover_id}"
-                     style="background:#093b31;color:white;padding:10px 20px;
-                            text-decoration:none;border-radius:6px;display:inline-block">
-                    View Turnover →
-                  </a>
-                </p>
-              </div>
-            `,
+            html: await renderPmAlert({
+              heading:  'Crew coverage gap',
+              body:     `${context.propertyName} has a turnover scheduled for ${dateStr} with no available crew member to auto-assign (needed ${crew_needed}, found ${crew_found}). This turnover is unassigned and waiting on manual assignment.`,
+              ctaLabel: 'View Turnover →',
+              ctaUrl:   `${appUrl}/turnovers/${turnover_id}`,
+            }),
           },
           { idempotencyKey: `assignment-gap-${turnover_id}-${member.userId}` }
         )
