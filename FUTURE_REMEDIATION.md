@@ -130,20 +130,16 @@ now purely the reliability backstop for whatever a scoped webhook run
 misses, not the primary sync path, so a wider window is an acceptable
 tradeoff.
 
-**Still open, not addressed by the above:** when the shared rate-limit
-budget IS exhausted mid-tick, the per-connection loop in
-`ownerrez-incremental-sync.ts` calls `step.sleep(retryAfterSeconds)`
-sequentially before moving to the next connection rather than failing that
-tick fast — if the budget is exhausted early in a large connection list,
-every subsequent connection in the same run will also immediately re-hit
-the exhausted budget and sleep again, and these sleeps stack rather than
-just ending the tick and letting the next hourly cron pick up the remainder
-in a fresh 5-minute window. Only a real concern once connection count grows
-enough to threaten the ~130-connection budget ceiling (2 confirmed active
-connections in production as of this writing) — worth revisiting before it
-does, by having a proactively-thrown `RateLimitError` end the tick
-immediately for all remaining connections instead of sleeping through each
-one in turn.
+**Resolved 2026-07-21 (fail-fast):** the per-connection loop in
+`ownerrez-incremental-sync.ts` no longer sleeps through a rate limit. A
+`RateLimitError` on any connection now sets `rateLimitedAt` and `break`s the
+loop immediately — no `step.sleep`, since the 300-req/5min budget is shared
+across every tenant, so every connection after the rate-limited one would
+have hit the same exhausted budget anyway. The tick ends, the function
+returns `rate_limited_at: <user_id>` for observability, and the unprocessed
+connections (their `sync_cursor` never advanced) pick up on the next
+scheduled hourly tick in a fresh window instead of the run's duration
+growing unbounded from stacked sleeps.
 
 ---
 

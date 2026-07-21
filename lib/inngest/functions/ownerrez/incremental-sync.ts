@@ -29,8 +29,11 @@
  *  4. Upsert results
  *  5. Update sync_cursor (using pre-fetch timestamp) and last_synced_at
  *
- * Each user runs in its own step.run() so failures are isolated.
- * step.sleep() is called at the TOP LEVEL only — never inside step.run().
+ * Each user runs in its own step.run() so failures are isolated. A
+ * RateLimitError from any connection ends the tick immediately (no sleep —
+ * the shared budget is exhausted for every remaining connection too; see
+ * the `if (rateLimited) break` below) rather than delaying and retrying
+ * within the same run.
  *
  * TODO(CLAUDE_55_5 Task 7): This function does not currently handle OwnerRez
  * property entity_update webhooks — it only fetches bookings via since_utc.
@@ -114,7 +117,8 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       return { synced: 0 }
     }
 
-    let syncedCount = 0
+    let syncedCount   = 0
+    let rateLimitedAt: string | null = null
 
     for (const conn of connections) {
       // ── Check for properties added in OwnerRez since the last sync ──────
@@ -165,9 +169,9 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         }
       }
 
-      // HIGH-1: rateLimited flag set inside step.run; sleep called outside
-      let rateLimited       = false
-      let retryAfterSeconds = 60
+      // Fail-fast rate-limit handling: set inside step.run, checked outside.
+      // No retry-after sleep — see the `if (rateLimited) break` below for why.
+      let rateLimited = false
 
       type SyncSuccess = {
         affectedPropertyIds:    string[]
@@ -378,11 +382,16 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
         } catch (err) {
           if (err instanceof RateLimitError) {
-            // HIGH-1: do NOT call step.sleep here — step primitives cannot be nested
-            // inside step.run. Set a flag; sleep is called at the top level below.
-            rateLimited       = true
-            retryAfterSeconds = err.retryAfter
-            logger.warn(`[OwnerRez:${conn.user_id}] Rate limited — sleeping ${err.retryAfter}s`)
+            // Fail fast: the 300-req/5min budget is shared across every
+            // tenant on this deployment's IP, so every connection after
+            // this one in the loop would immediately hit the same
+            // exhausted budget too. Set a flag; the outer loop ends this
+            // tick entirely below rather than sleeping through it — this
+            // connection's own sync_cursor didn't advance either way, so
+            // it (and everything after it) picks up on the next scheduled
+            // hourly tick in a fresh rate-limit window.
+            rateLimited = true
+            logger.warn(`[OwnerRez:${conn.user_id}] Rate limited (retry after ${err.retryAfter}s) — ending this tick early`)
 
             // Write transient rate-limit status — don't change connection status to 'error'
             await supabase
@@ -554,6 +563,17 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         throw err
       }
 
+      // Shared rate-limit budget exhausted — end this tick now rather than
+      // continuing to the next connection (which would immediately hit the
+      // same exhausted budget) or sleeping through it (every connection
+      // after this one would need its own sleep too, stacking into a run
+      // duration with no real ceiling). Nothing below this point runs for
+      // any connection past this one; they're picked up on the next tick.
+      if (rateLimited) {
+        rateLimitedAt = conn.user_id
+        break
+      }
+
       const affectedIds = syncResult && 'affectedPropertyIds' in syncResult
         ? syncResult.affectedPropertyIds
         : []
@@ -651,16 +671,8 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           }
         })
       }
-
-      // HIGH-1: step.sleep called at top level — NOT inside step.run
-      if (rateLimited) {
-        await step.sleep(
-          `rate-limit-backoff-${conn.user_id}`,
-          `${retryAfterSeconds}s`   // string duration, NOT milliseconds
-        )
-      }
     }
 
-    return { synced: syncedCount, total: connections.length }
+    return { synced: syncedCount, total: connections.length, rate_limited_at: rateLimitedAt }
   }
 )
