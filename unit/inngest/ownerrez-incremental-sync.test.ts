@@ -71,12 +71,13 @@ function makeSupabase(queued: QueuedByTable) {
   const counters: Record<string, number> = {}
   const upsertSpy = vi.fn()
   const updateSpy = vi.fn()
+  const eqSpy     = vi.fn()
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     chain.select = vi.fn(() => chain)
-    chain.eq     = vi.fn(() => chain)
+    chain.eq     = vi.fn((column: string, value: unknown) => { eqSpy(table, column, value); return chain })
     chain.in     = vi.fn(() => chain)
     chain.neq    = vi.fn(() => chain)
     chain.order  = vi.fn(() => chain)
@@ -97,7 +98,7 @@ function makeSupabase(queued: QueuedByTable) {
     return chain
   })
 
-  return { from, upsertSpy, updateSpy }
+  return { from, upsertSpy, updateSpy, eqSpy }
 }
 
 const CONN = {
@@ -198,7 +199,7 @@ describe('ownerRezIncrementalSync', () => {
     expect(metadata.sync_cursor).not.toBe(metadata.last_synced_at)
 
     expect(generateTurnoversForProperty).toHaveBeenCalledWith('prop_1', 'org_1', supabase)
-    expect(result).toEqual({ synced: 1, total: 1 })
+    expect(result).toEqual({ synced: 1, total: 1, rate_limited_at: null })
 
     vi.useRealTimers()
   })
@@ -229,7 +230,7 @@ describe('ownerRezIncrementalSync', () => {
     // The step returns before reaching the cursor-advance code at all —
     // a failed lookup must not silently mark this tick as synced.
     expect(supabase.updateSpy).not.toHaveBeenCalled()
-    expect(result).toEqual({ synced: 0, total: 1 })
+    expect(result).toEqual({ synced: 0, total: 1, rate_limited_at: null })
   })
 
   it('marks the connection revoked, fires integration/connection.error, and swallows the resulting NonRetriableError so the rest of the batch still runs', async () => {
@@ -270,10 +271,55 @@ describe('ownerRezIncrementalSync', () => {
     )
     // The per-connection loop's own try/catch swallows NonRetriableError —
     // the whole tick must not fail just because one connection's token died.
-    expect(result).toEqual({ synced: 0, total: 1 })
+    expect(result).toEqual({ synced: 0, total: 1, rate_limited_at: null })
   })
 
-  it('backs off with a top-level step.sleep (never nested in step.run) and records rate_limited without flipping connection status to error', async () => {
+  it('scopes fetch-connections to the triggering user_id when the event carries one (webhook/manual path)', async () => {
+    baseMocks()
+
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['fetch-connections', 'check-new-properties-user_1', 'sync-user-user_1'])
+
+    await invokeHandler(ownerRezIncrementalSync, {
+      event: {
+        data: {
+          provider_id: 'ownerrez', event_type: 'entity_update', entity_type: 'booking',
+          entity_id: '555', triggered_at: '2026-07-20T10:00:00.000Z', correlation_id: null,
+          user_id: 'user_1', org_id: 'org_1',
+        },
+      },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(supabase.eqSpy).toHaveBeenCalledWith('integration_connections', 'user_id', 'user_1')
+  })
+
+  it('does not scope fetch-connections when the triggering event carries no user_id (cron sweep)', async () => {
+    baseMocks()
+
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['fetch-connections', 'check-new-properties-user_1', 'sync-user-user_1'])
+
+    await invokeHandler(ownerRezIncrementalSync, {
+      event:  {},
+      step,
+      logger: makeLogger(),
+    })
+
+    const connectionsEqCalls = supabase.eqSpy.mock.calls.filter((c) => c[0] === 'integration_connections')
+    expect(connectionsEqCalls.map((c) => c[1])).not.toContain('user_id')
+  })
+
+  it('fails fast on rate limit — no sleep, records rate_limited without flipping connection status to error', async () => {
     const mockClient = baseMocks()
     mockClient.getBookings.mockRejectedValue(new RateLimitError(45))
 
@@ -296,7 +342,39 @@ describe('ownerRezIncrementalSync', () => {
     expect(payload.status).toBeUndefined()
     expect(payload.metadata.last_sync_status).toBe('rate_limited')
 
-    expect(step.sleep).toHaveBeenCalledWith('rate-limit-backoff-user_1', '45s')
-    expect(result).toEqual({ synced: 0, total: 1 })
+    // The shared budget is exhausted for every tenant, not just this one —
+    // sleeping and retrying within the same run would be pointless, so the
+    // tick just ends. The next scheduled run picks up where this left off.
+    expect(step.sleep).not.toHaveBeenCalled()
+    expect(result).toEqual({ synced: 0, total: 1, rate_limited_at: 'user_1' })
+  })
+
+  it('stops processing remaining connections in the same tick once one hits the shared rate limit', async () => {
+    const mockClient = baseMocks()
+    mockClient.getBookings.mockRejectedValue(new RateLimitError(45))
+
+    const CONN_2 = { ...CONN, id: 'conn_2', user_id: 'user_2', external_user_id: 'ext_2' }
+
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN, CONN_2], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep([
+      'fetch-connections', 'check-new-properties-user_1', 'sync-user-user_1',
+      'check-new-properties-user_2', 'sync-user-user_2',
+    ])
+
+    const result = await invokeHandler(ownerRezIncrementalSync, {
+      event:  {},
+      step,
+      logger: makeLogger(),
+    })
+
+    // Only the first connection's sync step ever ran — the second connection
+    // in the batch was never attempted once the shared budget was exhausted.
+    expect(step.run).toHaveBeenCalledWith('sync-user-user_1', expect.any(Function))
+    expect(step.run).not.toHaveBeenCalledWith('sync-user-user_2', expect.any(Function))
+    expect(result).toEqual({ synced: 0, total: 2, rate_limited_at: 'user_1' })
   })
 })

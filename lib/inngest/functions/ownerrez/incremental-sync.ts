@@ -2,8 +2,25 @@
  * OwnerRez Incremental Sync
  *
  * Triggered by:
- *  - Inngest cron:    every 15 minutes  (0/15 * * * *)
- *  - Webhook event:   integration/ownerrez.sync.requested
+ *  - Inngest cron:    hourly (0 * * * *) — reliability backstop, always a
+ *                      full sweep of every active connection
+ *  - Webhook event:   integration/ownerrez.sync.requested — scoped to the
+ *                      one connection the webhook belongs to when
+ *                      ownerrez.ts's handleWebhookEvent resolved it (falls
+ *                      back to a full sweep when it couldn't)
+ *  - Manual event:    ownerrez/sync.now.requested — always scoped to the
+ *                      PM's own connection (org_id/user_id come straight
+ *                      from their session, no resolution needed)
+ *
+ * A scoped (single-connection) run costs ~2 requests against OwnerRez's
+ * shared-IP rate-limit budget (see ownerrez-api.ts) instead of looping
+ * every tenant on the platform — see FUTURE_REMEDIATION.md's OwnerRez
+ * scaling note for why this matters as connection count grows. The cron
+ * was moved from every 15 minutes to hourly specifically because this
+ * scoping exists: real-time-ish updates now travel via the (cheap, scoped)
+ * webhook path, and the cron's only job is to catch whatever a webhook
+ * missed — a wider window is fine for a backstop, not fine for the only
+ * path data has.
  *
  * For each active OwnerRez connection:
  *  1. Read sync_cursor from metadata
@@ -12,8 +29,11 @@
  *  4. Upsert results
  *  5. Update sync_cursor (using pre-fetch timestamp) and last_synced_at
  *
- * Each user runs in its own step.run() so failures are isolated.
- * step.sleep() is called at the TOP LEVEL only — never inside step.run().
+ * Each user runs in its own step.run() so failures are isolated. A
+ * RateLimitError from any connection ends the tick immediately (no sleep —
+ * the shared budget is exhausted for every remaining connection too; see
+ * the `if (rateLimited) break` below) rather than delaying and retrying
+ * within the same run.
  *
  * TODO(CLAUDE_55_5 Task 7): This function does not currently handle OwnerRez
  * property entity_update webhooks — it only fetches bookings via since_utc.
@@ -51,13 +71,20 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     concurrency: { limit: 5 },
   },
   [
-    { cron: '0/15 * * * *' },
+    { cron: '0 * * * *' },
     { event: 'integration/ownerrez.sync.requested' as const },
     { event: 'ownerrez/sync.now.requested' as const },
   ],
-  async ({ step, logger }) => {
+  async ({ event, step, logger }) => {
     const workflowId = crypto.randomUUID()
-    logger.info('ownerrez-incremental-sync triggered', { workflowId, trigger: 'cron' })
+
+    // Inngest's synthetic cron-tick event has no `data.user_id` — only the
+    // two real event triggers carry one, and only when the webhook path
+    // successfully resolved a connection (see ownerrez.ts's
+    // handleWebhookEvent). Its absence means "do a full sweep", the same
+    // behavior this function always had before scoping existed.
+    const scopedUserId = event?.data && 'user_id' in event.data ? event.data.user_id : undefined
+    logger.info('ownerrez-incremental-sync triggered', { workflowId, scoped: Boolean(scopedUserId) })
 
     // Circuit breaker: if the OwnerRez API is degraded, skip this cron tick.
     const circuitOpen = await step.run('check-circuit-breaker', async () => {
@@ -73,11 +100,15 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
     const connections = await step.run('fetch-connections', async () => {
       const supabase = createServiceClient()
-      const { data } = await supabase
+      let query = supabase
         .from('integration_connections')
         .select('id, user_id, org_id, external_user_id, metadata')
         .eq('provider_id', PROVIDER)
         .eq('status', 'active')
+
+      if (scopedUserId) query = query.eq('user_id', scopedUserId)
+
+      const { data } = await query
       return data ?? []
     })
 
@@ -86,7 +117,8 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       return { synced: 0 }
     }
 
-    let syncedCount = 0
+    let syncedCount   = 0
+    let rateLimitedAt: string | null = null
 
     for (const conn of connections) {
       // ── Check for properties added in OwnerRez since the last sync ──────
@@ -137,9 +169,9 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         }
       }
 
-      // HIGH-1: rateLimited flag set inside step.run; sleep called outside
-      let rateLimited       = false
-      let retryAfterSeconds = 60
+      // Fail-fast rate-limit handling: set inside step.run, checked outside.
+      // No retry-after sleep — see the `if (rateLimited) break` below for why.
+      let rateLimited = false
 
       type SyncSuccess = {
         affectedPropertyIds:    string[]
@@ -350,11 +382,16 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
         } catch (err) {
           if (err instanceof RateLimitError) {
-            // HIGH-1: do NOT call step.sleep here — step primitives cannot be nested
-            // inside step.run. Set a flag; sleep is called at the top level below.
-            rateLimited       = true
-            retryAfterSeconds = err.retryAfter
-            logger.warn(`[OwnerRez:${conn.user_id}] Rate limited — sleeping ${err.retryAfter}s`)
+            // Fail fast: the 300-req/5min budget is shared across every
+            // tenant on this deployment's IP, so every connection after
+            // this one in the loop would immediately hit the same
+            // exhausted budget too. Set a flag; the outer loop ends this
+            // tick entirely below rather than sleeping through it — this
+            // connection's own sync_cursor didn't advance either way, so
+            // it (and everything after it) picks up on the next scheduled
+            // hourly tick in a fresh rate-limit window.
+            rateLimited = true
+            logger.warn(`[OwnerRez:${conn.user_id}] Rate limited (retry after ${err.retryAfter}s) — ending this tick early`)
 
             // Write transient rate-limit status — don't change connection status to 'error'
             await supabase
@@ -526,6 +563,17 @@ export const ownerRezIncrementalSync = inngest.createFunction(
         throw err
       }
 
+      // Shared rate-limit budget exhausted — end this tick now rather than
+      // continuing to the next connection (which would immediately hit the
+      // same exhausted budget) or sleeping through it (every connection
+      // after this one would need its own sleep too, stacking into a run
+      // duration with no real ceiling). Nothing below this point runs for
+      // any connection past this one; they're picked up on the next tick.
+      if (rateLimited) {
+        rateLimitedAt = conn.user_id
+        break
+      }
+
       const affectedIds = syncResult && 'affectedPropertyIds' in syncResult
         ? syncResult.affectedPropertyIds
         : []
@@ -623,16 +671,8 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           }
         })
       }
-
-      // HIGH-1: step.sleep called at top level — NOT inside step.run
-      if (rateLimited) {
-        await step.sleep(
-          `rate-limit-backoff-${conn.user_id}`,
-          `${retryAfterSeconds}s`   // string duration, NOT milliseconds
-        )
-      }
     }
 
-    return { synced: syncedCount, total: connections.length }
+    return { synced: syncedCount, total: connections.length, rate_limited_at: rateLimitedAt }
   }
 )

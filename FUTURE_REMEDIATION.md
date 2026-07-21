@@ -90,36 +90,56 @@ yet acted on:
 
 ---
 
-## 5. OwnerRez: webhook delivery payload shape never verified against a real event
+## 5. ~~OwnerRez: webhook delivery payload shape never verified against a real event~~ — RESOLVED 2026-07-16, scoping added 2026-07-21
 
-**File:** `lib/integrations/providers/ownerrez.ts` (`handleWebhookEvent`,
-`~line 185-231`), `lib/integrations/providers/ownerrez-api.ts`
-(`registerWebhookSubscriptions`, `~line 285-311`)
+**File:** `lib/integrations/providers/ownerrez.ts` (`handleWebhookEvent`),
+`app/api/webhooks/[provider]/route.ts`, `lib/inngest/functions/ownerrez/incremental-sync.ts`
 
-FieldStay registers webhook subscriptions with OwnerRez using dot-notation
-event types (`booking.created`, `booking.modified`, `guest.updated`, etc.),
-but `handleWebhookEvent`'s switch only recognizes a generic
-`entity_insert`/`entity_update`/`entity_delete` envelope with a separate
-`entity_type` field. Git history shows an earlier version of this file
-switched directly on the dot-notation names instead — the current shape
-replaced it with no comment citing a confirmed real payload sample. If
-OwnerRez's actual delivery echoes the subscription name literally rather
-than the assumed generic envelope, every booking/guest webhook silently
-hits the `default: unknown action` branch and does nothing — no error, just
-a `console.warn`.
+Original finding: `handleWebhookEvent`'s switch only recognized a generic
+`entity_insert`/`entity_update`/`entity_delete` envelope, with no comment
+citing a confirmed real payload sample — risk was that every real webhook
+silently hit the `default: unknown action` branch and did nothing.
 
-**Impact is bounded**, not data-loss: the 15-minute incremental-sync cron
-and 6-hour reviews cron don't depend on webhooks at all, so the worst case
-is "near-real-time sync via webhook silently never fires, data still
-arrives within 15 minutes via cron" rather than anything going missing.
-Still, any customer-facing claim of "instant" or "real-time" sync should be
-verified against an actual captured OwnerRez webhook payload (e.g. via
-Vercel logs after a real booking change) before being taken at face value.
+**Resolved 2026-07-16** (`4903f40`, `ed56396`): re-verified against
+OwnerRez's own published webhooks documentation (not a captured live
+payload — worth knowing if this ever needs re-confirming against an actual
+delivery). `entity_insert` was never a real action value; the real ones are
+`entity_create`/`entity_update`/`entity_delete` (the doc contradicts itself
+on the create name across two sections of the same page, so the code
+accepts both rather than picking one). Confirmed `entity_type` list:
+`api_application/booking/guest/inquiry/property/quote/thread_message` —
+`review` is not a valid OwnerRez webhook entity_type at all, reviews only
+ever sync via the 6-hour polling cron.
 
-**Suggested fix:** capture one real webhook delivery for each subscribed
-event type, confirm the actual field names, and add the same kind of
-"✅ Confirmed live" annotation this codebase already uses for Hospitable's
-adapter once verified.
+**Scoping added 2026-07-21:** `handleWebhookEvent` now resolves which
+FieldStay connection a webhook belongs to (via the route's already-extracted
+`externalUserId` against `integration_connections`) and includes
+`user_id`/`org_id` on the `integration/ownerrez.sync.requested` event it
+fires. `ownerrez-incremental-sync.ts` uses that to scope `fetch-connections`
+to just the one connection instead of re-syncing every active OwnerRez
+tenant platform-wide on every webhook delivery — previously a webhook did
+the exact same full-platform sweep as a cron tick, which meant more
+connected tenants → more webhook traffic → more full-sweep runs, compounding
+pressure on OwnerRez's shared-IP 300-req/5-min rate-limit budget (see
+`ownerrez-api.ts`'s proactive 270/300 Redis counter). The manual "sync now"
+button (`ownerrez/sync.now.requested`) was already carrying `org_id`/
+`user_id` and now gets the same scoping. Falls back to the old full-sweep
+behavior whenever the connection can't be resolved (no regression risk).
+The cron itself moved from every 15 minutes to hourly as a result — it's
+now purely the reliability backstop for whatever a scoped webhook run
+misses, not the primary sync path, so a wider window is an acceptable
+tradeoff.
+
+**Resolved 2026-07-21 (fail-fast):** the per-connection loop in
+`ownerrez-incremental-sync.ts` no longer sleeps through a rate limit. A
+`RateLimitError` on any connection now sets `rateLimitedAt` and `break`s the
+loop immediately — no `step.sleep`, since the 300-req/5min budget is shared
+across every tenant, so every connection after the rate-limited one would
+have hit the same exhausted budget anyway. The tick ends, the function
+returns `rate_limited_at: <user_id>` for observability, and the unprocessed
+connections (their `sync_cursor` never advanced) pick up on the next
+scheduled hourly tick in a fresh window instead of the run's duration
+growing unbounded from stacked sleeps.
 
 ---
 
