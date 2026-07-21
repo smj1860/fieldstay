@@ -17,6 +17,12 @@ function generatePublicToken(): string {
   return randomBytes(32).toString('hex')  // 64-char hex, URL-safe
 }
 
+function photoFileExtension(mimeType: string): string {
+  if (mimeType === 'image/png')  return 'png'
+  if (mimeType === 'image/webp') return 'webp'
+  return 'jpg'
+}
+
 export async function dispatchWorkOrderToVendor(input: {
   workOrderId:  string
   vendorEmail:  string
@@ -318,7 +324,7 @@ export async function submitWorkOrderSignOff(
   // Upload sign-off photos to storage and record in work_order_photos
   if (photos && photos.length > 0) {
     for (const photo of photos) {
-      const ext  = photo.type === 'image/png' ? 'png' : photo.type === 'image/webp' ? 'webp' : 'jpg'
+      const ext  = photoFileExtension(photo.type)
       const path = `work-orders/${wo.id}/signoff/${crypto.randomUUID()}.${ext}`
       const { error: uploadErr } = await supabase.storage
         .from('work-order-photos')

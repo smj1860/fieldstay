@@ -20,7 +20,7 @@ interface CelebrationModalProps {
   onClose: () => void
 }
 
-export function CelebrationModal({ tier, onClose }: CelebrationModalProps) {
+export function CelebrationModal({ tier, onClose }: Readonly<CelebrationModalProps>) {
   const copy = TIER_COPY[tier]
 
   return (

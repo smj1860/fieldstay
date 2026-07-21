@@ -210,7 +210,7 @@ export function PortfolioInventoryView({ items }: Readonly<{ items: PortfolioIte
                     </td>
                     <td
                       className="px-4 py-2.5 text-right font-mono font-semibold"
-                      style={{ color: isCritical ? 'var(--accent-red)' : isLow ? 'var(--accent-amber)' : 'var(--text-primary)' }}
+                      style={{ color: stockLevelColor(isCritical, isLow) }}
                     >
                       {isUncounted ? '—' : item.current_quantity}
                     </td>
@@ -241,6 +241,12 @@ function itemStockStatus(item: Pick<PortfolioItem, 'first_count_recorded_at' | '
   const isCritical  = !isUncounted && item.current_quantity <= item.par_level
   const isLow       = !isUncounted && !isCritical && item.current_quantity <= item.par_level * 1.2
   return { isUncounted, isCritical, isLow }
+}
+
+function stockLevelColor(isCritical: boolean, isLow: boolean): string {
+  if (isCritical) return 'var(--accent-red)'
+  if (isLow)      return 'var(--accent-amber)'
+  return 'var(--text-primary)'
 }
 
 function StockStatusBadge({
@@ -278,7 +284,7 @@ function PortfolioItemCard({
       <div className="mt-1.5 text-sm">
         <span
           className="font-mono font-semibold"
-          style={{ color: isCritical ? 'var(--accent-red)' : isLow ? 'var(--accent-amber)' : 'var(--text-primary)' }}
+          style={{ color: stockLevelColor(isCritical, isLow) }}
         >
           {isUncounted ? '—' : item.current_quantity}
         </span>

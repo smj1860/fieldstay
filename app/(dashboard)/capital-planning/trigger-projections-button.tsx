@@ -47,7 +47,7 @@ export function TriggerProjectionsButton({
         setPolling(false)
         setDone(true)
         clearInterval(interval)
-        window.location.reload()
+        globalThis.location.reload()
         return
       }
 

@@ -16,7 +16,7 @@ let clusterSnapshot: Record<string, boolean> = readClusterStateFromStorage()
 function readClusterStateFromStorage(): Record<string, boolean> {
   if (typeof window === 'undefined') return {}
   try {
-    const raw = window.localStorage.getItem(CLUSTER_STORAGE_KEY)
+    const raw = globalThis.localStorage.getItem(CLUSTER_STORAGE_KEY)
     return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
   } catch {
     return {}
@@ -39,7 +39,7 @@ function subscribeToClusters(onChange: () => void): () => void {
 function writeClusterState(next: Record<string, boolean>) {
   clusterSnapshot = next
   try {
-    window.localStorage.setItem(CLUSTER_STORAGE_KEY, JSON.stringify(next))
+    globalThis.localStorage.setItem(CLUSTER_STORAGE_KEY, JSON.stringify(next))
   } catch {
     // localStorage unavailable — collapse preference just won't persist
   }

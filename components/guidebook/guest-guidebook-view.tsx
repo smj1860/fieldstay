@@ -72,7 +72,7 @@ export function GuestGuidebookView({
   weather,
   extensionRequest = null,
   extensionConfig = null,
-}: GuestGuidebookViewProps) {
+}: Readonly<GuestGuidebookViewProps>) {
   if (!isActive) {
     return (
       <div style={{ minHeight: '100vh', background: CHARCOAL, color: TEXT, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>

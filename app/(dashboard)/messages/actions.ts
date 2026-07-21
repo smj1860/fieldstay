@@ -187,7 +187,11 @@ export async function sendGroupMessage(
     if (!rows.length) return { error: 'No valid recipients found' }
 
     const { error } = await supabase.from('messages').insert(rows)
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[sendGroupMessage]', error.message)
+      reportError(error, { site: 'serverAction.messages.sendGroupMessage' })
+      return { error: 'Failed to send group message' }
+    }
 
     revalidatePath('/messages')
     return {}
