@@ -401,8 +401,41 @@ export interface RoomTemplate {
   org_id:       string
   name:         string
   auto_include: boolean
+  is_system:    boolean
   created_at:   string
   updated_at:   string
+}
+
+// Org-scoped editable copy of inventory_catalog, seeded on first touch
+// (application code, Pass 2). See 20260721140000_templates_hub_schema_pass1.sql.
+export interface OrgInventoryCatalogItem {
+  id:                        string
+  org_id:                    string
+  platform_catalog_item_id:  string | null
+  name:                      string
+  category:                  InventoryCategory
+  default_unit:              string
+  description:               string | null
+  is_active:                 boolean
+  created_at:                string
+  updated_at:                string
+}
+
+// Org-scoped editable copy of maintenance_catalog_items, seeded on first
+// touch (application code, Pass 4). See 20260721140000_templates_hub_schema_pass1.sql.
+export interface OrgMaintenanceCatalogItem {
+  id:                        string
+  org_id:                    string
+  platform_catalog_item_id:  string | null
+  name:                      string
+  category:                  string
+  suggested_recurrence:      string | null
+  asset_category:            string | null
+  description:               string | null
+  sort_order:                number
+  is_active:                 boolean
+  created_at:                string
+  updated_at:                string
 }
 
 export interface RoomTemplateItem {
@@ -1551,6 +1584,8 @@ export interface Database {
       checklist_template_items:    { Row: ChecklistTemplateItem;    Insert: Partial<ChecklistTemplateItem>;    Update: Partial<ChecklistTemplateItem>;    Relationships: [] }
       room_templates:              { Row: RoomTemplate;             Insert: Partial<RoomTemplate>;             Update: Partial<RoomTemplate>;             Relationships: [] }
       room_template_items:         { Row: RoomTemplateItem;         Insert: Partial<RoomTemplateItem>;         Update: Partial<RoomTemplateItem>;         Relationships: [] }
+      org_inventory_catalog:       { Row: OrgInventoryCatalogItem;  Insert: Partial<OrgInventoryCatalogItem>;  Update: Partial<OrgInventoryCatalogItem>;  Relationships: [] }
+      org_maintenance_catalog_items: { Row: OrgMaintenanceCatalogItem; Insert: Partial<OrgMaintenanceCatalogItem>; Update: Partial<OrgMaintenanceCatalogItem>; Relationships: [] }
       platform_staff:                      { Row: PlatformStaff;                 Insert: Partial<PlatformStaff>;                 Update: Partial<PlatformStaff>;                 Relationships: [] }
       platform_seed_room_templates:       { Row: PlatformSeedRoomTemplate;      Insert: Partial<PlatformSeedRoomTemplate>;      Update: Partial<PlatformSeedRoomTemplate>;      Relationships: [] }
       platform_seed_room_template_items:  { Row: PlatformSeedRoomTemplateItem;  Insert: Partial<PlatformSeedRoomTemplateItem>;  Update: Partial<PlatformSeedRoomTemplateItem>;  Relationships: [] }
