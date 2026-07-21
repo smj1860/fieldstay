@@ -148,6 +148,9 @@ export type AuditAction =
   | 'org_inventory_catalog_item.updated'
   | 'org_inventory_catalog_item.deleted'
   | 'inventory_template.created'
+  | 'maintenance_template.item_created'
+  | 'maintenance_template.item_updated'
+  | 'maintenance_template.item_deleted'
 
 interface AuditParams {
   orgId?:         string

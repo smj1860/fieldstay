@@ -3,7 +3,6 @@ import Link from 'next/link'
 import { CalendarCheck, Package, Wrench } from 'lucide-react'
 import { requireOrgMember } from '@/lib/auth'
 import { Card } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
 
 export const metadata: Metadata = { title: 'Templates — FieldStay' }
 
@@ -12,7 +11,7 @@ interface TemplateTile {
   title:       string
   description: string
   icon:        typeof CalendarCheck
-  href:        string | null
+  href:        string
 }
 
 const TILES: TemplateTile[] = [
@@ -35,7 +34,7 @@ const TILES: TemplateTile[] = [
     title:       'Scheduled Maintenance',
     description: 'Org-wide recurring maintenance catalog and default schedules.',
     icon:        Wrench,
-    href:        null,
+    href:        '/templates/maintenance/create',
   },
 ]
 
@@ -62,29 +61,18 @@ export default async function TemplatesPage() {
 
 function TemplateTileCard({ tile }: Readonly<{ tile: TemplateTile }>) {
   const Icon = tile.icon
-  const content = (
-    <Card className={tile.href ? 'h-full transition-colors hover:border-[var(--accent-gold)]' : 'h-full opacity-60'}>
-      <div className="flex items-center justify-between mb-3">
+  return (
+    <Link href={tile.href} className="block h-full">
+      <Card className="h-full transition-colors hover:border-[var(--accent-gold)]">
         <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 mb-3"
           style={{ background: 'var(--accent-gold-dim)' }}
         >
           <Icon className="w-4 h-4" style={{ color: 'var(--accent-gold)' }} />
         </div>
-        {!tile.href && <Badge tone="slate">Coming soon</Badge>}
-      </div>
-      <h2 className="text-base font-semibold text-primary-themed mb-1">{tile.title}</h2>
-      <p className="text-sm text-muted-themed">{tile.description}</p>
-    </Card>
-  )
-
-  if (!tile.href) {
-    return <div aria-disabled="true">{content}</div>
-  }
-
-  return (
-    <Link href={tile.href} className="block h-full">
-      {content}
+        <h2 className="text-base font-semibold text-primary-themed mb-1">{tile.title}</h2>
+        <p className="text-sm text-muted-themed">{tile.description}</p>
+      </Card>
     </Link>
   )
 }

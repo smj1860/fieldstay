@@ -1157,23 +1157,6 @@ export interface InventoryTemplateItem {
   created_at:      string
 }
 
-// ── Portfolio-level master maintenance schedule ──────────────────────────────
-export interface OrgMasterMaintenanceSchedule {
-  id:             string
-  org_id:         string
-  title:          string
-  description:    string | null
-  frequency:      'weekly' | 'monthly' | 'quarterly' | 'annually'
-  month_day:      number | null
-  week_day:       number | null
-  estimated_cost: number | null
-  specialty:      string | null
-  notes:          string | null
-  is_active:      boolean
-  created_at:     string
-  updated_at:     string
-}
-
 export interface PushSubscription {
   id:             string
   crew_member_id: string
@@ -1606,7 +1589,6 @@ export interface Database {
       communication_logs:          { Row: CommunicationLog;              Insert: Partial<CommunicationLog>;              Update: Partial<CommunicationLog>;              Relationships: [] }
       messages:                    { Row: Message;                       Insert: Partial<Message>;                       Update: Partial<Message>;                       Relationships: [] }
       push_subscriptions:          { Row: PushSubscription;              Insert: Partial<PushSubscription>;              Update: Partial<PushSubscription>;              Relationships: [] }
-      org_master_maintenance_schedules:{ Row: OrgMasterMaintenanceSchedule;  Insert: Partial<OrgMasterMaintenanceSchedule>;  Update: Partial<OrgMasterMaintenanceSchedule>;  Relationships: [] }
 
       // ── Asset Health ───────────────────────────────────────
       property_assets:             { Row: PropertyAsset;            Insert: Partial<PropertyAsset>;            Update: Partial<PropertyAsset>;            Relationships: [] }
