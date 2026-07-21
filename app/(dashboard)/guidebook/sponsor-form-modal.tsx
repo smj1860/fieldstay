@@ -30,7 +30,7 @@ interface SponsorFormModalProps {
   onSaved:    () => void
 }
 
-export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSaved }: SponsorFormModalProps) {
+export function SponsorFormModal({ slotNumber, existing, appUrl, onClose, onSaved }: Readonly<SponsorFormModalProps>) {
   const [businessName, setBusinessName]               = useState(existing?.business_name ?? '')
   const [businessDescription, setBusinessDescription] = useState(existing?.business_description ?? '')
   const [businessPhone, setBusinessPhone]              = useState(existing?.business_phone ?? '')

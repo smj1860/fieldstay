@@ -60,7 +60,8 @@ export default async function VendorDetailPage({ params }: Props) {
       .select('id, work_order_id, invoice_number, status, total, submitted_at, paid_at, work_orders(title, wo_number, properties(name))')
       .eq('vendor_id', id)
       .eq('org_id', membership.org_id)
-      .order('submitted_at', { ascending: false }),
+      .order('submitted_at', { ascending: false })
+      .limit(25),
   ])
 
   if (invoiceError) {

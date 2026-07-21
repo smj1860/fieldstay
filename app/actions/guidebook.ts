@@ -139,7 +139,10 @@ export async function upsertSponsor(
       .select('id, media_kit_token')
       .single()
 
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[upsertSponsor]', error.message)
+      return { error: 'Failed to save sponsor details. Please try again.' }
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -205,7 +208,10 @@ export async function upsertPropertyGuidebookConfig(
         { onConflict: 'org_id,property_id' }
       )
 
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[upsertPropertyGuidebookConfig]', error.message)
+      return { error: 'Failed to save guidebook settings. Please try again.' }
+    }
 
     // Never log wifi_password value itself — it's a guest-facing credential
     await logAuditEvent({
@@ -269,7 +275,10 @@ export async function updateStayExtensionSettings(
       })
       .eq('org_id', membership.org_id)
 
-    if (error) return { error: error.message }
+    if (error) {
+      console.error('[updateStayExtensionSettings]', error.message)
+      return { error: 'Failed to save stay extension settings. Please try again.' }
+    }
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -328,7 +337,11 @@ export async function optInGuestSms(
       .select('id')
       .single()
 
-    if (error) return { error: error.message }
+    if (error) {
+      // Never log phoneE164 or any part of rawPhone — guest PII.
+      console.error('[optInGuestSms]', error.message)
+      return { error: 'Something went wrong. Please try again.' }
+    }
 
     await inngest.send({
       name: 'guidebook/guest.opted.in',

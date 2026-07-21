@@ -1163,7 +1163,7 @@ function BillingTab({ org }: { org: Organization }) {
     startCheckoutT(async () => {
       const result = await createCheckoutSession(planKey, interval)
       if (result?.redirectUrl) {
-        window.location.href = result.redirectUrl
+        globalThis.location.href = result.redirectUrl
       } else if (result?.error) {
         setCheckoutError(result.error)
         setCheckoutPlan(null)

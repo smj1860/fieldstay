@@ -588,17 +588,20 @@ export const ownerRezIncrementalSync = inngest.createFunction(
       const bookingsToPostRevenue = syncResult && 'bookingsToPostRevenue' in syncResult
         ? syncResult.bookingsToPostRevenue
         : []
-      for (const b of bookingsToPostRevenue) {
-        await step.sendEvent(`post-booking-revenue-${conn.user_id}-${b.bookingId}`, {
-          name: 'booking/confirmed' as const,
-          data: {
-            booking_id:          b.bookingId,
-            property_id:         b.propertyId,
-            org_id:              conn.org_id,
-            source:              'ownerrez' as const,
-            actual_total_amount: b.actualTotalAmount,
-          },
-        })
+      if (bookingsToPostRevenue.length > 0) {
+        await step.sendEvent(
+          `post-booking-revenue-${conn.user_id}`,
+          bookingsToPostRevenue.map((b) => ({
+            name: 'booking/confirmed' as const,
+            data: {
+              booking_id:          b.bookingId,
+              property_id:         b.propertyId,
+              org_id:              conn.org_id,
+              source:              'ownerrez' as const,
+              actual_total_amount: b.actualTotalAmount,
+            },
+          }))
+        )
       }
 
       // Generate turnovers for any properties that received booking updates.

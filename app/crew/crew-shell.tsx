@@ -17,7 +17,7 @@ import { Dialog }                   from '@/components/ui/Dialog'
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const rawData = window.atob(base64)
+  const rawData = globalThis.atob(base64)
   return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)))
 }
 
@@ -204,11 +204,11 @@ export function CrewShell({
     }
 
     run()  // attempt once on mount, in case items were queued in a prior session
-    window.addEventListener('online', run)
+    globalThis.addEventListener('online', run)
     const interval = setInterval(run, 30_000)
 
     return () => {
-      window.removeEventListener('online', run)
+      globalThis.removeEventListener('online', run)
       clearInterval(interval)
     }
   }, [userId])
@@ -396,11 +396,11 @@ function CrewBottomNav({ userId, onHelpClick }: { userId: string; onHelpClick: (
 }
 
 function subscribeToOnlineStatus(onChange: () => void): () => void {
-  window.addEventListener('online', onChange)
-  window.addEventListener('offline', onChange)
+  globalThis.addEventListener('online', onChange)
+  globalThis.addEventListener('offline', onChange)
   return () => {
-    window.removeEventListener('online', onChange)
-    window.removeEventListener('offline', onChange)
+    globalThis.removeEventListener('online', onChange)
+    globalThis.removeEventListener('offline', onChange)
   }
 }
 

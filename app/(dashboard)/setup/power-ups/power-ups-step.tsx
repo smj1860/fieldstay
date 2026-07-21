@@ -16,7 +16,7 @@ interface PowerUpsStepProps {
   finishAction: () => Promise<void>
 }
 
-export function PowerUpsStep({ powerUps, finishAction }: PowerUpsStepProps) {
+export function PowerUpsStep({ powerUps, finishAction }: Readonly<PowerUpsStepProps>) {
   const [isPending, startTransition] = useTransition()
 
   function handleFinish() {

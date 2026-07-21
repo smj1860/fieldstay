@@ -160,6 +160,13 @@ function AssetForm({
     }
   }
 
+  let submitButtonLabel: ReactNode
+  if (pending) {
+    submitButtonLabel = <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+  } else {
+    submitButtonLabel = isEdit ? 'Save Changes' : 'Add Asset'
+  }
+
   return (
     <Dialog open onClose={onClose} title={isEdit ? 'Edit Asset' : 'Add Asset'} maxWidthClassName="max-w-2xl">
         {/* Scan Data Plate — mobile only */}
@@ -352,7 +359,7 @@ function AssetForm({
 
           <div className="flex gap-2 pt-1">
             <Button type="submit" disabled={pending} className="flex items-center gap-2">
-              {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : (isEdit ? 'Save Changes' : 'Add Asset')}
+              {submitButtonLabel}
             </Button>
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
           </div>

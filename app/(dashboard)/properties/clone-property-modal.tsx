@@ -16,7 +16,7 @@ interface ClonePropertyModalProps {
   onClose: () => void
 }
 
-export function ClonePropertyModal({ targetProperty, otherProperties, onClose }: ClonePropertyModalProps) {
+export function ClonePropertyModal({ targetProperty, otherProperties, onClose }: Readonly<ClonePropertyModalProps>) {
   const [selectedId, setSelectedId] = useState<string>('')
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)

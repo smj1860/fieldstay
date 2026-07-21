@@ -384,7 +384,7 @@ export function ChecklistBuilder({
       const result = await cloneChecklistFromProperty(cloneFromSource, propertyId)
       if (result.error) { setError(result.error); return }
       setCloneFromModal(false)
-      window.location.reload()
+      globalThis.location.reload()
     })
   }
 

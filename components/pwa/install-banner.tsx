@@ -41,8 +41,8 @@ function isIOSSafari(): boolean {
 function isStandalone(): boolean {
   if (typeof window === 'undefined') return false
   return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as { standalone?: boolean }).standalone === true
+    globalThis.matchMedia('(display-mode: standalone)').matches ||
+    (globalThis.navigator as { standalone?: boolean }).standalone === true
   )
 }
 
@@ -76,8 +76,8 @@ export function InstallBanner() {
       setState('android')
     }
 
-    window.addEventListener('beforeinstallprompt', handler)
-    return () => window.removeEventListener('beforeinstallprompt', handler)
+    globalThis.addEventListener('beforeinstallprompt', handler)
+    return () => globalThis.removeEventListener('beforeinstallprompt', handler)
   }, [])
 
   function dismiss() {

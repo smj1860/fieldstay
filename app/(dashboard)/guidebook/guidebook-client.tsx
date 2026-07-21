@@ -57,7 +57,7 @@ export function GuidebookClient({
   initialActiveSponsorCount,
   properties,
   appUrl,
-}: GuidebookClientProps) {
+}: Readonly<GuidebookClientProps>) {
   const [sponsors, setSponsors]       = useState<GuidebookSponsor[]>(initialSponsors)
   const [config, setConfig]           = useState<GuidebookConfiguration | null>(initialConfig)
   const [editingSlot, setEditingSlot] = useState<number | null>(null)

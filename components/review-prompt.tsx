@@ -23,7 +23,7 @@ export function ReviewPrompt({ milestone, message }: Readonly<ReviewPromptProps>
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ milestone }),
     }).catch(() => {})
-    window.open(REVIEW_URL, '_blank', 'noopener,noreferrer')
+    globalThis.open(REVIEW_URL, '_blank', 'noopener,noreferrer')
     setHidden(true)
   }
 

@@ -823,10 +823,12 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
 
     const { resend: resendClient, FROM: from } = await import('@/lib/resend/client')
 
-    let sent = 0
-    const invitedCrewIds: string[] = []
-    for (const crew of uninvited) {
-      if (!crew.email && !crew.phone) continue
+    // Invites one crew member; returns their id if an invite was actually
+    // delivered, or null (not claimed, or delivery failed) — never throws,
+    // so Promise.all below can't have one crew member's failure take down
+    // the rest of the batch.
+    async function inviteOne(crew: NonNullable<typeof uninvited>[number]): Promise<string | null> {
+      if (!crew.email && !crew.phone) return null
 
       // Atomically claim this crew member before sending — closes the race
       // where a double-click fires two concurrent invocations that both query
@@ -840,7 +842,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
         .select('id')
         .maybeSingle()
 
-      if (!claimed) continue
+      if (!claimed) return null
 
       const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
       let delivered = false
@@ -882,16 +884,31 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
         }
       }
 
-      if (delivered) {
-        sent++
-        invitedCrewIds.push(crew.id)
-      } else {
-        // Release the claim so a future bulk run or manual resend can retry
-        await supabase
-          .from('crew_members')
-          .update({ invite_sent_at: null })
-          .eq('id', crew.id)
-          .eq('org_id', membership.org_id)
+      if (delivered) return crew.id
+
+      // Release the claim so a future bulk run or manual resend can retry
+      await supabase
+        .from('crew_members')
+        .update({ invite_sent_at: null })
+        .eq('id', crew.id)
+        .eq('org_id', membership.org_id)
+      return null
+    }
+
+    // Bounded concurrency — fires up to 5 invites at a time instead of one
+    // sequential await per crew member (this can be 20+ round trips per bulk
+    // send otherwise), while still capping burst load on Resend/Telnyx.
+    const INVITE_CONCURRENCY = 5
+    let sent = 0
+    const invitedCrewIds: string[] = []
+    for (let i = 0; i < uninvited.length; i += INVITE_CONCURRENCY) {
+      const batch   = uninvited.slice(i, i + INVITE_CONCURRENCY)
+      const results = await Promise.all(batch.map(inviteOne))
+      for (const crewId of results) {
+        if (crewId) {
+          sent++
+          invitedCrewIds.push(crewId)
+        }
       }
     }
 
