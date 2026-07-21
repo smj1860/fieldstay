@@ -594,6 +594,7 @@ export interface InventoryItem {
   property_id:             string
   org_id:                  string
   catalog_item_id:         string | null
+  source_template_id:      string | null
   name:                    string
   category:                InventoryCategory
   unit:                    string

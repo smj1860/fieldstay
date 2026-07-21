@@ -1,0 +1,454 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { requireOrgMember, requireOrgRole } from '@/lib/auth'
+import { logAuditEvent } from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
+import type { InventoryCategory } from '@/types/database'
+
+// ── Master List (org_inventory_catalog) ─────────────────────────────────────
+
+export async function createCatalogItem(
+  name: string,
+  category: InventoryCategory,
+  defaultUnit: string
+): Promise<{ id?: string; error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const trimmedName = name.trim()
+    const trimmedUnit = defaultUnit.trim()
+    if (!trimmedName) return { error: 'Item name is required.' }
+    if (!trimmedUnit) return { error: 'Unit is required.' }
+
+    const { data, error } = await supabase
+      .from('org_inventory_catalog')
+      .insert({ org_id: membership.org_id, name: trimmedName, category, default_unit: trimmedUnit })
+      .select('id')
+      .single()
+
+    if (error || !data) {
+      console.error('[createCatalogItem]', error)
+      reportError(error, { site: 'serverAction.templatesInventory.createCatalogItem', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org_inventory_catalog_item.created',
+      targetType: 'org_inventory_catalog',
+      targetId:   data.id,
+      metadata:   { name: trimmedName, category },
+    })
+
+    revalidatePath('/templates/inventory/master-list')
+    return { id: data.id }
+  } catch (err) {
+    console.error('[createCatalogItem]', err)
+    reportError(err, { site: 'serverAction.templatesInventory.createCatalogItem' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+export async function updateCatalogItem(
+  itemId: string,
+  updates: { name?: string; category?: InventoryCategory; default_unit?: string }
+): Promise<{ error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const patch: Record<string, string> = {}
+    if (updates.name !== undefined) {
+      const trimmed = updates.name.trim()
+      if (!trimmed) return { error: 'Item name is required.' }
+      patch.name = trimmed
+    }
+    if (updates.category !== undefined) patch.category = updates.category
+    if (updates.default_unit !== undefined) {
+      const trimmed = updates.default_unit.trim()
+      if (!trimmed) return { error: 'Unit is required.' }
+      patch.default_unit = trimmed
+    }
+    if (Object.keys(patch).length === 0) return {}
+
+    const { data, error } = await supabase
+      .from('org_inventory_catalog')
+      .update(patch)
+      .eq('id', itemId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[updateCatalogItem]', error)
+      reportError(error, { site: 'serverAction.templatesInventory.updateCatalogItem', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!data) return { error: 'Item not found.' }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org_inventory_catalog_item.updated',
+      targetType: 'org_inventory_catalog',
+      targetId:   itemId,
+      metadata:   patch,
+    })
+
+    revalidatePath('/templates/inventory/master-list')
+    return {}
+  } catch (err) {
+    console.error('[updateCatalogItem]', err)
+    reportError(err, { site: 'serverAction.templatesInventory.updateCatalogItem' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+export async function deleteCatalogItem(itemId: string): Promise<{ error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const { data, error } = await supabase
+      .from('org_inventory_catalog')
+      .delete()
+      .eq('id', itemId)
+      .eq('org_id', membership.org_id)
+      .select('id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[deleteCatalogItem]', error)
+      reportError(error, { site: 'serverAction.templatesInventory.deleteCatalogItem', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!data) return { error: 'Item not found.' }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org_inventory_catalog_item.deleted',
+      targetType: 'org_inventory_catalog',
+      targetId:   itemId,
+    })
+
+    revalidatePath('/templates/inventory/master-list')
+    return {}
+  } catch (err) {
+    console.error('[deleteCatalogItem]', err)
+    reportError(err, { site: 'serverAction.templatesInventory.deleteCatalogItem' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Create Template ──────────────────────────────────────────────────────────
+
+// Checkbox-select only, matching the confirmed design — no quantities
+// collected here. inventory_template_items.par_level is left at its
+// column default (1) and par_qty (unused, see Pass 1/3 self-audit) is
+// never written by this codebase at all.
+export async function createInventoryTemplate(
+  name: string,
+  selectedCatalogItemIds: string[]
+): Promise<{ templateId?: string; error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const trimmedName = name.trim()
+    if (!trimmedName) return { error: 'Template name is required.' }
+    if (selectedCatalogItemIds.length === 0) return { error: 'Select at least one item.' }
+
+    const { data: catalogItems, error: catalogError } = await supabase
+      .from('org_inventory_catalog')
+      .select('id, name, category, default_unit')
+      .eq('org_id', membership.org_id)
+      .in('id', selectedCatalogItemIds)
+
+    if (catalogError || !catalogItems?.length) {
+      console.error('[createInventoryTemplate] catalog fetch', catalogError)
+      reportError(catalogError, { site: 'serverAction.templatesInventory.createInventoryTemplate', orgId: membership.org_id })
+      return { error: 'Selected items not found.' }
+    }
+
+    const { data: template, error: templateError } = await supabase
+      .from('inventory_templates')
+      .insert({ org_id: membership.org_id, name: trimmedName })
+      .select('id')
+      .single()
+
+    if (templateError || !template) {
+      console.error('[createInventoryTemplate] template insert', templateError)
+      reportError(templateError, { site: 'serverAction.templatesInventory.createInventoryTemplate', orgId: membership.org_id })
+      // Pass 1's inventory_templates_org_name_unique means this is most
+      // often a duplicate name within the org, not a generic failure.
+      return { error: 'A template with that name already exists.' }
+    }
+
+    const { error: itemsError } = await supabase.from('inventory_template_items').insert(
+      catalogItems.map((item) => ({
+        template_id:     template.id,
+        catalog_item_id: item.id,
+        name:            item.name,
+        category:        item.category,
+        unit:            item.default_unit,
+      }))
+    )
+
+    if (itemsError) {
+      console.error('[createInventoryTemplate] items insert', itemsError)
+      reportError(itemsError, { site: 'serverAction.templatesInventory.createInventoryTemplate', orgId: membership.org_id })
+      // Don't leave an empty, orphaned template behind — the items insert
+      // failing after the template insert succeeded is a partial-write, not
+      // a fully-failed one, and this is a user-initiated one-shot action
+      // with no idempotent retry path like a background job would have.
+      await supabase.from('inventory_templates').delete().eq('id', template.id)
+      return { error: 'Failed to save template items. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'inventory_template.created',
+      targetType: 'inventory_template',
+      targetId:   template.id,
+      metadata:   { name: trimmedName, item_count: catalogItems.length },
+    })
+
+    revalidatePath('/templates/inventory/saved')
+    revalidatePath('/templates/inventory/create')
+    return { templateId: template.id }
+  } catch (err) {
+    console.error('[createInventoryTemplate]', err)
+    reportError(err, { site: 'serverAction.templatesInventory.createInventoryTemplate' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Par Levels property editor ───────────────────────────────────────────────
+// Reimplemented against this editor's own state shape rather than moved
+// verbatim from the old properties/[id]/setup/inventory screen — see
+// CLAUDE_TEMPLATES_3_INVENTORY.md Section 5.
+
+interface ParLevelItemInput {
+  id?: string
+  catalog_item_id?: string | null
+  name: string
+  category: InventoryCategory
+  unit: string
+  par_level: number
+  preferred_brand?: string | null
+}
+
+interface ParLevelItemRow {
+  id:                 string
+  property_id:        string
+  catalog_item_id:    string | null
+  source_template_id: string | null
+  name:               string
+  category:           InventoryCategory
+  unit:               string
+  par_level:          number
+  preferred_brand:    string | null
+}
+
+// Returns the saved rows (real DB ids included) rather than just {error?} —
+// a caller that keeps client-side item state (the Par Levels editor) needs
+// real ids back for newly-inserted items, not the client-generated
+// placeholder ids used before save. Without this, editing or deleting a
+// just-added item again in the same session (no page reload) would either
+// silently fail (delete against a nonexistent id) or double-insert (a
+// second save mistaking it for still-new).
+export async function upsertParLevelItems(
+  propertyId: string,
+  items: ParLevelItemInput[]
+): Promise<{ error?: string; items?: ParLevelItemRow[] }> {
+  try {
+    const { supabase, membership } = await requireOrgMember()
+
+    const existingItems = items.filter((item) => item.id)
+    const newItems      = items.filter((item) => !item.id)
+    const savedItems: ParLevelItemRow[] = []
+
+    if (existingItems.length) {
+      // Confirm every client-supplied id already belongs to this org
+      // before upserting — RLS backstops this, but a client-supplied id
+      // for another org's row should never reach the upsert call.
+      const { data: verifiedRows } = await supabase
+        .from('inventory_items')
+        .select('id')
+        .in('id', existingItems.map((item) => item.id!))
+        .eq('org_id', membership.org_id)
+      const verifiedIds   = new Set((verifiedRows ?? []).map((r) => r.id))
+      const verifiedItems = existingItems.filter((item) => verifiedIds.has(item.id!))
+
+      if (verifiedItems.length) {
+        // source_template_id is deliberately never included in this SET —
+        // editing an item's par level/unit/brand doesn't change where its
+        // content originally came from.
+        const { data, error } = await supabase.from('inventory_items').upsert(
+          verifiedItems.map((item) => ({
+            id:              item.id,
+            org_id:          membership.org_id,
+            property_id:     propertyId,
+            name:            item.name,
+            category:        item.category,
+            unit:            item.unit,
+            par_level:       item.par_level,
+            preferred_brand: item.preferred_brand ?? null,
+          })),
+          { onConflict: 'id' }
+        )
+          .select('id, property_id, catalog_item_id, source_template_id, name, category, unit, par_level, preferred_brand')
+        if (error) {
+          console.error('[upsertParLevelItems] update', error)
+          reportError(error, { site: 'serverAction.templatesInventory.upsertParLevelItems', orgId: membership.org_id })
+          return { error: 'Operation failed. Please try again.' }
+        }
+        savedItems.push(...(data ?? []))
+      }
+    }
+
+    if (newItems.length) {
+      const { data, error } = await supabase.from('inventory_items').insert(
+        newItems.map((item) => ({
+          property_id:      propertyId,
+          org_id:            membership.org_id,
+          catalog_item_id:   item.catalog_item_id ?? null,
+          name:              item.name,
+          category:          item.category,
+          unit:              item.unit,
+          par_level:         item.par_level,
+          current_quantity:  0,
+          preferred_brand:   item.preferred_brand ?? null,
+          is_active:         true,
+        }))
+      )
+        .select('id, property_id, catalog_item_id, source_template_id, name, category, unit, par_level, preferred_brand')
+      if (error) {
+        console.error('[upsertParLevelItems] insert', error)
+        reportError(error, { site: 'serverAction.templatesInventory.upsertParLevelItems', orgId: membership.org_id })
+        return { error: 'Operation failed. Please try again.' }
+      }
+      savedItems.push(...(data ?? []))
+    }
+
+    revalidatePath('/templates/inventory/par-levels')
+    return { items: savedItems }
+  } catch (err) {
+    console.error('[upsertParLevelItems]', err)
+    reportError(err, { site: 'serverAction.templatesInventory.upsertParLevelItems' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+export async function deleteParLevelItem(itemId: string): Promise<{ error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
+
+    const { data, error } = await supabase
+      .from('inventory_items')
+      .delete()
+      .eq('id', itemId)
+      .eq('org_id', membership.org_id)
+      .select('id, property_id')
+      .maybeSingle()
+
+    if (error) {
+      console.error('[deleteParLevelItem]', error)
+      reportError(error, { site: 'serverAction.templatesInventory.deleteParLevelItem', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    if (!data) return { error: 'Item not found.' }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'inventory.item.deleted',
+      targetType: 'inventory_item',
+      targetId:   itemId,
+      metadata:   { property_id: data.property_id },
+    })
+
+    revalidatePath('/templates/inventory/par-levels')
+    return {}
+  } catch (err) {
+    console.error('[deleteParLevelItem]', err)
+    reportError(err, { site: 'serverAction.templatesInventory.deleteParLevelItem' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Clone from another property ──────────────────────────────────────────────
+// Moved from properties/[id]/setup/inventory/actions.ts (deleted in this
+// pass) for reuse in the Par Levels property editor — see self-audit
+// item 3 in CLAUDE_TEMPLATES_3_INVENTORY.md. Body unchanged; only the
+// revalidatePath target moved with it.
+
+export async function cloneInventoryFromProperty(
+  sourcePropertyId: string,
+  targetPropertyId: string,
+): Promise<{ added: number; skipped: number; error?: string }> {
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
+
+    const { data: sourceItems } = await supabase
+      .from('inventory_items')
+      .select('name, category, unit, par_level, preferred_brand, catalog_item_id, low_stock_threshold_pct')
+      .eq('property_id', sourcePropertyId)
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+
+    if (!sourceItems?.length) return { added: 0, skipped: 0, error: 'Source property has no inventory items' }
+
+    const { data: existing } = await supabase
+      .from('inventory_items')
+      .select('name')
+      .eq('property_id', targetPropertyId)
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+
+    const existingNames = new Set((existing ?? []).map(i => i.name.toLowerCase()))
+
+    const toInsert = sourceItems
+      .filter(item => !existingNames.has(item.name.toLowerCase()))
+      .map(item => ({
+        property_id:             targetPropertyId,
+        org_id:                  membership.org_id,
+        catalog_item_id:         item.catalog_item_id ?? null,
+        name:                    item.name,
+        category:                item.category as never,
+        unit:                    item.unit,
+        par_level:               item.par_level,
+        current_quantity:        0,
+        low_stock_threshold_pct: item.low_stock_threshold_pct ?? 20,
+        preferred_brand:         item.preferred_brand ?? null,
+        is_active:               true,
+      }))
+
+    const skipped = sourceItems.length - toInsert.length
+    if (toInsert.length === 0) return { added: 0, skipped }
+
+    const { error } = await supabase.from('inventory_items').insert(toInsert)
+    if (error) {
+      console.error('[cloneInventoryFromProperty]', error)
+      reportError(error, { site: 'serverAction.templatesInventory.cloneInventoryFromProperty', orgId: membership.org_id })
+      return { added: 0, skipped, error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'property.inventory.cloned',
+      targetType: 'property',
+      targetId:   targetPropertyId,
+      metadata:   { sourcePropertyId, added: toInsert.length, skipped },
+    })
+
+    revalidatePath('/templates/inventory/par-levels')
+    return { added: toInsert.length, skipped }
+  } catch (err) {
+    console.error('[cloneInventoryFromProperty]', err)
+    reportError(err, { site: 'serverAction.templatesInventory.cloneInventoryFromProperty' })
+    return { added: 0, skipped: 0, error: 'Operation failed. Please try again.' }
+  }
+}

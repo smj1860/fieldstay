@@ -28,7 +28,7 @@ const TILES: TemplateTile[] = [
     title:       'Inventory',
     description: 'Org-wide restock catalog and default par levels for every property.',
     icon:        Package,
-    href:        null,
+    href:        '/templates/inventory/master-list',
   },
   {
     id:          'maintenance',

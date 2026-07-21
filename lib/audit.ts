@@ -144,6 +144,10 @@ export type AuditAction =
   | 'platform_admin.inventory_catalog_item.created'
   | 'platform_admin.inventory_catalog_item.updated'
   | 'platform_admin.inventory_catalog_item.deleted'
+  | 'org_inventory_catalog_item.created'
+  | 'org_inventory_catalog_item.updated'
+  | 'org_inventory_catalog_item.deleted'
+  | 'inventory_template.created'
 
 interface AuditParams {
   orgId?:         string

@@ -5,14 +5,13 @@ import { useRouter } from 'next/navigation'
 import {
   Plus, ClipboardList, ChevronDown, X,
   Package, AlertTriangle, ShoppingCart, Check, History,
-  BarChart2, Layers, Loader2, Save,
+  BarChart2, Loader2, Save,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount, triggerShoppingCart } from './actions'
 import type { InventoryCategory, PoStatus } from '@/types/database'
 import { PortfolioInventoryView } from './portfolio-view'
-import { TemplateManager } from './template-manager'
 import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
 import { NudgeBanner } from '@/components/nudge-banner'
@@ -87,22 +86,6 @@ interface PortfolioItem {
   preferred_brand: string | null
   property: { name: string } | null
   first_count_recorded_at: string | null
-}
-
-interface TemplateItem {
-  id: string
-  name: string
-  category: string
-  unit: string
-  par_level: number
-  notes: string | null
-  preferred_brand: string | null
-}
-
-interface Template {
-  id: string
-  name: string
-  inventory_template_items: TemplateItem[] | null
 }
 
 interface PurchaseOrderItem {
@@ -1265,7 +1248,7 @@ function PendingCountReview({
 
 // ── Main InventoryManager ─────────────────────────────────────────────────────
 
-type InventoryTab = 'property' | 'portfolio' | 'template'
+type InventoryTab = 'property' | 'portfolio'
 
 export function InventoryManager({
   properties,
@@ -1274,7 +1257,6 @@ export function InventoryManager({
   catalogItems,
   recentCounts,
   allInventoryItems,
-  template,
   pendingDrafts,
   cartData,
   showKrogerNudge = false,
@@ -1285,7 +1267,6 @@ export function InventoryManager({
   catalogItems: CatalogItem[]
   recentCounts: InventoryCount[]
   allInventoryItems: PortfolioItem[]
-  template: Template | null
   pendingDrafts: PendingDraft[]
   cartData: (CartBuildResult & { built_at: string; location_name: string }) | null
   showKrogerNudge?: boolean
@@ -1329,7 +1310,6 @@ export function InventoryManager({
   const tabs: TabItem<InventoryTab>[] = [
     { id: 'property',  label: 'By Property', icon: <Package className="w-3.5 h-3.5" /> },
     { id: 'portfolio', label: 'Portfolio',   icon: <BarChart2 className="w-3.5 h-3.5" /> },
-    { id: 'template',  label: 'Template',    icon: <Layers className="w-3.5 h-3.5" /> },
   ]
 
   return (
@@ -1437,14 +1417,6 @@ export function InventoryManager({
           )}
           <PortfolioInventoryView items={allInventoryItems} />
         </>
-      )}
-
-      {activeTab === 'template' && (
-        <TemplateManager
-          template={template}
-          properties={properties}
-          catalogItems={catalogItems}
-        />
       )}
 
       {/* Full-screen detail modal for the selected property */}

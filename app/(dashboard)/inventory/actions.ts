@@ -226,47 +226,6 @@ export async function submitInventoryCount(
 
 // ── Template actions ──────────────────────────────────────────────────────────
 
-export async function createOrGetTemplate(): Promise<{
-  template?: { id: string; name: string; inventory_template_items: null }
-  error?: string
-}> {
-  try {
-    const { supabase, membership } = await requireOrgMember()
-
-    // Upsert so concurrent calls don't race past the check+insert gap
-    const { data: tmpl, error } = await supabase
-      .from('inventory_templates')
-      .upsert(
-        { org_id: membership.org_id, name: 'Master Inventory List' },
-        { onConflict: 'org_id', ignoreDuplicates: true }
-      )
-      .select('id, name')
-      .single()
-
-    if (error || !tmpl) {
-      // Conflict ignored — fetch the existing row
-      const { data: existing, error: fetchErr } = await supabase
-        .from('inventory_templates')
-        .select('id, name')
-        .eq('org_id', membership.org_id)
-        .single()
-      if (fetchErr || !existing) {
-        console.error('[createOrGetTemplate]', fetchErr)
-        reportError(fetchErr, { site: 'serverAction.inventory.createOrGetTemplate', orgId: membership.org_id })
-        return { error: 'Template not found' }
-      }
-      return { template: { ...existing, inventory_template_items: null } }
-    }
-
-    revalidatePath('/inventory')
-    return { template: { ...tmpl, inventory_template_items: null } }
-  } catch (err) {
-    console.error('[createOrGetTemplate]', err)
-    reportError(err, { site: 'serverAction.inventory.createOrGetTemplate' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
 export async function addTemplateItem(
   templateId: string,
   item: { name: string; category: string; unit: string; par_level: number; preferred_brand?: string | null }
@@ -297,47 +256,6 @@ export async function addTemplateItem(
   } catch (err) {
     console.error('[addTemplateItem]', err)
     reportError(err, { site: 'serverAction.inventory.addTemplateItem' })
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-export async function bulkAddTemplateItems(
-  templateId: string,
-  items: Array<{ name: string; category: string; unit: string; par_level: number; preferred_brand?: string | null }>
-): Promise<{
-  items?: Array<{ id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null }>
-  error?: string
-}> {
-  try {
-    const { supabase } = await requireOrgMember()
-
-    if (!items.length) return { items: [] }
-
-    const { data, error } = await supabase
-      .from('inventory_template_items')
-      .insert(
-        items.map((item) => ({
-          template_id:     templateId,
-          name:            item.name,
-          category:        item.category,
-          unit:            item.unit,
-          par_level:       item.par_level,
-          preferred_brand: item.preferred_brand ?? null,
-        }))
-      )
-      .select('id, name, category, unit, par_level, notes, preferred_brand')
-
-    if (error) {
-      console.error('[bulkAddTemplateItems]', error)
-      reportError(error, { site: 'serverAction.inventory.bulkAddTemplateItems' })
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    revalidatePath('/inventory')
-    return { items: data as Array<{ id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null }> }
-  } catch (err) {
-    console.error('[bulkAddTemplateItems]', err)
-    reportError(err, { site: 'serverAction.inventory.bulkAddTemplateItems' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -409,58 +327,6 @@ export async function removeTemplateItem(itemId: string): Promise<{ error?: stri
   }
 }
 
-export async function applyTemplateToProperty(
-  templateId: string,
-  propertyId: string
-): Promise<{ added: number; skipped: number; error?: string }> {
-  try {
-    const { supabase, membership } = await requireOrgMember()
-
-    const { data: templateItems } = await supabase
-      .from('inventory_template_items')
-      .select('*')
-      .eq('template_id', templateId)
-
-    if (!templateItems?.length) return { added: 0, skipped: 0 }
-
-    const { data: existingItems } = await supabase
-      .from('inventory_items')
-      .select('name')
-      .eq('property_id', propertyId)
-      .eq('org_id', membership.org_id)
-
-    const existingNames = new Set((existingItems ?? []).map(i => i.name.toLowerCase()))
-
-    const toInsert = templateItems
-      .filter(item => !existingNames.has(item.name.toLowerCase()))
-      .map(item => ({
-        property_id:             propertyId,
-        org_id:                  membership.org_id,
-        name:                    item.name,
-        category:                item.category,
-        unit:                    item.unit,
-        par_level:               item.par_level,
-        current_quantity:        0,
-        notes:                   item.notes,
-        catalog_item_id:         item.catalog_item_id,
-        is_active:               true,
-        low_stock_threshold_pct: 20,
-        preferred_brand:         (item as { preferred_brand?: string | null }).preferred_brand ?? null,
-      }))
-
-    if (toInsert.length > 0) {
-      await supabase.from('inventory_items').insert(toInsert)
-    }
-
-    revalidatePath('/inventory')
-    return { added: toInsert.length, skipped: templateItems.length - toInsert.length }
-  } catch (err) {
-    console.error('[applyTemplateToProperty]', err)
-    reportError(err, { site: 'serverAction.inventory.applyTemplateToProperty' })
-    return { added: 0, skipped: 0, error: 'Operation failed. Please try again.' }
-  }
-}
-
 export async function applyTemplateToProperties(
   templateId: string,
   propertyIds: string[]
@@ -502,6 +368,7 @@ export async function applyTemplateToProperties(
       property_id:             string
       org_id:                  string
       catalog_item_id:         string | null
+      source_template_id:      string
       name:                    string
       category:                string
       unit:                    string
@@ -525,6 +392,7 @@ export async function applyTemplateToProperties(
           property_id:             propertyId,
           org_id:                  membership.org_id,
           catalog_item_id:         item.catalog_item_id ?? null,
+          source_template_id:      templateId,
           name:                    item.name,
           category:                item.category,
           unit:                    item.unit,
@@ -549,38 +417,6 @@ export async function applyTemplateToProperties(
     console.error('[applyTemplateToProperties]', err)
     reportError(err, { site: 'serverAction.inventory.applyTemplateToProperties' })
     return { error: 'Operation failed. Please try again.', applied: 0 }
-  }
-}
-
-export async function bulkAddTemplateItemsFromCSV(
-  templateId: string,
-  rows: Array<{ name: string; category: string; unit: string; par_level: number }>
-): Promise<{ error?: string; added: number }> {
-  try {
-    const { supabase } = await requireOrgMember()
-
-    const toInsert = rows.map((row, i) => ({
-      template_id: templateId,
-      name:        row.name,
-      category:    row.category,
-      unit:        row.unit,
-      par_level:   row.par_level,
-      sort_order:  i,
-    }))
-
-    const { error } = await supabase.from('inventory_template_items').insert(toInsert)
-    if (error) {
-      console.error('[bulkAddTemplateItemsFromCSV]', error)
-      reportError(error, { site: 'serverAction.inventory.bulkAddTemplateItemsFromCSV' })
-      return { error: 'Operation failed. Please try again.', added: 0 }
-    }
-
-    revalidatePath('/inventory')
-    return { added: toInsert.length }
-  } catch (err) {
-    console.error('[bulkAddTemplateItemsFromCSV]', err)
-    reportError(err, { site: 'serverAction.inventory.bulkAddTemplateItemsFromCSV' })
-    return { error: 'Operation failed. Please try again.', added: 0 }
   }
 }
 

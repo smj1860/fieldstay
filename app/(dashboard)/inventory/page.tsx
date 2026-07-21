@@ -16,7 +16,6 @@ export default async function InventoryPage() {
     { data: purchaseOrders },
     { data: catalogItems },
     { data: recentCounts },
-    { data: templates },
     { data: pendingDrafts },
   ] = await Promise.all([
     supabase
@@ -60,11 +59,6 @@ export default async function InventoryPage() {
       .order('submitted_at', { ascending: false })
       .limit(50),
     supabase
-      .from('inventory_templates')
-      .select('id, name, inventory_template_items(id, name, category, unit, par_level, notes, sort_order, preferred_brand)')
-      .eq('org_id', membership.org_id)
-      .limit(1),
-    supabase
       .from('inventory_count_drafts')
       .select(`
         id, property_id, status, created_at, notes,
@@ -86,7 +80,6 @@ export default async function InventoryPage() {
     .eq('milestone', 'last_cart_build')
     .maybeSingle()
 
-  const template  = templates?.[0] ?? null
   const cartData  = (cartMilestone?.value ?? null) as (CartBuildResult & { built_at: string; location_name: string }) | null
 
   const normalizedAllInventoryItems = (allInventoryItemsRaw ?? []).map((item) => ({
@@ -118,7 +111,6 @@ export default async function InventoryPage() {
         catalogItems={catalogItems ?? []}
         recentCounts={recentCounts ?? []}
         allInventoryItems={normalizedAllInventoryItems}
-        template={template}
         pendingDrafts={pendingDrafts ?? []}
         cartData={cartData}
         showKrogerNudge={showKrogerNudge}
