@@ -28,10 +28,10 @@ function detectPlatform(): Platform {
 function isRunningAsPWA(): boolean {
   if (typeof window === 'undefined') return false
   return (
-    window.matchMedia('(display-mode: standalone)').matches ||
+    globalThis.matchMedia('(display-mode: standalone)').matches ||
     (
-      'standalone' in window.navigator &&
-      (window.navigator as { standalone?: boolean }).standalone === true
+      'standalone' in globalThis.navigator &&
+      (globalThis.navigator as { standalone?: boolean }).standalone === true
     )
   )
 }
@@ -150,8 +150,8 @@ export function CrewInstallClient() {
       e.preventDefault()
       setDeferredPrompt(e as BeforeInstallPromptEvent)
     }
-    window.addEventListener('beforeinstallprompt', handler)
-    return () => window.removeEventListener('beforeinstallprompt', handler)
+    globalThis.addEventListener('beforeinstallprompt', handler)
+    return () => globalThis.removeEventListener('beforeinstallprompt', handler)
   }, [])
 
   const handleAndroidNativeInstall = async () => {

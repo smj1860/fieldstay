@@ -290,7 +290,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
           console.error('[DexieProvider] reconnect resync failed:', err)
         )
       }
-      window.addEventListener('online', onlineHandler)
+      globalThis.addEventListener('online', onlineHandler)
     }
 
     run().catch((err) => console.error('[DexieProvider] sync failed:', err))
@@ -300,7 +300,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (channel) supabase.removeChannel(channel)
       if (checklistChannel) supabase.removeChannel(checklistChannel)
       if (assetsChannel) supabase.removeChannel(assetsChannel)
-      if (onlineHandler) window.removeEventListener('online', onlineHandler)
+      if (onlineHandler) globalThis.removeEventListener('online', onlineHandler)
     }
   }, [userId])
 

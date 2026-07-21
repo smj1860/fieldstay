@@ -39,7 +39,7 @@ const PMS_OPTIONS = [
   // },
 ]
 
-export function OnboardingForm({ userEmail, initialStep = 'name-org' }: OnboardingFormProps) {
+export function OnboardingForm({ userEmail, initialStep = 'name-org' }: Readonly<OnboardingFormProps>) {
   const [state, action, pending] = useActionState(createOrganization, null)
   const [step, setStep]           = useState<Step>(initialStep)
 

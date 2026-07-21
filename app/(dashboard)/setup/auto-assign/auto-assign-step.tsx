@@ -28,7 +28,7 @@ const OPTIONS: Array<{ value: AutoAssignMode; label: string; description: string
   },
 ]
 
-export function AutoAssignWizardStep({ initialMode, continueAction }: AutoAssignWizardStepProps) {
+export function AutoAssignWizardStep({ initialMode, continueAction }: Readonly<AutoAssignWizardStepProps>) {
   const [selected, setSelected] = useState<AutoAssignMode>(initialMode)
   const [isPending, startTransition] = useTransition()
 

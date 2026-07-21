@@ -53,13 +53,13 @@ const MOBILE_SIZING  = { daysAhead: 7,  colW: 36, rowH: 56, labelW: 100, blockH:
 const MOBILE_BREAKPOINT = 640 // matches the `sm` breakpoint used elsewhere in the app
 
 function subscribeToMobileBreakpoint(onChange: () => void): () => void {
-  const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
+  const mql = globalThis.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
   mql.addEventListener('change', onChange)
   return () => mql.removeEventListener('change', onChange)
 }
 
 function getIsMobileSnapshot(): boolean {
-  return window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches
+  return globalThis.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`).matches
 }
 
 function useIsMobile(): boolean {

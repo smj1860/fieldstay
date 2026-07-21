@@ -44,10 +44,10 @@ export function SessionRefreshGuard() {
       if (!session) {
         // Only redirect if currently on a protected route — if already
         // on a public page (login, invite, etc.) do nothing
-        if (!isPublicPath(window.location.pathname)) {
-          const next = encodeURIComponent(window.location.pathname)
+        if (!isPublicPath(globalThis.location.pathname)) {
+          const next = encodeURIComponent(globalThis.location.pathname)
           // Detect crew vs PM and redirect to the correct login entry point
-          const loginPath = window.location.pathname.startsWith('/crew')
+          const loginPath = globalThis.location.pathname.startsWith('/crew')
             ? `/login?next=/crew`
             : `/login?next=${next}`
           router.push(loginPath)
@@ -60,10 +60,10 @@ export function SessionRefreshGuard() {
         console.warn('[SessionRefreshGuard] Refresh failed:', error.message)
         // If refresh fails on a protected route, redirect rather than
         // leaving the user in a broken offline state with no explanation
-        if (!isPublicPath(window.location.pathname)) {
-          const loginPath = window.location.pathname.startsWith('/crew')
+        if (!isPublicPath(globalThis.location.pathname)) {
+          const loginPath = globalThis.location.pathname.startsWith('/crew')
             ? `/login?next=/crew`
-            : `/login?next=${encodeURIComponent(window.location.pathname)}`
+            : `/login?next=${encodeURIComponent(globalThis.location.pathname)}`
           router.push(loginPath)
         }
       }

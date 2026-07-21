@@ -94,6 +94,12 @@ function parseSimpleCsv(text: string) {
   }).filter(r => r.name)
 }
 
+function addTabLabel(tab: 'catalog' | 'custom' | 'csv'): string {
+  if (tab === 'catalog') return 'From Catalog'
+  if (tab === 'csv')     return 'Upload CSV'
+  return 'Custom'
+}
+
 export function TemplateManager({
   template,
   properties,
@@ -460,7 +466,7 @@ export function TemplateManager({
                 ? { background: 'var(--bg-card)', color: 'var(--text-primary)' }
                 : { color: 'var(--text-muted)' }}
             >
-              {tab === 'catalog' ? 'From Catalog' : tab === 'csv' ? 'Upload CSV' : 'Custom'}
+              {addTabLabel(tab)}
             </button>
           ))}
         </div>

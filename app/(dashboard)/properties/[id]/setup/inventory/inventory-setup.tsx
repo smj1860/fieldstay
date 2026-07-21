@@ -176,7 +176,7 @@ export function InventorySetup({
       if (res.error) { setError(res.error); return }
       setCloneResult({ added: res.added, skipped: res.skipped })
       setCloneModal(false)
-      window.location.reload()
+      globalThis.location.reload()
     })
   }
 
@@ -188,7 +188,7 @@ export function InventorySetup({
         setError(res.error)
       } else {
         setApplyResult({ added: res.added, skipped: res.skipped })
-        window.location.reload()
+        globalThis.location.reload()
       }
     })
   }

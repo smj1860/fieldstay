@@ -1131,6 +1131,12 @@ function PropertyInventoryCard({
 
 // ── Pending Count Review ──────────────────────────────────────────────────────
 
+function diffColor(diff: number, neutralColor: string): string {
+  if (diff > 0) return 'var(--accent-green)'
+  if (diff < 0) return 'var(--accent-red)'
+  return neutralColor
+}
+
 function PendingCountReview({
   drafts,
   properties,
@@ -1218,7 +1224,7 @@ function PendingCountReview({
                           <span
                             className="text-right tabular-nums font-medium"
                             style={{
-                              color: diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--accent-amber)',
+                              color: diffColor(diff, 'var(--accent-amber)'),
                             }}
                           >
                             {di.counted_qty}
@@ -1226,7 +1232,7 @@ function PendingCountReview({
                           <span
                             className="text-right text-xs tabular-nums"
                             style={{
-                              color: diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--text-muted)',
+                              color: diffColor(diff, 'var(--text-muted)'),
                             }}
                           >
                             {diff > 0 ? `+${diff}` : diff === 0 ? '—' : String(diff)}
