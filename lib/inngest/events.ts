@@ -264,6 +264,12 @@ export type FieldStayEvents = {
       entity_id:      string
       triggered_at:   string
       correlation_id: string | null | undefined
+      // Resolved from the webhook's external_user_id against
+      // integration_connections — undefined when that lookup misses, in
+      // which case ownerrez-incremental-sync.ts falls back to its full
+      // platform-wide sweep instead of a single scoped connection.
+      user_id?:       string
+      org_id?:        string
     }
   }
 

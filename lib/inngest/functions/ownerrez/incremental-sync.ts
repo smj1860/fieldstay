@@ -2,8 +2,25 @@
  * OwnerRez Incremental Sync
  *
  * Triggered by:
- *  - Inngest cron:    every 15 minutes  (0/15 * * * *)
- *  - Webhook event:   integration/ownerrez.sync.requested
+ *  - Inngest cron:    hourly (0 * * * *) — reliability backstop, always a
+ *                      full sweep of every active connection
+ *  - Webhook event:   integration/ownerrez.sync.requested — scoped to the
+ *                      one connection the webhook belongs to when
+ *                      ownerrez.ts's handleWebhookEvent resolved it (falls
+ *                      back to a full sweep when it couldn't)
+ *  - Manual event:    ownerrez/sync.now.requested — always scoped to the
+ *                      PM's own connection (org_id/user_id come straight
+ *                      from their session, no resolution needed)
+ *
+ * A scoped (single-connection) run costs ~2 requests against OwnerRez's
+ * shared-IP rate-limit budget (see ownerrez-api.ts) instead of looping
+ * every tenant on the platform — see FUTURE_REMEDIATION.md's OwnerRez
+ * scaling note for why this matters as connection count grows. The cron
+ * was moved from every 15 minutes to hourly specifically because this
+ * scoping exists: real-time-ish updates now travel via the (cheap, scoped)
+ * webhook path, and the cron's only job is to catch whatever a webhook
+ * missed — a wider window is fine for a backstop, not fine for the only
+ * path data has.
  *
  * For each active OwnerRez connection:
  *  1. Read sync_cursor from metadata
@@ -51,13 +68,20 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     concurrency: { limit: 5 },
   },
   [
-    { cron: '0/15 * * * *' },
+    { cron: '0 * * * *' },
     { event: 'integration/ownerrez.sync.requested' as const },
     { event: 'ownerrez/sync.now.requested' as const },
   ],
-  async ({ step, logger }) => {
+  async ({ event, step, logger }) => {
     const workflowId = crypto.randomUUID()
-    logger.info('ownerrez-incremental-sync triggered', { workflowId, trigger: 'cron' })
+
+    // Inngest's synthetic cron-tick event has no `data.user_id` — only the
+    // two real event triggers carry one, and only when the webhook path
+    // successfully resolved a connection (see ownerrez.ts's
+    // handleWebhookEvent). Its absence means "do a full sweep", the same
+    // behavior this function always had before scoping existed.
+    const scopedUserId = event?.data && 'user_id' in event.data ? event.data.user_id : undefined
+    logger.info('ownerrez-incremental-sync triggered', { workflowId, scoped: Boolean(scopedUserId) })
 
     // Circuit breaker: if the OwnerRez API is degraded, skip this cron tick.
     const circuitOpen = await step.run('check-circuit-breaker', async () => {
@@ -73,11 +97,15 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
     const connections = await step.run('fetch-connections', async () => {
       const supabase = createServiceClient()
-      const { data } = await supabase
+      let query = supabase
         .from('integration_connections')
         .select('id, user_id, org_id, external_user_id, metadata')
         .eq('provider_id', PROVIDER)
         .eq('status', 'active')
+
+      if (scopedUserId) query = query.eq('user_id', scopedUserId)
+
+      const { data } = await query
       return data ?? []
     })
 

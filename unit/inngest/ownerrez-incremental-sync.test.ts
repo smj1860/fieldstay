@@ -71,12 +71,13 @@ function makeSupabase(queued: QueuedByTable) {
   const counters: Record<string, number> = {}
   const upsertSpy = vi.fn()
   const updateSpy = vi.fn()
+  const eqSpy     = vi.fn()
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
     chain.select = vi.fn(() => chain)
-    chain.eq     = vi.fn(() => chain)
+    chain.eq     = vi.fn((column: string, value: unknown) => { eqSpy(table, column, value); return chain })
     chain.in     = vi.fn(() => chain)
     chain.neq    = vi.fn(() => chain)
     chain.order  = vi.fn(() => chain)
@@ -97,7 +98,7 @@ function makeSupabase(queued: QueuedByTable) {
     return chain
   })
 
-  return { from, upsertSpy, updateSpy }
+  return { from, upsertSpy, updateSpy, eqSpy }
 }
 
 const CONN = {
@@ -271,6 +272,51 @@ describe('ownerRezIncrementalSync', () => {
     // The per-connection loop's own try/catch swallows NonRetriableError —
     // the whole tick must not fail just because one connection's token died.
     expect(result).toEqual({ synced: 0, total: 1 })
+  })
+
+  it('scopes fetch-connections to the triggering user_id when the event carries one (webhook/manual path)', async () => {
+    baseMocks()
+
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['fetch-connections', 'check-new-properties-user_1', 'sync-user-user_1'])
+
+    await invokeHandler(ownerRezIncrementalSync, {
+      event: {
+        data: {
+          provider_id: 'ownerrez', event_type: 'entity_update', entity_type: 'booking',
+          entity_id: '555', triggered_at: '2026-07-20T10:00:00.000Z', correlation_id: null,
+          user_id: 'user_1', org_id: 'org_1',
+        },
+      },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(supabase.eqSpy).toHaveBeenCalledWith('integration_connections', 'user_id', 'user_1')
+  })
+
+  it('does not scope fetch-connections when the triggering event carries no user_id (cron sweep)', async () => {
+    baseMocks()
+
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['fetch-connections', 'check-new-properties-user_1', 'sync-user-user_1'])
+
+    await invokeHandler(ownerRezIncrementalSync, {
+      event:  {},
+      step,
+      logger: makeLogger(),
+    })
+
+    const connectionsEqCalls = supabase.eqSpy.mock.calls.filter((c) => c[0] === 'integration_connections')
+    expect(connectionsEqCalls.map((c) => c[1])).not.toContain('user_id')
   })
 
   it('backs off with a top-level step.sleep (never nested in step.run) and records rate_limited without flipping connection status to error', async () => {

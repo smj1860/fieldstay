@@ -190,7 +190,7 @@ export const ownerRezProvider: IntegrationProvider = {
   // Handling both costs nothing — neither string means anything else — so
   // this doesn't pick a side. entity_update/entity_delete are consistent
   // across both sections. See app-api-webhooks doc, 2026-07-16.
-  async handleWebhookEvent({ action, payload, externalUserId: _externalUserId, correlationId }) {
+  async handleWebhookEvent({ action, payload, externalUserId, correlationId }) {
     const data       = payload as Record<string, unknown>
     const entityType = String(data.entity_type ?? '')
     const entityId   = String(data.entity_id ?? '')
@@ -211,30 +211,39 @@ export const ownerRezProvider: IntegrationProvider = {
       case 'entity_create':
       case 'entity_update':
       case 'entity_delete': {
-        if (entityType === 'booking') {
+        if (entityType === 'booking' || entityType === 'guest') {
+          // Resolve which FieldStay connection this webhook belongs to, so
+          // ownerrez-incremental-sync.ts can scope its work to just this one
+          // connection instead of re-syncing every active OwnerRez tenant
+          // platform-wide. Falls back to unresolved (fields simply omitted)
+          // if the lookup misses — the sync function then falls back to its
+          // full-sweep behavior, same as before this resolution existed.
+          let connection: { user_id: string; org_id: string } | null = null
+          if (externalUserId) {
+            const { createServiceClient } = await import('@/lib/supabase/server')
+            const supabase = createServiceClient()
+            const { data: conn } = await supabase
+              .from('integration_connections')
+              .select('user_id, org_id')
+              .eq('provider_id', 'ownerrez')
+              .eq('external_user_id', externalUserId)
+              .eq('status', 'active')
+              .maybeSingle()
+            if (conn?.org_id) connection = { user_id: conn.user_id, org_id: conn.org_id }
+          }
+
           const { inngest } = await import('@/lib/inngest/client')
           await inngest.send({
             name: 'integration/ownerrez.sync.requested',
             data: {
               provider_id:    'ownerrez',
               event_type:     action,
-              entity_type:    'booking',
+              entity_type:    entityType,
               entity_id:      entityId,
               triggered_at:   new Date().toISOString(),
               correlation_id: correlationId ?? null,
-            },
-          })
-        } else if (entityType === 'guest') {
-          const { inngest } = await import('@/lib/inngest/client')
-          await inngest.send({
-            name: 'integration/ownerrez.sync.requested',
-            data: {
-              provider_id:    'ownerrez',
-              event_type:     action,
-              entity_type:    'guest',
-              entity_id:      entityId,
-              triggered_at:   new Date().toISOString(),
-              correlation_id: correlationId ?? null,
+              user_id:        connection?.user_id,
+              org_id:         connection?.org_id,
             },
           })
         } else {
