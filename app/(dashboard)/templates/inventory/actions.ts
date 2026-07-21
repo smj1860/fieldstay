@@ -147,9 +147,23 @@ export async function deleteCatalogItem(itemId: string): Promise<{ error?: strin
 // collected here. inventory_template_items.par_level is left at its
 // column default (1) and par_qty (unused, see Pass 1/3 self-audit) is
 // never written by this codebase at all.
+//
+// CORRECTION (Pass 3 Addendum self-audit): the original version of this
+// function set inventory_template_items.catalog_item_id to the selected
+// org_inventory_catalog row's own id. That column is a foreign key to the
+// GLOBAL inventory_catalog table (20260612021647_fix_inventory_template_
+// items_columns.sql), not to org_inventory_catalog — org_inventory_catalog
+// ids are freshly generated per org and essentially never coincide with a
+// real inventory_catalog id, so every insert here was failing the FK
+// constraint and getting rolled back by the orphaned-template cleanup
+// below. Create Template was non-functional for any selection since Pass
+// 3 shipped. Fixed by using platform_catalog_item_id — the org catalog
+// row's own pointer back to its platform origin — which is exactly what
+// that FK expects, and is null (correctly) for an org's own custom items.
 export async function createInventoryTemplate(
   name: string,
-  selectedCatalogItemIds: string[]
+  selectedCatalogItemIds: string[],
+  brandByItemId: Record<string, string | null> = {}
 ): Promise<{ templateId?: string; error?: string }> {
   try {
     const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
@@ -160,7 +174,7 @@ export async function createInventoryTemplate(
 
     const { data: catalogItems, error: catalogError } = await supabase
       .from('org_inventory_catalog')
-      .select('id, name, category, default_unit')
+      .select('id, name, category, default_unit, platform_catalog_item_id')
       .eq('org_id', membership.org_id)
       .in('id', selectedCatalogItemIds)
 
@@ -187,10 +201,11 @@ export async function createInventoryTemplate(
     const { error: itemsError } = await supabase.from('inventory_template_items').insert(
       catalogItems.map((item) => ({
         template_id:     template.id,
-        catalog_item_id: item.id,
+        catalog_item_id: item.platform_catalog_item_id ?? null,
         name:            item.name,
         category:        item.category,
         unit:            item.default_unit,
+        preferred_brand: brandByItemId[item.id]?.trim() || null,
       }))
     )
 
@@ -220,6 +235,104 @@ export async function createInventoryTemplate(
   } catch (err) {
     console.error('[createInventoryTemplate]', err)
     reportError(err, { site: 'serverAction.templatesInventory.createInventoryTemplate' })
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+// ── Create Template from CSV ─────────────────────────────────────────────────
+// Addendum's second way to arrive at a new template's item list — same
+// "create empty template, then populate it, roll back on partial failure"
+// shape as createInventoryTemplate above, but items come from parsed CSV
+// rows instead of catalog-row ids. catalog_item_id is resolved by a single
+// case-insensitive batch name-match against org_inventory_catalog (not a
+// query per row) — matches by name only when that org catalog row also
+// has a platform origin; a name match against a purely custom org item
+// (platform_catalog_item_id null) correctly leaves catalog_item_id null,
+// since there's nothing in the global catalog to point at.
+export async function createInventoryTemplateFromCSV(
+  name: string,
+  rows: Array<{
+    name:             string
+    category:         InventoryCategory
+    unit:             string
+    par_level?:       number
+    preferred_brand?: string | null
+  }>
+): Promise<{ templateId?: string; error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    const trimmedName = name.trim()
+    if (!trimmedName) return { error: 'Template name is required.' }
+    if (rows.length === 0) return { error: 'No items to add.' }
+
+    const { data: catalogMatches, error: catalogError } = await supabase
+      .from('org_inventory_catalog')
+      .select('name, platform_catalog_item_id')
+      .eq('org_id', membership.org_id)
+
+    if (catalogError) {
+      console.error('[createInventoryTemplateFromCSV] catalog fetch', catalogError)
+      reportError(catalogError, { site: 'serverAction.templatesInventory.createInventoryTemplateFromCSV', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    const catalogIdByLowerName = new Map<string, string | null>()
+    for (const row of catalogMatches ?? []) {
+      catalogIdByLowerName.set(row.name.toLowerCase(), row.platform_catalog_item_id)
+    }
+
+    const { data: template, error: templateError } = await supabase
+      .from('inventory_templates')
+      .insert({ org_id: membership.org_id, name: trimmedName })
+      .select('id')
+      .single()
+
+    if (templateError || !template) {
+      console.error('[createInventoryTemplateFromCSV] template insert', templateError)
+      reportError(templateError, { site: 'serverAction.templatesInventory.createInventoryTemplateFromCSV', orgId: membership.org_id })
+      return { error: 'A template with that name already exists.' }
+    }
+
+    const { error: itemsError } = await supabase.from('inventory_template_items').insert(
+      rows.map((row) => ({
+        template_id:     template.id,
+        catalog_item_id: catalogIdByLowerName.get(row.name.toLowerCase()) ?? null,
+        name:            row.name,
+        category:        row.category,
+        unit:            row.unit,
+        // The addendum's spec said "default to 0, same as the column's own
+        // default" — that's actually inventory_items.par_level's default;
+        // inventory_template_items.par_level defaults to 1
+        // (20260618000002_baseline_schema_snapshot.sql). Using the real
+        // column default here, not the addendum's mixed-up one.
+        par_level:       row.par_level ?? 1,
+        preferred_brand: row.preferred_brand?.trim() || null,
+      }))
+    )
+
+    if (itemsError) {
+      console.error('[createInventoryTemplateFromCSV] items insert', itemsError)
+      reportError(itemsError, { site: 'serverAction.templatesInventory.createInventoryTemplateFromCSV', orgId: membership.org_id })
+      await supabase.from('inventory_templates').delete().eq('id', template.id)
+      return { error: 'Failed to save template items. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'inventory_template.created',
+      targetType: 'inventory_template',
+      targetId:   template.id,
+      metadata:   { name: trimmedName, item_count: rows.length, source: 'csv' },
+    })
+
+    revalidatePath('/templates/inventory/saved')
+    revalidatePath('/templates/inventory/create')
+    return { templateId: template.id }
+  } catch (err) {
+    console.error('[createInventoryTemplateFromCSV]', err)
+    reportError(err, { site: 'serverAction.templatesInventory.createInventoryTemplateFromCSV' })
     return { error: 'Operation failed. Please try again.' }
   }
 }

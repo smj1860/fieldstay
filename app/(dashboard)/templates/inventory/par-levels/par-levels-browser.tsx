@@ -285,8 +285,8 @@ function PropertyParLevelEditor({
 
         <div className="border border-themed rounded-lg divide-y divide-themed max-h-80 overflow-y-auto">
           {rows.map((row) => (
-            <div key={row.id} className="flex items-center gap-2 px-3 py-2">
-              <span className="text-sm text-primary-themed flex-1 truncate">{row.name}</span>
+            <div key={row.id} className="flex items-center gap-2 px-3 py-2 flex-wrap">
+              <span className="text-sm text-primary-themed flex-1 min-w-[80px] truncate">{row.name}</span>
               <span className="text-xs text-muted-themed">{INVENTORY_CATEGORY_LABELS[row.category] ?? row.category}</span>
               {canManage ? (
                 <>
@@ -295,20 +295,31 @@ function PropertyParLevelEditor({
                     <input
                       type="number" min="0" step="0.5" value={row.par_level}
                       onChange={(e) => updateRow(row.id, { par_level: Math.max(0, parseFloat(e.target.value) || 0) })}
+                      aria-label={`Par level for ${row.name}`}
                       className="w-14 text-center text-sm border border-themed rounded px-1 py-0.5 bg-transparent text-primary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                     />
                   </div>
                   <input
                     value={row.unit}
                     onChange={(e) => updateRow(row.id, { unit: e.target.value })}
+                    aria-label={`Unit for ${row.name}`}
                     className="w-16 text-xs border border-themed rounded px-1 py-0.5 bg-transparent text-secondary-themed focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
+                  />
+                  <input
+                    value={row.preferred_brand ?? ''}
+                    onChange={(e) => updateRow(row.id, { preferred_brand: e.target.value || null })}
+                    placeholder="Brand"
+                    aria-label={`Preferred brand for ${row.name}`}
+                    className="w-24 text-xs border border-themed rounded px-1.5 py-0.5 bg-transparent text-secondary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                   />
                   <button type="button" onClick={() => removeRow(row)} disabled={saving} className="text-muted-themed hover:text-red-500 transition-colors p-1">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </>
               ) : (
-                <span className="text-xs text-muted-themed">Par {row.par_level} {row.unit}</span>
+                <span className="text-xs text-muted-themed">
+                  Par {row.par_level} {row.unit}{row.preferred_brand && <> · {row.preferred_brand}</>}
+                </span>
               )}
             </div>
           ))}
