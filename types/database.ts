@@ -1156,18 +1156,6 @@ export interface InventoryTemplateItem {
   created_at:      string
 }
 
-// ── Portfolio-level master checklist item ───────────────────────────────────
-export interface OrgMasterChecklistItem {
-  id:         string
-  org_id:     string
-  section:    string
-  task:       string
-  sort_order: number
-  source:     'catalog' | 'custom' | 'upload'
-  created_at: string
-  updated_at: string
-}
-
 // ── Portfolio-level master maintenance schedule ──────────────────────────────
 export interface OrgMasterMaintenanceSchedule {
   id:             string
@@ -1617,7 +1605,6 @@ export interface Database {
       communication_logs:          { Row: CommunicationLog;              Insert: Partial<CommunicationLog>;              Update: Partial<CommunicationLog>;              Relationships: [] }
       messages:                    { Row: Message;                       Insert: Partial<Message>;                       Update: Partial<Message>;                       Relationships: [] }
       push_subscriptions:          { Row: PushSubscription;              Insert: Partial<PushSubscription>;              Update: Partial<PushSubscription>;              Relationships: [] }
-      org_master_checklist_items:      { Row: OrgMasterChecklistItem;        Insert: Partial<OrgMasterChecklistItem>;        Update: Partial<OrgMasterChecklistItem>;        Relationships: [] }
       org_master_maintenance_schedules:{ Row: OrgMasterMaintenanceSchedule;  Insert: Partial<OrgMasterMaintenanceSchedule>;  Update: Partial<OrgMasterMaintenanceSchedule>;  Relationships: [] }
 
       // ── Asset Health ───────────────────────────────────────

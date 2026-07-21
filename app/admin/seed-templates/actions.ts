@@ -164,7 +164,7 @@ export async function deleteSeedTemplate(
 }
 
 // Full replace of one template's items — mirrors saveRoomTemplateItems in
-// settings/room-templates/actions.ts. Safe because nothing outside this
+// templates/checklist/actions.ts. Safe because nothing outside this
 // table references a platform_seed_room_template_item's id.
 export async function saveSeedTemplateItems(
   templateId: string,

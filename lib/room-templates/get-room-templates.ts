@@ -5,6 +5,7 @@ export interface RoomTemplateWithItems {
   id:          string
   name:        string
   autoInclude: boolean
+  isSystem:    boolean
   items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }>
 }
 
@@ -20,7 +21,7 @@ export async function getRoomTemplatesForOrg(
 ): Promise<RoomTemplateWithItems[]> {
   const { data: rooms, error } = await supabase
     .from('room_templates')
-    .select(`id, name, auto_include, room_template_items ( id, task, requires_photo, notes, sort_order )`)
+    .select(`id, name, auto_include, is_system, room_template_items ( id, task, requires_photo, notes, sort_order )`)
     .eq('org_id', orgId)
     .order('name')
 
@@ -33,6 +34,7 @@ export async function getRoomTemplatesForOrg(
     id:          room.id as string,
     name:        room.name as string,
     autoInclude: room.auto_include as boolean,
+    isSystem:    room.is_system as boolean,
     items: [...(room.room_template_items ?? [])]
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((item) => ({

@@ -1,5 +1,5 @@
 import { requireOrgMember } from '@/lib/auth'
-import { RoomLibraryBuilder } from '../../settings/room-templates/room-library-builder'
+import { RoomLibraryBuilder } from '@/components/templates/room-library-builder'
 import { getRoomTemplatesForOrg } from '@/lib/room-templates/get-room-templates'
 import { applyMasterChecklistToProperties } from './actions'
 import { markStepComplete } from '../actions'
@@ -26,11 +26,12 @@ export default async function OnboardingChecklistTemplatePage() {
   async function continueAction() {
     'use server'
     // hasRoomTemplateConfig/propertyIds close over the values fetched
-    // above — no re-query needed. Any mapping/room edit made on this page
-    // already revalidates this route (setBedroomBathroomMapping,
-    // saveRoomTemplateItems both call revalidatePath('/setup/checklist-
-    // template')), so continueAction is always bound to the render the PM
-    // is actually looking at when they click it — no staleness risk.
+    // above — no re-query needed. Any room edit made on this page already
+    // revalidates this route (every room-template mutation in
+    // templates/checklist/actions.ts calls revalidatePath('/setup/
+    // checklist-template')), so continueAction is always bound to the
+    // render the PM is actually looking at when they click it — no
+    // staleness risk.
     if (hasRoomTemplateConfig && propertyIds.length > 0) {
       await applyMasterChecklistToProperties(propertyIds)
     }
@@ -71,8 +72,6 @@ export default async function OnboardingChecklistTemplatePage() {
       <RoomLibraryBuilder
         initialRooms={roomsSorted}
         canManage={membership.role !== 'viewer' && membership.role !== 'crew'}
-        initialBedroomRoomTemplateId={org?.bedroom_room_template_id ?? null}
-        initialBathroomRoomTemplateId={org?.bathroom_room_template_id ?? null}
         continueAction={continueAction}
         continuePropertyCount={propertyIds.length}
       />

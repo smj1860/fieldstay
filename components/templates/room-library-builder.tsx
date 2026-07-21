@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { Plus, Trash2, ChevronUp, ChevronDown, ChevronRight, Camera, Check, Home } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
+import { Badge } from '@/components/ui/Badge'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import {
@@ -11,9 +12,8 @@ import {
   deleteRoomTemplate,
   saveRoomTemplateItems,
   setRoomTemplateAutoInclude,
-  setBedroomBathroomMapping,
   type RoomTemplateItemInput,
-} from './actions'
+} from '@/app/(dashboard)/templates/checklist/actions'
 
 interface ItemState {
   tempId: string
@@ -26,6 +26,7 @@ interface RoomState {
   id: string
   name: string
   autoInclude: boolean
+  isSystem: boolean
   items: ItemState[]
 }
 
@@ -124,30 +125,22 @@ function continueButtonLabel(continuing: boolean, propertyCount: number | undefi
 export function RoomLibraryBuilder({
   initialRooms,
   canManage,
-  initialBedroomRoomTemplateId = null,
-  initialBathroomRoomTemplateId = null,
   continueAction,
   continuePropertyCount,
 }: Readonly<{
-  initialRooms: Array<{ id: string; name: string; autoInclude: boolean; items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }> }>
+  initialRooms: Array<{ id: string; name: string; autoInclude: boolean; isSystem: boolean; items: Array<{ id: string; task: string; requires_photo: boolean; notes: string }> }>
   canManage: boolean
-  initialBedroomRoomTemplateId?: string | null
-  initialBathroomRoomTemplateId?: string | null
   continueAction?: () => Promise<void>
   continuePropertyCount?: number
 }>) {
   const [rooms, setRooms] = useState<RoomState[]>(() =>
-    initialRooms.map((r) => ({ id: r.id, name: r.name, autoInclude: r.autoInclude, items: r.items.map(toItemState) }))
+    initialRooms.map((r) => ({ id: r.id, name: r.name, autoInclude: r.autoInclude, isSystem: r.isSystem, items: r.items.map(toItemState) }))
   )
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [newRoomName, setNewRoomName] = useState('')
   const [creating, startCreate] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [savedRoomId, setSavedRoomId] = useState<string | null>(null)
-  const [bedroomRoomTemplateId, setBedroomRoomTemplateId] = useState<string | null>(initialBedroomRoomTemplateId)
-  const [bathroomRoomTemplateId, setBathroomRoomTemplateId] = useState<string | null>(initialBathroomRoomTemplateId)
-  const [mappingSaving, setMappingSaving] = useState(false)
-  const [mappingError, setMappingError] = useState<string | null>(null)
   const [continuing, startContinue] = useTransition()
 
   const toggleExpanded = (id: string) => {
@@ -168,7 +161,7 @@ export function RoomLibraryBuilder({
         setError(result.error ?? 'Failed to create room template.')
         return
       }
-      setRooms((prev) => [...prev, { id: result.id!, name, autoInclude: false, items: [] }])
+      setRooms((prev) => [...prev, { id: result.id!, name, autoInclude: false, isSystem: false, items: [] }])
       setExpanded((prev) => new Set(prev).add(result.id!))
       setNewRoomName('')
       setError(null)
@@ -232,16 +225,6 @@ export function RoomLibraryBuilder({
     })
   }
 
-  async function updateMapping(bedroom: string | null, bathroom: string | null) {
-    setBedroomRoomTemplateId(bedroom)
-    setBathroomRoomTemplateId(bathroom)
-    setMappingSaving(true)
-    setMappingError(null)
-    const result = await setBedroomBathroomMapping(bedroom, bathroom)
-    setMappingSaving(false)
-    if (result.error) setMappingError(result.error)
-  }
-
   function handleContinue() {
     if (!continueAction) return
     startContinue(async () => { await continueAction() })
@@ -250,47 +233,6 @@ export function RoomLibraryBuilder({
   return (
     <div className="space-y-4">
       {error && <InlineAlert tone="error">{error}</InlineAlert>}
-
-      <div className="border border-themed rounded-xl p-4">
-        <h3 className="text-sm font-semibold text-primary-themed mb-1">Bedroom &amp; Bathroom Mapping</h3>
-        <p className="text-xs text-muted-themed mb-3">
-          We automatically add this many sections per property, based on the
-          bedroom/bathroom count from your PMS.
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="bedroom-room-template" className="text-xs font-medium text-secondary-themed">
-              Bedroom template
-            </label>
-            <select
-              id="bedroom-room-template"
-              value={bedroomRoomTemplateId ?? ''}
-              onChange={(e) => void updateMapping(e.target.value || null, bathroomRoomTemplateId)}
-              disabled={mappingSaving || !canManage}
-              className="input mt-1 w-full text-sm"
-            >
-              <option value="">Not set</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="bathroom-room-template" className="text-xs font-medium text-secondary-themed">
-              Bathroom template
-            </label>
-            <select
-              id="bathroom-room-template"
-              value={bathroomRoomTemplateId ?? ''}
-              onChange={(e) => void updateMapping(bedroomRoomTemplateId, e.target.value || null)}
-              disabled={mappingSaving || !canManage}
-              className="input mt-1 w-full text-sm"
-            >
-              <option value="">Not set</option>
-              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </div>
-        </div>
-        {mappingError && <InlineAlert tone="error" className="mt-3">{mappingError}</InlineAlert>}
-      </div>
 
       {rooms.length === 0 && (
         <div className="border border-dashed border-themed rounded-xl p-8 text-center">
@@ -399,6 +341,9 @@ function RoomCard({
       >
         <ChevronRight className={`w-4 h-4 flex-shrink-0 transition-transform text-muted-themed ${isOpen ? 'rotate-90' : ''}`} />
         <span className="text-sm font-semibold text-primary-themed flex-1">{room.name}</span>
+        {room.isSystem && (
+          <Badge tone="slate" className="flex-shrink-0">Built into FieldStay</Badge>
+        )}
         {room.autoInclude && (
           <span
             className="px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0"
@@ -488,23 +433,25 @@ function RoomCard({
                 {saveButtonLabel(saving, saved)}
               </Button>
 
-              {confirmDelete ? (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-themed">Delete this room template?</span>
-                  <Button variant="secondary" onClick={onDelete} disabled={saving} className="text-xs" style={{ color: 'var(--accent-red)' }}>
-                    Yes, delete
+              {!room.isSystem && (
+                confirmDelete ? (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-themed">Delete this room template?</span>
+                    <Button variant="secondary" onClick={onDelete} disabled={saving} className="text-xs" style={{ color: 'var(--accent-red)' }}>
+                      Yes, delete
+                    </Button>
+                    <Button variant="ghost" onClick={() => setConfirmDelete(false)} className="text-xs">Cancel</Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    onClick={() => setConfirmDelete(true)}
+                    disabled={saving}
+                    className="text-sm ml-auto text-muted-themed hover:text-red-500"
+                  >
+                    Delete Room Template
                   </Button>
-                  <Button variant="ghost" onClick={() => setConfirmDelete(false)} className="text-xs">Cancel</Button>
-                </div>
-              ) : (
-                <Button
-                  variant="ghost"
-                  onClick={() => setConfirmDelete(true)}
-                  disabled={saving}
-                  className="text-sm ml-auto text-muted-themed hover:text-red-500"
-                >
-                  Delete Room Template
-                </Button>
+                )
               )}
             </div>
           )}
