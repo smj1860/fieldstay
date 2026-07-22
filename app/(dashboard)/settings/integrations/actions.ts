@@ -180,8 +180,26 @@ export async function disconnectIntegration(
   if (!user) return { error: 'Not authenticated' }
 
   try {
-    // 1. Retrieve the token from Vault
-    const accessToken = await readIntegrationToken(user.id, providerId)
+    // Resolve the connection's owner — the user who originally went through OAuth
+    // may differ from the current user (e.g. an org admin disconnecting a connection
+    // their colleague set up). Vault operations key on user_id, so we need the
+    // actual owner, not the current session user. Mirrors triggerResync's approach.
+    const supabase = createServiceClient()
+    const { data: connection } = await supabase
+      .from('integration_connections')
+      .select('user_id')
+      .eq('org_id', membership.org_id)
+      .eq('provider_id', providerId)
+      .maybeSingle()
+
+    if (!connection) {
+      return { error: 'This integration isn\'t connected.' }
+    }
+
+    const connectionUserId = connection.user_id
+
+    // 1. Retrieve the token from Vault (keyed to the connection's owner)
+    const accessToken = await readIntegrationToken(connectionUserId, providerId)
 
     // 2. Revoke at the provider (best-effort)
     if (accessToken) {
@@ -198,7 +216,7 @@ export async function disconnectIntegration(
 
     // 3. Disconnect in Vault (marks connection 'disconnected' + deletes secret —
     //    distinct from revokeIntegrationToken, which is for involuntary revocation)
-    await disconnectIntegrationToken(user.id, providerId)
+    await disconnectIntegrationToken(connectionUserId, providerId)
 
     await logAuditEvent({
       orgId:      membership.org_id,
