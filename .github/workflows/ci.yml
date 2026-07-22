@@ -23,29 +23,30 @@ jobs:
       - run: pnpm run build
 
   # ── End-to-end (Playwright) ──────────────────────────────────────────────
-  # STATUS: wired but not yet enforced. `continue-on-error: true` below means
-  # this job can fail without failing the overall CI run or blocking merges,
-  # because none of the secrets it needs exist in this repo yet:
+  # STATUS: self-arming merge gate (launch-readiness audit B2 / 2026-07-22
+  # audit recommendation #2). The first step detects whether the E2E secrets
+  # are configured:
   #
-  #   1. A dedicated Supabase project/branch for E2E, migrated and with an
-  #      E2E_PM_EMAIL account whose org has completed all 8 onboarding steps
-  #      and has plan_status = 'active' (or an unexpired trial) — see
-  #      e2e/global-setup.ts for the exact preconditions it checks.
-  #   2. The following repo secrets (Settings → Secrets and variables →
-  #      Actions), matching the names in .env.example:
-  #        NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  #        SUPABASE_SERVICE_ROLE_KEY, E2E_PM_EMAIL, E2E_PM_PASSWORD,
-  #        E2E_CREW_EMAIL, E2E_CREW_PASSWORD, plus enough of the
-  #        third-party keys (Stripe, Resend, Mapbox, Telnyx, VAPID) for the
-  #        specific flows the specs under e2e/specs/ actually exercise.
+  #   - Secrets ABSENT  → every remaining step is skipped and a prominent
+  #     warning annotation marks the run "E2E gate unarmed". The job itself
+  #     passes, so an unconfigured repo/fork isn't permanently red — but the
+  #     warning makes the unarmed state impossible to mistake for coverage.
+  #   - Secrets PRESENT → the suite runs for real and failures FAIL the job.
+  #     No continue-on-error. Combined with branch protection (below), that
+  #     makes this a true merge gate.
   #
-  # Once those exist, remove `continue-on-error: true` and add this job as a
-  # required status check in the repo's branch protection settings to make
-  # it a real merge gate, per the launch-readiness audit's B2 finding.
+  # To arm the gate, follow docs/E2E_SETUP.md end to end:
+  #   1. Provision the dedicated E2E Supabase project (NOT production),
+  #      apply all migrations, run scripts/seed-e2e-project.ts.
+  #   2. Add the repo secrets listed there (Settings → Secrets and
+  #      variables → Actions). E2E_* Supabase values must point at the E2E
+  #      project — never production.
+  #   3. Add this `e2e` job as a required status check in branch protection
+  #      so a red suite blocks the merge button.
   e2e:
     runs-on: ubuntu-latest
-    continue-on-error: true
     env:
+      NEXT_PUBLIC_APP_URL:           http://localhost:3000
       NEXT_PUBLIC_SUPABASE_URL:      ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
       SUPABASE_SERVICE_ROLE_KEY:     ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -61,17 +62,36 @@ jobs:
       INNGEST_EVENT_KEY:             ${{ secrets.INNGEST_EVENT_KEY }}
       INNGEST_SIGNING_KEY:           ${{ secrets.INNGEST_SIGNING_KEY }}
     steps:
+      # Gate detection — see the job comment above. Checks the three secrets
+      # without which e2e/global-setup.ts cannot even start; the rest of the
+      # E2E_* set is validated by global-setup itself with precise errors.
+      - name: Detect whether the E2E gate is armed
+        id: gate
+        run: |
+          if [ -n "$NEXT_PUBLIC_SUPABASE_URL" ] && [ -n "$SUPABASE_SERVICE_ROLE_KEY" ] && [ -n "$E2E_PM_EMAIL" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+            echo "E2E gate is ARMED — suite failures will fail this job."
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=E2E gate UNARMED::E2E secrets are not configured, so the Playwright suite did NOT run. Regressions in onboarding, PMS sync, and payment flows are not being caught. Follow docs/E2E_SETUP.md to arm the gate."
+          fi
       - uses: actions/checkout@v4
+        if: steps.gate.outputs.armed == 'true'
       - uses: pnpm/action-setup@v4
+        if: steps.gate.outputs.armed == 'true'
       - uses: actions/setup-node@v4
+        if: steps.gate.outputs.armed == 'true'
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+        if: steps.gate.outputs.armed == 'true'
       - run: pnpm exec playwright install --with-deps chromium
+        if: steps.gate.outputs.armed == 'true'
       - run: pnpm run e2e
+        if: steps.gate.outputs.armed == 'true'
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: steps.gate.outputs.armed == 'true' && failure()
         with:
           name: playwright-report
           path: playwright-report/
