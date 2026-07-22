@@ -765,13 +765,22 @@ renderPmAlert({ heading, body, ctaLabel, ctaUrl, details?, table?, sections?, no
 
 ### Auth patterns
 
-**Crew API routes** — no helper exists, use inline pattern from issue-reports:
+**Crew auth (API routes AND server actions)** — always use the canonical
+`requireCrewMember()` from `lib/crew-auth.ts`. NEVER write an inline
+`crew_members` lookup as an auth gate, and NEVER filter on
+`invite_accepted_at` for crew (that's the PM-side `organization_members`
+rule only — ~a third of live crew rows have it NULL because they were
+onboarded outside the invite-link flow; filtering on it silently locks
+those crew out). This exact drift shipped as a live bug three times
+(crew/turnovers actions, crew/feedback route, crew/work-order-reports
+route, plus the crew layout gate) and was fixed 2026-07-22.
 ```typescript
-const { data: { user } } = await supabase.auth.getUser()
-if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-const { data: crew } = await supabase
-  .from('crew_members').select('id, org_id').eq('user_id', user.id).single()
-if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 403 })
+import { requireCrewMember } from '@/lib/crew-auth'
+
+const auth = await requireCrewMember()
+if (!auth.ok) return auth.response   // Route Handler (NextResponse)
+// if (!auth.ok) return { error: 'Crew member not found' }   // Server Action
+const { supabase, crew, user } = auth
 ```
 
 ### Table and column names

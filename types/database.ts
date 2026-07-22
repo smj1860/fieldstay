@@ -1227,6 +1227,13 @@ export interface ProcessedWebhook {
   processed_at: string
 }
 
+/**
+ * LEGACY marketplace-install holding area (exchanged tokens). No longer
+ * written to as of 2026-07-22 — replaced by PendingOAuthAuthorization, which
+ * holds the UNEXCHANGED code instead so the provider never registers a
+ * connection pre-signup. Table kept through the deploy window; drop in a
+ * follow-up migration.
+ */
 export interface PendingIntegrationLink {
   id:                            string
   pending_link_token:            string
@@ -1239,6 +1246,23 @@ export interface PendingIntegrationLink {
   /** 30-minute TTL from creation */
   expires_at:                    string
   created_at:                    string
+}
+
+/**
+ * Marketplace-install holding area for UNEXCHANGED OAuth authorization codes.
+ * The code→token exchange is deferred to /connect/finish (post-auth) — see
+ * supabase/migrations/20260722120000_defer_marketplace_code_exchange.sql.
+ */
+export interface PendingOAuthAuthorization {
+  id:                   string
+  pending_link_token:   string
+  provider_id:          string
+  code_vault_secret_id: string
+  /** The redirect_uri the authorization request was issued against — replayed on the deferred exchange */
+  redirect_uri:         string
+  /** 30-minute TTL from creation */
+  expires_at:           string
+  created_at:           string
 }
 
 // ── Self-Funding Guidebook ────────────────────────────────────────────────────
@@ -1605,6 +1629,7 @@ export interface Database {
       oauth_states:                   { Row: OAuthState;                  Insert: Partial<OAuthState>;                  Update: Partial<OAuthState>;                  Relationships: [] }
       processed_webhooks:             { Row: ProcessedWebhook;            Insert: Partial<ProcessedWebhook>;            Update: Partial<ProcessedWebhook>;            Relationships: [] }
       pending_integration_links:      { Row: PendingIntegrationLink;      Insert: Partial<PendingIntegrationLink>;      Update: Partial<PendingIntegrationLink>;      Relationships: [] }
+      pending_oauth_authorizations:   { Row: PendingOAuthAuthorization;   Insert: Partial<PendingOAuthAuthorization>;   Update: Partial<PendingOAuthAuthorization>;   Relationships: [] }
 
       // ── Support bot ────────────────────────────────────────
       support_kb_chunks:     { Row: SupportKbChunk;     Insert: Partial<SupportKbChunk>;     Update: Partial<SupportKbChunk>;     Relationships: [] }

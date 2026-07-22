@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
+  oauthCallbackRatelimit,
 } from '@/lib/rate-limit'
 
 // ── Content Security Policy ────────────────────────────────────────────────
@@ -181,6 +182,11 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/api/vendor-connect')) return vendorConnectRatelimit
   if (pathname.startsWith('/owner/'))             return ownerPortalRatelimit
   if (pathname.startsWith('/g/'))                 return guidebookRatelimit
+  // OAuth callbacks are BYPASS_ROUTES (no session to check) but must still be
+  // throttled — the oneclick route stores unvalidated authorization codes in
+  // Vault, so the limiter check below runs BEFORE the bypass early-return.
+  if (pathname.startsWith('/api/integrations/') && pathname.includes('/callback'))
+    return oauthCallbackRatelimit
   return null
 }
 
@@ -192,10 +198,11 @@ export async function proxy(request: NextRequest) {
   // (and any Server Component that wants it) can read it via headers().
   request.headers.set('x-nonce', nonce)
 
-  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return withCsp(NextResponse.next({ request }), nonce)
-
   // Rate limit unauthenticated token-guessable routes — guards against
-  // token enumeration and request flooding.
+  // token enumeration and request flooding. Runs BEFORE the bypass check so
+  // routes that skip auth entirely (the OAuth callbacks under
+  // /api/integrations/) are still throttled; bypass routes without a limiter
+  // entry are unaffected (rateLimiterForPathname returns null for them).
   const tokenRouteLimiter = rateLimiterForPathname(pathname)
 
   if (tokenRouteLimiter) {
@@ -229,6 +236,8 @@ export async function proxy(request: NextRequest) {
       console.error('[proxy] rate limit check failed', err)
     }
   }
+
+  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return withCsp(NextResponse.next({ request }), nonce)
 
   if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r)))  return withCsp(NextResponse.next({ request }), nonce)
 

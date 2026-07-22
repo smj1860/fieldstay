@@ -72,7 +72,7 @@ describe('crew/turnovers/actions', () => {
 
       const result = await reportTurnoverIssue('t_1', 'Broken AC', null, 'medium')
 
-      expect(result).toEqual({ error: 'Failed to report issue' })
+      expect(result).toEqual({ error: 'Crew member not found' })
       expect(supabase.from).not.toHaveBeenCalled()
     })
 
@@ -82,7 +82,7 @@ describe('crew/turnovers/actions', () => {
 
       const result = await reportTurnoverIssue('t_1', 'Broken AC', null, 'medium')
 
-      expect(result).toEqual({ error: 'Failed to report issue' })
+      expect(result).toEqual({ error: 'Crew member not found' })
       expect(supabase.from).not.toHaveBeenCalledWith('turnovers')
       expect(supabase.from).not.toHaveBeenCalledWith('work_orders')
     })
@@ -188,7 +188,7 @@ describe('crew/turnovers/actions', () => {
 
       const result = await submitAssetDiscovery('prop_1', 'hvac', payload)
 
-      expect(result).toEqual({ error: 'Failed to submit asset discovery' })
+      expect(result).toEqual({ error: 'Crew member not found' })
       expect(supabase.from).not.toHaveBeenCalled()
     })
 
@@ -198,7 +198,7 @@ describe('crew/turnovers/actions', () => {
 
       const result = await submitAssetDiscovery('prop_1', 'hvac', payload)
 
-      expect(result).toEqual({ error: 'Failed to submit asset discovery' })
+      expect(result).toEqual({ error: 'Crew member not found' })
     })
 
     it('rejects a property the crew member is not assigned to at their own org (IDOR/cross-org check)', async () => {

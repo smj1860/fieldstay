@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireCrewMember } from '@/lib/crew-auth'
 import { logAuditEvent } from '@/lib/audit'
 import { categoryForAssetType } from '@/lib/asset-discovery/config'
 import type { AssetType, PriorityLevel } from '@/types/database'
@@ -17,19 +17,12 @@ export async function POST(request: NextRequest) {
   if (!property_id) return NextResponse.json({ error: 'Missing property_id' }, { status: 400 })
   if (!title)       return NextResponse.json({ error: 'Missing title' }, { status: 400 })
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-
-  const { data: crew } = await supabase
-    .from('crew_members')
-    .select('id, org_id')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .not('invite_accepted_at', 'is', null)
-    .single()
-
-  if (!crew) return NextResponse.json({ error: 'Crew member not found' }, { status: 403 })
+  // Canonical crew gate (lib/crew-auth.ts) — a previous inline copy here
+  // added an invite_accepted_at filter that locked out the ~third of live
+  // crew rows onboarded outside the invite-link flow.
+  const auth = await requireCrewMember()
+  if (!auth.ok) return auth.response
+  const { supabase, crew, user } = auth
 
   const { data: property } = await supabase
     .from('properties')
