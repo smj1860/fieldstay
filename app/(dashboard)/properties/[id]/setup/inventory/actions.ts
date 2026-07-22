@@ -27,6 +27,15 @@ export async function upsertInventoryItems(
   try {
     const { supabase, membership } = await requireOrgMember()
 
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { error: 'Property not found' }
+
     const existingItems = items.filter((item) => item.id)
     const newItems      = items.filter((item) => !item.id)
 
@@ -167,6 +176,20 @@ export async function cloneInventoryFromProperty(
 ): Promise<{ added: number; skipped: number; error?: string }> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
+
+    // Both source and target must be confirmed to belong to this org before
+    // reading from / writing to them — a client-supplied id is not proof of
+    // ownership, and the source-items read below is scoped by org_id too but
+    // that alone doesn't stop an unverified targetPropertyId from being
+    // written into the insert further down.
+    const { data: targetProperty } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', targetPropertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!targetProperty) return { added: 0, skipped: 0, error: 'Target property not found' }
 
     const { data: sourceItems } = await supabase
       .from('inventory_items')

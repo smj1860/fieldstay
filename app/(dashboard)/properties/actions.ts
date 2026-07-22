@@ -571,6 +571,15 @@ export async function bulkImportAssets(
   try {
     const { supabase, membership, user } = await requireOrgMember()
 
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { imported: 0, error: 'Property not found' }
+
     const { data: standards } = await supabase
       .from('asset_type_standards')
       .select('asset_type, macrs_class_default, lifespan_min_years, lifespan_max_years')
