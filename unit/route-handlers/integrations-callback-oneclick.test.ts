@@ -6,12 +6,13 @@ vi.mock('@/lib/integrations/registry', () => ({
   getProvider: vi.fn(),
 }))
 vi.mock('@/lib/integrations/vault', () => ({
-  holdPendingIntegrationToken: vi.fn(async () => 'pending_link_1'),
+  holdPendingOAuthCode:                       vi.fn(async () => 'pending_link_1'),
+  cleanupExpiredPendingIntegrationArtifacts:  vi.fn(async () => undefined),
 }))
 
 import { GET } from '@/app/api/integrations/[provider]/callback/oneclick/route'
 import { getProvider } from '@/lib/integrations/registry'
-import { holdPendingIntegrationToken } from '@/lib/integrations/vault'
+import { holdPendingOAuthCode } from '@/lib/integrations/vault'
 
 const APP_URL = 'https://app.fieldstay.test'
 
@@ -86,29 +87,32 @@ describe('GET /api/integrations/[provider]/callback/oneclick', () => {
     const res = await callGet('hospitable', '?code=abc123')
 
     expect(locationOf(res)).toContain('error=provider_not_oauth')
+    expect(holdPendingOAuthCode).not.toHaveBeenCalled()
   })
 
-  it('redirects to token_exchange_failed when the provider adapter throws during exchange', async () => {
-    vi.mocked(getProvider).mockReturnValue(
-      oauthProvider({ exchangeCodeForToken: vi.fn(async () => { throw new Error('bad code') }) }),
-    )
-
-    const res = await callGet('hospitable', '?code=bad-code')
-
-    expect(locationOf(res)).toContain('error=token_exchange_failed')
-    expect(holdPendingIntegrationToken).not.toHaveBeenCalled()
-  })
-
-  it('redirects to storage_failed when holding the pending token fails', async () => {
+  it('redirects to storage_failed when holding the pending code fails', async () => {
     vi.mocked(getProvider).mockReturnValue(oauthProvider())
-    vi.mocked(holdPendingIntegrationToken).mockRejectedValueOnce(new Error('vault down'))
+    vi.mocked(holdPendingOAuthCode).mockRejectedValueOnce(new Error('vault down'))
 
     const res = await callGet('hospitable', '?code=abc123')
 
     expect(locationOf(res)).toContain('error=storage_failed')
   })
 
-  it('confused-deputy guard: always holds the token for post-signup claim and never attaches it to any session, regardless of an existing session cookie', async () => {
+  it('deferred exchange: NEVER exchanges the code on arrival — the provider must not register a connection before the user signs up', async () => {
+    // This is the invariant Hospitable's partner team flagged (2026-07-22):
+    // exchanging on the raw GET flipped their UI to "Connected" before any
+    // FieldStay account existed. The exchange belongs in /connect/finish,
+    // after requireAuth().
+    const provider = oauthProvider()
+    vi.mocked(getProvider).mockReturnValue(provider)
+
+    await callGet('hospitable', '?code=abc123')
+
+    expect(provider.exchangeCodeForToken).not.toHaveBeenCalled()
+  })
+
+  it('confused-deputy guard: always holds the code for post-signup claim and never attaches it to any session, regardless of an existing session cookie', async () => {
     vi.mocked(getProvider).mockReturnValue(oauthProvider())
 
     // Simulate a logged-in FieldStay victim's browser hitting this URL —
@@ -118,8 +122,8 @@ describe('GET /api/integrations/[provider]/callback/oneclick', () => {
       cookie: 'sb-access-token=some-active-victim-session',
     })
 
-    expect(holdPendingIntegrationToken).toHaveBeenCalledWith(
-      expect.objectContaining({ providerId: 'hospitable', externalUserId: 'external_user_1', accessToken: 'access_token_1' }),
+    expect(holdPendingOAuthCode).toHaveBeenCalledWith(
+      expect.objectContaining({ providerId: 'hospitable', code: 'abc123' }),
     )
     expect(res.status).toBe(307)
     expect(locationOf(res)).toContain('/signup')
@@ -127,13 +131,13 @@ describe('GET /api/integrations/[provider]/callback/oneclick', () => {
     expect(locationOf(res)).toContain('next=%2Fconnect%2Ffinish%3Fpending_link%3Dpending_link_1')
   })
 
-  it('passes this route\'s own oneclick redirect URI (not the standard callback URI) to the token exchange', async () => {
-    const provider = oauthProvider()
-    vi.mocked(getProvider).mockReturnValue(provider)
+  it('holds this route\'s own oneclick redirect URI (not the standard callback URI) for replay on the deferred exchange', async () => {
+    vi.mocked(getProvider).mockReturnValue(oauthProvider())
 
     await callGet('hospitable', '?code=abc123')
 
-    expect(provider.exchangeCodeForToken).toHaveBeenCalledWith({
+    expect(holdPendingOAuthCode).toHaveBeenCalledWith({
+      providerId:  'hospitable',
       code:        'abc123',
       redirectUri: `${APP_URL}/api/integrations/hospitable/callback/oneclick`,
     })

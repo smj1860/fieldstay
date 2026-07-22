@@ -5,10 +5,22 @@
 // What happens here:
 //   1. Validate the state token (CSRF protection)
 //   2. Catch any authorization errors from the provider
-//   3. Exchange the temporary code for a long-lived access token
-//   4. Ensure the user has a FieldStay account (create one if not)
-//   5. Store the token securely in Supabase Vault
-//   6. Redirect the user to their dashboard
+//   3. Resolve the FieldStay user identity FIRST
+//   4. With a real user: exchange the temporary code for a token, store it
+//      in Supabase Vault, link the org, kick off initial sync
+//   5. With no user (marketplace install, no account yet): hold the
+//      UNEXCHANGED code for post-signup claim — see below
+//   6. Redirect the user to their dashboard (or signup)
+//
+// ⚠️ Identity resolution deliberately happens BEFORE the token exchange.
+//   An earlier version exchanged first and then held the exchanged tokens
+//   for users with no account yet. The token exchange is what registers the
+//   connection on the provider's side (their UI flips to "Connected"), so
+//   that ordering showed users as connected before they had a FieldStay
+//   account at all — flagged by Hospitable's partner team 2026-07-22. The
+//   no-session branch now holds the unexchanged code instead; the exchange
+//   runs in /connect/finish after requireAuth(). Same model as the one-click
+//   route (./oneclick/route.ts).
 //
 // This route URL MUST match exactly what you registered with OwnerRez:
 //   https://fieldstay.app/api/integrations/ownerrez/callback
@@ -28,35 +40,9 @@ import { createServerClient }             from '@supabase/ssr'
 import { createServiceClient }            from '@/lib/supabase/server'
 import { revalidatePath }                 from 'next/cache'
 import { getProvider }                    from '@/lib/integrations/registry'
-import { storeIntegrationToken, storeIntegrationRefreshToken, holdPendingIntegrationToken } from '@/lib/integrations/vault'
+import { holdPendingOAuthCode }           from '@/lib/integrations/vault'
+import { finalizeIntegrationConnection }  from '@/lib/integrations/finalize-connection'
 import { logAuditEvent }                  from '@/lib/audit'
-import { inngest }                        from '@/lib/inngest/client'
-
-interface OAuthConnectedContext {
-  userId:         string
-  orgId:          string
-  externalUserId: string
-}
-
-// One entry per provider that needs an initial-sync event fired right after
-// a successful OAuth connect. Each event has its own payload shape (Kroger's
-// doesn't carry external_user_id), so entries are dispatch functions rather
-// than plain event-name strings — adding a new provider here is one table
-// entry instead of a new `if (providerId === '...')` block.
-const OAUTH_CONNECTED_EVENTS: Partial<Record<string, (ctx: OAuthConnectedContext) => Promise<unknown>>> = {
-  ownerrez: (ctx) => inngest.send({
-    name: 'integration/ownerrez.connected',
-    data: { user_id: ctx.userId, org_id: ctx.orgId, external_user_id: ctx.externalUserId },
-  }),
-  kroger: (ctx) => inngest.send({
-    name: 'integration/kroger.connected',
-    data: { org_id: ctx.orgId, user_id: ctx.userId },
-  }),
-  hospitable: (ctx) => inngest.send({
-    name: 'integration/hospitable.connected',
-    data: { user_id: ctx.userId, org_id: ctx.orgId, external_user_id: ctx.externalUserId },
-  }),
-}
 
 export async function GET(
   request: NextRequest,
@@ -177,55 +163,42 @@ export async function GET(
     return errorRedirect('provider_not_oauth')
   }
 
-  // ── 4. Exchange the temporary code for an access token ────
-  //    OwnerRez: code expires after 10 minutes and is single-use.
-  //    We pass redirectUri because we included it in step 1 — it must match exactly.
-  const redirectUri = `${appUrl}/api/integrations/${providerId}/callback`
-  let tokenData
-
-  try {
-    tokenData = await providerAdapter.exchangeCodeForToken({ code, redirectUri })
-  } catch (err) {
-    console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
-    return errorRedirect('token_exchange_failed')
-  }
-
-  // ── 5. Resolve the FieldStay user identity ─────────────────
+  // ── 4. Resolve the FieldStay user identity — BEFORE any exchange ──
   //    getUser() makes a network call to verify the JWT — use it, not getSession().
   //    This is also the call most likely to trigger a session refresh (setAll).
   //
   //    Priority order:
   //      A. Active session in the current request cookies  → sessionUser.id
   //      B. user_id stored in the state record when /connect was hit → stateRecord.user_id
-  //      C. Neither → new user arriving from OwnerRez marketplace → send to sign-up
+  //      C. Neither → new user arriving from the provider's marketplace → hold
+  //         the unexchanged code and send to sign-up (see file header for why
+  //         the exchange must not happen before signup)
   const { data: { user: sessionUser } } = await supabase.auth.getUser()
 
   const appUserId: string | null = sessionUser?.id ?? stateRecord.user_id ?? null
 
+  //    OwnerRez: code expires after 10 minutes and is single-use.
+  //    We pass redirectUri because we included it in step 1 — it must match exactly,
+  //    both on an immediate exchange and on the deferred one in /connect/finish.
+  const redirectUri = `${appUrl}/api/integrations/${providerId}/callback`
+
   if (!appUserId) {
-    // This is the "brand new user arriving from the provider's marketplace"
-    // scenario. They have no FieldStay account and didn't start this flow
-    // while logged in — but the code exchange above already succeeded, so we
-    // have a real, valid token in hand. Don't throw it away: hold it (Vault-
-    // backed, 30 min TTL, single-use) and redirect through signup with a
-    // claim token. Once they finish creating their account, /connect/finish
-    // links it to their new user without a second provider authorization.
+    // "Brand new user arriving from the provider's marketplace" scenario.
+    // They have no FieldStay account and didn't start this flow while logged
+    // in. Hold the UNEXCHANGED code (Vault-backed, 30 min TTL, single-use)
+    // and redirect through signup with a claim token; /connect/finish
+    // performs the exchange once they've actively authenticated. If the code
+    // has expired by then, /connect/finish falls back to restarting the
+    // standard /connect flow — never a dead end.
     console.warn(
-      `[OAuth:${providerId}] No FieldStay user identity found. Holding token for post-signup claim.`
+      `[OAuth:${providerId}] No FieldStay user identity found. Holding authorization code for post-signup exchange.`
     )
 
     let pendingLinkToken: string
     try {
-      pendingLinkToken = await holdPendingIntegrationToken({
-        providerId,
-        externalUserId: tokenData.externalUserId,
-        accessToken:    tokenData.accessToken,
-        refreshToken:   tokenData.refreshToken,
-        scope:          tokenData.scope,
-        metadata:       tokenData.metadata,
-      })
+      pendingLinkToken = await holdPendingOAuthCode({ providerId, code, redirectUri })
     } catch (err) {
-      console.error(`[OAuth:${providerId}] Failed to hold pending token:`, err)
+      console.error(`[OAuth:${providerId}] Failed to hold pending authorization code:`, err)
       return errorRedirect('storage_failed')
     }
 
@@ -235,66 +208,21 @@ export async function GET(
     return makeRedirect(signupUrl)
   }
 
-  // ── 6. Store the token securely in Vault ──────────────────
-  //    This calls our security-definer PL/pgSQL function via the
-  //    service-role client. The token never touches the browser.
+  // ── 5. Exchange the temporary code for an access token ────
+  let tokenData
+
   try {
-    await storeIntegrationToken({
-      userId:         appUserId,
-      providerId,
-      accessToken:    tokenData.accessToken,
-      externalUserId: tokenData.externalUserId,
-      scope:          tokenData.scope,
-      metadata:       tokenData.metadata,
-    })
+    tokenData = await providerAdapter.exchangeCodeForToken({ code, redirectUri })
+  } catch (err) {
+    console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
+    return errorRedirect('token_exchange_failed')
+  }
 
-    // Refresh token (if the provider returned one) goes into its own Vault
-    // secret — never into `metadata`, which is plaintext jsonb.
-    if (tokenData.refreshToken) {
-      await storeIntegrationRefreshToken({
-        userId:       appUserId,
-        providerId,
-        refreshToken: tokenData.refreshToken,
-        expiresAt:    tokenData.expiresAt,
-      })
-    }
-
-    // Link this connection to the user's org so Inngest steps and server
-    // actions that only have org context (e.g. cart automation) can find it.
-    const { data: membership } = await admin
-      .from('organization_members')
-      .select('org_id')
-      .eq('user_id', appUserId)
-      .not('invite_accepted_at', 'is', null)
-      .limit(1)
-      .maybeSingle()
-
-    if (membership?.org_id) {
-      await admin
-        .from('integration_connections')
-        .update({ org_id: membership.org_id })
-        .eq('user_id', appUserId)
-        .eq('provider_id', providerId)
-        // Only update rows with no org yet (first connect) or already belonging
-        // to this org (reconnect). Never silently repoint a connection owned by
-        // a different org the user is also a member of. Mirrors connectWithApiKey.
-        .or(`org_id.is.null,org_id.eq.${membership.org_id}`)
-    }
-
-    // ── 7. Kick off initial data sync ─────────────────────────────
-    //    Gated on membership?.org_id: the sync writes org-scoped rows
-    //    (properties, bookings, ...) and fails outright without a real
-    //    org_id, which previously flipped the brand-new connection to
-    //    status='error' seconds after a successful connect. A user with
-    //    no org yet simply has nothing to sync until they have one.
-    const fireConnectedEvent = OAUTH_CONNECTED_EVENTS[providerId]
-    if (fireConnectedEvent && membership?.org_id) {
-      await fireConnectedEvent({
-        userId:         appUserId,
-        orgId:          membership.org_id,
-        externalUserId: tokenData.externalUserId,
-      })
-    }
+  // ── 6. Store the token, link the org, kick off initial sync ──
+  //    Shared with /connect/finish — see lib/integrations/finalize-connection.ts.
+  //    The token never touches the browser.
+  try {
+    await finalizeIntegrationConnection({ userId: appUserId, providerId, tokenData })
   } catch (err) {
     console.error(`[OAuth:${providerId}] Vault storage failed:`, err)
     return errorRedirect('storage_failed')

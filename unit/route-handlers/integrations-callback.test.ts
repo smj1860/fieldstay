@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import type { IntegrationProvider } from '@/lib/integrations/types'
 
+vi.mock('server-only', () => ({}))
 vi.mock('@supabase/ssr', () => ({
   createServerClient: vi.fn(),
 }))
@@ -14,7 +15,7 @@ vi.mock('@/lib/integrations/registry', () => ({
 vi.mock('@/lib/integrations/vault', () => ({
   storeIntegrationToken:        vi.fn(async () => 'secret_1'),
   storeIntegrationRefreshToken: vi.fn(async () => undefined),
-  holdPendingIntegrationToken:  vi.fn(async () => 'pending_link_1'),
+  holdPendingOAuthCode:         vi.fn(async () => 'pending_link_1'),
 }))
 vi.mock('@/lib/audit', () => ({
   logAuditEvent: vi.fn(),
@@ -30,7 +31,7 @@ import { GET } from '@/app/api/integrations/[provider]/callback/route'
 import { createServerClient } from '@supabase/ssr'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getProvider } from '@/lib/integrations/registry'
-import { storeIntegrationToken, storeIntegrationRefreshToken, holdPendingIntegrationToken } from '@/lib/integrations/vault'
+import { storeIntegrationToken, storeIntegrationRefreshToken, holdPendingOAuthCode } from '@/lib/integrations/vault'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 
@@ -60,6 +61,7 @@ function makeAdmin(queued: QueuedByTable = {}) {
     chain.eq     = (...a: unknown[]) => record('eq', a)
     chain.gt     = (...a: unknown[]) => record('gt', a)
     chain.not    = (...a: unknown[]) => record('not', a)
+    chain.order  = (...a: unknown[]) => record('order', a)
     chain.limit  = (...a: unknown[]) => record('limit', a)
     chain.or     = (...a: unknown[]) => record('or', a)
 
@@ -213,9 +215,11 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     expect(locationOf(res)).toContain('error=provider_not_oauth')
   })
 
-  it('redirects to token_exchange_failed when the provider adapter throws during exchange', async () => {
+  it('redirects to token_exchange_failed when the provider adapter throws during exchange (resolved user path)', async () => {
+    // The exchange only runs once a user identity is resolved — here via the
+    // state row's user_id (no active session).
     const admin = makeAdmin({
-      oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: null, return_to: null }, error: null }],
+      oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: 'state_user', return_to: null }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
     vi.mocked(getProvider).mockReturnValue(
@@ -228,30 +232,37 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     expect(storeIntegrationToken).not.toHaveBeenCalled()
   })
 
-  it('holds the token for post-signup claim (never attaches it) when neither an active session nor the state row carries a user id', async () => {
+  it('deferred exchange: holds the UNEXCHANGED code for post-signup claim (never exchanges, never attaches) when neither an active session nor the state row carries a user id', async () => {
+    // Exchanging pre-signup registers the connection on the provider's side
+    // ("Connected" with no FieldStay account behind it) — the marketplace
+    // branch must hold the raw code and defer the exchange to /connect/finish.
     const admin = makeAdmin({
       oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: null, return_to: null }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
-    vi.mocked(getProvider).mockReturnValue(oauthProvider())
+    const provider = oauthProvider()
+    vi.mocked(getProvider).mockReturnValue(provider)
 
     const res = await callGet('ownerrez', '?code=abc123&state=s1')
 
-    expect(holdPendingIntegrationToken).toHaveBeenCalledWith(
-      expect.objectContaining({ providerId: 'ownerrez', externalUserId: 'external_user_1' }),
-    )
+    expect(provider.exchangeCodeForToken).not.toHaveBeenCalled()
+    expect(holdPendingOAuthCode).toHaveBeenCalledWith({
+      providerId:  'ownerrez',
+      code:        'abc123',
+      redirectUri: `${APP_URL}/api/integrations/ownerrez/callback`,
+    })
     expect(storeIntegrationToken).not.toHaveBeenCalled()
     expect(locationOf(res)).toContain('/signup')
     expect(locationOf(res)).toContain('next=%2Fconnect%2Ffinish%3Fpending_link%3Dpending_link_1')
   })
 
-  it('redirects to storage_failed when holding a pending token fails', async () => {
+  it('redirects to storage_failed when holding a pending code fails', async () => {
     const admin = makeAdmin({
       oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: null, return_to: null }, error: null }],
     })
     vi.mocked(createServiceClient).mockReturnValue(admin as never)
     vi.mocked(getProvider).mockReturnValue(oauthProvider())
-    vi.mocked(holdPendingIntegrationToken).mockRejectedValueOnce(new Error('vault down'))
+    vi.mocked(holdPendingOAuthCode).mockRejectedValueOnce(new Error('vault down'))
 
     const res = await callGet('ownerrez', '?code=abc123&state=s1')
 

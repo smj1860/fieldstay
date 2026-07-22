@@ -209,40 +209,43 @@ export async function findUserByExternalId(
   return data.user_id as string
 }
 
-// ── Marketplace install: pending links ──────────────────────────────────────
-// Holds an already-exchanged token for a user with no FieldStay session yet
-// (arriving from a provider's marketplace) until they finish signing up.
-// See supabase/migrations/*_marketplace_pending_integration_links.sql.
+// ── Marketplace install: pending authorization codes ────────────────────────
+// Holds the UNEXCHANGED OAuth authorization code for a user with no FieldStay
+// session yet (arriving from a provider's marketplace) until they finish
+// signing up. The code→token exchange is deferred to /connect/finish
+// (post-auth) — exchanging on arrival registered the connection with the
+// provider (their UI flipped to "Connected") before any FieldStay account
+// existed, which is exactly the behavior Hospitable's partner team flagged.
+// See supabase/migrations/20260722120000_defer_marketplace_code_exchange.sql.
 
 /**
- * Store an already-exchanged token in Vault under a random claim token,
- * for a user who doesn't have a FieldStay account/session yet. Returns the
- * pending_link_token to embed in the post-signup redirect URL.
+ * Store an unexchanged OAuth authorization code in Vault under a random
+ * claim token, for a user who doesn't have a FieldStay account/session yet.
+ * Returns the pending_link_token to embed in the post-signup redirect URL.
+ *
+ * The code is a credential — same zero-plaintext-at-rest rule as tokens.
+ * redirectUri is the exact value the authorization request was issued
+ * against; it is replayed on the deferred exchange for providers that
+ * enforce redirect_uri matching.
  */
-export async function holdPendingIntegrationToken(params: {
+export async function holdPendingOAuthCode(params: {
   providerId: string
-  externalUserId: string
-  accessToken: string
-  refreshToken?: string
-  scope?: string
-  metadata?: Record<string, unknown>
+  code: string
+  redirectUri: string
 }): Promise<string> {
   const admin = getAdminClient()
   const pendingLinkToken = randomBytes(32).toString('hex')
 
-  const { error } = await admin.rpc('create_pending_integration_link', {
+  const { error } = await admin.rpc('create_pending_oauth_authorization', {
     p_pending_link_token: pendingLinkToken,
     p_provider_id:        params.providerId,
-    p_external_user_id:   params.externalUserId,
-    p_access_token:       params.accessToken,
-    p_refresh_token:      params.refreshToken ?? null,
-    p_scope:              params.scope ?? null,
-    p_metadata:           params.metadata ?? {},
+    p_authorization_code: params.code,
+    p_redirect_uri:       params.redirectUri,
   })
 
   if (error) {
     throw new Error(
-      `[Vault] Failed to hold pending token for provider "${params.providerId}": ${error.message}`
+      `[Vault] Failed to hold pending authorization code for provider "${params.providerId}": ${error.message}`
     )
   }
 
@@ -250,31 +253,60 @@ export async function holdPendingIntegrationToken(params: {
 }
 
 /**
- * Complete a marketplace install: link a previously-held pending token to a
- * real FieldStay user now that they have an account. Single-use — returns
- * null if the token doesn't exist or already expired (30 min TTL).
+ * Retrieve (and destroy) a previously-held authorization code now that the
+ * user has an authenticated FieldStay session. Single-use — the Vault secret
+ * and pending row are deleted in the same transaction that returns the code.
+ * Returns null if the token doesn't exist or already expired (30 min TTL).
+ *
+ * The caller performs the code→token exchange immediately; if the provider
+ * rejects the code (expired/already used on their side), fall back to
+ * restarting the standard /connect flow — never a dead end.
  */
-export async function claimPendingIntegrationLink(
-  pendingLinkToken: string,
-  userId: string
-): Promise<{ providerId: string; externalUserId: string; orgId: string | null } | null> {
+export async function claimPendingOAuthCode(
+  pendingLinkToken: string
+): Promise<{ providerId: string; code: string; redirectUri: string } | null> {
   const admin = getAdminClient()
 
-  const { data, error } = await admin.rpc('claim_pending_integration_link', {
+  const { data, error } = await admin.rpc('claim_pending_oauth_authorization', {
     p_pending_link_token: pendingLinkToken,
-    p_user_id:            userId,
   })
 
   if (error) {
-    throw new Error(`[Vault] Failed to claim pending integration link: ${error.message}`)
+    throw new Error(`[Vault] Failed to claim pending authorization code: ${error.message}`)
   }
 
   const row = unwrapJoin(data)
   if (!row) return null
 
   return {
-    providerId:     row.provider_id as string,
-    externalUserId: row.external_user_id as string,
-    orgId:          (row.org_id as string | null) ?? null,
+    providerId:  row.provider_id as string,
+    code:        row.authorization_code as string,
+    redirectUri: row.redirect_uri as string,
+  }
+}
+
+/**
+ * TTL cleanup for both marketplace-install holding areas: expired unclaimed
+ * authorization codes (pending_oauth_authorizations) and any leftover rows in
+ * the legacy exchanged-token table (pending_integration_links — no longer
+ * written to, kept through the deploy window). Deletes the rows AND their
+ * Vault secrets. Invoked probabilistically from the integration routes,
+ * mirroring cleanup_webhook_dedup()'s fire-on-request pattern — closes
+ * FUTURE_REMEDIATION.md #7 (the legacy cleanup function existed but was
+ * never called from anywhere).
+ */
+export async function cleanupExpiredPendingIntegrationArtifacts(): Promise<void> {
+  const admin = getAdminClient()
+
+  const [codes, links] = await Promise.all([
+    admin.rpc('cleanup_expired_pending_oauth_authorizations'),
+    admin.rpc('cleanup_expired_pending_integration_links'),
+  ])
+
+  if (codes.error) {
+    console.warn(`[Vault] Pending authorization code TTL cleanup failed (non-fatal): ${codes.error.message}`)
+  }
+  if (links.error) {
+    console.warn(`[Vault] Pending integration link TTL cleanup failed (non-fatal): ${links.error.message}`)
   }
 }

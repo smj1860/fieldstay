@@ -173,7 +173,15 @@ throughout Hospitable's adapter.
 
 ---
 
-## 7. OwnerRez: orphaned marketplace-install artifacts are never cleaned up
+## 7. ✅ RESOLVED (2026-07-22) — OwnerRez: orphaned marketplace-install artifacts are never cleaned up
+
+**Resolution:** `cleanupExpiredPendingIntegrationArtifacts()` (lib/integrations/vault.ts)
+now runs probabilistically (~5% of requests) from both the oneclick callback and
+`/connect/finish`, covering the new `pending_oauth_authorizations` table AND the
+legacy `pending_integration_links` table (including the stale 2026-07-07 OwnerRez
+row noted below). Shipped alongside the deferred-token-exchange fix
+(`supabase/migrations/20260722120000_defer_marketplace_code_exchange.sql`).
+Original finding kept for context:
 
 **Files:** `lib/integrations/vault.ts` (`cleanup_expired_pending_integration_links`
 DB function), `supabase/migrations/20260707152648_marketplace_pending_integration_links.sql`

@@ -88,6 +88,20 @@ export const guidebookRatelimit = new Ratelimit({
   prefix:    'rl:guidebook',
 })
 
+// OAuth callback routes (/api/integrations/*/callback and /callback/oneclick)
+// — unauthenticated by nature (the provider redirects the browser here with
+// no FieldStay session). The oneclick route now stores the unexchanged
+// authorization code in Vault WITHOUT any provider-side validation first
+// (the exchange is deferred until post-signup), so without a throttle an
+// attacker could spam garbage codes to bloat vault.secrets. 20/min per IP
+// is far above any legitimate redirect rate.
+export const oauthCallbackRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:oauth-callback',
+})
+
 // Sign-off action — 5 submissions per 5 minutes per work order token
 // A contractor will never legitimately submit more than once
 export const signOffRatelimit = new Ratelimit({
