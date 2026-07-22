@@ -119,7 +119,11 @@ describe('settings/integrations/actions', () => {
       expect(createServiceClient).not.toHaveBeenCalled()
     })
 
-    it('scopes the connection lookup to the current user, keyed by provider_id', async () => {
+    it('scopes the connection lookup to the org, keyed by provider_id — not the current viewer\'s session', async () => {
+      // Regression: this used to scope by the current viewer's user_id, so
+      // any org member other than the one who originally connected the
+      // integration always got a null row here and saw sync progress hang
+      // forever, even though the sync was proceeding normally.
       mockAuthed()
       const supabase = makeSupabase({
         integration_connections: [{
@@ -133,7 +137,8 @@ describe('settings/integrations/actions', () => {
 
       expect(result).toEqual({ propertiesFound: 4, bookingsFound: 10, lastSyncStatus: 'ok' })
       const eqCalls = supabase.calls.filter((c) => c.table === 'integration_connections' && c.method === 'eq')
-      expect(eqCalls.some((c) => c.args[0] === 'user_id' && c.args[1] === USER_ID)).toBe(true)
+      expect(eqCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === ORG_ID)).toBe(true)
+      expect(eqCalls.some((c) => c.args[0] === 'user_id')).toBe(false)
       expect(eqCalls.some((c) => c.args[0] === 'provider_id' && c.args[1] === 'hospitable')).toBe(true)
     })
   })
@@ -220,8 +225,26 @@ describe('settings/integrations/actions', () => {
       expect(disconnectIntegrationToken).not.toHaveBeenCalled()
     })
 
+    it('returns an error when the integration isn\'t connected for this org', async () => {
+      mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [{ data: null, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+      const result = await disconnectIntegration('hospitable')
+
+      expect(result).toEqual({ error: 'This integration isn’t connected.' })
+      expect(readIntegrationToken).not.toHaveBeenCalled()
+      expect(disconnectIntegrationToken).not.toHaveBeenCalled()
+    })
+
     it('revokes at the provider and disconnects locally on the happy path', async () => {
       mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [{ data: { user_id: USER_ID }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
       vi.mocked(readIntegrationToken).mockResolvedValue('access_token_abc')
       const revokeAccessToken = vi.fn(async () => undefined)
       vi.mocked(getProvider).mockReturnValue({ revokeAccessToken } as never)
@@ -233,12 +256,16 @@ describe('settings/integrations/actions', () => {
       expect(revokeAccessToken).toHaveBeenCalledWith({ token: 'access_token_abc' })
       expect(disconnectIntegrationToken).toHaveBeenCalledWith(USER_ID, 'hospitable')
       expect(logAuditEvent).toHaveBeenCalledWith(
-        expect.objectContaining({ orgId: ORG_ID, action: 'integration.disconnected', targetId: 'hospitable' })
+        expect.objectContaining({ orgId: ORG_ID, actorId: USER_ID, action: 'integration.disconnected', targetId: 'hospitable' })
       )
     })
 
     it('still disconnects locally when provider revocation throws (non-fatal)', async () => {
       mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [{ data: { user_id: USER_ID }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
       vi.mocked(readIntegrationToken).mockResolvedValue('access_token_abc')
       const revokeAccessToken = vi.fn(async () => { throw new Error('provider down') })
       vi.mocked(getProvider).mockReturnValue({ revokeAccessToken } as never)
@@ -251,12 +278,45 @@ describe('settings/integrations/actions', () => {
 
     it('returns a generic error when the local disconnect itself fails', async () => {
       mockAuthed('admin')
+      const supabase = makeSupabase({
+        integration_connections: [{ data: { user_id: USER_ID }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
       vi.mocked(readIntegrationToken).mockResolvedValue(null)
       vi.mocked(disconnectIntegrationToken).mockRejectedValue(new Error('vault unreachable'))
 
       const result = await disconnectIntegration('hospitable')
 
       expect(result).toEqual({ error: 'Failed to disconnect. Please try again.' })
+    })
+
+    it('regression: resolves the connection\'s own user_id, not the current viewer\'s session — a different org member can actually disconnect it', async () => {
+      // Previously used the current session's user.id for both the Vault
+      // read and the disconnect RPC. Both are keyed on (user_id, provider_id),
+      // so a PM who didn't originally run the OAuth flow would silently no-op:
+      // no token found, no provider revocation, disconnectIntegrationToken
+      // updates zero rows — while this action still reported success and the
+      // real connection stayed fully active.
+      const CONNECTING_USER_ID = 'user_2_the_original_connector'
+      mockAuthed('admin') // current viewer is USER_ID ('user_1'), not the connector
+      const supabase = makeSupabase({
+        integration_connections: [{ data: { user_id: CONNECTING_USER_ID }, error: null }],
+      })
+      vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+      vi.mocked(readIntegrationToken).mockResolvedValue('access_token_abc')
+      const revokeAccessToken = vi.fn(async () => undefined)
+      vi.mocked(getProvider).mockReturnValue({ revokeAccessToken } as never)
+
+      const result = await disconnectIntegration('ownerrez')
+
+      expect(result).toEqual({})
+      expect(readIntegrationToken).toHaveBeenCalledWith(CONNECTING_USER_ID, 'ownerrez')
+      expect(disconnectIntegrationToken).toHaveBeenCalledWith(CONNECTING_USER_ID, 'ownerrez')
+      // The audit log's actor is still the person who clicked Disconnect,
+      // even though the Vault operations target the connection's own user.
+      expect(logAuditEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ actorId: USER_ID, action: 'integration.disconnected' })
+      )
     })
   })
 

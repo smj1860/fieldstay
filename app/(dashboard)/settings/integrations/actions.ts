@@ -18,13 +18,16 @@ export async function getSyncProgress(providerId: string): Promise<{
   lastSyncStatus:  string | null
 } | null> {
   try {
-    const { user } = await requireOrgMember()
+    // Scoped by org, not the current viewer's session — the PM watching
+    // sync progress may not be the PM who originally connected the
+    // integration (same pattern as triggerResync below).
+    const { membership } = await requireOrgMember()
     const supabase = createServiceClient()
 
     const { data } = await supabase
       .from('integration_connections')
       .select('metadata')
-      .eq('user_id', user.id)
+      .eq('org_id', membership.org_id)
       .eq('provider_id', providerId)
       .maybeSingle()
 
@@ -180,8 +183,29 @@ export async function disconnectIntegration(
   if (!user) return { error: 'Not authenticated' }
 
   try {
+    // Resolve the connection by org, not the current viewer's session — the
+    // PM clicking Disconnect may not be the PM who originally ran the OAuth
+    // flow (same pattern as triggerResync below). Vault reads/writes are
+    // keyed on (user_id, provider_id), so using the wrong user_id here
+    // silently no-ops: it finds no token, skips provider-side revocation,
+    // and disconnectIntegrationToken updates zero rows — while this action
+    // still reports success and the real connection stays fully active.
+    const supabase = createServiceClient()
+    const { data: connection } = await supabase
+      .from('integration_connections')
+      .select('user_id')
+      .eq('org_id', membership.org_id)
+      .eq('provider_id', providerId)
+      .maybeSingle()
+
+    if (!connection) {
+      return { error: 'This integration isn’t connected.' }
+    }
+
+    const connectedUserId = connection.user_id as string
+
     // 1. Retrieve the token from Vault
-    const accessToken = await readIntegrationToken(user.id, providerId)
+    const accessToken = await readIntegrationToken(connectedUserId, providerId)
 
     // 2. Revoke at the provider (best-effort)
     if (accessToken) {
@@ -198,7 +222,7 @@ export async function disconnectIntegration(
 
     // 3. Disconnect in Vault (marks connection 'disconnected' + deletes secret —
     //    distinct from revokeIntegrationToken, which is for involuntary revocation)
-    await disconnectIntegrationToken(user.id, providerId)
+    await disconnectIntegrationToken(connectedUserId, providerId)
 
     await logAuditEvent({
       orgId:      membership.org_id,

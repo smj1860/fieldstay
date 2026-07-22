@@ -45,6 +45,15 @@ function makeSupabase(queued: QueuedByTable) {
   const upsertSpy = vi.fn()
   const updateSpy = vi.fn()
   const eqSpy     = vi.fn()
+  // integration_connections.metadata is now merged atomically via the
+  // merge_integration_connection_metadata RPC (see
+  // lib/integrations/connection-metadata.ts) instead of a
+  // select-then-update round trip.
+  const rpcSpy = vi.fn()
+  const rpc = vi.fn((fnName: string, args: unknown) => {
+    rpcSpy(fnName, args)
+    return Promise.resolve({ data: {}, error: null })
+  })
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -70,7 +79,16 @@ function makeSupabase(queued: QueuedByTable) {
     return chain
   })
 
-  return { from, upsertSpy, updateSpy, eqSpy }
+  return { from, upsertSpy, updateSpy, eqSpy, rpc, rpcSpy }
+}
+
+/** Finds the merge_integration_connection_metadata RPC call whose p_patch contains `key`. */
+function findMetadataMergeCall(rpcSpy: ReturnType<typeof vi.fn>, key: string) {
+  return rpcSpy.mock.calls.find(
+    (c) =>
+      c[0] === 'merge_integration_connection_metadata' &&
+      (c[1] as { p_patch?: Record<string, unknown> }).p_patch?.[key] !== undefined,
+  )
 }
 
 function makeConn(overrides: Record<string, unknown> = {}) {
@@ -116,7 +134,6 @@ describe('ownerRezReviewsSync', () => {
     const supabase = makeSupabase({
       integration_connections: [
         { data: [makeConn()], error: null }, // fetch-connections
-        { data: null, error: null },         // update-reviews-cursor
       ],
       properties: [{ data: [{ id: 'prop_1', external_id: '777' }], error: null }],
       reviews:    [{ data: null, error: null }],
@@ -149,10 +166,10 @@ describe('ownerRezReviewsSync', () => {
       { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false },
     )
 
-    const cursorUpdate = supabase.updateSpy.mock.calls.find((c) => c[0] === 'integration_connections')
-    expect(cursorUpdate).toBeDefined()
-    const metadata = (cursorUpdate?.[1] as { metadata: Record<string, unknown> }).metadata
-    expect(metadata.reviews_sync_cursor).toBe(start.toISOString())
+    const cursorMergeCall = findMetadataMergeCall(supabase.rpcSpy, 'reviews_sync_cursor')
+    expect(cursorMergeCall).toBeDefined()
+    const patch = (cursorMergeCall?.[1] as { p_patch: Record<string, unknown> }).p_patch
+    expect(patch.reviews_sync_cursor).toBe(start.toISOString())
 
     expect(result).toBeUndefined()
     vi.useRealTimers()
@@ -189,9 +206,7 @@ describe('ownerRezReviewsSync', () => {
     const supabase = makeSupabase({
       integration_connections: [
         { data: [makeConn(), makeConn({ user_id: 'user_2', org_id: 'org_2', metadata: {} })], error: null }, // fetch-connections
-        { data: { id: 'conn_1', metadata: {} }, error: null }, // mark-revoked existing select
-        { data: null, error: null },                            // mark-revoked update
-        { data: null, error: null },                            // cursor update for user_2 (empty reviews still advances cursor)
+        { data: { id: 'conn_1' }, error: null }, // mark-revoked existing select
       ],
       org_milestones: [
         { data: null, error: null }, // no recent notification — not throttled
@@ -208,11 +223,11 @@ describe('ownerRezReviewsSync', () => {
       logger: makeLogger(),
     })
 
-    expect(supabase.updateSpy).toHaveBeenCalledWith(
-      'integration_connections',
+    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+      'merge_integration_connection_metadata',
       expect.objectContaining({
-        status:   'revoked',
-        metadata: expect.objectContaining({ last_sync_status: 'error' }),
+        p_status: 'revoked',
+        p_patch:  expect.objectContaining({ last_sync_status: 'error' }),
       }),
     )
     expect(logAuditEvent).toHaveBeenCalledWith(
@@ -255,8 +270,7 @@ describe('ownerRezReviewsSync', () => {
     const supabase = makeSupabase({
       integration_connections: [
         { data: [makeConn()], error: null },
-        { data: { id: 'conn_1', metadata: {} }, error: null },
-        { data: null, error: null },
+        { data: { id: 'conn_1' }, error: null },
       ],
       org_milestones: [
         { data: { value: { notified_at: recentNotifiedAt }, achieved_at: recentNotifiedAt }, error: null },
@@ -285,8 +299,6 @@ describe('ownerRezReviewsSync', () => {
     const supabase = makeSupabase({
       integration_connections: [
         { data: [makeConn(), makeConn({ user_id: 'user_2', org_id: 'org_2', metadata: {} })], error: null },
-        { data: null, error: null }, // record-reviews-sync-error for user_1
-        { data: null, error: null }, // cursor update for user_2
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -297,10 +309,11 @@ describe('ownerRezReviewsSync', () => {
       logger: makeLogger(),
     })
 
-    expect(supabase.updateSpy).toHaveBeenCalledWith(
-      'integration_connections',
+    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+      'merge_integration_connection_metadata',
       expect.objectContaining({
-        metadata: expect.objectContaining({
+        p_user_id: 'user_1',
+        p_patch:   expect.objectContaining({
           last_reviews_sync_status: 'error',
           last_reviews_sync_error:  'Sync failed — will retry automatically',
         }),
@@ -321,7 +334,6 @@ describe('ownerRezReviewsSync', () => {
     const supabase = makeSupabase({
       integration_connections: [
         { data: [makeConn()], error: null },
-        { data: null, error: null }, // cursor update
       ],
       properties: [{ data: [{ id: 'prop_1', external_id: '777' }], error: null }],
       reviews:    [{ data: null, error: null }],

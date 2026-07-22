@@ -65,6 +65,16 @@ function makeSupabase(queued: QueuedByTable) {
   const counters: Record<string, number> = {}
   const upsertSpy = vi.fn()
   const updateSpy = vi.fn()
+  // integration_connections.metadata is now merged atomically via the
+  // merge_integration_connection_metadata RPC (see
+  // lib/integrations/connection-metadata.ts) instead of a
+  // select-then-update round trip — writeSyncCount, update-last-synced, and
+  // handle-sync-failure's metadata write all go through here now.
+  const rpcSpy = vi.fn()
+  const rpc = vi.fn((fnName: string, args: unknown) => {
+    rpcSpy(fnName, args)
+    return Promise.resolve({ data: {}, error: null })
+  })
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -90,7 +100,16 @@ function makeSupabase(queued: QueuedByTable) {
     return chain
   })
 
-  return { from, upsertSpy, updateSpy }
+  return { from, upsertSpy, updateSpy, rpc, rpcSpy }
+}
+
+/** Finds the merge_integration_connection_metadata RPC call whose p_patch contains `key`. */
+function findMetadataMergeCall(rpcSpy: ReturnType<typeof vi.fn>, key: string) {
+  return rpcSpy.mock.calls.find(
+    (c) =>
+      c[0] === 'merge_integration_connection_metadata' &&
+      (c[1] as { p_patch?: Record<string, unknown> }).p_patch?.[key] !== undefined,
+  )
 }
 
 const PROPERTY: OwnerRezProperty = {
@@ -163,14 +182,6 @@ describe('ownerRezInitialSync', () => {
     ;(generateTurnoversForProperty as ReturnType<typeof vi.fn>).mockResolvedValue([])
 
     const supabase = makeSupabase({
-      integration_connections: [
-        { data: { metadata: {} }, error: null }, // fetch-properties writeSyncCount select
-        { data: null, error: null },             // fetch-properties writeSyncCount update
-        { data: { metadata: {} }, error: null }, // fetch-bookings writeSyncCount select
-        { data: null, error: null },             // fetch-bookings writeSyncCount update
-        { data: { metadata: {} }, error: null }, // update-last-synced select
-        { data: null, error: null },             // update-last-synced update (the cursor write)
-      ],
       properties: [
         { data: null, error: null },                                  // fetch-properties upsert
         { data: [], error: null },                                    // fetch-properties-to-enrich select (nothing to enrich)
@@ -211,18 +222,61 @@ describe('ownerRezInitialSync', () => {
       { onConflict: 'org_id,external_id,external_source' },
     )
 
-    const cursorUpdate = supabase.updateSpy.mock.calls
-      .filter((c) => c[0] === 'integration_connections')
-      .pop()
-    expect(cursorUpdate).toBeDefined()
-    const metadata = (cursorUpdate?.[1] as { metadata: Record<string, unknown> }).metadata
-    expect(metadata.sync_cursor).toBe(start.toISOString())
-    expect(metadata.sync_cursor).not.toBe(new Date(start.getTime() + 8000).toISOString())
+    const cursorMergeCall = findMetadataMergeCall(supabase.rpcSpy, 'sync_cursor')
+    expect(cursorMergeCall).toBeDefined()
+    const patch = (cursorMergeCall?.[1] as { p_patch: Record<string, unknown> }).p_patch
+    expect(patch.sync_cursor).toBe(start.toISOString())
+    expect(patch.sync_cursor).not.toBe(new Date(start.getTime() + 8000).toISOString())
 
     expect(generateTurnoversForProperty).toHaveBeenCalledWith('prop_1', 'org_1', supabase)
     expect(result).toEqual({ user_id: 'user_1', synced: true })
 
     vi.useRealTimers()
+  })
+
+  it('regression: patch-property-fields never overwrites a legitimate 0 bedroom/sqft value — only a real NULL gets filled', async () => {
+    // bedrooms/square_footage previously used a falsy check (`!existing.bedrooms`),
+    // which also matches a real 0 (e.g. a studio's bedroom count a PM
+    // deliberately corrected) and would silently overwrite it with whatever
+    // OwnerRez reports. bathrooms always used the correct `=== null` check;
+    // bedrooms/square_footage must now match it.
+    const mockClient = baseMocks()
+    ;(generateTurnoversForProperty as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+    const supabase = makeSupabase({
+      properties: [
+        { data: null, error: null }, // fetch-properties upsert
+        {
+          data: [{ id: 'prop_1', external_id: '42', bedrooms: 0, bathrooms: null, square_footage: null }],
+          error: null,
+        }, // patch-property-fields existingProps select — bedrooms is a real 0, not null
+        { data: null, error: null }, // patch-property-fields update (bathrooms/sqft only)
+        { data: [], error: null },   // fetch-properties-to-enrich select (nothing to enrich)
+        { data: [{ id: 'prop_1' }], error: null }, // find-properties-needing-checklist: property lookup
+        // fetch-bookings never queries properties here — getBookings() resolves
+        // to [] (default baseMocks() stub), so the property-lookup block inside
+        // fetch-bookings' `if (bookings.length)` guard never runs.
+      ],
+      checklist_templates: [{ data: [{ property_id: 'prop_1' }], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep([...GOLDEN_PATH_STEPS, 'patch-property-fields'])
+
+    await invokeHandler(ownerRezInitialSync, {
+      event:  { data: { user_id: 'user_1', org_id: 'org_1' } },
+      step,
+      logger: makeLogger(),
+    })
+
+    const propertyPatchCall = supabase.updateSpy.mock.calls.find((c) => c[0] === 'properties')
+    expect(propertyPatchCall).toBeDefined()
+    const patchPayload = propertyPatchCall?.[1] as Record<string, unknown>
+    // bedrooms was already 0 (a real, PM-set value) — must be left untouched.
+    expect(patchPayload.bedrooms).toBeUndefined()
+    // bathrooms/square_footage were genuinely null — still get filled from OwnerRez.
+    expect(patchPayload.bathrooms).toBe(2)
+    expect(patchPayload.square_footage).toBe(1500)
   })
 
   it('marks the connection revoked, notifies the PM, and throws NonRetriableError when OwnerRez reports a revoked token on the very first fetch', async () => {
@@ -231,8 +285,7 @@ describe('ownerRezInitialSync', () => {
 
     const supabase = makeSupabase({
       integration_connections: [
-        { data: { id: 'conn_1', metadata: {} }, error: null }, // handle-sync-failure select
-        { data: null, error: null },                            // handle-sync-failure update
+        { data: { id: 'conn_1' }, error: null }, // handle-sync-failure select
       ],
       org_milestones: [{ data: null, error: null }],
     })
@@ -248,9 +301,9 @@ describe('ownerRezInitialSync', () => {
       }),
     ).rejects.toThrow()
 
-    expect(supabase.updateSpy).toHaveBeenCalledWith(
-      'integration_connections',
-      expect.objectContaining({ status: 'revoked' }),
+    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+      'merge_integration_connection_metadata',
+      expect.objectContaining({ p_status: 'revoked' }),
     )
     expect(logAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -273,10 +326,7 @@ describe('ownerRezInitialSync', () => {
 
     const supabase = makeSupabase({
       integration_connections: [
-        { data: { metadata: {} }, error: null },                // fetch-properties writeSyncCount select
-        { data: null, error: null },                             // fetch-properties writeSyncCount update
-        { data: { id: 'conn_1', metadata: {} }, error: null },   // handle-sync-failure select
-        { data: null, error: null },                             // handle-sync-failure update
+        { data: { id: 'conn_1' }, error: null }, // handle-sync-failure select
       ],
       properties: [
         { data: null, error: null },               // fetch-properties upsert
@@ -306,9 +356,9 @@ describe('ownerRezInitialSync', () => {
     ).rejects.toThrow(/Property lookup failed for org org_1/)
 
     expect(supabase.upsertSpy).not.toHaveBeenCalledWith('bookings', expect.anything(), expect.anything())
-    expect(supabase.updateSpy).toHaveBeenCalledWith(
-      'integration_connections',
-      expect.objectContaining({ status: 'error' }),
+    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+      'merge_integration_connection_metadata',
+      expect.objectContaining({ p_status: 'error' }),
     )
 
     const auditCall = (logAuditEvent as ReturnType<typeof vi.fn>).mock.calls.find(
