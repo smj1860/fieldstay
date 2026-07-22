@@ -416,6 +416,17 @@ export async function applyTemplateToProperty(
   try {
     const { supabase, membership } = await requireOrgMember()
 
+    // Verify property belongs to this org — propertyId is client-supplied and
+    // must not be trusted to already scope to the caller's org.
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { added: 0, skipped: 0, error: 'Property not found' }
+
     const { data: templateItems } = await supabase
       .from('inventory_template_items')
       .select('*')
@@ -481,12 +492,25 @@ export async function applyTemplateToProperties(
       return { error: 'No items in template', applied: 0 }
     }
 
+    // Verify every target property belongs to this org — propertyIds is
+    // client-supplied and must not be trusted to already scope to the
+    // caller's org. Silently drop any id that doesn't verify, mirroring
+    // applyTemplateToProperty's single-property ownership check.
+    const { data: verifiedProperties } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .in('id', propertyIds)
+
+    const verifiedPropertyIds = (verifiedProperties ?? []).map((p) => p.id)
+    if (!verifiedPropertyIds.length) return { error: 'No matching properties found', applied: 0 }
+
     // Fetch all existing items for ALL target properties in a single query, then group by property
     const { data: allExisting } = await supabase
       .from('inventory_items')
       .select('property_id, catalog_item_id, name')
       .eq('org_id', membership.org_id)
-      .in('property_id', propertyIds)
+      .in('property_id', verifiedPropertyIds)
 
     const existingByProperty: Record<string, { catalogIds: Set<string>; names: Set<string> }> = {}
     for (const row of allExisting ?? []) {
@@ -512,7 +536,7 @@ export async function applyTemplateToProperties(
       preferred_brand:         string | null
     }> = []
 
-    for (const propertyId of propertyIds) {
+    for (const propertyId of verifiedPropertyIds) {
       const existing = existingByProperty[propertyId] ?? { catalogIds: new Set<string>(), names: new Set<string>() }
 
       const toInsert = items

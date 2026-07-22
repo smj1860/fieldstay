@@ -397,6 +397,17 @@ export async function createManualTurnover(
       windowMinutes < 120 ? 'urgent' :
       windowMinutes < 240 ? 'high'   : 'medium'
 
+    // Verify property belongs to this org — property_id is client-supplied and
+    // must not be trusted to already scope to the caller's org.
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', property_id)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { error: 'Property not found' }
+
     // Get default checklist template for the property
     const { data: template } = await supabase
       .from('checklist_templates')
