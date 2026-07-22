@@ -27,7 +27,12 @@ export async function getRoomTemplatesForOrg(
 
   if (error) {
     console.error('[getRoomTemplatesForOrg]', error)
-    return []
+    // Thrown, not swallowed into an empty array — both call sites render
+    // this straight into an "everything's fine, just no rooms" empty
+    // state (RoomLibraryBuilder), which would hide a real query failure
+    // behind what looks like normal empty data. Caught by the
+    // (dashboard) route group's error.tsx boundary.
+    throw new Error('Failed to load room templates')
   }
 
   return (rooms ?? []).map((room) => ({

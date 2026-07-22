@@ -95,7 +95,7 @@ export function CreateTemplateBuilder({
     description:           ci.description ?? '',
     schedule_frequency:    ci.schedule_frequency,
     vendor_specialty_hint: (ci.vendor_specialty_hint ?? '') as VendorSpecialty | '',
-    estimated_cost:        ci.estimated_cost != null ? String(ci.estimated_cost) : '',
+    estimated_cost:        ci.estimated_cost !== null && ci.estimated_cost !== undefined ? String(ci.estimated_cost) : '',
     catalogId:             ci.id,
   })
 
