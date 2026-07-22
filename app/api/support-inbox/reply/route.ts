@@ -31,7 +31,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       sent_by_user_id: user.id,
     })
 
-  if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 })
+  if (insertErr) {
+    console.error('[support-inbox/reply]', insertErr.message)
+    return NextResponse.json({ error: 'Failed to send reply. Please try again.' }, { status: 500 })
+  }
 
   await supabase
     .from('support_conversations')

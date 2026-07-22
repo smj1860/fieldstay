@@ -1836,6 +1836,17 @@ export async function addCatalogItemToProperty(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
+    // Verify property belongs to this org — propertyId is client-supplied and
+    // must not be trusted to already scope to the caller's org.
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { error: 'Property not found' }
+
     const { data: catalogItem, error: catErr } = await supabase
       .from('maintenance_catalog_items')
       .select('name, asset_category, description')
@@ -1892,6 +1903,17 @@ export async function addCustomMaintenanceItem(
 ): Promise<{ error?: string; success?: boolean }> {
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
+
+    // Verify property belongs to this org — propertyId is client-supplied and
+    // must not be trusted to already scope to the caller's org.
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { error: 'Property not found' }
 
     const { error } = await supabase
       .from('maintenance_schedules')

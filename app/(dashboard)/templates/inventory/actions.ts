@@ -378,6 +378,21 @@ export async function upsertParLevelItems(
   try {
     const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
+    // Verify propertyId belongs to this org before using it — RLS on
+    // inventory_items_insert only checks the row's own org_id, not that
+    // property_id itself belongs to that org (see
+    // 20260722000000_atomic_template_item_replace.sql, which closed this
+    // same gap for cloneInventoryFromProperty's target property but not
+    // for this function's new-item insert path below).
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { error: 'Property not found' }
+
     const existingItems = items.filter((item) => item.id)
     const newItems      = items.filter((item) => !item.id)
     const savedItems: ParLevelItemRow[] = []

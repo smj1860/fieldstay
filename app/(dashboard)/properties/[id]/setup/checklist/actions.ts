@@ -46,6 +46,17 @@ async function resolveTemplateId(
     return { id: templateId }
   }
 
+  // A client-supplied propertyId must also be confirmed to belong to this
+  // org before we create a new template tied to it — same reasoning as the
+  // templateId check above.
+  const { data: property } = await supabase
+    .from('properties')
+    .select('id')
+    .eq('id', propertyId)
+    .eq('org_id', orgId)
+    .maybeSingle()
+  if (!property) return { error: 'Property not found' }
+
   const { data, error } = await supabase
     .from('checklist_templates')
     .insert({

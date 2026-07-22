@@ -27,6 +27,15 @@ export async function addMaintenanceSchedule(
 
     if (!name) return { error: 'Schedule name is required' }
 
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { error: 'Property not found' }
+
     // Calculate first next_due_date
     let next_due_date: string | null = null
     const today = new Date()
@@ -105,6 +114,19 @@ export async function cloneMaintenanceFromProperty(
 ): Promise<{ added: number; skipped: number; error?: string }> {
   try {
     const { supabase, membership, user } = await requireOrgMember()
+
+    // The target property must be confirmed to belong to this org before we
+    // write into it — the source-schedules read below is scoped by org_id
+    // too, but that alone doesn't stop an unverified targetPropertyId from
+    // being written into the insert further down.
+    const { data: targetProperty } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', targetPropertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!targetProperty) return { added: 0, skipped: 0, error: 'Target property not found' }
 
     const { data: sourceSchedules } = await supabase
       .from('maintenance_schedules')

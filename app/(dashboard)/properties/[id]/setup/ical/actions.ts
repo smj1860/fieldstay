@@ -25,6 +25,15 @@ export async function addIcalFeed(
     if (!url)  return { error: 'Calendar URL is required' }
     if (!url.startsWith('http')) return { error: 'Please enter a valid URL' }
 
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
+
+    if (!property) return { error: 'Property not found' }
+
     const { error } = await supabase.from('ical_feeds').insert({
       property_id: propertyId,
       org_id:      membership.org_id,
