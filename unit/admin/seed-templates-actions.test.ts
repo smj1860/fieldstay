@@ -19,7 +19,7 @@ import {
 
 type Resp = { data?: unknown; error?: unknown }
 
-function makeSupabase(queue: Record<string, Resp[]>) {
+function makeSupabase(queue: Record<string, Resp[]>, rpcResult: Resp = { error: null }) {
   const from = vi.fn((table: string) => {
     const q = queue[table]
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
@@ -33,7 +33,8 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     chain.then        = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
     return chain
   })
-  return { from }
+  const rpc = vi.fn(() => Promise.resolve(rpcResult))
+  return { from, rpc }
 }
 
 describe('admin/seed-templates/actions', () => {
@@ -208,19 +209,35 @@ describe('admin/seed-templates/actions', () => {
       return [{ task: 'Wipe counters', requires_photo: false, notes: '', sort_order: 0 }]
     }
 
-    it('replaces a template’s items when the template exists', async () => {
+    it('replaces a template’s items via the atomic replace RPC when the template exists', async () => {
       const supabase = makeSupabase({
-        platform_seed_room_templates:      [{ data: { id: 'tmpl_1' } }],
-        platform_seed_room_template_items: [{ error: null }, { error: null }],
+        platform_seed_room_templates: [{ data: { id: 'tmpl_1' } }],
       })
       vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
 
       const result = await saveSeedTemplateItems('tmpl_1', items())
 
       expect(result).toEqual({ saved: 1 })
+      expect(supabase.rpc).toHaveBeenCalledWith('replace_seed_room_template_items', {
+        p_template_id: 'tmpl_1',
+        p_items:       items(),
+      })
       expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
         action: 'platform_admin.seed_template.updated', targetId: 'tmpl_1', metadata: { saved: 1 },
       }))
+    })
+
+    it('returns a generic error and does not log an audit event when the replace RPC fails', async () => {
+      const supabase = makeSupabase(
+        { platform_seed_room_templates: [{ data: { id: 'tmpl_1' } }] },
+        { error: { message: 'boom' } },
+      )
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      const result = await saveSeedTemplateItems('tmpl_1', items())
+
+      expect(result).toEqual({ error: 'Failed to save tasks. Please try again.', saved: 0 })
+      expect(logAuditEvent).not.toHaveBeenCalled()
     })
 
     it('rejects a template id that does not exist (IDOR/not-found check)', async () => {

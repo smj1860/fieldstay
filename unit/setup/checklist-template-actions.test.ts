@@ -5,15 +5,10 @@ vi.mock('@/lib/auth', () => ({
 }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
-vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
 
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
-import { logAuditEvent } from '@/lib/audit'
-import {
-  saveMasterChecklistItems,
-  applyMasterChecklistToProperties,
-} from '@/app/(dashboard)/setup/checklist-template/actions'
+import { applyMasterChecklistToProperties } from '@/app/(dashboard)/setup/checklist-template/actions'
 
 type Resp = { data?: unknown; error?: unknown }
 
@@ -45,50 +40,11 @@ describe('setup/checklist-template/actions', () => {
     vi.clearAllMocks()
   })
 
-  describe('saveMasterChecklistItems', () => {
-    const items = [{ section: 'Kitchen', task: 'Wipe counters', sort_order: 0, source: 'custom' as const }]
-
-    it('replaces the org master checklist atomically via RPC', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await saveMasterChecklistItems(items)
-
-      expect(result).toEqual({ saved: 1 })
-      expect(supabase.rpc).toHaveBeenCalledWith('replace_master_checklist_items', {
-        p_org_id: 'org_1',
-        p_items:  [{ section: 'Kitchen', task: 'Wipe counters', sort_order: 0, source: 'custom' }],
-      })
-      expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
-        orgId: 'org_1', action: 'checklist.master_template.updated',
-      }))
-    })
-
-    it('returns an error when the replace RPC fails', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(supabase.rpc).mockResolvedValue({ data: null, error: { message: 'db error' } })
-      vi.mocked(requireOrgMember).mockResolvedValue({
-        supabase, membership, user: { id: 'user_1' },
-      } as never)
-
-      const result = await saveMasterChecklistItems(items)
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.', saved: 0 })
-      expect(logAuditEvent).not.toHaveBeenCalled()
-    })
-
-    it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
-
-      const result = await saveMasterChecklistItems(items)
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.', saved: 0 })
-      expect(supabase.rpc).not.toHaveBeenCalled()
-    })
-  })
+  // saveMasterChecklistItems and the org_master_checklist_items table it
+  // wrote to were dropped by the Templates Hub refactor on main (see
+  // 20260721150000_drop_org_master_checklist_items.sql) — the master
+  // checklist concept was superseded by the room-template system, so
+  // there's nothing left here to test.
 
   // These property ids are only ever forwarded into an Inngest event —
   // the actual per-property write happens in

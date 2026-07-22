@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// createOrGetTemplate and applyTemplateToProperty (singular) were removed
+// from this file by the Templates Hub refactor on main (superseded by
+// createInventoryTemplate / applyTemplateToProperties in
+// app/(dashboard)/templates/inventory/actions.ts) — no longer tested here.
+
 vi.mock('@/lib/auth', () => ({
   requireOrgMember: vi.fn(),
   requireOrgRole:   vi.fn(),
@@ -17,11 +22,9 @@ import {
   updateParLevel,
   addInventoryItems,
   submitInventoryCount,
-  createOrGetTemplate,
   addTemplateItem,
   updateTemplateItemBrand,
   removeTemplateItem,
-  applyTemplateToProperty,
   applyTemplateToProperties,
   approveInventoryCount,
   rejectInventoryCount,
@@ -176,55 +179,29 @@ describe('inventory/actions', () => {
     })
   })
 
-  describe('createOrGetTemplate', () => {
-    it('returns the newly upserted template', async () => {
-      const supabase = makeSupabase({
-        inventory_templates: [{ data: { id: 'tmpl_1', name: 'Master Inventory List' } }],
-      })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await createOrGetTemplate()
-
-      expect(result.template).toEqual({ id: 'tmpl_1', name: 'Master Inventory List', inventory_template_items: null })
-    })
-
-    it('falls back to fetching the existing template on upsert conflict', async () => {
-      const supabase = makeSupabase({
-        inventory_templates: [
-          { data: null, error: { code: '23505' } },
-          { data: { id: 'tmpl_1', name: 'Master Inventory List' } },
-        ],
-      })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await createOrGetTemplate()
-
-      expect(result.template?.id).toBe('tmpl_1')
-    })
-
-    it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
-      const supabase = makeSupabase({})
-      vi.mocked(requireOrgMember).mockRejectedValue(new Error('REDIRECT:/login'))
-
-      const result = await createOrGetTemplate()
-
-      expect(result).toEqual({ error: 'Operation failed. Please try again.' })
-      expect(supabase.from).not.toHaveBeenCalled()
-    })
-  })
-
   describe('addTemplateItem', () => {
-    it('inserts a template item', async () => {
+    it('inserts a template item once the template is verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
+        inventory_templates:       [{ data: { id: 'tmpl_1' } }],
         inventory_template_items: [{
           data: { id: 'ti_1', name: 'Towels', category: 'bath', unit: 'each', par_level: 6, notes: null, preferred_brand: null },
         }],
       })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase } as never)
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
 
       const result = await addTemplateItem('tmpl_1', { name: 'Towels', category: 'bath', unit: 'each', par_level: 6 })
 
       expect(result.item?.id).toBe('ti_1')
+    })
+
+    it('rejects a template id that does not belong to the caller org (IDOR check)', async () => {
+      const supabase = makeSupabase({ inventory_templates: [{ data: null }] })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await addTemplateItem('other-orgs-template', { name: 'Towels', category: 'bath', unit: 'each', par_level: 6 })
+
+      expect(result).toEqual({ error: 'Template not found.' })
+      expect(supabase.from).not.toHaveBeenCalledWith('inventory_template_items')
     })
 
     it('returns a generic error and never touches the DB when the caller is unauthenticated', async () => {
@@ -282,34 +259,10 @@ describe('inventory/actions', () => {
     })
   })
 
-  describe('applyTemplateToProperty', () => {
-    it('applies template items to a property that belongs to the caller org', async () => {
-      const supabase = makeSupabase({
-        properties:                [{ data: { id: 'prop_1' } }],
-        inventory_template_items:  [{ data: [{ name: 'Towels', category: 'bath', unit: 'each', par_level: 6, notes: null, catalog_item_id: null }] }],
-        inventory_items:           [{ data: [] }, { error: null }],
-      })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await applyTemplateToProperty('tmpl_1', 'prop_1')
-
-      expect(result).toEqual({ added: 1, skipped: 0 })
-    })
-
-    it('rejects a property id that does not belong to the caller org (IDOR check)', async () => {
-      const supabase = makeSupabase({ properties: [{ data: null }] })
-      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
-
-      const result = await applyTemplateToProperty('tmpl_1', 'other-orgs-property')
-
-      expect(result).toEqual({ added: 0, skipped: 0, error: 'Property not found' })
-      expect(supabase.from).not.toHaveBeenCalledWith('inventory_template_items')
-    })
-  })
-
   describe('applyTemplateToProperties', () => {
     it('applies template items only to properties verified to belong to the caller org', async () => {
       const supabase = makeSupabase({
+        inventory_templates:       [{ data: { id: 'tmpl_1' } }],
         inventory_template_items: [{ data: [{ id: 'ti_1', name: 'Towels', category: 'bath', unit: 'each', par_level: 6, catalog_item_id: null }] }],
         properties:                [{ data: [{ id: 'prop_1' }] }], // only prop_1 verified — prop_2 (other org) dropped
         inventory_items:           [{ data: [] }, { error: null }],
@@ -321,8 +274,19 @@ describe('inventory/actions', () => {
       expect(result).toEqual({ applied: 1 })
     })
 
+    it('rejects a template id that does not belong to the caller org (IDOR check)', async () => {
+      const supabase = makeSupabase({ inventory_templates: [{ data: null }] })
+      vi.mocked(requireOrgMember).mockResolvedValue({ supabase, membership } as never)
+
+      const result = await applyTemplateToProperties('other-orgs-template', ['prop_1'])
+
+      expect(result).toEqual({ error: 'Template not found.', applied: 0 })
+      expect(supabase.from).not.toHaveBeenCalledWith('inventory_template_items')
+    })
+
     it('returns no matching properties when none verify against the caller org (IDOR check)', async () => {
       const supabase = makeSupabase({
+        inventory_templates:       [{ data: { id: 'tmpl_1' } }],
         inventory_template_items: [{ data: [{ id: 'ti_1', name: 'Towels', category: 'bath', unit: 'each', par_level: 6 }] }],
         properties:                [{ data: [] }],
       })
@@ -330,7 +294,7 @@ describe('inventory/actions', () => {
 
       const result = await applyTemplateToProperties('tmpl_1', ['other-orgs-property'])
 
-      expect(result).toEqual({ error: 'No matching properties found', applied: 0 })
+      expect(result).toEqual({ error: 'No valid properties selected', applied: 0 })
     })
   })
 

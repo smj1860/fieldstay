@@ -2,8 +2,14 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
-import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
+
+// Room templates now render on two call sites — the standalone hub page
+// and the onboarding wizard step — so every mutation revalidates both.
+function revalidateRoomTemplateSurfaces() {
+  revalidatePath('/templates/checklist')
+  revalidatePath('/setup/checklist-template')
+}
 
 const MANAGE_ROLES = ['admin', 'manager', 'owner'] as const
 
@@ -53,7 +59,7 @@ export async function createRoomTemplate(
       metadata:   { name: trimmed },
     })
 
-    revalidatePath('/settings/room-templates')
+    revalidateRoomTemplateSurfaces()
     return { id: data.id }
   } catch (err) {
     console.error('[createRoomTemplate]', err)
@@ -99,7 +105,7 @@ export async function renameRoomTemplate(
       metadata:   { name: trimmed },
     })
 
-    revalidatePath('/settings/room-templates')
+    revalidateRoomTemplateSurfaces()
     return {}
   } catch (err) {
     console.error('[renameRoomTemplate]', err)
@@ -140,7 +146,7 @@ export async function setRoomTemplateAutoInclude(
       metadata:   { auto_include: autoInclude },
     })
 
-    revalidatePath('/settings/room-templates')
+    revalidateRoomTemplateSurfaces()
     revalidatePath('/properties')
     return {}
   } catch (err) {
@@ -183,86 +189,10 @@ export async function deleteRoomTemplate(
       targetId:   roomTemplateId,
     })
 
-    revalidatePath('/settings/room-templates')
+    revalidateRoomTemplateSurfaces()
     return {}
   } catch (err) {
     console.error('[deleteRoomTemplate]', err)
-    return { error: 'Operation failed. Please try again.' }
-  }
-}
-
-/**
- * Sets which room templates drive the per-property bedroom/bathroom count.
- *
- * Uses the service-role client for the actual organizations write, not the
- * requireOrgMember()-scoped one used everywhere else in this file — the
- * organizations table's own "orgs_update" RLS policy is admin/owner only
- * (is_org_member(id, ['admin']), and 'owner' always passes regardless of
- * the array), narrower than assertCanManage's admin/manager/owner. A
- * manager passes the app-level role check here but would have the RLS
- * USING clause silently filter their UPDATE to 0 affected rows — no
- * Postgres error, just a no-op — leaving the mapping unset with nothing
- * telling them it didn't save. Every other action in this file writes to
- * room_templates, whose own RLS policy does allow manager, so this is the
- * only mutation in the file that needs this. The write stays safely scoped
- * because assertCanManage has already gated the caller and
- * membership.org_id (not a client-supplied value) is the only org this can
- * ever touch — the same reasoning CLAUDE.md allows for a Service Component
- * that validates first and scopes every query to the caller's own org.
- */
-export async function setBedroomBathroomMapping(
-  bedroomRoomTemplateId:  string | null,
-  bathroomRoomTemplateId: string | null
-): Promise<{ error?: string }> {
-  try {
-    const { user, supabase, membership } = await requireOrgMember()
-
-    const roleError = assertCanManage(membership.role)
-    if (roleError) return { error: roleError }
-
-    const idsToVerify = [bedroomRoomTemplateId, bathroomRoomTemplateId].filter(
-      (id): id is string => id !== null
-    )
-    if (idsToVerify.length > 0) {
-      const { data: owned } = await supabase
-        .from('room_templates')
-        .select('id')
-        .eq('org_id', membership.org_id)
-        .in('id', idsToVerify)
-      if ((owned?.length ?? 0) !== idsToVerify.length) {
-        return { error: 'One or more room templates not found.' }
-      }
-    }
-
-    const serviceSupabase = createServiceClient()
-    const { error } = await serviceSupabase
-      .from('organizations')
-      .update({
-        bedroom_room_template_id:  bedroomRoomTemplateId,
-        bathroom_room_template_id: bathroomRoomTemplateId,
-      })
-      .eq('id', membership.org_id)
-
-    if (error) {
-      console.error('[setBedroomBathroomMapping]', error)
-      return { error: 'Operation failed. Please try again.' }
-    }
-
-    await logAuditEvent({
-      orgId:      membership.org_id,
-      actorId:    user.id,
-      action:     'org.bedroom_bathroom_mapping_changed',
-      targetType: 'organization',
-      targetId:   membership.org_id,
-      metadata:   { bedroom_room_template_id: bedroomRoomTemplateId, bathroom_room_template_id: bathroomRoomTemplateId },
-    })
-
-    revalidatePath('/settings/room-templates')
-    revalidatePath('/setup/checklist-template')
-    revalidatePath('/properties')
-    return {}
-  } catch (err) {
-    console.error('[setBedroomBathroomMapping]', err)
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -288,30 +218,17 @@ export async function saveRoomTemplateItems(
       .maybeSingle()
     if (!room) return { error: 'Room template not found.', saved: 0 }
 
-    const { error: deleteError } = await supabase
-      .from('room_template_items')
-      .delete()
-      .eq('room_template_id', roomTemplateId)
-
-    if (deleteError) {
-      console.error('[saveRoomTemplateItems] delete failed', deleteError)
-      return { error: 'Operation failed. Please try again.', saved: 0 }
-    }
-
-    if (items.length > 0) {
-      const { error: insertError } = await supabase.from('room_template_items').insert(
-        items.map((item) => ({
-          room_template_id: roomTemplateId,
-          task:             item.task,
-          requires_photo:   item.requires_photo,
-          notes:            item.notes || null,
-          sort_order:       item.sort_order,
-        }))
-      )
-      if (insertError) {
-        console.error('[saveRoomTemplateItems] insert failed', insertError)
-        return { error: 'Failed to save tasks. Please try again.', saved: 0 }
-      }
+    // Atomic delete+insert via RPC — a plain client-side delete() then
+    // insert() left the template with zero items if the insert failed
+    // after the delete had already succeeded. See
+    // 20260722000000_atomic_template_item_replace.sql.
+    const { error: replaceError } = await supabase.rpc('replace_room_template_items', {
+      p_room_template_id: roomTemplateId,
+      p_items:             items,
+    })
+    if (replaceError) {
+      console.error('[saveRoomTemplateItems] replace failed', replaceError)
+      return { error: 'Failed to save tasks. Please try again.', saved: 0 }
     }
 
     await logAuditEvent({
@@ -323,7 +240,7 @@ export async function saveRoomTemplateItems(
       metadata:   { saved: items.length },
     })
 
-    revalidatePath('/settings/room-templates')
+    revalidateRoomTemplateSurfaces()
     revalidatePath('/properties')
     return { saved: items.length }
   } catch (err) {

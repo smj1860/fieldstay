@@ -4,6 +4,19 @@ import { Suspense } from 'react'
 import { LoginForm } from './login-form'
 
 export const metadata: Metadata = { title: 'Log In' }
+export const dynamic = 'force-dynamic'
+
+function LoginFormSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse" aria-hidden="true">
+      <div className="h-11 rounded-xl" style={{ background: 'var(--bg-raised)' }} />
+      <div className="h-px my-4" style={{ background: 'var(--border)' }} />
+      <div className="h-11 rounded-lg" style={{ background: 'var(--bg-raised)' }} />
+      <div className="h-11 rounded-lg" style={{ background: 'var(--bg-raised)' }} />
+      <div className="h-11 rounded-lg" style={{ background: 'var(--bg-raised)' }} />
+    </div>
+  )
+}
 
 export default function LoginPage() {
   return (
@@ -13,7 +26,7 @@ export default function LoginPage() {
         Sign in to your FieldStay account
       </p>
 
-      <Suspense>
+      <Suspense fallback={<LoginFormSkeleton />}>
         <LoginForm />
       </Suspense>
 

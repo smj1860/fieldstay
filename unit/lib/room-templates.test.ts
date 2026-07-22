@@ -88,13 +88,18 @@ describe('getRoomTemplatesForOrg', () => {
     expect(result[0]!.items[0]!.notes).toBe('')
   })
 
-  it('returns an empty array when the query errors, and logs the error', async () => {
+  it('throws (rather than silently returning empty) when the query errors, and logs the error', async () => {
+    // A query error and "no rooms yet" must not collapse into the same
+    // empty-array result — both call sites render an empty array as a
+    // normal empty state, which would hide a real query failure behind
+    // what looks like fine, empty data. The (dashboard) route group's
+    // error.tsx boundary is the intended place this surfaces instead.
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const supabase = makeSupabase({ data: null, error: { message: 'boom' } })
 
-    const result = await getRoomTemplatesForOrg(supabase as never, 'org_1')
-
-    expect(result).toEqual([])
+    await expect(getRoomTemplatesForOrg(supabase as never, 'org_1')).rejects.toThrow(
+      'Failed to load room templates'
+    )
     expect(errorSpy).toHaveBeenCalledWith('[getRoomTemplatesForOrg]', { message: 'boom' })
     errorSpy.mockRestore()
   })

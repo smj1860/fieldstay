@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from 'react'
 import { StandardTemplateModal } from '@/components/onboarding/StandardTemplateModal'
-import { CustomTemplateModal }   from '@/components/onboarding/CustomTemplateModal'
 import { completeMaintenanceStep } from './actions'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -11,8 +10,13 @@ interface Props {
   propertyId: string
 }
 
+// "Build Custom Schedule" (CustomTemplateModal) removed per the Templates
+// Hub project's "hybrid" decision — a custom, non-standard schedule is now
+// built via Templates → Maintenance → Create Template instead of inline
+// here. Standard Template stays, since applying the real seeded 36-item
+// schedule as-is is still the fast path for a new property.
 export function MaintenanceSetupStep({ propertyId }: Props) {
-  const [modal, setModal] = useState<'standard' | 'custom' | null>(null)
+  const [showStandardModal, setShowStandardModal] = useState(false)
   const [completing, startComplete] = useTransition()
 
   function advance() {
@@ -28,20 +32,14 @@ export function MaintenanceSetupStep({ propertyId }: Props) {
           Set Up Maintenance Schedule
         </h2>
         <p className="text-sm text-muted-themed text-center mt-2 max-w-xs">
-          Add recurring maintenance items for this property. You can always customize later.
+          Apply the standard FieldStay maintenance schedule now, or skip and
+          build a custom one later from Templates → Maintenance.
         </p>
 
-        <div className="flex flex-col sm:flex-row gap-3 mt-8 w-full">
+        <div className="mt-8 w-full">
           <Button
-            variant="secondary"
-            onClick={() => setModal('custom')}
-            className="flex-1 py-4 rounded-xl border text-sm font-semibold transition-colors"
-          >
-            Build Custom Schedule
-          </Button>
-          <Button
-            onClick={() => setModal('standard')}
-            className="flex-1 py-4 rounded-xl text-sm font-semibold transition-colors"
+            onClick={() => setShowStandardModal(true)}
+            className="w-full py-4 rounded-xl text-sm font-semibold transition-colors"
           >
             Use Standard Template
           </Button>
@@ -57,19 +55,11 @@ export function MaintenanceSetupStep({ propertyId }: Props) {
         </button>
       </div>
 
-      {modal === 'standard' && (
+      {showStandardModal && (
         <StandardTemplateModal
           propertyId={propertyId}
           onComplete={advance}
-          onClose={() => setModal(null)}
-        />
-      )}
-
-      {modal === 'custom' && (
-        <CustomTemplateModal
-          propertyId={propertyId}
-          onComplete={advance}
-          onClose={() => setModal(null)}
+          onClose={() => setShowStandardModal(false)}
         />
       )}
     </>

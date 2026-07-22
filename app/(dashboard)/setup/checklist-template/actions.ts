@@ -3,54 +3,6 @@
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { inngest } from '@/lib/inngest/client'
-import { logAuditEvent } from '@/lib/audit'
-
-export interface ChecklistItemInput {
-  section:    string
-  task:       string
-  sort_order: number
-  source:     'catalog' | 'custom' | 'upload'
-}
-
-export async function saveMasterChecklistItems(
-  items: ChecklistItemInput[]
-): Promise<{ error?: string; saved: number }> {
-  try {
-    const { user, supabase, membership } = await requireOrgMember()
-
-    // Atomic replace via RPC — avoids a non-transactional delete+insert gap
-    const { error } = await supabase.rpc('replace_master_checklist_items', {
-      p_org_id: membership.org_id,
-      p_items:  items.map((item) => ({
-        section:    item.section,
-        task:       item.task,
-        sort_order: item.sort_order,
-        source:     item.source,
-      })),
-    })
-
-    if (error) {
-      console.error('[saveMasterChecklistItems]', error)
-      return { error: 'Operation failed. Please try again.', saved: 0 }
-    }
-
-    await logAuditEvent({
-      orgId:      membership.org_id,
-      actorId:    user.id,
-      action:     'checklist.master_template.updated',
-      targetType: 'organization',
-      targetId:   membership.org_id,
-      metadata:   { saved: items.length },
-    })
-
-    revalidatePath('/setup')
-    revalidatePath('/inventory')
-    return { saved: items.length }
-  } catch (err) {
-    console.error('[saveMasterChecklistItems]', err)
-    return { error: 'Operation failed. Please try again.', saved: 0 }
-  }
-}
 
 // MEDIUM-7: this used to run ~20 sequential Supabase calls per property
 // in-request (delete-then-insert of sections/items + audit log), which for

@@ -12,71 +12,11 @@ const nextConfig: NextConfig = {
     ]
   },
 
-  async headers() {
-    // Turbopack's dev-mode hydration relies on inline <script> tags and
-    // eval()-based module wrapping — a strict script-src blocks React from
-    // ever mounting under `next dev` (self.__next_r invariant, page never
-    // hydrates). Production builds don't need either, so this only relaxes
-    // the dev server, never a deployed build.
-    const isDev = process.env.NODE_ENV !== 'production'
-
-    return [
-      {
-        // Apply these headers to all routes in the application
-        source: '/(.*)',
-        headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: [
-              // Locked-down default — no blanket https: source
-              "default-src 'self'",
-
-              // Scripts: no 'unsafe-inline'/'unsafe-eval' in production —
-              // inline theme script is a static file; wasm-unsafe-eval
-              // required by Supabase JS client. Dev mode needs both relaxed
-              // for Turbopack's hydration script and HMR to work at all.
-              isDev
-                ? "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'"
-                : "script-src 'self' 'wasm-unsafe-eval'",
-
-              // Styles: 'unsafe-inline' required for the codebase's established
-              // style={{ ... }} convention with CSS variables. Inline styles
-              // are CSS, not JS — no code-execution XSS risk from this directive.
-              "style-src 'self' 'unsafe-inline'",
-
-              // Images: data: for base64, blob: for canvas/crop/file preview
-              "img-src 'self' data: blob: https:",
-
-              // Fonts: self + Google Fonts CDN if used
-              "font-src 'self' data: https://fonts.gstatic.com",
-
-              // Frames: Stripe hosted elements only
-              "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
-
-              // Workers: blob: required for Supabase Realtime and some WASM usage
-              "worker-src 'self' blob:",
-
-              // API + WebSocket connections — preserved from previous config.
-              // Sentry ingest host added for client-side error/trace reporting
-              // (instrumentation-client.ts) — without this the browser SDK's
-              // own requests get silently blocked by this same CSP.
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511737962364928.ingest.us.sentry.io http://localhost:* ws://localhost:* wss://localhost:*",
-
-              // Object/media: locked down entirely
-              "object-src 'none'",
-              "media-src 'self'",
-
-              // Base URI: prevent base tag injection attacks
-              "base-uri 'self'",
-
-              // Form submissions: self only
-              "form-action 'self'",
-            ].join('; ')
-          }
-        ]
-      }
-    ]
-  }
+  // Content-Security-Policy is set in proxy.ts, not here — it needs a fresh
+  // nonce per request for script-src, which a static next.config.ts header
+  // can't provide. Do not add a CSP header here: a second, nonce-less CSP
+  // would make the browser enforce the intersection of both, silently
+  // dropping the nonce and re-blocking Next.js's inline hydration scripts.
 }
 
 export default withSentryConfig(nextConfig, {
