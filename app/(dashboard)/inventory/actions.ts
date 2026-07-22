@@ -231,7 +231,15 @@ export async function addTemplateItem(
   item: { name: string; category: string; unit: string; par_level: number; preferred_brand?: string | null }
 ): Promise<{ item?: { id: string; name: string; category: string; unit: string; par_level: number; notes: null; preferred_brand: string | null }; error?: string }> {
   try {
-    const { supabase } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgMember()
+
+    const { data: template } = await supabase
+      .from('inventory_templates')
+      .select('id')
+      .eq('id', templateId)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+    if (!template) return { error: 'Template not found.' }
 
     const { data, error } = await supabase
       .from('inventory_template_items')
@@ -334,6 +342,14 @@ export async function applyTemplateToProperties(
   try {
     const { supabase, membership } = await requireOrgMember()
 
+    const { data: template } = await supabase
+      .from('inventory_templates')
+      .select('id')
+      .eq('id', templateId)
+      .eq('org_id', membership.org_id)
+      .maybeSingle()
+    if (!template) return { error: 'Template not found.', applied: 0 }
+
     const { data: items, error: itemsErr } = await supabase
       .from('inventory_template_items')
       .select('*')
@@ -347,12 +363,28 @@ export async function applyTemplateToProperties(
       return { error: 'No items in template', applied: 0 }
     }
 
+    // inventory_items_insert's RLS check only verifies org_id matches the
+    // caller's org — it doesn't verify property_id itself belongs to that
+    // org (there's no cross-table check available to it). Without this,
+    // a propertyId for a different org would still pass RLS and get rows
+    // inserted with a mismatched org_id/property_id pair. Verify explicitly
+    // and drop anything that doesn't check out, same pattern as
+    // clone_inventory_from_property's target-property check.
+    const { data: ownedProperties } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .in('id', propertyIds)
+    const verifiedPropertyIds = new Set((ownedProperties ?? []).map((p) => p.id))
+    const targetPropertyIds = propertyIds.filter((id) => verifiedPropertyIds.has(id))
+    if (targetPropertyIds.length === 0) return { error: 'No valid properties selected', applied: 0 }
+
     // Fetch all existing items for ALL target properties in a single query, then group by property
     const { data: allExisting } = await supabase
       .from('inventory_items')
       .select('property_id, catalog_item_id, name')
       .eq('org_id', membership.org_id)
-      .in('property_id', propertyIds)
+      .in('property_id', targetPropertyIds)
 
     const existingByProperty: Record<string, { catalogIds: Set<string>; names: Set<string> }> = {}
     for (const row of allExisting ?? []) {
@@ -379,7 +411,7 @@ export async function applyTemplateToProperties(
       preferred_brand:         string | null
     }> = []
 
-    for (const propertyId of propertyIds) {
+    for (const propertyId of targetPropertyIds) {
       const existing = existingByProperty[propertyId] ?? { catalogIds: new Set<string>(), names: new Set<string>() }
 
       const toInsert = items
@@ -408,7 +440,12 @@ export async function applyTemplateToProperties(
     }
 
     if (allToInsert.length > 0) {
-      await supabase.from('inventory_items').insert(allToInsert)
+      const { error: insertErr } = await supabase.from('inventory_items').insert(allToInsert)
+      if (insertErr) {
+        console.error('[applyTemplateToProperties]', insertErr)
+        reportError(insertErr, { site: 'serverAction.inventory.applyTemplateToProperties', orgId: membership.org_id })
+        return { error: 'Operation failed. Please try again.', applied: 0 }
+      }
     }
 
     revalidatePath('/inventory')

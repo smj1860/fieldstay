@@ -235,7 +235,7 @@ function PropertySchedulesEditor({
                     type="button"
                     onClick={() => removeRow(row)}
                     disabled={saving && deletingId === row.id}
-                    className="text-muted-themed hover:text-red-500 transition-colors p-1 flex-shrink-0"
+                    className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1 flex-shrink-0"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

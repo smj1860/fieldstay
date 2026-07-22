@@ -5,6 +5,7 @@ import { ChevronDown, Plus, Trash2, AlertTriangle, CheckCircle2, Clock, Send } f
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
@@ -245,11 +246,10 @@ export function CreateTemplateBuilder({
                       <div className="space-y-1">
                         {catalogGroups[key].map((ci) => (
                           <label key={ci.id} className="flex items-center gap-2.5 text-sm bg-card-themed rounded-lg px-3 py-1.5 cursor-pointer border border-themed">
-                            <input
-                              type="checkbox"
+                            <Checkbox
                               checked={isCatalogSelected(ci.id)}
                               onChange={() => toggleCatalogItem(ci)}
-                              className="w-4 h-4 rounded flex-shrink-0"
+                              className="flex-shrink-0"
                             />
                             <span className="text-secondary-themed flex-1 truncate">{ci.name}</span>
                             {ci.is_optional_flag && (
@@ -315,7 +315,7 @@ export function CreateTemplateBuilder({
                   </div>
                   {items.length > 1 && (
                     <Button variant="ghost" type="button" onClick={() => removeItem(i)}
-                            className="p-1.5 text-red-500 hover:text-red-600 mt-5 flex-shrink-0">
+                            className="p-1.5 text-[var(--accent-red)] hover:opacity-80 mt-5 flex-shrink-0">
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   )}
@@ -395,11 +395,9 @@ export function CreateTemplateBuilder({
                 <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
                   {properties.map((p) => (
                     <label key={p.id} className="flex items-center gap-2.5 text-sm bg-canvas-themed rounded-lg px-3 py-2 cursor-pointer">
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selectedPropertyIds.includes(p.id)}
                         onChange={() => toggleProperty(p.id)}
-                        className="w-4 h-4 rounded"
                       />
                       <span className="text-secondary-themed">{p.name}</span>
                     </label>

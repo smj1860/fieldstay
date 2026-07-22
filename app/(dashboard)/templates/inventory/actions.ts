@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { requireOrgMember, requireOrgRole } from '@/lib/auth'
+import { requireOrgRole } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
 import type { InventoryCategory } from '@/types/database'
@@ -376,7 +376,7 @@ export async function upsertParLevelItems(
   items: ParLevelItemInput[]
 ): Promise<{ error?: string; items?: ParLevelItemRow[] }> {
   try {
-    const { supabase, membership } = await requireOrgMember()
+    const { supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     const existingItems = items.filter((item) => item.id)
     const newItems      = items.filter((item) => !item.id)
@@ -456,7 +456,7 @@ export async function upsertParLevelItems(
 
 export async function deleteParLevelItem(itemId: string): Promise<{ error?: string }> {
   try {
-    const { user, supabase, membership } = await requireOrgMember()
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
 
     const { data, error } = await supabase
       .from('inventory_items')
@@ -502,50 +502,29 @@ export async function cloneInventoryFromProperty(
   targetPropertyId: string,
 ): Promise<{ added: number; skipped: number; error?: string }> {
   try {
-    const { supabase, membership, user } = await requireOrgMember()
+    const { supabase, membership, user } = await requireOrgRole(['admin', 'manager'])
 
-    const { data: sourceItems } = await supabase
-      .from('inventory_items')
-      .select('name, category, unit, par_level, preferred_brand, catalog_item_id, low_stock_threshold_pct')
-      .eq('property_id', sourcePropertyId)
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
+    // Ownership of targetPropertyId, the dup-check race, and the actual
+    // insert all happen inside one RPC — see
+    // 20260722000000_atomic_template_item_replace.sql for why a plain
+    // client-side check-then-insert here was both an IDOR gap (no org
+    // check on the target property) and a TOCTOU race.
+    const { data: cloneResult, error } = await supabase.rpc('clone_inventory_from_property', {
+      p_org_id:             membership.org_id,
+      p_source_property_id: sourcePropertyId,
+      p_target_property_id: targetPropertyId,
+    })
 
-    if (!sourceItems?.length) return { added: 0, skipped: 0, error: 'Source property has no inventory items' }
-
-    const { data: existing } = await supabase
-      .from('inventory_items')
-      .select('name')
-      .eq('property_id', targetPropertyId)
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-
-    const existingNames = new Set((existing ?? []).map(i => i.name.toLowerCase()))
-
-    const toInsert = sourceItems
-      .filter(item => !existingNames.has(item.name.toLowerCase()))
-      .map(item => ({
-        property_id:             targetPropertyId,
-        org_id:                  membership.org_id,
-        catalog_item_id:         item.catalog_item_id ?? null,
-        name:                    item.name,
-        category:                item.category as never,
-        unit:                    item.unit,
-        par_level:               item.par_level,
-        current_quantity:        0,
-        low_stock_threshold_pct: item.low_stock_threshold_pct ?? 20,
-        preferred_brand:         item.preferred_brand ?? null,
-        is_active:               true,
-      }))
-
-    const skipped = sourceItems.length - toInsert.length
-    if (toInsert.length === 0) return { added: 0, skipped }
-
-    const { error } = await supabase.from('inventory_items').insert(toInsert)
     if (error) {
       console.error('[cloneInventoryFromProperty]', error)
       reportError(error, { site: 'serverAction.templatesInventory.cloneInventoryFromProperty', orgId: membership.org_id })
-      return { added: 0, skipped, error: 'Operation failed. Please try again.' }
+      return { added: 0, skipped: 0, error: 'Operation failed. Please try again.' }
+    }
+
+    const rows = cloneResult as { added: number; skipped: number; source_count: number }[] | null
+    const data = rows?.[0]
+    if (!data || data.source_count === 0) {
+      return { added: 0, skipped: 0, error: 'Source property has no inventory items' }
     }
 
     await logAuditEvent({
@@ -554,11 +533,11 @@ export async function cloneInventoryFromProperty(
       action:     'property.inventory.cloned',
       targetType: 'property',
       targetId:   targetPropertyId,
-      metadata:   { sourcePropertyId, added: toInsert.length, skipped },
+      metadata:   { sourcePropertyId, added: data.added, skipped: data.skipped },
     })
 
     revalidatePath('/templates/inventory/par-levels')
-    return { added: toInsert.length, skipped }
+    return { added: data.added, skipped: data.skipped }
   } catch (err) {
     console.error('[cloneInventoryFromProperty]', err)
     reportError(err, { site: 'serverAction.templatesInventory.cloneInventoryFromProperty' })

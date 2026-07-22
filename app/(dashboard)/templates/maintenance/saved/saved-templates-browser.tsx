@@ -5,6 +5,7 @@ import { Plus, Trash2, AlertTriangle, CheckCircle2, Lock } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
+import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
@@ -262,7 +263,7 @@ function TemplateDetail({
                 type="button"
                 onClick={() => handleRemoveItem(item.id)}
                 disabled={saving}
-                className="text-muted-themed hover:text-red-500 transition-colors p-1"
+                className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -329,11 +330,9 @@ function TemplateDetail({
             <div className="max-h-56 overflow-y-auto border border-themed rounded-lg divide-y divide-themed">
               {allProperties.map((property) => (
                 <label key={property.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-raised-themed transition-colors">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={applyPropertyIds.includes(property.id)}
                     onChange={() => toggleApplyProperty(property.id)}
-                    className="w-4 h-4 rounded"
                   />
                   <span className="text-sm text-primary-themed">{property.name}</span>
                 </label>

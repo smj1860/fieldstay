@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/Checkbox'
 import { Dialog } from '@/components/ui/Dialog'
 import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
+import { Tabs } from '@/components/ui/Tabs'
 import { createInventoryTemplate, createInventoryTemplateFromCSV } from '../actions'
 import { applyTemplateToProperties } from '@/app/(dashboard)/inventory/actions'
 import type { InventoryCategory } from '@/types/database'
@@ -237,26 +238,14 @@ export function CreateTemplateBuilder({
 
   return (
     <div className="space-y-4">
-      <div role="tablist" className="flex items-center gap-1 border-b border-themed">
-        {(['select', 'csv'] as const).map((m) => (
-          <button
-            key={m}
-            type="button"
-            role="tab"
-            aria-selected={mode === m}
-            onClick={() => setMode(m)}
-            className={cn(
-              'px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-              'focus:outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--accent-gold)]'
-            )}
-            style={mode === m
-              ? { borderColor: 'var(--accent-gold)', color: 'var(--accent-gold)' }
-              : { borderColor: 'transparent', color: 'var(--text-muted)' }}
-          >
-            {m === 'select' ? 'From Master List' : 'From CSV'}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { id: 'select', label: 'From Master List' },
+          { id: 'csv',    label: 'From CSV' },
+        ]}
+        active={mode}
+        onChange={setMode}
+      />
 
       {mode === 'select' ? (
         <>

@@ -312,7 +312,7 @@ function PropertyParLevelEditor({
                     aria-label={`Preferred brand for ${row.name}`}
                     className="w-24 text-xs border border-themed rounded px-1.5 py-0.5 bg-transparent text-secondary-themed placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-gold)]"
                   />
-                  <button type="button" onClick={() => removeRow(row)} disabled={saving} className="text-muted-themed hover:text-red-500 transition-colors p-1">
+                  <button type="button" onClick={() => removeRow(row)} disabled={saving} className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1">
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </>

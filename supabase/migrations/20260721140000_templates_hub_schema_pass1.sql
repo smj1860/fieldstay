@@ -48,6 +48,9 @@ ALTER TABLE public.org_inventory_catalog ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.org_inventory_catalog TO authenticated;
 
+DROP POLICY IF EXISTS "org_inventory_catalog_select" ON public.org_inventory_catalog;
+DROP POLICY IF EXISTS "org_inventory_catalog_manage" ON public.org_inventory_catalog;
+
 CREATE POLICY "org_inventory_catalog_select"
   ON public.org_inventory_catalog FOR SELECT
   USING (org_id IN (SELECT get_user_org_ids()));
@@ -89,6 +92,9 @@ ALTER TABLE public.org_maintenance_catalog_items ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.org_maintenance_catalog_items TO authenticated;
 
+DROP POLICY IF EXISTS "org_maintenance_catalog_items_select" ON public.org_maintenance_catalog_items;
+DROP POLICY IF EXISTS "org_maintenance_catalog_items_manage" ON public.org_maintenance_catalog_items;
+
 CREATE POLICY "org_maintenance_catalog_items_select"
   ON public.org_maintenance_catalog_items FOR SELECT
   USING (org_id IN (SELECT get_user_org_ids()));
@@ -97,6 +103,16 @@ CREATE POLICY "org_maintenance_catalog_items_manage"
   ON public.org_maintenance_catalog_items FOR ALL
   USING      (is_org_member(org_id, ARRAY['admin'::member_role, 'manager'::member_role, 'owner'::member_role]))
   WITH CHECK (is_org_member(org_id, ARRAY['admin'::member_role, 'manager'::member_role, 'owner'::member_role]));
+
+-- Guards a future bulk-seed of an org's maintenance catalog (mirrors the
+-- identical race this exact pattern was fixed for on org_inventory_catalog
+-- in Pass 3 — see 20260721160000_inventory_source_template_id.sql) against
+-- duplicating the whole catalog if seeding is ever invoked twice
+-- concurrently for the same org. No seeding function writes to this table
+-- yet, but the constraint costs nothing to add now and any future seed
+-- path needs it as the real (not just application-level) guard.
+CREATE UNIQUE INDEX IF NOT EXISTS org_maintenance_catalog_items_org_name_unique
+  ON public.org_maintenance_catalog_items (org_id, name);
 
 
 -- ── 3. inventory_templates: allow more than one per org ────────────────────

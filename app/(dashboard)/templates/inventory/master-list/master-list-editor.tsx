@@ -167,7 +167,7 @@ export function MasterListEditor({
                       type="button"
                       onClick={() => handleDelete(item.id)}
                       disabled={saving}
-                      className="text-muted-themed hover:text-red-500 transition-colors p-1"
+                      className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

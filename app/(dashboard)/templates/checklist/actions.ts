@@ -218,30 +218,17 @@ export async function saveRoomTemplateItems(
       .maybeSingle()
     if (!room) return { error: 'Room template not found.', saved: 0 }
 
-    const { error: deleteError } = await supabase
-      .from('room_template_items')
-      .delete()
-      .eq('room_template_id', roomTemplateId)
-
-    if (deleteError) {
-      console.error('[saveRoomTemplateItems] delete failed', deleteError)
-      return { error: 'Operation failed. Please try again.', saved: 0 }
-    }
-
-    if (items.length > 0) {
-      const { error: insertError } = await supabase.from('room_template_items').insert(
-        items.map((item) => ({
-          room_template_id: roomTemplateId,
-          task:             item.task,
-          requires_photo:   item.requires_photo,
-          notes:            item.notes || null,
-          sort_order:       item.sort_order,
-        }))
-      )
-      if (insertError) {
-        console.error('[saveRoomTemplateItems] insert failed', insertError)
-        return { error: 'Failed to save tasks. Please try again.', saved: 0 }
-      }
+    // Atomic delete+insert via RPC — a plain client-side delete() then
+    // insert() left the template with zero items if the insert failed
+    // after the delete had already succeeded. See
+    // 20260722000000_atomic_template_item_replace.sql.
+    const { error: replaceError } = await supabase.rpc('replace_room_template_items', {
+      p_room_template_id: roomTemplateId,
+      p_items:             items,
+    })
+    if (replaceError) {
+      console.error('[saveRoomTemplateItems] replace failed', replaceError)
+      return { error: 'Failed to save tasks. Please try again.', saved: 0 }
     }
 
     await logAuditEvent({

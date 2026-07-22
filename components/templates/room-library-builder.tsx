@@ -31,12 +31,19 @@ interface RoomState {
 }
 
 function makeId() {
-  if (typeof window === 'undefined') return 'ssr'
-  return crypto.randomUUID()
+  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID()
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-function toItemState(item: { task: string; requires_photo: boolean; notes: string }): ItemState {
-  return { tempId: makeId(), task: item.task, requires_photo: item.requires_photo, notes: item.notes }
+// Reuses the item's own stable server id as the tempId rather than
+// generating a fresh one — this runs inside useState's lazy initializer,
+// which executes once during SSR and again during client hydration; a
+// freshly-generated id (random, or even the previous 'ssr' placeholder
+// literal) would differ — or collide — between those two passes and either
+// produce duplicate React keys or a hydration mismatch. The server id is
+// identical both times since it comes from the initialRooms prop.
+function toItemState(item: { id: string; task: string; requires_photo: boolean; notes: string }): ItemState {
+  return { tempId: item.id, task: item.task, requires_photo: item.requires_photo, notes: item.notes }
 }
 
 // Pure list-transform helpers, kept at module scope rather than nested
@@ -407,7 +414,7 @@ function RoomCard({
                 >
                   <Camera className="w-4 h-4" />
                 </button>
-                <button type="button" onClick={() => onRemoveItem(item.tempId)} className="text-muted-themed hover:text-red-500 transition-colors p-1">
+                <button type="button" onClick={() => onRemoveItem(item.tempId)} className="text-muted-themed hover:text-[var(--accent-red)] transition-colors p-1">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -447,7 +454,7 @@ function RoomCard({
                     variant="ghost"
                     onClick={() => setConfirmDelete(true)}
                     disabled={saving}
-                    className="text-sm ml-auto text-muted-themed hover:text-red-500"
+                    className="text-sm ml-auto text-muted-themed hover:text-[var(--accent-red)]"
                   >
                     Delete Room Template
                   </Button>

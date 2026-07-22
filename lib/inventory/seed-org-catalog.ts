@@ -17,11 +17,15 @@ import { createServiceClient } from '@/lib/supabase/server'
 export async function seedOrgInventoryCatalogIfNeeded(orgId: string): Promise<void> {
   const supabase = createServiceClient()
 
-  const { count } = await supabase
+  const { count, error: countError } = await supabase
     .from('org_inventory_catalog')
     .select('id', { count: 'exact', head: true })
     .eq('org_id', orgId)
 
+  if (countError) {
+    console.error('[seedOrgInventoryCatalogIfNeeded] failed to check existing catalog:', countError)
+    return
+  }
   if ((count ?? 0) > 0) return
 
   const { data: platformItems, error } = await supabase
