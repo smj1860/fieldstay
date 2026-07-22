@@ -26,7 +26,7 @@ export type TurnoverStatus      = 'pending_assignment' | 'assigned' | 'in_progre
 export type PriorityLevel       = 'low' | 'medium' | 'high' | 'urgent'
 export type ContactPref         = 'email' | 'sms' | 'both'
 export type ChecklistStatus     = 'not_started' | 'in_progress' | 'completed'
-export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom_linens' | 'outdoor' | 'maintenance_safety' | 'guest_experience' | 'technology' | 'other'
+export type InventoryCategory   = 'paper_goods' | 'cleaning' | 'kitchen' | 'bath' | 'laundry' | 'bedroom' | 'bedroom_linens' | 'outdoor' | 'maintenance_safety' | 'guest_experience' | 'technology' | 'other'
 export type PoStatus            = 'draft' | 'sent' | 'acknowledged' | 'ordered' | 'received' | 'cancelled'
 export type VendorSpecialty     = 'plumbing' | 'electrical' | 'hvac' | 'landscaping' | 'cleaning' | 'pest_control' | 'pool' | 'roofing' | 'general' | 'other'
 export type WoStatus            = 'pending' | 'quote_requested' | 'assigned' | 'in_progress' | 'completed' | 'cancelled'
@@ -401,8 +401,41 @@ export interface RoomTemplate {
   org_id:       string
   name:         string
   auto_include: boolean
+  is_system:    boolean
   created_at:   string
   updated_at:   string
+}
+
+// Org-scoped editable copy of inventory_catalog, seeded on first touch
+// (application code, Pass 2). See 20260721140000_templates_hub_schema_pass1.sql.
+export interface OrgInventoryCatalogItem {
+  id:                        string
+  org_id:                    string
+  platform_catalog_item_id:  string | null
+  name:                      string
+  category:                  InventoryCategory
+  default_unit:              string
+  description:               string | null
+  is_active:                 boolean
+  created_at:                string
+  updated_at:                string
+}
+
+// Org-scoped editable copy of maintenance_catalog_items, seeded on first
+// touch (application code, Pass 4). See 20260721140000_templates_hub_schema_pass1.sql.
+export interface OrgMaintenanceCatalogItem {
+  id:                        string
+  org_id:                    string
+  platform_catalog_item_id:  string | null
+  name:                      string
+  category:                  string
+  suggested_recurrence:      string | null
+  asset_category:            string | null
+  description:               string | null
+  sort_order:                number
+  is_active:                 boolean
+  created_at:                string
+  updated_at:                string
 }
 
 export interface RoomTemplateItem {
@@ -561,6 +594,7 @@ export interface InventoryItem {
   property_id:             string
   org_id:                  string
   catalog_item_id:         string | null
+  source_template_id:      string | null
   name:                    string
   category:                InventoryCategory
   unit:                    string
@@ -1123,35 +1157,6 @@ export interface InventoryTemplateItem {
   created_at:      string
 }
 
-// ── Portfolio-level master checklist item ───────────────────────────────────
-export interface OrgMasterChecklistItem {
-  id:         string
-  org_id:     string
-  section:    string
-  task:       string
-  sort_order: number
-  source:     'catalog' | 'custom' | 'upload'
-  created_at: string
-  updated_at: string
-}
-
-// ── Portfolio-level master maintenance schedule ──────────────────────────────
-export interface OrgMasterMaintenanceSchedule {
-  id:             string
-  org_id:         string
-  title:          string
-  description:    string | null
-  frequency:      'weekly' | 'monthly' | 'quarterly' | 'annually'
-  month_day:      number | null
-  week_day:       number | null
-  estimated_cost: number | null
-  specialty:      string | null
-  notes:          string | null
-  is_active:      boolean
-  created_at:     string
-  updated_at:     string
-}
-
 export interface PushSubscription {
   id:             string
   crew_member_id: string
@@ -1551,6 +1556,8 @@ export interface Database {
       checklist_template_items:    { Row: ChecklistTemplateItem;    Insert: Partial<ChecklistTemplateItem>;    Update: Partial<ChecklistTemplateItem>;    Relationships: [] }
       room_templates:              { Row: RoomTemplate;             Insert: Partial<RoomTemplate>;             Update: Partial<RoomTemplate>;             Relationships: [] }
       room_template_items:         { Row: RoomTemplateItem;         Insert: Partial<RoomTemplateItem>;         Update: Partial<RoomTemplateItem>;         Relationships: [] }
+      org_inventory_catalog:       { Row: OrgInventoryCatalogItem;  Insert: Partial<OrgInventoryCatalogItem>;  Update: Partial<OrgInventoryCatalogItem>;  Relationships: [] }
+      org_maintenance_catalog_items: { Row: OrgMaintenanceCatalogItem; Insert: Partial<OrgMaintenanceCatalogItem>; Update: Partial<OrgMaintenanceCatalogItem>; Relationships: [] }
       platform_staff:                      { Row: PlatformStaff;                 Insert: Partial<PlatformStaff>;                 Update: Partial<PlatformStaff>;                 Relationships: [] }
       platform_seed_room_templates:       { Row: PlatformSeedRoomTemplate;      Insert: Partial<PlatformSeedRoomTemplate>;      Update: Partial<PlatformSeedRoomTemplate>;      Relationships: [] }
       platform_seed_room_template_items:  { Row: PlatformSeedRoomTemplateItem;  Insert: Partial<PlatformSeedRoomTemplateItem>;  Update: Partial<PlatformSeedRoomTemplateItem>;  Relationships: [] }
@@ -1582,8 +1589,6 @@ export interface Database {
       communication_logs:          { Row: CommunicationLog;              Insert: Partial<CommunicationLog>;              Update: Partial<CommunicationLog>;              Relationships: [] }
       messages:                    { Row: Message;                       Insert: Partial<Message>;                       Update: Partial<Message>;                       Relationships: [] }
       push_subscriptions:          { Row: PushSubscription;              Insert: Partial<PushSubscription>;              Update: Partial<PushSubscription>;              Relationships: [] }
-      org_master_checklist_items:      { Row: OrgMasterChecklistItem;        Insert: Partial<OrgMasterChecklistItem>;        Update: Partial<OrgMasterChecklistItem>;        Relationships: [] }
-      org_master_maintenance_schedules:{ Row: OrgMasterMaintenanceSchedule;  Insert: Partial<OrgMasterMaintenanceSchedule>;  Update: Partial<OrgMasterMaintenanceSchedule>;  Relationships: [] }
 
       // ── Asset Health ───────────────────────────────────────
       property_assets:             { Row: PropertyAsset;            Insert: Partial<PropertyAsset>;            Update: Partial<PropertyAsset>;            Relationships: [] }

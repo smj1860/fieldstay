@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   LayoutDashboard, Building2, CalendarCheck, Package, Wrench, Mail,
   BarChart3, Settings, Users2, Briefcase, MessageSquare, ShieldCheck,
-  TrendingUp, LifeBuoy, BookOpen, Inbox, Star,
+  TrendingUp, LifeBuoy, BookOpen, Inbox, Star, LayoutTemplate,
 } from 'lucide-react'
 import type { MemberRole } from '@/types/database'
 
@@ -42,6 +42,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { id: 'reviews',          href: '/reviews',          label: 'Reviews',          icon: Star,         roles: ['admin', 'manager'],           tier: 'management', category: 'Guest & Comms', condition: 'repuguard' },
   { id: 'assets',           href: '/assets',           label: 'Assets',           icon: ShieldCheck, roles: ['admin', 'manager'],           tier: 'management', category: 'Portfolio' },
   { id: 'capital-planning', href: '/capital-planning', label: 'Capital Planning', icon: TrendingUp,  roles: ['admin', 'manager'],           tier: 'management', category: 'Portfolio', keywords: ['capex', 'budget'] },
+  { id: 'templates',        href: '/templates',        label: 'Templates',       icon: LayoutTemplate, roles: ['admin', 'manager'],         tier: 'management', category: 'Portfolio' },
   { id: 'crew-manage',      href: '/crew-manage',      label: 'Crew',             icon: Users2,      roles: ['admin', 'manager'],           tier: 'management', category: 'Team & Vendors' },
   { id: 'messages',         href: '/messages',         label: 'Messages',         icon: MessageSquare, roles: ['admin', 'manager'],         tier: 'management', category: 'Guest & Comms' },
   { id: 'vendors',          href: '/vendors',          label: 'Vendors',          icon: Briefcase,   roles: ['admin', 'manager'],           tier: 'management', category: 'Team & Vendors' },

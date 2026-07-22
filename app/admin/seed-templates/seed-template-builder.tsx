@@ -38,7 +38,7 @@ function toItemState(item: { task: string; requires_photo: boolean; notes: strin
 }
 
 // Pure list-transform helpers kept at module scope — mirrors
-// settings/room-templates/room-library-builder.tsx's own reasoning for
+// components/templates/room-library-builder.tsx's own reasoning for
 // keeping cognitive complexity down by not nesting these inside handlers.
 function renameTemplateInList(templates: TemplateState[], id: string, name: string): TemplateState[] {
   return templates.map((t) => (t.id === id ? { ...t, name } : t))

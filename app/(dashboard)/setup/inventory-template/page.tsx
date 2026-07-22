@@ -1,35 +1,8 @@
-import { requireOrgMember } from '@/lib/auth'
-import { TemplateManager } from '../../inventory/template-manager'
+import Link from 'next/link'
 import { markStepComplete } from '../actions'
 import { Button } from '@/components/ui/Button'
 
 export default async function OnboardingInventoryTemplatePage() {
-  const { supabase, membership } = await requireOrgMember()
-
-  const [
-    { data: template },
-    { data: properties },
-    { data: catalogItems },
-  ] = await Promise.all([
-    supabase
-      .from('inventory_templates')
-      .select('id, name, inventory_template_items(*)')
-      .eq('org_id', membership.org_id)
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from('properties')
-      .select('id, name')
-      .eq('org_id', membership.org_id)
-      .eq('is_active', true)
-      .order('name'),
-    supabase
-      .from('inventory_catalog')
-      .select('id, name, category, default_unit')
-      .eq('is_active', true)
-      .order('name'),
-  ])
-
   async function continueAction() {
     'use server'
     await markStepComplete('inventory_template', '/setup/checklist-template')
@@ -39,18 +12,25 @@ export default async function OnboardingInventoryTemplatePage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-          Master Inventory Template
+          Inventory
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Build your master supply list with par levels. Apply it to any property in one click.
+          Unlike the turnover checklist, supply lists aren&apos;t built for you
+          automatically — there&apos;s less to set up here right now.
         </p>
+        <div className="mt-4 rounded-xl border p-4" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            Your org starts with an editable copy of the FieldStay starter
+            supply list, ready to customize under{' '}
+            <Link href="/templates/inventory" className="underline font-medium" style={{ color: 'var(--accent-gold)' }}>
+              Templates → Inventory
+            </Link>
+            . Build a template from it whenever convenient, then set par
+            levels per property — no auto-apply, so nothing changes on a
+            property until you assign one.
+          </p>
+        </div>
       </div>
-
-      <TemplateManager
-        template={template as never}
-        properties={properties ?? []}
-        catalogItems={catalogItems ?? []}
-      />
 
       <div className="pt-4 border-t border-themed">
         <form action={continueAction}>

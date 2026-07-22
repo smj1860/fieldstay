@@ -55,8 +55,11 @@ export default async function ChecklistPage({ params }: Props) {
     <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Turnover Checklist</h2>
       <p className="text-sm text-accent-500 mb-6">
-        Build the checklist your crew follows for every turnover. Organize by room or area.
-        Flag items that require a photo for accountability.
+        This property&apos;s checklist was already built automatically from its
+        bedroom/bathroom count and the standard rooms (Whole Home, Kitchen,
+        Living Room). Use this screen to add a room this property has that
+        wasn&apos;t auto-included, or remove one it doesn&apos;t actually have —
+        e.g. no Living Room.
       </p>
       <ChecklistBuilder
         propertyId={property.id}

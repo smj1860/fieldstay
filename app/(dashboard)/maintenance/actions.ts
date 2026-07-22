@@ -1366,6 +1366,7 @@ export async function createMaintenanceSchedule(
     }
 
     revalidatePath('/maintenance')
+    revalidatePath('/templates/maintenance/schedules')
     return { success: true }
   } catch (err) {
     console.error('[createMaintenanceSchedule]', err)
@@ -1415,6 +1416,7 @@ export async function updateMaintenanceSchedule(
     }
 
     revalidatePath('/maintenance')
+    revalidatePath('/templates/maintenance/schedules')
     return { success: true }
   } catch (err) {
     console.error('[updateMaintenanceSchedule]', err)
@@ -1441,6 +1443,7 @@ export async function deleteMaintenanceSchedule(
     }
 
     revalidatePath('/maintenance')
+    revalidatePath('/templates/maintenance/schedules')
     return { success: true }
   } catch (err) {
     console.error('[deleteMaintenanceSchedule]', err)
@@ -1505,6 +1508,8 @@ export async function createMaintenanceScheduleTemplate(data: {
     }
 
     revalidatePath('/maintenance')
+    revalidatePath('/templates/maintenance/create')
+    revalidatePath('/templates/maintenance/saved')
     return { success: true, templateId: template.id }
   } catch (err) {
     console.error('[createMaintenanceScheduleTemplate]', err)
@@ -1638,6 +1643,9 @@ export async function broadcastMaintenanceTemplate(
     })
 
     revalidatePath('/maintenance')
+    revalidatePath('/templates/maintenance/create')
+    revalidatePath('/templates/maintenance/saved')
+    revalidatePath('/templates/maintenance/schedules')
     return { success: true, created: rowsToInsert.length, skipped }
   } catch (err) {
     console.error('[broadcastMaintenanceTemplate]', err)
@@ -1696,6 +1704,7 @@ export async function updateMaintenanceTemplate(
     })
 
     revalidatePath('/maintenance')
+    revalidatePath('/templates/maintenance/saved')
     return {}
   } catch (err) {
     console.error('[updateMaintenanceTemplate]', err)
