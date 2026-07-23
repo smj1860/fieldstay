@@ -798,6 +798,19 @@ export type FieldStayEvents = {
     }
   }
 
+  // Daily PM wrap-up digest — fanned out from the 23:00 UTC cron, one event
+  // per org, so a single serial invocation never loops every tenant.
+  'org/daily_wrapup.requested': {
+    data: {
+      org_id: string
+      // Wall-clock captured ONCE by the cron and passed through so every
+      // per-org handler (and any retry of it) derives the same date — the
+      // email idempotencyKey is date-based and the cron fires an hour
+      // before midnight UTC.
+      now_ms: number
+    }
+  }
+
   // Stay-extension ("Gap Night") messaging
   'guidebook/stay.extension.cron': {
     data: Record<string, never>
