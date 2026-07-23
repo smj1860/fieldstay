@@ -11,6 +11,9 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 export const CRITICAL_FUNCTION_IDS = new Set([
   'ownerrez-initial-sync',
   'ownerrez-incremental-sync',
+  // Per-connection sync handler (the incremental-sync dispatcher fans out to
+  // it) — terminal failures here are the actual sync failures now.
+  'ownerrez-connection-sync',
   'work-order-created',
 
   // Post an owner_transactions ledger entry on completion — the literal

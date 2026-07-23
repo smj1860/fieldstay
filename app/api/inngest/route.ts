@@ -28,7 +28,7 @@ import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/li
 
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
-import { ownerRezIncrementalSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
+import { ownerRezIncrementalSync, ownerRezConnectionSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
 import { ownerRezReviewsSync }     from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
 import { ownerRezReconciliationCron }    from '@/lib/inngest/functions/ownerrez/reconciliation-cron'
 import { ownerRezReconciliationHandler } from '@/lib/inngest/functions/ownerrez/reconciliation-handler'
@@ -146,8 +146,8 @@ import { guidebookGraceExpiredHandler }   from '@/lib/inngest/functions/guideboo
 import { guidebookSponsorPaymentRecovered } from '@/lib/inngest/functions/guidebook-sponsor-payment-recovered'
 import { guidebookGuestOptedIn }            from '@/lib/inngest/functions/guidebook-guest-opted-in'
 import { guidebookPreArrivalEmailCron }     from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
-import { guidebookSmsMorningCron }          from '@/lib/inngest/functions/guidebook-sms-morning-cron'
-import { guidebookSmsEveningCron }          from '@/lib/inngest/functions/guidebook-sms-evening-cron'
+import { guidebookSmsMorningCron, guidebookSmsMorningSend } from '@/lib/inngest/functions/guidebook-sms-morning-cron'
+import { guidebookSmsEveningCron, guidebookSmsEveningSend } from '@/lib/inngest/functions/guidebook-sms-evening-cron'
 import { guidebookStayExtensionCron }       from '@/lib/inngest/functions/guidebook-stay-extension-cron'
 import { guidebookStayExtensionHandler }    from '@/lib/inngest/functions/guidebook-stay-extension-handler'
 
@@ -194,6 +194,7 @@ export const { GET, POST, PUT } = serve({
     // OwnerRez sync
     ownerRezInitialSync,
     ownerRezIncrementalSync,
+    ownerRezConnectionSync,
     ownerRezReviewsSync,
     ownerRezReconciliationCron,
     ownerRezReconciliationHandler,
@@ -301,7 +302,9 @@ export const { GET, POST, PUT } = serve({
     guidebookGuestOptedIn,
     guidebookPreArrivalEmailCron,
     guidebookSmsMorningCron,
+    guidebookSmsMorningSend,
     guidebookSmsEveningCron,
+    guidebookSmsEveningSend,
     guidebookStayExtensionCron,
     guidebookStayExtensionHandler,
 
