@@ -705,7 +705,24 @@ export function ChecklistBuilder({
         )}
       </div>
 
-      <Dialog open={broadcastModal} onClose={() => setBroadcastModal(false)} title="Apply to Other Properties" maxWidthClassName="max-w-sm">
+      <Dialog
+        open={broadcastModal}
+        onClose={() => setBroadcastModal(false)}
+        title="Apply to Other Properties"
+        maxWidthClassName="max-w-sm"
+        footer={
+          <>
+            <Button
+              onClick={handleBroadcast}
+              disabled={broadcasting || broadcastTargets.size === 0}
+              className="flex-1 text-sm"
+            >
+              {broadcasting ? 'Applying…' : `Apply to ${broadcastTargets.size} propert${broadcastTargets.size !== 1 ? 'ies' : 'y'}`}
+            </Button>
+            <Button variant="ghost" onClick={() => setBroadcastModal(false)} className="text-sm">Cancel</Button>
+          </>
+        }
+      >
         <div className="space-y-2 max-h-60 overflow-y-auto">
           <p className="text-xs text-muted-themed mb-3">
             This will replace the existing checklist at each selected property.
@@ -728,19 +745,26 @@ export function ChecklistBuilder({
             </label>
           ))}
         </div>
-        <div className="pt-3 mt-3 border-t border-themed flex gap-3">
-          <Button
-            onClick={handleBroadcast}
-            disabled={broadcasting || broadcastTargets.size === 0}
-            className="flex-1 text-sm"
-          >
-            {broadcasting ? 'Applying…' : `Apply to ${broadcastTargets.size} propert${broadcastTargets.size !== 1 ? 'ies' : 'y'}`}
-          </Button>
-          <Button variant="ghost" onClick={() => setBroadcastModal(false)} className="text-sm">Cancel</Button>
-        </div>
       </Dialog>
 
-      <Dialog open={cloneFromModal} onClose={() => setCloneFromModal(false)} title="Import Checklist From" maxWidthClassName="max-w-sm">
+      <Dialog
+        open={cloneFromModal}
+        onClose={() => setCloneFromModal(false)}
+        title="Import Checklist From"
+        maxWidthClassName="max-w-sm"
+        footer={
+          <>
+            <Button
+              onClick={handleCloneFrom}
+              disabled={!cloneFromSource || cloningFrom}
+              className="flex-1"
+            >
+              {cloningFrom ? 'Importing…' : 'Import Checklist'}
+            </Button>
+            <Button variant="ghost" onClick={() => setCloneFromModal(false)}>Cancel</Button>
+          </>
+        }
+      >
         <p className="text-xs text-muted-themed mb-1">
           This will replace the current checklist entirely with a copy from the selected property.
         </p>
@@ -760,19 +784,32 @@ export function ChecklistBuilder({
             </option>
           ))}
         </select>
-        <div className="flex gap-2">
-          <Button
-            onClick={handleCloneFrom}
-            disabled={!cloneFromSource || cloningFrom}
-            className="flex-1"
-          >
-            {cloningFrom ? 'Importing…' : 'Import Checklist'}
-          </Button>
-          <Button variant="ghost" onClick={() => setCloneFromModal(false)}>Cancel</Button>
-        </div>
       </Dialog>
 
-      <Dialog open={roomPickerOpen} onClose={() => setRoomPickerOpen(false)} title="Insert Rooms from Library" maxWidthClassName="max-w-lg">
+      <Dialog
+        open={roomPickerOpen}
+        onClose={() => setRoomPickerOpen(false)}
+        title="Insert Rooms from Library"
+        maxWidthClassName="max-w-lg"
+        footer={
+          <>
+            <Button
+              onClick={applyRoomQuantities}
+              disabled={Object.values(roomQuantities).every((q) => !q)}
+              className="flex-1 text-sm"
+            >
+              Add Rooms
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => { setRoomQuantities({}); setExpandedRoomIds(new Set()); setRoomPickerOpen(false) }}
+              className="text-sm"
+            >
+              Cancel
+            </Button>
+          </>
+        }
+      >
         <p className="text-xs text-muted-themed mb-4">
           Check the room types this property has and set how many of each —
           click a room&apos;s name to preview its checklist first. A section
@@ -845,22 +882,6 @@ export function ChecklistBuilder({
               </div>
             )
           })}
-        </div>
-        <div className="pt-3 mt-3 border-t border-themed flex gap-3">
-          <Button
-            onClick={applyRoomQuantities}
-            disabled={Object.values(roomQuantities).every((q) => !q)}
-            className="flex-1 text-sm"
-          >
-            Add Rooms
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => { setRoomQuantities({}); setExpandedRoomIds(new Set()); setRoomPickerOpen(false) }}
-            className="text-sm"
-          >
-            Cancel
-          </Button>
         </div>
       </Dialog>
     </div>
