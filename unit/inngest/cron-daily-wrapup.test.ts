@@ -20,7 +20,7 @@ vi.mock('@/lib/inngest/helpers', () => ({
   diffDigestSnapshot:  vi.fn(async () => ({ newIds: [], unchangedIds: [], removedIds: [] })),
 }))
 
-import { dailyWrapUp } from '@/lib/inngest/functions/cron/daily-wrapup'
+import { dailyWrapUp, dailyWrapUpOrg } from '@/lib/inngest/functions/cron/daily-wrapup'
 import { createServiceClient } from '@/lib/supabase/server'
 import { resend } from '@/lib/resend/client'
 import { renderDailyWrapUpEmail } from '@/lib/resend/emails/daily-wrapup'
@@ -67,7 +67,20 @@ function makeSupabase(queued: Record<string, { data?: unknown; error?: unknown }
 }
 
 function makeStep() {
-  return { run: vi.fn((_name: string, cb: () => unknown) => cb()) }
+  return {
+    run:       vi.fn((_name: string, cb: () => unknown) => cb()),
+    sendEvent: vi.fn(async () => ({ ids: [] })),
+  }
+}
+
+// 2026-07-22 is a Wednesday — neither the Friday-only asset-health section
+// nor the Monday-only vacancy/full-resurface behavior applies, keeping the
+// section set under test minimal and deterministic. The per-org handler
+// derives all dates from event.data.now_ms, so the fixture pins it directly.
+const NOW_MS = new Date('2026-07-22T23:00:00.000Z').getTime()
+
+function wrapupEvent(orgId: string) {
+  return { data: { org_id: orgId, now_ms: NOW_MS } }
 }
 
 // Every section other than the one under test in a given case resolves
@@ -88,56 +101,84 @@ function emptyOrgTables() {
   }
 }
 
-describe('dailyWrapUp', () => {
+describe('dailyWrapUp (cron fan-out)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    // 2026-07-22 is a Wednesday — neither the Friday-only asset-health
-    // section nor the Monday-only vacancy/full-resurface behavior applies,
-    // keeping the section set under test minimal and deterministic.
-    vi.setSystemTime(new Date('2026-07-22T23:00:00.000Z'))
+    vi.setSystemTime(new Date(NOW_MS))
   })
   afterEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
   })
 
-  it('is a no-op when there are no active orgs with an invite-accepted PM', async () => {
+  it('dispatches no events when there are no active orgs with an invite-accepted PM', async () => {
     const supabase = makeSupabase({
       organization_members: [{ data: [], error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
+    const step = makeStep()
     const result = await invokeHandler(dailyWrapUp, {
       event:  {},
-      step:   makeStep(),
+      step,
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ processed: 0 })
+    expect(result).toEqual({ dispatched: 0 })
+    expect(step.sendEvent).not.toHaveBeenCalled()
     expect(resend.emails.send).not.toHaveBeenCalled()
   })
 
-  it('processes an org but sends no email when every digest section is empty', async () => {
+  it('fans out one org/daily_wrapup.requested event per distinct org, with a stable now_ms', async () => {
     const supabase = makeSupabase({
-      organization_members: [{ data: [{ org_id: 'org_1' }], error: null }],
-      ...emptyOrgTables(),
+      organization_members: [{
+        // org_1 appears twice (owner + admin) — must be deduped to one event
+        data: [{ org_id: 'org_1' }, { org_id: 'org_1' }, { org_id: 'org_2' }],
+        error: null,
+      }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
+    const step = makeStep()
     const result = await invokeHandler(dailyWrapUp, {
       event:  {},
-      step:   makeStep(),
+      step,
       logger: { info: vi.fn(), error: vi.fn() },
     })
 
-    expect(result).toEqual({ processed: 1 })
+    expect(result).toEqual({ dispatched: 2 })
+    expect(step.sendEvent).toHaveBeenCalledTimes(1)
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-daily-wrapups', [
+      { name: 'org/daily_wrapup.requested', data: { org_id: 'org_1', now_ms: NOW_MS } },
+      { name: 'org/daily_wrapup.requested', data: { org_id: 'org_2', now_ms: NOW_MS } },
+    ])
+    // The cron itself never computes sections or sends email — that's the
+    // per-org handler's job.
+    expect(resend.emails.send).not.toHaveBeenCalled()
+  })
+})
+
+describe('dailyWrapUpOrg (per-org handler)', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('sends no email when every digest section is empty', async () => {
+    const supabase = makeSupabase(emptyOrgTables())
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(dailyWrapUpOrg, {
+      event: wrapupEvent('org_1'),
+      step:  makeStep(),
+    })
+
+    expect(result).toEqual({ orgId: 'org_1', sent: false, reason: 'nothing_to_report' })
     expect(resend.emails.send).not.toHaveBeenCalled()
     expect(getPmEmails).not.toHaveBeenCalled() // hasContent short-circuits before the PM lookup
   })
 
   it('sends the wrap-up email with an idempotency key when at least one section has content', async () => {
     const supabase = makeSupabase({
-      organization_members: [{ data: [{ org_id: 'org_1' }], error: null }],
       turnovers: [
         {
           data: [{
@@ -160,13 +201,12 @@ describe('dailyWrapUp', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue(['pm@example.com'])
 
-    const result = await invokeHandler(dailyWrapUp, {
-      event:  {},
-      step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+    const result = await invokeHandler(dailyWrapUpOrg, {
+      event: wrapupEvent('org_1'),
+      step:  makeStep(),
     })
 
-    expect(result).toEqual({ processed: 1 })
+    expect(result).toEqual({ orgId: 'org_1', sent: true })
     expect(renderDailyWrapUpEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         tomorrow: [{ property: 'Lakeview Cabin', time: expect.any(String), crew: 'Maria' }],
@@ -183,7 +223,6 @@ describe('dailyWrapUp', () => {
 
   it('skips sending when the org has content but no PM email can be resolved', async () => {
     const supabase = makeSupabase({
-      organization_members: [{ data: [{ org_id: 'org_1' }], error: null }],
       turnovers: [
         {
           data: [{
@@ -206,19 +245,17 @@ describe('dailyWrapUp', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue([])
 
-    const result = await invokeHandler(dailyWrapUp, {
-      event:  {},
-      step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+    const result = await invokeHandler(dailyWrapUpOrg, {
+      event: wrapupEvent('org_1'),
+      step:  makeStep(),
     })
 
-    expect(result).toEqual({ processed: 1 })
+    expect(result).toEqual({ orgId: 'org_1', sent: false, reason: 'no_pm_email' })
     expect(resend.emails.send).not.toHaveBeenCalled()
   })
 
   it('marks aggregated purchase orders as sent after a successful send', async () => {
     const supabase = makeSupabase({
-      organization_members: [{ data: [{ org_id: 'org_1' }], error: null }],
       ...emptyOrgTables(),
       purchase_orders: [
         {
@@ -234,13 +271,12 @@ describe('dailyWrapUp', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(getPmEmails as ReturnType<typeof vi.fn>).mockResolvedValue(['pm@example.com'])
 
-    const result = await invokeHandler(dailyWrapUp, {
-      event:  {},
-      step:   makeStep(),
-      logger: { info: vi.fn(), error: vi.fn() },
+    const result = await invokeHandler(dailyWrapUpOrg, {
+      event: wrapupEvent('org_1'),
+      step:  makeStep(),
     })
 
-    expect(result).toEqual({ processed: 1 })
+    expect(result).toEqual({ orgId: 'org_1', sent: true })
     expect(resend.emails.send).toHaveBeenCalledTimes(1)
 
     const poUpdate = supabase.calls.find((c) => c.table === 'purchase_orders' && c.method === 'update')
