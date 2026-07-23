@@ -38,6 +38,41 @@ export function VendorDispatchDialog({
       onClose={onClose}
       title="Send to Vendor"
       maxWidthClassName="max-w-sm"
+      footer={
+        !dispatchedUrl ? (
+          <button
+            onClick={handleDispatch}
+            disabled={dispatching || !dispatchEmail.trim()}
+            className="w-full btn flex items-center justify-center gap-2 py-2.5 text-sm font-semibold"
+            style={{
+              background: 'var(--bg-raised)',
+              color:      'var(--text-primary)',
+              border:     '2px solid var(--accent-gold)',
+              borderRadius: 12,
+              opacity: (dispatching || !dispatchEmail.trim()) ? 0.6 : 1,
+            }}
+          >
+            {dispatching ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
+            {dispatching
+              ? 'Sending…'
+              : vendorDispatchEmail
+                ? (dispatchEmail === vendorDispatchEmail ? 'Resend to Vendor' : 'Send to New Vendor')
+                : 'Dispatch to Vendor'}
+          </button>
+        ) : (
+          <Button
+            variant="secondary"
+            onClick={onClose}
+            className="w-full text-sm py-2"
+          >
+            Done
+          </Button>
+        )
+      }
     >
       <div className="space-y-4">
         <p className="text-xs -mt-2" style={{ color: 'var(--text-muted)' }}>
@@ -107,30 +142,6 @@ export function VendorDispatchDialog({
             {dispatchError && (
               <p className="text-xs text-red-400">{dispatchError}</p>
             )}
-
-            <button
-              onClick={handleDispatch}
-              disabled={dispatching || !dispatchEmail.trim()}
-              className="w-full btn flex items-center justify-center gap-2 py-2.5 text-sm font-semibold"
-              style={{
-                background: 'var(--bg-raised)',
-                color:      'var(--text-primary)',
-                border:     '2px solid var(--accent-gold)',
-                borderRadius: 12,
-                opacity: (dispatching || !dispatchEmail.trim()) ? 0.6 : 1,
-              }}
-            >
-              {dispatching ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Send className="w-4 h-4" />
-              )}
-              {dispatching
-                ? 'Sending…'
-                : vendorDispatchEmail
-                  ? (dispatchEmail === vendorDispatchEmail ? 'Resend to Vendor' : 'Send to New Vendor')
-                  : 'Dispatch to Vendor'}
-            </button>
           </>
         ) : (
           <>
@@ -176,14 +187,6 @@ export function VendorDispatchDialog({
                 </button>
               </div>
             </div>
-
-            <Button
-              variant="secondary"
-              onClick={onClose}
-              className="w-full text-sm py-2"
-            >
-              Done
-            </Button>
           </>
         )}
       </div>
