@@ -21,11 +21,13 @@ export function SignupForm() {
   const [confirmPassword,  setConfirmPassword]   = useState('')
   const [passwordMismatch, setPasswordMismatch]  = useState(false)
   const [error,            setError]             = useState<string | null>(null)
+  const [emailExists,      setEmailExists]       = useState(false)
   const [loading,          setLoading]           = useState(false)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    setEmailExists(false)
 
     if (password !== confirmPassword) {
       setPasswordMismatch(true)
@@ -65,6 +67,19 @@ export function SignupForm() {
       return
     }
 
+    // Supabase never returns an error for signUp() against an email that's
+    // already registered and confirmed — it responds as if signup succeeded,
+    // with a fake user object whose identities array is empty, specifically
+    // so signup can't be used to probe which emails already have accounts.
+    // No account is created and no confirmation email is sent. Detect that
+    // here so the user sees why, instead of being pushed onward as if a new
+    // account had just been created.
+    if (data.user && data.user.identities?.length === 0) {
+      setEmailExists(true)
+      setLoading(false)
+      return
+    }
+
     // If invite flow: show confirmation message (user needs to verify email).
     // Otherwise: if this project has email confirmation disabled, signUp()
     // already returns an active session — honor `next` immediately rather
@@ -95,6 +110,19 @@ export function SignupForm() {
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
           {error}
+        </div>
+      )}
+
+      {emailExists && (
+        <div
+          className="text-sm rounded-lg px-4 py-3"
+          style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)', border: '1px solid var(--accent-amber)' }}
+        >
+          An account with this email already exists.{' '}
+          <Link href="/login" className="underline font-medium">Log in</Link>
+          {' '}instead, or use{' '}
+          <Link href="/forgot-password" className="underline font-medium">forgot password</Link>
+          {' '}if you don&apos;t remember it.
         </div>
       )}
 
