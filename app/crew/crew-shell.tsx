@@ -257,6 +257,24 @@ export function CrewShell({
             title="Unsynced work on this device"
             mobileSheet
             maxWidthClassName="max-w-sm"
+            footer={
+              <div className="flex flex-col gap-2 w-full">
+                <button
+                  onClick={() => setShowUnsyncedWarning(false)}
+                  className="w-full py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+                >
+                  Stay Logged In
+                </button>
+                <button
+                  onClick={() => { setShowUnsyncedWarning(false); void performLogout() }}
+                  className="w-full py-3 rounded-xl text-sm font-semibold"
+                  style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
+                >
+                  Log Out Anyway
+                </button>
+              </div>
+            }
           >
             <div className="flex items-center gap-3 mb-3">
               <span
@@ -275,22 +293,6 @@ export function CrewShell({
               now, it will be lost. Stay logged in until you have signal and it
               finishes syncing.
             </p>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => setShowUnsyncedWarning(false)}
-                className="w-full py-3 rounded-xl text-sm font-semibold"
-                style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
-              >
-                Stay Logged In
-              </button>
-              <button
-                onClick={() => { setShowUnsyncedWarning(false); void performLogout() }}
-                className="w-full py-3 rounded-xl text-sm font-semibold"
-                style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)' }}
-              >
-                Log Out Anyway
-              </button>
-            </div>
           </Dialog>
         )}
 
@@ -425,7 +427,22 @@ function SyncStatus() {
       </button>
 
       {showInfo && (
-        <Dialog open onClose={() => setShowInfo(false)} title="You're offline" mobileSheet maxWidthClassName="max-w-sm">
+        <Dialog
+          open
+          onClose={() => setShowInfo(false)}
+          title="You're offline"
+          mobileSheet
+          maxWidthClassName="max-w-sm"
+          footer={
+            <button
+              onClick={() => setShowInfo(false)}
+              className="w-full py-3 rounded-xl text-sm font-semibold"
+              style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
+            >
+              Got it
+            </button>
+          }
+        >
           <div className="flex items-center gap-3 mb-3">
             <span
               className="w-10 h-10 rounded-full flex items-center justify-center"
@@ -442,13 +459,6 @@ function SyncStatus() {
             You can complete turnovers and check off tasks without a
             signal — everything syncs automatically when you reconnect.
           </p>
-          <button
-            onClick={() => setShowInfo(false)}
-            className="w-full py-3 rounded-xl text-sm font-semibold"
-            style={{ background: 'var(--bg-raised)', color: 'var(--text-primary)' }}
-          >
-            Got it
-          </button>
         </Dialog>
       )}
     </>

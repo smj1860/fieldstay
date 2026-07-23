@@ -128,15 +128,35 @@ export function CreateWorkOrderModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title="New Work Order" maxWidthClassName="max-w-3xl">
-        <form action={action} className="flex flex-col max-h-[85vh] -m-6">
+    <Dialog
+      open
+      onClose={onClose}
+      title="New Work Order"
+      maxWidthClassName="max-w-3xl"
+      footer={
+        <>
+          <Button
+            type="submit"
+            form="create-work-order-form"
+            disabled={pending || selectedCompliance === 'hard_blocked'}
+            className="flex-1"
+          >
+            {pending
+              ? 'Creating…'
+              : assignMode === 'quotes' && selectedQuoteVendors.length > 0
+              ? `Create & Request ${selectedQuoteVendors.length} Quote${selectedQuoteVendors.length !== 1 ? 's' : ''}`
+              : 'Create Work Order'}
+          </Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
+        <form id="create-work-order-form" action={action} className="space-y-4">
           {/* Hidden fields for mode */}
           <input type="hidden" name="request_quotes" value={assignMode === 'quotes' ? 'true' : 'false'} />
           {assignMode === 'quotes' && selectedQuoteVendors.map((id) => (
             <input key={id} type="hidden" name="quote_vendor_ids" value={id} />
           ))}
-
-          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
 
           {state?.error && (
             <InlineAlert tone="error">
@@ -470,22 +490,6 @@ export function CreateWorkOrderModal({
             </div>
           </div>
 
-          </div>{/* /scrollable content */}
-
-          <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
-            <Button
-              type="submit"
-              disabled={pending || selectedCompliance === 'hard_blocked'}
-              className="flex-1"
-            >
-              {pending
-                ? 'Creating…'
-                : assignMode === 'quotes' && selectedQuoteVendors.length > 0
-                ? `Create & Request ${selectedQuoteVendors.length} Quote${selectedQuoteVendors.length !== 1 ? 's' : ''}`
-                : 'Create Work Order'}
-            </Button>
-            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          </div>
         </form>
     </Dialog>
   )

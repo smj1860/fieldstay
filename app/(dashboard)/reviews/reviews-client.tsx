@@ -632,6 +632,37 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
         open={showManualModal}
         onClose={() => setShowManualModal(false)}
         title="Add Review Manually"
+        footer={
+          <button
+            onClick={async () => {
+              setManualSubmitting(true)
+              setManualError(null)
+              const result = await submitManualReview(manualForm)
+              if ('error' in result) {
+                setManualError(result.error)
+                setManualSubmitting(false)
+                return
+              }
+              // Immediately generate response
+              await fetch('/api/repuguard/generate', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ review_id: result.reviewId }),
+              })
+              setManualUsed(u => u + 1)
+              setShowManualModal(false)
+              setManualSubmitting(false)
+              setManualForm({ reviewText: '', starRating: 5, guestName: '', propertyId: null, platform: 'airbnb' })
+              // Reload to show the new review with its generated response
+              globalThis.location.reload()
+            }}
+            disabled={manualSubmitting || !manualForm.reviewText.trim()}
+            className="w-full rounded-xl font-bold text-sm py-3 transition-opacity disabled:opacity-50"
+            style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
+          >
+            {manualSubmitting ? 'Generating response…' : 'Submit & Generate Response'}
+          </button>
+        }
       >
         <div className="space-y-4">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -700,36 +731,6 @@ export function ReviewsClient({ reviews: initialReviews, manualUsedThisWeek }: P
               className="input resize-none"
             />
           </div>
-
-          <button
-            onClick={async () => {
-              setManualSubmitting(true)
-              setManualError(null)
-              const result = await submitManualReview(manualForm)
-              if ('error' in result) {
-                setManualError(result.error)
-                setManualSubmitting(false)
-                return
-              }
-              // Immediately generate response
-              await fetch('/api/repuguard/generate', {
-                method:  'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body:    JSON.stringify({ review_id: result.reviewId }),
-              })
-              setManualUsed(u => u + 1)
-              setShowManualModal(false)
-              setManualSubmitting(false)
-              setManualForm({ reviewText: '', starRating: 5, guestName: '', propertyId: null, platform: 'airbnb' })
-              // Reload to show the new review with its generated response
-              globalThis.location.reload()
-            }}
-            disabled={manualSubmitting || !manualForm.reviewText.trim()}
-            className="w-full rounded-xl font-bold text-sm py-3 transition-opacity disabled:opacity-50"
-            style={{ background: 'var(--accent-gold)', color: 'var(--text-inverse)' }}
-          >
-            {manualSubmitting ? 'Generating response…' : 'Submit & Generate Response'}
-          </button>
         </div>
       </Dialog>
     </div>

@@ -259,7 +259,19 @@ function AddEntryModal({
   if (state?.success) { onClose(); return null }
 
   return (
-    <Dialog open onClose={onClose} title="Log Communication">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Log Communication"
+      footer={
+        <>
+          <Button type="submit" form="add-comms-log-form" disabled={pending} className="flex-1">
+            {pending ? 'Saving…' : 'Save Entry'}
+          </Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
         {vendors.length === 0 && crew.length === 0 && (
           <div className="mb-4 px-3 py-2 rounded-lg text-sm"
                style={{ background: 'var(--accent-amber-dim)', color: 'var(--accent-amber)' }}>
@@ -277,7 +289,7 @@ function AddEntryModal({
           </div>
         )}
 
-        <form action={action} className="space-y-4">
+        <form id="add-comms-log-form" action={action} className="space-y-4">
           <input type="hidden" name="recipient_type" value={recipientType} />
 
           {/* Vendor / Crew toggle */}
@@ -385,13 +397,6 @@ function AddEntryModal({
                 ))}
               </select>
             </div>
-          </div>
-
-          <div className="flex gap-3 pt-1">
-            <Button type="submit" disabled={pending} className="flex-1">
-              {pending ? 'Saving…' : 'Save Entry'}
-            </Button>
-            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
           </div>
         </form>
     </Dialog>
