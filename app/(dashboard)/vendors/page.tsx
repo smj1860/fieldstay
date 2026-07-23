@@ -10,19 +10,45 @@ export default async function VendorsPage() {
 
   const { data: rawVendors } = await supabase
     .from('vendors')
-    .select('id, name, contact_name, email, phone, specialty, portal_enabled, is_active, notes, work_orders(vendor_rating, scheduled_date, completed_date, status)')
+    .select('id, name, contact_name, email, phone, specialty, portal_enabled, is_active, notes')
     .eq('org_id', membership.org_id)
     .eq('is_active', true)
     .order('specialty')
     .order('name')
 
+  // Scorecard inputs, bounded to the trailing 12 months. The previous shape
+  // embedded work_orders(...) directly on the vendors query with no bound —
+  // a long-lived vendor dragged its entire work-order history into every
+  // render of this page just to compute an average. A trailing-year window
+  // is also a better scorecard: it reflects current performance, not 2019's.
+  const oneYearAgo = new Date()
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+
+  const { data: scorecardWOs } = await supabase
+    .from('work_orders')
+    .select('vendor_id, vendor_rating, scheduled_date, completed_date, status')
+    .eq('org_id', membership.org_id)
+    .not('vendor_id', 'is', null)
+    .gte('created_at', oneYearAgo.toISOString())
+    .limit(5000)
+
+  type ScorecardWO = {
+    vendor_id: string | null
+    vendor_rating: number | null
+    scheduled_date: string | null
+    completed_date: string | null
+    status: string
+  }
+  const wosByVendor = new Map<string, ScorecardWO[]>()
+  for (const wo of (scorecardWOs ?? []) as ScorecardWO[]) {
+    if (!wo.vendor_id) continue
+    const list = wosByVendor.get(wo.vendor_id) ?? []
+    list.push(wo)
+    wosByVendor.set(wo.vendor_id, list)
+  }
+
   const vendors = (rawVendors ?? []).map((v) => {
-    const workOrders = (v.work_orders as Array<{
-      vendor_rating: number | null
-      scheduled_date: string | null
-      completed_date: string | null
-      status: string
-    }> ?? [])
+    const workOrders = wosByVendor.get(v.id) ?? []
 
     const ratings = workOrders
       .map((wo) => wo.vendor_rating)
@@ -37,7 +63,6 @@ export default async function VendorsPage() {
 
     return {
       ...v,
-      work_orders:         undefined,
       avg_rating:          ratings.length > 0
         ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10
         : null,

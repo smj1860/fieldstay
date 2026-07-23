@@ -53,7 +53,10 @@ export default async function ReviewsPage() {
 
   const manualUsedThisWeek = await getManualReviewsUsedThisWeek()
 
-  // Fetch reviews with responses
+  // Fetch reviews with responses. Bounded to the most recent 200: the
+  // response window is 14 days, so anything actionable is always in the
+  // newest slice — older reviews are a read-only archive that previously
+  // made this query grow without bound as the org aged.
   const { data: reviews } = await admin
     .from('reviews')
     .select(`
@@ -63,6 +66,7 @@ export default async function ReviewsPage() {
     `)
     .eq('org_id', membership.org_id)
     .order('review_date', { ascending: false })
+    .limit(200)
 
   const RESPONSE_WINDOW_DAYS = 14
 
