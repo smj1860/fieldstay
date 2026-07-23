@@ -1,10 +1,11 @@
+// fixing CDN stale cache snapshot
+export const dynamic = 'force-dynamic'
+
 export default function AuthLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
-// fixing CDN stale cache snapshot
-export const dynamic = 'force-dynamic'
   return (
     <div className="min-h-screen bg-brand-800 flex items-center justify-center p-4 theme-locked-light-passive-dark">
       <div className="w-full max-w-md">
