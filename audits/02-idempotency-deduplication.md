@@ -78,6 +78,8 @@ insert; migrations `20260610000001_maintenance_po_idempotency.sql` /
 ---
 
 ### CRITICAL: `create-purchase-order` step can create duplicate POs + line items on retry
+**Status: FIXED** — `lib/inngest/functions/inventory-events.ts:170-219` now
+checks `source_count_id` for an existing PO before insert and returns early if found.
 - **Area:** Inngest Steps
 - **Location:** `lib/inngest/functions/inventory-events.ts:130-162` (`handleInventoryCountSubmitted`, step `create-purchase-order`)
 - **Description:** The step performs three sequential writes with no existence
@@ -140,6 +142,7 @@ insert; migrations `20260610000001_maintenance_po_idempotency.sql` /
 ---
 
 ### HIGH: Dead duplicate cron function (`maintenance-check.ts`) has drifted from its registered replacements
+**Status: FIXED** — file no longer exists in the repo.
 - **Area:** Inngest Steps
 - **Location:** `lib/inngest/functions/maintenance-check.ts` (797 lines, exports `dailyMaintenanceCheck`, **not imported/registered** in `app/api/inngest/route.ts`)
 - **Description:** This file is an old "god function" that the route comment at
