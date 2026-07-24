@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { NonRetriableError } from 'inngest'
 
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
@@ -149,6 +148,7 @@ describe('hospIncrementalSync', () => {
         { data: { checkin_date: '2026-08-01', checkout_date: '2026-08-05' }, error: null }, // upsert-booking: existing dates (different from new)
         { data: { id: 'booking_1' }, error: null },                                     // upsert-booking: upserted row
       ],
+      integration_connections: [{ data: { org_id: 'org_1' }, error: null }],            // resolve-org-and-token: org_1's connection still active
       organization_members: [{ data: { user_id: 'user_1' }, error: null }],
       properties:           [{ data: { id: 'prop_1' }, error: null }],
       turnovers: [{
@@ -200,6 +200,7 @@ describe('hospIncrementalSync', () => {
         { data: { checkin_date: '2026-08-10', checkout_date: '2026-08-14' }, error: null }, // same as normalized below
         { data: { id: 'booking_1' }, error: null },
       ],
+      integration_connections: [{ data: { org_id: 'org_1' }, error: null }],
       organization_members: [{ data: { user_id: 'user_1' }, error: null }],
       properties:           [{ data: { id: 'prop_1' }, error: null }],
     })
@@ -307,7 +308,7 @@ describe('hospIncrementalSync', () => {
     expect(hospitableReservationToNormalized).not.toHaveBeenCalled()
   })
 
-  it('throws a NonRetriableError instead of crashing uninformatively when no active Hospitable connection can be found', async () => {
+  it('skips cleanly (no throw, no retry) instead of crashing when no active Hospitable connection can be found for a brand-new reservation', async () => {
     const supabase = makeSupabase({
       bookings:                 [{ data: null, error: null }], // new reservation, no existing booking to resolve org from
       integration_connections:  [{ data: null, error: null }], // no active connection either
@@ -315,14 +316,38 @@ describe('hospIncrementalSync', () => {
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
 
     const step = makeRunAllStep()
-
-    await expect(invokeHandler(hospIncrementalSync, {
+    const result = await invokeHandler(hospIncrementalSync, {
       event: { data: { provider_id: 'hospitable', event_type: 'reservation.created', entity_type: 'reservation', entity_id: 'res_2' } },
       step,
       logger: makeLogger(),
-    })).rejects.toThrow(NonRetriableError)
+    })
 
+    expect(result).toEqual({ skipped: true, reason: 'no_active_connection', entity_id: 'res_2' })
     // Never got far enough to fetch a token or hit the Hospitable API
+    expect(getValidHospitableToken).not.toHaveBeenCalled()
+    expect(hospitableFetch).not.toHaveBeenCalled()
+  })
+
+  it('skips cleanly instead of throwing when an existing booking resolves to an org whose Hospitable connection has since been disconnected', async () => {
+    // Mirrors the real production bug (SENTRY-CRAZY-CUSHION-9): Hospitable
+    // keeps sending webhooks for an org's existing bookings long after the
+    // PM disconnected in Settings — disconnectIntegration() never touches
+    // `bookings`, so resolve-org-and-token still finds org_1 here, but
+    // org_1's integration_connections row is no longer 'active'.
+    const supabase = makeSupabase({
+      bookings:                [{ data: { org_id: 'org_1' }, error: null }],
+      integration_connections: [{ data: null, error: null }], // org_1 has no active connection anymore
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeRunAllStep()
+    const result = await invokeHandler(hospIncrementalSync, {
+      event: { data: { provider_id: 'hospitable', event_type: 'reservation.changed', entity_type: 'reservation', entity_id: 'res_3', triggers: ['status_changed'] } },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ skipped: true, reason: 'no_active_connection', entity_id: 'res_3' })
     expect(getValidHospitableToken).not.toHaveBeenCalled()
     expect(hospitableFetch).not.toHaveBeenCalled()
   })
