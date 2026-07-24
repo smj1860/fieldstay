@@ -87,9 +87,19 @@ export async function POST(
   console.log(`[Webhook:${providerId}] action="${safeAction}" correlationId=${safeCorrelationId}`)
 
   // ── 4. Handle generic "authorization revoked" universally ─
-  //    This event means the user disconnected our app from within OwnerRez.
+  //    This event means the user disconnected our app from within the provider.
   //    We must destroy their stored token so future API calls don't fail silently.
-  if (action === 'application_authorization_revoked') {
+  //
+  //    Hospitable uses 'application_authorization_revoked', 'integration.disconnected',
+  //    and 'integration_disconnected' interchangeably for this action — all three
+  //    must trigger the same cleanup. OwnerRez uses only 'application_authorization_revoked'.
+  const REVOCATION_ACTIONS = new Set([
+    'application_authorization_revoked',
+    'integration.disconnected',
+    'integration_disconnected',
+  ])
+
+  if (REVOCATION_ACTIONS.has(action)) {
     try {
       if (!externalUserId) {
         console.error(`[Webhook:${providerId}] Revocation event missing user_id`)

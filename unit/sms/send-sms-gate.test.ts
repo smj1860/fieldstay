@@ -1,4 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+
+// Controllable Redis mock for the nudge-budget tests below. hoisted() so the
+// vi.mock factory (which vitest hoists above imports) can close over them.
+const { mockIncr, mockExpire } = vi.hoisted(() => ({
+  mockIncr:   vi.fn(async () => 1),
+  mockExpire: vi.fn(async () => undefined),
+}))
+vi.mock('@upstash/redis', () => ({
+  Redis: class {
+    incr   = mockIncr
+    expire = mockExpire
+  },
+}))
+
 import { sendSMS } from '@/lib/sms/telnyx'
 
 // CLAUDE.md: SMS_ENABLED is the single most safety-critical flag in this
@@ -118,5 +132,84 @@ describe('sendSMS — SMS_ENABLED gate', () => {
     await expect(sendSMS('+15551234567', 'Door code: 1234')).rejects.toThrow(
       /Telnyx send failed: 422/
     )
+  })
+})
+
+describe('sendSMS — daily nudge budget', () => {
+  const ORIGINAL_ENV = { ...process.env }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    mockIncr.mockReset().mockResolvedValue(1)
+    mockExpire.mockReset().mockResolvedValue(undefined)
+    process.env.SMS_ENABLED                 = 'true'
+    process.env.TELNYX_API_KEY              = 'test-api-key'
+    process.env.TELNYX_MESSAGING_PROFILE_ID = 'test-profile-id'
+    process.env.TELNYX_FROM_NUMBER          = '+15550001111'
+    delete process.env.SMS_DAILY_NUDGE_BUDGET
+  })
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV }
+  })
+
+  it('sends a nudge while the daily budget has headroom', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: 'msg_1' } }), { status: 200 })
+    )
+    mockIncr.mockResolvedValue(42)
+
+    const result = await sendSMS('+15551234567', 'Good morning!', { category: 'nudge' })
+
+    expect(result).toEqual({ sent: true })
+    expect(mockIncr).toHaveBeenCalledTimes(1)
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a nudge once the daily budget is exhausted — no Telnyx call', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch')
+    const warnSpy  = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    process.env.SMS_DAILY_NUDGE_BUDGET = '100'
+    mockIncr.mockResolvedValue(101)
+
+    const result = await sendSMS('+15551234567', 'Good morning!', { category: 'nudge' })
+
+    expect(result).toEqual({ sent: false, reason: 'daily nudge budget exhausted' })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalled()
+  })
+
+  it('fails CLOSED when Redis is unreachable — a cache outage must not disable the spend ceiling', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch')
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mockIncr.mockRejectedValue(new Error('redis down'))
+
+    const result = await sendSMS('+15551234567', 'Good morning!', { category: 'nudge' })
+
+    expect(result).toEqual({ sent: false, reason: 'nudge budget check unavailable' })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(errorSpy).toHaveBeenCalled()
+  })
+
+  it('transactional sends never consult the budget — door codes go out even if Redis is down', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: { id: 'msg_1' } }), { status: 200 })
+    )
+    mockIncr.mockRejectedValue(new Error('redis down'))
+
+    const result = await sendSMS('+15551234567', 'Door code: 1234')
+
+    expect(result).toEqual({ sent: true })
+    expect(mockIncr).not.toHaveBeenCalled()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not consume budget while SMS_ENABLED is off — the gate runs first', async () => {
+    process.env.SMS_ENABLED = 'false'
+
+    const result = await sendSMS('+15551234567', 'Good morning!', { category: 'nudge' })
+
+    expect(result).toEqual({ sent: false, reason: 'SMS_ENABLED is not true' })
+    expect(mockIncr).not.toHaveBeenCalled()
   })
 })

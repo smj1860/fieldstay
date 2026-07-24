@@ -1,5 +1,7 @@
 # FieldStay Codebase Audit — Coordinating Summary
 
+> **ARCHIVED — superseded by `audit/` Round 2. Findings here reflect the codebase as of 2026-07-13 and should not be read as current state.**
+
 Status: COMPLETE
 Last checkpoint: all 4 domain agents (RLS/security, idempotency/Inngest, schema/API/webhooks, scalability/tech-debt) finished and appended below
 Next: none — see individual findings files for full detail (audit/01-04*.md)

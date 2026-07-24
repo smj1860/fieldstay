@@ -6,9 +6,7 @@ Common questions about FieldStay that don't fit neatly into a single feature gui
 
 ## Does FieldStay work with the PMS I already use?
 
-FieldStay currently has integration partnerships with OwnerRez and
-Hospitable that will be live soon. We are always looking to add more
-integrations. If you use another PMS, let us know what you use.
+FieldStay integrates with OwnerRez and Hospitable today — connect either one from onboarding to sync properties, bookings, and reviews automatically. We are always looking to add more integrations. If you use another PMS, let us know what you use.
 
 ---
 

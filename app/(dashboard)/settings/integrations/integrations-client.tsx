@@ -213,7 +213,30 @@ function CredentialModalContent({
   }
 
   return (
-    <Dialog open onClose={onClose} title={`Connect ${displayName}`} maxWidthClassName="max-w-md">
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Connect ${displayName}`}
+      maxWidthClassName="max-w-md"
+      footer={
+        <>
+          <Button
+            onClick={handleConnect}
+            disabled={pending}
+            className="flex-1 flex items-center justify-center gap-2"
+          >
+            {pending ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Connecting…</>
+            ) : (
+              <><PlugZap className="w-4 h-4" /> Connect</>
+            )}
+          </Button>
+          <Button variant="secondary" onClick={onClose} className="px-4">
+            Cancel
+          </Button>
+        </>
+      }
+    >
       <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
         {config.description}
       </p>
@@ -248,23 +271,6 @@ function CredentialModalContent({
             />
           </div>
         ))}
-      </div>
-
-      <div className="flex gap-3">
-        <Button
-          onClick={handleConnect}
-          disabled={pending}
-          className="flex-1 flex items-center justify-center gap-2"
-        >
-          {pending ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Connecting…</>
-          ) : (
-            <><PlugZap className="w-4 h-4" /> Connect</>
-          )}
-        </Button>
-        <Button variant="secondary" onClick={onClose} className="px-4">
-          Cancel
-        </Button>
       </div>
 
       {/* Where to find credentials — provider-specific help text */}

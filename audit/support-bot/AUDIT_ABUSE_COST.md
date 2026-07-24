@@ -4,7 +4,7 @@ Next: finish widget review, write summary
 
 ---
 
-## Finding 1: No rate limiting on /api/support/chat — CONFIRMED, Critical
+## Finding 1: No rate limiting on /api/support/chat — CONFIRMED, Critical — FIXED
 
 File: `/home/user/fieldstay/app/api/support/chat/route.ts` (entire file — no rate limiter import or call anywhere)
 
@@ -18,6 +18,10 @@ The codebase has an established, repo-wide rate-limiting pattern at `/home/user/
 **Severity: Critical** — this is a direct, unmitigated cost-amplification and availability vector, and it deviates from an established codebase convention that the same author has applied to lower-stakes endpoints (a single 24h-throttled image scan) but not to this higher-frequency, multi-model-call, conversational endpoint.
 
 **Recommended fix:** Add a limiter in `lib/rate-limit.ts` (e.g. `supportChatLimiter`, suggest `Ratelimit.slidingWindow(20, '1 m')` or similar per-user-per-minute window, plus a daily cap) and call `await supportChatLimiter.limit(user.id)` at the top of the POST handler in `app/api/support/chat/route.ts`, returning 429 on failure — mirroring the exact pattern at `app/api/assets/scan-data-plate/route.ts:33`.
+
+**Status: FIXED.** `lib/rate-limit.ts:127-140` defines `supportChatLimiter`
+(20/min) and `supportChatDailyLimiter` (100/day); `app/api/support/chat/route.ts:11-24`
+calls both, returning 429 on either limit.
 
 ---
 
@@ -38,9 +42,13 @@ History sent to the model is hard-capped at 10 rows via `.limit(10)`, regardless
 
 Caveat (Low severity, suspected): the `.limit(10)` with `ascending: true` ordering means once a conversation has more than 10 messages, the query always returns the **oldest** 10 messages (not the most recent 10), since there's no offset/pagination logic. This is a context-quality bug, not a cost bug — the model would be working from stale early context indefinitely in long conversations rather than escalating cost. Worth flagging for the correctness-focused agent but not an abuse/cost issue. Cost-wise this is fine: confirmed clean.
 
+**Status: FIXED.** `app/api/support/chat/route.ts:63-69` now orders by
+`created_at desc, limit(10)` then `.reverse()`, so the model sees the most recent
+10 messages instead of the oldest.
+
 ---
 
-## Finding 3: account_specific category is Sonnet + tool-use loop — CONFIRMED amplification path exists, Medium
+## Finding 3: account_specific category is Sonnet + tool-use loop — CONFIRMED amplification path exists, Medium — FIXED via Finding 1
 
 File: `/home/user/fieldstay/lib/support/respond.ts:8-12` (model selection), `:57-116` (`generateAccountSpecificResponse`), `/home/user/fieldstay/lib/support/classify.ts:21-46` (classification)
 
@@ -53,6 +61,8 @@ There is no hard technical barrier stopping a user from phrasing unrelated/free-
 **Severity: Medium** — the classification step is reasonably designed and not "trivially" gameable in an obvious way, but combined with Finding 1 (no rate limit at all), repeated `account_specific`-baiting messages are the single most expensive way to abuse this endpoint (4x Sonnet calls per message vs 1x Haiku). Once Finding 1 is fixed, this amplification is naturally bounded per-user. Until then, this is the worst-case-cost path to highlight.
 
 **Recommended fix:** Primary fix is Finding 1 (rate limit closes this regardless of classification gaming). Secondary hardening (optional): consider a tighter per-category limiter if telemetry post-launch shows `account_specific` traffic disproportionate to actual account questions.
+
+**Status: FIXED via Finding 1** — `supportChatLimiter`/`supportChatDailyLimiter` bound the blast radius regardless of classification gaming.
 
 ---
 
@@ -78,7 +88,7 @@ File: `/home/user/fieldstay/lib/support/retrieve.ts:13-41`, `/home/user/fieldsta
 
 ---
 
-## Finding 6: Scope creep / free-form chatbot abuse potential — PARTIALLY MITIGATED, Medium (suspected residual risk)
+## Finding 6: Scope creep / free-form chatbot abuse potential — PARTIALLY MITIGATED, Medium (suspected residual risk) — primary mitigation shipped, residual accepted risk
 
 File: `/home/user/fieldstay/lib/support/respond.ts:136-170` (`buildSystemPrompt`)
 
@@ -98,6 +108,12 @@ This is a legitimate, non-trivial constraint — a system prompt instructing the
 **Recommended fix:**
 1. Primary: Finding 1 (rate limiting) bounds the abuse volume regardless of whether individual jailbreak attempts succeed.
 2. Optional hardening: consider adding a lightweight post-generation check (e.g. verify response content references KB context or escalation language) before persisting/returning, or accept residual risk as low-cost-impact-per-message given Finding 1 is fixed. Not blocking — system prompt constraints are reasonable for a v1 support bot.
+
+**Status: PARTIALLY ADDRESSED.** Finding 1's rate limiting (the primary mitigation
+recommended above) is live. No separate output-side topic-conformance check was
+added — treat as residual accepted risk, not fully closed. System prompt injection
+hardening (see AUDIT_PROMPT_INJECTION.md Finding 1) was also since added as
+defense-in-depth (`lib/support/respond.ts:199`).
 
 ---
 

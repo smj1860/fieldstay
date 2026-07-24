@@ -48,16 +48,17 @@ No application-level code should be trusted as the sole enforcement mechanism fo
 
 It is never passed to client components, never returned in API responses, and never logged.
 
-### PowerSync Sync Layer
+### Crew PWA Local-First Sync Layer
 
-The client (browser/PWA) reads only from a local SQLite database maintained by PowerSync. Sync rules are scoped by `org_id`, so a user's local database contains only their organization's data. Direct Supabase reads from client components are prohibited.
+The crew PWA (`app/crew/*`) reads only from a local Dexie (IndexedDB) cache, never Supabase directly — see `lib/dexie/*`. `DexieProvider` pulls the current user's data (turnovers, properties, inventory, checklists, messages) from Supabase into Dexie on an interval and on reconnect, so a user's local database only ever contains their organization's data. Writes go through a local mutation outbox (`enqueueMutation()`) that drains to Supabase in the background. Direct Supabase reads from client components in the crew PWA are prohibited. (This replaced an earlier PowerSync-based design; PowerSync is fully removed — the `powersync_crew_*` tables no longer exist in the schema at all.)
 
 ### Webhook Verification
 
 All inbound webhooks are verified before processing:
 
-- **Stripe:** `stripe.webhooks.constructEvent()` with the raw request body and `STRIPE_WEBHOOK_SECRET`
-- **OwnerRez:** HTTP Basic Auth (`OWNERREZ_WEBHOOK_USER` / `OWNERREZ_WEBHOOK_PASSWORD`)
+- **Stripe / Stripe Connect:** `stripe.webhooks.constructEvent()` with the raw request body and `STRIPE_WEBHOOK_SECRET` (`app/api/webhooks/stripe/route.ts`, `app/api/webhooks/stripe-connect/route.ts`)
+- **Telnyx:** Ed25519 signature verification (`verifyTelnyxSignature()` in `app/api/webhooks/telnyx/route.ts`) plus a timestamp-freshness check so a valid-but-old signature can't be replayed
+- **Generic provider webhooks** (`app/api/webhooks/[provider]/route.ts` — currently OwnerRez, Hospitable, Hostaway, Kroger): each provider adapter implements its own `validateWebhook()` — OwnerRez uses HTTP Basic Auth (`OWNERREZ_WEBHOOK_USER` / `OWNERREZ_WEBHOOK_PASSWORD`), Hospitable uses an IP-range allowlist plus an HMAC-SHA256 `Signature` header (`HOSPITABLE_WEBHOOK_SECRET`), Kroger has no inbound webhooks at all. Every event is also deduped against a content-hash keyed row in `processed_webhooks` — not `payload.id`, whose semantics vary by provider
 
 Webhook handlers are in the `BYPASS_ROUTES` list so they are reachable by external services without a session, but they authenticate themselves.
 

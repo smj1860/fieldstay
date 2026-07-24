@@ -84,7 +84,7 @@ describe('turnoverPriorityDecay', () => {
         },
       ],
       bookings: [
-        { data: null, error: null }, // no upcoming booking found
+        { data: [], error: null }, // no upcoming bookings for any candidate property
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -100,15 +100,16 @@ describe('turnoverPriorityDecay', () => {
     const updateCall = supabase.calls.find((c) => c.table === 'turnovers' && c.method === 'update')
     expect(updateCall?.args[0]).toEqual({ priority: 'low' })
 
-    // Optimistic lock — the update is scoped to priority='medium' so a
-    // concurrent manual override between the check and this write isn't clobbered.
-    const eqCalls = supabase.calls.filter(
-      (c) => c.table === 'turnovers' && c.method === 'eq' && supabase.calls.indexOf(c) > supabase.calls.indexOf(updateCall!)
+    // Batched downgrade (.in on ids) + optimistic lock — the update is scoped
+    // to priority='medium' so a concurrent manual override between the check
+    // and this write isn't clobbered.
+    const laterCalls = supabase.calls.filter(
+      (c) => c.table === 'turnovers' && supabase.calls.indexOf(c) > supabase.calls.indexOf(updateCall!)
     )
-    expect(eqCalls).toEqual(
+    expect(laterCalls).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ args: ['id', 'to_1'] }),
-        expect.objectContaining({ args: ['priority', 'medium'] }),
+        expect.objectContaining({ method: 'in', args: ['id', ['to_1']] }),
+        expect.objectContaining({ method: 'eq', args: ['priority', 'medium'] }),
       ]),
     )
   })
@@ -124,7 +125,8 @@ describe('turnoverPriorityDecay', () => {
         },
       ],
       bookings: [
-        { data: { id: 'booking_1' }, error: null }, // an upcoming booking exists
+        // an upcoming booking exists within the 14-day window
+        { data: [{ property_id: 'prop_2', checkin_date: '2026-07-30' }], error: null },
       ],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -137,5 +139,34 @@ describe('turnoverPriorityDecay', () => {
 
     expect(result).toEqual({ checked: 1, downgraded: 0 })
     expect(supabase.calls.some((c) => c.method === 'update')).toBe(false)
+  })
+
+  it('downgrades only the turnovers whose own window lacks a booking when candidates share a batch', async () => {
+    const supabase = makeSupabase({
+      turnovers: [
+        {
+          data: [
+            { id: 'to_a', property_id: 'prop_a', checkout_datetime: '2026-07-25T15:00:00.000Z' },
+            { id: 'to_b', property_id: 'prop_b', checkout_datetime: '2026-07-25T15:00:00.000Z' },
+          ],
+          error: null,
+        },
+      ],
+      bookings: [
+        // prop_b has a booking in window; prop_a has none
+        { data: [{ property_id: 'prop_b', checkin_date: '2026-08-01' }], error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(turnoverPriorityDecay, {
+      event:  {},
+      step:   makeStep(),
+      logger: { info: vi.fn(), error: vi.fn() },
+    })
+
+    expect(result).toEqual({ checked: 2, downgraded: 1 })
+    const inCall = supabase.calls.find((c) => c.table === 'turnovers' && c.method === 'in')
+    expect(inCall?.args).toEqual(['id', ['to_a']])
   })
 })

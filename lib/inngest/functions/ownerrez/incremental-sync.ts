@@ -1,39 +1,41 @@
 /**
  * OwnerRez Incremental Sync
  *
- * Triggered by:
- *  - Inngest cron:    hourly (0 * * * *) — reliability backstop, always a
- *                      full sweep of every active connection
- *  - Webhook event:   integration/ownerrez.sync.requested — scoped to the
+ * Two functions:
+ *
+ * 1. ownerRezIncrementalSync — DISPATCHER. Triggered by:
+ *     - Inngest cron:  hourly (0 * * * *) — reliability backstop, sweeps
+ *                      every active connection
+ *     - Webhook event: integration/ownerrez.sync.requested — scoped to the
  *                      one connection the webhook belongs to when
  *                      ownerrez.ts's handleWebhookEvent resolved it (falls
  *                      back to a full sweep when it couldn't)
- *  - Manual event:    ownerrez/sync.now.requested — always scoped to the
- *                      PM's own connection (org_id/user_id come straight
- *                      from their session, no resolution needed)
+ *     - Manual event:  ownerrez/sync.now.requested — always scoped to the
+ *                      PM's own connection
+ *    It only finds connections and fans out one
+ *    `ownerrez/connection.sync.requested` event per connection.
  *
- * A scoped (single-connection) run costs ~2 requests against OwnerRez's
- * shared-IP rate-limit budget (see ownerrez-api.ts) instead of looping
- * every tenant on the platform — see FUTURE_REMEDIATION.md's OwnerRez
- * scaling note for why this matters as connection count grows. The cron
- * was moved from every 15 minutes to hourly specifically because this
- * scoping exists: real-time-ish updates now travel via the (cheap, scoped)
- * webhook path, and the cron's only job is to catch whatever a webhook
- * missed — a wider window is fine for a backstop, not fine for the only
- * path data has.
+ * 2. ownerRezConnectionSync — PER-CONNECTION HANDLER. Does the actual work
+ *    for one connection under its own concurrency cap and retry policy.
  *
- * For each active OwnerRez connection:
- *  1. Read sync_cursor from metadata
- *  2. Fetch bookings + guests since cursor using since_utc
- *  3. Resolve FieldStay property_id from OwnerRez property external IDs
- *  4. Upsert results
- *  5. Update sync_cursor (using pre-fetch timestamp) and last_synced_at
+ * Why fan-out (see FUTURE_REMEDIATION.md's OwnerRez scaling note): the
+ * previous shape looped every connection serially inside one invocation.
+ * A RateLimitError from the shared-IP budget broke the WHOLE tick — every
+ * connection after the one that tripped it was parked until the next
+ * hourly cron. With per-connection runs, a rate-limited connection retries
+ * alone with Inngest's backoff (resuming as soon as the 5-minute budget
+ * window rolls) and no other tenant is affected. Fair-share enforcement
+ * lives in ownerrez-api.ts's checkAndIncrementRequestBudget, which caps a
+ * single connection to half the budget under contention.
  *
- * Each user runs in its own step.run() so failures are isolated. A
- * RateLimitError from any connection ends the tick immediately (no sleep —
- * the shared budget is exhausted for every remaining connection too; see
- * the `if (rateLimited) break` below) rather than delaying and retrying
- * within the same run.
+ * The per-connection new-property diff (a full getProperties() call) used
+ * to run every tick for every connection — 100+ requests/hour of pure
+ * diffing at 100 connections. New-property discovery is now webhook-primary:
+ * ownerrez.ts routes property entity_insert/entity_create webhooks into the
+ * scoped sync path (scoped runs always request the diff), so a property
+ * added in OwnerRez is discovered within moments. The hourly cron only
+ * requests the diff once a day (NEW_PROPERTY_DIFF_UTC_HOUR) as a
+ * missed-webhook backstop; manual "Resync" clicks also always request it.
  *
  * TODO(CLAUDE_55_5 Task 7): This function does not currently handle OwnerRez
  * property entity_update webhooks — it only fetches bookings via since_utc.
@@ -64,12 +66,20 @@ import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connectio
 
 const PROVIDER = 'ownerrez'
 
+const CIRCUIT_KEY       = 'ownerrez:circuit:consecutive_failures'
+const CIRCUIT_THRESHOLD = 10
+
+// The cron tick (hourly, minute 0) whose fan-out requests the new-property
+// diff — 10:00 UTC is early-morning US, away from the 13:00-14:00 UTC daily
+// cron cluster and low booking-webhook traffic.
+const NEW_PROPERTY_DIFF_UTC_HOUR = 10
+
 export const ownerRezIncrementalSync = inngest.createFunction(
   {
     id:          'ownerrez-incremental-sync',
     name:        'OwnerRez Incremental Sync',
-    retries:     3,
-    concurrency: { limit: 5 },
+    retries:     2,
+    concurrency: { limit: 1 },
   },
   [
     { cron: '0 * * * *' },
@@ -77,33 +87,32 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     { event: 'ownerrez/sync.now.requested' as const },
   ],
   async ({ event, step, logger }) => {
-    const workflowId = crypto.randomUUID()
-
     // Inngest's synthetic cron-tick event has no `data.user_id` — only the
     // two real event triggers carry one, and only when the webhook path
     // successfully resolved a connection (see ownerrez.ts's
     // handleWebhookEvent). Its absence means "do a full sweep", the same
     // behavior this function always had before scoping existed.
     const scopedUserId = event?.data && 'user_id' in event.data ? event.data.user_id : undefined
-    logger.info('ownerrez-incremental-sync triggered', { workflowId, scoped: Boolean(scopedUserId) })
+    logger.info('ownerrez-incremental-sync triggered', { scoped: Boolean(scopedUserId) })
 
-    // Circuit breaker: if the OwnerRez API is degraded, skip this cron tick.
+    // Circuit breaker: if the OwnerRez API is degraded, skip this tick
+    // entirely rather than queueing per-connection runs that will all fail.
     const circuitOpen = await step.run('check-circuit-breaker', async () => {
-      const redis    = getRedis()
-      const failCount = await redis.get<number>('ownerrez:circuit:consecutive_failures') ?? 0
-      return failCount >= 10
+      const redis     = getRedis()
+      const failCount = await redis.get<number>(CIRCUIT_KEY) ?? 0
+      return failCount >= CIRCUIT_THRESHOLD
     })
 
     if (circuitOpen) {
-      logger.warn('[OwnerRez] Circuit breaker open — skipping cron tick, waiting for recovery')
-      return { synced: 0, circuit_open: true }
+      logger.warn('[OwnerRez] Circuit breaker open — skipping tick, waiting for recovery')
+      return { dispatched: 0, circuit_open: true }
     }
 
     const connections = await step.run('fetch-connections', async () => {
       const supabase = createServiceClient()
       let query = supabase
         .from('integration_connections')
-        .select('id, user_id, org_id, external_user_id, metadata')
+        .select('id, user_id, org_id, external_user_id')
         .eq('provider_id', PROVIDER)
         .eq('status', 'active')
 
@@ -115,76 +124,131 @@ export const ownerRezIncrementalSync = inngest.createFunction(
 
     if (!connections.length) {
       logger.info('[OwnerRez] No active connections to sync')
-      return { synced: 0 }
+      return { dispatched: 0 }
     }
 
-    let syncedCount   = 0
-    let rateLimitedAt: string | null = null
+    // The new-property diff costs one full getProperties() per connection —
+    // budget-relevant at scale. Discovery is webhook-primary (see header):
+    // the hourly backstop only requests it once a day, for webhooks that
+    // never arrived. Scoped (webhook/manual) runs always get it.
+    const checkNewProperties = scopedUserId
+      ? true
+      : new Date().getUTCHours() === NEW_PROPERTY_DIFF_UTC_HOUR
 
-    for (const conn of connections) {
-      // ── Check for properties added in OwnerRez since the last sync ──────
-      // getBookings() below only ever asks about properties FieldStay already
-      // knows — a property added in OwnerRez (or restored after a reconnect)
-      // was otherwise invisible until the PM noticed and clicked "Resync" by
-      // hand. The property list is small and cheap to fetch in full (unlike
-      // bookings, which use the since_utc cursor), so diff it every tick and
-      // re-fire the initial-sync event when something new shows up — that
-      // event's steps already no-op for properties that are fully set up, so
-      // re-running it is safe and only does real work for the new ones.
-      if (conn.org_id) {
-        const newPropertyIds = await step.run(`check-new-properties-${conn.user_id}`, async () => {
-          const supabase = createServiceClient()
-          try {
-            const orProperties = await new OwnerRezApiClient(conn.user_id).getProperties()
-            if (!orProperties.length) return []
+    await step.sendEvent(
+      'fan-out-connection-syncs',
+      connections.map((conn) => ({
+        name: 'ownerrez/connection.sync.requested' as const,
+        data: {
+          connection_id:        conn.id,
+          user_id:              conn.user_id,
+          org_id:               conn.org_id ?? '',
+          external_user_id:     conn.external_user_id ?? '',
+          check_new_properties: checkNewProperties,
+        },
+      }))
+    )
 
-            const { data: known } = await supabase
-              .from('properties')
-              .select('external_id')
-              .eq('org_id', conn.org_id)
-              .eq('external_source', PROVIDER)
+    return { dispatched: connections.length }
+  }
+)
 
-            const knownIds = new Set((known ?? []).map((p) => p.external_id))
-            return orProperties
-              .map((p) => String(p.id))
-              .filter((id) => !knownIds.has(id))
-          } catch (err) {
-            logger.warn(`[OwnerRez:${conn.user_id}] new-property check failed: ${err instanceof Error ? err.message : String(err)}`)
-            return []
-          }
-        })
+export const ownerRezConnectionSync = inngest.createFunction(
+  {
+    id:          'ownerrez-connection-sync',
+    name:        'OwnerRez Connection Sync — per connection',
+    retries:     3,
+    // Global cap on concurrent OwnerRez API pressure. The shared-IP budget
+    // in ownerrez-api.ts is the hard limit; this keeps burst shape sane.
+    concurrency: { limit: 3 },
+  },
+  { event: 'ownerrez/connection.sync.requested' },
+  async ({ event, step, logger }) => {
+    const { connection_id: connectionId, user_id: userId, check_new_properties: checkNewProperties } = event.data
+    const orgId = event.data.org_id || null
 
-        if (newPropertyIds.length) {
-          logger.info(
-            `[OwnerRez:${conn.user_id}] ${newPropertyIds.length} new propert` +
-            `${newPropertyIds.length === 1 ? 'y' : 'ies'} found — re-running initial sync`
-          )
-          await step.sendEvent(`fire-new-properties-sync-${conn.user_id}`, {
-            name: 'integration/ownerrez.connected',
-            data: {
-              user_id:          conn.user_id,
-              org_id:           conn.org_id,
-              external_user_id: conn.external_user_id ?? '',
-            },
-          })
-        }
-      }
+    // Queued runs dispatched before the breaker opened must not pile onto a
+    // degraded API — re-check here, not just in the dispatcher.
+    const circuitOpen = await step.run('check-circuit-breaker', async () => {
+      const redis     = getRedis()
+      const failCount = await redis.get<number>(CIRCUIT_KEY) ?? 0
+      return failCount >= CIRCUIT_THRESHOLD
+    })
 
-      // Fail-fast rate-limit handling: set inside step.run, checked outside.
-      // No retry-after sleep — see the `if (rateLimited) break` below for why.
-      let rateLimited = false
+    if (circuitOpen) {
+      logger.warn(`[OwnerRez:${userId}] Circuit breaker open — skipping connection sync`)
+      return { skipped: 'circuit_open' }
+    }
 
-      type SyncSuccess = {
-        affectedPropertyIds:    string[]
-        bookingsToPostRevenue: { bookingId: string; propertyId: string; actualTotalAmount: number | null }[]
-      }
-      let syncResult: SyncSuccess | { skipped: boolean; reason: string } | null | undefined
-      try {
-      syncResult = await step.run(`sync-user-${conn.user_id}`, async () => {
+    // ── Check for properties added in OwnerRez since the last sync ──────────
+    // getBookings() below only ever asks about properties FieldStay already
+    // knows — a property added in OwnerRez (or restored after a reconnect)
+    // was otherwise invisible until the PM noticed and clicked "Resync" by
+    // hand. Re-firing the initial-sync event is safe: its steps no-op for
+    // properties that are fully set up.
+    if (orgId && checkNewProperties) {
+      const newPropertyIds = await step.run('check-new-properties', async () => {
         const supabase = createServiceClient()
+        try {
+          const orProperties = await new OwnerRezApiClient(userId).getProperties()
+          if (!orProperties.length) return []
+
+          const { data: known } = await supabase
+            .from('properties')
+            .select('external_id')
+            .eq('org_id', orgId)
+            .eq('external_source', PROVIDER)
+
+          const knownIds = new Set((known ?? []).map((p) => p.external_id))
+          return orProperties
+            .map((p) => String(p.id))
+            .filter((id) => !knownIds.has(id))
+        } catch (err) {
+          logger.warn(`[OwnerRez:${userId}] new-property check failed: ${err instanceof Error ? err.message : String(err)}`)
+          return []
+        }
+      })
+
+      if (newPropertyIds.length) {
+        logger.info(
+          `[OwnerRez:${userId}] ${newPropertyIds.length} new propert` +
+          `${newPropertyIds.length === 1 ? 'y' : 'ies'} found — re-running initial sync`
+        )
+        await step.sendEvent('fire-new-properties-sync', {
+          name: 'integration/ownerrez.connected',
+          data: {
+            user_id:          userId,
+            org_id:           orgId,
+            external_user_id: event.data.external_user_id,
+          },
+        })
+      }
+    }
+
+    type SyncSuccess = {
+      affectedPropertyIds:    string[]
+      bookingsToPostRevenue: { bookingId: string; propertyId: string; actualTotalAmount: number | null }[]
+    }
+    const syncResult: SyncSuccess | { skipped: boolean; reason: string } | null | undefined =
+      await step.run('sync-connection', async () => {
+        const supabase = createServiceClient()
+
+        // Re-fetch the connection: metadata (sync_cursor) and status may have
+        // changed between dispatch and this run — a revoked/disconnected
+        // connection must not be synced off a stale snapshot.
+        const { data: conn } = await supabase
+          .from('integration_connections')
+          .select('id, user_id, org_id, external_user_id, metadata, status')
+          .eq('id', connectionId)
+          .maybeSingle()
+
+        if (!conn || conn.status !== 'active') {
+          return { skipped: true, reason: 'connection_not_active' }
+        }
+
         const metadata = (conn.metadata ?? {}) as Record<string, unknown>
         const sinceUtc = (metadata['sync_cursor'] as string | undefined) ?? undefined
-        const client   = new OwnerRezApiClient(conn.user_id)
+        const client   = new OwnerRezApiClient(userId)
 
         // When no cursor exists yet (e.g. fresh reconnect before initial sync sets one),
         // fall back to property_ids so OwnerRez receives at least one required parameter.
@@ -203,7 +267,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           if (!ids.length) {
             // No connected properties yet (initial sync hasn't run/completed) —
             // skip rather than calling OwnerRez with neither required param.
-            console.log(`[OwnerRez:${conn.user_id}] No connected properties and no sync cursor — skipping`)
+            console.log(`[OwnerRez:${userId}] No connected properties and no sync cursor — skipping`)
             return { skipped: true, reason: 'no_cursor_no_properties' }
           }
           propertyIds = ids
@@ -251,7 +315,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
                 )
                 reportError(
                   new Error(propsLookupError?.message ?? 'Property lookup returned no data'),
-                  { site: 'inngest.ownerrez-incremental-sync.property_lookup', orgId: conn.org_id },
+                  { site: 'inngest.ownerrez-connection-sync.property_lookup', orgId: conn.org_id },
                 )
                 return
               }
@@ -269,7 +333,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               .select('id, external_id')
 
             if (error) {
-              logger.error(`[OwnerRez:${conn.user_id}] bookings upsert: ${error.message}`)
+              logger.error(`[OwnerRez:${userId}] bookings upsert: ${error.message}`)
               throw new Error(error.message)
             }
 
@@ -362,35 +426,32 @@ export const ownerRezIncrementalSync = inngest.createFunction(
             })
           } catch (cursorErr) {
             // Non-fatal: data was written correctly; log and continue
-            logger.error(`[OwnerRez:${conn.user_id}] cursor update failed: ${cursorErr instanceof Error ? cursorErr.message : String(cursorErr)}`)
+            logger.error(`[OwnerRez:${userId}] cursor update failed: ${cursorErr instanceof Error ? cursorErr.message : String(cursorErr)}`)
           }
 
-          logger.info(`[OwnerRez:${conn.user_id}] sync complete — ${bookings.length} bookings`, {
-            workflowId,
+          logger.info(`[OwnerRez:${userId}] sync complete — ${bookings.length} bookings`, {
             bookingCount: bookings.length,
           })
-          syncedCount++
 
           // Reset circuit breaker on success
           try {
             const redis = getRedis()
-            await redis.del('ownerrez:circuit:consecutive_failures')
+            await redis.del(CIRCUIT_KEY)
           } catch { /* non-fatal */ }
 
           return { affectedPropertyIds, bookingsToPostRevenue }
 
         } catch (err) {
           if (err instanceof RateLimitError) {
-            // Fail fast: the 300-req/5min budget is shared across every
-            // tenant on this deployment's IP, so every connection after
-            // this one in the loop would immediately hit the same
-            // exhausted budget too. Set a flag; the outer loop ends this
-            // tick entirely below rather than sleeping through it — this
-            // connection's own sync_cursor didn't advance either way, so
-            // it (and everything after it) picks up on the next scheduled
-            // hourly tick in a fresh rate-limit window.
-            rateLimited = true
-            logger.warn(`[OwnerRez:${conn.user_id}] Rate limited (retry after ${err.retryAfter}s) — ending this tick early`)
+            // The shared-IP budget (or this connection's fair share of it)
+            // is exhausted. Write transient status, then RETHROW so Inngest
+            // retries this step with backoff — the 5-minute budget window
+            // rolls well within the retry schedule, so this connection
+            // resumes on its own instead of parking until the next hourly
+            // cron. Other connections run independently and are unaffected
+            // (this was the old serial loop's `break`-the-whole-tick
+            // failure mode).
+            logger.warn(`[OwnerRez:${userId}] Rate limited (retry after ${err.retryAfter}s) — will retry with backoff`)
 
             // Write transient rate-limit status — don't change connection status to 'error'
             await mergeIntegrationConnectionMetadata({
@@ -402,12 +463,12 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               },
             })
 
-            return  // exit this step cleanly without failing it
+            throw err
           }
 
           if (err instanceof TokenRevokedError) {
             const humanError = translateSyncError(err)
-            logger.error(`[OwnerRez:${conn.user_id}] Token revoked — marking connection as revoked`)
+            logger.error(`[OwnerRez:${userId}] Token revoked — marking connection as revoked`)
 
             await mergeIntegrationConnectionMetadata({
               userId:     conn.user_id,
@@ -428,56 +489,19 @@ export const ownerRezIncrementalSync = inngest.createFunction(
               metadata:   { provider_id: PROVIDER, reason: 'token_revoked' },
             })
 
-            // Fire PM notification — throttled to once per 4 hours per connection.
-            // Revoked tokens are the most important case to notify on: only the PM
-            // can fix them by reconnecting, and they never self-resolve on retry.
-            try {
-              const milestoneKey = `integration_error_notified:${conn.id}`
-              const { data: recentNotification } = await supabase
-                .from('org_milestones')
-                .select('value, achieved_at')
-                .eq('org_id', conn.org_id)
-                .eq('milestone', milestoneKey)
-                .order('achieved_at', { ascending: false })
-                .limit(1)
-                .maybeSingle()
-
-              const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
-                ?.notified_at
-              const tooSoon = lastNotifiedAt &&
-                Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
-
-              if (!tooSoon) {
-                await step.sendEvent('notify-revoked-connection', {
-                  name: 'integration/connection.error',
-                  data: {
-                    user_id:     conn.user_id,
-                    org_id:      conn.org_id ?? '',
-                    provider_id: PROVIDER,
-                    reason:      humanError,
-                  },
-                })
-                await supabase.from('org_milestones').upsert({
-                  org_id:    conn.org_id,
-                  milestone: milestoneKey,
-                  value:     { notified_at: new Date().toISOString() },
-                }, { onConflict: 'org_id,milestone' })
-              }
-            } catch { /* non-fatal — connection status was already written */ }
+            await notifyConnectionErrorThrottled(supabase, conn.id, userId, conn.org_id, humanError)
 
             // MEDIUM-6: token revocation is permanent — retrying will only hit
-            // the same revoked token again. Throw NonRetriableError (after the
-            // side effects above already completed) so this is recorded as a
-            // distinct non-retriable failure in Inngest's dashboard instead of
-            // silently looking like a success. The per-connection loop below
-            // catches this so one revoked connection can't block the rest of
-            // this tick's batch.
+            // the same revoked token again. NonRetriableError (after the side
+            // effects above already completed) records this as a distinct
+            // non-retriable failure in Inngest's dashboard. With one
+            // connection per run, nothing else is blocked by it.
             throw new NonRetriableError(humanError)
           }
 
           const humanError = translateSyncError(err)
           logger.error(
-            `[OwnerRez:${conn.user_id}] sync failed: ${err instanceof Error ? err.message : String(err)}`
+            `[OwnerRez:${userId}] sync failed: ${err instanceof Error ? err.message : String(err)}`
           )
 
           await mergeIntegrationConnectionMetadata({
@@ -502,173 +526,165 @@ export const ownerRezIncrementalSync = inngest.createFunction(
           // Increment circuit breaker counter (expires in 30 minutes)
           try {
             const redis    = getRedis()
-            const key      = 'ownerrez:circuit:consecutive_failures'
-            const newCount = await redis.incr(key)
-            if (newCount === 1) await redis.expire(key, 30 * 60)
+            const newCount = await redis.incr(CIRCUIT_KEY)
+            if (newCount === 1) await redis.expire(CIRCUIT_KEY, 30 * 60)
           } catch { /* non-fatal */ }
 
-          // Fire PM notification — throttled to once per 4 hours per connection
-          try {
-            const milestoneKey = `integration_error_notified:${conn.id}`
-            const { data: recentNotification } = await supabase
-              .from('org_milestones')
-              .select('value, achieved_at')
-              .eq('org_id', conn.org_id)
-              .eq('milestone', milestoneKey)
-              .order('achieved_at', { ascending: false })
-              .limit(1)
-              .maybeSingle()
-
-            const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
-              ?.notified_at
-            const tooSoon = lastNotifiedAt &&
-              Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
-
-            if (!tooSoon) {
-              await step.sendEvent('notify-connection-error', {
-                name: 'integration/connection.error',
-                data: {
-                  user_id:     conn.user_id,
-                  org_id:      conn.org_id ?? '',
-                  provider_id: PROVIDER,
-                  reason:      humanError,
-                },
-              })
-              await supabase.from('org_milestones').upsert({
-                org_id:    conn.org_id,
-                milestone: milestoneKey,
-                value:     { notified_at: new Date().toISOString() },
-              }, { onConflict: 'org_id,milestone' })
-            }
-          } catch { /* non-fatal — data was already written to metadata */ }
+          await notifyConnectionErrorThrottled(supabase, conn.id, userId, conn.org_id, humanError)
         }
       })
-      } catch (err) {
-        // The token-revoked branch above throws NonRetriableError after its
-        // side effects (status update, audit log, notification) already
-        // completed — Inngest still records that step as a distinct
-        // non-retriable failure. Swallow it here so one revoked connection
-        // doesn't stop the rest of this tick's connections from syncing.
-        if (err instanceof NonRetriableError) {
-          logger.warn(`[OwnerRez:${conn.user_id}] Skipping — ${err instanceof Error ? err.message : String(err)}`)
-          continue
+
+    const affectedIds = syncResult && 'affectedPropertyIds' in syncResult
+      ? syncResult.affectedPropertyIds
+      : []
+
+    // Post booking revenue for newly-confirmed guest-stay bookings. Mirrors
+    // Hospitable's incremental-sync pattern: sendEvent happens at the top
+    // level of the function body, never nested inside step.run.
+    // actual_total_amount now comes from extractOwnerRezActualTotal
+    // (charges[].owner_amount / total_amount, confirmed live 2026-07-15);
+    // booking-events.ts's handleBookingConfirmed still falls back to the
+    // avg_nightly_rate estimate whenever it's null.
+    const bookingsToPostRevenue = syncResult && 'bookingsToPostRevenue' in syncResult
+      ? syncResult.bookingsToPostRevenue
+      : []
+    if (bookingsToPostRevenue.length > 0 && orgId) {
+      await step.sendEvent(
+        'post-booking-revenue',
+        bookingsToPostRevenue.map((b) => ({
+          name: 'booking/confirmed' as const,
+          data: {
+            booking_id:          b.bookingId,
+            property_id:         b.propertyId,
+            org_id:              orgId,
+            source:              'ownerrez' as const,
+            actual_total_amount: b.actualTotalAmount,
+          },
+        }))
+      )
+    }
+
+    // Generate turnovers for any properties that received booking updates.
+    // Called once per property (not per booking) so the generator sees the
+    // full booking list and can apply its two-pass pairing logic correctly.
+    if (affectedIds.length && orgId) {
+      const allNewTurnoverIds = await step.run('generate-turnovers', async () => {
+        const supabase = createServiceClient()
+        const ids: string[] = []
+        for (const propertyId of affectedIds) {
+          try {
+            const newIds = await generateTurnoversForProperty(propertyId, orgId, supabase)
+            ids.push(...newIds)
+          } catch (err) {
+            logger.error(
+              `[OwnerRez:${userId}] Turnover generation failed for property ${propertyId}: ${err}`
+            )
+            // Don't let one property's failure block the others
+          }
         }
-        throw err
-      }
+        return ids
+      })
 
-      // Shared rate-limit budget exhausted — end this tick now rather than
-      // continuing to the next connection (which would immediately hit the
-      // same exhausted budget) or sleeping through it (every connection
-      // after this one would need its own sleep too, stacking into a run
-      // duration with no real ceiling). Nothing below this point runs for
-      // any connection past this one; they're picked up on the next tick.
-      if (rateLimited) {
-        rateLimitedAt = conn.user_id
-        break
-      }
+      if (allNewTurnoverIds.length > 0) {
+        const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
+          const supabase = createServiceClient()
+          type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
+          const { data: turnovers } = await supabase
+            .from('turnovers')
+            .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
+            .in('id', allNewTurnoverIds)
 
-      const affectedIds = syncResult && 'affectedPropertyIds' in syncResult
-        ? syncResult.affectedPropertyIds
-        : []
-
-      // Post booking revenue for newly-confirmed guest-stay bookings. Mirrors
-      // Hospitable's incremental-sync pattern: sendEvent happens at the top
-      // level of the function body, never nested inside step.run.
-      // actual_total_amount now comes from extractOwnerRezActualTotal
-      // (charges[].owner_amount / total_amount, confirmed live 2026-07-15);
-      // booking-events.ts's handleBookingConfirmed still falls back to the
-      // avg_nightly_rate estimate whenever it's null.
-      const bookingsToPostRevenue = syncResult && 'bookingsToPostRevenue' in syncResult
-        ? syncResult.bookingsToPostRevenue
-        : []
-      if (bookingsToPostRevenue.length > 0) {
-        await step.sendEvent(
-          `post-booking-revenue-${conn.user_id}`,
-          bookingsToPostRevenue.map((b) => ({
-            name: 'booking/confirmed' as const,
+          return (turnovers as TurnoverRow[] ?? []).map((t) => ({
+            name: 'turnover/created' as const,
             data: {
-              booking_id:          b.bookingId,
-              property_id:         b.propertyId,
-              org_id:              conn.org_id,
-              source:              'ownerrez' as const,
-              actual_total_amount: b.actualTotalAmount,
+              turnover_id:       t.id,
+              property_id:       t.property_id,
+              org_id:            orgId,
+              checkout_datetime: t.checkout_datetime,
+              checkin_datetime:  t.checkin_datetime,
+              window_minutes:    t.window_minutes ?? 0,
             },
           }))
-        )
-      }
-
-      // Generate turnovers for any properties that received booking updates.
-      // Called once per property (not per booking) so the generator sees the
-      // full booking list and can apply its two-pass pairing logic correctly.
-      if (affectedIds.length) {
-        const allNewTurnoverIds = await step.run(`generate-turnovers-${conn.user_id}`, async () => {
-          const supabase = createServiceClient()
-          const ids: string[] = []
-          for (const propertyId of affectedIds) {
-            try {
-              const newIds = await generateTurnoversForProperty(propertyId, conn.org_id, supabase)
-              ids.push(...newIds)
-            } catch (err) {
-              logger.error(
-                `[OwnerRez:${conn.user_id}] Turnover generation failed for property ${propertyId}: ${err}`
-              )
-              // Don't let one property's failure block the others
-            }
-          }
-          return ids
         })
 
-        if (allNewTurnoverIds.length > 0) {
-          const turnoverEvents = await step.run(`fetch-new-turnover-data-${conn.user_id}`, async () => {
-            const supabase = createServiceClient()
-            type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
-            const { data: turnovers } = await supabase
-              .from('turnovers')
-              .select('id, property_id, checkout_datetime, checkin_datetime, window_minutes')
-              .in('id', allNewTurnoverIds)
-
-            return (turnovers as TurnoverRow[] ?? []).map((t) => ({
-              name: 'turnover/created' as const,
-              data: {
-                turnover_id:       t.id,
-                property_id:       t.property_id,
-                org_id:            conn.org_id,
-                checkout_datetime: t.checkout_datetime,
-                checkin_datetime:  t.checkin_datetime,
-                window_minutes:    t.window_minutes ?? 0,
-              },
-            }))
-          })
-
-          if (turnoverEvents.length > 0) {
-            await step.sendEvent(`fire-turnover-created-events-${conn.user_id}`, turnoverEvents)
-          }
+        if (turnoverEvents.length > 0) {
+          await step.sendEvent('fire-turnover-created-events', turnoverEvents)
         }
       }
 
       // Auto-create guidebook property configs for newly synced properties
-      if (affectedIds.length) {
-        await step.run(`create-guidebook-property-configs-${conn.user_id}`, async () => {
-          try {
-            await createGuidebookPropertyConfigsForProperties(conn.org_id, affectedIds)
-          } catch (err) {
-            logger.error(`[OwnerRez:${conn.user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
-          }
-        })
+      await step.run('create-guidebook-property-configs', async () => {
+        try {
+          await createGuidebookPropertyConfigsForProperties(orgId, affectedIds)
+        } catch (err) {
+          logger.error(`[OwnerRez:${userId}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      })
 
-        // No-op until amenities data exists for these properties (this file
-        // doesn't currently fetch property details — see the TODO above), but
-        // included for parity so it activates automatically once it does.
-        await step.run(`seed-present-assets-from-amenities-${conn.user_id}`, async () => {
-          try {
-            await seedPresentAssetsFromAmenities(conn.org_id, affectedIds)
-          } catch (err) {
-            logger.error(`[OwnerRez:${conn.user_id}] present-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
-          }
-        })
-      }
+      // No-op until amenities data exists for these properties (this file
+      // doesn't currently fetch property details — see the TODO above), but
+      // included for parity so it activates automatically once it does.
+      await step.run('seed-present-assets-from-amenities', async () => {
+        try {
+          await seedPresentAssetsFromAmenities(orgId, affectedIds)
+        } catch (err) {
+          logger.error(`[OwnerRez:${userId}] present-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      })
     }
 
-    return { synced: syncedCount, total: connections.length, rate_limited_at: rateLimitedAt }
+    const synced = Boolean(syncResult && 'affectedPropertyIds' in syncResult)
+    return { connectionId, synced }
   }
 )
+
+/**
+ * Fire a PM notification about a broken connection — throttled to once per
+ * 4 hours per connection via an org_milestones timestamp. Shared by the
+ * token-revoked and generic-error paths (previously duplicated inline).
+ * Runs inside the sync step, so failures here are deliberately swallowed:
+ * connection status/metadata were already written.
+ */
+async function notifyConnectionErrorThrottled(
+  supabase: ReturnType<typeof createServiceClient>,
+  connectionId: string,
+  userId: string,
+  orgId: string | null,
+  humanError: string
+): Promise<void> {
+  try {
+    const milestoneKey = `integration_error_notified:${connectionId}`
+    const { data: recentNotification } = await supabase
+      .from('org_milestones')
+      .select('value, achieved_at')
+      .eq('org_id', orgId)
+      .eq('milestone', milestoneKey)
+      .order('achieved_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    const lastNotifiedAt = (recentNotification?.value as Record<string, unknown> | null)
+      ?.notified_at
+    const tooSoon = lastNotifiedAt &&
+      Date.now() - new Date(lastNotifiedAt as string).getTime() < 4 * 60 * 60 * 1000
+
+    if (!tooSoon) {
+      // Revoked tokens are the most important case to notify on: only the PM
+      // can fix them by reconnecting, and they never self-resolve on retry.
+      await inngest.send({
+        name: 'integration/connection.error',
+        data: {
+          user_id:     userId,
+          org_id:      orgId ?? '',
+          provider_id: PROVIDER,
+          reason:      humanError,
+        },
+      })
+      await supabase.from('org_milestones').upsert({
+        org_id:    orgId,
+        milestone: milestoneKey,
+        value:     { notified_at: new Date().toISOString() },
+      }, { onConflict: 'org_id,milestone' })
+    }
+  } catch { /* non-fatal — connection status was already written */ }
+}

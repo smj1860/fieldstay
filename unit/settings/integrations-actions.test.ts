@@ -105,6 +105,10 @@ describe('settings/integrations/actions', () => {
     // mockResolvedValue() override — reset explicitly so a rate-limit-denied
     // test earlier in the suite can't leak into a later happy-path test.
     vi.mocked(integrationResyncLimiter.limit).mockResolvedValue({ success: true } as never)
+    // Same hazard: the "local disconnect fails" test sets a rejected
+    // implementation on disconnectIntegrationToken — reset it so tests that
+    // run after it get the default resolved behavior back.
+    vi.mocked(disconnectIntegrationToken).mockReset()
   })
 
   describe('getSyncProgress', () => {
@@ -234,7 +238,7 @@ describe('settings/integrations/actions', () => {
 
       const result = await disconnectIntegration('hospitable')
 
-      expect(result).toEqual({ error: 'This integration isn’t connected.' })
+      expect(result).toEqual({ error: "This integration isn't connected." })
       expect(readIntegrationToken).not.toHaveBeenCalled()
       expect(disconnectIntegrationToken).not.toHaveBeenCalled()
     })

@@ -7,7 +7,7 @@ All notable changes to FieldStay are documented here. The format follows [Keep a
 ## [Unreleased]
 
 ### Changed
-- **Migrated client-side offline sync from PowerSync to Dexie.js.** Client reads now come from a local IndexedDB database (`lib/dexie/schema.ts`) instead of PowerSync's local SQLite layer. Mutations are queued in a local `mutations` outbox table and drained by a custom `SyncEngine` (`lib/dexie/syncService.ts`), mirroring PowerSync's per-record retry behavior but pushing/pulling against Supabase directly instead of through the PowerSync Cloud relay. `lib/powersync/` has been removed and the `powersync` package dropped from `package.json` in favor of `dexie` / `dexie-react-hooks`. `NEXT_PUBLIC_POWERSYNC_URL` is no longer required. (Note: several Supabase view names, e.g. `powersync_crew_*`, still carry the old name — renaming those is a separate follow-up, not part of this migration.)
+- **Migrated client-side offline sync from PowerSync to Dexie.js.** Client reads now come from a local IndexedDB database (`lib/dexie/schema.ts`) instead of PowerSync's local SQLite layer. Mutations are queued in a local `mutations` outbox table and drained by a custom `SyncEngine` (`lib/dexie/syncService.ts`), mirroring PowerSync's per-record retry behavior but pushing/pulling against Supabase directly instead of through the PowerSync Cloud relay. `lib/powersync/` has been removed and the `powersync` package dropped from `package.json` in favor of `dexie` / `dexie-react-hooks`. `NEXT_PUBLIC_POWERSYNC_URL` is no longer required. The `powersync_crew_*` views/triggers noted as a follow-up here have since been fully dropped (`20260611063549_drop_powersync_helper_views.sql`, `20260622123556_drop_dangling_powersync_crew_sync_triggers.sql`) — they no longer exist in the schema at all.
 
 ### Fixed
 - Mobile "More" drawer nav order now matches the desktop sidebar order (Reviews moved directly after Properties)
@@ -22,8 +22,14 @@ All notable changes to FieldStay are documented here. The format follows [Keep a
 - `work-order-events.ts` `handleWorkOrderCompletedViaPortal` no longer writes to `owner_transactions` at all (PM notification only), eliminating the dual-handler double-post race with `handleWorkOrderCompleted`
 
 ### In Progress
-- UI/UX audit implementation: sidebar navigation grouping, dark-mode CSS token fixes, notification bell wiring
+- UI/UX audit implementation: sidebar navigation grouping, dark-mode CSS token fixes
 - Supabase-generated TypeScript types (replacing hand-maintained `types/database.ts`)
+
+### Also shipped since 0.13.0 (not yet cut into a dated release below)
+- In-app notification bell (`notifications` table, `components/notification-bell.tsx`) replacing 7 PM email categories, plus a daily 6pm PM wrap-up digest (`notification_digest_state`)
+- Sentry (`@sentry/nextjs`) added for error + performance tracing, taking over OTEL tracer-provider registration from the removed `@vercel/otel`
+- Hospitable PMS integration (OAuth2, booking/property/teammate/review sync, revenue automation) — now first-class alongside OwnerRez, including in the onboarding wizard
+- Templates Hub (`/templates`): Room Library Builder, org-level inventory and maintenance catalogs — replaced the old org master checklist/maintenance-schedule seed tables
 
 ---
 

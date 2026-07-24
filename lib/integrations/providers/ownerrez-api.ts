@@ -41,6 +41,14 @@ const RATE_LIMIT_KEY    = 'ownerrez:ip:request_count'
 const RATE_LIMIT_WINDOW = 5 * 60   // 5 minutes in seconds
 const RATE_LIMIT_BUDGET = 270      // 270/300 — 10% headroom before auto-disable
 
+// Fair-share: once the shared window is under real contention (more than
+// half consumed), no single connection may hold more than half the budget.
+// When the window is idle, a lone large sync (e.g. an initial import) may
+// still use the whole budget — the per-connection cap only exists to stop
+// one tenant from starving every other tenant's sync during a busy window.
+const PER_CONNECTION_BUDGET  = 135
+const CONTENTION_THRESHOLD   = 135
+
 let _redis: Redis | null = null
 export function getRedis(): Redis {
   if (!_redis) {
@@ -52,21 +60,34 @@ export function getRedis(): Redis {
   return _redis
 }
 
-async function checkAndIncrementRequestBudget(): Promise<void> {
+async function checkAndIncrementRequestBudget(userId: string): Promise<void> {
   const redis    = getRedis()
+  const connKey  = `${RATE_LIMIT_KEY}:conn:${userId}`
   const pipeline = redis.pipeline()
   pipeline.incr(RATE_LIMIT_KEY)
   pipeline.ttl(RATE_LIMIT_KEY)
-  const [count, ttl] = await pipeline.exec() as [number, number]
+  pipeline.incr(connKey)
+  pipeline.ttl(connKey)
+  const [count, ttl, connCount, connTtl] = await pipeline.exec() as [number, number, number, number]
 
   // Set window expiry only on the first request (ttl = -1 means no expiry set yet)
   if (ttl === -1) {
     await redis.expire(RATE_LIMIT_KEY, RATE_LIMIT_WINDOW)
   }
+  if (connTtl === -1) {
+    await redis.expire(connKey, RATE_LIMIT_WINDOW)
+  }
 
   if (count > RATE_LIMIT_BUDGET) {
     // Proactive throw — tell callers how long to wait for the window to expire
     const remainingSeconds = ttl > 0 ? ttl : RATE_LIMIT_WINDOW
+    throw new RateLimitError(remainingSeconds)
+  }
+
+  if (count > CONTENTION_THRESHOLD && connCount > PER_CONNECTION_BUDGET) {
+    // This connection has consumed more than its fair share of a contended
+    // window — throttle it alone; other tenants keep syncing.
+    const remainingSeconds = connTtl > 0 ? connTtl : RATE_LIMIT_WINDOW
     throw new RateLimitError(remainingSeconds)
   }
 }
@@ -83,8 +104,9 @@ export class OwnerRezApiClient {
   ): Promise<T> {
     // HIGH-2: check shared IP budget before making the request.
     // Throws RateLimitError proactively at 270/300 to prevent exhausting the pool
-    // shared by all tenants on the same Vercel deployment IP.
-    await checkAndIncrementRequestBudget()
+    // shared by all tenants on the same Vercel deployment IP, and enforces the
+    // per-connection fair-share cap under contention.
+    await checkAndIncrementRequestBudget(this.userId)
 
     const clientId = process.env.OWNERREZ_CLIENT_ID
     if (!clientId) throw new Error('OWNERREZ_CLIENT_ID is not set')

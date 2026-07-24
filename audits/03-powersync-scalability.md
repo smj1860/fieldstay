@@ -1,5 +1,7 @@
 # PowerSync, Local-First Sync & Scalability Audit
 
+> **OBSOLETE — this audit covers `lib/powersync/*`, which has been fully removed and replaced by the Dexie/IndexedDB local-first sync layer (see CLAUDE.md). Every finding below refers to deleted code, not merely superseded code.**
+
 ## Executive Summary
 
 FieldStay has no version-controlled PowerSync sync-rule definitions anywhere in

@@ -23,15 +23,8 @@ export function CancelConfirmDialog({
       onClose={onClose}
       title="Cancel this work order?"
       maxWidthClassName="max-w-sm"
-    >
-      <div className="space-y-4">
-        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-          This marks work order {woNumber ?? ''} as cancelled and logs the change. This cannot be undone from here.
-        </p>
-        {actionError && (
-          <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
-        )}
-        <div className="flex items-center gap-3">
+      footer={
+        <>
           <Button
             type="button"
             variant="danger"
@@ -50,7 +43,16 @@ export function CancelConfirmDialog({
           >
             Never Mind
           </Button>
-        </div>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+          This marks work order {woNumber ?? ''} as cancelled and logs the change. This cannot be undone from here.
+        </p>
+        {actionError && (
+          <p className="text-xs" style={{ color: 'var(--accent-red)' }}>{actionError}</p>
+        )}
       </div>
     </Dialog>
   )

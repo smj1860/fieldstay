@@ -395,7 +395,8 @@ export const hospitableProvider: IntegrationProvider = {
       case 'integration.disconnected':
       case 'integration_disconnected':
       case 'application_authorization_revoked':
-        // Handled upstream by the generic webhook route via revokeIntegrationToken()
+        // All three are Hospitable's revocation event names — handled upstream by
+        // the generic webhook route's REVOCATION_ACTIONS check via revokeIntegrationToken().
         break
 
       default:

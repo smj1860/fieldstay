@@ -427,16 +427,13 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Dialog open onClose={onClose} title="Send feedback" mobileSheet>
-      {submitted ? (
-        <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
-          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}><PartyPopper size={32} /></div>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#0D1F3C', marginBottom: 4 }}>
-            Thank you!
-          </p>
-          <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6, marginBottom: 20 }}>
-            Your feedback goes straight to the team that builds this app.
-          </p>
+    <Dialog
+      open
+      onClose={onClose}
+      title="Send feedback"
+      mobileSheet
+      footer={
+        submitted ? (
           <button
             onClick={onClose}
             className="w-full py-3 rounded-xl text-sm font-semibold text-white"
@@ -444,6 +441,27 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
           >
             Done
           </button>
+        ) : (
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !text.trim()}
+            className="w-full py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+            style={{ background: '#0D1F3C' }}
+          >
+            {submitting ? 'Sending…' : 'Submit'}
+          </button>
+        )
+      }
+    >
+      {submitted ? (
+        <div style={{ textAlign: 'center', padding: '16px 0 8px' }}>
+          <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}><PartyPopper size={32} /></div>
+          <p style={{ fontSize: 15, fontWeight: 700, color: '#0D1F3C', marginBottom: 4 }}>
+            Thank you!
+          </p>
+          <p style={{ fontSize: 13, color: '#475569', lineHeight: 1.6 }}>
+            Your feedback goes straight to the team that builds this app.
+          </p>
         </div>
       ) : (
         <>
@@ -464,14 +482,6 @@ function FeedbackModal({ onClose }: { onClose: () => void }) {
           {error && (
             <p style={{ fontSize: 12, color: '#dc2626', marginTop: 8 }}>{error}</p>
           )}
-          <button
-            onClick={handleSubmit}
-            disabled={submitting || !text.trim()}
-            className="w-full py-3 rounded-xl text-sm font-semibold text-white mt-4 disabled:opacity-50"
-            style={{ background: '#0D1F3C' }}
-          >
-            {submitting ? 'Sending…' : 'Submit'}
-          </button>
         </>
       )}
     </Dialog>

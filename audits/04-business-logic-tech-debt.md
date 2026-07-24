@@ -25,6 +25,10 @@ documented for completeness" notes rather than active bugs — see Findings sect
 ## Findings
 
 ### HIGH — `work_order/completed` posts `estimated_cost` as an expense when `actual_cost` is null
+**Status: FIXED** — `lib/inngest/functions/work-order-events.ts:295-317` now
+only posts on real `actual_cost` (`const cost = wo?.actual_cost ?? null`), with
+a comment noting `logActualCost()` posts/corrects the expense once `actual_cost`
+is logged.
 - **Area:** Financial Math
 - **Location:** `lib/inngest/functions/work-order-events.ts:122-145`
 - **Description:**
@@ -94,6 +98,8 @@ documented for completeness" notes rather than active bugs — see Findings sect
   conflict-resolution strategy.
 
 ### HIGH — `types/database.ts` `WorkOrder.assigned_crew_id` is the deprecated column; `maintenance/page.tsx` selects it
+**Status: FIXED** — `types/database.ts:724` only declares
+`assigned_crew_member_id` now; the deprecated `assigned_crew_id` field is gone.
 - **Area:** Type Safety
 - **Location:** `types/database.ts:478`, `app/(dashboard)/maintenance/page.tsx:23`
 - **Description:** CLAUDE.md explicitly states:
@@ -135,6 +141,8 @@ documented for completeness" notes rather than active bugs — see Findings sect
   legacy data, add a migration to drop it and do the same code fix.
 
 ### HIGH — `organizations` interface missing all RepuGuard columns; live API routes read/write them
+**Status: FIXED** — `types/database.ts:115-119` now has all five `repuguard_*`
+fields (with `repuguard_status` as the recommended narrow union type).
 - **Area:** Type Safety
 - **Location:** `types/database.ts:84-103` (Organization interface) vs.
   `supabase/migrations/20260601000000_repuguard.sql`

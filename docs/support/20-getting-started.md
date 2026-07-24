@@ -4,13 +4,13 @@ New to FieldStay? Here's the order that gets you up and running fastest, with ea
 
 ---
 
-## Step 1 — Connect OwnerRez
+## Step 1 — Connect Your PMS
 
-Start here. Go to **Settings → Integrations** and connect your OwnerRez account. This pulls in your properties, bookings, and guest data automatically — everything after this step depends on having that data in FieldStay.
+Start here. Go to **Settings → Integrations** (or the Connect PMS step during onboarding) and connect OwnerRez or Hospitable, whichever you use. This pulls in your properties, bookings, and guest data automatically — everything after this step depends on having that data in FieldStay.
 
-If you don't use OwnerRez, you can skip this and add properties manually, but most of the automation in FieldStay (turnovers, guidebook pre-population, revenue tracking) is designed around having a PMS connection.
+If you don't use either, you can skip this and add properties manually, but most of the automation in FieldStay (turnovers, guidebook pre-population, revenue tracking) is designed around having a PMS connection.
 
-See: **Connecting OwnerRez to FieldStay**
+See: **Connecting OwnerRez to FieldStay** or **Connecting Hospitable to FieldStay**
 
 ---
 
@@ -40,7 +40,7 @@ See: **Installing the Crew App**
 
 ## Step 4 — Review Your Guest Guidebook
 
-Each property's guidebook is pre-populated from OwnerRez, but it's worth reviewing the WiFi credentials, check-in instructions, and house rules before your next guest arrives. This is also when you decide whether to turn on SMS delivery for door codes.
+Each property's guidebook is pre-populated from your connected PMS, but it's worth reviewing the WiFi credentials, check-in instructions, and house rules before your next guest arrives. This is also when you decide whether to turn on SMS delivery for door codes.
 
 See: **How the Guest Guidebook Works**
 
@@ -56,7 +56,7 @@ See: **Inventory Templates and the Kroger Cart**
 
 ## Step 6 — Add Sponsors to Your Guidebook (Optional)
 
-Once your guidebook is live, consider reaching out to a local business or two about a sponsor slot. This can offset or fully cover your FieldStay subscription cost at 4+ active sponsors.
+Once your guidebook is live, consider reaching out to a local business or two about a sponsor slot. At 3 active sponsors the Guidebook feature unlocks permanently; 5 and 6 sponsors add plan credit toward your FieldStay subscription.
 
 See: **Setting Up Sponsors for Your Guidebook**
 

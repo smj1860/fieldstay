@@ -26,16 +26,13 @@ unit-testable without mounting the provider.
 
 ---
 
-## 2. `SyncEngine.uploadOne()` growing via flat if-chains
+## 2. ~~`SyncEngine.uploadOne()` growing via flat if-chains~~ — RESOLVED
 
 **File:** `lib/dexie/syncService.ts`
 
-Dispatches on 6 `table === '...'` branches (one, `checklist_instances`,
-added most recently). Each branch is simple and non-nested — no individual
-complexity/depth violation — but the function is trending toward the point
-where a per-table handler map (`Record<string, (mutation) => Promise<void>>`)
-would read more cleanly than sequential early-return `if`s. Not urgent;
-worth doing the next time a 7th table is added.
+This has been done: `uploadOne()` now dispatches through
+`const UPLOAD_HANDLERS: Record<string, UploadHandler> = {...}` (line 356)
+instead of a flat if-chain. No further action needed.
 
 ---
 
