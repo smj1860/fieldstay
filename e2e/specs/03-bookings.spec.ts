@@ -5,7 +5,7 @@ test.describe('Bookings', () => {
 
   test('bookings page loads and shows filters', async ({ page }) => {
     await page.goto('/bookings')
-    await expect(page.getByRole('button', { name: /Add Booking/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Add Booking/i }).first()).toBeVisible()
     // The 'All Properties' text is inside a <select> option which is hidden.
     // Assert the select element itself is visible instead.
     await expect(page.locator('select').first()).toBeVisible()
@@ -13,7 +13,7 @@ test.describe('Bookings', () => {
 
   test('[E2E] add manual booking creates booking and success banner', async ({ page }) => {
     await page.goto('/bookings')
-    await page.getByRole('button', { name: /Add Booking/i }).click()
+    await page.getByRole('button', { name: /Add Booking/i }).first().click()
 
     await expect(page.getByRole('heading', { name: /Log Non-Synced Booking/i })).toBeVisible()
 

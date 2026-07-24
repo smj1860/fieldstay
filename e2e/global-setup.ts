@@ -120,18 +120,26 @@ export default async function globalSetup(_config: FullConfig) {
     throw new Error('Failed to create seed property [E2E] The Lakehouse')
   }
 
-  // Seed one crew member
-  await supabase.from('crew_members').insert({
-    org_id: orgId,
-    name:   '[E2E] Alex Cleaner',
-    phone:  '+15550001234',
-    email:  null,
-    role:   'cleaner',
-    status: 'active',
+  // Seed one crew member. role must be a real crew_role enum value
+  // ('cleaning', not 'cleaner') and the active flag is is_active — the
+  // original insert used 'cleaner' + a nonexistent status column and,
+  // with no error check, failed silently on every run, which is why the
+  // crew specs never found '[E2E] Alex Cleaner'.
+  const { error: crewSeedErr } = await supabase.from('crew_members').insert({
+    org_id:    orgId,
+    name:      '[E2E] Alex Cleaner',
+    phone:     '+15550001234',
+    email:     null,
+    role:      'cleaning',
+    specialty: 'cleaning',
+    is_active: true,
   })
+  if (crewSeedErr) {
+    throw new Error(`Failed to seed crew member [E2E] Alex Cleaner: ${crewSeedErr.message}`)
+  }
 
   // Seed one vendor
-  await supabase.from('vendors').insert({
+  const { error: vendorSeedErr } = await supabase.from('vendors').insert({
     org_id:         orgId,
     name:           '[E2E] Reliable Plumbing Co.',
     email:          'plumber@e2e-test.invalid',
@@ -139,6 +147,9 @@ export default async function globalSetup(_config: FullConfig) {
     portal_enabled: true,
     is_active:      true,
   })
+  if (vendorSeedErr) {
+    throw new Error(`Failed to seed vendor [E2E] Reliable Plumbing Co.: ${vendorSeedErr.message}`)
+  }
 
   // ── 3. Seed a crew login + an assigned turnover/checklist item ───────────
   // Used by e2e/specs/22-crew-logout-guard.spec.ts to exercise the crew PWA

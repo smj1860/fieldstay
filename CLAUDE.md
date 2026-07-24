@@ -1057,8 +1057,8 @@ item below" as part of the definition of done for any non-trivial change.
 ## Structural Enforcement — Guardrails
 
 Conventions in this file are enforced in code wherever they can be, so
-following them stops being a memory test. Three layers, checked in CI via
-`npm run lint` and `vitest run`:
+following them stops being a memory test. Four layers, checked in CI via
+`npm run lint` and `vitest run` (plus the `db-invariants` CI job for layer 4):
 
 1. **ESLint rules** (`eslint.config.mjs`, the "Structural enforcement"
    config block) — AST-level bans scoped to `app/`, `lib/`, `components/`:
@@ -1086,6 +1086,16 @@ following them stops being a memory test. Three layers, checked in CI via
      and cleaned-up files must leave the baseline. Never add entries.
 
 3. **`check:ui-classes`** — the raw `btn-*`/`badge-*`/`card` class grep.
+
+4. **DB invariant gate** (`scripts/check-db-invariants.mjs`, CI
+   `db-invariants` job) — the live-schema invariants no code-side check can
+   see, via `public.db_invariant_report()` against the dedicated E2E
+   project: RLS enabled on every public table, no policy-less (deny-all)
+   tables outside the script's shrink-only `SERVICE_ROLE_ONLY_TABLES`
+   allowlist, a covering index on every FK column, and zero `anon` table
+   grants (all revoked 2026-07-24 — no client reads tables
+   unauthenticated). Self-disarms with a warning when the E2E secrets are
+   absent, same as the e2e job.
 
 **The meta-rule: a new convention ships WITH its guardrail.** If a rule is
 worth adding to this file, add its ESLint rule or `unit/guardrails/` test in

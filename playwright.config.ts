@@ -45,14 +45,22 @@ export default defineConfig({
     },
   ],
 
-  // Start local dev server automatically when not using a remote BASE_URL
+  // Start the app server automatically unless E2E_BASE_URL points at a
+  // remote deployment. Unset E2E_BASE_URL means the localhost default —
+  // the previous `!process.env.E2E_BASE_URL?.startsWith('http://localhost')`
+  // check made `undefined` fall into the no-webServer branch, so the first
+  // armed CI run (which doesn't set E2E_BASE_URL) had no server at all and
+  // died at global-setup with ERR_CONNECTION_REFUSED.
   ...(
-    !process.env.E2E_BASE_URL?.startsWith('http://localhost') ? {} : {
+    process.env.E2E_BASE_URL && !process.env.E2E_BASE_URL.startsWith('http://localhost') ? {} : {
       webServer: {
-        command:          'pnpm run dev',
+        // CI has no dev server to reuse — build once and serve the
+        // production build (dev-mode compile-on-navigate is also slow
+        // enough to blow per-test timeouts in CI).
+        command:          process.env.CI ? 'pnpm run build && pnpm run start' : 'pnpm run dev',
         url:              'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
-        timeout:          120_000,
+        timeout:          process.env.CI ? 600_000 : 120_000,
       },
     }
   ),

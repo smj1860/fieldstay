@@ -95,7 +95,7 @@ async function addVendor(page: import('@playwright/test').Page, name: string, em
   await page.fill('#vendor-email', email)
   await dismissCookieBanner(page)
   await page.click('button[type="submit"]')
-  await expect(page.getByText(name)).toBeVisible({ timeout: 8_000 })
+  await expect(page.getByText(name).first()).toBeVisible({ timeout: 8_000 })
 }
 
 async function addComplianceDocument(
@@ -104,7 +104,7 @@ async function addComplianceDocument(
   expiryDate: string,
 ) {
   await page.goto('/vendors')
-  await page.getByText(vendorName).click()
+  await page.getByText(vendorName).first().click()
   await expect(page.getByText(vendorName).first()).toBeVisible({ timeout: 8_000 })
 
   await page.getByRole('button', { name: 'Add Document' }).click()
