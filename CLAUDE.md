@@ -64,7 +64,9 @@ data leaks that could expose tenant data.
   caller's authorized scope, as in the owner-portal pages).
 - Never pass it to client components, never return it in API responses,
   never log it.
-- Use `createServiceClient()` from `lib/supabase/server.ts` for service role.
+- Use `createServiceClient(context)` from `lib/supabase/server.ts` for
+  service role — the `ServiceRoleContext` argument is required and names why
+  the RLS bypass is justified (see the Supabase Clients pattern section).
 - Use `createServerClient()` from `lib/supabase/server.ts` for normal auth.
 - Use `adminFetch()` from `lib/supabase/server.ts` for raw calls to the
   Supabase Admin REST API (e.g. `/auth/v1/admin/users?email=`) that aren't
@@ -384,9 +386,17 @@ export async function myServerAction(data: MyInput) {
 import { createServerClient } from '@/lib/supabase/server'
 const supabase = createServerClient()
 
-// In Inngest steps and admin operations — bypasses RLS intentionally
+// In Inngest steps and admin operations — bypasses RLS intentionally.
+// The context argument is REQUIRED (compile-time only, runtime ignores it):
+// it forces every call site to name why the RLS bypass is justified.
+// See the ServiceRoleContext type in lib/supabase/server.ts for all
+// variants and when each applies.
 import { createServiceClient } from '@/lib/supabase/server'
-const supabase = createServiceClient()
+const supabase = createServiceClient({ authorizedBy: membership })   // server actions (from requireOrgMember/requireOrgRole)
+const supabase = createServiceClient({ system: 'inngest:my-function' })      // Inngest steps/crons
+const supabase = createServiceClient({ crew })                       // crew routes (from requireCrewMember)
+const supabase = createServiceClient({ authenticatedUser: user })    // self-scoped session routes
+const supabase = createServiceClient({ publicSurface: 'owner-portal' })      // token-gated/webhook routes that validate in-file
 ```
 
 ### Dexie — Client-Side Data Access (Crew PWA)

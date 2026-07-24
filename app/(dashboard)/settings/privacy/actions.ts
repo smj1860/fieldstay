@@ -20,7 +20,7 @@ export async function anonymizeGuestData(
       return { success: false, bookingsAnonymized: 0, error: 'Invalid email address' }
     }
 
-    const supabase = createServiceClient()
+    const supabase = createServiceClient({ authorizedBy: membership })
     const normalizedEmail = guestEmail.toLowerCase().trim()
 
     const { data: affected, error: fetchErr } = await supabase

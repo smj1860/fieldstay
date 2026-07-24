@@ -42,7 +42,7 @@ export const notificationDigest = inngest.createFunction(
     })
 
     const woCreatedByOrg = await step.run('count-work-orders-created', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:notification-digest' })
       const { data, error } = await supabase
         .from('work_orders')
         .select('org_id, vendor_id, status')
@@ -62,7 +62,7 @@ export const notificationDigest = inngest.createFunction(
     })
 
     const repuguardByOrg = await step.run('count-repuguard-drafts', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:notification-digest' })
       const { data, error } = await supabase
         .from('review_responses')
         .select('org_id')
@@ -80,7 +80,7 @@ export const notificationDigest = inngest.createFunction(
     let created = 0
 
     await step.run('write-work-order-digest', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:notification-digest' })
       for (const [orgId, count] of woCreatedByOrg) {
         if (count === 0) continue
         await createPmNotification(supabase, {
@@ -97,7 +97,7 @@ export const notificationDigest = inngest.createFunction(
     })
 
     await step.run('write-repuguard-digest', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:notification-digest' })
       for (const [orgId, count] of repuguardByOrg) {
         if (count === 0) continue
         await createPmNotification(supabase, {

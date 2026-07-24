@@ -170,7 +170,7 @@ export class OwnerRezApiClient {
   }
 
   private async markConnectionError(): Promise<void> {
-    const supabase = createServiceClient()
+    const supabase = createServiceClient({ system: 'lib/integrations/providers/ownerrez-api' })
 
     const { data: conn } = await supabase
       .from('integration_connections')

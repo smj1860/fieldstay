@@ -47,7 +47,7 @@ export const hospTeammateSyncHandler = inngest.createFunction(
       const rows = hospitableTeammatesToCrewRows(org_id, teammates)
       if (!rows.length) return 0
 
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:teammate-sync-handler' })
       const { error } = await supabase
         .from('crew_members')
         .upsert(rows, { onConflict: 'org_id,external_id,external_source', ignoreDuplicates: false })
@@ -57,7 +57,7 @@ export const hospTeammateSyncHandler = inngest.createFunction(
     })
 
     const deactivatedCount = await step.run('deactivate-removed-teammates', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:teammate-sync-handler' })
       const freshExternalIds = new Set(teammates.map((t) => t.id))
 
       const { data: existingActive, error: fetchErr } = await supabase

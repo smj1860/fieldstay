@@ -44,7 +44,7 @@ export async function acceptTeamInvite(formData: FormData): Promise<{ error?: st
   }
 
   const { token, fullName, password } = parsed.data
-  const admin = createServiceClient()
+  const admin = createServiceClient({ publicSurface: 'accept-invite--token--actions' })
 
   const { data: invite, error: inviteError } = await admin
     .from('org_invites')

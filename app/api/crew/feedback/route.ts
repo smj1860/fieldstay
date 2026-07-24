@@ -24,7 +24,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // org_id + crew_member_id are derived server-side from the authenticated
   // session above; the insert goes through the service client so it isn't
   // blocked by the admin/manager-only manage policy on crew_feedback.
-  const service = createServiceClient()
+  const service = createServiceClient({ system: 'route:crew-feedback-notify-staff' })
   const { error } = await service.from('crew_feedback').insert({
     org_id:         crew.org_id,
     crew_member_id: crew.id,
@@ -49,7 +49,7 @@ async function notifyPlatformStaff(
   orgId:        string,
   feedbackText: string,
 ): Promise<void> {
-  const service = createServiceClient()
+  const service = createServiceClient({ system: 'route:crew-feedback-notify-staff' })
 
   const [{ data: cm }, { data: org }] = await Promise.all([
     service.from('crew_members').select('name').eq('id', crewMemberId).single(),

@@ -9,7 +9,7 @@ export default async function AcceptInvitePage({
   params: Promise<{ token: string }>
 }) {
   const { token } = await params
-  const admin = createServiceClient()
+  const admin = createServiceClient({ publicSurface: 'accept-invite--token-' })
 
   const { data: invite } = await admin
     .from('org_invites')

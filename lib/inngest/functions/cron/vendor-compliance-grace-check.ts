@@ -37,7 +37,7 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
     // ── a. Grace period entry (expiry_date = yesterday) ─────────────────────
 
     const graceDocs = await step.run('find-grace-period-entries', async () => {
-      const supabase    = createServiceClient()
+      const supabase    = createServiceClient({ system: 'inngest:vendor-compliance-grace-check' })
       const yesterday    = new Date(Date.now() - 86_400_000).toISOString().split('T')[0]
 
       const { data } = await supabase
@@ -70,7 +70,7 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
     // ── b. Hard block crossing (expiry_date <= today - 46, not yet recorded) ─
 
     const hardBlockCandidates = await step.run('find-hard-block-candidates', async () => {
-      const supabase  = createServiceClient()
+      const supabase  = createServiceClient({ system: 'inngest:vendor-compliance-grace-check' })
       const cutoff    = new Date(Date.now() - 46 * 86_400_000).toISOString().split('T')[0]
 
       const { data } = await supabase
@@ -87,7 +87,7 @@ export const vendorComplianceGraceCheck = inngest.createFunction(
 
     for (const doc of hardBlockCandidates) {
       await step.run(`mark-hard-blocked-${doc.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:vendor-compliance-grace-check' })
 
         // Idempotency: only proceed if this run is the one that flips the
         // gate — guards against a retried step re-logging the same doc.

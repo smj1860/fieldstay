@@ -25,7 +25,7 @@ export const vendorScoreRecompute = inngest.createFunction(
   { cron: '15 9 * * *' }, // ~3-4am CT, shortly after the crew score recompute
   async ({ step, logger }) => {
     const updated = await step.run('recompute-vendor-scores', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:vendor-score-recompute' })
       const { data, error } = await supabase.rpc('recompute_vendor_scores')
       if (error) throw new Error(`recompute_vendor_scores failed: ${error.message}`)
       return data as number

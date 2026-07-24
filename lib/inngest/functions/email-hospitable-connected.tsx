@@ -11,7 +11,7 @@ export const sendHospitableConnectedEmail = inngest.createFunction(
     const { org_id } = event.data
 
     await step.run('notify-pm', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:email-hospitable-connected' })
       await createPmNotification(supabase, {
         orgId:     org_id,
         type:      'integration_connected',

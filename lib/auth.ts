@@ -123,7 +123,7 @@ export async function requireOrgRole(allowedRoles: MemberRole[]) {
  * Used to gate owner-only UI in settings pages.
  */
 export async function getOrgMembership(userId: string, orgId: string) {
-  const admin = createServiceClient()
+  const admin = createServiceClient({ system: 'lib/auth' })
   const { data } = await admin
     .from('organization_members')
     .select('role')

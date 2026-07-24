@@ -27,7 +27,7 @@ export const ownerRezReconciliationCron = inngest.createFunction(
   async ({ step, logger }) => {
 
     const connections = await step.run('fetch-active-connections', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:reconciliation-cron' })
 
       const { data, error } = await supabase
         .from('integration_connections')

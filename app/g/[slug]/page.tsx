@@ -9,7 +9,7 @@ import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/type
 const FALLBACK_TIMEZONE = 'America/New_York'
 
 const getGuidebookConfig = cache(async (slug: string) => {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'g--slug-' })
 
   const { data: config } = await supabase
     .from('guidebook_property_configs')
@@ -49,7 +49,7 @@ export default async function GuestGuidebookPage({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'g--slug-' })
 
   const config = await getGuidebookConfig(slug)
   if (!config) notFound()

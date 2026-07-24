@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'api-webhooks-stripe-connect' })
 
   // Dedup — reuse the same stripe_processed_events table
   const dedupKey = `connect:${event.id}`

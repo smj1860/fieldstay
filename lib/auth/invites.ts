@@ -7,7 +7,7 @@ export async function acceptOrgInvite(
   userEmail: string,
   inviteToken: string
 ): Promise<{ accepted: boolean; orgId?: string }> {
-  const admin = createServiceClient()
+  const admin = createServiceClient({ system: 'lib/auth/invites' })
 
   const { data: invite } = await admin
     .from('org_invites')

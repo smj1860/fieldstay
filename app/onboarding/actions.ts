@@ -21,7 +21,7 @@ export async function createOrganization(
     if (!name) return { error: 'Organization name is required' }
 
     // Use service client for inserts — user identity already verified above
-    const admin = createServiceClient()
+    const admin = createServiceClient({ authenticatedUser: user })
 
     let slug = slugify(name)
     const { count } = await admin

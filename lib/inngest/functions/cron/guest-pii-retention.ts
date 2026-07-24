@@ -29,7 +29,7 @@ export const dailyGuestPiiRetention = inngest.createFunction(
   { cron: '15 14 * * *' },  // 15 min after dailyCommsRetention
   async ({ step, logger }) => {
     const retentionOrgs = await step.run('find-retention-orgs', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guest-pii-retention' })
       const { data } = await supabase
         .from('organizations')
         .select('id, guest_pii_retention_days')
@@ -42,7 +42,7 @@ export const dailyGuestPiiRetention = inngest.createFunction(
 
     for (const org of retentionOrgs) {
       await step.run(`guest-pii-retention-${org.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:guest-pii-retention' })
         const cutoff = new Date(Date.now() - org.guest_pii_retention_days * 86_400_000)
           .toISOString()
           .slice(0, 10)

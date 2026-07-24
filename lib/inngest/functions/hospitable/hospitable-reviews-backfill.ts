@@ -39,7 +39,7 @@ export const hospReviewsBackfill = inngest.createFunction(
 
     try {
       const properties = await step.run('fetch-org-properties', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:hospitable-reviews-backfill' })
         const { data } = await supabase
           .from('properties')
           .select('id, external_id')
@@ -118,7 +118,7 @@ export const hospReviewsBackfill = inngest.createFunction(
       const reviewCount = await step.run('upsert-reviews', async () => {
         if (reviewRows.length === 0) return 0
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:hospitable-reviews-backfill' })
         const { error } = await supabase
           .from('reviews')
           .upsert(reviewRows, {
@@ -168,7 +168,7 @@ async function updateConnectionMeta(
   userId: string,
   patch:  Record<string, unknown>
 ): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'inngest:hospitable-reviews-backfill' })
   const { data: existing } = await supabase
     .from('integration_connections')
     .select('metadata')

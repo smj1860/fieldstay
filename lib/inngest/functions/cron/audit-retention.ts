@@ -21,7 +21,7 @@ export const auditRetentionCron = inngest.createFunction(
   { cron: '0 3 1 * *' },  // 1st of each month at 3am UTC
   async ({ step, logger }) => {
     const result = await step.run('purge-expired-audit-events', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:audit-retention' })
       const { data, error } = await supabase.rpc('purge_expired_audit_events')
       if (error) throw new Error(`purge_expired_audit_events failed: ${error.message}`)
       return data as { financial_deleted: number; operational_deleted: number; run_at: string }

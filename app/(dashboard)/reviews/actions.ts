@@ -52,7 +52,7 @@ export async function submitManualReview(input: {
 }): Promise<{ reviewId: string } | { error: string }> {
   try {
     const { membership } = await requireOrgMember()
-    const supabase       = createServiceClient()
+    const supabase       = createServiceClient({ authorizedBy: membership })
 
     // Validate
     if (!input.reviewText?.trim()) return { error: 'Review text is required.' }
@@ -122,7 +122,7 @@ export async function submitManualReview(input: {
 export async function getManualReviewsUsedThisWeek(): Promise<number> {
   try {
     const { membership } = await requireOrgMember()
-    const supabase        = createServiceClient()
+    const supabase        = createServiceClient({ authorizedBy: membership })
     const monday          = startOfWeekMonday(new Date())
 
     const { count } = await supabase

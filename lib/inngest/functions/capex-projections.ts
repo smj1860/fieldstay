@@ -47,7 +47,7 @@ export const generateCapexProjections = inngest.createFunction(
     const currentYear = new Date().getFullYear()
 
     const orgs = await step.run('fetch-orgs', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:capex-projections' })
       const pageSize = 1000
       const all: { id: string }[] = []
       for (let from = 0; ; from += pageSize) {
@@ -66,7 +66,7 @@ export const generateCapexProjections = inngest.createFunction(
 
     for (const org of orgs) {
       await step.run(`project-org-${org.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:capex-projections' })
         const [{ data: assets }, { data: standards }, { data: properties }] =
           await Promise.all([
             supabase

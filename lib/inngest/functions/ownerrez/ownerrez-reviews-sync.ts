@@ -41,7 +41,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
     }
 
     const connections = await step.run('fetch-connections', async () => {
-      const admin = createServiceClient()
+      const admin = createServiceClient({ system: 'inngest:ownerrez-reviews-sync' })
       const { data, error } = await admin
         .from('integration_connections')
         .select('user_id, org_id, metadata')
@@ -89,7 +89,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
         } else if (err instanceof TokenRevokedError) {
           const humanError = translateSyncError(err)
           await step.run(`mark-revoked-${userId}`, async () => {
-            const admin = createServiceClient()
+            const admin = createServiceClient({ system: 'inngest:ownerrez-reviews-sync' })
             const { data: existing } = await admin
               .from('integration_connections')
               .select('id')
@@ -176,7 +176,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
 
       try {
         await step.run(`upsert-reviews-${userId}`, async () => {
-          const admin = createServiceClient()
+          const admin = createServiceClient({ system: 'inngest:ownerrez-reviews-sync' })
           if (reviews.length === 0) return
 
           const propertyExternalIds = reviews

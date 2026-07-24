@@ -77,7 +77,7 @@ function drawTableHeader(page: ReturnType<PDFDocument['addPage']>, y: number, bo
 export async function GET(req: Request) {
   // Auth
   const { membership } = await requireOrgMember()
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ authorizedBy: membership })
 
   const url     = new URL(req.url)
   const taxYear = parseInt(url.searchParams.get('tax_year') ?? String(new Date().getFullYear() - 1), 10)

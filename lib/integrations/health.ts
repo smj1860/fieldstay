@@ -68,7 +68,7 @@ function feedStatus(lastSyncStatus: string | null, lastSyncedAt: string | null):
 }
 
 export async function getIntegrationHealth(orgId: string): Promise<IntegrationHealthItem[]> {
-  const admin = createServiceClient()
+  const admin = createServiceClient({ system: 'lib/integrations/health' })
 
   const [{ data: connections }, { data: providers }, { data: feeds }] = await Promise.all([
     admin

@@ -38,7 +38,7 @@ export default async function CrewLayout({
   // flow), and gating on it here locked those real crew out of the entire
   // crew PWA (bounced to /ops with a spurious security.route.mismatch audit
   // entry).
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authenticatedUser: user })
   const { data: crewRecord } = await admin
     .from('crew_members')
     .select('id, name, org_id')

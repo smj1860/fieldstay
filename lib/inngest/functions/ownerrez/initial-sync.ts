@@ -111,7 +111,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           sqft:       p.living_area ?? null,
         }))
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const rows = properties.map((p) => ({
           org_id,
           name:            p.name,
@@ -150,7 +150,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       await step.run('patch-property-fields', async () => {
         if (!fetchPropsResult.patchData.length) return
 
-        const supabase    = createServiceClient()
+        const supabase    = createServiceClient({ system: 'inngest:initial-sync' })
         const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
 
         const { data: existingProps } = await supabase
@@ -228,7 +228,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       // Step 1c-i: snapshot the properties to enrich (needed in outer scope so
       // the per-property steps below can be fanned out from the loop).
       const enrichTargets = await step.run('fetch-properties-to-enrich', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const { data } = await supabase
           .from('properties')
           .select('id, external_id, wifi_name, wifi_password, access_instructions, house_manual, amenities')
@@ -265,7 +265,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       // Step 1c-iii: one memoized step per property for the detail call + patch.
       for (const dbProp of enrichTargets) {
         await step.run(`fetch-property-detail-${dbProp.id}`, async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           const orId     = Number(dbProp.external_id)
           const detail   = await client.getPropertyDetail(orId).catch(() => null)
 
@@ -308,7 +308,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       const propertiesNeedingChecklist = await step.run('find-properties-needing-checklist', async () => {
         if (!fetchPropsResult.patchData.length) return []
 
-        const supabase    = createServiceClient()
+        const supabase    = createServiceClient({ system: 'inngest:initial-sync' })
         const externalIds = fetchPropsResult.patchData.map((p) => p.externalId)
 
         const { data: properties } = await supabase
@@ -348,14 +348,14 @@ export const ownerRezInitialSync = inngest.createFunction(
         })
 
         ownerRezOrgRoomData = await step.run('fetch-room-template-data', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           return fetchOrgRoomTemplateData(org_id, supabase)
         })
       }
 
       for (const propertyId of propertiesNeedingChecklist) {
         await step.run(`apply-checklist-${propertyId}`, async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
             force:       false,
             actorId:     user_id,
@@ -466,7 +466,7 @@ export const ownerRezInitialSync = inngest.createFunction(
         let bookingsToPostRevenue: { bookingId: string; propertyId: string; actualTotalAmount: number | null }[] = []
 
         if (bookings.length) {
-          const supabase   = createServiceClient()
+          const supabase   = createServiceClient({ system: 'inngest:initial-sync' })
 
           // Resolve FieldStay property IDs from external IDs
           const { data: fsProps, error: propsLookupError } = await supabase
@@ -576,7 +576,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       const newTurnoverIds = await step.run('generate-turnovers', async () => {
         const propertyIds = fetchBookingsResult.affectedPropertyIds
         if (!propertyIds.length) return []
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const ids: string[] = []
         for (const propertyId of propertyIds) {
           try {
@@ -594,7 +594,7 @@ export const ownerRezInitialSync = inngest.createFunction(
 
       if (newTurnoverIds.length > 0) {
         const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
           const { data: turnovers } = await supabase
             .from('turnovers')
@@ -625,7 +625,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       )
 
       await step.run('handle-sync-failure', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const isRevoked = err instanceof TokenRevokedError
 
         const { data: existing } = await supabase
@@ -719,7 +719,7 @@ export const ownerRezInitialSync = inngest.createFunction(
     await step.run('auto-activate-repuguard', async () => {
       // RepuGuard is bundled for all OwnerRez users — activate on first connect.
       // .in() filter skips orgs already active, so reconnects are safe.
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:initial-sync' })
       await supabase
         .from('organizations')
         .update({ repuguard_status: 'active' })

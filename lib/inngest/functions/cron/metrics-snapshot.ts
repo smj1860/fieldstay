@@ -33,7 +33,7 @@ export const metricsSnapshot = inngest.createFunction(
   { cron: '*/30 * * * *' },
   async ({ step }) => {
     await step.run('work-order-backlog', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:metrics-snapshot' })
       const { data } = await supabase
         .from('work_orders')
         .select('status')
@@ -46,7 +46,7 @@ export const metricsSnapshot = inngest.createFunction(
     })
 
     await step.run('inventory-below-par', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:metrics-snapshot' })
       const { data } = await supabase
         .from('inventory_items')
         .select('current_quantity, par_level, first_count_recorded_at')
@@ -62,7 +62,7 @@ export const metricsSnapshot = inngest.createFunction(
     })
 
     await step.run('vendor-compliance-status', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:metrics-snapshot' })
       const { data } = await supabase
         .from('vendor_compliance_status')
         .select('compliance_status')

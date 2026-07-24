@@ -18,7 +18,7 @@ export async function POST(
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ authorizedBy: membership })
 
   // Fetch invoice with vendor Connect details — scoped to PM's org
   const { data: invoice } = await supabase

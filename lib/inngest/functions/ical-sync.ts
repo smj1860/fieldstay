@@ -52,7 +52,7 @@ export const syncAllIcalFeeds = inngest.createFunction(
     const orgId = 'org_id' in event.data ? event.data.org_id : undefined
 
     const feeds = await step.run('fetch-active-feeds', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:ical-sync' })
       let query = supabase
         .from('ical_feeds')
         .select('id, property_id, org_id')
@@ -125,7 +125,7 @@ export const syncIcalFeed = inngest.createFunction(
     // ── Step 1: Fetch feed URL and raw data ─────────────────────────────────
 
     const { url: feedUrl, source: feedSource } = await step.run('fetch-feed-url', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:ical-sync' })
       const { data, error } = await supabase
         .from('ical_feeds')
         .select('url, source, org_id')
@@ -152,7 +152,7 @@ export const syncIcalFeed = inngest.createFunction(
       })
     } catch (err) {
       // Mark feed as errored, then re-throw so Inngest's retry mechanism fires.
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:ical-sync' })
       await supabase.from('ical_feeds').update({
         last_synced_at:   new Date().toISOString(),
         last_sync_status: 'error',
@@ -176,7 +176,7 @@ export const syncIcalFeed = inngest.createFunction(
     const { newBookings, cancelledBookingIds } = await step.run(
       'upsert-bookings',
       async (): Promise<{ newBookings: Array<{ id: string; guestEmail: string | null }>; cancelledBookingIds: string[] }> => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:ical-sync' })
 
         type ExistingRow = { id: string; ical_uid: string; status: string; guest_email: string | null }
 
@@ -277,7 +277,7 @@ export const syncIcalFeed = inngest.createFunction(
 
     if (cancelledBookingIds.length > 0) {
       await step.run('cancel-affected-turnovers', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:ical-sync' })
         for (const bookingId of cancelledBookingIds) {
           await cancelTurnoversForBooking(bookingId, supabase)
         }
@@ -287,13 +287,13 @@ export const syncIcalFeed = inngest.createFunction(
     // ── Step 4b: Detect booking overlaps for this property ──────────────────
 
     const newConflicts = await step.run('detect-overlap-conflicts', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:ical-sync' })
       return detectAndFlagOverlaps(supabase, property_id)
     })
 
     if (newConflicts.length > 0) {
       await step.run('alert-pm-overlap-conflict', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:ical-sync' })
         const [pmEmail] = await getPmEmails(supabase, org_id)
         if (!pmEmail) return
 
@@ -340,7 +340,7 @@ export const syncIcalFeed = inngest.createFunction(
     const eventsToSend = await step.run('build-downstream-events', async () => {
       if (!(newBookings as Array<{ id: string }>).length) return []
 
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:ical-sync' })
 
       type BookingDetectedEvent = {
         name: 'booking/detected'
@@ -392,7 +392,7 @@ export const syncIcalFeed = inngest.createFunction(
     // ── Step 6: Update feed sync status ─────────────────────────────────────
 
     await step.run('mark-sync-success', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:ical-sync' })
       await supabase.from('ical_feeds').update({
         last_synced_at:   new Date().toISOString(),
         last_sync_status: 'success',

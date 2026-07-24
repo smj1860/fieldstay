@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing review_id' }, { status: 400 })
   }
 
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authenticatedUser: user })
 
   // Get org membership
   const { data: membership } = await admin

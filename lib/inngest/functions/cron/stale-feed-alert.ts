@@ -30,7 +30,7 @@ export const staleFeedAlert = inngest.createFunction(
   { cron: '0 15 * * *' },
   async ({ step, logger }) => {
     const staleFeeds = await step.run('find-stale-feeds', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:stale-feed-alert' })
       const cutoff   = new Date()
       cutoff.setHours(cutoff.getHours() - STALE_HOURS)
 
@@ -65,7 +65,7 @@ export const staleFeedAlert = inngest.createFunction(
     // One PM per org, resolved up front — step.sendEvent must run at the
     // top level of the function, not nested inside another step's callback.
     const pmUserIdByOrg = await step.run('resolve-pm-members', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:stale-feed-alert' })
       const result: Record<string, string> = {}
       for (const orgId of byOrg.keys()) {
         const [pmMember] = await getPmMembers(supabase, orgId, { limit: 1 })

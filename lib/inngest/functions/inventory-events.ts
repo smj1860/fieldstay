@@ -16,7 +16,7 @@ export const handlePurchaseOrderApproved = inngest.createFunction(
     await step.run('post-inventory-expense', async () => {
       if (!total_estimated_cost || total_estimated_cost <= 0) return { skipped: true }
 
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:inventory-events' })
 
       // Atomic upsert — ON CONFLICT (source_reference_id, source) DO NOTHING
       const { data: txn, error } = await supabase.from('owner_transactions').upsert(
@@ -75,7 +75,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // ── Apply the count to inventory_items ──────────────────────────────────
 
     const { belowParItems } = await step.run('apply-count-and-check-par', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:inventory-events' })
 
       // Validate the count session itself belongs to this org before trusting
       // any row derived from count_id — a forged/mismatched count_id must
@@ -168,7 +168,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // ── Generate purchase order ──────────────────────────────────────────────
 
     const { purchaseOrderId, alreadyExisted } = await step.run('create-purchase-order', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:inventory-events' })
       // Idempotency: a PO for this count may already exist from a prior retry
       const { data: existing } = await supabase
         .from('purchase_orders')
@@ -220,7 +220,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     }
 
     await step.run('record-first-po-milestone', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:inventory-events' })
       await supabase.from('org_milestones').upsert(
         { org_id, milestone: 'first_purchase_order' },
         { onConflict: 'org_id,milestone', ignoreDuplicates: true }
@@ -231,7 +231,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // A same-day flip = this property has a checkout today AND an incoming
     // guest today or tomorrow. Those need restocking now, not at end of day.
     const isSameDayFlip = await step.run('detect-same-day-flip', async () => {
-      const supabase  = createServiceClient()
+      const supabase  = createServiceClient({ system: 'inngest:inventory-events' })
       const todayDate = new Date().toISOString().split('T')[0]!
 
       const { data } = await supabase
@@ -264,7 +264,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // order_email_sent stays false here: same-day flips flip it to true after
     // the immediate email below; normal counts leave it for the daily cron.
     await step.run('mark-po-email-status', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:inventory-events' })
       await supabase
         .from('purchase_orders')
         .update({ is_same_day_flip: isSameDayFlip })
@@ -274,7 +274,7 @@ export const handleInventoryCountSubmitted = inngest.createFunction(
     // ── Email PM: immediate for same-day flips only ──────────────────────────
     if (isSameDayFlip) {
       await step.run('email-po-to-pm-immediate', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:inventory-events' })
         const [{ data: property }, pmEmails] = await Promise.all([
           supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
           getPmEmails(supabase, org_id),

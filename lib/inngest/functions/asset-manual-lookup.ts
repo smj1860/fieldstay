@@ -38,7 +38,7 @@ export const assetManualLookup = inngest.createFunction(
     const normalizedModel = normalize(model)
 
     const existing = await step.run('check-existing', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:asset-manual-lookup' })
       const { data, error } = await supabase
         .from('asset_manuals')
         .select('id')
@@ -65,7 +65,7 @@ export const assetManualLookup = inngest.createFunction(
     })
 
     await step.run('save-result', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:asset-manual-lookup' })
       const { error } = await supabase
         .from('asset_manuals')
         .insert({

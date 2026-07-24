@@ -85,7 +85,7 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
 
     // ── Step 2: Mark revoked, check dedup (top-level, atomic UPDATE+RETURNING) ──
     const alreadyNotified = await step.run('mark-revoked', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:integration-token-refresh-handler' })
 
       const { data: updatedConn } = await supabase
         .from('integration_connections')
@@ -108,7 +108,7 @@ export const integrationTokenRefreshHandler = inngest.createFunction(
           return
         }
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:integration-token-refresh-handler' })
         const [pmEmail] = await getPmEmails(supabase, org_id)
 
         if (!pmEmail) {

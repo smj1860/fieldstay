@@ -91,7 +91,7 @@ export default async function InventoryPage() {
     .filter((item) => item.is_active)
     .sort((a, b) => a.name.localeCompare(b.name))
 
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authorizedBy: membership })
   const { data: krogerConnection } = await admin
     .from('integration_connections')
     .select('id')

@@ -107,7 +107,7 @@ export async function submitAssetDiscovery(
 
     if (!assignedTurnover) return { error: 'Property not found' }
 
-    const admin = createServiceClient()
+    const admin = createServiceClient({ crew })
 
     const { data: existing } = await admin
       .from('property_assets')

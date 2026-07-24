@@ -13,7 +13,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
     const { turnover_id, property_id, org_id, flag_notes } = event.data
 
     const workOrder = await step.run('create-draft-wo', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:flagged-turnover-wo' })
 
       // Idempotency: return existing WO if this step is retried
       const { data: existing } = await supabase
@@ -63,7 +63,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
     })
 
     const managers = await step.run('load-managers', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:flagged-turnover-wo' })
 
       const { data } = await supabase
         .from('organization_members')
@@ -78,7 +78,7 @@ export const flaggedTurnoverToWO = inngest.createFunction(
       if (!mgr.user_id) continue
 
       await step.run(`notify-manager-${mgr.user_id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:flagged-turnover-wo' })
 
         const { data: subs } = await supabase
           .from('push_subscriptions')

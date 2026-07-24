@@ -16,7 +16,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   // Service client — fetches across org boundaries for a complete personal data picture
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authenticatedUser: user })
 
   const [
     { data: profile },

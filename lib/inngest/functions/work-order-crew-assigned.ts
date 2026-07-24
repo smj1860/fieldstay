@@ -13,7 +13,7 @@ export const handleWorkOrderCrewAssigned = inngest.createFunction(
     // This handler is scaffolded for the push notification integration.
 
     await step.run('log-assignment', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-crew-assigned' })
       const { data: wo } = await supabase
         .from('work_orders')
         .select('wo_number, title')

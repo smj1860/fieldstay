@@ -12,7 +12,7 @@ export const guidebookGuestOptedIn = inngest.createFunction(
     // Fetch property and booking token in parallel
     const [property, booking] = await Promise.all([
       step.run('fetch-property', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:guidebook-guest-opted-in' })
         const { data, error } = await supabase
           .from('properties')
           .select('id, name, door_code_secret_id, org_id')
@@ -22,7 +22,7 @@ export const guidebookGuestOptedIn = inngest.createFunction(
         return data
       }),
       step.run('fetch-booking-token', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:guidebook-guest-opted-in' })
         const { data, error } = await supabase
           .from('bookings')
           .select('guidebook_token')
@@ -34,7 +34,7 @@ export const guidebookGuestOptedIn = inngest.createFunction(
     ])
 
     await step.run('send-door-code-sms', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-guest-opted-in' })
 
       if (!property.door_code_secret_id) return { skipped: 'no_door_code' }
 

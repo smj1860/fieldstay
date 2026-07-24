@@ -11,7 +11,7 @@ import { embedText }           from './embed'
  * still responds (with degraded relevance) if OpenAI is temporarily unavailable.
  */
 export async function retrieveContext(query: string): Promise<string[]> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/support/retrieve' })
 
   try {
     const embedding = await embedText(query)

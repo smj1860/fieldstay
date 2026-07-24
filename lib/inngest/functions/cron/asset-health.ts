@@ -40,7 +40,7 @@ export const dailyAssetHealth = inngest.createFunction(
       estimated_replacement_cost: number | null
       health_score: number | null
     }>> => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:asset-health' })
       const { data } = await supabase
         .from('property_assets')
         .select(`
@@ -56,7 +56,7 @@ export const dailyAssetHealth = inngest.createFunction(
 
     if (activeAssets.length > 0) {
       const standards = await step.run('fetch-asset-standards', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:asset-health' })
         const { data } = await supabase
           .from('asset_type_standards')
           .select('asset_type, lifespan_min_years, lifespan_max_years, avg_replacement_cost_high, age_weight, condition_weight')
@@ -64,7 +64,7 @@ export const dailyAssetHealth = inngest.createFunction(
       })
 
       const repairWOs = await step.run('fetch-asset-repair-history', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:asset-health' })
         const { data } = await supabase
           .from('work_orders')
           .select('asset_id, actual_cost, estimated_cost, completed_date')
@@ -113,7 +113,7 @@ export const dailyAssetHealth = inngest.createFunction(
 
         if (updates.length > 0) {
           await step.run(`persist-scores-${orgId}`, async () => {
-            const supabase = createServiceClient()
+            const supabase = createServiceClient({ system: 'inngest:asset-health' })
             await persistScores(supabase, updates)
           })
         }
@@ -121,7 +121,7 @@ export const dailyAssetHealth = inngest.createFunction(
 
       // ── Bayesian weight nudge: per-asset-type age vs. condition weight drift ──
       await step.run('bayesian-weight-nudge', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:asset-health' })
 
         const { data: assetRepairs } = await supabase
           .from('work_orders')

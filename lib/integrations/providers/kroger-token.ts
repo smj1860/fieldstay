@@ -20,7 +20,7 @@ const REFRESH_WINDOW = 5 * 60 * 1_000   // refresh when < 5 min remaining
  * 5 minutes of expiry.
  */
 export async function getValidKrogerToken(userId: string): Promise<string> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/integrations/providers/kroger-token' })
 
   const { data: conn } = await supabase
     .from('integration_connections')
@@ -46,7 +46,7 @@ export async function getValidKrogerToken(userId: string): Promise<string> {
  * revoked — Inngest must not retry a refresh that can never succeed.
  */
 export async function refreshKrogerToken(userId: string): Promise<string> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/integrations/providers/kroger-token' })
 
   const { data: conn } = await supabase
     .from('integration_connections')

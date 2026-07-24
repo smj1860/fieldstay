@@ -10,7 +10,7 @@ export const autoAssignTurnover = inngest.createFunction(
     const { turnover_id, property_id, org_id, checkout_datetime } = event.data
 
     const context = await step.run('load-context', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:auto-assign-turnover' })
 
       const [
         { data: org },
@@ -173,7 +173,7 @@ export const autoAssignTurnover = inngest.createFunction(
       : top.name
 
     const acted = await step.run('act-on-mode', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:auto-assign-turnover' })
       const { mode } = context
 
       if (mode === 'suggest') {
@@ -235,7 +235,7 @@ export const autoAssignTurnover = inngest.createFunction(
     })
 
     await step.run('record-outcomes', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:auto-assign-turnover' })
       const wasAutopilotAssigned =
         acted.action === 'autopilot_assigned' || acted.action === 'already_assigned'
 

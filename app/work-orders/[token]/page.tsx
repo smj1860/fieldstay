@@ -15,7 +15,7 @@ export default async function VendorPortalPage({
   const { token } = await params
 
   // Use service client — no session cookie available for vendor
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'work-orders--token-' })
 
   const { data: workOrder } = await supabase
     .from('work_orders')

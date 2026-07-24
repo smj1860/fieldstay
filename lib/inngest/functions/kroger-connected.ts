@@ -23,7 +23,7 @@ export const setupKrogerOnConnect = inngest.createFunction(
     const { org_id } = event.data
 
     const result = await step.run('find-and-store-nearest-location', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:kroger-connected' })
 
       const { data: property } = await supabase
         .from('properties')

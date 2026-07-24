@@ -48,7 +48,7 @@ export const hostawayInitialSync = inngest.createFunction(
         const listings = await hostawayFetchListings(token)
         logger.info(`[Hostaway:${user_id}] Fetched ${listings.length} listings`)
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const idMap: Record<number, string> = {}  // hostaway listing id → fieldstay property uuid
 
         if (listings.length) {
@@ -114,7 +114,7 @@ export const hostawayInitialSync = inngest.createFunction(
           const reservations = await hostawayFetchReservations(token, since)
           logger.info(`[Hostaway:${user_id}] Fetched ${reservations.length} reservations`)
 
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           const touched   = new Set<string>()
           const bookingRows = reservations
             .map((res: HostawayReservation) => {
@@ -165,7 +165,7 @@ export const hostawayInitialSync = inngest.createFunction(
       // ── 4. Generate turnovers for affected properties ────────────────
       const newTurnoverIds = await step.run('generate-turnovers', async () => {
         if (!affectedPropertyIds.length) return []
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const ids: string[] = []
         for (const propertyId of affectedPropertyIds) {
           try {
@@ -181,7 +181,7 @@ export const hostawayInitialSync = inngest.createFunction(
 
       if (newTurnoverIds.length > 0) {
         const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           type TRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
           const { data: turnovers } = await supabase
             .from('turnovers')
@@ -226,7 +226,7 @@ export const hostawayInitialSync = inngest.createFunction(
       logger.error(`[Hostaway:${user_id}] initial sync failed: ${msg}`)
 
       await step.run('handle-sync-failure', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         await supabase
           .from('integration_connections')
           .update({ status: 'error' })
@@ -251,7 +251,7 @@ async function updateConnectionMetadata(
   userId: string,
   patch:  Record<string, unknown>
 ): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'inngest:initial-sync' })
   const { data: existing } = await supabase
     .from('integration_connections')
     .select('metadata')

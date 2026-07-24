@@ -20,7 +20,7 @@ export default async function AuditLogPage({
 
   // Use service client — audit_events RLS restricts to owner role only,
   // but admin/managers should also be able to view for SOC2 purposes.
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ authorizedBy: membership })
 
   // Fetch one extra row to detect a next page without a separate count query.
   const { data: events } = await supabase

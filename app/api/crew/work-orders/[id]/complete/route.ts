@@ -30,7 +30,7 @@ export async function POST(
 
   // Service client for the WO read/update — crew role has no UPDATE policy on
   // work_orders; assignment is verified explicitly below instead of via RLS.
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ crew })
 
   const { data: wo } = await supabase
     .from('work_orders')

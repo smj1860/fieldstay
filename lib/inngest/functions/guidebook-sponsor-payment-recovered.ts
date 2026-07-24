@@ -10,7 +10,7 @@ export const guidebookSponsorPaymentRecovered = inngest.createFunction(
     const { sponsorId, orgId } = event.data
 
     await step.run('reactivate-sponsor-row', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-payment-recovered' })
       const { error } = await supabase
         .from('guidebook_sponsors')
         .update({
@@ -31,7 +31,7 @@ export const guidebookSponsorPaymentRecovered = inngest.createFunction(
     await step.run('evaluate-guidebook-lock', async () => {
       if (activeSponsorCount < 3) return
 
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-payment-recovered' })
       await supabase
         .from('guidebook_configurations')
         .upsert(

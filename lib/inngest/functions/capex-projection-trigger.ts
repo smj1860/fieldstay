@@ -31,7 +31,7 @@ export const triggerCapexProjectionForOrg = inngest.createFunction(
     const currentYear = new Date().getFullYear()
 
     const result = await step.run('project-org', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:capex-projection-trigger' })
 
       const [{ data: assets }, { data: standards }, { data: properties }] =
         await Promise.all([

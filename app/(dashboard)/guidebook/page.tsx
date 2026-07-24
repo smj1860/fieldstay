@@ -8,7 +8,7 @@ export const metadata: Metadata = { title: 'Guidebook' }
 
 export default async function GuidebookPage() {
   const { membership } = await requireOrgMember()
-  const supabase        = createServiceClient()
+  const supabase        = createServiceClient({ authorizedBy: membership })
 
   const [sponsorsResult, configResult, propertiesResult] = await Promise.all([
     supabase

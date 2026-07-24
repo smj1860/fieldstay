@@ -32,7 +32,7 @@ export const computeChecklistSignals = inngest.createFunction(
     // truncate history without any error. completed_at DESC ordering is
     // load-bearing for streak detection below.
     const items = await step.run('fetch-windowed-completions', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:checklist-signals' })
       const windowStart = new Date(Date.now() - OBSERVATION_WINDOW_DAYS * 86_400_000).toISOString()
 
       type Page = Awaited<ReturnType<typeof fetchPage>>
@@ -138,7 +138,7 @@ export const computeChecklistSignals = inngest.createFunction(
     // Wrapped in a single step so it's memoized — a mid-loop failure won't
     // force re-running the expensive read + grouping pass above.
     await step.run('persist-signals', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:checklist-signals' })
       const CHUNK = 200
       for (let i = 0; i < upserts.length; i += CHUNK) {
         await supabase

@@ -19,7 +19,7 @@ export async function logSystemCommunication(data: {
   property_id?:    string | null
   work_order_id?:  string | null
 }): Promise<void> {
-  const admin = createServiceClient()
+  const admin = createServiceClient({ system: 'lib/comms-log' })
 
   await admin.from('communication_logs').insert({
     org_id:            data.org_id,

@@ -20,7 +20,7 @@ export const dailyCommsRetention = inngest.createFunction(
     const today = new Date()
 
     const retentionOrgs = await step.run('find-comms-retention-orgs', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:comms-retention' })
       const { data } = await supabase
         .from('organizations')
         .select('id, comms_log_retention_days')
@@ -33,7 +33,7 @@ export const dailyCommsRetention = inngest.createFunction(
 
     for (const org of retentionOrgs) {
       await step.run(`comms-log-retention-${org.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:comms-retention' })
         // Step A — soft-delete logs older than the retention window
         const { data: softDeleted } = await supabase
           .from('communication_logs')

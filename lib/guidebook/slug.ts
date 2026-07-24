@@ -23,7 +23,7 @@ export function generateBaseSlug(name: string): string {
  *   ...
  */
 export async function generateUniqueSlug(propertyName: string): Promise<string> {
-  const supabase  = createServiceClient()
+  const supabase  = createServiceClient({ system: 'lib/guidebook/slug' })
   const baseSlug  = generateBaseSlug(propertyName)
 
   // Fetch all existing slugs that start with the base slug in one query
@@ -52,7 +52,7 @@ export async function generateUniqueSlug(propertyName: string): Promise<string> 
 export async function generateUniqueSlugsForProperties(
   properties: { id: string; name: string }[]
 ): Promise<Map<string, string>> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/guidebook/slug' })
 
   // Generate all base slugs first
   const baseSlugs = properties.map((p) => ({

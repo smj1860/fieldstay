@@ -30,7 +30,7 @@ export const autoAssignVendor = inngest.createFunction(
     const { work_order_id, property_id, org_id, category } = event.data
 
     const context = await step.run('load-context', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:auto-assign-vendor' })
 
       const [
         { data: org },
@@ -156,7 +156,7 @@ export const autoAssignVendor = inngest.createFunction(
       : top.name
 
     await step.run('write-suggestion', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:auto-assign-vendor' })
       await supabase
         .from('work_orders')
         .update({
@@ -169,7 +169,7 @@ export const autoAssignVendor = inngest.createFunction(
     })
 
     await step.run('record-outcome', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:auto-assign-vendor' })
       const { error } = await supabase.from('vendor_assignment_outcomes').upsert(
         {
           work_order_id,

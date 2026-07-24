@@ -17,7 +17,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
 
     // ── Step 1: Fetch WO + vendor + property + org in parallel ───────────
     const { wo, vendor, property, org } = await step.run('fetch-context', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-vendor-assigned' })
       const [woRes, vendorRes] = await Promise.all([
         supabase
           .from('work_orders')
@@ -82,7 +82,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     const token = await step.run('ensure-completion-token', async () => {
       if (wo.completion_token) return wo.completion_token
 
-      const supabase  = createServiceClient()
+      const supabase  = createServiceClient({ system: 'inngest:work-order-vendor-assigned' })
       const newToken  = crypto.randomUUID()
       const expiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -104,7 +104,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
 
     // ── Step 3: Fetch dispatcher ───────────────────────────────────────────
     const dispatcher = await step.run('fetch-dispatcher', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-vendor-assigned' })
       const { data: members } = await supabase
         .from('organization_members')
         .select('user_id')
@@ -136,7 +136,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
     const propertyAddress = property?.address ?? ''
 
     await step.run('send-vendor-email', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-vendor-assigned' })
       const manualUrl = await getManualUrlForAsset(supabase, orgId, wo.asset_id ?? null)
 
       const html = await render(WorkOrderDispatchEmail({
@@ -220,7 +220,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
 
     // ── Step 5: Notify PM that vendor was dispatched ───────────────────────
     await step.run('notify-pm-dispatched', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-vendor-assigned' })
       await createPmNotification(supabase, {
         orgId,
         type:      'work_order_dispatched',

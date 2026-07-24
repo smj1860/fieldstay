@@ -25,7 +25,7 @@ export const turnoverPriorityDecay = inngest.createFunction(
   { cron: '0 14 * * *' },  // 9am CT (UTC-5), after the maintenance cron's 8am run
   async ({ step, logger }) => {
     const candidates = await step.run('find-standalone-medium-turnovers', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:turnover-priority-decay' })
       const { data } = await supabase
         .from('turnovers')
         .select('id, property_id, checkout_datetime')
@@ -45,7 +45,7 @@ export const turnoverPriorityDecay = inngest.createFunction(
     // "N round trips → 1" fix maintenance-schedules.ts's vacancy-gap pass
     // uses. Step count no longer scales with turnover backlog.
     const idsToDowngrade = await step.run('find-turnovers-without-upcoming-booking', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:turnover-priority-decay' })
 
       const dateOnly = (iso: string) => iso.split('T')[0]!
       const windows = candidates.map((t) => {
@@ -88,7 +88,7 @@ export const turnoverPriorityDecay = inngest.createFunction(
 
     if (idsToDowngrade.length) {
       await step.run('downgrade-turnovers', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:turnover-priority-decay' })
         await supabase
           .from('turnovers')
           .update({ priority: 'low' })

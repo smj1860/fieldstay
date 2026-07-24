@@ -41,7 +41,7 @@ export const generateDepreciationLedger = inngest.createFunction(
     // ── Step 1: Load active assets ──────────────────────────────────────────
 
     const assets = await step.run('load-assets', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:depreciation-ledger' })
       const pageSize = 1000
       const all: Array<{
         id: string; org_id: string; property_id: string; name: string; asset_type: string
@@ -80,7 +80,7 @@ export const generateDepreciationLedger = inngest.createFunction(
     // ── Step 2: Fetch prior cumulative depreciation per asset ───────────────
 
     const priorEntries = await step.run('fetch-prior-cumulative', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:depreciation-ledger' })
       const assetIds = assets.map((a) => a.id)
       const { data } = await supabase
         .from('asset_depreciation_entries')
@@ -110,7 +110,7 @@ export const generateDepreciationLedger = inngest.createFunction(
 
     for (const [orgId, orgAssets] of Object.entries(orgMap)) {
       const written = await step.run(`upsert-entries-${orgId}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:depreciation-ledger' })
         const entries = []
 
         for (const asset of orgAssets) {

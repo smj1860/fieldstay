@@ -16,7 +16,7 @@ function isInviteExpired(sentAt: string, ttlDays: number): boolean {
 
 export default async function CrewInvitePage({ params }: Props) {
   const { token } = await params
-  const supabase  = createServiceClient()
+  const supabase  = createServiceClient({ publicSurface: 'crew-invite--token-' })
 
   const { data: crew } = await supabase
     .from('crew_members')

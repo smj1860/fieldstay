@@ -35,7 +35,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     // ── 7.1: WO Aging Escalation ─────────────────────────────────────────────
     const agingWOs = await step.run('find-aging-work-orders', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
       const sevenDaysAgo = new Date(today)
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
 
@@ -53,7 +53,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     // ── 7.4 lookup: schedules eligible for auto-WO (fetched early to batch PM emails) ──
     const autoWOSchedules = await step.run('find-auto-wo-schedules', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
       const { data } = await supabase
         .from('maintenance_schedules')
         .select(`
@@ -73,7 +73,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
 
     for (const wo of agingWOs) {
       const escalationEventData = await step.run(`escalate-aging-wo-${wo.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
         const daysOpen = Math.round((today.getTime() - new Date(wo.created_at).getTime()) / 86_400_000)
 
         await supabase
@@ -131,7 +131,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
     // ── 7.4: Auto-create WOs for due maintenance schedules ───────────────────
     for (const schedule of autoWOSchedules) {
       const autoCreateEventData = await step.run(`auto-create-wo-${schedule.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
         const property = unwrapJoin(schedule.properties)
 
         // Idempotency: skip if an open WO already exists for this schedule + date
@@ -283,7 +283,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
     // Removes processed_webhooks entries older than 72 hours (all providers).
     // Moved off the webhook hot path — runs once daily here instead.
     await step.run('cleanup-webhook-inbox', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-ops' })
       await supabase
         .from('processed_webhooks')
         .delete()

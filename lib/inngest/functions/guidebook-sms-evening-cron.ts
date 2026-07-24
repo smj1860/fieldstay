@@ -29,7 +29,7 @@ export const guidebookSmsEveningCron = inngest.createFunction(
     const todayDate = new Intl.DateTimeFormat('en-CA', { timeZone: FALLBACK_TIMEZONE }).format(new Date())
 
     const optins = await step.run('fetch-active-optins', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-sms-evening-cron' })
       const { data, error } = await supabase
         .from('guidebook_guest_sms_optins')
         .select(`
@@ -87,7 +87,7 @@ export const guidebookSmsEveningSend = inngest.createFunction(
     const { optin_id: optinId, org_id: orgId, property_id: propertyId, today_date: todayDate } = event.data
 
     const sent = await step.run('send-evening-sms', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-sms-evening-cron' })
 
       // Re-fetch instead of trusting the dispatch-time snapshot: is_active
       // may have flipped (guest texted STOP) since the cron ran.

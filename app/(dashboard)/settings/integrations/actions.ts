@@ -22,7 +22,7 @@ export async function getSyncProgress(providerId: string): Promise<{
     // sync progress may not be the PM who originally connected the
     // integration (same pattern as triggerResync below).
     const { membership } = await requireOrgMember()
-    const supabase = createServiceClient()
+    const supabase = createServiceClient({ authorizedBy: membership })
 
     const { data } = await supabase
       .from('integration_connections')
@@ -58,7 +58,7 @@ export async function triggerResync(
     return { error: 'Permission denied' }
   }
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ authorizedBy: membership })
   const { data: connection } = await supabase
     .from('integration_connections')
     .select('user_id, org_id, external_user_id, status')
@@ -187,7 +187,7 @@ export async function disconnectIntegration(
     // may differ from the current user (e.g. an org admin disconnecting a connection
     // their colleague set up). Vault operations key on user_id, so we need the
     // actual owner, not the current session user. Mirrors triggerResync's approach.
-    const supabase = createServiceClient()
+    const supabase = createServiceClient({ authorizedBy: membership })
     const { data: connection } = await supabase
       .from('integration_connections')
       .select('user_id')
@@ -294,7 +294,7 @@ export async function connectWithApiKey(
   //
   //   // Link to the org and record expiry — storeIntegrationToken doesn't
   //   // know about org_id or expires_at, so patch them in after.
-  //   const admin = createServiceClient()
+  //   const admin = createServiceClient({ authorizedBy: membership })
   //   // Scope to rows with no org_id yet (first connect — storeIntegrationToken
   //   // doesn't set org_id on insert) or already matching this org (reconnect).
   //   // Never let this silently repoint a connection that belongs to a

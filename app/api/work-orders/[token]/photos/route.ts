@@ -39,7 +39,7 @@ async function checkPhotoRateLimit(request: NextRequest): Promise<NextResponse |
 }
 
 async function loadOpenWorkOrder(token: string) {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--photos' })
 
   const { data: workOrder } = await supabase
     .from('work_orders')

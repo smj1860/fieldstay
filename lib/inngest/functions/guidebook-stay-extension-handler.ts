@@ -16,7 +16,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
 
     // Fetch property and booking context
     const { property, booking } = await step.run('fetch-context', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-stay-extension-handler' })
       const [propRes, bookRes] = await Promise.all([
         supabase
           .from('properties')
@@ -40,7 +40,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
     // ── SMS to guest (if opted in) ────────────────────────────────────
     if (guestPhoneE164 && portalUrl) {
       await step.run('send-guest-sms', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:guidebook-stay-extension-handler' })
 
         // Re-check consent at send time, not just when the triggering cron
         // computed eligibility — this handler runs off a queued event and
@@ -106,7 +106,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
 
       if (contactMethod === 'sms') {
         await step.run('notify-pm-sms', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:guidebook-stay-extension-handler' })
           const [pmMember] = await getPmMembers(supabase, orgId, { limit: 1 })
           if (!pmMember) return { skipped: true }
 
@@ -156,7 +156,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
       } else {
         // contactMethod === 'email' (also the fallback if null/unset)
         await step.run('notify-pm-email', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:guidebook-stay-extension-handler' })
           const [pmEmail] = await getPmEmails(supabase, orgId, { limit: 1 })
           if (!pmEmail) return { skipped: true }
 

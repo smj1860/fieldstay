@@ -199,5 +199,5 @@ async function markConnectionError(userId: string): Promise<void> {
 }
 
 function getAdminClient() {
-  return createServiceClient()
+  return createServiceClient({ system: 'lib/integrations/providers/hospitable-token' })
 }

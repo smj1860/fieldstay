@@ -40,7 +40,7 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
     const { org_id, source_property_id, target_property_ids } = event.data
 
     const sourceTemplate = await step.run('load-source-template', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:checklist-broadcast' })
       const { data } = await supabase
         .from('checklist_templates')
         .select(`
@@ -63,7 +63,7 @@ export const broadcastChecklistTemplateJob = inngest.createFunction(
 
     for (const targetId of target_property_ids) {
       const applied = await step.run(`broadcast-to-${targetId}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:checklist-broadcast' })
 
         const { data: newTemplate } = await supabase
           .from('checklist_templates')

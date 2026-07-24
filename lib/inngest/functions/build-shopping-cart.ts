@@ -53,7 +53,7 @@ export const buildShoppingCart = inngest.createFunction(
     const { org_id, requested_by, property_ids, modality } = event.data
 
     const persistCartStatus = async (status: string, extra: Record<string, unknown> = {}) => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
       await supabase.from('org_milestones').upsert({
         org_id,
         milestone: 'last_cart_build',
@@ -63,7 +63,7 @@ export const buildShoppingCart = inngest.createFunction(
 
     // ── Step 1: Load org settings + below-par items + Kroger connection ──
     const { orgSettings, belowParItems, connection } = await step.run('load-inventory-data', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
       const [{ data: org }, { data: allItems }, { data: conn }] = await Promise.all([
         supabase
           .from('organizations')
@@ -125,7 +125,7 @@ export const buildShoppingCart = inngest.createFunction(
 
     const krogerLocationId   = (connection?.metadata as { location_id?: string } | null)?.location_id
     const krogerLocationName = (connection?.metadata as { location_name?: string } | null)?.location_name
-    const supabase = createServiceClient()
+    const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
 
     if (!connection || !krogerLocationId) {
       await supabase.from('org_milestones').upsert({
@@ -150,7 +150,7 @@ export const buildShoppingCart = inngest.createFunction(
           // the PM sees a reconnect prompt instead of the cart silently
           // degrading to list-only with no visible error state until the
           // next proactive-refresh cron tick.
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
           await supabase
             .from('integration_connections')
             .update({ status: 'revoked' })
@@ -337,7 +337,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
     // and guarded by an org_milestones flag (keyed on this function run) so a
     // retry of this step itself can't add the items to the cart twice.
     const cartAdded = await step.run('add-items-to-kroger-cart', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
       if (!customerToken || matchResult.cartItems.length === 0) return false
 
       const milestoneKey = `kroger_cart_added:${runId}`
@@ -378,7 +378,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
 
     // ── Step 7: Persist result for dashboard UI ─────────────
     await step.run('persist-result', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:build-shopping-cart' })
       await supabase.from('org_milestones').upsert({
         org_id,
         milestone: 'last_cart_build',
@@ -406,7 +406,7 @@ ${JSON.stringify(itemsForNormalization, null, 2)}`,
 
     // ── Step 8: Email PM with cart summary ───────────────────────────────────
     await step.run('send-cart-ready-email', async () => {
-      const admin = createServiceClient()
+      const admin = createServiceClient({ system: 'inngest:build-shopping-cart' })
       const { data: userRecord } = await admin.auth.admin.getUserById(requested_by)
       const pmEmail = userRecord?.user?.email
       if (!pmEmail || !userRecord.user) return

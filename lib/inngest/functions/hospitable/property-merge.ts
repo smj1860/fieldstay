@@ -39,7 +39,7 @@ export const hospPropertyMerge = inngest.createFunction(
     const { previous_external_id, new_external_id } = event.data
 
     const result = await step.run('remap-or-flag', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:property-merge' })
 
       const { data: previousProperty } = await supabase
         .from('properties')

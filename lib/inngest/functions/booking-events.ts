@@ -20,7 +20,7 @@ export const handleBookingConfirmed = inngest.createFunction(
     const { booking_id, property_id, org_id, source, actual_total_amount } = event.data
 
     await step.run('post-booking-revenue', async () => {
-      const supabase  = createServiceClient()
+      const supabase  = createServiceClient({ system: 'inngest:booking-events' })
       const txnSource = source === 'uplisting' ? 'uplisting_booking' : 'booking_revenue'
 
       const [{ data: booking }, { data: property }] = await Promise.all([
@@ -109,7 +109,7 @@ export const handleBookingDetected = inngest.createFunction(
     // A failure here must NEVER block turnover generation.
     // These are independent operations. Wrap entirely in try/catch.
     await step.run('create-booking-revenue-transaction', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:booking-events' })
       try {
         const { data: prop } = await supabase
           .from('properties')
@@ -179,7 +179,7 @@ export const handleBookingDetected = inngest.createFunction(
     })
     // Step 2: Turnover generation — CRITICAL. Always runs.
     const newTurnoverIds = await step.run('generate-turnovers', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:booking-events' })
       try {
         const ids = await generateTurnoversForProperty(property_id, org_id, supabase)
         logger.info(`[booking-detected] generated ${ids.length} turnover(s)`, { property_id })
@@ -198,7 +198,7 @@ export const handleBookingDetected = inngest.createFunction(
     // OwnerRez bookings via the same generateTurnoversForProperty call.
     if (newTurnoverIds.length > 0) {
       const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:booking-events' })
         type TurnoverRow = { id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
         const { data: turnovers } = await supabase
           .from('turnovers')

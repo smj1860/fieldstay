@@ -17,7 +17,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
 
     // ── Step 1: Fetch pending reviews ─────────────────────────────────────────
     const reviews = await step.run('fetch-pending-reviews', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:repuguard-batch-generate' })
 
       const { data, error } = await supabase
         .from('reviews')
@@ -45,7 +45,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
 
     for (const review of reviews) {
       const result = await step.run(`generate-${review.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:repuguard-batch-generate' })
 
         type PropertyRef = { name?: string } | { name?: string }[] | null
         const propertyRef = review.properties as PropertyRef

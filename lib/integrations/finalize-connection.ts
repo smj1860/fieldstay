@@ -85,7 +85,7 @@ export async function finalizeIntegrationConnection(params: {
   // actions that only have org context (e.g. cart automation) can find it.
   // Deterministic earliest-accepted-membership rule, same as
   // claim_pending_integration_link()'s org resolution.
-  const admin = createServiceClient()
+  const admin = createServiceClient({ system: 'lib/integrations/finalize-connection' })
   const { data: membership } = await admin
     .from('organization_members')
     .select('org_id')

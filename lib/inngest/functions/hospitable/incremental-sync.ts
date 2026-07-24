@@ -96,7 +96,7 @@ export const hospIncrementalSync = inngest.createFunction(
       }
 
       const resolved = await step.run('resolve-org-and-token', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
 
         const { data: booking } = await supabase
           .from('bookings')
@@ -186,7 +186,7 @@ export const hospIncrementalSync = inngest.createFunction(
 
       if (!reservation) {
         const cancelledBookingId = await step.run('mark-cancelled', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
           const { data: cancelled, error } = await supabase
             .from('bookings')
             .update({ status: 'cancelled', updated_at: new Date().toISOString() })
@@ -202,7 +202,7 @@ export const hospIncrementalSync = inngest.createFunction(
 
         if (cancelledBookingId) {
           await step.run('cancel-turnovers-for-deleted-reservation', async () => {
-            const supabase = createServiceClient()
+            const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
             await cancelTurnoversForBooking(cancelledBookingId, supabase)
           })
         }
@@ -212,7 +212,7 @@ export const hospIncrementalSync = inngest.createFunction(
       }
 
       const upsertResult = await step.run('upsert-booking', async () => {
-        const supabase       = createServiceClient()
+        const supabase       = createServiceClient({ system: 'inngest:incremental-sync' })
         // Confirmed from the official Hospitable webhook spec: 'properties'
         // is an array[Property], not a singular 'property' object.
         const hospPropertyId = reservation.properties?.[0]?.id ?? null
@@ -317,7 +317,7 @@ export const hospIncrementalSync = inngest.createFunction(
       // the datesChanged regeneration path below.
       if (upsertResult.status === 'cancelled') {
         await step.run('cancel-turnovers-for-status-change', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
           await cancelTurnoversForBooking(upsertResult.bookingId, supabase)
         })
         return { action: 'cancelled-via-status', entity_id }
@@ -328,13 +328,13 @@ export const hospIncrementalSync = inngest.createFunction(
       // we then fetch the full rows to build turnover/created events.
       if (upsertResult.datesChanged) {
         const newTurnoverIds = await step.run('regenerate-turnovers', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
           return generateTurnoversForProperty(upsertResult.propertyId, orgId, supabase)
         })
 
         if (newTurnoverIds.length > 0) {
           const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-            const supabase = createServiceClient()
+            const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
             type TRow = {
               id:                string
               property_id:       string
@@ -373,7 +373,7 @@ export const hospIncrementalSync = inngest.createFunction(
     if (entity_type === 'property') {
 
       const resolved = await step.run('resolve-org-and-token', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
 
         const { data: property } = await supabase
           .from('properties')
@@ -449,7 +449,7 @@ export const hospIncrementalSync = inngest.createFunction(
         )
 
         if (res.status === 404) {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
           const { error } = await supabase
             .from('properties')
             .update({ is_active: false, updated_at: new Date().toISOString() })
@@ -526,7 +526,7 @@ export const hospIncrementalSync = inngest.createFunction(
         if (isNewProperty) {
           await step.run('notify-new-property-setup', async () => {
             try {
-              const supabase = createServiceClient()
+              const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
               const { error } = await supabase
                 .from('org_milestones')
                 .upsert(
@@ -556,7 +556,7 @@ export const hospIncrementalSync = inngest.createFunction(
     if (entity_type === 'review') {
 
       const resolved = await step.run('resolve-org-and-token', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
 
         // Fast path: review already in FieldStay
         const { data: existingReview } = await supabase
@@ -653,7 +653,7 @@ export const hospIncrementalSync = inngest.createFunction(
         }
         const review = data.data
 
-        const supabase          = createServiceClient()
+        const supabase          = createServiceClient({ system: 'inngest:incremental-sync' })
         let   resolvedPropertyId: string | null = null
 
         // Resolve property_id (FK) from the Hospitable property UUID, scoped
@@ -729,7 +729,7 @@ export const hospIncrementalSync = inngest.createFunction(
     if (entity_type === 'message') {
 
       const resolved = await step.run('resolve-org-booking-and-token', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
 
         const { data: booking } = await supabase
           .from('bookings')
@@ -817,7 +817,7 @@ export const hospIncrementalSync = inngest.createFunction(
           }
         })
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
         const { error } = await supabase
           .from('reservation_messages')
           .upsert(rows, { onConflict: 'org_id,dedup_key', ignoreDuplicates: true })

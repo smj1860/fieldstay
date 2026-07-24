@@ -51,7 +51,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     // ── Pass 1: Due-soon schedules ─────────────────────────────────────────
     const dueSchedules = await step.run('find-due-schedules', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
       const { data } = await supabase
         .from('maintenance_schedules')
         .select(`
@@ -73,7 +73,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     // ── Pass 2 lookup: Overdue schedules (fetched early to batch PM emails) ──
     const overdueSchedules = await step.run('find-overdue-schedules', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
       const { data } = await supabase
         .from('maintenance_schedules')
         .select(`
@@ -92,7 +92,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     for (const schedule of dueSchedules) {
       const processResult = await step.run(`process-schedule-${schedule.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
         const vendor   = unwrapJoin(schedule.vendors)
 
         let dueDate: Date
@@ -163,7 +163,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     for (const schedule of overdueSchedules) {
       await step.run(`escalate-overdue-${schedule.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
         let dueDate: Date
         try {
           dueDate = parseLocalDate(schedule.next_due_date, 'next_due_date')
@@ -267,7 +267,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
 
     // ── Pass 3: Vacancy-gap maintenance suggestions ─────────────────────────
     const gapSuggestions = await step.run('find-vacancy-gaps', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
 
       // ── 1. All active properties ───────────────────────────────────────────
       const { data: properties } = await supabase
@@ -327,7 +327,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     // (2-day lookback window for safety) instead of re-scanning every org that has
     // ever existed — the upsert's ignoreDuplicates guards against overlap/reruns.
     await step.run('check-thirty-day-milestone', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:maintenance-schedules' })
       const windowStart = new Date(Date.now() - 32 * 86_400_000).toISOString()
       const windowEnd   = new Date(Date.now() - 30 * 86_400_000).toISOString()
       const { data: orgs } = await supabase
