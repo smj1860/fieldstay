@@ -96,3 +96,24 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 14
+
+  # ── Database invariants (structural enforcement Tier 3) ──────────────────
+  # Checks the live schema for what no code-side check can see: RLS enabled
+  # on every public table, no unexpected policy-less (deny-all) tables, a
+  # covering index on every FK column, zero anon table grants. Runs against
+  # the DEDICATED E2E project (same secrets as the e2e job — CI never holds
+  # production credentials); both projects receive every migration, so
+  # schema invariants verified there hold for production by construction.
+  # Self-disarming like the e2e job: secrets absent → warning annotation,
+  # job passes. See scripts/check-db-invariants.mjs for the check details.
+  db-invariants:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL:  ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-db-invariants.mjs
