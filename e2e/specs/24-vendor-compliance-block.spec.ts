@@ -35,6 +35,33 @@ test.describe('Vendor compliance hard-block', () => {
     await expect(option).toHaveJSProperty('disabled', true)
   })
 
+  test('[E2E] server rejects a hard-blocked vendor even if the disabled option is bypassed', async ({ page }) => {
+    // The disabled <option> above is a client-side courtesy, not the
+    // enforcement boundary — createWorkOrder (app/(dashboard)/maintenance/actions.ts)
+    // must independently reject a hard-blocked vendor_id. Force-enable the
+    // option (simulating a modified/bypassed client) and submit the real
+    // Server Action to prove the server itself blocks it.
+    const vendorName = '[E2E] Hard Blocked Direct Submit'
+    await addVendor(page, vendorName, 'hardblocked-direct@e2e-test.invalid')
+    await addComplianceDocument(page, vendorName, daysAgo(35))
+
+    await page.goto('/maintenance')
+    await page.getByRole('button', { name: /New Work Order|Add Work Order|Create|New WO/i }).first().click()
+    await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
+
+    const option = page.locator('#wo-vendor option', { hasText: vendorName })
+    await option.evaluate((el: HTMLOptionElement) => { el.disabled = false })
+    await page.selectOption('#wo-vendor', { label: vendorName })
+
+    await page.fill('[name="title"]', '[E2E] Should Be Rejected By Server')
+    await dismissCookieBanner(page)
+    await page.click('button[type="submit"]')
+
+    await expect(page.getByText(/compliance hard-blocked/i)).toBeVisible({ timeout: 8_000 })
+    // The rejected work order must not have been created.
+    await expect(page.getByText('[E2E] Should Be Rejected By Server')).not.toBeVisible()
+  })
+
   test('[E2E] grace-period vendor is selectable with a warning banner', async ({ page }) => {
     const vendorName = '[E2E] Grace Period Plumbing'
     await addVendor(page, vendorName, 'graceperiod@e2e-test.invalid')

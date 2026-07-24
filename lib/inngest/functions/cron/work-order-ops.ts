@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
 import { createPmNotification } from '@/lib/inngest/helpers'
+import { isVendorHardBlocked } from '@/lib/vendors/compliance'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 /**
@@ -159,6 +160,14 @@ export const dailyWorkOrderOps = inngest.createFunction(
             .maybeSingle()
 
           vendorId = hintVendor?.id ?? null
+        }
+
+        // A hard-blocked assigned/specialty-hint vendor is not a valid
+        // resolution — fall through as if the chain found no vendor so this
+        // unattended cron never silently assigns someone 31+ days out of
+        // compliance (see lib/vendors/compliance.ts).
+        if (vendorId && await isVendorHardBlocked(supabase, vendorId, schedule.org_id)) {
+          vendorId = null
         }
 
         // vendor_specialty_hint values are a subset of WoCategory — the

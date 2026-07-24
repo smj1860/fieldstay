@@ -16,6 +16,7 @@ import {
   checkCrewTimeOffWarning,
   dispatchWorkOrderEvents,
 } from './create-work-order-helpers'
+import { isVendorHardBlocked, VENDOR_HARD_BLOCKED_ERROR } from '@/lib/vendors/compliance'
 
 export type MaintenanceActionState = { error?: string; success?: boolean; workOrderId?: string; templateId?: string; warning?: string }
 
@@ -132,6 +133,10 @@ export async function createWorkOrder(
       .single()
 
     if (!property) return { error: 'Property not found' }
+
+    if (vendor_id && !request_quotes && await isVendorHardBlocked(supabase, vendor_id, membership.org_id)) {
+      return { error: VENDOR_HARD_BLOCKED_ERROR }
+    }
 
     // In quote-request mode, WO starts as quote_requested with no vendor assigned yet
     const woStatus            = resolveWorkOrderStatus(request_quotes, vendor_id)
@@ -312,6 +317,14 @@ export async function updateWorkOrder(
 
     const previousVendorId = currentWo?.vendor_id ?? null
     const newVendorId      = data.vendor_id || null
+
+    if (
+      newVendorId &&
+      newVendorId !== previousVendorId &&
+      await isVendorHardBlocked(supabase, newVendorId, membership.org_id)
+    ) {
+      return { error: VENDOR_HARD_BLOCKED_ERROR }
+    }
 
     const { error } = await supabase
       .from('work_orders')
@@ -975,6 +988,14 @@ export async function createWorkOrderFromSchedule(
       vendorId = hintVendor?.id ?? null
     }
 
+    // A hard-blocked assigned/specialty-hint vendor is not a valid resolution —
+    // fall through as if the chain found no vendor, same as the null branches
+    // above, so the WO lands in the vendor-suggestion flow below instead of
+    // silently assigning someone 31+ days out of compliance.
+    if (vendorId && await isVendorHardBlocked(supabase, vendorId, membership.org_id)) {
+      vendorId = null
+    }
+
     // vendor_specialty_hint values are a subset of WoCategory, so this is a
     // safe direct cast — the closest thing a maintenance schedule has to a
     // WO category, and needed for vendor suggestions to have anything to
@@ -1070,6 +1091,10 @@ export async function bulkAssignVendor(
 
     if (!vendor) return { error: 'Vendor not found' }
 
+    if (await isVendorHardBlocked(supabase, vendorId, membership.org_id)) {
+      return { error: VENDOR_HARD_BLOCKED_ERROR }
+    }
+
     const { data: workOrders } = await supabase
       .from('work_orders')
       .select('id, suggestion_status, suggested_vendor_ids')
@@ -1140,6 +1165,10 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
 
     const vendorId = (wo.suggested_vendor_ids as string[] | null)?.[0]
     if (!vendorId) return { error: 'No suggestion to accept' }
+
+    if (await isVendorHardBlocked(supabase, vendorId, membership.org_id)) {
+      return { error: VENDOR_HARD_BLOCKED_ERROR }
+    }
 
     const { error } = await supabase
       .from('work_orders')
