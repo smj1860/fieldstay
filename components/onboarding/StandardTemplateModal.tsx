@@ -85,15 +85,32 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Reado
   }
 
   return (
-    <Dialog open onClose={onClose} title="Standard Maintenance Template" mobileSheet>
-      <div className="flex flex-col max-h-[75vh] -m-6">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Standard Maintenance Template"
+      mobileSheet
+      footer={
+        <div className="w-full space-y-2">
+          {error && (
+            <p className="text-xs text-center" style={{ color: 'var(--accent-red)' }}>{error}</p>
+          )}
+          <Button
+            onClick={handleApply}
+            disabled={saving || loading}
+            className="w-full py-3"
+          >
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Applying…</> : 'Apply to Property'}
+          </Button>
+        </div>
+      }
+    >
         {/* Sub-header */}
-        <p className="text-xs text-muted-themed px-5 pt-1 pb-3 border-b border-themed shrink-0">
+        <p className="text-xs text-muted-themed mb-3">
           Adjust frequencies and start dates below
         </p>
 
-        {/* Scrollable list */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+        <div className="space-y-2">
           {loading ? (
             <div className="py-8 text-center text-sm text-muted-themed flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" /> Loading template…
@@ -143,21 +160,6 @@ export function StandardTemplateModal({ propertyId, onComplete, onClose }: Reado
             ))
           )}
         </div>
-
-        {/* Footer */}
-        <div className="px-4 py-4 border-t border-themed shrink-0 space-y-2">
-          {error && (
-            <p className="text-xs text-center" style={{ color: 'var(--accent-red)' }}>{error}</p>
-          )}
-          <Button
-            onClick={handleApply}
-            disabled={saving || loading}
-            className="w-full py-3"
-          >
-            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Applying…</> : 'Apply to Property'}
-          </Button>
-        </div>
-      </div>
     </Dialog>
   )
 }

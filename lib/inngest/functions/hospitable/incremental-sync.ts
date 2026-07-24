@@ -95,7 +95,7 @@ export const hospIncrementalSync = inngest.createFunction(
         return { action: 'skipped', reason: 'irrelevant_trigger', entity_id, triggers }
       }
 
-      const { orgId, token } = await step.run('resolve-org-and-token', async () => {
+      const resolved = await step.run('resolve-org-and-token', async () => {
         const supabase = createServiceClient()
 
         const { data: booking } = await supabase
@@ -109,6 +109,23 @@ export const hospIncrementalSync = inngest.createFunction(
         let pmUserId: string | null      = null
 
         if (resolvedOrgId) {
+          // Disconnecting an integration never touches `bookings` — a
+          // resolved org here can still point at a since-disconnected
+          // connection indefinitely. Check before doing anything else so
+          // this returns a clean skip instead of letting
+          // getValidHospitableToken() throw below, which otherwise retries
+          // 3x and lands in Sentry for every webhook Hospitable keeps
+          // sending after disconnect (SENTRY-CRAZY-CUSHION-9).
+          const { data: activeConnection } = await supabase
+            .from('integration_connections')
+            .select('org_id')
+            .eq('org_id',      resolvedOrgId)
+            .eq('provider_id', PROVIDER)
+            .eq('status',      'active')
+            .maybeSingle()
+
+          if (!activeConnection) return { skipped: true as const }
+
           const { data: member } = await supabase
             .from('organization_members')
             .select('user_id')
@@ -131,16 +148,21 @@ export const hospIncrementalSync = inngest.createFunction(
             .limit(1)
             .single()
 
-          if (!connection) {
-            throw new NonRetriableError('No active Hospitable connection found')
-          }
+          if (!connection) return { skipped: true as const }
           pmUserId      = connection.user_id
           resolvedOrgId = connection.org_id
         }
 
         const validToken = await getValidHospitableToken(pmUserId!)
-        return { orgId: resolvedOrgId!, token: validToken }
+        return { skipped: false as const, orgId: resolvedOrgId!, token: validToken }
       })
+
+      if (resolved.skipped) {
+        logger.info(`[Hospitable incremental] Skipping reservation ${entity_id} — no active Hospitable connection`)
+        return { skipped: true, reason: 'no_active_connection', entity_id }
+      }
+
+      const { orgId, token } = resolved
 
       const reservation = await step.run('fetch-reservation', async () => {
         // financials is speculative — gated on the not-yet-granted
@@ -350,7 +372,7 @@ export const hospIncrementalSync = inngest.createFunction(
     // ── PROPERTY ─────────────────────────────────────────────────────────────
     if (entity_type === 'property') {
 
-      const { orgId, token, isNewProperty } = await step.run('resolve-org-and-token', async () => {
+      const resolved = await step.run('resolve-org-and-token', async () => {
         const supabase = createServiceClient()
 
         const { data: property } = await supabase
@@ -364,6 +386,20 @@ export const hospIncrementalSync = inngest.createFunction(
         let pmUserId: string | null      = null
 
         if (resolvedOrgId) {
+          // See the reservation branch above for why this check exists —
+          // disconnecting an integration never touches `properties`, so a
+          // resolved org here can still point at a since-disconnected
+          // connection indefinitely (SENTRY-CRAZY-CUSHION-9).
+          const { data: activeConnection } = await supabase
+            .from('integration_connections')
+            .select('org_id')
+            .eq('org_id',      resolvedOrgId)
+            .eq('provider_id', PROVIDER)
+            .eq('status',      'active')
+            .maybeSingle()
+
+          if (!activeConnection) return { skipped: true as const }
+
           const { data: member } = await supabase
             .from('organization_members')
             .select('user_id')
@@ -389,16 +425,21 @@ export const hospIncrementalSync = inngest.createFunction(
             .limit(1)
             .single()
 
-          if (!connection) {
-            throw new NonRetriableError('No active Hospitable connection found')
-          }
+          if (!connection) return { skipped: true as const }
           pmUserId      = connection.user_id
           resolvedOrgId = connection.org_id
         }
 
         const validToken = await getValidHospitableToken(pmUserId!)
-        return { orgId: resolvedOrgId!, token: validToken, isNewProperty: !property }
+        return { skipped: false as const, orgId: resolvedOrgId!, token: validToken, isNewProperty: !property }
       })
+
+      if (resolved.skipped) {
+        logger.info(`[Hospitable incremental] Skipping property ${entity_id} — no active Hospitable connection`)
+        return { skipped: true, reason: 'no_active_connection', entity_id }
+      }
+
+      const { orgId, token, isNewProperty } = resolved
 
       const fetchAndUpsertResult = await step.run('fetch-and-upsert-property', async () => {
         // bookings is speculative — see HospitableProperty.bookings.
@@ -514,7 +555,7 @@ export const hospIncrementalSync = inngest.createFunction(
     // ── REVIEW ────────────────────────────────────────────────────────────────
     if (entity_type === 'review') {
 
-      const { orgId, token } = await step.run('resolve-org-and-token', async () => {
+      const resolved = await step.run('resolve-org-and-token', async () => {
         const supabase = createServiceClient()
 
         // Fast path: review already in FieldStay
@@ -526,6 +567,20 @@ export const hospIncrementalSync = inngest.createFunction(
           .maybeSingle()
 
         if (existingReview) {
+          // See the reservation branch above for why this check exists —
+          // disconnecting an integration never touches `reviews`, so a
+          // resolved org here can still point at a since-disconnected
+          // connection indefinitely (SENTRY-CRAZY-CUSHION-9).
+          const { data: activeConnection } = await supabase
+            .from('integration_connections')
+            .select('org_id')
+            .eq('org_id',      existingReview.org_id)
+            .eq('provider_id', PROVIDER)
+            .eq('status',      'active')
+            .maybeSingle()
+
+          if (!activeConnection) return { skipped: true as const }
+
           const { data: member } = await supabase
             .from('organization_members')
             .select('user_id')
@@ -537,7 +592,7 @@ export const hospIncrementalSync = inngest.createFunction(
 
           if (!member) throw new NonRetriableError(`No admin for org ${existingReview.org_id}`)
           const validToken = await getValidHospitableToken(member.user_id)
-          return { orgId: existingReview.org_id, token: validToken }
+          return { skipped: false as const, orgId: existingReview.org_id, token: validToken }
         }
 
         // New review — use any active connection; org will be resolved via property in next step
@@ -550,13 +605,18 @@ export const hospIncrementalSync = inngest.createFunction(
           .limit(1)
           .single()
 
-        if (!connection) {
-          throw new NonRetriableError('No active Hospitable connection found for review sync')
-        }
+        if (!connection) return { skipped: true as const }
 
         const validToken = await getValidHospitableToken(connection.user_id)
-        return { orgId: connection.org_id!, token: validToken }
+        return { skipped: false as const, orgId: connection.org_id!, token: validToken }
       })
+
+      if (resolved.skipped) {
+        logger.info(`[Hospitable incremental] Skipping review ${entity_id} — no active Hospitable connection`)
+        return { skipped: true, reason: 'no_active_connection', entity_id }
+      }
+
+      const { orgId, token } = resolved
 
       // Fetch review and upsert using live reviews table schema:
       //   guest_name, review_text, rating (NOT NULL), review_date, property_id (UUID FK)
@@ -682,6 +742,20 @@ export const hospIncrementalSync = inngest.createFunction(
         let pmUserId: string | null      = null
 
         if (resolvedOrgId) {
+          // See the reservation branch above for why this check exists —
+          // disconnecting an integration never touches `bookings`, so a
+          // resolved org here can still point at a since-disconnected
+          // connection indefinitely (SENTRY-CRAZY-CUSHION-9).
+          const { data: activeConnection } = await supabase
+            .from('integration_connections')
+            .select('org_id')
+            .eq('org_id',      resolvedOrgId)
+            .eq('provider_id', PROVIDER)
+            .eq('status',      'active')
+            .maybeSingle()
+
+          if (!activeConnection) return { skipped: true as const }
+
           const { data: member } = await supabase
             .from('organization_members')
             .select('user_id')
@@ -703,16 +777,19 @@ export const hospIncrementalSync = inngest.createFunction(
             .limit(1)
             .single()
 
-          if (!connection) {
-            throw new NonRetriableError('No active Hospitable connection found for message sync')
-          }
+          if (!connection) return { skipped: true as const }
           pmUserId      = connection.user_id
           resolvedOrgId = connection.org_id
         }
 
         const validToken = await getValidHospitableToken(pmUserId!)
-        return { orgId: resolvedOrgId!, bookingId: booking?.id ?? null, token: validToken }
+        return { skipped: false as const, orgId: resolvedOrgId!, bookingId: booking?.id ?? null, token: validToken }
       })
+
+      if (resolved.skipped) {
+        logger.info(`[Hospitable incremental] Skipping message ${entity_id} — no active Hospitable connection`)
+        return { skipped: true, reason: 'no_active_connection', entity_id }
+      }
 
       const upsertCount = await step.run('fetch-and-upsert-messages', async () => {
         const messages = await hospFetchReservationMessages(resolved.token, entity_id)

@@ -406,6 +406,22 @@ export function CreateTemplateBuilder({
         onClose={closeDialog}
         title={createdTemplateId ? 'Apply Template' : 'Name This Template'}
         maxWidthClassName="max-w-sm"
+        footer={
+          !createdTemplateId ? (
+            <Button onClick={handleCreate} disabled={creating || !templateName.trim()} className="w-full">
+              {creating ? 'Creating…' : 'Create Template'}
+            </Button>
+          ) : applyResult || properties.length === 0 ? (
+            <Button onClick={closeDialog} className="w-full">Done</Button>
+          ) : (
+            <>
+              <Button onClick={handleApply} disabled={applying || selectedPropertyIds.length === 0} className="flex-1">
+                {applying ? 'Applying…' : `Apply to ${selectedPropertyIds.length || ''} propert${selectedPropertyIds.length === 1 ? 'y' : 'ies'}`}
+              </Button>
+              <Button variant="ghost" onClick={closeDialog}>Skip</Button>
+            </>
+          )
+        }
       >
         {!createdTemplateId ? (
           <div className="space-y-4">
@@ -419,9 +435,6 @@ export function CreateTemplateBuilder({
                 placeholder="e.g. Beachfront Standard"
               />
             </div>
-            <Button onClick={handleCreate} disabled={creating || !templateName.trim()} className="w-full">
-              {creating ? 'Creating…' : 'Create Template'}
-            </Button>
           </div>
         ) : (
           <div className="space-y-4">
@@ -430,20 +443,14 @@ export function CreateTemplateBuilder({
             {applyError && <InlineAlert tone="error">{applyError}</InlineAlert>}
 
             {applyResult ? (
-              <>
-                <InlineAlert tone="success" className="flex items-start gap-2">
-                  <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  <span>Applied — {applyResult.applied} item{applyResult.applied !== 1 ? 's' : ''} added across selected properties.</span>
-                </InlineAlert>
-                <Button onClick={closeDialog} className="w-full">Done</Button>
-              </>
+              <InlineAlert tone="success" className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>Applied — {applyResult.applied} item{applyResult.applied !== 1 ? 's' : ''} added across selected properties.</span>
+              </InlineAlert>
             ) : properties.length === 0 ? (
-              <>
-                <p className="text-sm text-muted-themed">
-                  No properties to apply this template to yet. You can apply it later from Saved Templates.
-                </p>
-                <Button onClick={closeDialog} className="w-full">Done</Button>
-              </>
+              <p className="text-sm text-muted-themed">
+                No properties to apply this template to yet. You can apply it later from Saved Templates.
+              </p>
             ) : (
               <>
                 <p className="text-sm text-secondary-themed">Apply this template to any properties now?</p>
@@ -457,12 +464,6 @@ export function CreateTemplateBuilder({
                       <span className="text-sm text-primary-themed">{property.name}</span>
                     </label>
                   ))}
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={handleApply} disabled={applying || selectedPropertyIds.length === 0} className="flex-1">
-                    {applying ? 'Applying…' : `Apply to ${selectedPropertyIds.length || ''} propert${selectedPropertyIds.length === 1 ? 'y' : 'ies'}`}
-                  </Button>
-                  <Button variant="ghost" onClick={closeDialog}>Skip</Button>
                 </div>
               </>
             )}

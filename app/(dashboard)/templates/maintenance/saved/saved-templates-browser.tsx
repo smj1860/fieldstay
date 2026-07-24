@@ -307,43 +307,46 @@ function TemplateDetail({
         )
       )}
 
-      <Dialog open={showApplyDialog} onClose={closeApplyDialog} title="Apply Template" maxWidthClassName="max-w-sm">
-        {applyError && <InlineAlert tone="error" className="mb-3">{applyError}</InlineAlert>}
-        {applyResult ? (
-          <div className="space-y-4">
-            <InlineAlert tone="success" className="flex items-start gap-2">
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <span>
-                Created {applyResult.created ?? 0} schedule{(applyResult.created ?? 0) !== 1 ? 's' : ''}
-                {(applyResult.skipped ?? 0) > 0 && <> · {applyResult.skipped} skipped (already existed)</>}
-              </span>
-            </InlineAlert>
+      <Dialog
+        open={showApplyDialog}
+        onClose={closeApplyDialog}
+        title="Apply Template"
+        maxWidthClassName="max-w-sm"
+        footer={
+          applyResult || allProperties.length === 0 ? (
             <Button onClick={closeApplyDialog} className="w-full">Done</Button>
-          </div>
-        ) : allProperties.length === 0 ? (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-themed">No active properties to apply this template to.</p>
-            <Button onClick={closeApplyDialog} className="w-full">Done</Button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="max-h-56 overflow-y-auto border border-themed rounded-lg divide-y divide-themed">
-              {allProperties.map((property) => (
-                <label key={property.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-raised-themed transition-colors">
-                  <Checkbox
-                    checked={applyPropertyIds.includes(property.id)}
-                    onChange={() => toggleApplyProperty(property.id)}
-                  />
-                  <span className="text-sm text-primary-themed">{property.name}</span>
-                </label>
-              ))}
-            </div>
-            <div className="flex gap-2">
+          ) : (
+            <>
               <Button onClick={handleApply} disabled={applying || applyPropertyIds.length === 0} className="flex-1">
                 {applying ? 'Applying…' : `Apply to ${applyPropertyIds.length || ''} propert${applyPropertyIds.length === 1 ? 'y' : 'ies'}`}
               </Button>
               <Button variant="ghost" onClick={closeApplyDialog}>Cancel</Button>
-            </div>
+            </>
+          )
+        }
+      >
+        {applyError && <InlineAlert tone="error" className="mb-3">{applyError}</InlineAlert>}
+        {applyResult ? (
+          <InlineAlert tone="success" className="flex items-start gap-2">
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>
+              Created {applyResult.created ?? 0} schedule{(applyResult.created ?? 0) !== 1 ? 's' : ''}
+              {(applyResult.skipped ?? 0) > 0 && <> · {applyResult.skipped} skipped (already existed)</>}
+            </span>
+          </InlineAlert>
+        ) : allProperties.length === 0 ? (
+          <p className="text-sm text-muted-themed">No active properties to apply this template to.</p>
+        ) : (
+          <div className="max-h-56 overflow-y-auto border border-themed rounded-lg divide-y divide-themed">
+            {allProperties.map((property) => (
+              <label key={property.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-raised-themed transition-colors">
+                <Checkbox
+                  checked={applyPropertyIds.includes(property.id)}
+                  onChange={() => toggleApplyProperty(property.id)}
+                />
+                <span className="text-sm text-primary-themed">{property.name}</span>
+              </label>
+            ))}
           </div>
         )}
       </Dialog>

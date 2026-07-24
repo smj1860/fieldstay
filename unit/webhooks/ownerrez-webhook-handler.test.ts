@@ -89,12 +89,49 @@ describe('ownerRezProvider.handleWebhookEvent — connection scoping', () => {
     })
   })
 
-  it('does not fire a sync event for an entity_type with no handler yet (e.g. property)', async () => {
+  it('fires a scoped sync when a property is CREATED in OwnerRez — webhook-primary new-property discovery', async () => {
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(
+      makeSupabase({ user_id: 'user_1', org_id: 'org_1' })
+    )
+
+    await ownerRezProvider.handleWebhookEvent({
+      action:         'entity_insert',
+      payload:        { entity_type: 'property', entity_id: '10' },
+      externalUserId: '9001',
+      correlationId:  'corr_4',
+    })
+
+    // The scoped sync path always runs the new-property diff, so this event
+    // is what makes a just-added OwnerRez property appear without waiting
+    // for the daily cron backstop.
+    expect(inngest.send).toHaveBeenCalledWith({
+      name: 'integration/ownerrez.sync.requested',
+      data: expect.objectContaining({
+        entity_type: 'property',
+        entity_id:   '10',
+        user_id:     'user_1',
+        org_id:      'org_1',
+      }),
+    })
+  })
+
+  it('does not fire a sync event for a property UPDATE (edits create no sync work)', async () => {
     await ownerRezProvider.handleWebhookEvent({
       action:         'entity_update',
       payload:        { entity_type: 'property', entity_id: '10' },
       externalUserId: '9001',
-      correlationId:  'corr_4',
+      correlationId:  'corr_5',
+    })
+
+    expect(inngest.send).not.toHaveBeenCalled()
+  })
+
+  it('does not fire a sync event for an entity_type with no handler (e.g. inquiry)', async () => {
+    await ownerRezProvider.handleWebhookEvent({
+      action:         'entity_update',
+      payload:        { entity_type: 'inquiry', entity_id: '77' },
+      externalUserId: '9001',
+      correlationId:  'corr_6',
     })
 
     expect(inngest.send).not.toHaveBeenCalled()

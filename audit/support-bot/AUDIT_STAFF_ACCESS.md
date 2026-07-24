@@ -4,7 +4,7 @@ Next: None — audit complete. See findings 1-6 below and summary appended to AU
 
 ---
 
-## FINDING 1 — CRITICAL — `platform_staff` table does not exist in any migration (CONFIRMED)
+## FINDING 1 — CRITICAL — `platform_staff` table does not exist in any migration (CONFIRMED) — FIXED
 
 **Files:** `app/(dashboard)/support-inbox/page.tsx:11-17`, `app/api/support-inbox/reply/route.ts:10-16`, `app/api/support-inbox/resolve/route.ts:10-16`
 
@@ -19,9 +19,13 @@ Next: None — audit complete. See findings 1-6 below and summary appended to AU
 2. If no such migration exists and these were applied ad hoc to the live DB, that is itself a process violation of CLAUDE.md ("Write a new file in supabase/migrations/ ... and apply it via Supabase CLI or MCP apply_migration") and creates exactly the schema-drift risk the schema_reference.sql regeneration step exists to catch.
 3. Regenerate `supabase/schema_reference.sql` via `bash scripts/generate-schema-reference.sh` and diff against committed migrations to confirm what's actually live.
 
+**Status: FIXED.** `supabase/migrations/20260630044706_support_bot_phase3_human_inbox.sql`
+now creates the `platform_staff` table, `is_platform_staff()` function, and the 4 RLS
+policies, matching live exactly — source and live DB are back in sync.
+
 ---
 
-## FINDING 2 — CRITICAL — `support_message_role` enum lacks `'human'` value (CONFIRMED, blocks Finding 1's fix)
+## FINDING 2 — CRITICAL — `support_message_role` enum lacks `'human'` value (CONFIRMED, blocks Finding 1's fix) — FIXED
 
 **File:** `supabase/migrations/20260620233632_support_bot_scaffold.sql:11-15` vs `app/api/support-inbox/reply/route.ts:29`
 
@@ -33,15 +37,18 @@ but `reply/route.ts:29` inserts `role: 'human'`. Per committed migrations, this 
 
 **Recommended fix:** Same as Finding 1 — find and commit the real migration; confirm `'human'` was added via `ALTER TYPE support_message_role ADD VALUE`.
 
+**Status: FIXED.** `supabase/migrations/20260630044706_support_bot_phase3_human_inbox.sql`
+adds the `'human'` value to `support_message_role`, matching live.
+
 ---
 
-## FINDING 3 — Item 1 (is_platform_staff scope-creep check) — N/A, function doesn't exist in migrations (CONFIRMED, see Finding 1)
+## FINDING 3 — Item 1 (is_platform_staff scope-creep check) — N/A, function doesn't exist in migrations (CONFIRMED, see Finding 1) — RESOLVED/FIXED
 
 Ran `grep -rn "is_platform_staff" /home/user/fieldstay/supabase/migrations/` across the **full** migration history (not just support-matching files) — zero results anywhere. There is therefore no committed SQL definition of `is_platform_staff()` to audit for scope creep. This sub-finding cannot be answered from the repo; it depends entirely on whatever was applied live and out-of-band. Flagging as part of Finding 1's remediation: once the real migration is located/recommitted, re-run this grep to confirm `is_platform_staff()` (or equivalent) is referenced ONLY in the 4 intended policies (support_conversations SELECT/UPDATE, support_messages SELECT/INSERT) and nowhere else (e.g. not accidentally OR'd into `organizations`, `owner_transactions`, or other tenant tables).
 
 ---
 
-## FINDING 4 — Item 2 (platform_staff deny-all policy) — CANNOT VERIFY, needs live-DB check (CONFIRMED LIMITATION)
+## FINDING 4 — Item 2 (platform_staff deny-all policy) — CANNOT VERIFY, needs live-DB check (CONFIRMED LIMITATION) — RESOLVED/FIXED
 
 No migration in the repo creates a `platform_staff` table, so there is no committed RLS policy to inspect for a deny-all INSERT/UPDATE/DELETE guard. **This must be verified directly against the live Supabase project** (`vpmznjktllhmmbfnxuvk`) using `list_tables` / a direct policy query — this audit has no live DB access and cannot confirm or deny this property from the repo alone. Treat as UNVERIFIED, not "passed."
 
@@ -89,7 +96,7 @@ Neither route checks whether the replying/resolving staff member has any relatio
 
 ---
 
-## FINDING 8 — Item 6 (realtime channel RLS scoping) — HIGH — needs live-DB verification, suspicious by design (SUSPECTED, partially confirmed)
+## FINDING 8 — Item 6 (realtime channel RLS scoping) — HIGH — needs live-DB verification, suspicious by design (SUSPECTED, partially confirmed) — RESOLVED CLEAN / FIXED (publication)
 
 **File:** `app/(dashboard)/support-inbox/support-inbox-client.tsx:42-64` (conversations channel), `:77-88` (messages channel)
 
@@ -108,6 +115,12 @@ Two findings here:
 2. Confirm the live RLS SELECT policy on both tables includes the intended `OR is_platform_staff()` (or similar) clause — if it's exactly what's committed (`user_id = auth.uid()` only), non-staff users get correctly scoped realtime (safe), but staff get nothing (broken). If live RLS is broader than committed (e.g., `USING (true)` for staff convenience), re-verify it isn't *also* accidentally broad for non-staff.
 3. As defense-in-depth, consider scoping the channel itself with a `filter` on `org_id` matching `is_platform_staff()`-eligible orgs, rather than relying solely on RLS — currently the conversations channel filter is `{ event: '*', schema: 'public', table: 'support_conversations' }` with **no filter clause at all** (support-inbox-client.tsx:46), meaning it requests change events for the entire table and trusts RLS alone to narrow results. This is functionally correct *if* RLS is correct, but is a single point of failure — any future RLS regression on this table would immediately become a cross-tenant realtime leak with no second layer of defense.
 
+**Status: FIXED (publication membership).** `supabase/migrations/20260630100300_support_realtime_publication.sql`
+adds both tables to `supabase_realtime` (duplicate migration
+`20260707145519_support_realtime_publication.sql` is a cosmetic dup, self-annotated
+already applied — not a security issue). RLS scoping for `is_platform_staff()`
+was separately confirmed correctly scoped live (see LIVE DB RESOLUTION below).
+
 ---
 
 ## ADDITIONAL CONTEXT — `platform_staff` referenced outside declared scope too
@@ -120,14 +133,14 @@ While confirming Finding 1, noted `app/(dashboard)/layout.tsx:127-133` (outside 
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
-| 1 | `platform_staff` table / `is_platform_staff()` function / staff RLS exception missing from all committed migrations | Critical | Confirmed (repo-level); live state unverified |
-| 2 | `support_message_role` enum missing `'human'` value in committed migration | Critical | Confirmed (repo-level); live state unverified |
-| 3 | is_platform_staff() scope-creep across all migrations | N/A | Cannot verify — function not in repo |
-| 4 | platform_staff deny-all write policy | Critical | Cannot verify from repo — requires live DB query |
+| 1 | `platform_staff` table / `is_platform_staff()` function / staff RLS exception missing from all committed migrations | Critical | FIXED — `20260630044706_support_bot_phase3_human_inbox.sql` backfills the migration |
+| 2 | `support_message_role` enum missing `'human'` value in committed migration | Critical | FIXED — same migration adds the `'human'` enum value |
+| 3 | is_platform_staff() scope-creep across all migrations | N/A | RESOLVED — live query confirms exactly 4 policy references, no scope creep |
+| 4 | platform_staff deny-all write policy | Critical | FIXED/RESOLVED — confirmed live (`qual=false, with_check=false`) and now backed by committed migration |
 | 5 | Server-side staff gate on /support-inbox page | Clean | Confirmed (contingent on Finding 4) |
 | 6 | reply/resolve routes independently verify staff | Clean | Confirmed (contingent on Finding 4) |
 | 7 | Staff can reply cross-org | Clean (by design) | Confirmed intentional |
-| 8 | Realtime channel RLS scoping | High | Partially confirmed; needs live verification of publication membership + RLS policy content |
+| 8 | Realtime channel RLS scoping | High | FIXED/RESOLVED — publication membership added via migration; RLS confirmed correctly scoped live |
 
 **Overarching theme:** every concrete code-level access-control pattern that IS visible in this repo (Findings 5, 6, 7) is implemented correctly — server-side checks, independent verification per route, no UI-only gating. The critical risk is entirely a **schema-drift / migration-discipline problem**: the `platform_staff` table and its RLS, the `is_platform_staff()` function, the `'human'` enum value, and the `needs_human`/`escalation_reason`/`escalated_at`/`assigned_staff_id`/`sent_by_user_id` columns are used throughout `lib/support/*`, `app/api/support/*`, `app/api/support-inbox/*`, and `app/(dashboard)/layout.tsx`, but none of this schema exists in any file under `supabase/migrations/`. This violates the CLAUDE.md mandate that all schema changes go through committed, timestamped migration files. Until the real migration is located and committed (or written fresh and applied), this audit cannot certify that the platform_staff exception is correctly scoped — only that the application-layer code which calls it is well-structured.
 

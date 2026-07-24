@@ -280,16 +280,39 @@ function DiscoveryCaptureModal({
       title={success ? 'Saved' : `Capture: ${assetTypeDisplayName(assetType)}`}
       maxWidthClassName="max-w-sm"
       mobileSheet
+      footer={
+        success ? (
+          <Button onClick={onClose} className="w-full">Done</Button>
+        ) : (
+          <div className="w-full space-y-3">
+            <button
+              type="submit"
+              form="discovery-capture-form"
+              disabled={submitting}
+              className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save'}
+            </button>
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={handleMarkNa}
+              className="w-full py-2.5 rounded-xl border border-themed text-sm font-medium text-secondary-themed disabled:opacity-50"
+            >
+              This property doesn&apos;t have one
+            </button>
+          </div>
+        )
+      }
     >
       {success ? (
         <div className="text-center py-4">
           <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
-          <p className="text-sm text-muted-themed mb-4">
+          <p className="text-sm text-muted-themed">
             {scanQueued
               ? "Asset saved. We're reading the photo now — make and model will fill in automatically in a moment."
               : 'Asset details saved.'}
           </p>
-          <Button onClick={onClose} className="w-full">Done</Button>
         </div>
       ) : (
         <>
@@ -298,7 +321,7 @@ function DiscoveryCaptureModal({
               {error}
             </div>
           )}
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form id="discovery-capture-form" onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label htmlFor="discovery-make" className="label text-primary-themed">Make</label>
               <Input id="discovery-make" type="text" value={make} onChange={(e) => setMake(e.target.value)} placeholder="e.g. Samsung" />
@@ -318,21 +341,6 @@ function DiscoveryCaptureModal({
                 className="input"
               />
             </div>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save'}
-            </button>
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={handleMarkNa}
-              className="w-full py-2.5 rounded-xl border border-themed text-sm font-medium text-secondary-themed disabled:opacity-50"
-            >
-              This property doesn&apos;t have one
-            </button>
           </form>
         </>
       )}
@@ -386,14 +394,33 @@ function PlaceWorkOrderModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title={success ? 'Work Order Placed' : 'Place a Work Order'} maxWidthClassName="max-w-sm" mobileSheet>
+    <Dialog
+      open
+      onClose={onClose}
+      title={success ? 'Work Order Placed' : 'Place a Work Order'}
+      maxWidthClassName="max-w-sm"
+      mobileSheet
+      footer={
+        success ? (
+          <Button onClick={onClose} className="w-full">Done</Button>
+        ) : (
+          <button
+            type="submit"
+            form="place-wo-form"
+            disabled={submitting}
+            className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</> : <><Wrench className="w-4 h-4" /> Submit</>}
+          </button>
+        )
+      }
+    >
       {success ? (
         <div className="text-center py-4">
           <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-3" />
-          <p className="text-sm text-muted-themed mb-4">
+          <p className="text-sm text-muted-themed">
             Saved. The property manager will see this as soon as your phone has a connection.
           </p>
-          <Button onClick={onClose} className="w-full">Done</Button>
         </div>
       ) : (
         <>
@@ -402,7 +429,7 @@ function PlaceWorkOrderModal({
               {error}
             </div>
           )}
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form id="place-wo-form" onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label htmlFor="wo-property" className="label text-primary-themed">Property</label>
               <Input id="wo-property" type="text" value={propertyName} disabled />
@@ -440,13 +467,6 @@ function PlaceWorkOrderModal({
               />
               This is an emergency
             </label>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-            >
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting…</> : <><Wrench className="w-4 h-4" /> Submit</>}
-            </button>
           </form>
         </>
       )}

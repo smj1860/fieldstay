@@ -26,6 +26,34 @@ export const hospCalendarSyncCron = inngest.createFunction(
   { cron: '30 9 * * *' },
   async ({ step, logger }) => {
 
+    // Orgs whose Hospitable connection is still active. Disconnecting an
+    // integration (settings/integrations/actions.ts:disconnectIntegration)
+    // only flips integration_connections.status and clears the Vault
+    // secret — it never touches `properties`, so external_source/is_active
+    // stay set on rows synced before the disconnect. Without this join,
+    // this cron re-dispatches a doomed sync for those properties forever:
+    // every run after a disconnect hits calendar-sync-handler, which
+    // throws "No active connection ... Reconnect required" and exhausts
+    // retries (see SENTRY-CRAZY-CUSHION-8).
+    const activeOrgIds = await step.run('fetch-active-hospitable-org-ids', async () => {
+      const supabase = createServiceClient()
+
+      const { data, error } = await supabase
+        .from('integration_connections')
+        .select('org_id')
+        .eq('provider_id', 'hospitable')
+        .eq('status', 'active')
+        .not('org_id', 'is', null)
+
+      if (error) throw new Error(`Failed to fetch active Hospitable connections: ${error.message}`)
+      // step.run's return value is JSON-serialized by Inngest — return a
+      // plain array (matches the Record pattern used by resolve-admins-by-org
+      // below), not a Set.
+      return Array.from(new Set((data ?? []).map((c) => c.org_id as string)))
+    })
+
+    if (activeOrgIds.length === 0) return { dispatched: 0, skipped_reason: 'no_active_connections' }
+
     const properties = await step.run('fetch-active-hospitable-properties', async () => {
       const supabase = createServiceClient()
 
@@ -35,6 +63,7 @@ export const hospCalendarSyncCron = inngest.createFunction(
         .eq('external_source', 'hospitable')
         .eq('is_active', true)
         .not('external_id', 'is', null)
+        .in('org_id', activeOrgIds)
 
       if (error) throw new Error(`Failed to fetch properties: ${error.message}`)
       return data ?? []

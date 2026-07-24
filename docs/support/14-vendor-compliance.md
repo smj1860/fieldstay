@@ -46,15 +46,7 @@ This gives you flexibility for trusted vendors while maintaining an audit trail.
 
 ## Expiry Notifications
 
-FieldStay sends email notifications at:
-- 30 days before expiration
-- 14 days before expiration
-- 7 days before expiration
-- On the expiration date
-- 14 days after expiration
-- 30 days after expiration (vendor moves to Hard Blocked at 46 days)
-
-Both you and the vendor receive these notifications so they can take action on their end.
+FieldStay sends a single one-time warning email when a document first enters the 30-day expiring-soon window — it doesn't repeat as the date gets closer. After that, the document's grace-period entry (day 1 of expired) and hard-block transition (day 46) are tracked and shown in the app (compliance status badges, dashboards) but don't trigger additional emails today.
 
 ---
 

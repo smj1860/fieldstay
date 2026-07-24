@@ -22,7 +22,7 @@ when ready. Guests cannot see it until it is published.
 
 ## The Sponsor Model
 Local businesses pay $15/month per featured slot.
-- 4 active sponsors: your FieldStay plan is free
+- 3 active sponsors: the Guidebook feature itself is permanently unlocked (free)
 - 5 active sponsors: $10/month plan credit
 - 6 active sponsors: $25/month plan credit
 

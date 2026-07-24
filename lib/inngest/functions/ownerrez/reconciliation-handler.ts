@@ -37,6 +37,16 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
   async ({ event, step, logger }) => {
     const { user_id, org_id } = event.data
 
+    // Deliberately NOT filtered to is_active properties — cancel-stale-bookings
+    // below compares against every non-cancelled booking for the org with no
+    // property filter at all. Scoping this fetch to active properties only
+    // meant a booking on a property the PM had deactivated in FieldStay (but
+    // which still exists in OwnerRez) was never included in the "current"
+    // set below, so it always looked stale and got cancelled — every day,
+    // for as long as the property stayed inactive. Both queries must agree
+    // on scope; matching this one to the unfiltered existing-bookings query
+    // (rather than the other way around) keeps reconciliation reflecting
+    // OwnerRez's real state regardless of FieldStay's local active flag.
     const propertyIds = await step.run('fetch-property-ids', async () => {
       const supabase = createServiceClient()
 
@@ -45,7 +55,6 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
         .select('external_id')
         .eq('org_id', org_id)
         .eq('external_source', PROVIDER)
-        .eq('is_active', true)
 
       return ((data ?? []) as Array<{ external_id: string | null }>)
         .map((p) => Number(p.external_id))

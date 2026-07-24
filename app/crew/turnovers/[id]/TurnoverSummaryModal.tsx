@@ -38,15 +38,38 @@ export function TurnoverSummaryModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title={success ? 'Notes Saved' : 'Turnover Summary & Additional Notes'} maxWidthClassName="max-w-sm" mobileSheet>
+    <Dialog
+      open
+      onClose={onClose}
+      title={success ? 'Notes Saved' : 'Turnover Summary & Additional Notes'}
+      maxWidthClassName="max-w-sm"
+      mobileSheet
+      footer={
+        success ? (
+          <Button onClick={onClose} className="w-full">Done</Button>
+        ) : (
+          <button
+            type="submit"
+            form="turnover-summary-form"
+            disabled={submitting}
+            className="w-full py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+            style={{ background: 'var(--accent-amber)', color: 'var(--text-inverse)' }}
+          >
+            {submitting
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+              : <><StickyNote className="w-4 h-4" /> Save Notes</>
+            }
+          </button>
+        )
+      }
+    >
       {success ? (
         <div className="text-center py-4">
           <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: 'var(--accent-green)' }} />
-          <p className="text-sm text-muted-themed mb-4">
+          <p className="text-sm text-muted-themed">
             Saved. The property manager will see this on the turnover as soon as
             your phone has a connection.
           </p>
-          <Button onClick={onClose} className="w-full">Done</Button>
         </div>
       ) : (
         <>
@@ -59,7 +82,7 @@ export function TurnoverSummaryModal({
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-3">
+          <form id="turnover-summary-form" onSubmit={handleSubmit} className="space-y-3">
             <div>
               <label htmlFor="turnover-summary-notes" className="label text-primary-themed">Anything the PM should know? *</label>
               <textarea
@@ -72,17 +95,6 @@ export function TurnoverSummaryModal({
                 required
               />
             </div>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-              style={{ background: 'var(--accent-amber)', color: 'var(--text-inverse)' }}
-            >
-              {submitting
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
-                : <><StickyNote className="w-4 h-4" /> Save Notes</>
-              }
-            </button>
           </form>
         </>
       )}

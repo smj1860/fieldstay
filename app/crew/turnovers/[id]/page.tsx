@@ -206,22 +206,24 @@ export default function CrewTurnoverPage() {
           title="Continue anyway?"
           maxWidthClassName="max-w-sm"
           mobileSheet
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setPendingConfirm(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="cta"
+                onClick={() => {
+                  pendingConfirm.onConfirm()
+                  setPendingConfirm(null)
+                }}
+              >
+                Confirm
+              </Button>
+            </>
+          }
         >
-          <p className="text-sm text-secondary-themed mb-4">{pendingConfirm.message}</p>
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setPendingConfirm(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="cta"
-              onClick={() => {
-                pendingConfirm.onConfirm()
-                setPendingConfirm(null)
-              }}
-            >
-              Confirm
-            </Button>
-          </div>
+          <p className="text-sm text-secondary-themed">{pendingConfirm.message}</p>
         </Dialog>
       )}
     </div>

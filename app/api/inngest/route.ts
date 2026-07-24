@@ -21,14 +21,14 @@ import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audi
 import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale-feed-alert'
 import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turnover-priority-decay'
 import { notificationDigest }           from '@/lib/inngest/functions/cron/notification-digest'
-import { dailyWrapUp }                  from '@/lib/inngest/functions/cron/daily-wrapup'
+import { dailyWrapUp, dailyWrapUpOrg }  from '@/lib/inngest/functions/cron/daily-wrapup'
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
 
 // OwnerRez integration
 import { ownerRezInitialSync }     from '@/lib/inngest/functions/ownerrez/initial-sync'
-import { ownerRezIncrementalSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
+import { ownerRezIncrementalSync, ownerRezConnectionSync } from '@/lib/inngest/functions/ownerrez/incremental-sync'
 import { ownerRezReviewsSync }     from '@/lib/inngest/functions/ownerrez/ownerrez-reviews-sync'
 import { ownerRezReconciliationCron }    from '@/lib/inngest/functions/ownerrez/reconciliation-cron'
 import { ownerRezReconciliationHandler } from '@/lib/inngest/functions/ownerrez/reconciliation-handler'
@@ -146,8 +146,8 @@ import { guidebookGraceExpiredHandler }   from '@/lib/inngest/functions/guideboo
 import { guidebookSponsorPaymentRecovered } from '@/lib/inngest/functions/guidebook-sponsor-payment-recovered'
 import { guidebookGuestOptedIn }            from '@/lib/inngest/functions/guidebook-guest-opted-in'
 import { guidebookPreArrivalEmailCron }     from '@/lib/inngest/functions/guidebook-pre-arrival-email-cron'
-import { guidebookSmsMorningCron }          from '@/lib/inngest/functions/guidebook-sms-morning-cron'
-import { guidebookSmsEveningCron }          from '@/lib/inngest/functions/guidebook-sms-evening-cron'
+import { guidebookSmsMorningCron, guidebookSmsMorningSend } from '@/lib/inngest/functions/guidebook-sms-morning-cron'
+import { guidebookSmsEveningCron, guidebookSmsEveningSend } from '@/lib/inngest/functions/guidebook-sms-evening-cron'
 import { guidebookStayExtensionCron }       from '@/lib/inngest/functions/guidebook-stay-extension-cron'
 import { guidebookStayExtensionHandler }    from '@/lib/inngest/functions/guidebook-stay-extension-handler'
 
@@ -184,6 +184,7 @@ export const { GET, POST, PUT } = serve({
     turnoverPriorityDecay,
     notificationDigest,
     dailyWrapUp,
+    dailyWrapUpOrg,
     computeChecklistSignals,
 
     // Inventory → PO
@@ -193,6 +194,7 @@ export const { GET, POST, PUT } = serve({
     // OwnerRez sync
     ownerRezInitialSync,
     ownerRezIncrementalSync,
+    ownerRezConnectionSync,
     ownerRezReviewsSync,
     ownerRezReconciliationCron,
     ownerRezReconciliationHandler,
@@ -300,7 +302,9 @@ export const { GET, POST, PUT } = serve({
     guidebookGuestOptedIn,
     guidebookPreArrivalEmailCron,
     guidebookSmsMorningCron,
+    guidebookSmsMorningSend,
     guidebookSmsEveningCron,
+    guidebookSmsEveningSend,
     guidebookStayExtensionCron,
     guidebookStayExtensionHandler,
 

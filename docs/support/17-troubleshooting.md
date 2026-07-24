@@ -62,16 +62,16 @@ Publish the guidebook from Guidebook → [Property Name] → toggle Published. F
 
 ---
 
-## OwnerRez Sync Showing Stale Data
+## OwnerRez or Hospitable Sync Showing Stale Data
 
-**Symptom:** Changes made in OwnerRez (updated booking dates, new properties) are not reflecting in FieldStay.
+**Symptom:** Changes made in your PMS (updated booking dates, new properties) are not reflecting in FieldStay.
 
 **Check first:**
 - Was the change made recently? Webhook events can take a few minutes to process.
-- Is the OwnerRez integration still connected? Go to Settings → Integrations and confirm OwnerRez shows as Connected.
+- Is the integration still connected? Go to Settings → Integrations and confirm OwnerRez or Hospitable shows as Connected.
 
 **Fix:**
-Click **Sync** on the Turnovers dashboard to trigger an immediate re-sync. If the integration shows as disconnected, reconnect from Settings → Integrations — this happens when an OwnerRez password is changed or access is revoked.
+Click **Sync** on the Turnovers dashboard to trigger an immediate re-sync. If the integration shows as disconnected, reconnect from Settings → Integrations — for OwnerRez this happens when the password is changed or access is revoked; for Hospitable this happens when access is revoked from the Hospitable side.
 
 ---
 

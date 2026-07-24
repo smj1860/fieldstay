@@ -227,14 +227,8 @@ export function DetailsForm({
           onClose={() => setShowArchiveConfirm(false)}
           title="Archive this property?"
           maxWidthClassName="max-w-sm"
-        >
-          <div className="space-y-4">
-            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              {property.name} will be removed from the active properties list and excluded from
-              automated jobs. This can be undone only by an admin working directly in the database.
-              Are you sure you want to continue?
-            </p>
-            <div className="flex items-center gap-3">
+          footer={
+            <>
               <Button
                 type="button"
                 variant="danger"
@@ -251,7 +245,15 @@ export function DetailsForm({
               >
                 Cancel
               </Button>
-            </div>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              {property.name} will be removed from the active properties list and excluded from
+              automated jobs. This can be undone only by an admin working directly in the database.
+              Are you sure you want to continue?
+            </p>
           </div>
         </Dialog>
       )}

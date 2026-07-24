@@ -22,7 +22,7 @@ FieldStay is a **local-first, event-driven, multi-tenant SaaS** application. The
                │ pull sync / mutation drain
                ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  Next.js 15 on Vercel (IAD1)                                    │
+│  Next.js 16 on Vercel (IAD1)                                    │
 │  App Router · Server Components · Server Actions                 │
 └──────────────┬───────────────────────────────────────────────────┘
                │ queries (RLS enforced)

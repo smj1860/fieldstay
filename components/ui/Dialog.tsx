@@ -11,6 +11,13 @@ interface DialogProps {
   onClose: () => void
   title: string
   children: ReactNode
+  /**
+   * Action buttons (Save/Cancel, Delete/Cancel, etc.) pinned below the
+   * scrollable content in their own fixed bar. Use this instead of putting
+   * buttons at the end of `children` — it keeps them visible while the
+   * content above scrolls, with one shared style across every dialog.
+   */
+  footer?: ReactNode
   /** Renders as a bottom sheet on mobile widths instead of a centered panel. */
   mobileSheet?: boolean
   maxWidthClassName?: string
@@ -21,6 +28,7 @@ export function Dialog({
   onClose,
   title,
   children,
+  footer,
   mobileSheet = false,
   maxWidthClassName = 'max-w-lg',
 }: Readonly<DialogProps>) {
@@ -63,9 +71,14 @@ export function Dialog({
             <X className="w-4 h-4" />
           </Button>
         </div>
-        <div className={`overflow-y-auto min-h-0 px-6 ${mobileSheet ? 'pb-10 sm:pb-6' : 'pb-6'}`}>
+        <div className={`overflow-y-auto min-h-0 px-6 ${footer ? '' : mobileSheet ? 'pb-10 sm:pb-6' : 'pb-6'}`}>
           {children}
         </div>
+        {footer && (
+          <div className={`flex items-center gap-3 px-6 pt-4 border-t border-themed flex-shrink-0 ${mobileSheet ? 'pb-10 sm:pb-6' : 'pb-6'}`}>
+            {footer}
+          </div>
+        )}
       </div>
     </div>,
     document.body

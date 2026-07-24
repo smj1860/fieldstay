@@ -4,6 +4,7 @@ import { OwnerRezApiClient }   from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import type { OwnerRezReview } from '@/lib/integrations/types'
 import { logAuditEvent }       from '@/lib/audit'
+import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 
 export const ownerRezReviewsSync = inngest.createFunction(
   {
@@ -23,24 +24,19 @@ export const ownerRezReviewsSync = inngest.createFunction(
     // unaffected, matching how incremental-sync.ts isolates failures.
     async function recordReviewsSyncError(
       userId: string,
-      meta:   Record<string, unknown>,
       err:    unknown,
     ): Promise<void> {
       const humanError = translateSyncError(err)
       logger.error(`[OwnerRez:${userId}] Reviews fetch failed: ${err instanceof Error ? err.message : String(err)}`)
       await step.run(`record-reviews-sync-error-${userId}`, async () => {
-        const admin = createServiceClient()
-        await admin
-          .from('integration_connections')
-          .update({
-            metadata: {
-              ...meta,
-              last_reviews_sync_status: 'error',
-              last_reviews_sync_error:  humanError,
-            },
-          })
-          .eq('user_id', userId)
-          .eq('provider_id', 'ownerrez')
+        await mergeIntegrationConnectionMetadata({
+          userId,
+          providerId: 'ownerrez',
+          patch: {
+            last_reviews_sync_status: 'error',
+            last_reviews_sync_error:  humanError,
+          },
+        })
       })
     }
 
@@ -96,25 +92,21 @@ export const ownerRezReviewsSync = inngest.createFunction(
             const admin = createServiceClient()
             const { data: existing } = await admin
               .from('integration_connections')
-              .select('id, metadata')
+              .select('id')
               .eq('user_id', userId)
               .eq('provider_id', 'ownerrez')
               .maybeSingle()
-            const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
 
-            await admin
-              .from('integration_connections')
-              .update({
-                status:   'revoked',
-                metadata: {
-                  ...existingMeta,
-                  last_sync_status: 'error',
-                  last_sync_error:  humanError,
-                  last_synced_at:   new Date().toISOString(),
-                },
-              })
-              .eq('user_id', userId)
-              .eq('provider_id', 'ownerrez')
+            await mergeIntegrationConnectionMetadata({
+              userId,
+              providerId: 'ownerrez',
+              patch: {
+                last_sync_status: 'error',
+                last_sync_error:  humanError,
+                last_synced_at:   new Date().toISOString(),
+              },
+              status: 'revoked',
+            })
 
             await logAuditEvent({
               orgId:      orgId,
@@ -169,7 +161,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
           // block every other tenant's review sync for this tick — later
           // connections in this loop never got processed if the retries
           // were exhausted.
-          await recordReviewsSyncError(userId, meta, err)
+          await recordReviewsSyncError(userId, err)
           continue
         }
       }
@@ -178,7 +170,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
         // The rate-limit retry itself failed — same isolation treatment,
         // otherwise this would propagate uncaught out of this connection's
         // turn and abort the whole run.
-        await recordReviewsSyncError(userId, meta, retryFailed)
+        await recordReviewsSyncError(userId, retryFailed)
         continue
       }
 
@@ -236,18 +228,15 @@ export const ownerRezReviewsSync = inngest.createFunction(
         })
 
         await step.run(`update-reviews-cursor-${userId}`, async () => {
-          const admin = createServiceClient()
-          const newMeta = { ...meta, reviews_sync_cursor: fetchStartedAt }
-
-          const { error: updateErr } = await admin
-            .from('integration_connections')
-            .update({ metadata: newMeta })
-            .eq('user_id', userId)
-            .eq('provider_id', 'ownerrez')
-
-          if (updateErr) {
+          try {
+            await mergeIntegrationConnectionMetadata({
+              userId,
+              providerId: 'ownerrez',
+              patch: { reviews_sync_cursor: fetchStartedAt },
+            })
+          } catch (err) {
             throw new Error(
-              `[OwnerRez:${userId}] Failed to update reviews cursor: ${updateErr.message}`
+              `[OwnerRez:${userId}] Failed to update reviews cursor: ${err instanceof Error ? err.message : String(err)}`
             )
           }
         })
@@ -255,7 +244,7 @@ export const ownerRezReviewsSync = inngest.createFunction(
         // Same isolation as the fetch failures above — an upsert or
         // cursor-update failure for this connection shouldn't stop the
         // rest of the loop from running.
-        await recordReviewsSyncError(userId, meta, err)
+        await recordReviewsSyncError(userId, err)
       }
     }
   }
