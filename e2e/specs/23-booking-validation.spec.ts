@@ -19,7 +19,7 @@ test.describe('Booking validation', () => {
 
   test('[E2E] checkout date equal to checkin date is rejected', async ({ page }) => {
     await page.goto('/bookings')
-    await page.getByRole('button', { name: /Add Booking/i }).click()
+    await page.getByRole('button', { name: /Add Booking/i }).first().click()
     await expect(page.getByRole('heading', { name: /Log Non-Synced Booking/i })).toBeVisible()
 
     await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
@@ -43,7 +43,7 @@ test.describe('Booking validation', () => {
 
     // First booking — should succeed
     await page.goto('/bookings')
-    await page.getByRole('button', { name: /Add Booking/i }).click()
+    await page.getByRole('button', { name: /Add Booking/i }).first().click()
     await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
@@ -55,7 +55,7 @@ test.describe('Booking validation', () => {
     // Second booking — same property + same dates, different guest name.
     // The unique index is on (property_id, checkin_date, checkout_date), not
     // guest name, so this must still collide.
-    await page.getByRole('button', { name: /Add Booking/i }).click()
+    await page.getByRole('button', { name: /Add Booking/i }).first().click()
     await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
