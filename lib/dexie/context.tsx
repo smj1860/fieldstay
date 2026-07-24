@@ -230,13 +230,20 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     // while the socket was disconnected — a crew member offline for a
     // stretch (a reassignment, a co-crew-member's checklist completion)
     // would otherwise leave Dexie silently stuck at pre-outage state until
-    // the next full page load re-ran run() from scratch. Reusing the exact
-    // same full-pull set as the initial mount on every reconnect closes
-    // that gap without needing a separate incremental "what did I miss"
-    // query.
-    async function fullResync(crewMemberId: string): Promise<void> {
+    // the next full page load re-ran run() from scratch. Running the same
+    // sync set as the initial mount on every reconnect closes that gap.
+    //
+    // Since sync-v2 (crew sync Phase 1) this is delta, not a full re-pull:
+    // each sync function reconciles scope membership with a cheap full
+    // id-set fetch (which handles unassignment/completion deletions) and
+    // transfers row data via per-entity updated_at cursors — so a
+    // reconnect after a quiet stretch costs a handful of near-empty
+    // queries instead of re-downloading every assigned turnover's full
+    // checklist. Cursors are a bandwidth optimization only; correctness
+    // never depends on them (see lib/dexie/sync/cursors.ts).
+    async function resync(crewMemberId: string): Promise<void> {
       await Promise.all([
-        syncAssignedTurnovers(supabase, userId!, crewMemberId, true),
+        syncAssignedTurnovers(supabase, userId!, crewMemberId),
         syncWorkOrders(supabase, userId!, crewMemberId),
         syncMessages(supabase, userId!),
         syncCrewAvailability(supabase, userId!, crewMemberId),
@@ -258,8 +265,11 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       setCrewMemberId(crewMember.id as string)
 
-      // force=true: full pull on mount, bypasses any stale watermark
-      await fullResync(crewMember.id)
+      // Delta on mount too: a device with cursors only fetches what changed
+      // since it last synced; a fresh device (no cursors) naturally does a
+      // full pull. Scope reconciliation inside syncAssignedTurnovers guards
+      // against a stale cursor ever hiding an assignment change.
+      await resync(crewMember.id)
       if (cancelled) return
 
       channel = supabase
@@ -268,7 +278,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
           'postgres_changes',
           { event: '*', schema: 'public', table: 'turnover_assignments', filter: `crew_member_id=eq.${crewMember.id}` },
           async () => {
-            await syncAssignedTurnovers(supabase, userId!, crewMember.id, false)
+            await syncAssignedTurnovers(supabase, userId!, crewMember.id)
             if (!cancelled) await refreshChecklistSubscription(crewMember.id)
             if (!cancelled) await refreshAssetsSubscription()
           }
@@ -286,7 +296,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
 
       onlineHandler = () => {
         if (cancelled) return
-        void fullResync(crewMember.id).catch((err) =>
+        void resync(crewMember.id).catch((err) =>
           console.error('[DexieProvider] reconnect resync failed:', err)
         )
       }
