@@ -78,6 +78,7 @@ export const syncAllIcalFeeds = inngest.createFunction(
         const baseDelay    = feeds.length > 1
           ? Math.floor((index / (feeds.length - 1)) * JITTER_WINDOW_MS)
           : 0
+        // eslint-disable-next-line no-restricted-properties -- schedule jitter to spread feed fetches, not id/token generation
         const randomJitter = Math.floor(Math.random() * 30_000)
         const scheduledTs  = Date.now() + baseDelay + randomJitter
 

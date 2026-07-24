@@ -26,7 +26,7 @@ function detectPlatform(): Platform {
 }
 
 function isRunningAsPWA(): boolean {
-  if (typeof window === 'undefined') return false
+  if (typeof globalThis.window === 'undefined') return false
   return (
     globalThis.matchMedia('(display-mode: standalone)').matches ||
     (

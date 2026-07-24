@@ -142,8 +142,8 @@ export function CrewShell({
 
   // Register SW silently on mount — no permission prompt
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return
+    if (typeof globalThis.window === 'undefined') return
+    if (!('serviceWorker' in navigator) || !('PushManager' in globalThis)) return
 
     const register = async () => {
       try {

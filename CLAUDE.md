@@ -1041,3 +1041,44 @@ item below" as part of the definition of done for any non-trivial change.
   slips past `check:ui-classes` since that script only greps for literal
   `btn-*`/`badge-*`/`card` class strings, not visually-equivalent
   hand-rolled markup.
+
+---
+
+## Structural Enforcement — Guardrails
+
+Conventions in this file are enforced in code wherever they can be, so
+following them stops being a memory test. Three layers, checked in CI via
+`npm run lint` and `vitest run`:
+
+1. **ESLint rules** (`eslint.config.mjs`, the "Structural enforcement"
+   config block) — AST-level bans scoped to `app/`, `lib/`, `components/`:
+   `.from('memberships')`, `assigned_crew_id`, `dangerouslySetInnerHTML`,
+   `supabase.raw()`, reading `SUPABASE_SERVICE_ROLE_KEY` outside
+   `lib/supabase/server.ts`, `Math.random`, bare `window`. A legitimate
+   exception gets an inline `eslint-disable-next-line` WITH a one-line
+   justification (see the sampling/jitter sites for the pattern).
+
+2. **Guardrail tests** (`unit/guardrails/`) — cross-file invariants no
+   per-file rule can express:
+   - `service-role-authorization` — every `createServiceClient()` call
+     site in `app/` contains a recognized authorization step (or a
+     justified entry in its EXCEPTIONS list). This is the structural
+     backstop for Critical Security Rule #1.
+   - `crew-auth-drift` — the `invite_accepted_at` crew-lockout regression.
+   - `forbidden-patterns` — Telnyx API confined to `lib/sms/telnyx.ts`
+     (the SMS_ENABLED + budget chokepoint), service-key string confined,
+     Inngest functions confined to `lib/inngest/functions/`, exactly one
+     `serve()` in the Inngest route.
+   - `migration-hygiene` — filename format, unique version prefixes,
+     CREATE TABLE ⇒ ENABLE ROW LEVEL SECURITY in the same file.
+   - `tailwind-color-ratchet` — files that predate the color-token rule
+     are baselined; new files may not hardcode Tailwind color utilities,
+     and cleaned-up files must leave the baseline. Never add entries.
+
+3. **`check:ui-classes`** — the raw `btn-*`/`badge-*`/`card` class grep.
+
+**The meta-rule: a new convention ships WITH its guardrail.** If a rule is
+worth adding to this file, add its ESLint rule or `unit/guardrails/` test in
+the same PR — and the CLAUDE.md prose for mechanically-checkable rules
+should stay one line pointing at the check. Prose is for judgment calls;
+enforcement is for everything else.

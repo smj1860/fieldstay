@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
   // ~5% of requests, same pattern as cleanup_webhook_dedup() in the webhook
   // route. Closes FUTURE_REMEDIATION.md #7 (cleanup function existed but was
   // never invoked from anywhere).
+  // eslint-disable-next-line no-restricted-properties -- probabilistic sampling to amortise cleanup, not id/token generation
   if (Math.random() < 0.05) {
     void cleanupExpiredPendingIntegrationArtifacts()
   }

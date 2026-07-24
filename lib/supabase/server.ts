@@ -53,6 +53,7 @@ export async function createClient() {
 export function createServiceClient() {
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    // eslint-disable-next-line no-restricted-syntax -- the ONE canonical read of the service-role key (with adminFetch below); everywhere else goes through these helpers
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {
       cookies: {
@@ -82,6 +83,7 @@ export function createServiceClient() {
  * Server-only — attaches the service role key. Never call from client code.
  */
 export function adminFetch(path: string, init?: RequestInit) {
+  // eslint-disable-next-line no-restricted-syntax -- see createServiceClient above: canonical key-read site
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
   return fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}${path}`, {

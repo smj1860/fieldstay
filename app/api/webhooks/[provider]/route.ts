@@ -227,6 +227,7 @@ export async function POST(
 
   // Periodic TTL cleanup — fire-and-forget, runs on ~5% of ALL provider webhook
   // requests to amortise cleanup cost without a dedicated cron job.
+  // eslint-disable-next-line no-restricted-properties -- probabilistic sampling to amortise cleanup, not id/token generation
   if (Math.random() < 0.05) {
     void (async () => {
       const { error } = await createServiceClient().rpc('cleanup_webhook_dedup')
