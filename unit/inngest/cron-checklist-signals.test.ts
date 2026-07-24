@@ -14,7 +14,9 @@ function makeSupabase(responses: Record<string, { data?: unknown; error?: unknow
     const chain: any = {}
     chain.select = () => chain
     chain.eq     = () => chain
+    chain.gte    = () => chain
     chain.order  = () => chain
+    chain.range  = () => chain
     chain.upsert = () => chain
     chain.then   = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
       Promise.resolve(responses[table] ?? { data: null, error: null }).then(resolve, reject)

@@ -117,7 +117,7 @@ describe('guidebookStayExtensionHandler', () => {
       checkout_date: '2026-07-25',
       portal_url:    expect.stringContaining('/g/b/tok_abc123'),
     }))
-    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered stay extension sms')
+    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered stay extension sms', { category: 'nudge' })
 
     expect(renderPmAlert).toHaveBeenCalledWith(expect.objectContaining({ heading: 'Stay Extension Opportunity' }))
     expect(resend.emails.send).toHaveBeenCalledWith(
