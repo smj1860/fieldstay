@@ -51,6 +51,10 @@ describe('hospCalendarSyncCron', () => {
 
   it('dispatches one calendar_sync.requested event per active property, picking the owner over an admin when both exist for the same org', async () => {
     const supabase = makeSupabase({
+      integration_connections: [{
+        data: [{ org_id: 'org_1' }, { org_id: 'org_2' }],
+        error: null,
+      }],
       properties: [{
         data: [
           { id: 'prop_1', org_id: 'org_1', external_id: 'hosp_1' },
@@ -94,6 +98,7 @@ describe('hospCalendarSyncCron', () => {
 
   it('is a no-op when there are no active Hospitable-sourced properties', async () => {
     const supabase = makeSupabase({
+      integration_connections: [{ data: [{ org_id: 'org_1' }], error: null }],
       properties: [{ data: [], error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
@@ -107,12 +112,65 @@ describe('hospCalendarSyncCron', () => {
 
     expect(result).toEqual({ dispatched: 0 })
     expect(step.sendEvent).not.toHaveBeenCalled()
-    // The admin-resolution query never needs to run when there's nothing to dispatch for.
+    // Reaches the properties query (org has an active connection) but stops there.
+    expect(supabase.from).toHaveBeenCalledTimes(2)
+  })
+
+  it('is a no-op and never queries properties when there are no active Hospitable connections at all', async () => {
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = runAllStep()
+    const result = await invokeHandler(hospCalendarSyncCron, {
+      event: {},
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ dispatched: 0, skipped_reason: 'no_active_connections' })
+    expect(step.sendEvent).not.toHaveBeenCalled()
     expect(supabase.from).toHaveBeenCalledTimes(1)
+    expect(supabase.from).toHaveBeenCalledWith('integration_connections')
+  })
+
+  it('excludes a property whose org has no active connection even though is_active/external_source still say Hospitable', async () => {
+    const supabase = makeSupabase({
+      // Only org_1 has an active connection — org_2 disconnected but its
+      // property row was never touched by disconnectIntegration().
+      integration_connections: [{ data: [{ org_id: 'org_1' }], error: null }],
+      properties: [{
+        data: [{ id: 'prop_1', org_id: 'org_1', external_id: 'hosp_1' }],
+        error: null,
+      }],
+      organization_members: [{
+        data: [{ org_id: 'org_1', user_id: 'owner_1', role: 'owner' }],
+        error: null,
+      }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = runAllStep()
+    const result = await invokeHandler(hospCalendarSyncCron, {
+      event: {},
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ dispatched: 1 })
+    const sentEvents = (step.sendEvent as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as unknown[]
+    expect(sentEvents).toEqual([
+      {
+        name: 'integration/hospitable.calendar_sync.requested',
+        data: { property_id: 'prop_1', org_id: 'org_1', user_id: 'owner_1', hospitable_property_id: 'hosp_1' },
+      },
+    ])
   })
 
   it('filters out a property whose org has no admin/owner member, dispatching for none and sending no events', async () => {
     const supabase = makeSupabase({
+      integration_connections: [{ data: [{ org_id: 'org_orphan' }], error: null }],
       properties: [{
         data: [{ id: 'prop_1', org_id: 'org_orphan', external_id: 'hosp_1' }],
         error: null,
@@ -134,6 +192,7 @@ describe('hospCalendarSyncCron', () => {
 
   it('dispatches exactly one event per property even when its org has more than one qualifying admin — no duplicate dispatch per property', async () => {
     const supabase = makeSupabase({
+      integration_connections: [{ data: [{ org_id: 'org_1' }], error: null }],
       properties: [{
         data: [{ id: 'prop_1', org_id: 'org_1', external_id: 'hosp_1' }],
         error: null,
