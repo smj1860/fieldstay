@@ -30,9 +30,12 @@
  *
  * The per-connection new-property diff (a full getProperties() call) used
  * to run every tick for every connection — 100+ requests/hour of pure
- * diffing at 100 connections. The cron now requests it only every 6th
- * hourly tick; scoped runs (webhook/manual) always request it, since a PM
- * clicking "Resync" expects new properties to appear.
+ * diffing at 100 connections. New-property discovery is now webhook-primary:
+ * ownerrez.ts routes property entity_insert/entity_create webhooks into the
+ * scoped sync path (scoped runs always request the diff), so a property
+ * added in OwnerRez is discovered within moments. The hourly cron only
+ * requests the diff once a day (NEW_PROPERTY_DIFF_UTC_HOUR) as a
+ * missed-webhook backstop; manual "Resync" clicks also always request it.
  *
  * TODO(CLAUDE_55_5 Task 7): This function does not currently handle OwnerRez
  * property entity_update webhooks — it only fetches bookings via since_utc.
@@ -64,6 +67,11 @@ const PROVIDER = 'ownerrez'
 
 const CIRCUIT_KEY       = 'ownerrez:circuit:consecutive_failures'
 const CIRCUIT_THRESHOLD = 10
+
+// The cron tick (hourly, minute 0) whose fan-out requests the new-property
+// diff — 10:00 UTC is early-morning US, away from the 13:00-14:00 UTC daily
+// cron cluster and low booking-webhook traffic.
+const NEW_PROPERTY_DIFF_UTC_HOUR = 10
 
 export const ownerRezIncrementalSync = inngest.createFunction(
   {
@@ -119,11 +127,12 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     }
 
     // The new-property diff costs one full getProperties() per connection —
-    // budget-relevant at scale, so the hourly backstop only requests it
-    // every 6th tick. Scoped (webhook/manual) runs always get it.
+    // budget-relevant at scale. Discovery is webhook-primary (see header):
+    // the hourly backstop only requests it once a day, for webhooks that
+    // never arrived. Scoped (webhook/manual) runs always get it.
     const checkNewProperties = scopedUserId
       ? true
-      : new Date().getUTCHours() % 6 === 0
+      : new Date().getUTCHours() === NEW_PROPERTY_DIFF_UTC_HOUR
 
     await step.sendEvent(
       'fan-out-connection-syncs',

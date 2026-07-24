@@ -164,8 +164,9 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
 
   it('fans out one connection.sync.requested event per active connection (cron sweep, unscoped)', async () => {
     baseMocks()
-    // 13:00 UTC → 13 % 6 !== 0 → the cron does NOT request the
-    // getProperties() new-property diff on this tick.
+    // 13:00 UTC ≠ the daily 10:00 UTC diff hour → the cron does NOT request
+    // the getProperties() new-property diff on this tick (discovery is
+    // webhook-primary; the cron diff is a once-daily backstop).
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-22T13:00:00.000Z'))
 
@@ -192,6 +193,28 @@ describe('ownerRezIncrementalSync (dispatcher)', () => {
     // Unscoped sweep — no user_id filter on the connections query
     const connectionsEqCalls = supabase.eqSpy.mock.calls.filter((c) => c[0] === 'integration_connections')
     expect(connectionsEqCalls.map((c) => c[1])).not.toContain('user_id')
+
+    vi.useRealTimers()
+  })
+
+  it('requests the new-property diff on the daily backstop tick (10:00 UTC)', async () => {
+    baseMocks()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-22T10:00:00.000Z'))
+
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_ROW], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const step = makeAllowlistStep(['check-circuit-breaker', 'fetch-connections'])
+    await invokeHandler(ownerRezIncrementalSync, { event: {}, step, logger: makeLogger() })
+
+    expect(step.sendEvent).toHaveBeenCalledWith('fan-out-connection-syncs', [
+      expect.objectContaining({
+        data: expect.objectContaining({ check_new_properties: true }),
+      }),
+    ])
 
     vi.useRealTimers()
   })

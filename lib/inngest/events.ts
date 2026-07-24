@@ -828,7 +828,7 @@ export type FieldStayEvents = {
       user_id:              string
       org_id:               string   // '' when the connection has no org yet
       external_user_id:     string
-      check_new_properties: boolean  // full getProperties() diff — budget-relevant, so cron requests it only every 6th tick
+      check_new_properties: boolean  // full getProperties() diff — webhook-primary discovery; the cron requests it only once a day as a missed-webhook backstop
     }
   }
 
