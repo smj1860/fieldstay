@@ -58,7 +58,6 @@ const SERVICE_ROLE_ONLY_TABLES = new Set([
   'pending_integration_links',
   'pending_oauth_authorizations',
   'processed_webhooks',
-  'stripe_processed_events',
 ])
 
 const res = await fetch(new URL('/rest/v1/rpc/db_invariant_report', url), {
