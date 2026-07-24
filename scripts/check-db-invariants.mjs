@@ -72,7 +72,9 @@ const res = await fetch(new URL('/rest/v1/rpc/db_invariant_report', url), {
 })
 
 if (!res.ok) {
-  console.error(`db_invariant_report RPC failed: HTTP ${res.status} — ${await res.text()}`)
+  // Status code only — the response body is network-controlled data and
+  // doesn't belong in CI logs (Sonar S5145 log-injection rule).
+  console.error(`db_invariant_report RPC failed: HTTP ${res.status}`)
   console.error(
     'Has supabase/migrations/20260724131000_db_invariant_report.sql been applied to the E2E project?'
   )
