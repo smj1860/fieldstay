@@ -73,7 +73,7 @@ Before marking a PR ready for review, confirm every item:
 ### Database
 - [ ] Every new table has `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` and four policies (SELECT, INSERT, UPDATE, DELETE) using `get_user_org_ids()` and `is_org_member()`
 - [ ] Every migration that adds a column also updates the matching interface in `types/database.ts` in the same commit
-- [ ] New migration files are named `fieldstay_migration_vN.sql` and are safe to re-run (idempotent SQL)
+- [ ] New migration files are named `YYYYMMDDHHMMSS_description.sql` (e.g. `20260723140000_add_widget_column.sql`) and are safe to re-run (idempotent SQL) — the older `fieldstay_migration_vN.sql` convention is retired; the two `fieldstay_migration_v1/v2.SUPERSEDED.sql` files at the repo root are historical only, do not run them
 - [ ] No new `.from('memberships')` calls — the table is `organization_members`
 
 ### Security
@@ -91,7 +91,7 @@ Before marking a PR ready for review, confirm every item:
 ### TypeScript
 - [ ] No `any` types
 - [ ] No `unknown` without a type guard
-- [ ] No direct Supabase reads in client components — PowerSync hooks only
+- [ ] No direct Supabase reads in crew PWA client components (`app/crew/*`) — Dexie (`getDexieDb`/`useLiveQuery`) only
 - [ ] `npm run build` passes with zero errors
 
 ### UI
@@ -102,7 +102,7 @@ Before marking a PR ready for review, confirm every item:
 
 ## Adding a New Database Table
 
-1. Write the migration SQL in `fieldstay_migration_vN.sql`
+1. Write the migration SQL in `supabase/migrations/YYYYMMDDHHMMSS_description.sql`
 2. Include `ENABLE ROW LEVEL SECURITY` and all four policies in the same file
 3. Update `types/database.ts` — find the correct section and add the new interface
 4. Run `npm run types:supabase` to regenerate `types/supabase.ts`

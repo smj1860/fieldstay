@@ -29,7 +29,7 @@ The link in the dispatch email is unique to each work order and vendor. When the
 - The scope of work and authorized spending amount
 - A **Sign Off** button to mark the work complete when they're done
 
-The link is valid for 30 days. If a vendor needs a new link after it expires, go to the work order detail page and click **Resend to Vendor** to generate a fresh one.
+The link is valid for 90 days. If a vendor needs a new link after it expires, go to the work order detail page and click **Resend to Vendor** to generate a fresh one.
 
 **The link is for the vendor's eyes only.** Do not forward it or share it publicly — it grants access to property access information including lockbox codes.
 
@@ -79,7 +79,7 @@ If the scope grows beyond the NTE during the job, the vendor is expected to cont
 Check their spam folder first. If it's not there, open the work order detail panel and use **Send to Vendor** to resend. Confirm the email address on file for the vendor in Settings → Vendors.
 
 **The vendor's link isn't working.**
-Links expire after 30 days. Use **Send to Vendor** to generate a fresh link.
+Links expire after 90 days. Use **Send to Vendor** to generate a fresh link.
 
 **The dispatch email didn't send when I created the work order.**
 The vendor must have an email address on file and the portal option must be enabled when creating the work order. Check the vendor's profile in Settings → Vendors to confirm their email is set. Then use **Send to Vendor** from the work order detail panel to dispatch manually.

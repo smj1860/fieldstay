@@ -10,10 +10,10 @@ Each sponsor occupies a slot in your guidebook. Guests browsing the guidebook se
 
 If you have opted-in SMS guests, sponsors in the right time slot may also be mentioned in the morning or evening recommendation message sent during the guest's stay.
 
-**Plan credits based on active sponsors:**
-- 4 sponsors → your plan is free
-- 5 sponsors → $10/month credit applied to your next bill
-- 6 sponsors → $25/month credit applied to your next bill
+**Sponsor thresholds:**
+- 3 active sponsors → the Guidebook feature itself is permanently unlocked (free), separate from the rest of your FieldStay plan
+- 5 active sponsors → $10/month credit applied to your next bill
+- 6 active sponsors → $25/month credit applied to your next bill (does not stack with the 5-sponsor credit)
 
 ---
 

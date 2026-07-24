@@ -1,5 +1,7 @@
 # Idempotency / Deduplication / Inngest Audit
 
+> **ARCHIVED — superseded by `audit/` Round 2. Findings here reflect the codebase as of 2026-07-13 and should not be read as current state.**
+
 Status: COMPLETE
 Last checkpoint: audited all lib/inngest/functions/*.ts (including cron/, ownerrez/, hostaway/ subdirectories) for idempotency, createServiceClient placement, step.sleep nesting, for-of return-vs-continue, and event registration. Verified exactly one serve() call in app/api/inngest/route.ts and all used events are registered in events.ts.
 Next: none — audit complete
@@ -80,4 +82,3 @@ Next: none — audit complete
 - Fix: N/A
 
 Status: COMPLETE
-

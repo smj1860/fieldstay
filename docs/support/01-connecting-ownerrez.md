@@ -3,6 +3,8 @@
 Connecting OwnerRez syncs your properties, bookings, and guest data into FieldStay
 automatically — no manual data entry required.
 
+Using Hospitable instead? See [Connecting Hospitable](./25-connecting-hospitable.md).
+
 ## Before You Start
 - Active FieldStay account (Starter plan or higher)
 - OwnerRez login credentials

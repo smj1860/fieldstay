@@ -3,9 +3,9 @@
 Pass 1 mapped where data *enters* FieldStay. Pass 2 traced what happens to
 it internally (the Inngest event graph). This pass closes the loop: every
 place FieldStay sends something *out* to the world — email, SMS, money
-movement, third-party API calls, and browser push. Six channels, each with
-a single chokepoint client and a lazy-construction pattern to survive
-build-time module loading without required env vars.
+movement, third-party API calls, browser push, and observability data.
+Seven channels, each with a single chokepoint client and a lazy-construction
+pattern to survive build-time module loading without required env vars.
 
 ---
 
@@ -170,6 +170,26 @@ self-cleaning of stale endpoints.
 
 ---
 
+## 7. Observability — Sentry
+
+**Chokepoint:** `Sentry.init()`, called from `instrumentation.ts` (server/edge
+runtime) and `instrumentation-client.ts` (browser) — `@sentry/nextjs`, added
+2026-07-15. Unlike the other six channels, this isn't invoked at individual
+call sites; it's a global error/trace capture layer that intercepts uncaught
+exceptions and API-route/Server-Action execution automatically once
+initialized. Sentry owns the OTEL tracer-provider registration for the whole
+app — it replaced `@vercel/otel`, which was removed when Sentry was added, so
+there is exactly one tracer-provider registration, not two. This is distinct
+from Axiom (Pass 2/CLAUDE.md's observability table): Axiom is a Vercel-native
+log capture for Inngest's own `logger` calls, not a trace exporter; Sentry is
+the one that owns traces plus error reporting.
+
+**Gate/safety:** standard Sentry SDK sampling config (`tracesSampleRate` etc.
+in the instrumentation files) — no app-level feature flag gates it the way
+`SMS_ENABLED` gates Telnyx.
+
+---
+
 ## Summary
 
 | Channel | Chokepoint | Gate/safety mechanism | Primarily driven by |
@@ -180,11 +200,14 @@ self-cleaning of stale endpoints.
 | Kroger | `lib/kroger/client.ts` | Fresh token per call (no stale-token risk) | `build-shopping-cart.ts` only |
 | Mapbox | `lib/geocoding.ts` | Silent `null` on failure — never throws | Property/vendor Server Actions |
 | Web Push | `lib/push/send-push.ts` | Lazy VAPID init, self-prunes dead endpoints (410) | 2 Inngest functions + 1 Server Action |
+| Sentry (observability) | `instrumentation.ts` / `instrumentation-client.ts` | Sentry SDK sampling config | Automatic — any uncaught error or traced execution |
 
-All six channels follow the same defensive-construction idiom seen
+The first six channels follow the same defensive-construction idiom seen
 across this codebase's external clients: build the real client lazily,
 behind either a `Proxy` or a function-scoped check, so a missing
 credential in one environment can't take down `next build` or unrelated
-code sharing the same import graph. Combined with Pass 1 (data in) and
-Pass 2 (internal processing), this closes the loop on FieldStay's full
-external surface area.
+code sharing the same import graph. Sentry is the exception — it's
+initialized globally at instrumentation time rather than lazily per call
+site, since its whole job is catching errors *anywhere* in the app.
+Combined with Pass 1 (data in) and Pass 2 (internal processing), this
+closes the loop on FieldStay's full external surface area.
