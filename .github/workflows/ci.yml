@@ -113,6 +113,10 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # This job only reads the repo and runs one script — no reason to
+          # leave the checkout token on disk.
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22

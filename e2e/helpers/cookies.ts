@@ -5,7 +5,9 @@ export async function dismissCookieBanner(page: Page): Promise<void> {
   const isVisible = await banner.isVisible().catch(() => false)
   if (!isVisible) return
 
-  const dismissBtn = page.getByRole('button', {
+  // Scoped to the banner region: with force:true below, a page-wide locator
+  // could force-click an open dialog's Close/OK button instead.
+  const dismissBtn = banner.getByRole('button', {
     name: /accept|got it|ok|dismiss|close|agree|allow/i,
   }).first()
 

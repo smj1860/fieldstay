@@ -161,8 +161,13 @@ evidence.
   turnover cascade-deletes its `turnover_assignments` rows, and cascaded
   deletes fire the child table's own statement trigger — so the
   `turnover_assignments` DELETE trigger already signals the affected crew.
-  Checklist deletes likewise cascade from turnovers; reconciliation covers
-  the rest.
+  Checklist deletes likewise cascade from turnovers. A *standalone*
+  checklist deletion (a PM deleting a checklist row without its turnover —
+  permitted by the PM RLS policies) intentionally gets no trigger either:
+  deletion correctness is reconciliation's job by invariant #1, so the only
+  cost is signal latency, bounded by the next `turnovers` broadcast or the
+  5-minute safety poll. That freshness tradeoff is accepted — do not add
+  checklist DELETE triggers for it.
 - **UPDATE triggers notify old AND new parties** where a row can be
   re-pointed (`turnover_assignments.crew_member_id`,
   `work_orders.assigned_crew_member_id`) — a reassigned crew member must be
@@ -583,8 +588,8 @@ refactor it "while you're in there"; it gets deleted wholesale in Phase 5.
 4. **Reconnect with jitter:** on channel status `CHANNEL_ERROR`,
    `TIMED_OUT`, or `CLOSED` (when not deliberately unmounting), tear down
    and resubscribe after `base + jitter` where jitter is uniform in
-   ±30 s (e.g. base 5 s, so 5–35 s spread) — prevents a thundering herd of
-   rejoins when a Realtime node restarts. `Math.random()` here needs the
+   [0, 30 s] (e.g. base 5 s → total delay uniform in 5–35 s) — prevents a
+   thundering herd of rejoins when a Realtime node restarts. `Math.random()` here needs the
    eslint-disable + justification line. After every successful
    (re)subscribe, run one full `resync()` — the gap while disconnected may
    have swallowed signals.
@@ -636,7 +641,9 @@ own small PR.
     just adds "not due yet" as a stop reason).
   - On push failure:
     `retryCount += 1`, and
-    `nextAttemptAt = Date.now() + Math.min(2 ** retryCount * 5_000, 300_000) * (0.5 + jitter)`
+    `nextAttemptAt = Date.now() + Math.min(2 ** (retryCount - 1) * 5_000, 300_000) * (0.5 + jitter)`
+    (the `- 1` because `retryCount` was already incremented — without it
+    the first retry would wait 10 s, not 5 s)
     where `jitter` is uniform in [0, 1) (`Math.random()` with the
     eslint-disable justification — spreads retry storms after an outage).
     So delays grow 5 s → 10 s → 20 s … capped at 5 min, each scaled by
@@ -711,21 +718,29 @@ are load-bearing correctness backstops, not scaffolding.
 
 ### 5e. Convention + guardrail (the CLAUDE.md meta-rule applies)
 
-Add to `CLAUDE.md` (Dexie/crew section): **"Every table the crew PWA caches
-in Dexie must be covered by exactly one of: (a) a broadcast trigger in the
-crew-sync trigger migration, or (b) the safety-poll pull list — and new
-cached tables must be added to one of them in the same PR."**
+Add to `CLAUDE.md` (Dexie/crew section): **"Every Supabase-backed table the
+crew PWA caches in Dexie is covered by the safety poll (the full `resync()`
+covers all of them); every such table must ALSO either have a broadcast
+trigger in the crew-sync trigger migration (low-latency entities) or be
+explicitly listed in the `SAFETY_POLL_ONLY` allowlist — new cached tables
+must be placed in one of those two sets in the same PR."** (Broadcast-
+triggered tables are deliberately covered by both mechanisms — the poll is
+the correctness backstop, so this is a union check, not exclusive-or.)
 
 Per the repo's meta-rule, ship the guardrail with it: a new
 `unit/guardrails/crew-sync-coverage.test.ts` that derives the list of
 synced Supabase-backed tables from `lib/dexie/schema.ts` (maintain an
 explicit exported const if parsing is brittle — e.g.
-`CREW_SYNCED_TABLES`), and asserts each appears either in the trigger
-migration SQL (grep the `supabase/migrations/*crew_sync_broadcast*` file
-for `ON public.<table>`) or in an explicit `SAFETY_POLL_ONLY` allowlist
-(initially: `property_assets`, plus purely-local tables like `mutations` /
-`sync_meta` in a `LOCAL_ONLY` list). A new cached table then fails CI until
-the developer consciously places it.
+`CREW_SYNCED_TABLES`), keeps purely-local Dexie tables (`mutations`,
+`sync_meta`, and anything else with no Supabase counterpart) in a separate
+`LOCAL_ONLY` list, and asserts every remaining table appears in the union
+of (a) the trigger migration SQL (grep the
+`supabase/migrations/*crew_sync_broadcast*` file for `ON public.<table>`)
+and (b) an explicit `SAFETY_POLL_ONLY` allowlist (initially:
+`property_assets`, plus any other cached remote table without a trigger —
+enumerate them from the schema when writing the test, don't assume this
+list is complete). A new cached table then fails CI until the developer
+consciously places it.
 
 **Definition of done (Phase 5 / the whole program):** flag removed, old
 path deleted, acceptance test recorded as passed, soak week clean,
