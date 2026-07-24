@@ -62,6 +62,7 @@ import {
   buildOwnerRezBookingRow,
   selectOwnerRezBookingsToPostRevenue,
 } from '@/lib/integrations/providers/ownerrez'
+import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 
 const PROVIDER = 'ownerrez'
 
@@ -411,23 +412,21 @@ export const ownerRezConnectionSync = inngest.createFunction(
           }
 
           // MEDIUM-3: use pre-fetch timestamp as cursor — not post-fetch
-          const { error: cursorErr } = await supabase
-            .from('integration_connections')
-            .update({
-              metadata: {
-                ...metadata,
-                sync_cursor:       fetchStartedAt,
-                last_synced_at:    new Date().toISOString(),
-                last_sync_status:  'success',
-                last_sync_error:   null,
-                last_sync_count:   bookings.length,
+          try {
+            await mergeIntegrationConnectionMetadata({
+              userId:     conn.user_id,
+              providerId: PROVIDER,
+              patch: {
+                sync_cursor:      fetchStartedAt,
+                last_synced_at:   new Date().toISOString(),
+                last_sync_status: 'success',
+                last_sync_error:  null,
+                last_sync_count:  bookings.length,
               },
             })
-            .eq('id', conn.id)
-
-          if (cursorErr) {
+          } catch (cursorErr) {
             // Non-fatal: data was written correctly; log and continue
-            logger.error(`[OwnerRez:${userId}] cursor update failed: ${cursorErr.message}`)
+            logger.error(`[OwnerRez:${userId}] cursor update failed: ${cursorErr instanceof Error ? cursorErr.message : String(cursorErr)}`)
           }
 
           logger.info(`[OwnerRez:${userId}] sync complete — ${bookings.length} bookings`, {
@@ -454,16 +453,15 @@ export const ownerRezConnectionSync = inngest.createFunction(
             // failure mode).
             logger.warn(`[OwnerRez:${userId}] Rate limited (retry after ${err.retryAfter}s) — will retry with backoff`)
 
-            await supabase
-              .from('integration_connections')
-              .update({
-                metadata: {
-                  ...metadata,
-                  last_sync_status: 'rate_limited',
-                  last_sync_error:  translateSyncError(err),
-                },
-              })
-              .eq('id', conn.id)
+            // Write transient rate-limit status — don't change connection status to 'error'
+            await mergeIntegrationConnectionMetadata({
+              userId:     conn.user_id,
+              providerId: PROVIDER,
+              patch: {
+                last_sync_status: 'rate_limited',
+                last_sync_error:  translateSyncError(err),
+              },
+            })
 
             throw err
           }
@@ -472,18 +470,16 @@ export const ownerRezConnectionSync = inngest.createFunction(
             const humanError = translateSyncError(err)
             logger.error(`[OwnerRez:${userId}] Token revoked — marking connection as revoked`)
 
-            await supabase
-              .from('integration_connections')
-              .update({
-                status:   'revoked',
-                metadata: {
-                  ...metadata,
-                  last_sync_status: 'error',
-                  last_sync_error:  humanError,
-                  last_synced_at:   new Date().toISOString(),
-                },
-              })
-              .eq('id', conn.id)
+            await mergeIntegrationConnectionMetadata({
+              userId:     conn.user_id,
+              providerId: PROVIDER,
+              patch: {
+                last_sync_status: 'error',
+                last_sync_error:  humanError,
+                last_synced_at:   new Date().toISOString(),
+              },
+              status: 'revoked',
+            })
 
             await logAuditEvent({
               orgId:      conn.org_id,
@@ -508,18 +504,16 @@ export const ownerRezConnectionSync = inngest.createFunction(
             `[OwnerRez:${userId}] sync failed: ${err instanceof Error ? err.message : String(err)}`
           )
 
-          await supabase
-            .from('integration_connections')
-            .update({
-              status:   'error',
-              metadata: {
-                ...metadata,
-                last_sync_status: 'error',
-                last_sync_error:  humanError,
-                last_synced_at:   new Date().toISOString(),
-              },
-            })
-            .eq('id', conn.id)
+          await mergeIntegrationConnectionMetadata({
+            userId:     conn.user_id,
+            providerId: PROVIDER,
+            patch: {
+              last_sync_status: 'error',
+              last_sync_error:  humanError,
+              last_synced_at:   new Date().toISOString(),
+            },
+            status: 'error',
+          })
 
           await logAuditEvent({
             orgId:      conn.org_id,

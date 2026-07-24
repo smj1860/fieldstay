@@ -18,13 +18,16 @@ export async function getSyncProgress(providerId: string): Promise<{
   lastSyncStatus:  string | null
 } | null> {
   try {
-    const { user } = await requireOrgMember()
+    // Scoped by org, not the current viewer's session — the PM watching
+    // sync progress may not be the PM who originally connected the
+    // integration (same pattern as triggerResync below).
+    const { membership } = await requireOrgMember()
     const supabase = createServiceClient()
 
     const { data } = await supabase
       .from('integration_connections')
       .select('metadata')
-      .eq('user_id', user.id)
+      .eq('org_id', membership.org_id)
       .eq('provider_id', providerId)
       .maybeSingle()
 

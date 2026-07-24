@@ -78,6 +78,15 @@ function makeSupabase(queued: QueuedByTable) {
   const upsertSpy = vi.fn()
   const updateSpy = vi.fn()
   const eqSpy     = vi.fn()
+  // integration_connections.metadata is now merged atomically via the
+  // merge_integration_connection_metadata RPC (see
+  // lib/integrations/connection-metadata.ts) instead of a
+  // select-then-update round trip.
+  const rpcSpy = vi.fn()
+  const rpc = vi.fn((fnName: string, args: unknown) => {
+    rpcSpy(fnName, args)
+    return Promise.resolve({ data: {}, error: null })
+  })
 
   const from = vi.fn((table: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -104,7 +113,16 @@ function makeSupabase(queued: QueuedByTable) {
     return chain
   })
 
-  return { from, upsertSpy, updateSpy, eqSpy }
+  return { from, upsertSpy, updateSpy, eqSpy, rpc, rpcSpy }
+}
+
+/** Finds the merge_integration_connection_metadata RPC call whose p_patch contains `key`. */
+function findMetadataMergeCall(rpcSpy: ReturnType<typeof vi.fn>, key: string) {
+  return rpcSpy.mock.calls.find(
+    (c) =>
+      c[0] === 'merge_integration_connection_metadata' &&
+      (c[1] as { p_patch?: Record<string, unknown> }).p_patch?.[key] !== undefined,
+  )
 }
 
 const CONN_ROW = {
@@ -314,12 +332,12 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     // Cursor correctness: sync_cursor must be the PRE-fetch timestamp, not
     // last_synced_at (post-fetch) — using the post-fetch value would miss
     // any booking modified upstream during the fetch window.
-    const cursorUpdate = supabase.updateSpy.mock.calls.find((c) => c[0] === 'integration_connections')
-    expect(cursorUpdate).toBeDefined()
-    const metadata = (cursorUpdate?.[1] as { metadata: Record<string, unknown> }).metadata
-    expect(metadata.sync_cursor).toBe(start.toISOString())
-    expect(metadata.last_synced_at).toBe(new Date(start.getTime() + 5000).toISOString())
-    expect(metadata.sync_cursor).not.toBe(metadata.last_synced_at)
+    const cursorMergeCall = findMetadataMergeCall(supabase.rpcSpy, 'sync_cursor')
+    expect(cursorMergeCall).toBeDefined()
+    const patch = (cursorMergeCall?.[1] as { p_patch: Record<string, unknown> }).p_patch
+    expect(patch.sync_cursor).toBe(start.toISOString())
+    expect(patch.last_synced_at).toBe(new Date(start.getTime() + 5000).toISOString())
+    expect(patch.sync_cursor).not.toBe(patch.last_synced_at)
 
     expect(generateTurnoversForProperty).toHaveBeenCalledWith('prop_1', 'org_1', supabase)
     expect(result).toEqual({ connectionId: 'conn_1', synced: true })
@@ -362,6 +380,7 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
     // The step returns before reaching the cursor-advance code at all —
     // a failed lookup must not silently mark this run as synced.
     expect(supabase.updateSpy).not.toHaveBeenCalled()
+    expect(supabase.rpcSpy).not.toHaveBeenCalled()
     expect(result).toEqual({ connectionId: 'conn_1', synced: false })
   })
 
@@ -384,9 +403,9 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
       invokeHandler(ownerRezConnectionSync, { event: SYNC_EVENT, step, logger: makeLogger() })
     ).rejects.toThrow()
 
-    expect(supabase.updateSpy).toHaveBeenCalledWith(
-      'integration_connections',
-      expect.objectContaining({ status: 'revoked' }),
+    expect(supabase.rpcSpy).toHaveBeenCalledWith(
+      'merge_integration_connection_metadata',
+      expect.objectContaining({ p_status: 'revoked' }),
     )
     expect(logAuditEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -422,11 +441,13 @@ describe('ownerRezConnectionSync (per-connection handler)', () => {
       invokeHandler(ownerRezConnectionSync, { event: SYNC_EVENT, step, logger: makeLogger() })
     ).rejects.toThrow()
 
-    const rateLimitUpdate = supabase.updateSpy.mock.calls.find((c) => c[0] === 'integration_connections')
-    expect(rateLimitUpdate).toBeDefined()
-    const payload = rateLimitUpdate?.[1] as { status?: string; metadata: Record<string, unknown> }
-    expect(payload.status).toBeUndefined()
-    expect(payload.metadata.last_sync_status).toBe('rate_limited')
+    // The transient status is written via the atomic metadata merge with
+    // NO status change — rate-limited must not flip the connection to error.
+    const rateLimitMergeCall = findMetadataMergeCall(supabase.rpcSpy, 'last_sync_status')
+    expect(rateLimitMergeCall).toBeDefined()
+    const payload = rateLimitMergeCall?.[1] as { p_status: string | null; p_patch: Record<string, unknown> }
+    expect(payload.p_status).toBeNull()
+    expect(payload.p_patch.last_sync_status).toBe('rate_limited')
     expect(step.sleep).not.toHaveBeenCalled()
   })
 
