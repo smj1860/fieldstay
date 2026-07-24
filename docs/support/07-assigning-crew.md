@@ -6,7 +6,7 @@
 
 ## How Assignment Works
 
-When FieldStay creates a turnover from an OwnerRez booking, it starts in **Pending** status with no crew assigned. You assign crew manually, or FieldStay can suggest assignments based on availability and familiarity with the property.
+When FieldStay creates a turnover from a booking (OwnerRez or Hospitable), it starts in **Pending** status with no crew assigned. You assign crew manually, or FieldStay can suggest assignments based on availability and familiarity with the property.
 
 ---
 

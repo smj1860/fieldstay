@@ -1,5 +1,8 @@
 # FieldStay Comprehensive Codebase Audit — Summary
 
+**As of 2026-07-23: nearly every finding across audits/01, 02, 04, 05 has since been
+fixed; audits/03 covers a fully-removed subsystem (see its own banner).**
+
 **Date:** 2026-06-10
 **Scope:** Full codebase, audited against `main` (commit `e0ddf01`) using four
 specialized agents, one per dimension below. Each agent's full findings,
@@ -25,6 +28,9 @@ linked report.
    reasonable policies. A fresh environment provisioned from these migrations
    alone would be insecure (no RLS on most tables).
    → [01, "Migrations directory does not reflect live schema/RLS state"](./01-security-multitenant-isolation.md#critical-migrations-directory-does-not-reflect-live-schema-rls-state--cannot-be-used-to-provision-a-secure-environment)
+   **Status: STALE/LARGELY FIXED** — repo now has 310+ migrations including
+   proper baseline schema files with RLS. Recommend a fresh spot-check rather
+   than treating as still-critical.
 
 2. **Auto-created maintenance work orders have no idempotency guard on
    retry** — `lib/inngest/functions/cron/maintenance-schedules.ts:60-93`
@@ -32,10 +38,16 @@ linked report.
    pre-insert existence check. An Inngest retry creates a duplicate WO every
    time.
    → [02, "Auto-created maintenance work orders..."](./02-idempotency-deduplication.md#critical-auto-created-maintenance-work-orders-have-no-idempotency-guard-on-retry)
+   **Status: FIXED** — `lib/inngest/functions/cron/maintenance-schedules.ts:226-255`
+   now checks for an existing WO before insert; migrations
+   `20260610000001_maintenance_po_idempotency.sql` /
+   `20260707145540_maintenance_po_idempotency.sql`.
 
 3. **`create-purchase-order` step can create duplicate POs + line items on
    retry** — same root cause as #2, applied to purchase orders.
    → [02, "create-purchase-order step..."](./02-idempotency-deduplication.md#critical-create-purchase-order-step-can-create-duplicate-pos--line-items-on-retry)
+   **Status: FIXED** — `lib/inngest/functions/inventory-events.ts:170-219`
+   checks `source_count_id` before insert.
 
 4. **Crew "Mark Complete" bypasses the entire turnover-completion automation
    pipeline** — the crew PWA writes directly to PowerSync/SQLite and never
@@ -44,6 +56,9 @@ linked report.
    never fire for turnovers completed via the crew app — i.e. the majority of
    real-world completions.
    → [03, "Crew Mark Complete bypasses..."](./03-powersync-scalability.md#critical-crew-mark-complete-bypasses-the-entire-turnover-completion-automation-pipeline)
+   **Status: OBSOLETE** — this finding concerns `lib/powersync/*`, which no
+   longer exists (see the banner on audits/03). Not tracked as an open item
+   against the current Dexie-based crew PWA.
 
 ---
 
@@ -63,12 +78,16 @@ linked report.
 - Dead duplicate cron function `lib/inngest/functions/maintenance-check.ts`
   has drifted out of sync with its four registered replacements — maintenance
   hazard, should be deleted.
+  **Status: FIXED** — file no longer exists.
 - `auto-assign-turnover.ts` autopilot insert relies on an unhandled
   unique-constraint error for dedup (silent failure mode).
 - `record-outcomes` step does an unconditional INSERT with try/catch
   swallowing retries.
 
 **PowerSync / Scalability (03)**
+**Status: OBSOLETE** — `lib/powersync/*` no longer exists in the repo at all
+(replaced by Dexie/IndexedDB, see CLAUDE.md and the banner on audits/03).
+Every bullet below refers to deleted code.
 - Crew PWA writes `work_orders` directly via client-side Supabase, bypassing
   Server Actions and tenant-scoping conventions.
 - `getPmEmail()` called per-item inside cron loops (`maintenance-schedules.ts`,
@@ -85,15 +104,20 @@ linked report.
 - `work_order/completed` posts `estimated_cost` as the expense amount when
   `actual_cost` is null, contradicting the documented spec; `ignoreDuplicates:
   true` means a later real `actual_cost` never overwrites the placeholder.
+  **Status: FIXED** — `lib/inngest/functions/work-order-events.ts:295-317`
+  now only posts on real `actual_cost`.
 - `handleWorkOrderCompletedViaPortal` can double-post (race-order-dependent
   amount) alongside `handleWorkOrderCompleted`.
 - `types/database.ts` `WorkOrder.assigned_crew_id` is the **deprecated**
   column; `app/(dashboard)/maintenance/page.tsx:23` actively selects it
   instead of `assigned_crew_member_id` — exactly the bug class CLAUDE.md warns
   about.
+  **Status: FIXED** — `types/database.ts:724` only has
+  `assigned_crew_member_id` now.
 - `organizations` interface is missing all 5 `repuguard_*` columns added by
   `20260601000000_repuguard.sql`, despite being read/written by
   `app/api/repuguard/activate/route.ts` and the Stripe webhook.
+  **Status: FIXED** — `types/database.ts:115-119` has all five.
 
 ---
 

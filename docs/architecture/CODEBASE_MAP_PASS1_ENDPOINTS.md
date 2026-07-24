@@ -52,6 +52,7 @@ owners, guests, crew invitees) land on directly from an emailed/texted link.
 | `app/api/vendor-connect/[token]/return/route.ts` | same | Vendor — Stripe's post-onboarding redirect; renders holding page pending `account.updated` webhook |
 | `app/api/work-orders/[token]/complete/route.ts` (GET, POST) | WO completion token | Vendor — mark a work order complete without logging in |
 | `app/api/work-orders/[token]/quote/route.ts` (GET, POST) | WO quote token | Vendor — submit a quote without logging in |
+| `app/api/work-orders/[token]/photos/route.ts` (GET, POST, DELETE) | WO completion token | Vendor — upload/remove photos on a work order without logging in |
 
 ### Pages backed by Server Actions (no `route.ts`, token checked in the page itself)
 | Page | Token column | Consumer |
@@ -81,6 +82,7 @@ don't need an org yet) — see `CLAUDE.md`'s Auth pattern section.
 app/api/assets/capex-csv/route.ts          [GET]  requireOrgMember
 app/api/assets/cpa-export/route.ts         [GET]  requireOrgMember
 app/api/assets/scan-data-plate/route.ts    [POST] requireOrgMember
+app/api/assets/request-scan/route.ts       [POST] requireOrgMember  (fires asset/scan_requested for crew-uploaded data-plate photos)
 app/api/integrations/health/route.ts       [GET]  requireOrgMember
 app/api/invoices/[invoiceId]/checkout/route.ts [POST] requireOrgMember
 app/api/milestones/dismiss/route.ts        [POST] requireOrgMember
@@ -101,21 +103,26 @@ operations.
 
 ## 5. Crew-Authenticated Routes (PWA, session + `crew_members` row required)
 
-All use the inline pattern from `CLAUDE.md` (no shared helper exists yet):
+As of the 2026-07-22 fix (see `CLAUDE.md`'s Canonical Patterns section —
+an inline `crew_members` lookup filtering on `invite_accepted_at` shipped
+as a live bug three times), the canonical pattern is `requireCrewMember()`
+from `lib/crew-auth.ts`, not an inline lookup:
 ```typescript
-const { data: { user } } = await supabase.auth.getUser()
-const { data: crew } = await supabase.from('crew_members').select('id, org_id').eq('user_id', user.id).single()
+import { requireCrewMember } from '@/lib/crew-auth'
+const auth = await requireCrewMember()
+if (!auth.ok) return auth.response
+const { supabase, crew, user } = auth
 ```
 
 ```
-app/api/crew/feedback/route.ts                      [POST]
-app/api/crew/inventory-count/route.ts               [POST]
-app/api/crew/issue-reports/route.ts                 [POST]
-app/api/crew/push-subscribe/route.ts                [POST]
-app/api/crew/turnovers/[id]/complete/route.ts       [POST]
-app/api/crew/turnovers/[id]/start/route.ts          [POST]
-app/api/crew/work-orders/[id]/complete/route.ts     [POST]
-app/api/dashboard/push-subscribe/route.ts           [POST]  (PM push subscribe, same inline pattern, dashboard side)
+app/api/crew/feedback/route.ts                      [POST]  requireCrewMember
+app/api/crew/inventory-count/route.ts               [POST]  requireCrewMember
+app/api/crew/work-order-reports/route.ts            [POST]  requireCrewMember
+app/api/crew/push-subscribe/route.ts                [POST]  requireCrewMember
+app/api/crew/turnovers/[id]/complete/route.ts       [POST]  requireCrewMember
+app/api/crew/turnovers/[id]/start/route.ts          [POST]  requireCrewMember
+app/api/crew/work-orders/[id]/complete/route.ts     [POST]  still the inline pattern, not yet migrated
+app/api/dashboard/push-subscribe/route.ts           [POST]  (PM push subscribe, inline pattern, dashboard side — not a crew route)
 app/api/support-inbox/reply/route.ts                [POST]
 app/api/support-inbox/resolve/route.ts              [POST]
 ```
@@ -163,11 +170,13 @@ later pass, not Pass 1.
 |---|---|---|
 | Third-party webhooks | 4 routes (Stripe ×2, Telnyx, `[provider]` ×2 providers) | Signature/HMAC |
 | OAuth callbacks | 3 routes | Supabase/provider code exchange |
-| Public token-gated | 5 `route.ts` + 9 pages | DB-stored token match |
-| Authenticated dashboard | 12 routes | `requireOrgMember`/`requireAuth`/session |
-| Crew-authenticated | 10 routes | Session + `crew_members` row |
+| Public token-gated | 6 `route.ts` + 9 pages | DB-stored token match |
+| Authenticated dashboard | 13 routes | `requireOrgMember`/`requireAuth`/session |
+| Crew-authenticated | 10 routes | Session + `crew_members` row (mostly via `requireCrewMember()`) |
 | Unauthenticated (intentional) | 1 route | None — health check |
 | Inngest | 1 route, ~70 functions | Inngest request signing |
 
-**36** `route.ts` files + **1** Inngest mega-endpoint + **9** token-gated
-Server-Action pages = the full incoming-data boundary.
+**39** `route.ts` files + **1** Inngest mega-endpoint + **9** token-gated
+Server-Action pages = the full incoming-data boundary. (Counts as of
+2026-07-23 — re-run `find app/api -name route.ts | wc -l` rather than
+trusting this number as it ages.)

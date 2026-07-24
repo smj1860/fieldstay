@@ -41,6 +41,10 @@ belonging to multiple orgs.
 ## Findings
 
 ### CRITICAL: Migrations directory does not reflect live schema/RLS state — cannot be used to provision a secure environment
+**Status: STALE/LARGELY FIXED (as of 2026-07-23)** — this finding was dated
+against a repo with only 13 migration files. The repo now has 310+ migrations
+including proper baseline schema files with RLS. Recommend a fresh spot-check
+of live RLS coverage rather than treating this as still-critical.
 - **Area:** RLS
 - **Location:** `supabase/migrations/*.sql` (only 13 files, ~840 lines total) vs. live DB (60+ tables with RLS + policies)
 - **Description:** Tables referenced throughout `app/` and `lib/` — including

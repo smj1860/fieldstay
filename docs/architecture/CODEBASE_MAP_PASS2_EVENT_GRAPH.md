@@ -545,6 +545,11 @@ depreciation-ledger.ts             annual (0 0 1 1 *) standalone leg
 guidebook-sms-morning-cron.ts      noon UTC daily
 guidebook-sms-evening-cron.ts      22:00 UTC daily
 guidebook-pre-arrival-email-cron.ts 14:00 UTC daily
+cron/guest-pii-retention.ts        14:15 UTC daily — 15 min after comms-retention, purges guest PII
+cron/metrics-snapshot.ts           every 30 min — snapshots platform metrics
+cron/vendor-compliance-grace-check.ts 11:15 UTC daily — 15 min after vendor-compliance-expiry-check, escalates grace/hard-block state
+cron/notification-digest.ts        12:00 UTC daily — writes notification_digest_state snapshots (added 2026-07-15/16)
+cron/daily-wrapup.ts               23:00 UTC daily — PM 6pm-local wrap-up digest email, reads notification_digest_state
 ```
 
 ---
@@ -558,7 +563,7 @@ guidebook-pre-arrival-email-cron.ts 14:00 UTC daily
 | Integrations | 2-3 hops per provider | 3 independent trigger paths (cron + webhook + manual) converge on one incremental-sync handler for OwnerRez |
 | Guidebook | 2 hops | Stripe is the origin for 5 of its 7 events |
 | Billing | 1 hop | All 3 billing events fully wired — `billing/subscription-updated` is the one exception, see below |
-| Standalone crons | 0 hops | 12 crons never touch the event graph — pure scheduled sweeps |
+| Standalone crons | 0 hops | 17 crons never touch the event graph — pure scheduled sweeps |
 
 ### Resolved: the 7 originally-unmatched events
 

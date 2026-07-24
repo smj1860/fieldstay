@@ -11,16 +11,16 @@ Next: final write-up.
 - Severity: Medium
 - Issue: This file has no timestamp prefix (`YYYYMMDDHHMMSS_description.sql`) and no `.sql` extension at all — it's literally named `new asset_type_standards_rls` (with a space). CLAUDE.md's migration workflow section is explicit: "write a new file in `supabase/migrations/` named `YYYYMMDDHHMMSS_description.sql`". A file like this may be silently skipped by `supabase db push` (which matches on `.sql` extension) or applied out of order relative to its actual intent, since there's no timestamp to anchor it after `20260628013427_property_sync_expansion.sql`. Its content (enabling RLS + locking down INSERT/UPDATE/DELETE on `asset_type_standards`, allowing authenticated SELECT) looks correct and harmless in isolation, but the question is whether it was ever actually applied to the live DB, since `supabase db push` filename matching may reject it.
 - Confirmed/Suspected: Confirmed file exists with this exact malformed name; suspected (not verified against live DB) that this causes drift — could not query live Supabase project state in this pass to confirm whether RLS is actually enabled on `asset_type_standards` live.
-- Status: NEW
-- Fix: Rename to `20260629000000_asset_type_standards_rls.sql` (or appropriate timestamp) and re-apply via `supabase db push` / `apply_migration` to guarantee it's tracked, then verify live RLS state on `asset_type_standards` via `get_advisors` or `list_tables`.
+- Status: FIXED — the malformed file no longer exists; it has been renamed/replaced with a properly timestamped `supabase/migrations/20260629114714_asset_type_standards_rls_tracking.sql`, which follows the `YYYYMMDDHHMMSS_description.sql` convention and sits correctly in migration order after the 2026-06-28 batch.
+- Fix: None needed — already applied. (Original fix recommendation retained below for historical record.) Rename to `20260629000000_asset_type_standards_rls.sql` (or appropriate timestamp) and re-apply via `supabase db push` / `apply_migration` to guarantee it's tracked, then verify live RLS state on `asset_type_standards` via `get_advisors` or `list_tables`.
 
 ### Finding 2: `TELNYX_WEBHOOK_PUBLIC_KEY` undocumented in `.env.example`
 - File: .env.example (missing entry); referenced in app/api/webhooks/telnyx/route.ts:15
 - Severity: Low
 - Issue: The new Telnyx signature verification depends on `process.env.TELNYX_WEBHOOK_PUBLIC_KEY`, but `.env.example` only documents `KROGER_CLIENT_ID`/`KROGER_CLIENT_SECRET` (per CLAUDE.md's required-env list) and has no Telnyx section at all. If unset in any environment, `verifyTelnyxSignature()` returns `false` unconditionally (safe failure — no legitimate webhooks get silently accepted), but the webhook will appear broken with no documentation pointing at the missing var.
 - Confirmed/Suspected: Confirmed via grep — zero Telnyx entries in `.env.example`.
-- Status: NEW
-- Fix: Add `TELNYX_WEBHOOK_PUBLIC_KEY=` (and ideally `TELNYX_API_KEY` if used elsewhere in `lib/sms/telnyx.ts` for outbound sends) to `.env.example` with a comment pointing to Telnyx Portal → API Keys → Ed25519 Public Key, matching the comment already in the route file.
+- Status: FIXED — `.env.example:136-146` now has a full "TELNYX" section documenting `TELNYX_API_KEY`, `TELNYX_MESSAGING_PROFILE_ID`, `TELNYX_FROM_NUMBER`, and `TELNYX_WEBHOOK_PUBLIC_KEY`, with a comment explaining that inbound webhook signature verification fails closed without the public key set.
+- Fix: None needed — already applied. (Original fix recommendation retained below for historical record.) Add `TELNYX_WEBHOOK_PUBLIC_KEY=` (and ideally `TELNYX_API_KEY` if used elsewhere in `lib/sms/telnyx.ts` for outbound sends) to `.env.example` with a comment pointing to Telnyx Portal → API Keys → Ed25519 Public Key, matching the comment already in the route file.
 
 ### Finding 3 (informational — re-flagging round-1 watch item, now resolved): Provider adapter `validateWebhook()` stubs fail closed correctly
 - File: lib/integrations/providers/hostaway.ts:67-73, lib/integrations/providers/kroger.ts:80-82, lib/integrations/providers/ownerrez.ts:141-163

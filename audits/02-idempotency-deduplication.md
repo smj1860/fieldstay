@@ -22,6 +22,11 @@ crons and has drifted out of sync with them, creating a maintenance hazard.
 ## Findings
 
 ### CRITICAL: Auto-created maintenance work orders have no idempotency guard on retry
+**Status: FIXED** — `lib/inngest/functions/cron/maintenance-schedules.ts:226-255`
+(Pass 2) and `lib/inngest/functions/cron/maintenance-schedules-helpers.ts`'s
+`createMaintenanceWorkOrder` (Pass 1) now both check for an existing WO before
+insert; migrations `20260610000001_maintenance_po_idempotency.sql` /
+`20260707145540_maintenance_po_idempotency.sql` add the backing unique index.
 - **Area:** Inngest Steps
 - **Location:** `lib/inngest/functions/cron/maintenance-schedules.ts:60-93` (Pass 1, `process-schedule-${schedule.id}`, `auto_create_wo === true` branch)
 - **Description:** When a maintenance schedule is due within `ALERT_WINDOW_DAYS` and `auto_create_wo = true`, this step directly does:

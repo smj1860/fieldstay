@@ -8,7 +8,7 @@ Next: None — audit complete.
 
 ## Item 4 & 5: support-inbox routes + RLS policy verification
 
-**FINDING — CRITICAL (confirmed via migration analysis; live DB state NOT verified, see caveat below)**
+**FINDING — CRITICAL (confirmed via migration analysis; live DB state NOT verified, see caveat below) — RESOLVED/FIXED, see LIVE DB RESOLUTION at bottom of this file**
 
 File: `supabase/migrations/20260620233632_support_bot_scaffold.sql`, lines 67-95.
 
@@ -96,7 +96,11 @@ Supabase dashboard, MCP `apply_migration` without a corresponding committed file
 out-of-band mechanism, it would not appear here and the actual live behavior could differ from
 what's described above.
 
-## Item 4b: platform_staff table definition
+**Status: FIXED.** `supabase/migrations/20260630044706_support_bot_phase3_human_inbox.sql`
+now creates the staff-gated RLS policies described in the recommended fix above,
+matching live exactly (see LIVE DB RESOLUTION section at the bottom of this file).
+
+## Item 4b: platform_staff table definition — FIXED
 
 `grep -rl "platform_staff" supabase/migrations/` returned NO results — the `platform_staff`
 table itself is not defined in any migration in this repository. It is referenced only in
@@ -106,6 +110,9 @@ conclusion that the staff/admin authorization layer for this feature was set up 
 migrations directory and is not auditable from source in this repo. Flagging as Medium severity
 on its own (schema-drift/process issue) — compounds the Critical RLS finding above since it
 means there's no migration to inspect for how `platform_staff` itself is populated/secured either.
+
+**Status: FIXED.** `supabase/migrations/20260630044706_support_bot_phase3_human_inbox.sql`
+now defines `platform_staff` in a committed migration, closing the schema-drift gap.
 
 ## Item 4c: support-inbox API routes — server-side staff check on every request
 
@@ -130,7 +137,7 @@ confirmed from source.
 ## Item 6: app/(dashboard)/support-inbox/support-inbox-client.tsx — CLIENT-SIDE Supabase reads, RLS-dependent
 
 **FINDING — High (confirmed code pattern; severity depends on the same unresolved RLS question
-from Item 4).**
+from Item 4). — RESOLVED CLEAN, see LIVE DB RESOLUTION at bottom of this file.**
 
 File: `app/(dashboard)/support-inbox/support-inbox-client.tsx`
 
@@ -187,6 +194,12 @@ Recommended fix: Same as Item 4 — formalize the platform_staff RLS policy in a
 migration with the narrowest possible `USING`/`WITH CHECK` clauses
 (`EXISTS (SELECT 1 FROM platform_staff WHERE user_id = auth.uid())`), and verify live policy
 state against it. Until verified, treat this as the highest-priority open item from this audit.
+
+**Status: FIXED/RESOLVED.** RLS confirmed correctly scoped live (no scope creep, see
+LIVE DB RESOLUTION below), and `supabase/migrations/20260630044706_support_bot_phase3_human_inbox.sql`
+now formalizes the policy in a committed migration as recommended. Realtime publication
+membership for both tables was also added via
+`supabase/migrations/20260630100300_support_realtime_publication.sql`.
 
 ## Item 7: components/support/support-chat-widget.tsx — CLEAN
 

@@ -57,7 +57,7 @@ Flags don't block you from posting — they're advisory. Read flagged content ca
 
 ## Adding Reviews Manually
 
-Reviews only sync from OwnerRez automatically. If you receive a review on Airbnb, Vrbo, Google, or Booking.com that you'd like a draft response for, you can add it manually.
+Reviews sync automatically from OwnerRez and Hospitable. If you receive a review on Airbnb, Vrbo, Google, or Booking.com outside those, and you'd like a draft response for it, you can add it manually.
 
 Go to **Reviews → Add Review Manually** and enter the review text, star rating, guest name, and platform. RepuGuard generates a response immediately.
 

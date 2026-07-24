@@ -1,5 +1,7 @@
 # Scalability / Loops / Silent Failures / Tech Debt Audit
 
+> **ARCHIVED — superseded by `audit/` Round 2. Findings here reflect the codebase as of 2026-07-13 and should not be read as current state.**
+
 Status: COMPLETE
 Last checkpoint: Reviewed all lib/inngest/functions/cron/*.ts, ownerrez/hostaway sync functions, geocoding-backfill.ts, account deletion route, Telnyx webhook, inventory/capital-planning dashboard pages, turnover-board/turnover-gantt, GDPR export route, crew API routes, and ~20+ dashboard/crew client components (owners-manager, inventory-manager, assets-board, bookings-client, crew-manage-client, integrations-client, settings-tabs, messages clients, reviews-client, maintenance-board, guidebook-client, crew work-order completion page) via a combination of direct reads and a delegated sub-agent pass.
 Next: None — audit complete. Remaining untouched files (small modals/buttons/banners: ical-form.tsx, crew-setup.tsx, trigger-projections-button.tsx, trigger-ledger-button.tsx, reset-password-form.tsx, dashboard-shell.tsx, session-refresh-guard.tsx, cookie-notice.tsx, time-off-request.tsx, install-banner.tsx, RepuGuardSandbox.tsx, onboarding modals, crisp-widget.tsx, dashboard-toast-provider.tsx) are judged low-yield based on the consistent pattern of clean results in structurally similar small UI components reviewed so far, and are not expected to contain scalability/N+1/silent-failure issues of note. A non-finding worth noting for future review: crew-shell.tsx polls the Dexie outbox sync on a fixed 30-second interval with no exponential backoff — low impact (bounded local polling, not a DB/API hot loop) so not written up as a standalone finding.
@@ -109,4 +111,3 @@ Next: None — audit complete. Remaining untouched files (small modals/buttons/b
 - guidebook-client.tsx `PropertyGuidebookForm`'s load effect has no error handling on its `.select('*')` — a failed load silently falls through to "create new config" branch, risking an overwrite of an existing but failed-to-load guidebook config.
 - app/crew/work-orders/[id]/page.tsx's `handleComplete` catch block resets `setCompleting(false)` but shows no error message to the crew member — they only know to retry by trial and error.
 - These are all narrow-blast-radius UI-only issues (single record, no cross-tenant or financial impact) bundled here rather than given individual Critical/High writeups; each fix is the same shape — check the result/error and surface a visible message instead of failing silently.
-

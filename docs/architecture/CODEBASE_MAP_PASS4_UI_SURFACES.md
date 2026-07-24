@@ -11,10 +11,19 @@ gated public pages) doesn't fit either mold.
 
 ## 1. PM Dashboard (`app/(dashboard)/*`) — direct Supabase reads
 
-**20 feature sections:** assets, bookings, capital-planning, comms-log,
+**21 feature sections:** assets, bookings, capital-planning, comms-log,
 crew-manage, guidebook, help, inventory, invoices, maintenance, messages,
 ops, owners, properties, reviews, settings, setup, support-inbox,
-turnovers, vendors.
+templates, turnovers, vendors.
+
+`templates` (added 2026-07-21) is the Templates Hub — Room Library Builder
+for turnover checklists, plus org-level inventory and maintenance catalogs.
+It replaced the old onboarding-only checklist/maintenance-schedule seeding
+that lived under `setup/checklist-template` and `setup/maintenance-template`
+(those two pages are now thin pointers into `/templates` rather than owning
+their own seed data — the `org_master_checklist_items` /
+`org_master_maintenance_schedules` tables they used to write to were
+dropped outright, not just superseded).
 
 **Layout-level gate** (`app/(dashboard)/layout.tsx`) runs on every
 request before any page: auth check → org membership lookup → onboarding
@@ -115,13 +124,15 @@ per session:
    `checklist_instance_items` checkbox ticks, `checklist_instances`
    confirm-complete) go straight to a Supabase `.update()`/`.upsert()`.
    But turnover **status transitions** to `in_progress` or `completed`,
-   and new `turnover_issue_reports`, are routed through Route Handlers
+   and crew-flagged issue reports, are routed through Route Handlers
    instead (`/api/crew/turnovers/[id]/start`, `.../complete`,
-   `/api/crew/issue-reports`) — because those are exactly the crew-side
-   entry points into Pass 1 §5's crew-authenticated routes and Pass 2's
-   turnover/work-order event chains. A direct table write would skip
-   the cleaning-fee posting, PM notification, and crew-duration tracking
-   that only fire through the proper Route Handler → event pipeline.
+   `/api/crew/work-order-reports`) — because those are exactly the
+   crew-side entry points into Pass 1 §5's crew-authenticated routes and
+   Pass 2's turnover/work-order event chains. A direct table write would
+   skip the cleaning-fee posting, PM notification, and crew-duration
+   tracking that only fire through the proper Route Handler → event
+   pipeline. (There is no `turnover_issue_reports` table — a crew-flagged
+   issue is inserted as a `work_orders` row with `wo_source: 'crew_flag'`.)
 
 **Teardown:** on logout, `closeDexieDb()` deletes the entire per-user
 IndexedDB database (and the separate photo-blob store) so no crew data
