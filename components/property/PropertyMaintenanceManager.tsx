@@ -137,7 +137,20 @@ function EditModal({
   const monthOptions = MONTH_NAMES.slice(1).map((m, i) => ({ value: i + 1, label: m }))
 
   return (
-    <Dialog open onClose={onClose} title="Edit Schedule Item" maxWidthClassName="max-w-md">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Edit Schedule Item"
+      maxWidthClassName="max-w-md"
+      footer={
+        <>
+          <Button onClick={handleSave} disabled={saving} className="flex items-center gap-2">
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
       {error && (
         <div className="text-sm rounded-lg px-3 py-2 mb-4"
              style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}>
@@ -195,13 +208,6 @@ function EditModal({
           <textarea id="edit-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
         </div>
       </div>
-
-      <div className="flex gap-2 mt-5">
-        <Button onClick={handleSave} disabled={saving} className="flex items-center gap-2">
-          {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
-        </Button>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-      </div>
     </Dialog>
   )
 }
@@ -231,7 +237,20 @@ function DuplicateModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title="Duplicate Item" maxWidthClassName="max-w-sm">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Duplicate Item"
+      maxWidthClassName="max-w-sm"
+      footer={
+        <>
+          <Button onClick={handleDuplicate} disabled={saving} className="flex items-center gap-2">
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Duplicating…</> : 'Duplicate'}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
       <p className="text-sm text-muted-themed mb-4">
         Duplicating: <strong className="text-primary-themed">{item.name}</strong>
       </p>
@@ -246,13 +265,6 @@ function DuplicateModal({
       <div className="mb-4">
         <label htmlFor="duplicate-next-due-date" className="label">Next Due Date for Duplicate</label>
         <Input id="duplicate-next-due-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-      </div>
-
-      <div className="flex gap-2">
-        <Button onClick={handleDuplicate} disabled={saving} className="flex items-center gap-2">
-          {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Duplicating…</> : 'Duplicate'}
-        </Button>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
       </div>
     </Dialog>
   )
@@ -301,7 +313,20 @@ function CatalogModal({
   const categories = Object.keys(byCategory) as MaintenanceCatalogCategory[]
 
   return (
-    <Dialog open onClose={onClose} title="Add from Catalog" maxWidthClassName="max-w-md">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Add from Catalog"
+      maxWidthClassName="max-w-md"
+      footer={selectedItem ? (
+        <>
+          <Button onClick={handleAdd} disabled={saving} className="flex items-center gap-2">
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add to Property'}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        </>
+      ) : undefined}
+    >
       {!selectedItem ? (
         <div className="max-h-[60vh] overflow-y-auto space-y-4">
           {categories.map((cat) => (
@@ -365,13 +390,6 @@ function CatalogModal({
               <Input id="catalog-next-due-date" type="date" value={nextDueDate} onChange={(e) => setNextDueDate(e.target.value)} />
             </div>
           </div>
-
-          <div className="flex gap-2 pt-2">
-            <Button onClick={handleAdd} disabled={saving} className="flex items-center gap-2">
-              {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add to Property'}
-            </Button>
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          </div>
         </div>
       )}
     </Dialog>
@@ -421,7 +439,20 @@ function CustomItemModal({
   const monthOptions = MONTH_NAMES.slice(1).map((m, i) => ({ value: i + 1, label: m }))
 
   return (
-    <Dialog open onClose={onClose} title="Add Custom Item" maxWidthClassName="max-w-md">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Add Custom Item"
+      maxWidthClassName="max-w-md"
+      footer={
+        <>
+          <Button onClick={handleAdd} disabled={saving} className="flex items-center gap-2">
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Item'}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
       {error && (
         <div className="text-sm rounded-lg px-3 py-2 mb-4"
              style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)' }}>
@@ -477,13 +508,6 @@ function CustomItemModal({
           <label htmlFor="custom-notes" className="label">Notes</label>
           <textarea id="custom-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="input resize-none" />
         </div>
-      </div>
-
-      <div className="flex gap-2 mt-5">
-        <Button onClick={handleAdd} disabled={saving} className="flex items-center gap-2">
-          {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding…</> : 'Add Item'}
-        </Button>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
       </div>
     </Dialog>
   )

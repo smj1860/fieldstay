@@ -1,6 +1,70 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
-import { workOrderRatelimit, vendorConnectRatelimit } from '@/lib/rate-limit'
+import {
+  workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
+  oauthCallbackRatelimit,
+} from '@/lib/rate-limit'
+
+// ── Content Security Policy ────────────────────────────────────────────────
+// Generated fresh per request so script-src can carry a per-request nonce
+// instead of a blanket 'unsafe-inline' — Next.js automatically stamps that
+// nonce onto the inline <script>self.__next_f.push()</script> tags it uses
+// in production to stream the RSC/hydration payload, once it sees a
+// 'nonce-...' source in the response's CSP header. This must be the only
+// place the app sets this header — a second static CSP (e.g. in
+// next.config.ts) would make the browser enforce the *intersection* of both,
+// silently dropping the nonce and reintroducing the hydration breakage this
+// replaces.
+function buildCsp(nonce: string, isDev: boolean) {
+  return [
+    // Locked-down default — no blanket https: source
+    "default-src 'self'",
+
+    // Scripts: nonce covers Next.js's own inline hydration scripts;
+    // wasm-unsafe-eval required by Supabase JS client. Dev mode additionally
+    // needs 'unsafe-eval' for Turbopack's eval()-based module wrapping/HMR.
+    isDev
+      ? `script-src 'self' 'nonce-${nonce}' 'unsafe-eval' 'wasm-unsafe-eval'`
+      : `script-src 'self' 'nonce-${nonce}' 'wasm-unsafe-eval'`,
+
+    // Styles: 'unsafe-inline' required for the codebase's established
+    // style={{ ... }} convention with CSS variables. Inline styles are CSS,
+    // not JS — no code-execution XSS risk from this directive.
+    "style-src 'self' 'unsafe-inline'",
+
+    // Images: data: for base64, blob: for canvas/crop/file preview
+    "img-src 'self' data: blob: https:",
+
+    // Fonts: self + Google Fonts CDN if used
+    "font-src 'self' data: https://fonts.gstatic.com",
+
+    // Frames: Stripe hosted elements only
+    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+
+    // Workers: blob: required for Supabase Realtime and some WASM usage
+    "worker-src 'self' blob:",
+
+    // API + WebSocket connections. Sentry ingest host added for client-side
+    // error/trace reporting (instrumentation-client.ts) — without this the
+    // browser SDK's own requests get silently blocked by this same CSP.
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://js.stripe.com https://auth.hospitable.com https://public.api.hospitable.com https://o4511737962364928.ingest.us.sentry.io http://localhost:* ws://localhost:* wss://localhost:*",
+
+    // Object/media: locked down entirely
+    "object-src 'none'",
+    "media-src 'self'",
+
+    // Base URI: prevent base tag injection attacks
+    "base-uri 'self'",
+
+    // Form submissions: self only
+    "form-action 'self'",
+  ].join('; ')
+}
+
+function withCsp(response: NextResponse, nonce: string) {
+  response.headers.set('Content-Security-Policy', buildCsp(nonce, process.env.NODE_ENV !== 'production'))
+  return response
+}
 
 // ── Public routes ──────────────────────────────────────────────────────────
 // Unauthenticated users can access these. Authenticated users are redirected
@@ -26,6 +90,7 @@ const TOKEN_ROUTES = [
   '/wo/',
   '/vendor-connect/',
   '/api/vendor-connect',
+  '/g/',
 ]
 
 // ── Bypass routes ──────────────────────────────────────────────────────────
@@ -97,13 +162,15 @@ const BYPASS_ROUTES = [
   // Supabase auth callback (magic links, OAuth email confirmation)
   '/auth/callback',
 
-  // Guest-facing guidebook routes (media kit signup + guest guidebook pages).
-  // Intentionally public — guests and sponsors never have a FieldStay session.
-  '/g/',
-
   // Account deletion — handles its own auth verification server-side
   '/api/account/delete',
 ]
+
+// Guest-facing guidebook routes (media kit signup + guest guidebook pages,
+// see TOKEN_ROUTES above) are intentionally public — guests and sponsors
+// never have a FieldStay session — but still get rate-limited like every
+// other token-guessable route, so they're a TOKEN_ROUTES entry, not a
+// BYPASS_ROUTES one (bypass skips rate limiting entirely).
 
 // Each guessable-token surface gets its own limiter/prefix so hammering
 // one doesn't throttle another.
@@ -113,16 +180,29 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/api/work-orders'))    return workOrderRatelimit
   if (pathname.startsWith('/vendor-connect/'))    return vendorConnectRatelimit
   if (pathname.startsWith('/api/vendor-connect')) return vendorConnectRatelimit
+  if (pathname.startsWith('/owner/'))             return ownerPortalRatelimit
+  if (pathname.startsWith('/g/'))                 return guidebookRatelimit
+  // OAuth callbacks are BYPASS_ROUTES (no session to check) but must still be
+  // throttled — the oneclick route stores unvalidated authorization codes in
+  // Vault, so the limiter check below runs BEFORE the bypass early-return.
+  if (pathname.startsWith('/api/integrations/') && pathname.includes('/callback'))
+    return oauthCallbackRatelimit
   return null
 }
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return NextResponse.next()
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64')
+  // Forwarded as a request header so Next.js's own script-tag rendering
+  // (and any Server Component that wants it) can read it via headers().
+  request.headers.set('x-nonce', nonce)
 
   // Rate limit unauthenticated token-guessable routes — guards against
-  // token enumeration and request flooding.
+  // token enumeration and request flooding. Runs BEFORE the bypass check so
+  // routes that skip auth entirely (the OAuth callbacks under
+  // /api/integrations/) are still throttled; bypass routes without a limiter
+  // entry are unaffected (rateLimiterForPathname returns null for them).
   const tokenRouteLimiter = rateLimiterForPathname(pathname)
 
   if (tokenRouteLimiter) {
@@ -136,7 +216,7 @@ export async function proxy(request: NextRequest) {
         await tokenRouteLimiter.limit(ip)
 
       if (!success) {
-        return new NextResponse(
+        return withCsp(new NextResponse(
           JSON.stringify({ error: 'Too many requests. Please try again shortly.' }),
           {
             status:  429,
@@ -148,7 +228,7 @@ export async function proxy(request: NextRequest) {
               'Retry-After':           String(Math.ceil((reset - Date.now()) / 1000)),
             },
           }
-        )
+        ), nonce)
       }
     } catch (err) {
       // If Redis is unavailable, fail open — don't take down these public
@@ -157,7 +237,9 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r)))  return NextResponse.next()
+  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return withCsp(NextResponse.next({ request }), nonce)
+
+  if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r)))  return withCsp(NextResponse.next({ request }), nonce)
 
   const { supabaseResponse, user } = await updateSession(request)
 
@@ -170,7 +252,7 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     url.searchParams.set('next', pathname)
-    return NextResponse.redirect(url)
+    return withCsp(NextResponse.redirect(url), nonce)
   }
 
   // Authenticated user hitting a public route → redirect into the app.
@@ -181,24 +263,12 @@ export async function proxy(request: NextRequest) {
     const next = request.nextUrl.searchParams.get('next') ?? ''
     url.pathname = next.startsWith('/crew') ? '/crew' : '/ops'
     url.search   = ''
-    return NextResponse.redirect(url)
+    return withCsp(NextResponse.redirect(url), nonce)
   }
 
   supabaseResponse.headers.set('x-pathname', pathname)
-// Append Hospitable domains to CSP — next.config.ts headers are overridden
-// by supabaseResponse when middleware returns a custom response object.
- const csp = supabaseResponse.headers.get('Content-Security-Policy') ?? ''
- if (csp && !csp.includes('auth.hospitable.com')) {
-   supabaseResponse.headers.set(
-     'Content-Security-Policy',
-     csp.replace(
-       'connect-src ',
-       'connect-src https://auth.hospitable.com https://public.api.hospitable.com '
-     )
-   )
- }
 
-  return supabaseResponse
+  return withCsp(supabaseResponse, nonce)
 }
 
 export const config = {

@@ -170,14 +170,14 @@ They are not represented in Tracks 1–9 below.
 |---|---|---|
 | 3.1 | Property geocoding — zip → lat/lng on property save (Mapbox) | ✅ |
 | 3.2 | Vendor geocoding — zip → lat/lng on vendor save (same Mapbox pattern) | ✅ |
-| 3.3 | Inngest: auto-assignment scoring engine | 🔧 |
-| 3.4 | Suggest mode: populate `turnovers.suggested_crew_ids` + `suggestion_reasoning` | 🔧 |
-| 3.5 | Autopilot mode: assign directly + Resend notification to PM | 🔧 |
-| 3.6 | Gap detection: no crew available → flag + email PM | 🔧 |
-| 3.7 | Turnover Board: "⚡ Suggested: [Name] — [reason]" one-tap confirm UI | 🔧 |
-| 3.8 | PM override → record to `assignment_outcomes.was_accepted = false` | 🔧 |
-| 3.9 | Checklist completion timestamps → populate `assignment_outcomes` duration | 🔧 |
-| 3.10 | Org settings: auto-assign mode toggle (Suggest / Autopilot / Off) | 🔧 |
+| 3.3 | Inngest: auto-assignment scoring engine | ✅ Shipped — see `lib/inngest/functions/auto-assign-turnover.ts` |
+| 3.4 | Suggest mode: populate `turnovers.suggested_crew_ids` + `suggestion_reasoning` | ✅ Shipped — see `lib/inngest/functions/auto-assign-turnover.ts` |
+| 3.5 | Autopilot mode: assign directly + Resend notification to PM | ✅ Shipped — see `lib/inngest/functions/auto-assign-turnover.ts` |
+| 3.6 | Gap detection: no crew available → flag + email PM | ✅ Shipped — see `lib/inngest/functions/auto-assign-turnover.ts` |
+| 3.7 | Turnover Board: "⚡ Suggested: [Name] — [reason]" one-tap confirm UI | ✅ Shipped — see `turnover-board.tsx` (`suggested_crew_ids` UI) |
+| 3.8 | PM override → record to `assignment_outcomes.was_accepted = false` | ✅ Shipped — `assignment_outcomes.was_accepted` tracking in place |
+| 3.9 | Checklist completion timestamps → populate `assignment_outcomes` duration | ✅ Shipped — `assignment_outcomes.was_accepted` tracking in place |
+| 3.10 | Org settings: auto-assign mode toggle (Suggest / Autopilot / Off) | ✅ Shipped — see `app/(dashboard)/setup/auto-assign/page.tsx` |
 | 3.11 | Crew app: monthly availability calendar (tap to toggle) | 📋 Phase 9 |
 | 3.12 | Add `crew_availability` to Dexie sync pull in DexieProvider | 📋 Phase 9 |
 
@@ -206,16 +206,16 @@ They are not represented in Tracks 1–9 below.
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 4.8 | Inventory template builder: brand field + education copy block | 🔧 | |
-| 4.9 | Property setup wizard step 3: property-level brand override | 🔧 | |
-| 4.10 | Portfolio inventory table: Brand column | 🔧 | |
-| 4.11 | Settings: "Connect Kroger Account" button | 🔧 | |
-| 4.12 | Settings: nearest store selector | 🔧 | |
-| 4.13 | Portfolio inventory: "Build Cart" button with portfolio/property filter | 🔧 | Supports both all-properties and filtered modes |
-| 4.14 | `lib/resend/emails/shopping-cart-ready.tsx` | 🔧 | |
-| 4.15 | Register `buildShoppingCart` in `app/api/inngest/route.ts` | 🔧 | |
+| 4.8 | Inventory template builder: brand field + education copy block | ✅ Shipped | See `create-template-builder.tsx` (`preferred_brand`) |
+| 4.9 | Property setup wizard step 3: property-level brand override | ✅ Shipped | `preferred_brand` override present in `inventory-manager.tsx`/`portfolio-view.tsx` |
+| 4.10 | Portfolio inventory table: Brand column | ✅ Shipped | See `app/(dashboard)/inventory/portfolio-view.tsx` |
+| 4.11 | Settings: "Connect Kroger Account" button | ✅ Shipped | See `app/(dashboard)/settings/settings-tabs.tsx` |
+| 4.12 | Settings: nearest store selector | ✅ Shipped | See `app/(dashboard)/settings/settings-tabs.tsx` |
+| 4.13 | Portfolio inventory: "Build Cart" button with portfolio/property filter | ✅ Shipped | Supports both all-properties and filtered modes. See `app/(dashboard)/inventory/inventory-manager.tsx` |
+| 4.14 | `lib/resend/emails/shopping-cart-ready.tsx` | ✅ Shipped | File exists at that path |
+| 4.15 | Register `buildShoppingCart` in `app/api/inngest/route.ts` | ✅ Shipped | Already registered — `app/api/inngest/route.ts:230` |
 | 4.16 | CSV upload: add `brand` column + hint text | 🔧 | |
-| 4.17 | `applyTemplateToProperties`: copy `preferred_brand` to `inventory_items` | 🔧 | |
+| 4.17 | `applyTemplateToProperties`: copy `preferred_brand` to `inventory_items` | ✅ Shipped | See `app/(dashboard)/properties/clone-actions.ts` |
 
 ---
 
@@ -239,29 +239,36 @@ They are not represented in Tracks 1–9 below.
 
 ### Task 1 — In-App Messaging: PM ↔ Crew
 
+**✅ Fully shipped.** See `messages` table (migration `20260608052756_add_messages_table.sql`),
+`app/(dashboard)/messages/{page.tsx,actions.ts,messages-client.tsx}`, `app/crew/messages/page.tsx`,
+`push_subscriptions` table, and the PWA manifest/icons.
+
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 6.1 | `messages` table + RLS | 📋 | Fix `memberships` → `organization_members` in policy before applying |
-| 6.2 | Dexie: add `messages` table to DexieProvider pull sync + Dexie schema | 📋 | Match existing Dexie table pattern in `lib/dexie/schema.ts` |
-| 6.3 | `lib/dexie/schema.ts` — add messages table interface + version bump | 📋 | |
-| 6.4 | Inngest: `message/sent` → push notify + Comms Log entry | 📋 | |
-| 6.5 | PM dashboard: Messages page (split-pane) | 📋 | |
-| 6.6 | Crew app: Messages page (Dexie `useLiveQuery` reads) | 📋 | |
-| 6.7 | Nav: Messages in PM dashboard + crew app | 📋 | |
-| 6.8 | PWA: `app/manifest.ts`, service worker, icons | 📋 | Icons: `app/icon.png`, `app/apple-icon.png`, `public/icon-192.png`, `public/icon-512.png` |
-| 6.9 | `push_subscriptions` table | 📋 | |
+| 6.1 | `messages` table + RLS | ✅ | Fix `memberships` → `organization_members` in policy before applying |
+| 6.2 | Dexie: add `messages` table to DexieProvider pull sync + Dexie schema | ✅ | Match existing Dexie table pattern in `lib/dexie/schema.ts` |
+| 6.3 | `lib/dexie/schema.ts` — add messages table interface + version bump | ✅ | |
+| 6.4 | Inngest: `message/sent` → push notify + Comms Log entry | ✅ | |
+| 6.5 | PM dashboard: Messages page (split-pane) | ✅ | See `app/(dashboard)/messages/{page.tsx,actions.ts,messages-client.tsx}` |
+| 6.6 | Crew app: Messages page (Dexie `useLiveQuery` reads) | ✅ | See `app/crew/messages/page.tsx` |
+| 6.7 | Nav: Messages in PM dashboard + crew app | ✅ | |
+| 6.8 | PWA: `app/manifest.ts`, service worker, icons | ✅ | Icons: `app/icon.png`, `app/apple-icon.png`, `public/icon-192.png`, `public/icon-512.png` |
+| 6.9 | `push_subscriptions` table | ✅ | |
 | 6.10 | Optional: PM Slack incoming webhook for event notifications | 📋 | Crew → PWA messaging. PM → optional Slack ping for key events |
 
 ### Task 2 — Comms Log Retention
 
+**✅ Shipped.** See `organizations.comms_log_retention_days` + `communication_logs.deleted_at`,
+migration `20260608043442_add_comms_log_retention.sql`.
+
 | # | Item | Status |
 |---|---|---|
-| 6.11 | `communication_logs.deleted_at` + retention index | 📋 |
-| 6.12 | `organizations.comms_log_retention_days` (default 365) | 📋 |
-| 6.13 | All Comms Log queries: add `.is('deleted_at', null)` filter | 📋 |
-| 6.14 | Inngest cron: soft-delete → 30-day grace → hard purge | 📋 |
-| 6.15 | Auto-log emailed work orders to Comms Log | 📋 |
-| 6.16 | Org settings: retention period selector | 📋 |
+| 6.11 | `communication_logs.deleted_at` + retention index | ✅ |
+| 6.12 | `organizations.comms_log_retention_days` (default 365) | ✅ |
+| 6.13 | All Comms Log queries: add `.is('deleted_at', null)` filter | ✅ |
+| 6.14 | Inngest cron: soft-delete → 30-day grace → hard purge | ✅ |
+| 6.15 | Auto-log emailed work orders to Comms Log | ✅ |
+| 6.16 | Org settings: retention period selector | ✅ |
 
 ### Task 3 — Google Reviews
 **⏸️ Deferred to end of year.** RepuGuard is live and covers OwnerRez-synced reviews
@@ -270,13 +277,16 @@ No Google API integration needed until 2027.
 
 ### Task 4 — Maintenance Schedule Template Broadcasting
 
+**✅ Shipped.** See migration `20260608043808` and UI at
+`app/(dashboard)/templates/maintenance/{schedules,create,saved}/page.tsx`.
+
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 6.17 | `maintenance_schedule_templates` + `_items` tables + RLS | 📋 | |
-| 6.18 | Seed data: **36 items across 8 categories** (expanded from original 10) | 📋 | See categories: HVAC/Air, Safety/Code, Plumbing/Water, Exterior/Structure, Pest/Landscape, Interior Appliances, Seasonal |
-| 6.19 | `vendor_specialty_hint` added to template items on seed | 📋 | Enables auto-vendor matching on broadcast |
-| 6.20 | PM UI: template browser + customize + broadcast to selected properties | 📋 | |
-| 6.21 | Broadcast action: skip existing by name (idempotent) | 📋 | |
+| 6.17 | `maintenance_schedule_templates` + `_items` tables + RLS | ✅ | |
+| 6.18 | Seed data: **36 items across 8 categories** (expanded from original 10) | ✅ | See categories: HVAC/Air, Safety/Code, Plumbing/Water, Exterior/Structure, Pest/Landscape, Interior Appliances, Seasonal |
+| 6.19 | `vendor_specialty_hint` added to template items on seed | ✅ | Enables auto-vendor matching on broadcast |
+| 6.20 | PM UI: template browser + customize + broadcast to selected properties | ✅ | See `app/(dashboard)/templates/maintenance/{schedules,create,saved}/page.tsx` |
+| 6.21 | Broadcast action: skip existing by name (idempotent) | ✅ | |
 
 ### Task 5 — Crew Availability Calendar
 *Schema applied. UI remains.*
@@ -294,10 +304,10 @@ No Google API integration needed until 2027.
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 7.1 | WO aging/escalation: Inngest `step.sleep` — if WO open > X days → change priority to urgent + notify PM | 🔧 | Configurable threshold per org |
-| 7.2 | Repeat issue detection: 3+ WOs same category at same property in 90 days → flag PM | 🔧 | Daily Inngest cron |
+| 7.1 | WO aging/escalation: Inngest `step.sleep` — if WO open > X days → change priority to urgent + notify PM | ✅ Shipped — see `lib/inngest/functions/cron/work-order-ops.ts` | Configurable threshold per org |
+| 7.2 | Repeat issue detection: 3+ WOs same category at same property in 90 days → flag PM | ❌ Decided against — see `work-order-ops.ts` header comment | Daily Inngest cron |
 | 7.3 | Crew "Flag for WO" during turnover | ✅ | Already in codebase — validate only |
-| 7.4 | Seasonal maintenance → auto-create WO draft when `next_due_date` reached | 🔧 | `auto_create_wo` now defaults to `true`. Vendor matching via `vendor_specialty_hint` |
+| 7.4 | Seasonal maintenance → auto-create WO draft when `next_due_date` reached | ✅ Shipped — see `lib/inngest/functions/cron/work-order-ops.ts` | `auto_create_wo` now defaults to `true`. Vendor matching via `vendor_specialty_hint` |
 
 ---
 
@@ -307,14 +317,14 @@ No Google API integration needed until 2027.
 - `asset_type_standards` — 21 asset types with lifespan + replacement cost ranges
 - `property_assets` — asset ledger with health score cache, CapEx fields, warranty tracking
 - `vendor_compliance_documents` — COI, licenses, bonding with expiry tracking
-- `vendor_compliance_status` view — 4-state compliance gate: `compliant`, `expiring_soon`, `grace_period` (days 1–30), `hard_blocked` (day 31+)
+- `vendor_compliance_status` view — 4-state compliance gate: `compliant`, `expiring_soon`, `grace_period` (days 1–45), `hard_blocked` (day 46+)
 - `asset_depreciation_entries` — annual MACRS depreciation records
 - `work_orders.asset_id` — links WOs to tracked assets (repair history for health score)
 - `vendors.lat` + `lng` + `service_zip` + `service_radius_miles`
 - `vendor_compliance_documents.first_warned_at` + `hard_blocked_at` (audit trail)
 
 ### 8B — Locked Decisions
-- **Compliance gate:** Soft warn + PM acknowledgment (days 1–30). Hard block day 31+. Acknowledgment is timestamped and logged.
+- **Compliance gate:** Soft warn + PM acknowledgment (days 1–45). Hard block day 46+. Acknowledgment is timestamped and logged.
 - **Feature access:** No gating. All plans. Full platform on day one.
 - **Depreciation scope:** Capital assets only (5-year and 15-year MACRS). IRS Publication 946 + Section 179.
 - **Reports:** Carry disclaimer "For use with IRS Pub 946. Review with your CPA before filing."
@@ -327,11 +337,11 @@ No Google API integration needed until 2027.
 | # | Item | Status |
 |---|---|---|
 | 8.1 | Crew app: "Scan Data Plate" → Claude Vision → auto-populate asset form | 🔧 |
-| 8.2 | PM property detail: manual asset entry form | 🔧 |
+| 8.2 | PM property detail: manual asset entry form | ✅ Shipped — see `app/(dashboard)/assets/{asset-manager,portfolio-view}.tsx` |
 | 8.3 | PM property detail: bulk asset CSV import | 🔧 |
-| 8.4 | Inngest daily cron: health score recalculation for all active assets | 🔧 |
+| 8.4 | Inngest daily cron: health score recalculation for all active assets | ✅ Shipped — see `lib/inngest/functions/cron/asset-health.ts` |
 | 8.5 | Health score threshold alert: when score crosses 60, 40, or 20 → notify PM | 🔧 |
-| 8.6 | Asset Health dashboard: portfolio heatmap, color-coded by score | 🔧 |
+| 8.6 | Asset Health dashboard: portfolio heatmap, color-coded by score | ✅ Shipped — see `app/(dashboard)/assets/{asset-manager,portfolio-view}.tsx` |
 | 8.7 | Repair vs. Replace Calculator: shown on WO creation when asset is linked | 🔧 |
 | 8.8 | WO form: asset selector (links work order to tracked asset) | 🔧 |
 
@@ -342,7 +352,7 @@ No Google API integration needed until 2027.
 | 8.9 | Vendor detail page: compliance document upload (Supabase Storage) | 🔧 |
 | 8.10 | WO assignment form: compliance gate check via `vendor_compliance_status` view | 🔧 |
 | 8.11 | Grace period warning modal with PM acknowledgment (logs timestamp) | 🔧 |
-| 8.12 | Hard block UI: vendor grayed out with "COI expired 31+ days" badge | 🔧 |
+| 8.12 | Hard block UI: vendor grayed out with "COI expired 46+ days" badge | 🔧 |
 | 8.13 | Inngest: COI expiry escalation ladder — 30d / 14d / 7d / expiry day / +14d / +30d | 🔧 |
 | 8.14 | Vendor geocoding on create/update (Mapbox, same pattern as properties) | 🔧 |
 | 8.15 | Vendor list: distance-from-property shown on WO assignment | 🔧 |
@@ -351,8 +361,8 @@ No Google API integration needed until 2027.
 
 | # | Item | Status |
 |---|---|---|
-| 8.16 | Inngest monthly cron: generate CapEx projections (3/5/10-year) | 🔧 |
-| 8.17 | CapEx forecast UI: bar chart by year + itemized list per property | 🔧 |
+| 8.16 | Inngest monthly cron: generate CapEx projections (3/5/10-year) | ✅ Shipped — see `capex-projections.ts` + `capex-projection-trigger.ts` (registered) |
+| 8.17 | CapEx forecast UI: bar chart by year + itemized list per property | ✅ Shipped — see `app/(dashboard)/capital-planning/page.tsx` |
 | 8.18 | Section 179 eligibility flag on applicable assets | 🔧 |
 | 8.19 | Annual depreciation ledger: compute MACRS rates, store in `asset_depreciation_entries` | 🔧 |
 | 8.20 | One-click CPA export: PDF depreciation report (IRS Pub 946 formatted) | 🔧 |
@@ -382,7 +392,7 @@ No Google API integration needed until 2027.
 | P6 | Minut noise monitoring | API is public. High relevance for STR guest management. Evaluate after smart lock decision |
 | P7 | Phyn/Moen water sensor integration | API available. Premium property add-on. Future partnership territory |
 | P8 | Pricing review | No feature gating confirmed. May warrant slight price increase to reflect full platform value |
-| P9 | Hospitable integration | OAuth 2.0 architecture designed, application submitted, awaiting approval. Build after OwnerRez marketplace launch. |
+| P9 | Hospitable integration | ✅ Shipped and live — shipped ahead of schedule, not gated on OwnerRez marketplace launch as originally planned. See `lib/inngest/functions/hospitable/*` (initial-sync, incremental-sync, teammate-sync, calendar-sync, reviews-backfill); `'hospitable'` is in `REVENUE_AUTOMATION_PROVIDER_IDS` in `app/(dashboard)/ops/page.tsx`. |
 | P10 | MealMe integration | Potential replacement/supplement to Kroger for multi-retailer inventory ordering. Instrument PO volume/GMV data first before evaluating pricing. |
 | P11 | TradeSuite build phase | July 28, 2026 calendar reminder set. Standalone Next.js deployment, shared Supabase infra TBD. |
 | P12 | Minut / NoiseAware | Noise monitoring evaluation. Minut via direct enterprise conversation preferred. |
@@ -411,7 +421,7 @@ No Google API integration needed until 2027.
 4. **Track 5** — Full owner portal P&L view
 
 ### After Marketplace Launch
-5. **Hospitable integration** — OAuth 2.0, per-user webhook registration, HMAC middleware
+5. ~~**Hospitable integration** — OAuth 2.0, per-user webhook registration, HMAC middleware~~ ✅ Shipped and live — shipped ahead of this build order, not gated on marketplace launch. See `lib/inngest/functions/hospitable/*`.
 6. **Smart thermostat** — Nest + Ecobee via ThermostatProvider abstraction
 7. **Track 7** — Reactive maintenance automation (WO aging, repeat issue detection)
 8. **Track 8** — Asset Health module (Pillars 1–3)

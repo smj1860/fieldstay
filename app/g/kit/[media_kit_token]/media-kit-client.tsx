@@ -17,7 +17,7 @@ interface MediaKitClientProps {
   sponsor: GuidebookSponsor
 }
 
-export function MediaKitClient({ sponsor }: MediaKitClientProps) {
+export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
   const searchParams = useSearchParams()
   const success       = searchParams.get('success') === 'true'
   const cancelled     = searchParams.get('cancelled') === 'true'
@@ -46,7 +46,7 @@ export function MediaKitClient({ sponsor }: MediaKitClientProps) {
         return
       }
 
-      window.location.href = json.url
+      globalThis.location.href = json.url
     } catch {
       setError('Something went wrong. Please try again.')
       setIsLoading(false)

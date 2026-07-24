@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { VendorPortal } from './vendor-portal'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export const metadata: Metadata = { title: 'Complete Work Order — FieldStay' }
 
@@ -47,13 +48,9 @@ export default async function VendorPortalPage({
     workOrder.completion_token_expires_at &&
     new Date(workOrder.completion_token_expires_at) < new Date()
 
-  const property = Array.isArray(workOrder.properties)
-    ? workOrder.properties[0]
-    : workOrder.properties
+  const property = unwrapJoin(workOrder.properties)
 
-  const vendor = Array.isArray(workOrder.vendors)
-    ? workOrder.vendors[0]
-    : workOrder.vendors
+  const vendor = unwrapJoin(workOrder.vendors)
 
   return (
     <VendorPortal

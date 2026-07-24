@@ -16,7 +16,7 @@ interface ClonePropertyModalProps {
   onClose: () => void
 }
 
-export function ClonePropertyModal({ targetProperty, otherProperties, onClose }: ClonePropertyModalProps) {
+export function ClonePropertyModal({ targetProperty, otherProperties, onClose }: Readonly<ClonePropertyModalProps>) {
   const [selectedId, setSelectedId] = useState<string>('')
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -41,18 +41,34 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
       onClose={onClose}
       title={done ? 'Setup copied' : `Copy setup to ${targetProperty.name}`}
       maxWidthClassName="max-w-md"
+      footer={
+        done ? (
+          <Button type="button" onClick={onClose} className="w-full">
+            Done
+          </Button>
+        ) : (
+          <>
+            <Button
+              type="button"
+              onClick={handleClone}
+              disabled={!selectedId || isPending}
+              className="flex-1"
+            >
+              {isPending ? 'Copying…' : 'Copy setup'}
+            </Button>
+            <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
+              Cancel
+            </Button>
+          </>
+        )
+      }
     >
       <div className="space-y-4">
         {done ? (
-          <>
-            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-              Inventory, checklist, and maintenance schedules from the selected property have been
-              applied to <strong>{targetProperty.name}</strong>.
-            </p>
-            <Button type="button" onClick={onClose} className="w-full">
-              Done
-            </Button>
-          </>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            Inventory, checklist, and maintenance schedules from the selected property have been
+            applied to <strong>{targetProperty.name}</strong>.
+          </p>
         ) : (
           <>
             <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -94,20 +110,6 @@ export function ClonePropertyModal({ targetProperty, otherProperties, onClose }:
                 {error}
               </p>
             )}
-
-            <div className="flex gap-2 pt-1">
-              <Button
-                type="button"
-                onClick={handleClone}
-                disabled={!selectedId || isPending}
-                className="flex-1"
-              >
-                {isPending ? 'Copying…' : 'Copy setup'}
-              </Button>
-              <Button type="button" variant="secondary" onClick={onClose} className="flex-1">
-                Cancel
-              </Button>
-            </div>
           </>
         )}
       </div>

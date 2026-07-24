@@ -26,7 +26,7 @@ FieldStay is a local-first, multi-tenant SaaS platform that automates turnover o
 
 | Layer | Technology |
 |---|---|
-| Framework | Next.js 15 (App Router, Server Components, Server Actions) |
+| Framework | Next.js 16 (App Router, Server Components, Server Actions) |
 | Hosting | Vercel (IAD1 region) |
 | Database | Supabase (PostgreSQL 15, Row Level Security, Realtime) |
 | Auth | Supabase Auth (email + password) |
@@ -41,7 +41,7 @@ FieldStay is a local-first, multi-tenant SaaS platform that automates turnover o
 | AI | Anthropic Claude (data plate OCR, RepuGuard draft generation) |
 | SMS | Telnyx (A2P 10DLC) |
 | Weather | Tomorrow.io |
-| Observability | Axiom + Grafana Cloud |
+| Observability | Axiom (Inngest logs) + Sentry (errors + performance traces) + Grafana Cloud (custom business metrics) |
 
 ---
 
@@ -82,7 +82,7 @@ All other integrations (OwnerRez, Kroger, Mapbox, Anthropic, Upstash) are option
 ```bash
 git clone https://github.com/your-org/fieldstay.git
 cd fieldstay
-npm install
+pnpm install
 ```
 
 ### 2. Configure environment variables
@@ -116,14 +116,23 @@ supabase link --project-ref vpmznjktllhmmbfnxuvk
 supabase db push
 ```
 
-> `fieldstay_migration_v1.sql` and `fieldstay_migration_v2.sql` at the repo root
-> are SUPERSEDED and must not be run. Current schema is maintained as timestamped
-> files in `supabase/migrations/`.
+> `fieldstay_migration_v1.SUPERSEDED.sql` and `fieldstay_migration_v2.SUPERSEDED.sql`
+> at the repo root are SUPERSEDED and must not be run. Current schema is
+> maintained as timestamped files in `supabase/migrations/`.
+
+**Migration rollback policy:** migrations in this repo are forward-only —
+there are no paired "down" migrations. To undo a bad migration, write and
+apply a new corrective migration (e.g. `DROP COLUMN`, restore a dropped
+constraint) rather than trying to reverse-apply the original file. Before
+running `supabase db push` against production, validate the migration on a
+Supabase preview branch first (`supabase branches create`, or the
+`create_branch` Supabase MCP tool) — see [`CLAUDE.md`](CLAUDE.md#database-migrations--schema-drift)
+for the full migration workflow.
 
 ### 4. Generate TypeScript types
 
 ```bash
-npm run types:supabase
+pnpm run types:supabase
 ```
 
 This writes `types/supabase.ts` from the live schema. Re-run after every migration.
@@ -132,12 +141,12 @@ This writes `types/supabase.ts` from the live schema. Re-run after every migrati
 
 **Terminal 1 — Next.js:**
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 **Terminal 2 — Inngest dev server (processes background jobs locally):**
 ```bash
-npm run inngest:dev
+pnpm run inngest:dev
 ```
 
 The Inngest dev UI is available at `http://localhost:8288`.
@@ -150,12 +159,12 @@ App runs at `http://localhost:3000`.
 
 | Script | Description |
 |---|---|
-| `npm run dev` | Start Next.js in development mode |
-| `npm run build` | Production build |
-| `npm start` | Start production server |
-| `npm run lint` | Run ESLint |
-| `npm run inngest:dev` | Start Inngest local dev server |
-| `npm run types:supabase` | Regenerate Supabase TypeScript types from live schema |
+| `pnpm run dev` | Start Next.js in development mode |
+| `pnpm run build` | Production build |
+| `pnpm start` | Start production server |
+| `pnpm run lint` | Run ESLint |
+| `pnpm run inngest:dev` | Start Inngest local dev server |
+| `pnpm run types:supabase` | Regenerate Supabase TypeScript types from live schema |
 
 ---
 
@@ -197,8 +206,8 @@ fieldstay/
 ├── types/
 │   ├── database.ts         # Hand-maintained DB types (being migrated to generated)
 │   └── supabase.ts         # Generated from schema — do not edit manually
-├── fieldstay_migration_v1.sql   # Initial schema
-├── fieldstay_migration_v2.sql   # Incremental schema updates
+├── fieldstay_migration_v1.SUPERSEDED.sql   # Initial schema — historical reference only, do not run
+├── fieldstay_migration_v2.SUPERSEDED.sql   # Incremental schema updates — historical reference only, do not run
 └── CLAUDE.md               # AI coding assistant instructions (read before touching code)
 ```
 
@@ -256,7 +265,7 @@ The app deploys to Vercel automatically on push to `main`. Configuration is in [
 - Stripe webhook handler: 30s
 - AI routes (data plate scan, RepuGuard): 30–60s
 
-**Security headers** are set globally in `vercel.json`: `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Strict-Transport-Security`, and a restrictive `Content-Security-Policy`.
+**Security headers:** `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and `Strict-Transport-Security` are set globally in `vercel.json`. `Content-Security-Policy` is owned solely by `next.config.ts` — it is not duplicated in `vercel.json`, to avoid the two configs drifting out of sync.
 
 **Required environment variables in Vercel:** All variables from `.env.example` must be set in your Vercel project settings before deploying. The app will deploy silently with missing optional keys but will fail at runtime when that feature is first used.
 

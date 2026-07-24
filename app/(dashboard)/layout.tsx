@@ -1,7 +1,9 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
-import { createClient } from '@/lib/supabase/server'
+import { after } from 'next/server'
+import { createServiceClient } from '@/lib/supabase/server'
+import { requireOrgMember } from '@/lib/auth'
 import { DashboardShell } from '@/components/dashboard-shell'
 import { DashboardToastProvider } from '@/components/dashboard-toast-provider'
 import { SupportChatWidget } from '@/components/support/support-chat-widget'
@@ -31,27 +33,16 @@ export default async function DashboardLayout({
 }: Readonly<{
   children: React.ReactNode
 }>) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-
-  const { data: membership } = await supabase
-    .from('organization_members')
-    .select('org_id, role, organizations(name, plan, plan_status, max_properties, trial_ends_at, repuguard_status, onboarding_steps_completed)')
-    .eq('user_id', user.id)
-    .not('invite_accepted_at', 'is', null)
-    .single()
-
-  if (!membership) redirect('/onboarding')
-
-  const org = Array.isArray(membership.organizations)
-    ? membership.organizations[0]
-    : membership.organizations
+  // Request-memoized via React cache() in lib/auth.ts — the page rendered
+  // inside this layout calls requireOrgMember() too, and both now share one
+  // auth.getUser() + one organization_members query per request.
+  const { user, supabase, membership } = await requireOrgMember()
+  const org = membership.org
 
   const repuguardActive =
-    org?.repuguard_status === 'trial' || org?.repuguard_status === 'active'
+    org.repuguard_status === 'trial' || org.repuguard_status === 'active'
 
-  const completedSteps  = (org?.onboarding_steps_completed ?? {}) as Record<string, boolean>
+  const completedSteps  = org.onboarding_steps_completed
   const onboardingPct   = calcOnboardingProgress(completedSteps)
   const onboardingComplete = ONBOARDING_STEPS.every((s) => completedSteps[s.key])
 
@@ -80,8 +71,8 @@ export default async function DashboardLayout({
   }
 
   // ── Billing gate ──────────────────────────────────────────────────────────
-  const planStatus  = org?.plan_status  ?? 'trialing'
-  const trialEndsAt = org?.trial_ends_at ?? null
+  const planStatus  = org.plan_status
+  const trialEndsAt = org.trial_ends_at
 
   const trialExpired = planStatus === 'trialing'
     && trialEndsAt !== null
@@ -106,32 +97,63 @@ export default async function DashboardLayout({
   }
   // ── End billing gate ──────────────────────────────────────────────────────
 
-  const { data: pendingMilestone } = await supabase
-    .from('org_milestones')
-    .select('milestone, achieved_at')
-    .eq('org_id', membership.org_id)
-    .eq('dismissed', false)
-    .is('prompted_at', null)
-    .order('achieved_at', { ascending: true })
-    .limit(1)
-    .maybeSingle()
+  // These five lookups are independent of each other — run them concurrently
+  // instead of as a serial waterfall (this layout renders on every dashboard
+  // navigation, so each serial round-trip here is paid app-wide).
+  const [
+    { data: pendingMilestone },
+    { data: newPropertyMilestones },
+    { data: staffRow },
+    notifications,
+    { count: unreadMessages },
+  ] = await Promise.all([
+    supabase
+      .from('org_milestones')
+      .select('milestone, achieved_at')
+      .eq('org_id', membership.org_id)
+      .eq('dismissed', false)
+      .is('prompted_at', null)
+      .order('achieved_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('org_milestones')
+      .select('milestone, value')
+      .eq('org_id', membership.org_id)
+      .eq('dismissed', false)
+      .like('milestone', 'new_property_setup:%')
+      .order('achieved_at', { ascending: false })
+      .limit(3),
+    supabase
+      .from('platform_staff')
+      .select('user_id')
+      .eq('user_id', user.id)
+      .maybeSingle(),
+    getNotifications(membership.org_id),
+    supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', membership.org_id)
+      .eq('recipient_id', user.id)
+      .is('read_at', null),
+  ])
 
   if (pendingMilestone) {
-    await supabase
-      .from('org_milestones')
-      .update({ prompted_at: new Date().toISOString() })
-      .eq('org_id', membership.org_id)
-      .eq('milestone', pendingMilestone.milestone)
+    // Mark the milestone as prompted AFTER the response streams — a write
+    // has no business blocking every dashboard render. Uses the service
+    // client because after() runs outside the request's cookie scope; the
+    // update is scoped to the org_id we just authenticated via
+    // requireOrgMember() plus the exact milestone key.
+    const orgId = membership.org_id
+    after(async () => {
+      const admin = createServiceClient()
+      await admin
+        .from('org_milestones')
+        .update({ prompted_at: new Date().toISOString() })
+        .eq('org_id', orgId)
+        .eq('milestone', pendingMilestone.milestone)
+    })
   }
-
-  const { data: newPropertyMilestones } = await supabase
-    .from('org_milestones')
-    .select('milestone, value')
-    .eq('org_id', membership.org_id)
-    .eq('dismissed', false)
-    .like('milestone', 'new_property_setup:%')
-    .order('achieved_at', { ascending: false })
-    .limit(3)
 
   const { data: orgProperties } = newPropertyMilestones?.length
     ? await supabase
@@ -141,22 +163,7 @@ export default async function DashboardLayout({
         .eq('is_active', true)
     : { data: null }
 
-  const { data: staffRow } = await supabase
-    .from('platform_staff')
-    .select('user_id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
   const isStaff = !!staffRow
-
-  const notifications = await getNotifications(membership.org_id)
-
-  const { count: unreadMessages } = await supabase
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('org_id', membership.org_id)
-    .eq('recipient_id', user.id)
-    .is('read_at', null)
 
   const displayName =
     (user.user_metadata?.full_name as string | undefined) ??
@@ -167,7 +174,7 @@ export default async function DashboardLayout({
     <DashboardToastProvider orgId={membership.org_id} userId={user.id}>
       <DashboardShell
         role={membership.role}
-        orgName={org?.name ?? 'FieldStay'}
+        orgName={org.name || 'FieldStay'}
         userName={displayName}
         userEmail={user.email ?? ''}
         repuguardActive={repuguardActive}

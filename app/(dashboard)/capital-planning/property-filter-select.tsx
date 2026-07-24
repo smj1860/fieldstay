@@ -12,7 +12,7 @@ export function PropertyFilterSelect({
       defaultValue={selectedPropertyId ?? ''}
       onChange={(e) => {
         const val = e.target.value
-        window.location.href = val
+        globalThis.location.href = val
           ? `/capital-planning?property=${val}`
           : '/capital-planning'
       }}

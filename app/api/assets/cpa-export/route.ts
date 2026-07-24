@@ -10,6 +10,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { requireOrgMember }   from '@/lib/auth'
 import { PDFDocument, PDFFont, StandardFonts, rgb } from 'pdf-lib'
 import { MACRS_LABELS } from '@/lib/assets/depreciation'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { MacrsClass } from '@/types/database'
 
 // ── Layout constants ──────────────────────────────���───────────────────────────
@@ -119,8 +120,8 @@ export async function GET(req: Request) {
   }> = {}
 
   for (const e of entries) {
-    const asset = Array.isArray(e.property_assets) ? e.property_assets[0] : e.property_assets
-    const propName = (Array.isArray(asset?.properties) ? asset?.properties[0] : asset?.properties)?.name ?? 'Unknown Property'
+    const asset = unwrapJoin(e.property_assets)
+    const propName = unwrapJoin(asset?.properties)?.name ?? 'Unknown Property'
     const propKey  = propName
 
     if (!byProperty[propKey]) byProperty[propKey] = { propertyName: propName, rows: [] }
@@ -212,7 +213,7 @@ export async function GET(req: Request) {
       const rowBg = rowIndex % 2 === 1 ? ROW_BG : WHITE
       page.drawRectangle({ x: ML, y: y - 18, width: CW, height: 18, color: rowBg })
 
-      const asset = Array.isArray(entry.property_assets) ? entry.property_assets[0] : entry.property_assets
+      const asset = unwrapJoin(entry.property_assets)
       const assetName   = asset?.name ?? '—'
       const placedDate  = asset?.placed_in_service_date?.slice(0, 10) ?? '—'
       const macrsLabel  = MACRS_LABELS[entry.macrs_class as MacrsClass] ?? String(entry.macrs_class)

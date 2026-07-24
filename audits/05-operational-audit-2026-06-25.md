@@ -26,8 +26,10 @@ report.
 **Cross-org repoint of `integration_connections` on reconnect** — `app/(dashboard)/settings/integrations/actions.ts:130-134` — *High*
 `connectWithApiKey` updates a connection filtered only by `user_id` + `provider_id`, with no `org_id` in the `WHERE` clause. A user belonging to two orgs who reconnects an integration while acting in Org B can silently repoint Org A's existing PMS connection to Org B, since the underlying Vault token functions have no org concept at all.
 
-**Vendor quote-portal GET endpoint never checks token expiry** — `app/api/work-orders/[token]/quote/route.ts:5-36` — *Medium*
+**Vendor quote-portal GET endpoint never checks token expiry** — `app/api/work-orders/[token]/quote/route.ts:5-36` — *Medium* — **FIXED**
 The GET handler returns work order title, description, cost, and property location based purely on token validity, with no expiry check — unlike its own POST handler and the sibling `complete/route.ts` GET handler, both of which do check expiry. An expired quote link discloses this data indefinitely.
+**Status: FIXED.** `app/api/work-orders/[token]/quote/route.ts:48-49,86-88` — both
+the GET and POST handlers now check `quote_token_expires_at`.
 
 **Vault token RPC grants are unverifiable from version control** — referenced in `supabase/migrations/20260612000004_fix_refresh_token_function_grants.sql:1-5` — *Medium*
 The base `store/read/revoke_integration_token` functions are claimed to be service-role-only, but no migration anywhere grants/revokes privileges on them — they predate migration tracking. This is the most sensitive code path in the app (decrypting OAuth tokens), and its access-control state currently rests on an unverifiable comment rather than a checked-in grant.
@@ -41,14 +43,22 @@ Up to 200 chars of Hostaway's raw HTTP error response is embedded in a thrown er
 
 ## 2. Offline Cache Sanitization
 
-**`closeDexieDb()` never deletes the IndexedDB database on logout** — `lib/dexie/schema.ts:231-237`, called from `app/crew/crew-shell.tsx:56-61` — *Critical*
+**`closeDexieDb()` never deletes the IndexedDB database on logout** — `lib/dexie/schema.ts:231-237`, called from `app/crew/crew-shell.tsx:56-61` — *Critical* — **FIXED**
 Logout only closes the Dexie connection; it never calls `Dexie.delete()`. Every cached turnover, property address, checklist note, and message a crew member ever synced remains readable in IndexedDB after sign-out, on a device that may be shared or eventually lost.
+**Status: FIXED.** `lib/dexie/schema.ts:312-323` — `closeDexieDb()` now calls
+`Dexie.delete(dbName)` after closing the connection.
 
-**Photo blob store is a single shared, non-namespaced IndexedDB database across all users** — `lib/dexie/photo-queue.ts:7-9` — *High*
+**Photo blob store is a single shared, non-namespaced IndexedDB database across all users** — `lib/dexie/photo-queue.ts:7-9` — *High* — **FIXED**
 Unlike the main Dexie DB (namespaced per `userId`), the raw photo-blob store always opens the same fixed database name regardless of who's logged in. A second crew member logging into the same device before the first user's queued photos finish syncing can read or upload the first user's queued blobs.
+**Status: FIXED.** `lib/dexie/photo-queue.ts:7-15` — the store is now namespaced
+per-userId (`fieldstay-photo-queue-${userId}`).
 
-**No retry cap on the mutation outbox — failed mutations and their payloads accumulate indefinitely** — `lib/dexie/syncService.ts:21-46, 145-176` — *High*
+**No retry cap on the mutation outbox — failed mutations and their payloads accumulate indefinitely** — `lib/dexie/syncService.ts:21-46, 145-176` — *High* — **FIXED**
 `processOutbox()` increments a retry count that's never checked against any ceiling, and breaks on first failure. A single permanently-failing mutation keeps its full payload (notes, descriptions, counts) resident in IndexedDB forever and stalls every mutation queued after it.
+**Status: FIXED.** `lib/dexie/syncService.ts:41-67` implements `MAX_RETRIES = 5`
+— a mutation exceeding the cap is marked `failed` (dead-lettered) instead of
+blocking the queue forever; the drain now `continue`s past permanently-failing
+mutations retried 3+ times rather than breaking on every failure.
 
 **`getDexieDb()` singleton can race across a user switch within one tab session** — `lib/dexie/schema.ts:219-229` — *Medium*
 The previous Dexie instance is closed but not invalidated everywhere it's referenced — an in-flight `useLiveQuery` or background sync call captured before a user switch can continue operating against the closed connection or race the new instance during handoff.
@@ -223,8 +233,11 @@ Hostaway's own sync functions are well-guarded, but webhook validation currently
 
 ### Stuck/Infinite Loop Risk
 
-**Mutation outbox drain has no max-retry cap, and blocks the entire queue on first failure** — `lib/dexie/syncService.ts:21-46` — *Critical*
+**Mutation outbox drain has no max-retry cap, and blocks the entire queue on first failure** — `lib/dexie/syncService.ts:21-46` — *Critical* — **FIXED**
 A retry count is tracked but never checked against any threshold, and the drain loop stops at the first failure so nothing after it in the queue is processed either. Every subsequent `enqueueMutation()` call re-triggers a drain that hits the same permanently-failing mutation first every time.
+**Status: FIXED.** `lib/dexie/syncService.ts:41-67` implements `MAX_RETRIES = 5`
+with dead-lettering past the cap, and the drain now skips (rather than blocks on)
+mutations already retried 3+ times.
 
 **OwnerRez pagination loop has no max-page cap** — `lib/integrations/providers/ownerrez-api.ts:190-208` — *High*
 The loop trusts the upstream "next page token" to eventually become falsy with no iteration counter, on a 15-minute cron cadence — a cycling or buggy token would loop indefinitely inside a single Inngest step.

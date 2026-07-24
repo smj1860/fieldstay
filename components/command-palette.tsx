@@ -15,7 +15,7 @@ const MAX_RECENTS  = 5
 function readRecents(): string[] {
   if (typeof window === 'undefined') return []
   try {
-    const raw = window.localStorage.getItem(RECENT_KEY)
+    const raw = globalThis.localStorage.getItem(RECENT_KEY)
     return raw ? (JSON.parse(raw) as string[]) : []
   } catch {
     return []
@@ -26,7 +26,7 @@ function pushRecent(href: string) {
   if (typeof window === 'undefined') return
   try {
     const next = [href, ...readRecents().filter((h) => h !== href)].slice(0, MAX_RECENTS)
-    window.localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+    globalThis.localStorage.setItem(RECENT_KEY, JSON.stringify(next))
   } catch {
     // localStorage unavailable (private browsing etc.) — recents just won't persist
   }

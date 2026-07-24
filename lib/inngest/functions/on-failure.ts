@@ -5,11 +5,24 @@ import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 
 // Functions where a silent failure has direct revenue/data impact — these
 // get an email to the founder in addition to the console log every failed
-// run already gets below.
-const CRITICAL_FUNCTION_IDS = new Set([
+// run already gets below. Exported so a test can assert against it directly
+// rather than re-deriving the list of function IDs a founder alert should
+// cover.
+export const CRITICAL_FUNCTION_IDS = new Set([
   'ownerrez-initial-sync',
   'ownerrez-incremental-sync',
+  // Per-connection sync handler (the incremental-sync dispatcher fans out to
+  // it) — terminal failures here are the actual sync failures now.
+  'ownerrez-connection-sync',
   'work-order-created',
+
+  // Post an owner_transactions ledger entry on completion — the literal
+  // "core automation promise" (see CLAUDE.md). A retry-exhausted failure
+  // here means a completed turnover/work order/purchase order silently
+  // never gets its expense/revenue entry, with nothing else to catch it.
+  'turnover-completed',
+  'work-order-completed',
+  'purchase-order-approved',
 ])
 
 /**

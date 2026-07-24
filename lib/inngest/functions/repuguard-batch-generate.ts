@@ -1,6 +1,7 @@
 import { inngest }                    from '@/lib/inngest/client'
 import { createServiceClient }       from '@/lib/supabase/server'
 import { generateReviewResponse }    from '@/lib/repuguard/generate-response'
+import { unwrapJoin }                from '@/lib/utils/supabase-joins'
 
 const BATCH_LIMIT = 25
 
@@ -48,9 +49,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
 
         type PropertyRef = { name?: string } | { name?: string }[] | null
         const propertyRef = review.properties as PropertyRef
-        const propertyName = Array.isArray(propertyRef)
-          ? (propertyRef[0]?.name ?? 'the property')
-          : ((propertyRef as { name?: string } | null)?.name ?? 'the property')
+        const propertyName = unwrapJoin(propertyRef)?.name ?? 'the property'
 
         const guestName     = (review.guest_name as string | null) ?? 'Guest'
         const reviewText    = review.review_text as string

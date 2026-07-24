@@ -8,12 +8,19 @@ import { revalidatePath }      from 'next/cache'
 import { logAuditEvent }       from '@/lib/audit'
 import { renderSmsBody }       from '@/lib/sms/templates'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
 
 function generatePublicToken(): string {
   return randomBytes(32).toString('hex')  // 64-char hex, URL-safe
+}
+
+function photoFileExtension(mimeType: string): string {
+  if (mimeType === 'image/png')  return 'png'
+  if (mimeType === 'image/webp') return 'webp'
+  return 'jpg'
 }
 
 export async function dispatchWorkOrderToVendor(input: {
@@ -73,7 +80,7 @@ export async function dispatchWorkOrderToVendor(input: {
       .eq('id', membership.org_id)
       .single()
 
-    const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+    const property = unwrapJoin(wo.properties)
 
     const manualUrl = await getManualUrlForAsset(supabase, membership.org_id, wo.asset_id ?? null)
 
@@ -202,9 +209,9 @@ export async function getWorkOrderByToken(token: string): Promise<{
   return {
     data: {
       ...wo,
-      properties: Array.isArray(wo.properties) ? wo.properties[0] ?? null : wo.properties,
-      vendors:    Array.isArray(wo.vendors)    ? wo.vendors[0]    ?? null : wo.vendors,
-      organizations: Array.isArray(wo.organizations) ? wo.organizations[0] ?? null : wo.organizations,
+      properties: unwrapJoin(wo.properties),
+      vendors:    unwrapJoin(wo.vendors),
+      organizations: unwrapJoin(wo.organizations),
     }
   }
 }
@@ -299,8 +306,8 @@ export async function submitWorkOrderSignOff(
     return { error: 'Failed to record sign-off. Please try again.' }
   }
 
-  const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
-  const org      = Array.isArray(wo.organizations) ? wo.organizations[0] : wo.organizations
+  const property = unwrapJoin(wo.properties)
+  const org      = unwrapJoin(wo.organizations)
 
   await logAuditEvent({
     orgId:      wo.org_id,
@@ -317,7 +324,7 @@ export async function submitWorkOrderSignOff(
   // Upload sign-off photos to storage and record in work_order_photos
   if (photos && photos.length > 0) {
     for (const photo of photos) {
-      const ext  = photo.type === 'image/png' ? 'png' : photo.type === 'image/webp' ? 'webp' : 'jpg'
+      const ext  = photoFileExtension(photo.type)
       const path = `work-orders/${wo.id}/signoff/${crypto.randomUUID()}.${ext}`
       const { error: uploadErr } = await supabase.storage
         .from('work-order-photos')

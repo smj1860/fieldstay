@@ -60,7 +60,7 @@ export const autoAssignVendor = inngest.createFunction(
       for (const c of complianceRows ?? []) complianceByVendor[c.vendor_id] = c.compliance_status
 
       // Hard exclusion — no human in the loop yet to override a bad pick, so
-      // a hard-blocked vendor (expired compliance docs, 31+ days) never enters
+      // a hard-blocked vendor (expired compliance docs, 46+ days) never enters
       // the candidate pool at all, mirroring crew's unavailable-date exclusion.
       const eligibleVendors = (vendors as VendorCandidate[]).filter(
         (v) => complianceByVendor[v.id] !== 'hard_blocked'

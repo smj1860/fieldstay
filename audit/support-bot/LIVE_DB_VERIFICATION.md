@@ -1,6 +1,12 @@
 # Live DB Verification (Supabase MCP, project vpmznjktllhmmbfnxuvk)
 Queried directly against the live database on 2026-06-30 to supplement migration-file analysis.
 
+**Update 2026-07-23: FIXED.** The backfill migration recommended below
+(`supabase/migrations/20260630044706_support_bot_phase3_human_inbox.sql`) has since
+been written and committed, closing the schema-drift gap this file documents. The
+realtime publication gap noted below has also been fixed via
+`supabase/migrations/20260630100300_support_realtime_publication.sql`.
+
 ## RLS policies on support_conversations / support_messages / platform_staff
 
 ```
@@ -89,6 +95,9 @@ policies, and the `support_message_role` enum addition for `'human'`, using `CRE
 NOT EXISTS` / `CREATE OR REPLACE FUNCTION` / `DROP POLICY IF EXISTS` + `CREATE POLICY` so it's
 idempotent against the already-applied live state, bringing source and live DB back in sync.
 
+**Status: FIXED.** `supabase/migrations/20260630044706_support_bot_phase3_human_inbox.sql`
+is exactly this backfill migration.
+
 ## Realtime publication check (Agent 3 Item 6)
 
 ```sql
@@ -108,3 +117,8 @@ via a migration) if realtime updates are actually desired, and re-verify RLS sco
 postgres_changes specifically once enabled (Supabase realtime does respect RLS for
 postgres_changes events when the table is in the publication, scoped per-connection by the
 authenticated role).
+
+**Status: FIXED.** `supabase/migrations/20260630100300_support_realtime_publication.sql`
+adds both tables to the `supabase_realtime` publication (a later duplicate,
+`20260707145519_support_realtime_publication.sql`, is a cosmetic dup self-annotated
+as already applied — not a security issue).

@@ -1,5 +1,7 @@
 # Schema Naming / API / Webhooks Audit
 
+> **ARCHIVED — superseded by `audit/` Round 2. Findings here reflect the codebase as of 2026-07-13 and should not be read as current state.**
+
 Status: COMPLETE
 Last checkpoint: reviewed all app/api/**/route.ts handlers, all webhook handlers, OAuth connect/callback flow, token-based public vendor/work-order routes, GDPR/account-delete routes, asset export routes, and cross-checked types/database.ts against the three most recent migrations (property_sync_expansion, crew_feedback, vendor_stripe_connect) plus enum usage for txn_category/txn_type/source/wo_status across lib/inngest/functions and app/(dashboard) actions.
 Next: none — audit complete
@@ -43,5 +45,3 @@ The following areas were specifically audited per the assignment brief and found
 - **Recent migration → types/database.ts sync**: Spot-checked the 3 most recent schema-changing migrations (`20260628013427_property_sync_expansion.sql` adding 8 columns to `properties`; `20260628000000_crew_feedback.sql` creating `crew_feedback`; `20260626142311_vendor_stripe_connect.sql` adding 5 `stripe_connect_*` columns to `vendors` plus `work_order_line_items.vendor_submitted`). All new columns/tables are present in `types/database.ts` with correct nullability.
 - **GDPR export, account deletion, asset CapEx/CPA export routes**: All correctly call `requireOrgMember()` or equivalent session check first, scope every query by `org_id`/`user.id`, and never leak the service role key or raw DB errors to the client.
 - **Crew PWA API routes** (`crew/inventory-count`, `crew/issue-reports`, `crew/feedback`, `crew/turnovers/[id]/complete`, `crew/work-orders/[id]/complete`, `crew/push-subscribe`): All follow the documented inline auth pattern (`supabase.auth.getUser()` → `crew_members` lookup by `user_id` → 403 if not found), and all subsequent queries are scoped by `org_id` derived server-side, never trusting client-supplied org/property IDs without a server-side ownership check.
-
-

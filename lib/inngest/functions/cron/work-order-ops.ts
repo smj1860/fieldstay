@@ -4,6 +4,7 @@ import { calcNextDueDate } from '@/lib/turnovers/generator'
 import { logAuditEvent } from '@/lib/audit'
 import { createPmNotification } from '@/lib/inngest/helpers'
 import { isVendorHardBlocked } from '@/lib/vendors/compliance'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 /**
  * SCHEDULED: runs every morning at 8am CT (independent of maintenance-schedules cron).
@@ -131,7 +132,7 @@ export const dailyWorkOrderOps = inngest.createFunction(
     for (const schedule of autoWOSchedules) {
       const autoCreateEventData = await step.run(`auto-create-wo-${schedule.id}`, async () => {
         const supabase = createServiceClient()
-        const property = Array.isArray(schedule.properties) ? schedule.properties[0] : schedule.properties
+        const property = unwrapJoin(schedule.properties)
 
         // Idempotency: skip if an open WO already exists for this schedule + date
         const { data: existingWO } = await supabase

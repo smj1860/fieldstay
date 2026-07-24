@@ -26,34 +26,39 @@ export async function updateOrgSettings(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const name          = (formData.get('name') as string)?.trim()
-  const billing_email = (formData.get('billing_email') as string)?.trim() || null
+    const name          = (formData.get('name') as string)?.trim()
+    const billing_email = (formData.get('billing_email') as string)?.trim() || null
 
-  if (!name) return { error: 'Organization name is required' }
+    if (!name) return { error: 'Organization name is required' }
 
-  const { error } = await supabase
-    .from('organizations')
-    .update({ name, billing_email })
-    .eq('id', membership.org_id)
+    const { error } = await supabase
+      .from('organizations')
+      .update({ name, billing_email })
+      .eq('id', membership.org_id)
 
-  if (error) {
-    console.error('[updateOrgSettings]', error)
-    reportError(error, { site: 'serverAction.settings.updateOrgSettings', orgId: membership.org_id })
+    if (error) {
+      console.error('[updateOrgSettings]', error)
+      reportError(error, { site: 'serverAction.settings.updateOrgSettings', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org.settings.updated',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+    })
+
+    revalidatePath('/settings')
+    return { success: true }
+  } catch (err) {
+    console.error('[updateOrgSettings]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'org.settings.updated',
-    targetType: 'organization',
-    targetId:   membership.org_id,
-  })
-
-  revalidatePath('/settings')
-  return { success: true }
 }
 
 // ── Slack Notifications ───────────────────────────────────────
@@ -62,37 +67,42 @@ export async function updateSlackWebhook(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const url = (formData.get('slack_webhook_url') as string)?.trim() || null
+    const url = (formData.get('slack_webhook_url') as string)?.trim() || null
 
-  if (url && !url.startsWith('https://hooks.slack.com/')) {
-    return { error: 'That doesn\'t look like a Slack Incoming Webhook URL' }
-  }
+    if (url && !url.startsWith('https://hooks.slack.com/')) {
+      return { error: 'That doesn\'t look like a Slack Incoming Webhook URL' }
+    }
 
-  const { error } = await supabase
-    .from('organizations')
-    .update({ slack_webhook_url: url })
-    .eq('id', membership.org_id)
+    const { error } = await supabase
+      .from('organizations')
+      .update({ slack_webhook_url: url })
+      .eq('id', membership.org_id)
 
-  if (error) {
-    console.error('[updateSlackWebhook]', error)
-    reportError(error, { site: 'serverAction.settings.updateSlackWebhook', orgId: membership.org_id })
+    if (error) {
+      console.error('[updateSlackWebhook]', error)
+      reportError(error, { site: 'serverAction.settings.updateSlackWebhook', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    // Never log the webhook URL itself — it's a credential
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org.slack_webhook.updated',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+      metadata:   { configured: url !== null },
+    })
+
+    revalidatePath('/settings')
+    return { success: true }
+  } catch (err) {
+    console.error('[updateSlackWebhook]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  // Never log the webhook URL itself — it's a credential
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'org.slack_webhook.updated',
-    targetType: 'organization',
-    targetId:   membership.org_id,
-    metadata:   { configured: url !== null },
-  })
-
-  revalidatePath('/settings')
-  return { success: true }
 }
 
 // ── Security / Password ───────────────────────────────────────
@@ -101,30 +111,35 @@ export async function changePassword(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const newPassword = (formData.get('new_password') as string)?.trim()
-  const confirm     = (formData.get('confirm_password') as string)?.trim()
+  try {
+    const newPassword = (formData.get('new_password') as string)?.trim()
+    const confirm     = (formData.get('confirm_password') as string)?.trim()
 
-  if (!newPassword || newPassword.length < 8)
-    return { error: 'Password must be at least 8 characters' }
-  if (newPassword !== confirm)
-    return { error: 'Passwords do not match' }
+    if (!newPassword || newPassword.length < 8)
+      return { error: 'Password must be at least 8 characters' }
+    if (newPassword !== confirm)
+      return { error: 'Passwords do not match' }
 
-  const { user, supabase, membership } = await requireOrgMember()
-  const { error } = await supabase.auth.updateUser({ password: newPassword })
+    const { user, supabase, membership } = await requireOrgMember()
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
 
-  if (error) {
-    console.error('[changePassword]', error)
-    reportError(error, { site: 'serverAction.settings.changePassword', orgId: membership.org_id })
+    if (error) {
+      console.error('[changePassword]', error)
+      reportError(error, { site: 'serverAction.settings.changePassword', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:   membership.org_id,
+      actorId: user.id,
+      action:  'account.password_changed',
+    })
+
+    return { success: true }
+  } catch (err) {
+    console.error('[changePassword]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:   membership.org_id,
-    actorId: user.id,
-    action:  'account.password_changed',
-  })
-
-  return { success: true }
 }
 
 // ── Notifications ─────────────────────────────────────────────
@@ -133,26 +148,31 @@ export async function updateNotificationPrefs(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { error: 'Not authenticated' }
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'Not authenticated' }
 
-  const prefs = {
-    push_turnovers:      formData.get('push_turnovers')      === 'on',
-    push_maintenance:    formData.get('push_maintenance')    === 'on',
-    push_inventory:      formData.get('push_inventory')      === 'on',
-    push_work_orders:    formData.get('push_work_orders')    === 'on',
-    email_daily_digest:  formData.get('email_daily_digest')  === 'on',
-    email_weekly_report: formData.get('email_weekly_report') === 'on',
-  }
+    const prefs = {
+      push_turnovers:      formData.get('push_turnovers')      === 'on',
+      push_maintenance:    formData.get('push_maintenance')    === 'on',
+      push_inventory:      formData.get('push_inventory')      === 'on',
+      push_work_orders:    formData.get('push_work_orders')    === 'on',
+      email_daily_digest:  formData.get('email_daily_digest')  === 'on',
+      email_weekly_report: formData.get('email_weekly_report') === 'on',
+    }
 
-  const { error } = await supabase.auth.updateUser({ data: { notification_prefs: prefs } })
-  if (error) {
-    console.error('[updateNotificationPrefs]', error)
-    reportError(error, { site: 'serverAction.settings.updateNotificationPrefs' })
+    const { error } = await supabase.auth.updateUser({ data: { notification_prefs: prefs } })
+    if (error) {
+      console.error('[updateNotificationPrefs]', error)
+      reportError(error, { site: 'serverAction.settings.updateNotificationPrefs' })
+      return { error: 'Operation failed. Please try again.' }
+    }
+    return { success: true }
+  } catch (err) {
+    console.error('[updateNotificationPrefs]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-  return { success: true }
 }
 
 // ── Crew ─────────────────────────────────────────────────────
@@ -161,67 +181,72 @@ export async function addCrewMember(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  const name              = (formData.get('name') as string)?.trim()
-  const email             = (formData.get('email') as string)?.trim() || null
-  const phone             = (formData.get('phone') as string)?.trim() || null
-  const specialty         = (formData.get('specialty') as string)?.trim() || ''
-  const preferred_contact = (formData.get('preferred_contact') as ContactPref) || 'email'
-  const role              = ((formData.get('role') as CrewRole) || 'general') as CrewRole
-  const home_zip          = (formData.get('home_zip') as string)?.trim() || null
+    const name              = (formData.get('name') as string)?.trim()
+    const email             = (formData.get('email') as string)?.trim() || null
+    const phone             = (formData.get('phone') as string)?.trim() || null
+    const specialty         = (formData.get('specialty') as string)?.trim() || ''
+    const preferred_contact = (formData.get('preferred_contact') as ContactPref) || 'email'
+    const role              = ((formData.get('role') as CrewRole) || 'general') as CrewRole
+    const home_zip          = (formData.get('home_zip') as string)?.trim() || null
 
-  if (!name) return { error: 'Name is required' }
-  if (!email && !phone) return { error: 'Email or phone is required' }
+    if (!name) return { error: 'Name is required' }
+    if (!email && !phone) return { error: 'Email or phone is required' }
 
-  const { data: newCrew, error } = await supabase.from('crew_members').insert({
-    org_id: membership.org_id,
-    name,
-    email,
-    phone,
-    specialty,
-    preferred_contact,
-    role,
-    home_zip,
-    is_active: true,
-  }).select('id').single()
-
-  if (error) {
-    console.error('[addCrewMember]', error)
-    reportError(error, { site: 'serverAction.settings.addCrewMember', orgId: membership.org_id })
-    return { error: 'Operation failed. Please try again.' }
-  }
-
-  // Geocode from home ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
-  if (home_zip) {
-    const coords = await geocodeZip(home_zip)
-    if (coords) {
-      await supabase.from('crew_members').update({ home_lat: coords.lat, home_lng: coords.lng }).eq('id', newCrew.id)
-    }
-  }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'crew.member.created',
-    targetType: 'crew_member',
-    targetId:   newCrew?.id,
-    metadata:   { name, role },
-  })
-
-  revalidatePath('/crew-manage')
-  revalidatePath('/settings')
-  return {
-    success: true,
-    crewMember: {
-      id:            newCrew.id,
+    const { data: newCrew, error } = await supabase.from('crew_members').insert({
+      org_id: membership.org_id,
       name,
-      role,
-      specialty,
       email,
-      invite_sent_at: null as null,
-      user_id:        null as null,
-    },
+      phone,
+      specialty,
+      preferred_contact,
+      role,
+      home_zip,
+      is_active: true,
+    }).select('id').single()
+
+    if (error) {
+      console.error('[addCrewMember]', error)
+      reportError(error, { site: 'serverAction.settings.addCrewMember', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    // Geocode from home ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
+    if (home_zip) {
+      const coords = await geocodeZip(home_zip)
+      if (coords) {
+        await supabase.from('crew_members').update({ home_lat: coords.lat, home_lng: coords.lng }).eq('id', newCrew.id)
+      }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'crew.member.created',
+      targetType: 'crew_member',
+      targetId:   newCrew?.id,
+      metadata:   { name, role },
+    })
+
+    revalidatePath('/crew-manage')
+    revalidatePath('/settings')
+    return {
+      success: true,
+      crewMember: {
+        id:            newCrew.id,
+        name,
+        role,
+        specialty,
+        email,
+        invite_sent_at: null as null,
+        user_id:        null as null,
+      },
+    }
+  } catch (err) {
+    console.error('[addCrewMember]', err)
+    return { error: 'Operation failed. Please try again.' }
   }
 }
 
@@ -238,122 +263,137 @@ export async function updateCrewMember(
     home_zip: string
   }>
 ): Promise<SettingsActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  const { data: existing } = await supabase
-    .from('crew_members')
-    .select('home_zip')
-    .eq('id', crewId)
-    .eq('org_id', membership.org_id)
-    .single()
+    const { data: existing } = await supabase
+      .from('crew_members')
+      .select('home_zip')
+      .eq('id', crewId)
+      .eq('org_id', membership.org_id)
+      .single()
 
-  const { error } = await supabase
-    .from('crew_members')
-    .update(data)
-    .eq('id', crewId)
-    .eq('org_id', membership.org_id)
+    const { error } = await supabase
+      .from('crew_members')
+      .update(data)
+      .eq('id', crewId)
+      .eq('org_id', membership.org_id)
 
-  if (error) {
-    console.error('[updateCrewMember]', error)
-    reportError(error, { site: 'serverAction.settings.updateCrewMember', orgId: membership.org_id })
-    return { error: 'Operation failed. Please try again.' }
-  }
-
-  // Re-geocode when home ZIP changes — Mapbox postcode endpoint requires a ZIP, not a full address
-  const zipChanged = data.home_zip !== undefined && data.home_zip !== (existing?.home_zip ?? null)
-
-  if (zipChanged && data.home_zip) {
-    const coords = await geocodeZip(data.home_zip)
-    if (coords) {
-      await supabase.from('crew_members').update({ home_lat: coords.lat, home_lng: coords.lng }).eq('id', crewId)
+    if (error) {
+      console.error('[updateCrewMember]', error)
+      reportError(error, { site: 'serverAction.settings.updateCrewMember', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
     }
-  }
 
-  if (data.role !== undefined) {
+    // Re-geocode when home ZIP changes — Mapbox postcode endpoint requires a ZIP, not a full address
+    const zipChanged = data.home_zip !== undefined && data.home_zip !== (existing?.home_zip ?? null)
+
+    if (zipChanged && data.home_zip) {
+      const coords = await geocodeZip(data.home_zip)
+      if (coords) {
+        await supabase.from('crew_members').update({ home_lat: coords.lat, home_lng: coords.lng }).eq('id', crewId)
+      }
+    }
+
+    if (data.role !== undefined) {
+      await logAuditEvent({
+        orgId:      membership.org_id,
+        actorId:    user.id,
+        action:     'crew.member.role_changed',
+        targetType: 'crew_member',
+        targetId:   crewId,
+        metadata:   { new_role: data.role },
+      })
+    }
+
     await logAuditEvent({
       orgId:      membership.org_id,
       actorId:    user.id,
-      action:     'crew.member.role_changed',
+      action:     'crew.member.updated',
       targetType: 'crew_member',
       targetId:   crewId,
-      metadata:   { new_role: data.role },
     })
+
+    revalidatePath('/crew-manage')
+    revalidatePath('/settings')
+    return { success: true }
+  } catch (err) {
+    console.error('[updateCrewMember]', err)
+    return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'crew.member.updated',
-    targetType: 'crew_member',
-    targetId:   crewId,
-  })
-
-  revalidatePath('/crew-manage')
-  revalidatePath('/settings')
-  return { success: true }
 }
 
 export async function deactivateCrewMember(crewId: string): Promise<void> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  await supabase
-    .from('crew_members')
-    .update({ is_active: false })
-    .eq('id', crewId)
-    .eq('org_id', membership.org_id)
+    await supabase
+      .from('crew_members')
+      .update({ is_active: false })
+      .eq('id', crewId)
+      .eq('org_id', membership.org_id)
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'crew.member.deactivated',
-    targetType: 'crew_member',
-    targetId:   crewId,
-  })
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'crew.member.deactivated',
+      targetType: 'crew_member',
+      targetId:   crewId,
+    })
 
-  revalidatePath('/crew-manage')
-  revalidatePath('/settings')
+    revalidatePath('/crew-manage')
+    revalidatePath('/settings')
+  } catch (err) {
+    console.error('[deactivateCrewMember]', err)
+    throw err
+  }
 }
 
 export async function bulkImportCrew(
   rows: Array<{ name: string; email?: string; phone?: string; specialty?: string }>
 ): Promise<{ imported: number; skipped: number; error?: string }> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
+    if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
 
-  const valid   = rows.filter((r) => r.name?.trim())
-  const skipped = rows.length - valid.length
+    const valid   = rows.filter((r) => r.name?.trim())
+    const skipped = rows.length - valid.length
 
-  if (!valid.length) return { imported: 0, skipped, error: 'No rows with a valid name' }
+    if (!valid.length) return { imported: 0, skipped, error: 'No rows with a valid name' }
 
-  const records = valid.map((r) => ({
-    org_id:            membership.org_id,
-    name:              r.name.trim(),
-    email:             r.email?.trim() || null,
-    phone:             r.phone?.trim() || null,
-    specialty:         r.specialty?.trim() || '',
-    preferred_contact: 'email' as ContactPref,
-    is_active:         true,
-  }))
+    const records = valid.map((r) => ({
+      org_id:            membership.org_id,
+      name:              r.name.trim(),
+      email:             r.email?.trim() || null,
+      phone:             r.phone?.trim() || null,
+      specialty:         r.specialty?.trim() || '',
+      preferred_contact: 'email' as ContactPref,
+      is_active:         true,
+    }))
 
-  const { error } = await supabase.from('crew_members').insert(records)
-  if (error) {
-    console.error('[bulkImportCrew]', error)
-    reportError(error, { site: 'serverAction.settings.bulkImportCrew', orgId: membership.org_id })
-    return { imported: 0, skipped, error: 'Operation failed. Please try again.' }
+    const { error } = await supabase.from('crew_members').insert(records)
+    if (error) {
+      console.error('[bulkImportCrew]', error)
+      reportError(error, { site: 'serverAction.settings.bulkImportCrew', orgId: membership.org_id })
+      return { imported: 0, skipped, error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'crew.member.bulk_imported',
+      targetType: 'crew_member',
+      metadata:   { imported: valid.length },
+    })
+
+    revalidatePath('/crew-manage')
+    revalidatePath('/settings')
+    return { imported: valid.length, skipped }
+  } catch (err) {
+    console.error('[bulkImportCrew]', err)
+    return { imported: 0, skipped: rows.length, error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'crew.member.bulk_imported',
-    targetType: 'crew_member',
-    metadata:   { imported: valid.length },
-  })
-
-  revalidatePath('/crew-manage')
-  revalidatePath('/settings')
-  return { imported: valid.length, skipped }
 }
 
 // ── Vendors ───────────────────────────────────────────────────
@@ -362,70 +402,75 @@ export async function addVendor(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  const name           = (formData.get('name') as string)?.trim()
-  const contact_name   = (formData.get('contact_name') as string)?.trim() || null
-  const email          = (formData.get('email') as string)?.trim() || null
-  const phone          = (formData.get('phone') as string)?.trim() || null
-  const specialty      = (formData.get('specialty') as string) || 'general'
-  const portal_enabled = formData.get('portal_enabled') === 'on'
-  const address        = (formData.get('address') as string)?.trim() || null
-  const city           = (formData.get('city') as string)?.trim() || null
-  const state          = (formData.get('state') as string)?.trim() || null
-  const service_zip    = (formData.get('service_zip') as string)?.trim() || null
+    const name           = (formData.get('name') as string)?.trim()
+    const contact_name   = (formData.get('contact_name') as string)?.trim() || null
+    const email          = (formData.get('email') as string)?.trim() || null
+    const phone          = (formData.get('phone') as string)?.trim() || null
+    const specialty      = (formData.get('specialty') as string) || 'general'
+    const portal_enabled = formData.get('portal_enabled') === 'on'
+    const address        = (formData.get('address') as string)?.trim() || null
+    const city           = (formData.get('city') as string)?.trim() || null
+    const state          = (formData.get('state') as string)?.trim() || null
+    const service_zip    = (formData.get('service_zip') as string)?.trim() || null
 
-  if (!name) return { error: 'Vendor name is required' }
-  if (!email) return { error: 'Email address is required. Vendors need an email to receive work order dispatch notifications.' }
+    if (!name) return { error: 'Vendor name is required' }
+    if (!email) return { error: 'Email address is required. Vendors need an email to receive work order dispatch notifications.' }
 
-  const { data: vendor, error } = await supabase.from('vendors').insert({
-    org_id: membership.org_id,
-    name,
-    contact_name,
-    email,
-    phone,
-    specialty: specialty as VendorSpecialty,
-    portal_enabled,
-    address,
-    city,
-    state,
-    service_zip,
-    is_active: true,
-  }).select('id').single()
-
-  if (error) {
-    console.error('[addVendor]', error)
-    reportError(error, { site: 'serverAction.settings.addVendor', orgId: membership.org_id })
-    return { error: 'Operation failed. Please try again.' }
-  }
-
-  // Geocode from service ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
-  if (service_zip) {
-    const coords = await geocodeZip(service_zip)
-    if (coords) {
-      await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendor.id)
-    }
-  }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'vendor.created',
-    targetType: 'vendor',
-    targetId:   vendor.id,
-    metadata:   { name, specialty },
-  })
-
-  revalidatePath('/vendors')
-  revalidatePath('/settings')
-  return {
-    success: true,
-    vendor: {
-      id: vendor.id,
+    const { data: vendor, error } = await supabase.from('vendors').insert({
+      org_id: membership.org_id,
       name,
-      specialty,
       contact_name,
-    },
+      email,
+      phone,
+      specialty: specialty as VendorSpecialty,
+      portal_enabled,
+      address,
+      city,
+      state,
+      service_zip,
+      is_active: true,
+    }).select('id').single()
+
+    if (error) {
+      console.error('[addVendor]', error)
+      reportError(error, { site: 'serverAction.settings.addVendor', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    // Geocode from service ZIP only — Mapbox postcode endpoint requires a ZIP, not a full address
+    if (service_zip) {
+      const coords = await geocodeZip(service_zip)
+      if (coords) {
+        await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendor.id)
+      }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'vendor.created',
+      targetType: 'vendor',
+      targetId:   vendor.id,
+      metadata:   { name, specialty },
+    })
+
+    revalidatePath('/vendors')
+    revalidatePath('/settings')
+    return {
+      success: true,
+      vendor: {
+        id: vendor.id,
+        name,
+        specialty,
+        contact_name,
+      },
+    }
+  } catch (err) {
+    console.error('[addVendor]', err)
+    return { error: 'Operation failed. Please try again.' }
   }
 }
 
@@ -434,352 +479,284 @@ export async function updateVendor(
   _prev: SettingsActionState | null,
   formData: FormData
 ): Promise<SettingsActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  const name         = (formData.get('name') as string)?.trim()
-  const contact_name = (formData.get('contact_name') as string)?.trim() || null
-  const email        = (formData.get('email') as string)?.trim() || null
-  const phone        = (formData.get('phone') as string)?.trim() || null
-  const specialty    = (formData.get('specialty') as string) || 'general'
-  const address      = (formData.get('address') as string)?.trim() || null
-  const city         = (formData.get('city') as string)?.trim() || null
-  const state        = (formData.get('state') as string)?.trim() || null
-  const service_zip  = (formData.get('service_zip') as string)?.trim() || null
-  const notes        = (formData.get('notes') as string)?.trim() || null
+    const name         = (formData.get('name') as string)?.trim()
+    const contact_name = (formData.get('contact_name') as string)?.trim() || null
+    const email        = (formData.get('email') as string)?.trim() || null
+    const phone        = (formData.get('phone') as string)?.trim() || null
+    const specialty    = (formData.get('specialty') as string) || 'general'
+    const address      = (formData.get('address') as string)?.trim() || null
+    const city         = (formData.get('city') as string)?.trim() || null
+    const state        = (formData.get('state') as string)?.trim() || null
+    const service_zip  = (formData.get('service_zip') as string)?.trim() || null
+    const notes        = (formData.get('notes') as string)?.trim() || null
 
-  if (!name) return { error: 'Vendor name is required' }
+    if (!name) return { error: 'Vendor name is required' }
 
-  const { data: existing } = await supabase
-    .from('vendors')
-    .select('service_zip')
-    .eq('id', vendorId)
-    .eq('org_id', membership.org_id)
-    .single()
+    const { data: existing } = await supabase
+      .from('vendors')
+      .select('service_zip')
+      .eq('id', vendorId)
+      .eq('org_id', membership.org_id)
+      .single()
 
-  const { error } = await supabase
-    .from('vendors')
-    .update({ name, contact_name, email, phone, specialty: specialty as VendorSpecialty, address, city, state, service_zip, notes })
-    .eq('id', vendorId)
-    .eq('org_id', membership.org_id)
+    const { error } = await supabase
+      .from('vendors')
+      .update({ name, contact_name, email, phone, specialty: specialty as VendorSpecialty, address, city, state, service_zip, notes })
+      .eq('id', vendorId)
+      .eq('org_id', membership.org_id)
 
-  if (error) {
-    console.error('[updateVendor]', error)
-    reportError(error, { site: 'serverAction.settings.updateVendor', orgId: membership.org_id })
+    if (error) {
+      console.error('[updateVendor]', error)
+      reportError(error, { site: 'serverAction.settings.updateVendor', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    // Re-geocode when service ZIP changes — Mapbox postcode endpoint requires a ZIP, not a full address
+    const zipChanged = service_zip !== (existing?.service_zip ?? null)
+
+    if (zipChanged && service_zip) {
+      const coords = await geocodeZip(service_zip)
+      if (coords) {
+        await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendorId)
+      }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'vendor.updated',
+      targetType: 'vendor',
+      targetId:   vendorId,
+      metadata:   { name, specialty },
+    })
+
+    revalidatePath('/vendors')
+    revalidatePath('/settings')
+    return { success: true }
+  } catch (err) {
+    console.error('[updateVendor]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  // Re-geocode when service ZIP changes — Mapbox postcode endpoint requires a ZIP, not a full address
-  const zipChanged = service_zip !== (existing?.service_zip ?? null)
-
-  if (zipChanged && service_zip) {
-    const coords = await geocodeZip(service_zip)
-    if (coords) {
-      await supabase.from('vendors').update({ lat: coords.lat, lng: coords.lng }).eq('id', vendorId)
-    }
-  }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'vendor.updated',
-    targetType: 'vendor',
-    targetId:   vendorId,
-    metadata:   { name, specialty },
-  })
-
-  revalidatePath('/vendors')
-  revalidatePath('/settings')
-  return { success: true }
 }
 
 export async function updateVendorPortal(vendorId: string, enabled: boolean): Promise<void> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  await supabase
-    .from('vendors')
-    .update({ portal_enabled: enabled })
-    .eq('id', vendorId)
-    .eq('org_id', membership.org_id)
+    await supabase
+      .from('vendors')
+      .update({ portal_enabled: enabled })
+      .eq('id', vendorId)
+      .eq('org_id', membership.org_id)
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'vendor.portal_access.updated',
-    targetType: 'vendor',
-    targetId:   vendorId,
-    metadata:   { enabled },
-  })
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'vendor.portal_access.updated',
+      targetType: 'vendor',
+      targetId:   vendorId,
+      metadata:   { enabled },
+    })
 
-  revalidatePath('/vendors')
-  revalidatePath('/settings')
+    revalidatePath('/vendors')
+    revalidatePath('/settings')
+  } catch (err) {
+    console.error('[updateVendorPortal]', err)
+    throw err
+  }
 }
 
 export async function deactivateVendor(vendorId: string): Promise<void> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  await supabase
-    .from('vendors')
-    .update({ is_active: false })
-    .eq('id', vendorId)
-    .eq('org_id', membership.org_id)
+    await supabase
+      .from('vendors')
+      .update({ is_active: false })
+      .eq('id', vendorId)
+      .eq('org_id', membership.org_id)
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'vendor.deactivated',
-    targetType: 'vendor',
-    targetId:   vendorId,
-  })
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'vendor.deactivated',
+      targetType: 'vendor',
+      targetId:   vendorId,
+    })
 
-  revalidatePath('/vendors')
-  revalidatePath('/settings')
+    revalidatePath('/vendors')
+    revalidatePath('/settings')
+  } catch (err) {
+    console.error('[deactivateVendor]', err)
+    throw err
+  }
 }
 
 export async function bulkImportVendors(
   rows: Array<{ name: string; contact_name?: string; email?: string; phone?: string; specialty?: string }>
 ): Promise<{ imported: number; skipped: number; error?: string }> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
+    if (!rows.length) return { imported: 0, skipped: 0, error: 'No rows to import' }
 
-  const valid   = rows.filter((r) => r.name?.trim() && r.email?.trim())
-  const skipped = rows.length - valid.length
+    const valid   = rows.filter((r) => r.name?.trim() && r.email?.trim())
+    const skipped = rows.length - valid.length
 
-  if (!valid.length) return { imported: 0, skipped, error: 'No rows with a valid name and email' }
+    if (!valid.length) return { imported: 0, skipped, error: 'No rows with a valid name and email' }
 
-  const records = valid.map((r) => ({
-    org_id:         membership.org_id,
-    name:           r.name.trim(),
-    contact_name:   r.contact_name?.trim() || null,
-    email:          r.email?.trim() || null,
-    phone:          r.phone?.trim() || null,
-    specialty:      (r.specialty?.trim() as VendorSpecialty) || 'general' as VendorSpecialty,
-    portal_enabled: false,
-    is_active:      true,
-  }))
+    const records = valid.map((r) => ({
+      org_id:         membership.org_id,
+      name:           r.name.trim(),
+      contact_name:   r.contact_name?.trim() || null,
+      email:          r.email?.trim() || null,
+      phone:          r.phone?.trim() || null,
+      specialty:      (r.specialty?.trim() as VendorSpecialty) || 'general' as VendorSpecialty,
+      portal_enabled: false,
+      is_active:      true,
+    }))
 
-  const { error } = await supabase.from('vendors').insert(records)
-  if (error) {
-    console.error('[bulkImportVendors]', error)
-    reportError(error, { site: 'serverAction.settings.bulkImportVendors', orgId: membership.org_id })
-    return { imported: 0, skipped, error: 'Operation failed. Please try again.' }
+    const { error } = await supabase.from('vendors').insert(records)
+    if (error) {
+      console.error('[bulkImportVendors]', error)
+      reportError(error, { site: 'serverAction.settings.bulkImportVendors', orgId: membership.org_id })
+      return { imported: 0, skipped, error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'vendor.bulk_imported',
+      targetType: 'vendor',
+      metadata:   { imported: valid.length },
+    })
+
+    revalidatePath('/vendors')
+    revalidatePath('/settings')
+    return { imported: valid.length, skipped }
+  } catch (err) {
+    console.error('[bulkImportVendors]', err)
+    return { imported: 0, skipped: rows.length, error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'vendor.bulk_imported',
-    targetType: 'vendor',
-    metadata:   { imported: valid.length },
-  })
-
-  revalidatePath('/vendors')
-  revalidatePath('/settings')
-  return { imported: valid.length, skipped }
 }
 
 // ── Billing ───────────────────────────────────────────────────
 
 export async function openBillingPortal(): Promise<void> {
-  const { supabase, membership } = await requireOrgMember()
+  // redirect() throws a special Next.js control-flow error internally — it
+  // must not be caught here, so it's called after the try block completes
+  // rather than from inside it.
+  let portalUrl: string | null = null
 
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('stripe_customer_id')
-    .eq('id', membership.org_id)
-    .single()
+  try {
+    const { supabase, membership } = await requireOrgMember()
 
-  if (!org?.stripe_customer_id) return
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('stripe_customer_id')
+      .eq('id', membership.org_id)
+      .single()
 
-  const session = await stripe.billingPortal.sessions.create({
-    customer: org.stripe_customer_id,
-    return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
-  })
+    if (!org?.stripe_customer_id) return
 
-  redirect(session.url)
+    const session = await stripe.billingPortal.sessions.create({
+      customer: org.stripe_customer_id,
+      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
+    })
+
+    portalUrl = session.url
+  } catch (err) {
+    console.error('[openBillingPortal]', err)
+    throw err
+  }
+
+  if (portalUrl) {
+    redirect(portalUrl)
+  }
 }
 
 export async function inviteCrewMember(
   crewMemberId: string
 ): Promise<{ error?: string; success?: boolean }> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  if (!['owner', 'admin', 'manager'].includes(membership.role)) {
-    return { error: 'Permission denied' }
-  }
-
-  const { data: crew } = await supabase
-    .from('crew_members')
-    .select('id, name, email, phone, invite_token, user_id, invite_sent_at')
-    .eq('id', crewMemberId)
-    .eq('org_id', membership.org_id)
-    .single()
-
-  if (!crew)        return { error: 'Crew member not found' }
-  if (!crew.email && !crew.phone) return { error: 'No contact information on file for this crew member' }
-  if (crew.user_id) return { error: 'This crew member already has an active account' }
-
-  // Atomically claim the send via a conditional update keyed on the same 10s
-  // window the old heuristic used — closes the race where two concurrent
-  // requests (double-click, two tabs) both read the same invite_sent_at and
-  // both proceed to send. A deliberate "Resend Invite" click after the
-  // window still claims successfully and sends.
-  const windowStart = new Date(Date.now() - 10_000).toISOString()
-  const { data: claimed } = await supabase
-    .from('crew_members')
-    .update({ invite_sent_at: new Date().toISOString() })
-    .eq('id', crewMemberId)
-    .eq('org_id', membership.org_id)
-    .or(`invite_sent_at.is.null,invite_sent_at.lt.${windowStart}`)
-    .select('id')
-    .maybeSingle()
-
-  if (!claimed) return { success: true }
-
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('name')
-    .eq('id', membership.org_id)
-    .single()
-
-  const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
-
-  if (crew.email) {
-    const { resend, FROM } = await import('@/lib/resend/client')
-    const html = await renderCrewInviteEmail({
-      crewName:  crew.name,
-      orgName:   org?.name ?? 'Your property manager',
-      inviteUrl,
-    })
-    const { error: emailError } = await resend.emails.send({
-      from:     FROM,
-      to:       crew.email,
-      replyTo:  'help@fieldstay.app',
-      subject:  `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
-      html,
-    })
-
-    if (emailError) {
-      console.error('[inviteCrewMember] email send failed')
-      reportError(emailError, { site: 'serverAction.settings.inviteCrewMember', orgId: membership.org_id })
-      // Release the claim so a retry isn't blocked by the window above
-      await supabase
-        .from('crew_members')
-        .update({ invite_sent_at: crew.invite_sent_at })
-        .eq('id', crewMemberId)
-      return { error: 'Failed to send invite email. Please try again.' }
+    if (!['owner', 'admin', 'manager'].includes(membership.role)) {
+      return { error: 'Permission denied' }
     }
-  }
 
-  // SMS — crew with a phone number receive an invite via SMS in addition to
-  // (or instead of) email. Non-fatal on failure.
-  if (crew.phone) {
-    const { normalizePhoneToE164, sendSMS } =
-      await import('@/lib/sms/telnyx')
+    const { data: crew } = await supabase
+      .from('crew_members')
+      .select('id, name, email, phone, invite_token, user_id, invite_sent_at')
+      .eq('id', crewMemberId)
+      .eq('org_id', membership.org_id)
+      .single()
 
-    const e164 = normalizePhoneToE164(crew.phone)
-    if (e164) {
-      const smsBody = await renderSmsBody(membership.org_id, 'crew_invite', {
-        crew_name:  crew.name,
-        org_name:   org?.name ?? 'Your property manager',
-        invite_url: inviteUrl,
-      })
-      try {
-        await sendSMS(e164, smsBody)
-      } catch (smsErr) {
-        console.error('[inviteCrewMember] SMS failed (non-fatal):', smsErr)
-        reportError(smsErr, { site: 'serverAction.settings.inviteCrewMember.inner', orgId: membership.org_id })
-      }
-    }
-  }
+    if (!crew)        return { error: 'Crew member not found' }
+    if (!crew.email && !crew.phone) return { error: 'No contact information on file for this crew member' }
+    if (crew.user_id) return { error: 'This crew member already has an active account' }
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'crew.invite.sent',
-    targetType: 'crew_member',
-    targetId:   crewMemberId,
-  })
-
-  revalidatePath('/crew-manage')
-  revalidatePath('/settings')
-  return { success: true }
-}
-
-export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: string }> {
-  const { user, supabase, membership } = await requireOrgMember()
-
-  if (!['owner', 'admin', 'manager'].includes(membership.role)) {
-    return { sent: 0, error: 'Permission denied' }
-  }
-
-  const { data: uninvited, error: queryError } = await supabase
-    .from('crew_members')
-    .select('id, name, email, phone, invite_token')
-    .eq('org_id', membership.org_id)
-    .eq('is_active', true)
-    .is('user_id', null)
-    .is('invite_sent_at', null)
-    .or('email.not.is.null,phone.not.is.null')
-
-  if (queryError) {
-    console.error('[inviteAllUninvitedCrew] query failed')
-    reportError(queryError, { site: 'serverAction.settings.inviteAllUninvitedCrew', orgId: membership.org_id })
-    return { sent: 0, error: 'Failed to load crew members. Please try again.' }
-  }
-
-  if (!uninvited?.length) return { sent: 0 }
-
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('name')
-    .eq('id', membership.org_id)
-    .single()
-
-  const { resend: resendClient, FROM: from } = await import('@/lib/resend/client')
-
-  let sent = 0
-  const invitedCrewIds: string[] = []
-  for (const crew of uninvited) {
-    if (!crew.email && !crew.phone) continue
-
-    // Atomically claim this crew member before sending — closes the race
-    // where a double-click fires two concurrent invocations that both query
-    // the same "uninvited" list and each send a duplicate invite to everyone.
+    // Atomically claim the send via a conditional update keyed on the same 10s
+    // window the old heuristic used — closes the race where two concurrent
+    // requests (double-click, two tabs) both read the same invite_sent_at and
+    // both proceed to send. A deliberate "Resend Invite" click after the
+    // window still claims successfully and sends.
+    const windowStart = new Date(Date.now() - 10_000).toISOString()
     const { data: claimed } = await supabase
       .from('crew_members')
       .update({ invite_sent_at: new Date().toISOString() })
-      .eq('id', crew.id)
+      .eq('id', crewMemberId)
       .eq('org_id', membership.org_id)
-      .is('invite_sent_at', null)
+      .or(`invite_sent_at.is.null,invite_sent_at.lt.${windowStart}`)
       .select('id')
       .maybeSingle()
 
-    if (!claimed) continue
+    if (!claimed) return { success: true }
+
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', membership.org_id)
+      .single()
 
     const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
-    let delivered = false
 
     if (crew.email) {
+      const { resend, FROM } = await import('@/lib/resend/client')
       const html = await renderCrewInviteEmail({
         crewName:  crew.name,
         orgName:   org?.name ?? 'Your property manager',
         inviteUrl,
       })
-      const { error: emailError } = await resendClient.emails.send({
-        from:    from,
-        to:      crew.email,
-        replyTo: 'help@fieldstay.app',
-        subject: `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
+      const { error: emailError } = await resend.emails.send({
+        from:     FROM,
+        to:       crew.email,
+        replyTo:  'help@fieldstay.app',
+        subject:  `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
         html,
       })
-      if (!emailError) delivered = true
+
+      if (emailError) {
+        console.error('[inviteCrewMember] email send failed')
+        reportError(emailError, { site: 'serverAction.settings.inviteCrewMember', orgId: membership.org_id })
+        // Release the claim so a retry isn't blocked by the window above
+        await supabase
+          .from('crew_members')
+          .update({ invite_sent_at: crew.invite_sent_at })
+          .eq('id', crewMemberId)
+        return { error: 'Failed to send invite email. Please try again.' }
+      }
     }
 
-    // No email on file but a phone number exists — send via SMS instead.
-    // Non-fatal on failure, mirroring inviteCrewMember()'s single-invite path.
+    // SMS — crew with a phone number receive an invite via SMS in addition to
+    // (or instead of) email. Non-fatal on failure.
     if (crew.phone) {
-      const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
+      const { normalizePhoneToE164, sendSMS } =
+        await import('@/lib/sms/telnyx')
+
       const e164 = normalizePhoneToE164(crew.phone)
       if (e164) {
         const smsBody = await renderSmsBody(membership.org_id, 'crew_invite', {
@@ -788,165 +765,314 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
           invite_url: inviteUrl,
         })
         try {
-          const result = await sendSMS(e164, smsBody)
-          if (result.sent) delivered = true
+          await sendSMS(e164, smsBody)
         } catch (smsErr) {
-          console.error('[inviteAllUninvitedCrew] SMS failed (non-fatal):', smsErr)
-          reportError(smsErr, { site: 'serverAction.settings.inviteAllUninvitedCrew.inner', orgId: membership.org_id })
+          console.error('[inviteCrewMember] SMS failed (non-fatal):', smsErr)
+          reportError(smsErr, { site: 'serverAction.settings.inviteCrewMember.inner', orgId: membership.org_id })
         }
       }
     }
 
-    if (delivered) {
-      sent++
-      invitedCrewIds.push(crew.id)
-    } else {
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'crew.invite.sent',
+      targetType: 'crew_member',
+      targetId:   crewMemberId,
+    })
+
+    revalidatePath('/crew-manage')
+    revalidatePath('/settings')
+    return { success: true }
+  } catch (err) {
+    console.error('[inviteCrewMember]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: string }> {
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
+
+    if (!['owner', 'admin', 'manager'].includes(membership.role)) {
+      return { sent: 0, error: 'Permission denied' }
+    }
+
+    const { data: uninvited, error: queryError } = await supabase
+      .from('crew_members')
+      .select('id, name, email, phone, invite_token')
+      .eq('org_id', membership.org_id)
+      .eq('is_active', true)
+      .is('user_id', null)
+      .is('invite_sent_at', null)
+      .or('email.not.is.null,phone.not.is.null')
+
+    if (queryError) {
+      console.error('[inviteAllUninvitedCrew] query failed')
+      reportError(queryError, { site: 'serverAction.settings.inviteAllUninvitedCrew', orgId: membership.org_id })
+      return { sent: 0, error: 'Failed to load crew members. Please try again.' }
+    }
+
+    if (!uninvited?.length) return { sent: 0 }
+
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('name')
+      .eq('id', membership.org_id)
+      .single()
+
+    const { resend: resendClient, FROM: from } = await import('@/lib/resend/client')
+
+    // Invites one crew member; returns their id if an invite was actually
+    // delivered, or null (not claimed, or delivery failed) — never throws,
+    // so Promise.all below can't have one crew member's failure take down
+    // the rest of the batch.
+    async function inviteOne(crew: NonNullable<typeof uninvited>[number]): Promise<string | null> {
+      if (!crew.email && !crew.phone) return null
+
+      // Atomically claim this crew member before sending — closes the race
+      // where a double-click fires two concurrent invocations that both query
+      // the same "uninvited" list and each send a duplicate invite to everyone.
+      const { data: claimed } = await supabase
+        .from('crew_members')
+        .update({ invite_sent_at: new Date().toISOString() })
+        .eq('id', crew.id)
+        .eq('org_id', membership.org_id)
+        .is('invite_sent_at', null)
+        .select('id')
+        .maybeSingle()
+
+      if (!claimed) return null
+
+      const inviteUrl = `${process.env.NEXT_PUBLIC_APP_URL}/crew-invite/${crew.invite_token}`
+      let delivered = false
+
+      if (crew.email) {
+        const html = await renderCrewInviteEmail({
+          crewName:  crew.name,
+          orgName:   org?.name ?? 'Your property manager',
+          inviteUrl,
+        })
+        const { error: emailError } = await resendClient.emails.send({
+          from:    from,
+          to:      crew.email,
+          replyTo: 'help@fieldstay.app',
+          subject: `You've been invited to join ${org?.name ?? 'FieldStay'} — crew app access`,
+          html,
+        })
+        if (!emailError) delivered = true
+      }
+
+      // No email on file but a phone number exists — send via SMS instead.
+      // Non-fatal on failure, mirroring inviteCrewMember()'s single-invite path.
+      if (crew.phone) {
+        const { normalizePhoneToE164, sendSMS } = await import('@/lib/sms/telnyx')
+        const e164 = normalizePhoneToE164(crew.phone)
+        if (e164) {
+          const smsBody = await renderSmsBody(membership.org_id, 'crew_invite', {
+            crew_name:  crew.name,
+            org_name:   org?.name ?? 'Your property manager',
+            invite_url: inviteUrl,
+          })
+          try {
+            const result = await sendSMS(e164, smsBody)
+            if (result.sent) delivered = true
+          } catch (smsErr) {
+            console.error('[inviteAllUninvitedCrew] SMS failed (non-fatal):', smsErr)
+            reportError(smsErr, { site: 'serverAction.settings.inviteAllUninvitedCrew.inner', orgId: membership.org_id })
+          }
+        }
+      }
+
+      if (delivered) return crew.id
+
       // Release the claim so a future bulk run or manual resend can retry
       await supabase
         .from('crew_members')
         .update({ invite_sent_at: null })
         .eq('id', crew.id)
         .eq('org_id', membership.org_id)
+      return null
     }
-  }
 
-  if (invitedCrewIds.length > 0) {
-    await logAuditEvents(
-      invitedCrewIds.map((crewId) => ({
-        orgId:      membership.org_id,
-        actorId:    user.id,
-        action:     'crew.invite.sent' as const,
-        targetType: 'crew_member',
-        targetId:   crewId,
-      }))
-    )
-  }
+    // Bounded concurrency — fires up to 5 invites at a time instead of one
+    // sequential await per crew member (this can be 20+ round trips per bulk
+    // send otherwise), while still capping burst load on Resend/Telnyx.
+    const INVITE_CONCURRENCY = 5
+    let sent = 0
+    const invitedCrewIds: string[] = []
+    for (let i = 0; i < uninvited.length; i += INVITE_CONCURRENCY) {
+      const batch   = uninvited.slice(i, i + INVITE_CONCURRENCY)
+      const results = await Promise.all(batch.map(inviteOne))
+      for (const crewId of results) {
+        if (crewId) {
+          sent++
+          invitedCrewIds.push(crewId)
+        }
+      }
+    }
 
-  revalidatePath('/crew-manage')
-  return { sent }
+    if (invitedCrewIds.length > 0) {
+      await logAuditEvents(
+        invitedCrewIds.map((crewId) => ({
+          orgId:      membership.org_id,
+          actorId:    user.id,
+          action:     'crew.invite.sent' as const,
+          targetType: 'crew_member',
+          targetId:   crewId,
+        }))
+      )
+    }
+
+    revalidatePath('/crew-manage')
+    return { sent }
+  } catch (err) {
+    console.error('[inviteAllUninvitedCrew]', err)
+    return { sent: 0, error: 'Operation failed. Please try again.' }
+  }
 }
 
 export async function updateAutoAssignMode(
   mode: 'suggest' | 'autopilot' | 'disabled'
 ): Promise<SettingsActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  const { error } = await supabase
-    .from('organizations')
-    .update({ auto_assign_mode: mode })
-    .eq('id', membership.org_id)
+    const { error } = await supabase
+      .from('organizations')
+      .update({ auto_assign_mode: mode })
+      .eq('id', membership.org_id)
 
-  if (error) {
-    console.error('[updateAutoAssignMode]', error)
-    reportError(error, { site: 'serverAction.settings.updateAutoAssignMode', orgId: membership.org_id })
+    if (error) {
+      console.error('[updateAutoAssignMode]', error)
+      reportError(error, { site: 'serverAction.settings.updateAutoAssignMode', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org.auto_assign_mode.updated',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+      metadata:   { mode },
+    })
+
+    revalidatePath('/settings')
+    return { success: true }
+  } catch (err) {
+    console.error('[updateAutoAssignMode]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'org.auto_assign_mode.updated',
-    targetType: 'organization',
-    targetId:   membership.org_id,
-    metadata:   { mode },
-  })
-
-  revalidatePath('/settings')
-  return { success: true }
 }
 
 export async function updateVendorAutoAssignMode(
   mode: 'suggest' | 'disabled'
 ): Promise<SettingsActionState> {
-  const { supabase, membership, user } = await requireOrgMember()
+  try {
+    const { supabase, membership, user } = await requireOrgMember()
 
-  const { error } = await supabase
-    .from('organizations')
-    .update({ vendor_auto_assign_mode: mode })
-    .eq('id', membership.org_id)
+    const { error } = await supabase
+      .from('organizations')
+      .update({ vendor_auto_assign_mode: mode })
+      .eq('id', membership.org_id)
 
-  if (error) {
-    console.error('[updateVendorAutoAssignMode]', error)
-    reportError(error, { site: 'serverAction.settings.updateVendorAutoAssignMode', orgId: membership.org_id })
+    if (error) {
+      console.error('[updateVendorAutoAssignMode]', error)
+      reportError(error, { site: 'serverAction.settings.updateVendorAutoAssignMode', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org.vendor_auto_assign_mode.updated',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+      metadata:   { mode },
+    })
+
+    revalidatePath('/settings')
+    return { success: true }
+  } catch (err) {
+    console.error('[updateVendorAutoAssignMode]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'org.vendor_auto_assign_mode.updated',
-    targetType: 'organization',
-    targetId:   membership.org_id,
-    metadata:   { mode },
-  })
-
-  revalidatePath('/settings')
-  return { success: true }
 }
 
 export async function updateCommsRetention(days: number): Promise<SettingsActionState> {
-  const { user, supabase, membership } = await requireOrgMember()
+  try {
+    const { user, supabase, membership } = await requireOrgMember()
 
-  const { error } = await supabase
-    .from('organizations')
-    .update({ comms_log_retention_days: days })
-    .eq('id', membership.org_id)
+    const { error } = await supabase
+      .from('organizations')
+      .update({ comms_log_retention_days: days })
+      .eq('id', membership.org_id)
 
-  if (error) {
-    console.error('[updateCommsRetention]', error)
-    reportError(error, { site: 'serverAction.settings.updateCommsRetention', orgId: membership.org_id })
+    if (error) {
+      console.error('[updateCommsRetention]', error)
+      reportError(error, { site: 'serverAction.settings.updateCommsRetention', orgId: membership.org_id })
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'org.comms_retention.updated',
+      targetType: 'organization',
+      targetId:   membership.org_id,
+      metadata:   { retention_days: days },
+    })
+
+    revalidatePath('/settings')
+    return { success: true }
+  } catch (err) {
+    console.error('[updateCommsRetention]', err)
     return { error: 'Operation failed. Please try again.' }
   }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'org.comms_retention.updated',
-    targetType: 'organization',
-    targetId:   membership.org_id,
-    metadata:   { retention_days: days },
-  })
-
-  revalidatePath('/settings')
-  return { success: true }
 }
 
 export async function createCheckoutSession(
   planKey: 'starter' | 'growth' | 'portfolio',
   interval: 'monthly' | 'annual'
 ): Promise<SettingsActionState> {
-  const { supabase, membership } = await requireOrgMember()
+  try {
+    const { supabase, membership } = await requireOrgMember()
 
-  const planDef = PLANS[planKey]
-  if (!planDef) return { error: 'Invalid plan' }
+    const planDef = PLANS[planKey]
+    if (!planDef) return { error: 'Invalid plan' }
 
-  const priceId = interval === 'annual'
-    ? planDef.annualPriceId
-    : planDef.monthlyPriceId
+    const priceId = interval === 'annual'
+      ? planDef.annualPriceId
+      : planDef.monthlyPriceId
 
-  if (!priceId) return { error: 'Plan not available' }
+    if (!priceId) return { error: 'Plan not available' }
 
-  const { data: org } = await supabase
-    .from('organizations')
-    .select('stripe_customer_id, billing_email')
-    .eq('id', membership.org_id)
-    .single()
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('stripe_customer_id, billing_email')
+      .eq('id', membership.org_id)
+      .single()
 
-  const session = await stripe.checkout.sessions.create({
-    mode:                 'subscription',
-    payment_method_types: ['card'],
-    customer:             org?.stripe_customer_id ?? undefined,
-    customer_email:       !org?.stripe_customer_id ? (org?.billing_email ?? undefined) : undefined,
-    line_items:           [{ price: priceId, quantity: 1 }],
-    success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
-    cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
-    metadata:             { org_id: membership.org_id, plan: planKey },
-  })
+    const session = await stripe.checkout.sessions.create({
+      mode:                 'subscription',
+      payment_method_types: ['card'],
+      customer:             org?.stripe_customer_id ?? undefined,
+      customer_email:       !org?.stripe_customer_id ? (org?.billing_email ?? undefined) : undefined,
+      line_items:           [{ price: priceId, quantity: 1 }],
+      success_url:          `${process.env.NEXT_PUBLIC_APP_URL}/settings?checkout=success`,
+      cancel_url:           `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
+      metadata:             { org_id: membership.org_id, plan: planKey },
+    })
 
-  if (!session.url) return { error: 'Could not create checkout session' }
+    if (!session.url) return { error: 'Could not create checkout session' }
 
-  revalidatePath('/settings')
-  return { redirectUrl: session.url }
+    revalidatePath('/settings')
+    return { redirectUrl: session.url }
+  } catch (err) {
+    console.error('[createCheckoutSession]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
 }
 
 // ── SMS Templates ─────────────────────────────────────────────────────────────
@@ -954,62 +1080,77 @@ export async function createCheckoutSession(
 export async function getOrgSmsTemplates(): Promise<
   Array<{ key: string; body: string }>
 > {
-  const { supabase, membership } = await requireOrgMember()
-  const { data } = await supabase
-    .from('org_sms_templates')
-    .select('key, body')
-    .eq('org_id', membership.org_id)
-  return data ?? []
+  try {
+    const { supabase, membership } = await requireOrgMember()
+    const { data } = await supabase
+      .from('org_sms_templates')
+      .select('key, body')
+      .eq('org_id', membership.org_id)
+    return data ?? []
+  } catch (err) {
+    console.error('[getOrgSmsTemplates]', err)
+    throw err
+  }
 }
 
 export async function saveOrgSmsTemplate(
   key:  string,
   body: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  try {
+    const { supabase, membership } = await requireOrgMember()
 
-  if (!key || !body.trim()) return { error: 'Key and body are required.' }
-  if (body.trim().length > 1000) return { error: 'Template must be 1000 characters or fewer.' }
+    if (!key || !body.trim()) return { error: 'Key and body are required.' }
+    if (body.trim().length > 1000) return { error: 'Template must be 1000 characters or fewer.' }
 
-  const { error } = await supabase
-    .from('org_sms_templates')
-    .upsert(
-      {
-        org_id:     membership.org_id,
-        key,
-        body:       body.trim(),
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'org_id,key' }
-    )
+    const { error } = await supabase
+      .from('org_sms_templates')
+      .upsert(
+        {
+          org_id:     membership.org_id,
+          key,
+          body:       body.trim(),
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'org_id,key' }
+      )
 
-  if (error) {
-    console.error('[saveOrgSmsTemplate]', error)
-    reportError(error, { site: 'serverAction.settings.saveOrgSmsTemplate', orgId: membership.org_id })
+    if (error) {
+      console.error('[saveOrgSmsTemplate]', error)
+      reportError(error, { site: 'serverAction.settings.saveOrgSmsTemplate', orgId: membership.org_id })
+      return { error: 'Failed to save template. Please try again.' }
+    }
+
+    revalidatePath('/settings')
+    return {}
+  } catch (err) {
+    console.error('[saveOrgSmsTemplate]', err)
     return { error: 'Failed to save template. Please try again.' }
   }
-
-  revalidatePath('/settings')
-  return {}
 }
 
 export async function resetOrgSmsTemplate(
   key: string
 ): Promise<{ error?: string }> {
-  const { supabase, membership } = await requireOrgMember()
+  try {
+    const { supabase, membership } = await requireOrgMember()
 
-  const { error } = await supabase
-    .from('org_sms_templates')
-    .delete()
-    .eq('org_id', membership.org_id)
-    .eq('key', key)
+    const { error } = await supabase
+      .from('org_sms_templates')
+      .delete()
+      .eq('org_id', membership.org_id)
+      .eq('key', key)
 
-  if (error) {
-    console.error('[resetOrgSmsTemplate]', error)
-    reportError(error, { site: 'serverAction.settings.resetOrgSmsTemplate', orgId: membership.org_id })
+    if (error) {
+      console.error('[resetOrgSmsTemplate]', error)
+      reportError(error, { site: 'serverAction.settings.resetOrgSmsTemplate', orgId: membership.org_id })
+      return { error: 'Failed to reset template.' }
+    }
+
+    revalidatePath('/settings')
+    return {}
+  } catch (err) {
+    console.error('[resetOrgSmsTemplate]', err)
     return { error: 'Failed to reset template.' }
   }
-
-  revalidatePath('/settings')
-  return {}
 }

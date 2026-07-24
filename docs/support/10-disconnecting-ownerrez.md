@@ -2,6 +2,8 @@
 
 **Disconnecting OwnerRez stops future syncs but preserves all historical data already in FieldStay — your turnovers, work orders, and financial records are not deleted.**
 
+The same applies if you're connected to Hospitable instead — the disconnect steps below work the same way from its card in Settings → Integrations.
+
 ---
 
 ## Disconnecting OwnerRez

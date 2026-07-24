@@ -22,6 +22,11 @@ crons and has drifted out of sync with them, creating a maintenance hazard.
 ## Findings
 
 ### CRITICAL: Auto-created maintenance work orders have no idempotency guard on retry
+**Status: FIXED** — `lib/inngest/functions/cron/maintenance-schedules.ts:226-255`
+(Pass 2) and `lib/inngest/functions/cron/maintenance-schedules-helpers.ts`'s
+`createMaintenanceWorkOrder` (Pass 1) now both check for an existing WO before
+insert; migrations `20260610000001_maintenance_po_idempotency.sql` /
+`20260707145540_maintenance_po_idempotency.sql` add the backing unique index.
 - **Area:** Inngest Steps
 - **Location:** `lib/inngest/functions/cron/maintenance-schedules.ts:60-93` (Pass 1, `process-schedule-${schedule.id}`, `auto_create_wo === true` branch)
 - **Description:** When a maintenance schedule is due within `ALERT_WINDOW_DAYS` and `auto_create_wo = true`, this step directly does:
@@ -73,6 +78,8 @@ crons and has drifted out of sync with them, creating a maintenance hazard.
 ---
 
 ### CRITICAL: `create-purchase-order` step can create duplicate POs + line items on retry
+**Status: FIXED** — `lib/inngest/functions/inventory-events.ts:170-219` now
+checks `source_count_id` for an existing PO before insert and returns early if found.
 - **Area:** Inngest Steps
 - **Location:** `lib/inngest/functions/inventory-events.ts:130-162` (`handleInventoryCountSubmitted`, step `create-purchase-order`)
 - **Description:** The step performs three sequential writes with no existence
@@ -135,6 +142,7 @@ crons and has drifted out of sync with them, creating a maintenance hazard.
 ---
 
 ### HIGH: Dead duplicate cron function (`maintenance-check.ts`) has drifted from its registered replacements
+**Status: FIXED** — file no longer exists in the repo.
 - **Area:** Inngest Steps
 - **Location:** `lib/inngest/functions/maintenance-check.ts` (797 lines, exports `dailyMaintenanceCheck`, **not imported/registered** in `app/api/inngest/route.ts`)
 - **Description:** This file is an old "god function" that the route comment at

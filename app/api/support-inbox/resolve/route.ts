@@ -27,7 +27,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     })
     .eq('id', conversationId)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('[support-inbox/resolve]', error.message)
+    return NextResponse.json({ error: 'Failed to resolve conversation. Please try again.' }, { status: 500 })
+  }
 
   return NextResponse.json({ resolved: true })
 }

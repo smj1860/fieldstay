@@ -40,9 +40,11 @@ OWNERREZ_WEBHOOK_USER=
 OWNERREZ_WEBHOOK_PASSWORD=
 
 # Hostaway (API key — not OAuth)
-# Hospitable (OAuth2)
-# Both configured per-org through the integration registry; no global
-# client id/secret env vars — see Integration Registry below.
+# Hospitable (OAuth2) — HOSPITABLE_CLIENT_ID / HOSPITABLE_CLIENT_SECRET /
+# HOSPITABLE_WEBHOOK_SECRET ARE global env vars (see .env.example); every
+# org's OAuth flow uses the same registered app. lib/integrations/providers/
+# hospitable-token.ts and hospitable.ts both throw at runtime if unset.
+# See Integration Registry below for how per-org tokens are then stored.
 
 # Mapbox (geocoding — properties and vendors)
 MAPBOX_PUBLIC_TOKEN=
@@ -288,16 +290,26 @@ Reviews sync: `lib/inngest/functions/ownerrez/ownerrez-reviews-sync.ts`.
 
 ### Marketplace install (no FieldStay account yet)
 
-A user arriving from a provider's marketplace (e.g. "Connect FieldStay" inside
-OwnerRez) may hit `/callback` with a valid, already-exchanged token but no FieldStay
-session and no account. The code exchange with the provider already succeeded by that
-point — throwing the token away and making the user re-authorize from scratch after
-signup would be wasteful and fragile. Instead:
+A user arriving from a provider's marketplace (e.g. Hospitable's "Get Started"
+button, or "Connect FieldStay" inside OwnerRez) hits a callback with a valid
+authorization `code` but no FieldStay session and no account.
 
-1. `holdPendingIntegrationToken()` (`lib/integrations/vault.ts`) stores the token in
-   Vault under a random claim token and inserts a row into `pending_integration_links`
-   (30 min TTL, single-use, RLS-enabled/no-policies like `oauth_states`). The callback
-   route redirects to `/signup?provider=X&next=/connect/finish?pending_link=<token>`.
+⚠️ **The code is NOT exchanged at this point — deliberately.** An earlier
+version exchanged immediately and held the exchanged tokens for post-signup
+claim. Hospitable's partner team flagged the consequence (2026-07-22): the
+token exchange is what registers the connection on the provider's side, so
+their UI showed the user as "Connected" before any FieldStay account existed —
+and an abandoned signup left that dangling Connected state (plus an unrevoked
+refresh token in an expired pending row) forever. The exchange is now deferred
+until after the user actively authenticates:
+
+1. `holdPendingOAuthCode()` (`lib/integrations/vault.ts`) stores the raw,
+   unexchanged authorization code in Vault under a random claim token and
+   inserts a row into `pending_oauth_authorizations` (30 min TTL, single-use,
+   RLS-enabled/no-policies like `oauth_states`), along with the exact
+   `redirect_uri` the authorization was issued against (replayed on the
+   deferred exchange for providers that enforce it). The callback route
+   redirects to `/signup?provider=X&next=/connect/finish?pending_link=<token>`.
 2. `app/(auth)/signup/signup-form.tsx` threads `next` through **both** signup paths:
    Google (via the existing `fs-oauth-next` cookie mechanism, same as before) and
    email/password (embedded directly in `emailRedirectTo`'s query string — a cookie
@@ -307,18 +319,32 @@ signup would be wasteful and fragile. Instead:
    already returns a session and the client-side redirect honors `next` immediately too.
 3. `app/connect/finish/route.ts` requires an authenticated session (`requireAuth()` —
    not `requireOrgMember()`, since the user may not have completed onboarding/org
-   creation yet) and calls `claimPendingIntegrationLink()`, which re-points the
-   already-encrypted Vault secret at a real `integration_connections` row for the new
-   user — no decrypt/re-encrypt round trip, since a Vault secret isn't tied to any
-   particular consumer row. This does NOT require a second provider authorization,
-   regardless of the exact OwnerRez marketplace handoff mechanics.
-4. Expired/already-claimed pending links (or a user who lands here with no
+   creation yet), calls `claimPendingOAuthCode()` (single-use — the Vault secret
+   and pending row are destroyed in the claiming transaction), performs the
+   code→token exchange **here**, and finalizes via
+   `finalizeIntegrationConnection()` (`lib/integrations/finalize-connection.ts`,
+   shared with the standard callback: Vault storage, org linking, initial-sync
+   event gated on a real org_id).
+4. **Expired-code fallback:** provider codes are single-use and short-lived
+   (~10 min typically) while email-confirmation signup can take longer. If the
+   provider rejects the code at exchange time, `/connect/finish` redirects into
+   the standard `/api/integrations/[provider]/connect` flow — the user is
+   authenticated by then, and a provider re-authorizing an already-granted app
+   bounces straight back without re-prompting. Never a dead end.
+5. Expired/already-claimed pending links (or a user who lands here with no
    `pending_link` at all) redirect to Settings → Integrations where they can connect
    normally — never a dead end.
 
-Never store a raw access/refresh token in `pending_integration_links` directly —
-`vault_secret_id`/`refresh_token_vault_secret_id` only, same rule as
-`integration_connections`.
+Never store a raw authorization code in `pending_oauth_authorizations` directly —
+`code_vault_secret_id` only; the code is a credential, same
+zero-plaintext-at-rest rule as `integration_connections` tokens.
+
+The legacy exchanged-token holding area (`pending_integration_links` +
+`create/claim_pending_integration_link`) is no longer written to as of
+2026-07-22; its DB objects are kept through the deploy window and should be
+dropped in a follow-up migration. TTL cleanup for both tables runs
+probabilistically via `cleanupExpiredPendingIntegrationArtifacts()` from the
+oneclick callback and `/connect/finish` routes.
 
 ---
 

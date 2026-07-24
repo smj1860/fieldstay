@@ -3,6 +3,7 @@ import { createServiceClient }       from '@/lib/supabase/server'
 import { inngest }                   from '@/lib/inngest/client'
 import { workOrderRatelimit }        from '@/lib/rate-limit'
 import { extractClientIp }           from '@/lib/integrations/webhook-verification'
+import { unwrapJoin }                from '@/lib/utils/supabase-joins'
 
 // Public, unauthenticated, token-gated route — rate limit by IP so a
 // leaked/enumerated token can't drive unbounded repeated lookups or
@@ -48,7 +49,7 @@ export async function GET(
     return NextResponse.json({ error: 'This quote link has expired' }, { status: 410 })
   }
 
-  const wo = Array.isArray(qr.work_orders) ? qr.work_orders[0] : qr.work_orders
+  const wo = unwrapJoin(qr.work_orders)
 
   return NextResponse.json({
     quoteRequest: {

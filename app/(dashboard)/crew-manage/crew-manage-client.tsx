@@ -279,7 +279,17 @@ function CrewCardModal({
   onClose:      () => void
 }) {
   return (
-    <Dialog open onClose={onClose} title={member.name} maxWidthClassName="max-w-sm">
+    <Dialog
+      open
+      onClose={onClose}
+      title={member.name}
+      maxWidthClassName="max-w-sm"
+      footer={
+        !member.user_id
+          ? <InviteButton memberId={member.id} inviteSentAt={member.invite_sent_at} />
+          : undefined
+      }
+    >
       <div className="flex items-center gap-3 mb-4">
         <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0"
              style={{ background: 'var(--accent-gold-dim)', color: 'var(--accent-gold)' }}>
@@ -418,12 +428,6 @@ function CrewCardModal({
             })()}
           </div>
         </div>
-
-      {!member.user_id && (
-        <div className="pt-3 border-t border-themed mt-3">
-          <InviteButton memberId={member.id} inviteSentAt={member.invite_sent_at} />
-        </div>
-      )}
     </Dialog>
   )
 }

@@ -160,8 +160,30 @@ function AssetForm({
     }
   }
 
+  let submitButtonLabel: ReactNode
+  if (pending) {
+    submitButtonLabel = <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</>
+  } else {
+    submitButtonLabel = isEdit ? 'Save Changes' : 'Add Asset'
+  }
+
+  const formId = isEdit ? 'edit-asset-form' : 'add-asset-form'
+
   return (
-    <Dialog open onClose={onClose} title={isEdit ? 'Edit Asset' : 'Add Asset'} maxWidthClassName="max-w-2xl">
+    <Dialog
+      open
+      onClose={onClose}
+      title={isEdit ? 'Edit Asset' : 'Add Asset'}
+      maxWidthClassName="max-w-2xl"
+      footer={
+        <>
+          <Button type="submit" form={formId} disabled={pending} className="flex items-center gap-2">
+            {submitButtonLabel}
+          </Button>
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
         {/* Scan Data Plate — mobile only */}
         <div className="sm:hidden mb-4">
           <input
@@ -213,7 +235,7 @@ function AssetForm({
           <div className="mb-4"><Section179Badge /></div>
         )}
 
-        <form action={formAction} className="space-y-4">
+        <form id={formId} action={formAction} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Asset Type — only on create */}
             {!isEdit && (
@@ -349,13 +371,6 @@ function AssetForm({
               <textarea id="asset-notes" name="notes" rows={2} defaultValue={asset?.notes ?? ''} className="input resize-none" />
             </div>
           </div>
-
-          <div className="flex gap-2 pt-1">
-            <Button type="submit" disabled={pending} className="flex items-center gap-2">
-              {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : (isEdit ? 'Save Changes' : 'Add Asset')}
-            </Button>
-            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          </div>
         </form>
     </Dialog>
   )
@@ -415,17 +430,45 @@ function CsvImportModal({
 
   if (done) {
     return (
-      <Dialog open onClose={onClose} title="Import Complete" maxWidthClassName="max-w-sm">
+      <Dialog
+        open
+        onClose={onClose}
+        title="Import Complete"
+        maxWidthClassName="max-w-sm"
+        footer={<Button onClick={onClose}>Done</Button>}
+      >
         <div className="text-center py-2">
-          <p className="text-sm text-muted-themed mb-4">{rows.filter((r) => r._valid).length} assets imported.</p>
-          <Button onClick={onClose}>Done</Button>
+          <p className="text-sm text-muted-themed">{rows.filter((r) => r._valid).length} assets imported.</p>
         </div>
       </Dialog>
     )
   }
 
   return (
-    <Dialog open onClose={onClose} title="Import Assets from CSV" maxWidthClassName="max-w-3xl">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Import Assets from CSV"
+      maxWidthClassName="max-w-3xl"
+      footer={rows.length > 0 ? (
+        <>
+          <Button
+            onClick={handleImport}
+            disabled={importing || !rows.some((r) => r._valid)}
+            className="flex items-center gap-2"
+          >
+            {importing
+              ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</>
+              : `Import ${rows.filter((r) => r._valid).length} Assets`
+            }
+          </Button>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <span className="text-xs text-muted-themed ml-auto">
+            {rows.filter((r) => !r._valid).length > 0 && `${rows.filter((r) => !r._valid).length} row(s) need fixing`}
+          </span>
+        </>
+      ) : undefined}
+    >
         {rows.length === 0 ? (
           <>
             <p className="text-sm text-muted-themed mb-4">
@@ -491,22 +534,6 @@ function CsvImportModal({
               </table>
             </div>
             {error && <p className="text-sm mb-3" style={{ color: 'var(--accent-red)' }}>{error}</p>}
-            <div className="flex items-center gap-3">
-              <Button
-                onClick={handleImport}
-                disabled={importing || !rows.some((r) => r._valid)}
-                className="flex items-center gap-2"
-              >
-                {importing
-                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Importing…</>
-                  : `Import ${rows.filter((r) => r._valid).length} Assets`
-                }
-              </Button>
-              <Button variant="ghost" onClick={onClose}>Cancel</Button>
-              <span className="text-xs text-muted-themed ml-auto">
-                {rows.filter((r) => !r._valid).length > 0 && `${rows.filter((r) => !r._valid).length} row(s) need fixing`}
-              </span>
-            </div>
           </>
         )}
     </Dialog>

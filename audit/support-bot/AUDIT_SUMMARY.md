@@ -1,5 +1,8 @@
 # Support Chat Agent Audit — Coordinating Summary
 
+**As of 2026-07-23: every High/Medium finding below has since been fixed — see
+individual status updates.**
+
 Scope: lib/support/*, app/api/support/chat/route.ts, app/api/support-inbox/*,
 app/(dashboard)/support-inbox/*, components/support/support-chat-widget.tsx,
 support_bot/support_staff migrations. 4 parallel subagents covered Tenant Isolation,
@@ -22,8 +25,9 @@ per message — has none of it. Any authenticated user can hammer it directly (t
 client-side `loading` debounce is trivially bypassed by calling the API directly).
 **Fix:** add a `supportChatLimiter` to `lib/rate-limit.ts`, call `.limit(user.id)` at
 the top of the handler, mirroring `scan-data-plate/route.ts`.
-**Status:** CONFIRMED. This is the single most actionable, highest-confidence finding
-in the audit — recommend fixing first.
+**Status:** FIXED. `lib/rate-limit.ts:127-140` defines `supportChatLimiter`
+(20/min) and `supportChatDailyLimiter` (100/day); `app/api/support/chat/route.ts:11-24`
+calls both and returns 429 on either limit.
 
 ### 2. [HIGH] Escalation detection is brittle keyword-matching on bot OUTPUT — confirmed
 **File:** `lib/support/respond.ts`, `detectEscalation()` (~lines 118-134)
@@ -35,9 +39,11 @@ escalation (billing dispute, safety incident, legal threat) to silently never re
 escalation is asymmetric and significant — worse than a false positive.
 **Fix:** Replace string-matching with a forced structured tool-call/JSON output, the
 same pattern already used by `classify.ts`'s `route_support_request` tool.
-**Status:** CONFIRMED, exploitable in principle, not live-tested against the model.
+**Status:** FIXED. `detectEscalation()` no longer exists; `lib/support/respond.ts:14-35`
+now forces a structured `submit_response` tool call with a required
+`needs_escalation` boolean, applied at both response paths (respond.ts:63-73, 157-164).
 
-### 3. [MEDIUM→RESOLVED] Schema drift: `platform_staff` authorization layer not in committed migrations
+### 3. [MEDIUM→RESOLVED→FIXED] Schema drift: `platform_staff` authorization layer not in committed migrations
 **Files:** no `supabase/migrations/*.sql` references `platform_staff`/`is_platform_staff` at all
 (confirmed via repo-wide grep — zero hits). Yet it's used throughout `lib/support/*`,
 `app/api/support/chat/route.ts`, `app/api/support-inbox/*`, `support-inbox-client.tsx`,
@@ -70,8 +76,11 @@ exact DDL for disaster recovery / new environments / branch parity).
 `is_platform_staff()` function, the 4 RLS policies, and the `'human'` message-role enum
 value idempotently (`CREATE TABLE IF NOT EXISTS`, `CREATE OR REPLACE FUNCTION`,
 `DROP POLICY IF EXISTS` + `CREATE POLICY`) to bring source and live DB back in sync.
+**Status:** FIXED. `supabase/migrations/20260630044706_support_bot_phase3_human_inbox.sql`
+now creates `platform_staff`, `is_platform_staff()`, the 4 RLS policies, and the
+`'human'` enum value, matching live exactly.
 
-### 4. [LOW, downgraded from HIGH] Realtime subscriptions in `support-inbox-client.tsx` are inert, not leaking
+### 4. [LOW, downgraded from HIGH → FIXED] Realtime subscriptions in `support-inbox-client.tsx` are inert, not leaking
 **File:** `app/(dashboard)/support-inbox/support-inbox-client.tsx`
 Agent 1 and Agent 3 both flagged the unfiltered `postgres_changes` subscription on
 `support_conversations`/`support_messages` as High severity, contingent on the
@@ -86,31 +95,43 @@ effectively relying on manual refresh.
 **Fix (if realtime is actually wanted):** add both tables to the publication via a
 migration, then re-verify RLS scoping specifically for `postgres_changes` (Realtime
 does respect RLS once a table is published, scoped per-connection).
+**Status:** FIXED. `supabase/migrations/20260630100300_support_realtime_publication.sql`
+adds both tables to `supabase_realtime`. Note:
+`20260707145519_support_realtime_publication.sql` is a duplicate migration
+(self-annotated "already applied — do not re-run") — cosmetic dup, not a security issue.
 
 ---
 
 ## Medium Findings
 
-### 5. [MEDIUM] No explicit prompt-injection hardening in system prompt
+### 5. [MEDIUM → FIXED] No explicit prompt-injection hardening in system prompt
 `buildSystemPrompt()` (`lib/support/respond.ts`) never instructs the model to disregard
 "ignore your instructions" style attacks or refuse verbatim disclosure of the system
 prompt/tool definitions. Relies entirely on Claude's baseline behavior, no
 application-level hardening. **Fix:** add explicit precedence + non-disclosure
 instructions to the system prompt.
+**Status:** FIXED. `lib/support/respond.ts:199` now contains the exact recommended
+precedence + non-disclosure clause.
 
-### 6. [MEDIUM] `account_specific` classification is the worst-case cost path, no hard technical barrier
+### 6. [MEDIUM → FIXED, via #1] `account_specific` classification is the worst-case cost path, no hard technical barrier
 Routes to Sonnet with up to a 3-round tool-use loop (up to 4 Sonnet calls vs. 1 Haiku
 call for `faq`). The classifier (`lib/support/classify.ts`) is reasonably well-scoped
 and fails safe (defaults to cheap `faq`), but nothing structurally prevents a user from
 phrasing messages to bait this classification repeatedly. Primary mitigation is finding
 #1 (rate limiting), which bounds blast radius regardless of classification gaming.
+**Status:** FIXED via #1 — `supportChatLimiter`/`supportChatDailyLimiter` bound the
+blast radius of any classification-gaming attempt.
 
-### 7. [MEDIUM] Free-form/off-topic chatbot abuse constrained by prompt only, no output-side check
+### 7. [MEDIUM → PARTIALLY ADDRESSED] Free-form/off-topic chatbot abuse constrained by prompt only, no output-side check
 System prompt instructs the model to answer only from KB context and never invent
 features — meaningfully discourages "write me a poem" style abuse — but there's no
 technical control verifying responses stayed on-topic. Low per-message cost impact in
 isolation, but compounds with finding #1: without a throttle, this is a "free
 inference" surface on FieldStay's Anthropic/OpenAI billing at volume.
+**Status:** PARTIALLY ADDRESSED — rate limiting (the docs' own stated primary
+mitigation) is live (see #1); no separate output-side topic-conformance check was
+added, which was treated as optional/lower priority. Primary mitigation shipped,
+residual accepted risk.
 
 ---
 
@@ -158,7 +179,10 @@ inference" surface on FieldStay's Anthropic/OpenAI billing at volume.
 - Conversation history query has no offset/ordering fix — once a conversation exceeds
   10 messages, the bot always replays the *oldest* 10, not the most recent, degrading
   response quality in long conversations.
+  **Status:** FIXED. `app/api/support/chat/route.ts:63-69` now orders by
+  `created_at desc, limit(10)` then `.reverse()`.
 - Realtime "live updates" in the support inbox are currently non-functional (finding #4).
+  **Status:** FIXED — see finding #4 above.
 
 ---
 

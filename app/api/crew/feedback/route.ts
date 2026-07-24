@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/server'
+import { requireCrewMember }   from '@/lib/crew-auth'
 import { resend, FROM }              from '@/lib/resend/client'
 import { renderPmAlert }             from '@/lib/resend/emails/pm-alert'
 
@@ -13,19 +14,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Feedback text is required' }, { status: 400 })
   }
 
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-
-  const { data: crew } = await supabase
-    .from('crew_members')
-    .select('id, org_id')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .not('invite_accepted_at', 'is', null)
-    .single()
-
-  if (!crew) return NextResponse.json({ error: 'Crew member not found' }, { status: 403 })
+  // Canonical crew gate (lib/crew-auth.ts) — a previous inline copy here
+  // added an invite_accepted_at filter that locked out the ~third of live
+  // crew rows onboarded outside the invite-link flow.
+  const auth = await requireCrewMember()
+  if (!auth.ok) return auth.response
+  const { crew } = auth
 
   // org_id + crew_member_id are derived server-side from the authenticated
   // session above; the insert goes through the service client so it isn't

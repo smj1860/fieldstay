@@ -1,6 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvents } from '@/lib/audit'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import {
   scoreAssets,
   persistScores,
@@ -133,7 +134,7 @@ export const dailyAssetHealth = inngest.createFunction(
         const byType: Record<string, RepairRecord[]> = {}
 
         for (const wo of assetRepairs) {
-          const assetInfo = Array.isArray(wo.assets) ? wo.assets[0] : wo.assets
+          const assetInfo = unwrapJoin(wo.assets)
           if (!assetInfo?.asset_type || !assetInfo.installation_date || !wo.completed_date) continue
 
           const installYear = new Date(assetInfo.installation_date).getFullYear()

@@ -11,6 +11,19 @@
 //   client_id and THIS route's URL as redirect_uri — FieldStay never
 //   initiates this flow, so there is no state token for us to check.
 //
+// ⚠️ NO TOKEN EXCHANGE HAPPENS IN THIS ROUTE — deliberately.
+//   An earlier version exchanged the code for tokens here, on the raw
+//   unauthenticated GET, and held the exchanged tokens for post-signup
+//   claim. Hospitable's partner team flagged the consequence (2026-07-22):
+//   the token exchange is what registers the connection on the provider's
+//   side, so their UI showed "Connected" before the user had any FieldStay
+//   account — and an abandoned signup left that dangling Connected state
+//   (plus an unrevoked refresh token in an expired pending row) forever.
+//   This route now holds the UNEXCHANGED authorization code instead
+//   (Vault-backed, single-use, 30 min TTL) and the exchange runs in
+//   /connect/finish, after requireAuth(). Do not "optimize" by exchanging
+//   early again.
+//
 // SECURITY MODEL — read before modifying:
 //   Because there is no state/CSRF token, this route must NEVER attach the
 //   resulting connection to whatever FieldStay session happens to be active
@@ -22,19 +35,17 @@
 //
 //   Mitigation: this route ALWAYS treats the arrival as an unauthenticated
 //   marketplace install, regardless of any existing session cookie. It
-//   holds the token via holdPendingIntegrationToken() (Vault-backed,
-//   single-use, 30 min TTL) and sends the user through
+//   holds the code via holdPendingOAuthCode() and sends the user through
 //   /signup?next=/connect/finish?pending_link=..., and /connect/finish
 //   requires requireAuth() — the user must actively sign in or sign up to
-//   claim it. This exactly mirrors the existing "new user arriving from
-//   marketplace" branch already shipped in ../callback/route.ts (see its
-//   no-session branch), it's the same accepted pattern, just made
-//   unconditional here instead of a fallback for the no-session case only.
+//   claim it. Deferring the exchange strengthens this further: nothing is
+//   even registered with the provider until that active authentication
+//   happens.
 // ============================================================
 
 import { NextResponse, type NextRequest } from 'next/server'
 import { getProvider } from '@/lib/integrations/registry'
-import { holdPendingIntegrationToken } from '@/lib/integrations/vault'
+import { holdPendingOAuthCode, cleanupExpiredPendingIntegrationArtifacts } from '@/lib/integrations/vault'
 
 export async function GET(
   request: NextRequest,
@@ -70,6 +81,9 @@ export async function GET(
   }
 
   // ── 2. Load the provider adapter ────────────────────────────
+  //    Validated here even though the exchange is deferred — an unknown or
+  //    non-OAuth provider should fail now, not after the user has gone
+  //    through the whole signup flow.
   let providerAdapter
   try {
     providerAdapter = getProvider(providerId)
@@ -81,53 +95,38 @@ export async function GET(
     return errorRedirect('provider_not_oauth')
   }
 
-  // ── 3. Exchange the code for a token ────────────────────────
-  //    redirectUri is part of every provider adapter's exchangeCodeForToken
-  //    signature, but not every provider actually uses it — Hospitable's
-  //    adapter (lib/integrations/providers/hospitable.ts) destructures only
-  //    `{ code }` and documents that redirect_uri is portal-configured on
-  //    their side rather than sent per-request, so this value is inert for
-  //    Hospitable specifically. It's still passed here because the shared
-  //    IntegrationProvider interface requires it, and because a future
-  //    one-click provider (e.g. OwnerRez) may enforce it — in that case it
-  //    MUST exactly match the one-click redirect URL registered with that
-  //    provider for THIS route, not the standard-flow callback URL.
+  // ── 3. Hold the unexchanged code — never exchange here ──────
+  //    See file header. The stored redirectUri is replayed on the deferred
+  //    exchange in /connect/finish for providers that enforce redirect_uri
+  //    matching (inert for Hospitable, whose redirect_uri is
+  //    portal-configured; a future one-click provider may enforce it, in
+  //    which case it MUST be the one-click URL registered for THIS route).
   const redirectUri = `${appUrl}/api/integrations/${providerId}/callback/oneclick`
-  let tokenData
-
-  try {
-    tokenData = await providerAdapter.exchangeCodeForToken({ code, redirectUri })
-  } catch (err) {
-    console.error(`[OAuth:${providerId}:oneclick] Token exchange failed:`, err)
-    return errorRedirect('token_exchange_failed')
-  }
-
-  // ── 4. Always hold — never attach to an existing session ────
-  //    See file header. This is intentional; do not "optimize" this by
-  //    checking for an active session and skipping the hold/claim step.
   let pendingLinkToken: string
+
   try {
-    pendingLinkToken = await holdPendingIntegrationToken({
-      providerId,
-      externalUserId: tokenData.externalUserId,
-      accessToken:    tokenData.accessToken,
-      refreshToken:   tokenData.refreshToken,
-      scope:          tokenData.scope,
-      metadata:       tokenData.metadata,
-    })
+    pendingLinkToken = await holdPendingOAuthCode({ providerId, code, redirectUri })
   } catch (err) {
-    console.error(`[OAuth:${providerId}:oneclick] Failed to hold pending token:`, err)
+    console.error(`[OAuth:${providerId}:oneclick] Failed to hold pending authorization code:`, err)
     return errorRedirect('storage_failed')
   }
 
   console.log(
-    `[OAuth:${providerId}:oneclick] Token held pending claim — external user ${tokenData.externalUserId}`
+    `[OAuth:${providerId}:oneclick] Authorization code held — exchange deferred until post-signup claim`
   )
 
-  // ── 5. Send through signup/login → claim ─────────────────────
+  // Periodic TTL cleanup of expired never-claimed holds — fire-and-forget,
+  // runs on ~5% of arrivals to amortise cleanup cost without a dedicated
+  // cron. Same pattern as cleanup_webhook_dedup() in the webhook route.
+  if (Math.random() < 0.05) {
+    void cleanupExpiredPendingIntegrationArtifacts()
+  }
+
+  // ── 4. Send through signup/login → claim ─────────────────────
   //    /connect/finish requires requireAuth() (see app/connect/finish/route.ts)
-  //    — the user must actively authenticate before this token is linked
-  //    to any FieldStay account, regardless of any session already present.
+  //    — the user must actively authenticate before the code is exchanged or
+  //    linked to any FieldStay account, regardless of any session already
+  //    present in this browser.
   const signupUrl = new URL('/signup', appUrl)
   signupUrl.searchParams.set('provider', providerId)
   signupUrl.searchParams.set('next', `/connect/finish?pending_link=${pendingLinkToken}`)

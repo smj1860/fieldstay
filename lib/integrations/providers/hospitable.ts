@@ -20,6 +20,7 @@
 import { RateLimitError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
 import { hospitableApiLimiter } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type {
   HospitableUser,
   HospitableProperty,
@@ -260,7 +261,7 @@ export const hospitableProvider: IntegrationProvider = {
   async handleWebhookEvent({ action, payload }) {
     const data = payload as Record<string, unknown>
 
-    const entityData = (Array.isArray(data.data) ? data.data[0] : data.data) as Record<string, unknown> | undefined
+    const entityData = unwrapJoin(data.data as Record<string, unknown> | Record<string, unknown>[] | null | undefined) ?? undefined
     const entityId   = entityData?.id as string | undefined
 
     switch (action) {
@@ -394,7 +395,8 @@ export const hospitableProvider: IntegrationProvider = {
       case 'integration.disconnected':
       case 'integration_disconnected':
       case 'application_authorization_revoked':
-        // Handled upstream by the generic webhook route via revokeIntegrationToken()
+        // All three are Hospitable's revocation event names — handled upstream by
+        // the generic webhook route's REVOCATION_ACTIONS check via revokeIntegrationToken().
         break
 
       default:

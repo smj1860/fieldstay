@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createVerify } from 'crypto'
+import { verify as verifyEd25519, createPublicKey } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
@@ -8,34 +8,48 @@ import { reportError } from '@/lib/observability/report-error'
 
 // ── Signature verification ────────────────────────────────────────────────────
 // Telnyx signs webhooks with ed25519. The signed payload is `timestamp|rawBody`.
-// Public key comes from Telnyx Portal → API Keys → Ed25519 Public Key.
+// Public key comes from Telnyx Portal → API Keys → Ed25519 Public Key — a
+// base64 encoding of the raw 32-byte public key.
+//
+// Node's crypto has no streaming update() support for EdDSA (createVerify/
+// createSign only support digest-based algorithms) — confirmed live: calling
+// createVerify('ed25519').update(...) throws "Invalid digest" every time,
+// which the surrounding try/catch silently turned into "signature invalid",
+// meaning every real Telnyx webhook was being rejected regardless of whether
+// its signature was actually valid. Ed25519 requires the one-shot verify()
+// function instead, with the raw public key reconstructed as a JWK (OKP/
+// Ed25519) key object since createPublicKey has no bare "raw bytes" import
+// format for asymmetric keys.
 //
 // A cryptographically valid signature alone doesn't expire — without also
 // checking the signed timestamp, a captured request stays replayable
 // forever. isTimestampFresh() closes that window (5 min tolerance, same
 // default Stripe's SDK uses for its own webhook verification).
-function verifyTelnyxSignature(
+export function verifyTelnyxSignature(
   rawBody:   string,
   signature: string | null,
   timestamp: string | null
 ): boolean {
-  const publicKey = process.env.TELNYX_WEBHOOK_PUBLIC_KEY
-  if (!publicKey || !signature || !timestamp) return false
+  const publicKeyB64 = process.env.TELNYX_WEBHOOK_PUBLIC_KEY
+  if (!publicKeyB64 || !signature || !timestamp) return false
 
   const timestampSeconds = Number(timestamp)
   if (!Number.isFinite(timestampSeconds) || !isTimestampFresh(timestampSeconds)) return false
 
   try {
     const signedPayload = `${timestamp}|${rawBody}`
-    const verifier      = createVerify('ed25519')
-    verifier.update(signedPayload)
-    return verifier.verify(
-      Buffer.from(publicKey, 'base64'),
-      Buffer.from(signature, 'base64')
-    )
+    const publicKey = createPublicKey({
+      key:    { kty: 'OKP', crv: 'Ed25519', x: base64ToBase64Url(publicKeyB64) },
+      format: 'jwk',
+    })
+    return verifyEd25519(null, Buffer.from(signedPayload), publicKey, Buffer.from(signature, 'base64'))
   } catch {
     return false
   }
+}
+
+function base64ToBase64Url(b64: string): string {
+  return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 export async function POST(req: NextRequest) {

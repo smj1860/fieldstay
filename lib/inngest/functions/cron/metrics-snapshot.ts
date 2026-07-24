@@ -17,20 +17,19 @@ function tally<K extends string>(values: K[]): Record<K, number> {
  * SCHEDULED: runs every 30 minutes.
  *
  * Platform-wide (not per-org) point-in-time snapshot of a handful of
- * operational health numbers, pushed to Grafana Cloud as gauges. This is
- * the first FieldStay-specific data to reach Grafana — everything else in
- * that Grafana Cloud instance today is stock Supabase/Vercel infra
- * metrics, not app-level business data.
+ * operational health numbers, sent to Sentry as Application Metrics gauges
+ * via lib/observability/metrics.ts (Sentry.metrics — originally built
+ * against a Grafana Cloud OTLP push, migrated here since it needs no
+ * separate credential beyond the DSN already in use for error reporting).
  *
- * Platform-wide rather than per-org to keep OTLP series cardinality flat
- * as the org count grows — see the "GrafanaCloud > Cardinality
- * management" dashboards already in this Grafana Cloud instance. Per-org
- * breakdowns belong in per-org event counters (see turnover-events.ts,
- * work-order-crew-completed.ts) where cardinality is naturally bounded by
- * event volume, not by every org getting its own always-on timeseries.
+ * Platform-wide rather than per-org to keep metric-attribute cardinality
+ * flat as the org count grows. Per-org breakdowns belong in per-org event
+ * counters (see turnover-events.ts, work-order-crew-completed.ts) where
+ * cardinality is naturally bounded by event volume, not by every org
+ * getting its own always-on timeseries.
  */
 export const metricsSnapshot = inngest.createFunction(
-  { id: 'cron-metrics-snapshot', name: 'Cron: Grafana Metrics Snapshot', retries: 2 },
+  { id: 'cron-metrics-snapshot', name: 'Cron: Metrics Snapshot', retries: 2 },
   { cron: '*/30 * * * *' },
   async ({ step }) => {
     await step.run('work-order-backlog', async () => {

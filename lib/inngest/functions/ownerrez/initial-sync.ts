@@ -37,6 +37,7 @@ import {
   createGuidebookPropertyConfigsForProperties,
   syncGuidebookConfigsFromProperty,
 } from '@/lib/guidebook/sync'
+import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 
 const PROVIDER = 'ownerrez'
 
@@ -45,21 +46,11 @@ async function writeSyncCount(
   field: 'properties_found' | 'bookings_found',
   value: number
 ) {
-  const supabase = createServiceClient()
-  const { data: existing } = await supabase
-    .from('integration_connections')
-    .select('metadata')
-    .eq('user_id', user_id)
-    .eq('provider_id', PROVIDER)
-    .maybeSingle()
-
-  const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
-
-  await supabase
-    .from('integration_connections')
-    .update({ metadata: { ...existingMeta, [field]: value } })
-    .eq('user_id', user_id)
-    .eq('provider_id', PROVIDER)
+  await mergeIntegrationConnectionMetadata({
+    userId:     user_id,
+    providerId: PROVIDER,
+    patch:      { [field]: value },
+  })
 }
 
 export const ownerRezInitialSync = inngest.createFunction(
@@ -180,13 +171,17 @@ export const ownerRezInitialSync = inngest.createFunction(
 
           const patch: Record<string, unknown> = {}
 
-          if (orData.bedrooms  !== null && !existing.bedrooms)
+          // === null (not a falsy check) on all three — a falsy check also
+          // matches a legitimate 0 (e.g. a studio's bedroom count), which
+          // would silently overwrite a PM's manual correction with whatever
+          // OwnerRez reports on every re-run of this step.
+          if (orData.bedrooms  !== null && existing.bedrooms === null)
             patch.bedrooms = orData.bedrooms
 
           if (orData.bathrooms !== null && existing.bathrooms === null)
             patch.bathrooms = orData.bathrooms
 
-          if (orData.sqft !== null && !existing.square_footage)
+          if (orData.sqft !== null && existing.square_footage === null)
             patch.square_footage = orData.sqft
 
           if (Object.keys(patch).length > 0) {
@@ -556,35 +551,21 @@ export const ownerRezInitialSync = inngest.createFunction(
       // ── Step 3: Update sync metadata ────────────────────────────────────────
 
       await step.run('update-last-synced', async () => {
-        const supabase = createServiceClient()
-
-        const { data: existing } = await supabase
-          .from('integration_connections')
-          .select('metadata')
-          .eq('user_id', user_id)
-          .eq('provider_id', PROVIDER)
-          .maybeSingle()
-
-        const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
-
-        const { error } = await supabase
-          .from('integration_connections')
-          .update({
-            metadata: {
-              ...existingMeta,
-              sync_cursor:       fetchBookingsResult.cursor,
-              last_synced_at:    new Date().toISOString(),
-              last_sync_status:  'success',
-              last_sync_error:   null,
-              last_sync_count:   fetchBookingsResult.count,
+        // MEDIUM-2: throw on cursor failure — a stale cursor causes full re-syncs
+        try {
+          await mergeIntegrationConnectionMetadata({
+            userId:     user_id,
+            providerId: PROVIDER,
+            patch: {
+              sync_cursor:      fetchBookingsResult.cursor,
+              last_synced_at:   new Date().toISOString(),
+              last_sync_status: 'success',
+              last_sync_error:  null,
+              last_sync_count:  fetchBookingsResult.count,
             },
           })
-          .eq('user_id', user_id)
-          .eq('provider_id', PROVIDER)
-
-        // MEDIUM-2: throw on cursor failure — a stale cursor causes full re-syncs
-        if (error) {
-          throw new Error(`[OwnerRez:${user_id}] Failed to persist sync cursor: ${error.message}`)
+        } catch (err) {
+          throw new Error(`[OwnerRez:${user_id}] Failed to persist sync cursor: ${err instanceof Error ? err.message : String(err)}`)
         }
       })
 
@@ -649,26 +630,21 @@ export const ownerRezInitialSync = inngest.createFunction(
 
         const { data: existing } = await supabase
           .from('integration_connections')
-          .select('id, metadata')
+          .select('id')
           .eq('user_id', user_id)
           .eq('provider_id', PROVIDER)
           .maybeSingle()
 
-        const existingMeta = (existing?.metadata as Record<string, unknown> | null) ?? {}
-
-        await supabase
-          .from('integration_connections')
-          .update({
-            status:   isRevoked ? 'revoked' : 'error',
-            metadata: {
-              ...existingMeta,
-              last_sync_status: 'error',
-              last_sync_error:  humanError,
-              last_synced_at:   new Date().toISOString(),
-            },
-          })
-          .eq('user_id', user_id)
-          .eq('provider_id', PROVIDER)
+        await mergeIntegrationConnectionMetadata({
+          userId:     user_id,
+          providerId: PROVIDER,
+          patch: {
+            last_sync_status: 'error',
+            last_sync_error:  humanError,
+            last_synced_at:   new Date().toISOString(),
+          },
+          status: isRevoked ? 'revoked' : 'error',
+        })
 
         await logAuditEvent({
           orgId:      org_id,

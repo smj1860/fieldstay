@@ -22,7 +22,7 @@ FieldStay is a **local-first, event-driven, multi-tenant SaaS** application. The
                │ pull sync / mutation drain
                ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  Next.js 15 on Vercel (IAD1)                                    │
+│  Next.js 16 on Vercel (IAD1)                                    │
 │  App Router · Server Components · Server Actions                 │
 └──────────────┬───────────────────────────────────────────────────┘
                │ queries (RLS enforced)
@@ -273,8 +273,8 @@ This is the idempotency key for the financial ledger. Every automated transactio
 ```
 compliant
   → expiring_soon    (expires within 30 days → email warning)
-  → grace_period     (expired 1–30 days → soft block + acknowledgement required)
-  → hard_blocked     (expired 31+ days → no WO assignment possible)
+  → grace_period     (expired 1–45 days → soft block + acknowledgement required)
+  → hard_blocked     (expired 46+ days → no WO assignment possible)
 ```
 
 The state is computed in the `vendor_compliance_status` VIEW. Application code should query the view, not the raw `vendor_compliance_documents` table.

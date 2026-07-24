@@ -25,7 +25,7 @@ export function PayInvoiceButton({
         setError(data.error ?? 'Could not create checkout session. Try again.')
         return
       }
-      window.location.href = data.url
+      globalThis.location.href = data.url
     } catch {
       setError('Network error. Please check your connection.')
     } finally {

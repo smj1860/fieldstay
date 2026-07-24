@@ -105,8 +105,9 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
     audience:    'guest',
     variables: [
       { token: '{{property_name}}', description: 'Property name', example: 'Lakeside Lodge' },
+      { token: '{{offer_line}}',    description: 'Sponsor line — always names the active rainy-day sponsor; includes their offer or custom message plus distance when available', example: 'Cozy Books Café has 15% off — just show this screen (0.3 mi away)' },
     ],
-    defaultBody: 'Heads up — rain expected near {{property_name}} today. Check your guidebook for rainy-day recommendations. Reply STOP to opt out.',
+    defaultBody: 'Heads up — rain expected near {{property_name}} today. {{offer_line}} Reply STOP to opt out.',
   },
   {
     key:         'stay_extension',

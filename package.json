@@ -2,7 +2,11 @@
   "name": "fieldstay",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "preinstall": "npx only-allow pnpm",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -19,8 +23,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
-    "@hookform/resolvers": "^3.9.1",
-    "@opentelemetry/api": "^1.9.1",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",
     "@sentry/nextjs": "^10.65.0",
@@ -45,7 +47,6 @@
     "react": "19.2.7",
     "react-calendar-timeline": "^0.30.0-beta.18",
     "react-dom": "19.2.7",
-    "react-hook-form": "^7.54.0",
     "resend": "^4.0.0",
     "stripe": "^17.0.0",
     "tailwind-merge": "^2.5.4",
@@ -65,7 +66,7 @@
     "autoprefixer": "^10.4.20",
     "dotenv": "^17.4.2",
     "eslint": "^9.16.0",
-    "eslint-config-next": "16.2.7",
+    "eslint-config-next": "^16.2.9",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.10",
     "supabase": "^2.108.0",

@@ -10,6 +10,7 @@ import {
   Search, Download, LayoutList,
 } from 'lucide-react'
 import { cn, formatDate } from '@/lib/utils'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { createBooking, cancelBooking, triggerSync } from './actions'
 import { BookingsCalendar } from './bookings-calendar'
 import { Dialog } from '@/components/ui/Dialog'
@@ -79,8 +80,7 @@ function getDateLabel(date: string): { label: string; urgent: boolean } {
 }
 
 function getTurnover(row: BookingRow): { id: string; status: string } | null {
-  if (!row.turnovers) return null
-  return Array.isArray(row.turnovers) ? (row.turnovers[0] ?? null) : row.turnovers
+  return unwrapJoin(row.turnovers)
 }
 
 // ── Source badges ─────────────────────────────────────────────────────────────
@@ -418,7 +418,19 @@ function AddBookingModal({
   if (state?.success) { onSuccess(); onClose(); return null }
 
   return (
-    <Dialog open onClose={onClose} title="Log Non-Synced Booking">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Log Non-Synced Booking"
+      footer={
+        <>
+          <Button type="submit" form="add-booking-form" disabled={pending} className="flex-1">
+            {pending ? 'Saving…' : 'Add Booking'}
+          </Button>
+          <Button type="button" onClick={onClose} variant="ghost">Cancel</Button>
+        </>
+      }
+    >
         {state?.error && (
           <div
             className="text-sm rounded-lg px-3 py-2 mb-4"
@@ -433,7 +445,7 @@ function AddBookingModal({
           (direct reservations, social media enquiries, etc.). A turnover will be automatically created.
         </p>
 
-        <form action={action} className="space-y-4">
+        <form id="add-booking-form" action={action} className="space-y-4">
           <div>
             <label className="label">Property <RequiredMark /></label>
             <select name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
@@ -492,13 +504,6 @@ function AddBookingModal({
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             A turnover will be automatically generated for this booking.
           </p>
-
-          <div className="flex gap-3 pt-1">
-            <Button type="submit" disabled={pending} className="flex-1">
-              {pending ? 'Saving…' : 'Add Booking'}
-            </Button>
-            <Button type="button" onClick={onClose} variant="ghost">Cancel</Button>
-          </div>
         </form>
     </Dialog>
   )
@@ -678,10 +683,7 @@ export function BookingsClient({
                 {checkinsToday.length} check-in{checkinsToday.length !== 1 ? 's' : ''} today
               </span>
               <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {checkinsToday.map((b) => b.properties
-                  ? (Array.isArray(b.properties) ? b.properties[0]?.name : b.properties.name)
-                  : '—'
-                ).join(', ')}
+                {checkinsToday.map((b) => unwrapJoin(b.properties)?.name ?? '—').join(', ')}
               </span>
             </div>
           )}

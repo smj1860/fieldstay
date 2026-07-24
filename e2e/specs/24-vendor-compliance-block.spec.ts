@@ -2,10 +2,11 @@ import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
 
 // Covers the vendor_compliance_status hard-block rule from CLAUDE.md
-// ("hard_blocked = expired 31+ days (no WO assignment)") — currently
+// ("hard_blocked = expired 46+ days (no WO assignment)") — currently
 // untested. The compliance_status view (migration
-// 20260606051120_add_geocoding_to_vendors_and_grace_period_logic.sql)
-// computes status live off vendor_compliance_documents.expiry_date, so a
+// 20260606051120_add_geocoding_to_vendors_and_grace_period_logic.sql,
+// grace period widened to 45 days by 20260720170645) computes status
+// live off vendor_compliance_documents.expiry_date, so a
 // document can be backdated through the real "Add Compliance Document" UI
 // (app/(dashboard)/vendors/[id]/compliance-section.tsx) to drive a vendor
 // into hard_blocked or grace_period without any service-role seeding.
@@ -18,7 +19,7 @@ test.describe('Vendor compliance hard-block', () => {
   test('[E2E] hard-blocked vendor cannot be selected on a new work order', async ({ page }) => {
     const vendorName = '[E2E] Hard Blocked Plumbing'
     await addVendor(page, vendorName, 'hardblocked@e2e-test.invalid')
-    await addComplianceDocument(page, vendorName, daysAgo(35))
+    await addComplianceDocument(page, vendorName, daysAgo(50))
 
     await page.goto('/maintenance')
     await page.getByRole('button', { name: /New Work Order|Add Work Order|Create|New WO/i }).first().click()

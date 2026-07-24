@@ -128,15 +128,35 @@ export function CreateWorkOrderModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title="New Work Order" maxWidthClassName="max-w-3xl">
-        <form action={action} className="flex flex-col max-h-[85vh] -m-6">
+    <Dialog
+      open
+      onClose={onClose}
+      title="New Work Order"
+      maxWidthClassName="max-w-3xl"
+      footer={
+        <>
+          <Button
+            type="submit"
+            form="create-work-order-form"
+            disabled={pending || selectedCompliance === 'hard_blocked'}
+            className="flex-1"
+          >
+            {pending
+              ? 'Creating…'
+              : assignMode === 'quotes' && selectedQuoteVendors.length > 0
+              ? `Create & Request ${selectedQuoteVendors.length} Quote${selectedQuoteVendors.length !== 1 ? 's' : ''}`
+              : 'Create Work Order'}
+          </Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
+        <form id="create-work-order-form" action={action} className="space-y-4">
           {/* Hidden fields for mode */}
           <input type="hidden" name="request_quotes" value={assignMode === 'quotes' ? 'true' : 'false'} />
           {assignMode === 'quotes' && selectedQuoteVendors.map((id) => (
             <input key={id} type="hidden" name="quote_vendor_ids" value={id} />
           ))}
-
-          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
 
           {state?.error && (
             <InlineAlert tone="error">
@@ -367,7 +387,7 @@ export function CreateWorkOrderModal({
                     <div className="text-xs rounded-lg px-3 py-2 mt-2 flex items-center gap-1.5"
                          style={{ background: 'var(--accent-red-dim)', color: 'var(--accent-red)', border: '1px solid rgba(240,84,84,0.2)' }}>
                       <ShieldOff className="w-3.5 h-3.5 flex-shrink-0" />
-                      This vendor has expired compliance documents (31+ days). Assignment is blocked.
+                      This vendor has expired compliance documents (46+ days). Assignment is blocked.
                     </div>
                   )}
                   {selectedCompliance === 'grace_period' && (
@@ -470,22 +490,6 @@ export function CreateWorkOrderModal({
             </div>
           </div>
 
-          </div>{/* /scrollable content */}
-
-          <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
-            <Button
-              type="submit"
-              disabled={pending || selectedCompliance === 'hard_blocked'}
-              className="flex-1"
-            >
-              {pending
-                ? 'Creating…'
-                : assignMode === 'quotes' && selectedQuoteVendors.length > 0
-                ? `Create & Request ${selectedQuoteVendors.length} Quote${selectedQuoteVendors.length !== 1 ? 's' : ''}`
-                : 'Create Work Order'}
-            </Button>
-            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          </div>
         </form>
     </Dialog>
   )

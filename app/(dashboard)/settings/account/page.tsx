@@ -54,6 +54,25 @@ export default function AccountSettingsPage() {
         onClose={() => { setShowModal(false); setConfirm(''); setError(null) }}
         title="Delete Account"
         maxWidthClassName="max-w-md"
+        footer={
+          <>
+            <Button
+              variant="danger"
+              onClick={handleDelete}
+              disabled={confirm !== 'DELETE' || pending}
+              className="flex-1"
+            >
+              {pending ? 'Deleting…' : 'Permanently Delete Account'}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => { setShowModal(false); setConfirm(''); setError(null) }}
+              className="flex-1"
+            >
+              Cancel
+            </Button>
+          </>
+        }
       >
         <p className="text-sm text-muted-themed mb-4">
           This will permanently delete your account, cancel any active subscriptions, revoke all
@@ -74,24 +93,6 @@ export default function AccountSettingsPage() {
           className="mb-4 w-full"
           autoComplete="off"
         />
-
-        <div className="flex gap-3">
-          <Button
-            variant="danger"
-            onClick={handleDelete}
-            disabled={confirm !== 'DELETE' || pending}
-            className="flex-1"
-          >
-            {pending ? 'Deleting…' : 'Permanently Delete Account'}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => { setShowModal(false); setConfirm(''); setError(null) }}
-            className="flex-1"
-          >
-            Cancel
-          </Button>
-        </div>
       </Dialog>
     </div>
   )

@@ -24,7 +24,7 @@ created from a maintenance schedule, the right vendor is selected and notified.
 
 | Layer | Tool | Notes |
 |---|---|---|
-| Framework | Next.js 14+ App Router | Server Components, Server Actions, Route Handlers |
+| Framework | Next.js 16 App Router | Server Components, Server Actions, Route Handlers |
 | Hosting | Vercel | Edge runtime where applicable |
 | Database | Supabase (PostgreSQL) | RLS on every table, no exceptions |
 | Auth | Supabase Auth | `createServerClient` from `@supabase/ssr` |
@@ -194,8 +194,15 @@ wo_number_counters          — per-org WO number sequence
 ```
 maintenance_schedules       — Has auto_create_wo (DEFAULT TRUE), vendor_specialty_hint,
                               assigned_vendor_id, next_due_date, schedule_frequency
-org_master_checklist_items  — seed checklist tasks (73 items, 7 sections)
-org_master_maintenance_schedules — seed maintenance schedules
+room_templates              — Templates Hub: org-level room library (name, auto_include,
+                              is_system). Backs the Turnover Checklist tile at /templates —
+                              replaced the old org_master_checklist_items seed table,
+                              dropped by 20260721150000_drop_org_master_checklist_items.sql
+org_maintenance_catalog_items — Templates Hub: org-level maintenance catalog item (name,
+                              category, suggested_recurrence, asset_category). Backs the
+                              Scheduled Maintenance tile at /templates — replaced the old
+                              org_master_maintenance_schedules seed table, dropped by
+                              20260721170000_drop_org_master_maintenance_schedules.sql
 checklist_templates         — property-level checklist templates
 checklist_template_sections
 checklist_template_items
@@ -209,7 +216,11 @@ inventory_catalog           — global seed catalog (115 items, 10 categories)
                               categories: paper_goods|cleaning|kitchen|bath|laundry|
                               outdoor|bedroom_linens|maintenance_safety|guest_experience|
                               technology|bedroom|other
-inventory_templates         — org-level inventory template
+org_inventory_catalog       — Templates Hub: org's own editable copy of inventory_catalog,
+                              seeded from it on first touch. platform_catalog_item_id
+                              nullable/ON DELETE SET NULL (added 2026-07-21)
+inventory_templates         — org-level inventory template. Since 2026-07-21, an org can
+                              have more than one (unique on (org_id, name), not just org_id)
 inventory_template_items    — Has preferred_brand column
 inventory_items             — property-level. Has preferred_brand (overrides template brand)
 inventory_counts            — periodic count sessions
@@ -227,8 +238,8 @@ vendor_compliance_documents — COI, licenses, bonding. Has expiry_date,
                               first_warned_at, hard_blocked_at
 vendor_compliance_status    — VIEW. compliance_status:
                               compliant|expiring_soon|grace_period|hard_blocked
-                              grace_period = expired 1–30 days (soft warn + ack)
-                              hard_blocked = expired 31+ days (no WO assignment)
+                              grace_period = expired 1–45 days (soft warn + ack)
+                              hard_blocked = expired 46+ days (no WO assignment)
 ```
 
 ### Asset Health
@@ -691,7 +702,7 @@ Key functions in `public` schema:
 
 ## Database Migrations & Schema Drift
 
-**Current state:** 147+ migrations applied to project `vpmznjktllhmmbfnxuvk`.
+**Current state:** 310+ migrations applied to project `vpmznjktllhmmbfnxuvk` (as of 2026-07-23 — check `ls supabase/migrations/ | wc -l` rather than trusting this number as it ages).
 All migrations live in `supabase/migrations/` as `YYYYMMDDHHMMSS_description.sql`.
 
 `fieldstay_migration_v1.SUPERSEDED.sql` and `fieldstay_migration_v2.SUPERSEDED.sql`
@@ -765,13 +776,22 @@ renderPmAlert({ heading, body, ctaLabel, ctaUrl, details?, table?, sections?, no
 
 ### Auth patterns
 
-**Crew API routes** — no helper exists, use inline pattern from issue-reports:
+**Crew auth (API routes AND server actions)** — always use the canonical
+`requireCrewMember()` from `lib/crew-auth.ts`. NEVER write an inline
+`crew_members` lookup as an auth gate, and NEVER filter on
+`invite_accepted_at` for crew (that's the PM-side `organization_members`
+rule only — ~a third of live crew rows have it NULL because they were
+onboarded outside the invite-link flow; filtering on it silently locks
+those crew out). This exact drift shipped as a live bug three times
+(crew/turnovers actions, crew/feedback route, crew/work-order-reports
+route, plus the crew layout gate) and was fixed 2026-07-22.
 ```typescript
-const { data: { user } } = await supabase.auth.getUser()
-if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-const { data: crew } = await supabase
-  .from('crew_members').select('id, org_id').eq('user_id', user.id).single()
-if (!crew) return NextResponse.json({ error: 'Not a crew member' }, { status: 403 })
+import { requireCrewMember } from '@/lib/crew-auth'
+
+const auth = await requireCrewMember()
+if (!auth.ok) return auth.response   // Route Handler (NextResponse)
+// if (!auth.ok) return { error: 'Crew member not found' }   // Server Action
+const { supabase, crew, user } = auth
 ```
 
 ### Table and column names

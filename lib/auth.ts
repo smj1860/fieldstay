@@ -1,7 +1,9 @@
+import { cache } from 'react'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import type { MemberRole } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 export interface OrgMembership {
   org_id: string
@@ -12,16 +14,71 @@ export interface OrgMembership {
     plan_status: string
     max_properties: number
     trial_ends_at: string | null
+    repuguard_status: 'inactive' | 'trial' | 'active' | 'cancelled'
+    onboarding_steps_completed: Record<string, boolean>
   }
 }
+
+/**
+ * Request-memoized auth lookup. requireAuth/requireOrgMember are called by
+ * the dashboard layout AND again by nearly every page/action in the same
+ * request — without memoization each call re-runs auth.getUser() plus the
+ * organization_members query. cache() dedupes them to one execution per
+ * request during an RSC render (outside a render it degrades to a plain
+ * call, so Server Actions and tests behave as before).
+ *
+ * redirect() stays OUT of these cached functions: it throws a control-flow
+ * error, and caching a rejected promise would replay a stale redirect if a
+ * later caller in the same request could handle the null differently.
+ */
+const getAuthContext = cache(async () => {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  return { supabase, user }
+})
+
+const getMembershipContext = cache(async () => {
+  const { supabase, user } = await getAuthContext()
+  if (!user) return { supabase, user, membership: null }
+
+  const { data: row } = await supabase
+    .from('organization_members')
+    .select(`
+      org_id, role,
+      organizations ( name, plan, plan_status, max_properties, trial_ends_at, repuguard_status, onboarding_steps_completed )
+    `)
+    .eq('user_id', user.id)
+    .not('invite_accepted_at', 'is', null)
+    .single()
+
+  if (!row) return { supabase, user, membership: null }
+
+  const orgData = unwrapJoin(row.organizations)
+
+  const membership: OrgMembership = {
+    org_id: row.org_id,
+    role:   row.role as MemberRole,
+    org: {
+      name:           orgData?.name ?? '',
+      plan:           orgData?.plan ?? 'starter',
+      plan_status:    orgData?.plan_status ?? 'trialing',
+      max_properties: orgData?.max_properties ?? 5,
+      trial_ends_at:  orgData?.trial_ends_at ?? null,
+      repuguard_status: orgData?.repuguard_status ?? 'inactive',
+      onboarding_steps_completed:
+        (orgData?.onboarding_steps_completed ?? {}) as Record<string, boolean>,
+    },
+  }
+
+  return { supabase, user, membership }
+})
 
 /**
  * Verify the current user is authenticated.
  * Redirects to /login if not.
  */
 export async function requireAuth() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, user } = await getAuthContext()
   if (!user) redirect('/login')
   return { user, supabase }
 }
@@ -35,37 +92,9 @@ export async function requireOrgMember(): Promise<
     ? T & { membership: OrgMembership }
     : never
 > {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const { supabase, user, membership } = await getMembershipContext()
   if (!user) redirect('/login')
-
-  const { data: row } = await supabase
-    .from('organization_members')
-    .select(`
-      org_id, role,
-      organizations ( name, plan, plan_status, max_properties, trial_ends_at )
-    `)
-    .eq('user_id', user.id)
-    .not('invite_accepted_at', 'is', null)
-    .single()
-
-  if (!row) redirect('/onboarding')
-
-  const orgData = Array.isArray(row.organizations)
-    ? row.organizations[0]
-    : row.organizations
-
-  const membership: OrgMembership = {
-    org_id: row.org_id,
-    role:   row.role as MemberRole,
-    org: {
-      name:           orgData?.name ?? '',
-      plan:           orgData?.plan ?? 'starter',
-      plan_status:    orgData?.plan_status ?? 'trialing',
-      max_properties: orgData?.max_properties ?? 5,
-      trial_ends_at:  orgData?.trial_ends_at ?? null,
-    },
-  }
+  if (!membership) redirect('/onboarding')
 
   return { user, supabase, membership } as never
 }

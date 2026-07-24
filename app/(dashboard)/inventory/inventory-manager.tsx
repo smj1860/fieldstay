@@ -5,14 +5,13 @@ import { useRouter } from 'next/navigation'
 import {
   Plus, ClipboardList, ChevronDown, X,
   Package, AlertTriangle, ShoppingCart, Check, History,
-  BarChart2, Layers, Loader2, Save,
+  BarChart2, Loader2, Save,
 } from 'lucide-react'
 import { cn, INVENTORY_CATEGORY_LABELS, formatDate } from '@/lib/utils'
 import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 import { updateParLevel, addInventoryItems, submitInventoryCount, approveInventoryCount, rejectInventoryCount, triggerShoppingCart } from './actions'
 import type { InventoryCategory, PoStatus } from '@/types/database'
 import { PortfolioInventoryView } from './portfolio-view'
-import { TemplateManager } from './template-manager'
 import { CartReadyBanner } from '@/components/inventory/cart-ready-banner'
 import { InventoryItemCard } from '@/components/inventory/inventory-item-card'
 import { NudgeBanner } from '@/components/nudge-banner'
@@ -87,22 +86,6 @@ interface PortfolioItem {
   preferred_brand: string | null
   property: { name: string } | null
   first_count_recorded_at: string | null
-}
-
-interface TemplateItem {
-  id: string
-  name: string
-  category: string
-  unit: string
-  par_level: number
-  notes: string | null
-  preferred_brand: string | null
-}
-
-interface Template {
-  id: string
-  name: string
-  inventory_template_items: TemplateItem[] | null
 }
 
 interface PurchaseOrderItem {
@@ -323,24 +306,69 @@ function AddItemsModal({
 
   const selectedArray = Array.from(selected.values())
 
+  const addItemsFooter = tab === 'catalog' ? (
+    <form action={action} className="flex gap-3 w-full">
+      <input type="hidden" name="property_id" value={propertyId} />
+      <input type="hidden" name="item_count" value={selectedArray.length} />
+      {selectedArray.map(({ catalogItem, parLevel, unit }, i) => (
+        <Fragment key={catalogItem.id}>
+          <input type="hidden" name={`item_${i}_catalog_item_id`} value={catalogItem.id} />
+          <input type="hidden" name={`item_${i}_name`}           value={catalogItem.name} />
+          <input type="hidden" name={`item_${i}_category`}       value={catalogItem.category} />
+          <input type="hidden" name={`item_${i}_unit`}           value={unit} />
+          <input type="hidden" name={`item_${i}_par_level`}      value={parLevel} />
+        </Fragment>
+      ))}
+      <Button
+        type="submit"
+        disabled={pending || selectedArray.length === 0}
+        className="flex-1 disabled:opacity-50"
+      >
+        {pending
+          ? 'Adding…'
+          : selectedArray.length === 0
+          ? 'Select items above'
+          : `Add ${selectedArray.length} item${selectedArray.length !== 1 ? 's' : ''}`}
+      </Button>
+      <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+    </form>
+  ) : (
+    <form action={action} className="flex gap-3 w-full">
+      <input type="hidden" name="property_id"        value={propertyId} />
+      <input type="hidden" name="item_count"         value="1" />
+      <input type="hidden" name="item_0_catalog_item_id" value="" />
+      <input type="hidden" name="item_0_name"        value={customName} />
+      <input type="hidden" name="item_0_category"    value={customCategory} />
+      <input type="hidden" name="item_0_unit"        value={customUnit} />
+      <input type="hidden" name="item_0_par_level"   value={customParLevel} />
+      <input type="hidden" name="item_0_notes"       value={customNotes} />
+      <Button
+        type="submit"
+        disabled={pending || !customName.trim() || !customUnit.trim()}
+        className="flex-1 disabled:opacity-50"
+      >
+        {pending ? 'Adding…' : 'Add Item'}
+      </Button>
+      <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+    </form>
+  )
+
   return (
-    <Dialog open onClose={onClose} title="Add Inventory Items">
-      <div className="flex flex-col max-h-[90vh] -m-6">
+    <Dialog open onClose={onClose} title="Add Inventory Items" footer={addItemsFooter}>
+      <div className="space-y-4">
         <Tabs
           tabs={ADD_ITEMS_TABS}
           active={tab}
           onChange={setTab}
-          className="px-6 pt-6 flex-shrink-0"
         />
 
         {state?.error && (
-          <InlineAlert tone="error" className="mx-6 mt-4 flex-shrink-0">
+          <InlineAlert tone="error">
             {state.error}
           </InlineAlert>
         )}
 
-        <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
-          {tab === 'catalog' ? (
+        {tab === 'catalog' ? (
             <>
               <div className="flex gap-1.5 flex-wrap">
                 {(['all', ...CATEGORY_ORDER] as const).map((c) => (
@@ -508,56 +536,6 @@ function AddItemsModal({
               </div>
             </>
           )}
-        </div>
-
-        <div className="px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
-          {tab === 'catalog' ? (
-            <form action={action} className="flex gap-3">
-              <input type="hidden" name="property_id" value={propertyId} />
-              <input type="hidden" name="item_count" value={selectedArray.length} />
-              {selectedArray.map(({ catalogItem, parLevel, unit }, i) => (
-                <Fragment key={catalogItem.id}>
-                  <input type="hidden" name={`item_${i}_catalog_item_id`} value={catalogItem.id} />
-                  <input type="hidden" name={`item_${i}_name`}           value={catalogItem.name} />
-                  <input type="hidden" name={`item_${i}_category`}       value={catalogItem.category} />
-                  <input type="hidden" name={`item_${i}_unit`}           value={unit} />
-                  <input type="hidden" name={`item_${i}_par_level`}      value={parLevel} />
-                </Fragment>
-              ))}
-              <Button
-                type="submit"
-                disabled={pending || selectedArray.length === 0}
-                className="flex-1 disabled:opacity-50"
-              >
-                {pending
-                  ? 'Adding…'
-                  : selectedArray.length === 0
-                  ? 'Select items above'
-                  : `Add ${selectedArray.length} item${selectedArray.length !== 1 ? 's' : ''}`}
-              </Button>
-              <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-            </form>
-          ) : (
-            <form action={action} className="flex gap-3">
-              <input type="hidden" name="property_id"        value={propertyId} />
-              <input type="hidden" name="item_count"         value="1" />
-              <input type="hidden" name="item_0_catalog_item_id" value="" />
-              <input type="hidden" name="item_0_name"        value={customName} />
-              <input type="hidden" name="item_0_category"    value={customCategory} />
-              <input type="hidden" name="item_0_unit"        value={customUnit} />
-              <input type="hidden" name="item_0_par_level"   value={customParLevel} />
-              <input type="hidden" name="item_0_notes"       value={customNotes} />
-              <Button
-                type="submit"
-                disabled={pending || !customName.trim() || !customUnit.trim()}
-                className="flex-1 disabled:opacity-50"
-              >
-                {pending ? 'Adding…' : 'Add Item'}
-              </Button>
-              <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-            </form>
-          )}
-        </div>
       </div>
     </Dialog>
   )
@@ -585,9 +563,23 @@ function RunCountModal({
     .filter(({ catItems }) => catItems.length > 0)
 
   return (
-    <Dialog open onClose={onClose} title="Run Inventory Count" maxWidthClassName="max-w-2xl">
-      <div className="max-h-[80vh] overflow-y-auto -m-6 p-6">
-        <p className="text-sm text-muted-themed -mt-3 mb-4">Enter current quantities for each item</p>
+    <Dialog
+      open
+      onClose={onClose}
+      title="Run Inventory Count"
+      maxWidthClassName="max-w-2xl"
+      footer={
+        items.length > 0 ? (
+          <>
+            <Button type="submit" form="run-count-form" disabled={pending} className="flex-1">
+              {pending ? 'Submitting…' : 'Submit Count'}
+            </Button>
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+          </>
+        ) : undefined
+      }
+    >
+      <p className="text-sm text-muted-themed mb-4">Enter current quantities for each item</p>
 
         {state?.error && (
           <InlineAlert tone="error" className="mb-4">
@@ -601,7 +593,7 @@ function RunCountModal({
             <p className="text-sm">No items to count for this property.</p>
           </div>
         ) : (
-          <form action={action} className="space-y-6">
+          <form id="run-count-form" action={action} className="space-y-6">
             <input type="hidden" name="property_id" value={propertyId} />
 
             {byCategory.map(({ cat, catItems }) => (
@@ -661,16 +653,8 @@ function RunCountModal({
                 placeholder="Any notes about this count…"
               />
             </div>
-
-            <div className="flex gap-3 pt-2 border-t border-themed">
-              <Button type="submit" disabled={pending} className="flex-1">
-                {pending ? 'Submitting…' : 'Submit Count'}
-              </Button>
-              <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-            </div>
           </form>
         )}
-      </div>
     </Dialog>
   )
 }
@@ -1131,6 +1115,12 @@ function PropertyInventoryCard({
 
 // ── Pending Count Review ──────────────────────────────────────────────────────
 
+function diffColor(diff: number, neutralColor: string): string {
+  if (diff > 0) return 'var(--accent-green)'
+  if (diff < 0) return 'var(--accent-red)'
+  return neutralColor
+}
+
 function PendingCountReview({
   drafts,
   properties,
@@ -1218,7 +1208,7 @@ function PendingCountReview({
                           <span
                             className="text-right tabular-nums font-medium"
                             style={{
-                              color: diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--accent-amber)',
+                              color: diffColor(diff, 'var(--accent-amber)'),
                             }}
                           >
                             {di.counted_qty}
@@ -1226,7 +1216,7 @@ function PendingCountReview({
                           <span
                             className="text-right text-xs tabular-nums"
                             style={{
-                              color: diff > 0 ? 'var(--accent-green)' : diff < 0 ? 'var(--accent-red)' : 'var(--text-muted)',
+                              color: diffColor(diff, 'var(--text-muted)'),
                             }}
                           >
                             {diff > 0 ? `+${diff}` : diff === 0 ? '—' : String(diff)}
@@ -1265,7 +1255,7 @@ function PendingCountReview({
 
 // ── Main InventoryManager ─────────────────────────────────────────────────────
 
-type InventoryTab = 'property' | 'portfolio' | 'template'
+type InventoryTab = 'property' | 'portfolio'
 
 export function InventoryManager({
   properties,
@@ -1274,7 +1264,6 @@ export function InventoryManager({
   catalogItems,
   recentCounts,
   allInventoryItems,
-  template,
   pendingDrafts,
   cartData,
   showKrogerNudge = false,
@@ -1285,7 +1274,6 @@ export function InventoryManager({
   catalogItems: CatalogItem[]
   recentCounts: InventoryCount[]
   allInventoryItems: PortfolioItem[]
-  template: Template | null
   pendingDrafts: PendingDraft[]
   cartData: (CartBuildResult & { built_at: string; location_name: string }) | null
   showKrogerNudge?: boolean
@@ -1329,7 +1317,6 @@ export function InventoryManager({
   const tabs: TabItem<InventoryTab>[] = [
     { id: 'property',  label: 'By Property', icon: <Package className="w-3.5 h-3.5" /> },
     { id: 'portfolio', label: 'Portfolio',   icon: <BarChart2 className="w-3.5 h-3.5" /> },
-    { id: 'template',  label: 'Template',    icon: <Layers className="w-3.5 h-3.5" /> },
   ]
 
   return (
@@ -1437,14 +1424,6 @@ export function InventoryManager({
           )}
           <PortfolioInventoryView items={allInventoryItems} />
         </>
-      )}
-
-      {activeTab === 'template' && (
-        <TemplateManager
-          template={template}
-          properties={properties}
-          catalogItems={catalogItems}
-        />
       )}
 
       {/* Full-screen detail modal for the selected property */}

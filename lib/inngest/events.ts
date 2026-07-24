@@ -264,6 +264,12 @@ export type FieldStayEvents = {
       entity_id:      string
       triggered_at:   string
       correlation_id: string | null | undefined
+      // Resolved from the webhook's external_user_id against
+      // integration_connections — undefined when that lookup misses, in
+      // which case ownerrez-incremental-sync.ts falls back to its full
+      // platform-wide sweep instead of a single scoped connection.
+      user_id?:       string
+      org_id?:        string
     }
   }
 
@@ -789,6 +795,53 @@ export type FieldStayEvents = {
       conversationId: string
       orgId:          string
       reason:         string  // bot's own escalation sentence, for context in the email
+    }
+  }
+
+  // Guest SMS nudges — fanned out from the morning/evening crons, one event
+  // per eligible opt-in. Phone numbers deliberately stay OUT of the payload
+  // (Inngest persists event data); the send handler refetches the opt-in row
+  // and re-checks is_active so a STOP between dispatch and send is honored.
+  'guidebook/sms_morning.requested': {
+    data: {
+      optin_id:    string
+      org_id:      string
+      property_id: string
+      today_date:  string   // YYYY-MM-DD in the send timezone — the daily-slot claim key
+    }
+  }
+  'guidebook/sms_evening.requested': {
+    data: {
+      optin_id:    string
+      org_id:      string
+      property_id: string
+      today_date:  string
+    }
+  }
+
+  // OwnerRez per-connection sync — fanned out from the hourly backstop cron
+  // and the scoped webhook/manual triggers, one event per active connection,
+  // so one rate-limited tenant retries alone instead of parking the tick.
+  'ownerrez/connection.sync.requested': {
+    data: {
+      connection_id:        string
+      user_id:              string
+      org_id:               string   // '' when the connection has no org yet
+      external_user_id:     string
+      check_new_properties: boolean  // full getProperties() diff — webhook-primary discovery; the cron requests it only once a day as a missed-webhook backstop
+    }
+  }
+
+  // Daily PM wrap-up digest — fanned out from the 23:00 UTC cron, one event
+  // per org, so a single serial invocation never loops every tenant.
+  'org/daily_wrapup.requested': {
+    data: {
+      org_id: string
+      // Wall-clock captured ONCE by the cron and passed through so every
+      // per-org handler (and any retry of it) derives the same date — the
+      // email idempotencyKey is date-based and the cron fires an hour
+      // before midnight UTC.
+      now_ms: number
     }
   }
 

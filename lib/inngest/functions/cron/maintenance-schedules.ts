@@ -5,6 +5,7 @@ import { isMaintenanceItemActiveThisMonth } from '@/lib/utils/maintenance'
 import { parseLocalDate } from '@/lib/utils/date-validation'
 import { logAuditEvent } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import {
   createMaintenanceWorkOrder,
   computeVacancyGaps,
@@ -92,7 +93,7 @@ export const dailyMaintenanceScheduleCheck = inngest.createFunction(
     for (const schedule of dueSchedules) {
       const processResult = await step.run(`process-schedule-${schedule.id}`, async () => {
         const supabase = createServiceClient()
-        const vendor   = Array.isArray(schedule.vendors)   ? schedule.vendors[0]   : schedule.vendors
+        const vendor   = unwrapJoin(schedule.vendors)
 
         let dueDate: Date
         try {

@@ -66,7 +66,7 @@ const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   // hostaway: 'Connects your Hostaway account to sync all listings and reservations in real time.',
   // Guesty is not yet wired — hidden until the integration is live.
   // guesty:   'Connects your Guesty account to sync all listings and reservations in real time.',
-  kroger:     'Builds Kroger grocery carts automatically from below-par inventory items.',
+  kroger:     "Builds Kroger grocery carts automatically from below-par inventory items. Works with any nearby Kroger-owned store — Kroger, Ralphs, Fred Meyer, King Soopers, Smith's, Fry's, QFC, City Market, Dillons, Baker's, Gerbes, Harris Teeter, Mariano's, Pick 'n Save, Metro Market, Food 4 Less, and Foods Co.",
 }
 
 // Providers not yet wired (or not fully implemented) — excluded from the
@@ -213,7 +213,30 @@ function CredentialModalContent({
   }
 
   return (
-    <Dialog open onClose={onClose} title={`Connect ${displayName}`} maxWidthClassName="max-w-md">
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Connect ${displayName}`}
+      maxWidthClassName="max-w-md"
+      footer={
+        <>
+          <Button
+            onClick={handleConnect}
+            disabled={pending}
+            className="flex-1 flex items-center justify-center gap-2"
+          >
+            {pending ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Connecting…</>
+            ) : (
+              <><PlugZap className="w-4 h-4" /> Connect</>
+            )}
+          </Button>
+          <Button variant="secondary" onClick={onClose} className="px-4">
+            Cancel
+          </Button>
+        </>
+      }
+    >
       <p className="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
         {config.description}
       </p>
@@ -248,23 +271,6 @@ function CredentialModalContent({
             />
           </div>
         ))}
-      </div>
-
-      <div className="flex gap-3">
-        <Button
-          onClick={handleConnect}
-          disabled={pending}
-          className="flex-1 flex items-center justify-center gap-2"
-        >
-          {pending ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Connecting…</>
-          ) : (
-            <><PlugZap className="w-4 h-4" /> Connect</>
-          )}
-        </Button>
-        <Button variant="secondary" onClick={onClose} className="px-4">
-          Cancel
-        </Button>
       </div>
 
       {/* Where to find credentials — provider-specific help text */}

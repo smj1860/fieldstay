@@ -3,6 +3,7 @@ import { requireOrgMember }           from '@/lib/auth'
 import { stripe }                     from '@/lib/stripe/client'
 import { createServiceClient }        from '@/lib/supabase/server'
 import { logAuditEvent }              from '@/lib/audit'
+import { unwrapJoin }                 from '@/lib/utils/supabase-joins'
 
 export async function POST(
   _request: NextRequest,
@@ -53,7 +54,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invoice is cancelled' }, { status: 409 })
   }
 
-  const vendor = Array.isArray(invoice.vendors) ? invoice.vendors[0] : invoice.vendors
+  const vendor = unwrapJoin(invoice.vendors)
 
   if (!vendor?.stripe_connect_account_id) {
     return NextResponse.json(
@@ -82,7 +83,7 @@ export async function POST(
   }
 
   const baseUrl          = process.env.NEXT_PUBLIC_APP_URL!
-  const property         = Array.isArray(invoice.properties) ? invoice.properties[0] : invoice.properties
+  const property         = unwrapJoin(invoice.properties)
   const amountCents      = Math.round(invoice.total * 100)
   const feeCents         = Math.round(invoice.platform_fee_amount * 100)
   const platformFeePct   = parseFloat(process.env.STRIPE_PLATFORM_FEE_PCT ?? '0')

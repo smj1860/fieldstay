@@ -581,9 +581,10 @@ checkin_changed  checkout_changed  notes_changed  financials_changed  guest_issu
 | Action | Status | FieldStay Handler |
 |---|---|---|
 | `reservation.created` | ✅ Confirmed from Vercel logs | `hospIncrementalSync` → upsert booking, generate turnovers |
-| `reservation.changed` | 📄 Spec (payload shape ✅ confirmed — see partial-payload note above) | `hospIncrementalSync` → update booking, regenerate turnovers |
-| `reservation.cancelled` | 📄 Spec | `hospIncrementalSync` → set status cancelled |
+| `reservation.changed` | 📄 Spec (payload shape ✅ confirmed — see partial-payload note above) | `hospIncrementalSync` → update booking, regenerate turnovers; also the event cancellations arrive on — see below |
 | `integration.disconnected` | 📄 Spec | Mark revoked, send PM reconnect email |
+
+**There is no `reservation.cancelled` action** (see the status-enum note above and `lib/integrations/providers/hospitable.ts:248-250`) — cancellations fire as `reservation.changed` with `triggers: ['status_changed']`; `hospIncrementalSync` detects the cancellation by re-fetching the reservation and checking `reservation_status.current.category`, not by a distinct action name. An earlier version of this table listed `reservation.cancelled` as a separate active event — that was wrong and has been removed.
 
 ### Unconfirmed Webhook Events (action names not yet verified from live delivery)
 

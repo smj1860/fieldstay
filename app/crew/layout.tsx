@@ -30,15 +30,20 @@ export default async function CrewLayout({
   }
 
   // ── PM / non-crew guard ────────────────────────────────────────────────────
-  // Verify the authenticated user has an active, accepted crew_members record.
+  // Verify the authenticated user has an active crew_members record.
   // Uses service client to bypass RLS — lookup is scoped to user.id only.
+  // Filters on is_active ONLY — NOT invite_accepted_at, matching the
+  // canonical requireCrewMember() in lib/crew-auth.ts: ~a third of live crew
+  // rows have invite_accepted_at IS NULL (onboarded outside the invite-link
+  // flow), and gating on it here locked those real crew out of the entire
+  // crew PWA (bounced to /ops with a spurious security.route.mismatch audit
+  // entry).
   const admin = createServiceClient()
   const { data: crewRecord } = await admin
     .from('crew_members')
     .select('id, name, org_id')
     .eq('user_id', user.id)
     .eq('is_active', true)
-    .not('invite_accepted_at', 'is', null)
     .maybeSingle()
 
   if (!crewRecord) {

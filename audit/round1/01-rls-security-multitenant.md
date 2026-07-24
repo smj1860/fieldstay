@@ -1,5 +1,7 @@
 # RLS / Security / Multi-Tenant Isolation Audit
 
+> **ARCHIVED — superseded by `audit/` Round 2. Findings here reflect the codebase as of 2026-07-13 and should not be read as current state.**
+
 Status: COMPLETE
 Last checkpoint: Completed all checks — RLS policy scan, memberships/user_id bug grep, service role usage audit, Stripe webhook verification, anon grants, crew PWA Dexie compliance.
 Next: n/a — audit complete

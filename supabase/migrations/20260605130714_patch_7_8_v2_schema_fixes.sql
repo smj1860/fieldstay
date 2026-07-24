@@ -52,6 +52,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE
 -- ============================================================
 DO $$
 BEGIN
+  -- Guard: communication_logs was created outside tracked migration history
+  -- (dashboard DDL, backfilled later by the baseline schema snapshot), so a
+  -- fresh replay reaches this file before the table exists.
+  IF to_regclass('public.communication_logs') IS NULL THEN
+    RETURN;
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE tablename = 'communication_logs'

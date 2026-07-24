@@ -45,7 +45,7 @@ export function TriggerLedgerButton({ taxYear, orgId }: Readonly<{ taxYear: numb
         )
         setPolling(false)
         clearInterval(interval)
-        window.location.reload()
+        globalThis.location.reload()
         return
       }
 

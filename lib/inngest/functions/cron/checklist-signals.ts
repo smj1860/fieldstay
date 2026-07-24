@@ -1,9 +1,22 @@
 import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 const ALPHA_PRIOR = 2  // prior: assume "probably clean"
 const BETA_PRIOR  = 1  // prior: with small upward bias on flag probability
 const PHOTO_THRESHOLD = 0.20  // flag probability >= 20% → require photo
+
+// Rolling observation window. The original pass fetched ALL completed items
+// ever ("Bayesian models work better with full history") — but with
+// cumulative counts old observations are never actually down-weighted, they
+// accumulate forever: a task that was messy a year ago and clean for six
+// months would keep requiring photos, and the unbounded fetch grows with
+// platform age × turnover volume (an OOM/step-payload time bomb, and
+// silently truncated by PostgREST's max-rows cap anyway). 180 days keeps
+// the signal responsive and the working set bounded; the priors still
+// smooth low-history groups.
+const OBSERVATION_WINDOW_DAYS = 180
+const FETCH_PAGE_SIZE = 1000
 
 export const computeChecklistSignals = inngest.createFunction(
   {
@@ -13,27 +26,42 @@ export const computeChecklistSignals = inngest.createFunction(
   },
   { cron: '0 4 * * *' }, // 11pm CT, before the 8am asset health run
   async ({ step, logger }) => {
-    // Fetch all completed checklist items with their property and org context.
-    // No rolling window — Bayesian models work better with full history (old
-    // data is naturally down-weighted by the prior's relative strength vs
-    // total observation count). Use completed_at ordering for streak detection.
-    const items = await step.run('fetch-all-completions', async () => {
+    // Fetch completed checklist items within the rolling window, with their
+    // property and org context. Paginated explicitly — a single unpaginated
+    // select is silently capped at PostgREST's max-rows limit, which would
+    // truncate history without any error. completed_at DESC ordering is
+    // load-bearing for streak detection below.
+    const items = await step.run('fetch-windowed-completions', async () => {
       const supabase = createServiceClient()
-      const { data } = await supabase
-        .from('checklist_instance_items')
-        .select(`
-          id, section_name, task,
-          crew_notes, photo_storage_path, requires_photo,
-          is_completed, completed_at,
-          checklist_instances!inner (
-            property_id,
-            turnovers!inner ( org_id )
-          )
-        `)
-        .eq('is_completed', true)
-        .order('completed_at', { ascending: false })
+      const windowStart = new Date(Date.now() - OBSERVATION_WINDOW_DAYS * 86_400_000).toISOString()
 
-      return data ?? []
+      type Page = Awaited<ReturnType<typeof fetchPage>>
+      async function fetchPage(offset: number) {
+        const { data } = await supabase
+          .from('checklist_instance_items')
+          .select(`
+            id, section_name, task,
+            crew_notes, photo_storage_path, requires_photo,
+            is_completed, completed_at,
+            checklist_instances!inner (
+              property_id,
+              turnovers!inner ( org_id )
+            )
+          `)
+          .eq('is_completed', true)
+          .gte('completed_at', windowStart)
+          .order('completed_at', { ascending: false })
+          .range(offset, offset + FETCH_PAGE_SIZE - 1)
+        return data ?? []
+      }
+
+      const all: Page = []
+      for (let offset = 0; ; offset += FETCH_PAGE_SIZE) {
+        const page = await fetchPage(offset)
+        all.push(...page)
+        if (page.length < FETCH_PAGE_SIZE) break
+      }
+      return all
     })
 
     logger.info(`[checklistSignals] Processing ${items.length} completed items`)
@@ -43,13 +71,11 @@ export const computeChecklistSignals = inngest.createFunction(
     const groups = new Map<string, ItemRow[]>()
 
     for (const item of items) {
-      const inst = Array.isArray(item.checklist_instances)
-        ? item.checklist_instances[0]
-        : item.checklist_instances
+      const inst = unwrapJoin(item.checklist_instances)
       if (!inst) continue
 
       const turnoversRaw = (inst as unknown as { turnovers: { org_id: string } | { org_id: string }[] }).turnovers
-      const tvo = Array.isArray(turnoversRaw) ? turnoversRaw[0] : turnoversRaw
+      const tvo = unwrapJoin(turnoversRaw)
       if (!tvo?.org_id) continue
 
       const key = `${(inst as { property_id: string }).property_id}|${item.section_name}|${item.task}|${tvo.org_id}`

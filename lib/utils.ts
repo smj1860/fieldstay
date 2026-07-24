@@ -93,6 +93,7 @@ export const INVENTORY_CATEGORY_LABELS = {
   kitchen:            'Kitchen',
   bath:               'Bath',
   laundry:            'Laundry',
+  bedroom:            'Bedroom',
   bedroom_linens:     'Bedroom & Linens',
   outdoor:            'Outdoor',
   maintenance_safety: 'Maintenance & Safety',

@@ -713,14 +713,27 @@ function AddTurnoverModal({
   const [state, action, pending] = useActionState(createManualTurnover, null)
 
   return (
-    <Dialog open onClose={onClose} title="Add Turnover" maxWidthClassName="max-w-md">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Add Turnover"
+      maxWidthClassName="max-w-md"
+      footer={
+        <>
+          <Button type="submit" form="add-turnover-form" disabled={pending} className="flex-1">
+            {pending ? 'Creating…' : 'Create Turnover'}
+          </Button>
+          <Button type="button" onClick={onClose} variant="ghost">Cancel</Button>
+        </>
+      }
+    >
       {state?.error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2 mb-4">
           {state.error}
         </div>
       )}
 
-      <form action={async (fd) => { await action(fd); if (!state?.error) onClose() }} className="space-y-4">
+      <form id="add-turnover-form" action={async (fd) => { await action(fd); if (!state?.error) onClose() }} className="space-y-4">
         <div>
           <label className="label">Property</label>
           <select name="property_id" required className="input">
@@ -753,12 +766,6 @@ function AddTurnoverModal({
         <div>
           <label className="label">Notes (optional)</label>
           <textarea name="notes" rows={2} className="input resize-none" placeholder="Any special instructions…" />
-        </div>
-        <div className="flex gap-3 pt-2">
-          <Button type="submit" disabled={pending} className="flex-1">
-            {pending ? 'Creating…' : 'Create Turnover'}
-          </Button>
-          <Button type="button" onClick={onClose} variant="ghost">Cancel</Button>
         </div>
       </form>
     </Dialog>
@@ -814,7 +821,29 @@ function SplitAssignModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title="Assign Individually" maxWidthClassName="max-w-lg">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Assign Individually"
+      maxWidthClassName="max-w-lg"
+      footer={
+        <div className="w-full flex items-center justify-between gap-3">
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            {pickedCount} of {selected.length} assigned
+          </p>
+          <div className="flex gap-2">
+            <Button onClick={onClose} variant="ghost" className="text-sm">Cancel</Button>
+            <Button
+              onClick={handleApply}
+              disabled={submitting || pickedCount === 0}
+              className="text-sm"
+            >
+              {submitting ? 'Applying…' : 'Apply Assignments'}
+            </Button>
+          </div>
+        </div>
+      }
+    >
       <p className="text-xs text-muted-themed -mt-3 mb-4">
         {selected.length} turnovers — pick a crew member for each
       </p>
@@ -857,22 +886,6 @@ function SplitAssignModal({
             </div>
           )
         })}
-      </div>
-
-      <div className="flex items-center justify-between gap-3 mt-4 pt-4 border-t border-themed">
-        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          {pickedCount} of {selected.length} assigned
-        </p>
-        <div className="flex gap-2">
-          <Button onClick={onClose} variant="ghost" className="text-sm">Cancel</Button>
-          <Button
-            onClick={handleApply}
-            disabled={submitting || pickedCount === 0}
-            className="text-sm"
-          >
-            {submitting ? 'Applying…' : 'Apply Assignments'}
-          </Button>
-        </div>
       </div>
     </Dialog>
   )

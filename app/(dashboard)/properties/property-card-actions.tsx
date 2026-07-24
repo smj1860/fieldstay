@@ -15,7 +15,7 @@ interface CopyFromButtonProps {
   otherProperties: Property[]
 }
 
-export function CopyFromButton({ targetProperty, otherProperties }: CopyFromButtonProps) {
+export function CopyFromButton({ targetProperty, otherProperties }: Readonly<CopyFromButtonProps>) {
   const [open, setOpen] = useState(false)
 
   if (otherProperties.length === 0) return null

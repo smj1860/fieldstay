@@ -79,8 +79,25 @@ function AddDocumentForm({
   }
 
   return (
-    <Dialog open onClose={onClose} title="Add Compliance Document" maxWidthClassName="max-w-lg">
-      <div className="max-h-[70vh] overflow-y-auto -mx-6 px-6">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Add Compliance Document"
+      maxWidthClassName="max-w-lg"
+      footer={
+        <>
+          <Button
+            type="submit"
+            form="add-compliance-document-form"
+            disabled={pending || uploading}
+            className="flex items-center gap-2"
+          >
+            {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Add Document'}
+          </Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
         {state?.error && (
           <div className="text-sm rounded-lg px-3 py-2 mb-4"
                style={{ color: 'var(--accent-red)', background: 'var(--accent-red-dim)', border: '1px solid rgba(240,84,84,0.2)' }}>
@@ -88,7 +105,7 @@ function AddDocumentForm({
           </div>
         )}
 
-        <form action={formAction} className="space-y-4">
+        <form id="add-compliance-document-form" action={formAction} className="space-y-4">
           {/* Pass uploaded URL as hidden input */}
           <input type="hidden" name="document_url" value={uploadedUrl ?? ''} />
 
@@ -160,19 +177,7 @@ function AddDocumentForm({
               )}
             </div>
           </div>
-
-          <div className="flex gap-2 pt-1">
-            <Button
-              type="submit"
-              disabled={pending || uploading}
-              className="flex items-center gap-2"
-            >
-              {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Add Document'}
-            </Button>
-            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          </div>
         </form>
-      </div>
     </Dialog>
   )
 }

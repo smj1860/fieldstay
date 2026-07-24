@@ -81,7 +81,9 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
           discount_line:  discountLine,
         })
 
-        const result = await sendSMS(guestPhoneE164, text)
+        // 'nudge': guest marketing message — counts against the platform-wide
+        // daily SMS budget (the PM notification below is operational and doesn't)
+        const result = await sendSMS(guestPhoneE164, text, { category: 'nudge' })
 
         if (!result.sent) {
           // SMS failed — roll back the claim so a retry can attempt again

@@ -2,6 +2,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { parseLocalDate }      from '@/lib/utils/date-validation'
 import { logAuditEvent }       from '@/lib/audit'
+import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
 // Mirrors the 30-day "expiring_soon" window in the vendor_compliance_status
 // view (migration 20260606051120) — a document enters this window the same
@@ -61,7 +62,7 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
 
         if (!updated) return null
 
-        const vendor    = Array.isArray(doc.vendors) ? doc.vendors[0] : doc.vendors
+        const vendor    = unwrapJoin(doc.vendors)
         const expiry    = parseLocalDate(doc.expiry_date, 'expiry_date')
         const daysUntil = Math.round((expiry.getTime() - Date.now()) / 86_400_000)
 

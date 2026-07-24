@@ -1,28 +1,19 @@
 'use server'
 
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/server'
+import { requireCrewMember } from '@/lib/crew-auth'
 import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discovery/config'
 import { logAuditEvent } from '@/lib/audit'
 import type { AssetType } from '@/types/database'
 
+// Crew auth comes from the canonical requireCrewMember() in lib/crew-auth.ts.
+// A previous local reimplementation here added an invite_accepted_at filter
+// that the canonical helper deliberately omits (~a third of live crew rows
+// have it NULL — crew onboarded outside the invite-link flow), silently
+// locking those crew members out of these two actions. Never re-implement
+// this predicate locally.
+
 export type ReportIssueResult = { success?: boolean; error?: string }
-
-async function requireCrewMember() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('Not authenticated')
-
-  const { data: crew } = await supabase
-    .from('crew_members')
-    .select('id, org_id')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .not('invite_accepted_at', 'is', null)
-    .single()
-  if (!crew) throw new Error('Crew member not found')
-
-  return { supabase, crew, user }
-}
 
 export async function reportTurnoverIssue(
   turnoverId: string,
@@ -33,7 +24,9 @@ export async function reportTurnoverIssue(
   try {
     if (!title.trim()) return { error: 'Please describe the issue.' }
 
-    const { supabase, crew } = await requireCrewMember()
+    const auth = await requireCrewMember()
+    if (!auth.ok) return { error: 'Crew member not found' }
+    const { supabase, crew } = auth
 
     const { data: turnover } = await supabase
       .from('turnovers')
@@ -97,7 +90,9 @@ export async function submitAssetDiscovery(
       return { error: 'Provide asset details or mark as not applicable' }
     }
 
-    const { supabase, crew, user } = await requireCrewMember()
+    const auth = await requireCrewMember()
+    if (!auth.ok) return { error: 'Crew member not found' }
+    const { supabase, crew, user } = auth
 
     // Crew must be assigned to an active turnover at this property — same
     // gate used by the checklist_instance_items crew RLS policy.

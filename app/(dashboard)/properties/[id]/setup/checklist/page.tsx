@@ -1,6 +1,7 @@
 import { requireProperty, requireOrgMember } from '@/lib/auth'
 import { ChecklistBuilder } from './checklist-builder'
 import { Card } from '@/components/ui/Card'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: 'Turnover Checklist' }
@@ -40,10 +41,10 @@ export default async function ChecklistPage({ params }: Props) {
   const sectionCountByProperty: Record<string, number> = {}
   const propNameByProperty: Record<string, string> = {}
   for (const row of siblingChecklistSections ?? []) {
-    const tmpl = Array.isArray(row.checklist_templates) ? row.checklist_templates[0] : row.checklist_templates
+    const tmpl = unwrapJoin(row.checklist_templates)
     if (!tmpl?.property_id) continue
     sectionCountByProperty[tmpl.property_id] = (sectionCountByProperty[tmpl.property_id] ?? 0) + 1
-    const p = Array.isArray(tmpl.properties) ? tmpl.properties[0] : tmpl.properties
+    const p = unwrapJoin(tmpl.properties)
     if (p?.name) propNameByProperty[tmpl.property_id] = p.name
   }
   const sourceProperties = Object.entries(sectionCountByProperty)
@@ -54,8 +55,11 @@ export default async function ChecklistPage({ params }: Props) {
     <Card>
       <h2 className="text-lg font-semibold text-primary-themed mb-1">Turnover Checklist</h2>
       <p className="text-sm text-accent-500 mb-6">
-        Build the checklist your crew follows for every turnover. Organize by room or area.
-        Flag items that require a photo for accountability.
+        This property&apos;s checklist was already built automatically from its
+        bedroom/bathroom count and the standard rooms (Whole Home, Kitchen,
+        Living Room). Use this screen to add a room this property has that
+        wasn&apos;t auto-included, or remove one it doesn&apos;t actually have —
+        e.g. no Living Room.
       </p>
       <ChecklistBuilder
         propertyId={property.id}

@@ -236,7 +236,7 @@ export function WorkOrderDetail({ workOrder: wo, userRole, vendors = [] }: Reado
 
           {/* Print button */}
           <button
-            onClick={() => window.print()}
+            onClick={() => globalThis.print()}
             className="print:hidden p-2 rounded-lg transition-colors"
             style={{ color: 'var(--text-muted)' }}
             title="Print work order"

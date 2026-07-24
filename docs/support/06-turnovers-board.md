@@ -6,7 +6,7 @@
 
 ## What Is a Turnover
 
-A turnover is the preparation period between a guest checking out and the next guest checking in. FieldStay creates one automatically every time a new booking is confirmed in OwnerRez, using the checkout and check-in dates to calculate how much time your crew has to prepare the property.
+A turnover is the preparation period between a guest checking out and the next guest checking in. FieldStay creates one automatically every time a new booking is confirmed in your connected PMS (OwnerRez or Hospitable), using the checkout and check-in dates to calculate how much time your crew has to prepare the property.
 
 ---
 

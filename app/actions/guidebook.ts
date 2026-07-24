@@ -17,20 +17,20 @@ import type { GuidebookSlotType, GuidebookOfferType } from '@/types/database'
 export async function createSponsorCheckoutSession(
   mediaKitToken: string
 ): Promise<{ url: string } | { error: string }> {
-  const supabase = createServiceClient()
-
-  const { data: sponsor } = await supabase
-    .from('guidebook_sponsors')
-    .select('id, org_id, business_name, slot_type, status')
-    .eq('media_kit_token', mediaKitToken)
-    .single()
-
-  if (!sponsor)                    return { error: 'Invalid media kit link.' }
-  if (sponsor.status === 'active') return { error: 'This sponsorship slot is already active.' }
-
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
-
   try {
+    const supabase = createServiceClient()
+
+    const { data: sponsor } = await supabase
+      .from('guidebook_sponsors')
+      .select('id, org_id, business_name, slot_type, status')
+      .eq('media_kit_token', mediaKitToken)
+      .single()
+
+    if (!sponsor)                    return { error: 'Invalid media kit link.' }
+    if (sponsor.status === 'active') return { error: 'This sponsorship slot is already active.' }
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
+
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       line_items: [
@@ -75,7 +75,7 @@ export async function createSponsorCheckoutSession(
     return { url: session.url }
   } catch (err) {
     console.error('[createSponsorCheckoutSession]', err)
-    return { error: err instanceof Error ? err.message : 'Unknown Stripe error' }
+    return { error: 'Unable to start checkout. Please try again.' }
   }
 }
 
@@ -104,52 +104,60 @@ export interface UpsertSponsorInput {
 export async function upsertSponsor(
   input: UpsertSponsorInput
 ): Promise<{ mediaKitToken: string } | { error: string }> {
-  const { user, membership } = await requireOrgRole(['admin', 'manager'])
-  const supabase        = createServiceClient()
+  try {
+    const { user, membership } = await requireOrgRole(['admin', 'manager'])
+    const supabase        = createServiceClient()
 
-  if (input.slotNumber < 1 || input.slotNumber > 6) {
-    return { error: 'Slot number must be between 1 and 6.' }
+    if (input.slotNumber < 1 || input.slotNumber > 6) {
+      return { error: 'Slot number must be between 1 and 6.' }
+    }
+
+    const { data, error } = await supabase
+      .from('guidebook_sponsors')
+      .upsert(
+        {
+          org_id:               membership.org_id,
+          slot_number:          input.slotNumber,
+          business_name:        input.businessName,
+          business_description: input.businessDescription,
+          business_phone:       input.businessPhone,
+          business_website:     input.businessWebsite,
+          custom_offer_text:    input.customOfferText,
+          offer_type:           input.offerType,
+          offer_value:          input.offerValue,
+          offer_item:           input.offerItem,
+          featured_item:        input.featuredItem,
+          address:              input.address,
+          lat:                  input.lat,
+          lng:                  input.lng,
+          slot_type:            input.slotType,
+          slot_context:         input.slotContext,
+          updated_at:           new Date().toISOString(),
+        },
+        { onConflict: 'org_id,slot_number' }
+      )
+      .select('id, media_kit_token')
+      .single()
+
+    if (error) {
+      console.error('[upsertSponsor]', error.message)
+      return { error: 'Failed to save sponsor details. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'guidebook.sponsor.updated',
+      targetType: 'guidebook_sponsor',
+      targetId:   data.id,
+      metadata:   { slot_number: input.slotNumber, slot_type: input.slotType },
+    })
+
+    return { mediaKitToken: data.media_kit_token }
+  } catch (err) {
+    console.error('[upsertSponsor]', err)
+    return { error: 'Operation failed. Please try again.' }
   }
-
-  const { data, error } = await supabase
-    .from('guidebook_sponsors')
-    .upsert(
-      {
-        org_id:               membership.org_id,
-        slot_number:          input.slotNumber,
-        business_name:        input.businessName,
-        business_description: input.businessDescription,
-        business_phone:       input.businessPhone,
-        business_website:     input.businessWebsite,
-        custom_offer_text:    input.customOfferText,
-        offer_type:           input.offerType,
-        offer_value:          input.offerValue,
-        offer_item:           input.offerItem,
-        featured_item:        input.featuredItem,
-        address:              input.address,
-        lat:                  input.lat,
-        lng:                  input.lng,
-        slot_type:            input.slotType,
-        slot_context:         input.slotContext,
-        updated_at:           new Date().toISOString(),
-      },
-      { onConflict: 'org_id,slot_number' }
-    )
-    .select('id, media_kit_token')
-    .single()
-
-  if (error) return { error: error.message }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'guidebook.sponsor.updated',
-    targetType: 'guidebook_sponsor',
-    targetId:   data.id,
-    metadata:   { slot_number: input.slotNumber, slot_type: input.slotType },
-  })
-
-  return { mediaKitToken: data.media_kit_token }
 }
 
 export interface UpsertPropertyGuidebookConfigInput {
@@ -169,49 +177,57 @@ export interface UpsertPropertyGuidebookConfigInput {
 export async function upsertPropertyGuidebookConfig(
   input: UpsertPropertyGuidebookConfigInput
 ): Promise<{ error?: string }> {
-  const { user, membership } = await requireOrgRole(['admin', 'manager'])
-  const supabase        = createServiceClient()
+  try {
+    const { user, membership } = await requireOrgRole(['admin', 'manager'])
+    const supabase        = createServiceClient()
 
-  const { data: property } = await supabase
-    .from('properties')
-    .select('id')
-    .eq('id', input.propertyId)
-    .eq('org_id', membership.org_id)
-    .single()
+    const { data: property } = await supabase
+      .from('properties')
+      .select('id')
+      .eq('id', input.propertyId)
+      .eq('org_id', membership.org_id)
+      .single()
 
-  if (!property) return { error: 'Property not found.' }
+    if (!property) return { error: 'Property not found.' }
 
-  const { error } = await supabase
-    .from('guidebook_property_configs')
-    .upsert(
-      {
-        org_id:                 membership.org_id,
-        property_id:            input.propertyId,
-        slug:                   input.slug.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
-        check_in_instructions:  input.checkInInstructions,
-        check_out_instructions: input.checkOutInstructions,
-        wifi_network:           input.wifiNetwork,
-        wifi_password:          input.wifiPassword,
-        house_rules:            input.houseRules,
-        is_published:           input.isPublished,
-        updated_at:             new Date().toISOString(),
-      },
-      { onConflict: 'org_id,property_id' }
-    )
+    const { error } = await supabase
+      .from('guidebook_property_configs')
+      .upsert(
+        {
+          org_id:                 membership.org_id,
+          property_id:            input.propertyId,
+          slug:                   input.slug.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+          check_in_instructions:  input.checkInInstructions,
+          check_out_instructions: input.checkOutInstructions,
+          wifi_network:           input.wifiNetwork,
+          wifi_password:          input.wifiPassword,
+          house_rules:            input.houseRules,
+          is_published:           input.isPublished,
+          updated_at:             new Date().toISOString(),
+        },
+        { onConflict: 'org_id,property_id' }
+      )
 
-  if (error) return { error: error.message }
+    if (error) {
+      console.error('[upsertPropertyGuidebookConfig]', error.message)
+      return { error: 'Failed to save guidebook settings. Please try again.' }
+    }
 
-  // Never log wifi_password value itself — it's a guest-facing credential
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'guidebook.configuration.updated',
-    targetType: 'guidebook_property_config',
-    targetId:   input.propertyId,
-    metadata:   { is_published: input.isPublished },
-  })
+    // Never log wifi_password value itself — it's a guest-facing credential
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'guidebook.configuration.updated',
+      targetType: 'guidebook_property_config',
+      targetId:   input.propertyId,
+      metadata:   { is_published: input.isPublished },
+    })
 
-  return {}
+    return {}
+  } catch (err) {
+    console.error('[upsertPropertyGuidebookConfig]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
 }
 
 export interface UpdateStayExtensionSettingsInput {
@@ -229,47 +245,55 @@ export interface UpdateStayExtensionSettingsInput {
 export async function updateStayExtensionSettings(
   input: UpdateStayExtensionSettingsInput
 ): Promise<{ error?: string }> {
-  const { user, membership } = await requireOrgRole(['admin', 'manager'])
-  const supabase        = createServiceClient()
+  try {
+    const { user, membership } = await requireOrgRole(['admin', 'manager'])
+    const supabase        = createServiceClient()
 
-  if (input.discountPct !== null && (input.discountPct < 0 || input.discountPct > 100)) {
-    return { error: 'Discount must be between 0 and 100.' }
-  }
-  if (input.gapThresholdDays < 1) {
-    return { error: 'Gap threshold must be at least 1 day.' }
-  }
-  if (input.daysBefore < 1) {
-    return { error: 'Message timing must be at least 1 day before checkout.' }
-  }
-  if (input.contactMethod === 'ownerrez_url' && !input.ownerRezUrl?.trim()) {
-    return { error: 'Please enter your OwnerRez booking page URL.' }
-  }
+    if (input.discountPct !== null && (input.discountPct < 0 || input.discountPct > 100)) {
+      return { error: 'Discount must be between 0 and 100.' }
+    }
+    if (input.gapThresholdDays < 1) {
+      return { error: 'Gap threshold must be at least 1 day.' }
+    }
+    if (input.daysBefore < 1) {
+      return { error: 'Message timing must be at least 1 day before checkout.' }
+    }
+    if (input.contactMethod === 'ownerrez_url' && !input.ownerRezUrl?.trim()) {
+      return { error: 'Please enter your OwnerRez booking page URL.' }
+    }
 
-  const { error } = await supabase
-    .from('guidebook_configurations')
-    .update({
-      extension_messaging_enabled:   input.enabled,
-      extension_gap_threshold_days:  input.gapThresholdDays,
-      extension_discount_pct:        input.discountPct,
-      extension_contact_method:      input.contactMethod,
-      extension_ownerrez_url:        input.contactMethod === 'ownerrez_url' ? input.ownerRezUrl : null,
-      extension_message_days_before: input.daysBefore,
-      updated_at:                    new Date().toISOString(),
+    const { error } = await supabase
+      .from('guidebook_configurations')
+      .update({
+        extension_messaging_enabled:   input.enabled,
+        extension_gap_threshold_days:  input.gapThresholdDays,
+        extension_discount_pct:        input.discountPct,
+        extension_contact_method:      input.contactMethod,
+        extension_ownerrez_url:        input.contactMethod === 'ownerrez_url' ? input.ownerRezUrl : null,
+        extension_message_days_before: input.daysBefore,
+        updated_at:                    new Date().toISOString(),
+      })
+      .eq('org_id', membership.org_id)
+
+    if (error) {
+      console.error('[updateStayExtensionSettings]', error.message)
+      return { error: 'Failed to save stay extension settings. Please try again.' }
+    }
+
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'guidebook.stay_extension_settings.updated',
+      targetType: 'guidebook_configuration',
+      targetId:   membership.org_id,
+      metadata:   { enabled: input.enabled, gap_threshold_days: input.gapThresholdDays },
     })
-    .eq('org_id', membership.org_id)
 
-  if (error) return { error: error.message }
-
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'guidebook.stay_extension_settings.updated',
-    targetType: 'guidebook_configuration',
-    targetId:   membership.org_id,
-    metadata:   { enabled: input.enabled, gap_threshold_days: input.gapThresholdDays },
-  })
-
-  return {}
+    return {}
+  } catch (err) {
+    console.error('[updateStayExtensionSettings]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
 }
 
 /**
@@ -281,49 +305,58 @@ export async function optInGuestSms(
   guidebookToken: string,
   rawPhone:       string
 ): Promise<{ success: true } | { error: string }> {
-  const phoneE164 = normalizePhoneToE164(rawPhone)
-  if (!phoneE164) return { error: 'Please enter a valid US or Canadian phone number.' }
+  try {
+    const phoneE164 = normalizePhoneToE164(rawPhone)
+    if (!phoneE164) return { error: 'Please enter a valid US or Canadian phone number.' }
 
-  const supabase = createServiceClient()
+    const supabase = createServiceClient()
 
-  const { data: booking } = await supabase
-    .from('bookings')
-    .select('id, org_id, property_id')
-    .eq('guidebook_token', guidebookToken)
-    .maybeSingle()
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('id, org_id, property_id')
+      .eq('guidebook_token', guidebookToken)
+      .maybeSingle()
 
-  if (!booking) return { error: 'Invalid guidebook link.' }
+    if (!booking) return { error: 'Invalid guidebook link.' }
 
-  const { data: optin, error } = await supabase
-    .from('guidebook_guest_sms_optins')
-    .upsert(
-      {
-        org_id:      booking.org_id,
-        property_id: booking.property_id,
-        booking_id:  booking.id,
-        phone_e164:  phoneE164,
-        is_active:   true,
-        opted_out_at: null,
-        opted_in_at: new Date().toISOString(),
-        updated_at:  new Date().toISOString(),
+    const { data: optin, error } = await supabase
+      .from('guidebook_guest_sms_optins')
+      .upsert(
+        {
+          org_id:      booking.org_id,
+          property_id: booking.property_id,
+          booking_id:  booking.id,
+          phone_e164:  phoneE164,
+          is_active:   true,
+          opted_out_at: null,
+          opted_in_at: new Date().toISOString(),
+          updated_at:  new Date().toISOString(),
+        },
+        { onConflict: 'booking_id' }
+      )
+      .select('id')
+      .single()
+
+    if (error) {
+      // Never log phoneE164 or any part of rawPhone — guest PII.
+      console.error('[optInGuestSms]', error.message)
+      return { error: 'Something went wrong. Please try again.' }
+    }
+
+    await inngest.send({
+      name: 'guidebook/guest.opted.in',
+      data: {
+        optinId:    optin.id,
+        bookingId:  booking.id,
+        orgId:      booking.org_id,
+        propertyId: booking.property_id,
+        phoneE164,
       },
-      { onConflict: 'booking_id' }
-    )
-    .select('id')
-    .single()
+    })
 
-  if (error) return { error: error.message }
-
-  await inngest.send({
-    name: 'guidebook/guest.opted.in',
-    data: {
-      optinId:    optin.id,
-      bookingId:  booking.id,
-      orgId:      booking.org_id,
-      propertyId: booking.property_id,
-      phoneE164,
-    },
-  })
-
-  return { success: true }
+    return { success: true }
+  } catch (err) {
+    console.error('[optInGuestSms]', err)
+    return { error: 'Something went wrong. Please try again.' }
+  }
 }

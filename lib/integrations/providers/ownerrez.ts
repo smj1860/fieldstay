@@ -190,7 +190,7 @@ export const ownerRezProvider: IntegrationProvider = {
   // Handling both costs nothing — neither string means anything else — so
   // this doesn't pick a side. entity_update/entity_delete are consistent
   // across both sections. See app-api-webhooks doc, 2026-07-16.
-  async handleWebhookEvent({ action, payload, externalUserId: _externalUserId, correlationId }) {
+  async handleWebhookEvent({ action, payload, externalUserId, correlationId }) {
     const data       = payload as Record<string, unknown>
     const entityType = String(data.entity_type ?? '')
     const entityId   = String(data.entity_id ?? '')
@@ -211,36 +211,58 @@ export const ownerRezProvider: IntegrationProvider = {
       case 'entity_create':
       case 'entity_update':
       case 'entity_delete': {
-        if (entityType === 'booking') {
+        // Property CREATION webhooks ride the same scoped-sync path as
+        // booking/guest changes: the incremental-sync dispatcher always sets
+        // check_new_properties=true on scoped runs, so the per-connection
+        // handler's getProperties() diff discovers the new property and
+        // re-fires initial sync for it. This webhook is the PRIMARY
+        // new-property discovery path — the hourly cron only re-checks once
+        // a day as a missed-webhook backstop. Property entity_update/delete
+        // still have no handler (nothing to do — edits don't create work).
+        const isNewProperty =
+          entityType === 'property' &&
+          (action === 'entity_insert' || action === 'entity_create')
+
+        if (entityType === 'booking' || entityType === 'guest' || isNewProperty) {
+          // Resolve which FieldStay connection this webhook belongs to, so
+          // ownerrez-incremental-sync.ts can scope its work to just this one
+          // connection instead of re-syncing every active OwnerRez tenant
+          // platform-wide. Falls back to unresolved (fields simply omitted)
+          // if the lookup misses — the sync function then falls back to its
+          // full-sweep behavior, same as before this resolution existed.
+          let connection: { user_id: string; org_id: string } | null = null
+          if (externalUserId) {
+            const { createServiceClient } = await import('@/lib/supabase/server')
+            const supabase = createServiceClient()
+            const { data: conn } = await supabase
+              .from('integration_connections')
+              .select('user_id, org_id')
+              .eq('provider_id', 'ownerrez')
+              .eq('external_user_id', externalUserId)
+              .eq('status', 'active')
+              .maybeSingle()
+            if (conn?.org_id) connection = { user_id: conn.user_id, org_id: conn.org_id }
+          }
+
           const { inngest } = await import('@/lib/inngest/client')
           await inngest.send({
             name: 'integration/ownerrez.sync.requested',
             data: {
               provider_id:    'ownerrez',
               event_type:     action,
-              entity_type:    'booking',
+              entity_type:    entityType,
               entity_id:      entityId,
               triggered_at:   new Date().toISOString(),
               correlation_id: correlationId ?? null,
-            },
-          })
-        } else if (entityType === 'guest') {
-          const { inngest } = await import('@/lib/inngest/client')
-          await inngest.send({
-            name: 'integration/ownerrez.sync.requested',
-            data: {
-              provider_id:    'ownerrez',
-              event_type:     action,
-              entity_type:    'guest',
-              entity_id:      entityId,
-              triggered_at:   new Date().toISOString(),
-              correlation_id: correlationId ?? null,
+              user_id:        connection?.user_id,
+              org_id:         connection?.org_id,
             },
           })
         } else {
-          // property, inquiry, quote, thread_message — OwnerRez's real
-          // supported entity_type list (confirmed live 2026-07-16), none
-          // wired to a specific handler yet. Note: 'review' is NOT a valid
+          // property (update/delete only — creation is handled above),
+          // inquiry, quote, thread_message — OwnerRez's real supported
+          // entity_type list (confirmed live 2026-07-16), none wired to a
+          // specific handler yet. Note: 'review' is NOT a valid
           // OwnerRez webhook entity_type at all — reviews can only be
           // synced via the existing 6-hour polling cron
           // (ownerrez-reviews-sync.ts), there is no webhook alternative.

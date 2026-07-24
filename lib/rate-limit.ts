@@ -68,6 +68,40 @@ export const vendorConnectRatelimit = new Ratelimit({
   prefix:    'rl:vendor-connect',
 })
 
+// Owner portal (/owner/[token]) — same rationale as workOrderRatelimit: a
+// UUID token makes brute-force impractical, but the route is unauthenticated
+// and serves financial P&L data, so it still needs its own throttle rather
+// than relying on token entropy alone.
+export const ownerPortalRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:owner-portal',
+})
+
+// Guest-facing guidebook routes (/g/*) — media kit signup, guest guidebook
+// view, and the SMS opt-in link. All unauthenticated and token-guessable.
+export const guidebookRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(30, '1 m'),
+  analytics: false,
+  prefix:    'rl:guidebook',
+})
+
+// OAuth callback routes (/api/integrations/*/callback and /callback/oneclick)
+// — unauthenticated by nature (the provider redirects the browser here with
+// no FieldStay session). The oneclick route now stores the unexchanged
+// authorization code in Vault WITHOUT any provider-side validation first
+// (the exchange is deferred until post-signup), so without a throttle an
+// attacker could spam garbage codes to bloat vault.secrets. 20/min per IP
+// is far above any legitimate redirect rate.
+export const oauthCallbackRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(20, '1 m'),
+  analytics: false,
+  prefix:    'rl:oauth-callback',
+})
+
 // Sign-off action — 5 submissions per 5 minutes per work order token
 // A contractor will never legitimately submit more than once
 export const signOffRatelimit = new Ratelimit({

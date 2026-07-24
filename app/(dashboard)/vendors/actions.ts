@@ -85,24 +85,29 @@ export async function deleteComplianceDocument(
   docId: string,
   vendorId: string
 ): Promise<void> {
-  const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
-  await supabase
-    .from('vendor_compliance_documents')
-    .update({ is_active: false })
-    .eq('id', docId)
-    .eq('org_id', membership.org_id)
+  try {
+    const { user, supabase, membership } = await requireOrgRole(['admin', 'manager'])
+    await supabase
+      .from('vendor_compliance_documents')
+      .update({ is_active: false })
+      .eq('id', docId)
+      .eq('org_id', membership.org_id)
 
-  await logAuditEvent({
-    orgId:      membership.org_id,
-    actorId:    user.id,
-    action:     'vendor.compliance_document.deactivated',
-    targetType: 'vendor_compliance_document',
-    targetId:   docId,
-    metadata:   { vendor_id: vendorId },
-  })
+    await logAuditEvent({
+      orgId:      membership.org_id,
+      actorId:    user.id,
+      action:     'vendor.compliance_document.deactivated',
+      targetType: 'vendor_compliance_document',
+      targetId:   docId,
+      metadata:   { vendor_id: vendorId },
+    })
 
-  revalidatePath(`/vendors/${vendorId}`)
-  revalidatePath('/vendors')
+    revalidatePath(`/vendors/${vendorId}`)
+    revalidatePath('/vendors')
+  } catch (err) {
+    console.error('[deleteComplianceDocument]', err)
+    throw err
+  }
 }
 
 export async function verifyComplianceDocument(

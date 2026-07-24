@@ -6,6 +6,7 @@ import { resend, FROM } from '@/lib/resend/client'
 import { renderSmsBody } from '@/lib/sms/templates'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { reportError } from '@/lib/observability/report-error'
+import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { randomBytes } from 'crypto'
 
 /**
@@ -73,8 +74,8 @@ export async function loadDispatchContext(
     )
   }
 
-  const vendor   = Array.isArray(wo.vendors)    ? wo.vendors[0]    : wo.vendors
-  const property = Array.isArray(wo.properties) ? wo.properties[0] : wo.properties
+  const vendor   = unwrapJoin(wo.vendors)
+  const property = unwrapJoin(wo.properties)
 
   // Build vendor window string for same-day flip dispatch
   let vendorWindow: string | undefined
