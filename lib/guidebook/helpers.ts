@@ -5,7 +5,7 @@ import { createServiceClient } from '@/lib/supabase/server'
  * Service client only — called from Inngest and Server Actions.
  */
 export async function getActiveSponsorCount(orgId: string): Promise<number> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/guidebook/helpers' })
   const { count, error } = await supabase
     .from('guidebook_sponsors')
     .select('id', { count: 'exact', head: true })

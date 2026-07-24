@@ -18,7 +18,7 @@ const PMS_PROVIDER_IDS = ['ownerrez', 'hospitable' /* , 'hostaway', 'guesty' */]
 
 export default async function OnboardingPmsPage() {
   const { membership } = await requireOrgMember()
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authorizedBy: membership })
 
   const { data: providers } = await admin
     .from('integration_providers')

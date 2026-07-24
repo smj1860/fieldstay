@@ -21,7 +21,7 @@ export async function mergeIntegrationConnectionMetadata(params: {
   patch:      Record<string, unknown>
   status?:    string
 }): Promise<Record<string, unknown>> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/integrations/connection-metadata' })
 
   const { data, error } = await supabase.rpc('merge_integration_connection_metadata', {
     p_user_id:     params.userId,

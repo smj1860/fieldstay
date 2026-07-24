@@ -15,7 +15,7 @@ import { createServiceClient } from '@/lib/supabase/server'
  * catalog even though this check-then-write sequence isn't itself atomic.
  */
 export async function seedOrgInventoryCatalogIfNeeded(orgId: string): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/inventory/seed-org-catalog' })
 
   const { count, error: countError } = await supabase
     .from('org_inventory_catalog')

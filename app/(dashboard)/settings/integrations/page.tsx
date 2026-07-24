@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: 'Integrations — FieldStay' }
 export default async function IntegrationsPage() {
   const { membership } = await requireOrgMember()
 
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authorizedBy: membership })
 
   const { data: providers } = await admin
     .from('integration_providers')

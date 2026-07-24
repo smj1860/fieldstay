@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { createServiceClient }       from '@/lib/supabase/server'
+import { requireCrewMember }         from '@/lib/crew-auth'
 import { inngest }                   from '@/lib/inngest/client'
 import { logAuditEvent }             from '@/lib/audit'
 
@@ -17,25 +18,19 @@ export async function POST(
 ): Promise<NextResponse> {
   const { id } = await params
 
-  // Authenticate as a crew member (same pattern as turnover completion route)
-  const authClient = await createClient()
-  const { data: { user } } = await authClient.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const { data: crew } = await authClient
-    .from('crew_members')
-    .select('id, org_id')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .single()
-
-  if (!crew) return NextResponse.json({ error: 'Crew member not found' }, { status: 403 })
+  // Canonical crew auth gate (lib/crew-auth.ts). This route was the last
+  // straggler on the inline-lookup pattern the 2026-07-22 crew-auth sweep
+  // replaced everywhere else — surfaced by the service-role-authorization
+  // guardrail the day it landed.
+  const auth = await requireCrewMember()
+  if (!auth.ok) return auth.response
+  const { crew, user } = auth
 
   const { notes } = (await req.json().catch(() => ({}))) as { notes?: string }
 
   // Service client for the WO read/update — crew role has no UPDATE policy on
   // work_orders; assignment is verified explicitly below instead of via RLS.
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ crew })
 
   const { data: wo } = await supabase
     .from('work_orders')

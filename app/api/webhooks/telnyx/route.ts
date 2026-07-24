@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ received: true })
   }
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'api-webhooks-telnyx' })
 
   if (text === 'STOP' || text === 'STOPALL' || text === 'UNSUBSCRIBE' || text === 'CANCEL' || text === 'END' || text === 'QUIT') {
     const { data: updated } = await supabase

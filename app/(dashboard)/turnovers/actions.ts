@@ -26,7 +26,7 @@ async function trackAssignmentAgainstSuggestions(
 ): Promise<void> {
   try {
     const { createServiceClient } = await import('@/lib/supabase/server')
-    const service = createServiceClient()
+    const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
 
     const overridden = turnovers.filter(t =>
       t.suggestion_status === 'pending' &&
@@ -174,7 +174,7 @@ export async function assignCrew(
     // Send push notification to the assigned crew member
     try {
       const { createServiceClient } = await import('@/lib/supabase/server')
-      const serviceClient = createServiceClient()
+      const serviceClient = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
 
       const { data: subs } = await serviceClient
         .from('push_subscriptions')
@@ -846,7 +846,7 @@ export async function acceptSuggestion(turnoverId: string): Promise<TurnoverActi
         .single()
 
       const { createServiceClient } = await import('@/lib/supabase/server')
-      const service = createServiceClient()
+      const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
       await service.from('assignment_outcomes').upsert(
         crewIds.map(crewId => ({
           turnover_id:        turnoverId,
@@ -913,7 +913,7 @@ export async function dismissSuggestion(turnoverId: string): Promise<TurnoverAct
           : { data: null }
 
         const { createServiceClient } = await import('@/lib/supabase/server')
-        const service = createServiceClient()
+        const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
         await service.from('assignment_outcomes').upsert(
           crewIds.map(crewId => ({
             turnover_id:        turnoverId,
@@ -980,7 +980,7 @@ export async function rateTurnoverCompletion(
     if (!crewIds.length) return { error: 'No crew assigned to rate' }
 
     const { createServiceClient } = await import('@/lib/supabase/server')
-    const service = createServiceClient()
+    const service = createServiceClient({ system: 'action:turnover-suggestion-tracking' })
 
     const { error } = await service.from('assignment_outcomes').upsert(
       crewIds.map(crewMemberId => ({

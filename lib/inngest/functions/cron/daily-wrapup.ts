@@ -32,7 +32,7 @@ export const dailyWrapUp = inngest.createFunction(
 
     // ── Every org with an active, invite-accepted PM is a candidate ─────────
     const orgIds = await step.run('find-active-orgs', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:daily-wrapup' })
       const { data } = await supabase
         .from('organization_members')
         .select('org_id')
@@ -92,7 +92,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
     // email that actually goes out. Splitting means the compute step is
     // memoized once it succeeds — a send-step retry never re-triggers it.
     const wrapup = await step.run('compute-wrapup', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:daily-wrapup' })
 
       // ── 1. Turnover schedule for tomorrow ──────────────────────────────
       const { data: turnoversTomorrow } = await supabase
@@ -405,7 +405,7 @@ export const dailyWrapUpOrg = inngest.createFunction(
     return await step.run('send-wrapup', async () => {
       if (!wrapup.hasContent) return { orgId, sent: false, reason: 'nothing_to_report' }
 
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:daily-wrapup' })
       const [pmEmail] = await getPmEmails(supabase, orgId)
       if (!pmEmail) return { orgId, sent: false, reason: 'no_pm_email' }
 

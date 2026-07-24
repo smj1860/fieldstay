@@ -21,7 +21,7 @@ const POWER_UP_DEFS = [
 export default async function PowerUpsPage() {
   const { membership } = await requireOrgMember()
 
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authorizedBy: membership })
   const { data: connections } = await admin
     .from('integration_connections')
     .select('provider_id, status')

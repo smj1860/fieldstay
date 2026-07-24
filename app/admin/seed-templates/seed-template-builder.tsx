@@ -29,7 +29,7 @@ interface TemplateState {
 }
 
 function makeId() {
-  if (typeof window === 'undefined') return 'ssr'
+  if (typeof globalThis.window === 'undefined') return 'ssr'
   return crypto.randomUUID()
 }
 

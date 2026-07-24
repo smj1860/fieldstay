@@ -24,7 +24,7 @@ export const handleTrialLifecycle = inngest.createFunction(
 
     // Check if they subscribed — if so, cancel the whole sequence
     const subscribed = await step.run('check-subscription-before-warning', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
       const { data: org } = await supabase
         .from('organizations')
         .select('plan_status')
@@ -36,7 +36,7 @@ export const handleTrialLifecycle = inngest.createFunction(
     if (subscribed) return { cancelled: true, reason: 'subscribed-before-warning' }
 
     await step.run('send-trial-expiring-email', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
 
       const { data: integration } = await supabase
         .from('integration_connections')
@@ -79,7 +79,7 @@ export const handleTrialLifecycle = inngest.createFunction(
     await step.sleepUntil('sleep-until-expired', expiredAt)
 
     const subscribedAfterWarning = await step.run('check-subscription-at-expiry', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
       const { data: org } = await supabase
         .from('organizations')
         .select('plan_status')
@@ -118,7 +118,7 @@ export const handleTrialLifecycle = inngest.createFunction(
     await step.sleep('sleep-before-churn-email', '3 days')
 
     const subscribedLate = await step.run('check-subscription-before-churn', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:email-trial-lifecycle' })
       const { data: org } = await supabase
         .from('organizations')
         .select('plan_status')

@@ -11,7 +11,7 @@ export const notifyAssignmentGap = inngest.createFunction(
     const { turnover_id, property_id, org_id, turnover_date, crew_needed, crew_found } = event.data
 
     const context = await step.run('load-context', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:notify-assignment-gap' })
 
       const [{ data: property }, pmMembers] = await Promise.all([
         supabase.from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single(),
@@ -59,7 +59,7 @@ export const notifyAssignmentGap = inngest.createFunction(
     // Push notifications (best-effort — don't fail the function if push errors)
     for (const member of context.pmMembers as PmMember[]) {
       await step.run(`push-manager-${member.userId}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:notify-assignment-gap' })
         const { data: subs } = await supabase
           .from('push_subscriptions')
           .select('endpoint, p256dh, auth')

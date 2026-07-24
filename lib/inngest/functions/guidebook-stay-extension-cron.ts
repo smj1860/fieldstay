@@ -12,7 +12,7 @@ export const guidebookStayExtensionCron = inngest.createFunction(
 
     // Fetch orgs with extension messaging enabled
     const configs = await step.run('fetch-extension-configs', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-stay-extension-cron' })
       const { data, error } = await supabase
         .from('guidebook_configurations')
         .select(`
@@ -33,7 +33,7 @@ export const guidebookStayExtensionCron = inngest.createFunction(
 
     for (const config of configs) {
       const count = await step.run(`check-gaps-${config.org_id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:guidebook-stay-extension-cron' })
         // Find bookings checking out in `extension_message_days_before` days
         const targetCheckout = new Date(
           Date.now() + config.extension_message_days_before * 24 * 60 * 60 * 1000

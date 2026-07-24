@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: 'Team — FieldStay' }
 
 export default async function TeamPage() {
   const { user, membership } = await requireOrgMember()
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authorizedBy: membership })
 
   // Fetch all members with their auth emails
   const { data: members } = await admin

@@ -13,7 +13,7 @@ const RECENT_KEY   = 'fs-recent-nav'
 const MAX_RECENTS  = 5
 
 function readRecents(): string[] {
-  if (typeof window === 'undefined') return []
+  if (typeof globalThis.window === 'undefined') return []
   try {
     const raw = globalThis.localStorage.getItem(RECENT_KEY)
     return raw ? (JSON.parse(raw) as string[]) : []
@@ -23,7 +23,7 @@ function readRecents(): string[] {
 }
 
 function pushRecent(href: string) {
-  if (typeof window === 'undefined') return
+  if (typeof globalThis.window === 'undefined') return
   try {
     const next = [href, ...readRecents().filter((h) => h !== href)].slice(0, MAX_RECENTS)
     globalThis.localStorage.setItem(RECENT_KEY, JSON.stringify(next))

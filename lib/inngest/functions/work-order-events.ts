@@ -26,7 +26,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
       // ── Step 1: Load dispatch context (WO/vendor/property/dispatcher/org,
       // completion-token ensure) ──────────────────────────────────────────────
       const dispatchResult = await step.run('load-dispatch-context', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:work-order-events' })
         return loadDispatchContext(supabase, work_order_id, org_id)
       })
 
@@ -35,7 +35,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
       // duplicate email send, and vice versa.
       if (dispatchResult.dispatched) {
         await step.run('send-vendor-email', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:work-order-events' })
           await sendVendorDispatchEmail(work_order_id, dispatchResult, supabase, org_id)
           logger.info(`Dispatched WO ${work_order_id} to vendor ${dispatchResult.vendorEmail}`)
         })
@@ -54,7 +54,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
           return { skipped: true, reason: dispatchResult.reason }
         }
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:work-order-events' })
         await createPmNotification(supabase, {
           orgId:     org_id,
           type:      'work_order_dispatched',
@@ -78,7 +78,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
       // If the cron or a prior dispatch already sent the invite, this is a no-op.
       if (dispatchResult.dispatched && event.data.vendor_id) {
         await step.run('trigger-vendor-stripe-onboarding', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
           const { data: vendor, error: vendorErr } = await supabase
             .from('vendors')
@@ -232,7 +232,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
     // ── Overdue check (unchanged from original) ────────────────────────────
     if (event.data.vendor_id) {
       const scheduledDate = await step.run('fetch-scheduled-date', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:work-order-events' })
         const { data: wo } = await supabase
           .from('work_orders')
           .select('scheduled_date')
@@ -251,7 +251,7 @@ export const handleWorkOrderCreated = inngest.createFunction(
         await step.sleepUntil('wait-until-overdue-threshold', overdueCheckDate)
 
         const stillOpen = await step.run('check-still-open-before-overdue-event', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:work-order-events' })
           const { data: wo } = await supabase
             .from('work_orders')
             .select('status')
@@ -288,7 +288,7 @@ export const handleWorkOrderCompleted = inngest.createFunction(
     const { work_order_id, property_id, org_id } = event.data
 
     await step.run('post-wo-expense', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
       const { data: wo } = await supabase
         .from('work_orders')
@@ -346,7 +346,7 @@ export const handleWorkOrderCompletedViaPortal = inngest.createFunction(
     const { work_order_id } = event.data
 
     await step.run('notify-pm-of-completion', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
       const { data: wo } = await supabase
         .from('work_orders')
@@ -401,7 +401,7 @@ export const handleWorkOrderOverdue = inngest.createFunction(
     const { work_order_id, org_id, days_overdue } = event.data
 
     await step.run('check-and-alert', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
       const { data: wo } = await supabase
         .from('work_orders')
@@ -457,7 +457,7 @@ export const handleWorkOrderQuoteRequested = inngest.createFunction(
     const { work_order_id, quote_request_id } = event.data
 
     await step.run('send-vendor-quote-request', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
       const { data: qr } = await supabase
         .from('quote_requests')
@@ -531,7 +531,7 @@ export const handleWorkOrderQuoteSubmitted = inngest.createFunction(
     const { work_order_id, quote_request_id, org_id, quoted_amount, quote_notes } = event.data
 
     await step.run('notify-pm-of-quote', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-events' })
 
       const { data: wo } = await supabase
         .from('work_orders')

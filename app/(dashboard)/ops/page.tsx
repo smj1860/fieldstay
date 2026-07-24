@@ -81,7 +81,7 @@ export default async function OpsSnapshotPage() {
   // shouldn't suppress the nudge.
   const REVENUE_AUTOMATION_PROVIDER_IDS = ['ownerrez', 'hospitable']
 
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authorizedBy: membership })
   const { data: pmsConnections } = await admin
     .from('integration_connections')
     .select('id')

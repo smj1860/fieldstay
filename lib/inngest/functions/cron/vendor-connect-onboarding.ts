@@ -40,7 +40,7 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
 
     // ── Step 1: Fetch uninvited vendors with email ───────────────────────────
     const vendors = await step.run('fetch-uninvited-vendors', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:vendor-connect-onboarding' })
 
       // Look back 2 days to catch any missed by a failed run
       const cutoff = new Date()

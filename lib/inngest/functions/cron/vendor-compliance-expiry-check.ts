@@ -28,7 +28,7 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
   { cron: '0 11 * * *' },  // 6am CT (UTC-5)
   async ({ step, logger }) => {
     const documents = await step.run('find-expiring-documents', async () => {
-      const supabase  = createServiceClient()
+      const supabase  = createServiceClient({ system: 'inngest:vendor-compliance-expiry-check' })
       const todayStr  = new Date().toISOString().split('T')[0]
       const windowEnd = new Date(Date.now() + EXPIRING_SOON_WINDOW_DAYS * 86_400_000)
         .toISOString().split('T')[0]
@@ -48,7 +48,7 @@ export const vendorComplianceExpiryCheck = inngest.createFunction(
 
     for (const doc of documents) {
       const warned = await step.run(`mark-warned-${doc.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:vendor-compliance-expiry-check' })
 
         // Idempotency: only proceed if this run is the one that flips the
         // gate — guards against a retried step re-emitting for the same doc.

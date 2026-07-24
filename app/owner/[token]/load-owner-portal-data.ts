@@ -92,7 +92,7 @@ export async function loadOwnerPortalData(
   monthParam:   string | undefined,
   propertyParam: string | undefined,
 ): Promise<OwnerPortalPageState | null> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'owner--token--load-owner-portal-data' })
 
   // Validate token + fetch owner + property
   const { data: portalToken } = await supabase

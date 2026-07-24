@@ -39,7 +39,7 @@ async function trackVendorAssignmentAgainstSuggestions(
 ): Promise<void> {
   try {
     const { createServiceClient } = await import('@/lib/supabase/server')
-    const service = createServiceClient()
+    const service = createServiceClient({ system: 'action:maintenance-suggestion-tracking' })
 
     const overridden = workOrders.filter(wo =>
       wo.suggestion_status === 'pending' &&
@@ -1183,7 +1183,7 @@ export async function acceptVendorSuggestion(workOrderId: string): Promise<{ err
 
     try {
       const { createServiceClient } = await import('@/lib/supabase/server')
-      const service = createServiceClient()
+      const service = createServiceClient({ system: 'action:maintenance-suggestion-tracking' })
       await service.from('vendor_assignment_outcomes').upsert(
         { work_order_id: workOrderId, org_id: membership.org_id, vendor_id: vendorId, was_accepted: true, was_suggestion: true },
         { onConflict: 'work_order_id,vendor_id', ignoreDuplicates: false }
@@ -1250,7 +1250,7 @@ export async function dismissVendorSuggestion(workOrderId: string): Promise<{ er
     if (vendorId) {
       try {
         const { createServiceClient } = await import('@/lib/supabase/server')
-        const service = createServiceClient()
+        const service = createServiceClient({ system: 'action:maintenance-suggestion-tracking' })
         await service.from('vendor_assignment_outcomes').upsert(
           { work_order_id: workOrderId, org_id: membership.org_id, vendor_id: vendorId, was_accepted: false, was_suggestion: true },
           { onConflict: 'work_order_id,vendor_id', ignoreDuplicates: false }

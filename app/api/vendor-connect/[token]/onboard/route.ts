@@ -39,7 +39,7 @@ export async function GET(
     console.error('[vendor-connect/onboard] rate limit check failed', rlErr)
   }
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'api-vendor-connect--token--onboard' })
 
   const { data: vendor } = await supabase
     .from('vendors')

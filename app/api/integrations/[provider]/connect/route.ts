@@ -108,7 +108,7 @@ export async function GET(
   // ── 5. Persist state in the DB ────────────────────────────
   //    Storing in the DB (not only a cookie) makes the state durable
   //    across cross-device flows and easier to expire/consume server-side.
-  const admin = createServiceClient()
+  const admin = createServiceClient({ publicSurface: 'integrations-oauth-connect' })
 
   const { error: stateError } = await admin.from('oauth_states').insert({
     state,

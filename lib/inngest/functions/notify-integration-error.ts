@@ -17,7 +17,7 @@ export const notifyIntegrationError = inngest.createFunction(
     const { org_id, provider_id, reason } = event.data
 
     await step.run('create-notification', async () => {
-      const supabase     = createServiceClient()
+      const supabase     = createServiceClient({ system: 'inngest:notify-integration-error' })
       const providerName = PROVIDER_DISPLAY_NAMES[provider_id] ?? provider_id
       const today         = new Date().toISOString().split('T')[0]
 

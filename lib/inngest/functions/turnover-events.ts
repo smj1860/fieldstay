@@ -35,7 +35,7 @@ export const handleTurnoverCreated = inngest.createFunction(
     // ── Fetch turnover data ──────────────────────────────────────────────────
 
     const { turnover, property } = await step.run('fetch-turnover-data', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
       const [{ data: turnover }, { data: property }] = await Promise.all([
         supabase
@@ -130,7 +130,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
     })
 
     await step.run('notify-pm-of-completion', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
       const { data: property } = await supabase
         .from('properties').select('name').eq('id', property_id).eq('org_id', org_id).single()
@@ -147,7 +147,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
     })
 
     await step.run('notify-pm-of-open-mandatory-items', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
       const { data: assets } = await supabase
         .from('property_assets')
@@ -190,7 +190,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
     })
 
     await step.run('record-completion-milestones', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
       const { count } = await supabase
         .from('turnovers')
@@ -214,7 +214,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
     })
 
     await step.run('post-cleaning-fee-expense', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
       const [{ data: property }, { data: turnover }] = await Promise.all([
         supabase.from('properties').select('cleaning_cost, same_day_premium_pct').eq('id', property_id).eq('org_id', org_id).single(),
@@ -264,7 +264,7 @@ export const handleTurnoverCompleted = inngest.createFunction(
     })
 
     await step.run('record-crew-duration', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:turnover-events' })
 
       const { data: instance } = await supabase
         .from('checklist_instances')

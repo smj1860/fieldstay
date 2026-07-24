@@ -146,7 +146,7 @@ export default async function DashboardLayout({
     // requireOrgMember() plus the exact milestone key.
     const orgId = membership.org_id
     after(async () => {
-      const admin = createServiceClient()
+      const admin = createServiceClient({ authorizedBy: membership })
       await admin
         .from('org_milestones')
         .update({ prompted_at: new Date().toISOString() })

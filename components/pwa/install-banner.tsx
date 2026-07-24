@@ -33,13 +33,13 @@ function saveDismissed() {
 }
 
 function isIOSSafari(): boolean {
-  if (typeof window === 'undefined') return false
+  if (typeof globalThis.window === 'undefined') return false
   const ua = navigator.userAgent
   return /iphone|ipad|ipod/i.test(ua) && /safari/i.test(ua) && !/crios|fxios/i.test(ua)
 }
 
 function isStandalone(): boolean {
-  if (typeof window === 'undefined') return false
+  if (typeof globalThis.window === 'undefined') return false
   return (
     globalThis.matchMedia('(display-mode: standalone)').matches ||
     (globalThis.navigator as { standalone?: boolean }).standalone === true

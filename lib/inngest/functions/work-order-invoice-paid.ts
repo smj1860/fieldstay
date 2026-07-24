@@ -19,7 +19,7 @@ export const handleWorkOrderInvoicePaid = inngest.createFunction(
     const { work_order_id, invoice_id, org_id } = event.data
 
     await step.run('notify-vendor-of-payment', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-invoice-paid' })
 
       const [woResult, invoiceResult] = await Promise.all([
         supabase

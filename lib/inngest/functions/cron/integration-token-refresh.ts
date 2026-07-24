@@ -20,7 +20,7 @@ export const integrationTokenRefreshCron = inngest.createFunction(
   async ({ step, logger }) => {
 
     const connections = await step.run('fetch-expiring-connections', async () => {
-      const supabase   = createServiceClient()
+      const supabase   = createServiceClient({ system: 'inngest:integration-token-refresh' })
       const windowEdge = new Date(Date.now() + 60 * 60 * 1_000).toISOString()
 
       const { data, error } = await supabase

@@ -26,7 +26,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'Confirmation required' }, { status: 400 })
   }
 
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authenticatedUser: user })
 
   // Get all org memberships — user may belong to more than one org
   const { data: memberships, error: memberErr } = await admin

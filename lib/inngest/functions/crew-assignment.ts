@@ -29,7 +29,7 @@ export const handleCrewAssigned = inngest.createFunction(
     const { crew_member_id, turnover_ids, org_id } = event.data
 
     const { crew, turnovers } = await step.run('fetch-assignment-data', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:crew-assignment' })
 
       const [{ data: crew }, { data: turnovers }] = await Promise.all([
         supabase
@@ -117,7 +117,7 @@ export const handleCrewAssigned = inngest.createFunction(
         const e164 = normalizePhoneToE164(crew.phone!)
         if (!e164) return { skipped: true, reason: 'invalid-phone' }
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:crew-assignment' })
         const { data: org } = await supabase
           .from('organizations')
           .select('name')

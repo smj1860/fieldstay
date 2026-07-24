@@ -9,7 +9,7 @@ export const logMessageCommunication = inngest.createFunction(
     const { message_id, org_id, sender_id, recipient_id, is_crew_to_pm } = event.data
 
     const message = await step.run('fetch-message', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:log-message-comm' })
       const { data } = await supabase
         .from('messages')
         .select('content, created_at, work_order_id')
@@ -24,7 +24,7 @@ export const logMessageCommunication = inngest.createFunction(
     const crewUserId = is_crew_to_pm ? sender_id : recipient_id
 
     const crewMember = await step.run('resolve-crew-member', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:log-message-comm' })
       const { data } = await supabase
         .from('crew_members')
         .select('id')
@@ -37,7 +37,7 @@ export const logMessageCommunication = inngest.createFunction(
     if (!crewMember) return { skipped: 'crew_member_not_found' }
 
     const result = await step.run('write-comms-log', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:log-message-comm' })
       // MEDIUM-9: dedup_key is backed by a partial unique index — a retried
       // step can no longer create a duplicate row even under a race between
       // a check and an insert, unlike the prior pure application-level check.

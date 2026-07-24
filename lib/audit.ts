@@ -175,7 +175,7 @@ export async function logAuditEvent(params: AuditParams): Promise<void> {
 export async function logAuditEvents(entries: AuditParams[]): Promise<void> {
   if (!entries.length) return
   try {
-    const admin = createServiceClient()
+    const admin = createServiceClient({ system: 'lib/audit' })
     await admin.from('audit_events').insert(
       entries.map((params) => ({
         org_id:      params.orgId      ?? null,

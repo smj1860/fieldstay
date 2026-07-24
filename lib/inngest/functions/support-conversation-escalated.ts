@@ -9,7 +9,7 @@ export const handleSupportEscalation = inngest.createFunction(
 
     const context = await step.run('fetch-context', async () => {
       const { createServiceClient } = await import('@/lib/supabase/server')
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:support-conversation-escalated' })
 
       const [{ data: org }, { data: conversation }] = await Promise.all([
         supabase.from('organizations').select('name').eq('id', orgId).single(),
@@ -34,7 +34,7 @@ export const handleSupportEscalation = inngest.createFunction(
     await step.run('notify-stephen', async () => {
       const { createServiceClient } = await import('@/lib/supabase/server')
       const { resend, FROM }        = await import('@/lib/resend/client')
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:support-conversation-escalated' })
 
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
 

@@ -32,7 +32,7 @@ export async function POST(
     console.error('[work-orders/complete] rate limit check failed', rlErr)
   }
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--complete' })
 
   // Validate token
   const { data: workOrder } = await supabase
@@ -170,7 +170,7 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--complete' })
 
   const { data: workOrder } = await supabase
     .from('work_orders')

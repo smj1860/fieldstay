@@ -18,7 +18,7 @@ export async function createSponsorCheckoutSession(
   mediaKitToken: string
 ): Promise<{ url: string } | { error: string }> {
   try {
-    const supabase = createServiceClient()
+    const supabase = createServiceClient({ publicSurface: 'guidebook-sponsor-media-kit' })
 
     const { data: sponsor } = await supabase
       .from('guidebook_sponsors')
@@ -106,7 +106,7 @@ export async function upsertSponsor(
 ): Promise<{ mediaKitToken: string } | { error: string }> {
   try {
     const { user, membership } = await requireOrgRole(['admin', 'manager'])
-    const supabase        = createServiceClient()
+    const supabase        = createServiceClient({ authorizedBy: membership })
 
     if (input.slotNumber < 1 || input.slotNumber > 6) {
       return { error: 'Slot number must be between 1 and 6.' }
@@ -179,7 +179,7 @@ export async function upsertPropertyGuidebookConfig(
 ): Promise<{ error?: string }> {
   try {
     const { user, membership } = await requireOrgRole(['admin', 'manager'])
-    const supabase        = createServiceClient()
+    const supabase        = createServiceClient({ authorizedBy: membership })
 
     const { data: property } = await supabase
       .from('properties')
@@ -247,7 +247,7 @@ export async function updateStayExtensionSettings(
 ): Promise<{ error?: string }> {
   try {
     const { user, membership } = await requireOrgRole(['admin', 'manager'])
-    const supabase        = createServiceClient()
+    const supabase        = createServiceClient({ authorizedBy: membership })
 
     if (input.discountPct !== null && (input.discountPct < 0 || input.discountPct > 100)) {
       return { error: 'Discount must be between 0 and 100.' }
@@ -309,7 +309,7 @@ export async function optInGuestSms(
     const phoneE164 = normalizePhoneToE164(rawPhone)
     if (!phoneE164) return { error: 'Please enter a valid US or Canadian phone number.' }
 
-    const supabase = createServiceClient()
+    const supabase = createServiceClient({ publicSurface: 'guidebook-guest-sms-optin' })
 
     const { data: booking } = await supabase
       .from('bookings')

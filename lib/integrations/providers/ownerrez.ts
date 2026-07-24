@@ -233,7 +233,7 @@ export const ownerRezProvider: IntegrationProvider = {
           let connection: { user_id: string; org_id: string } | null = null
           if (externalUserId) {
             const { createServiceClient } = await import('@/lib/supabase/server')
-            const supabase = createServiceClient()
+            const supabase = createServiceClient({ system: 'lib/integrations/providers/ownerrez' })
             const { data: conn } = await supabase
               .from('integration_connections')
               .select('user_id, org_id')

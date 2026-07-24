@@ -16,7 +16,7 @@ export default async function SettingsPage() {
     .eq('id', membership.org_id)
     .single()
 
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authorizedBy: membership })
   const { data: connections } = await admin
     .from('integration_connections')
     .select('provider_id, status, external_user_id, connected_at, metadata')

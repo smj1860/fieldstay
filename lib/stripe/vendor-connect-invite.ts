@@ -90,7 +90,7 @@ export interface EnsureVendorConnectInvitedParams {
 export async function ensureVendorConnectInvited(
   params: EnsureVendorConnectInvitedParams
 ): Promise<{ invited: boolean }> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/stripe/vendor-connect-invite' })
 
   const claim = await claimVendorConnectInvite(supabase, params.vendorId, params.orgId)
   if (!claim.claimed) {
@@ -190,7 +190,7 @@ export interface ResendVendorConnectInviteParams {
 export async function resendVendorConnectInvite(
   params: ResendVendorConnectInviteParams
 ): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/stripe/vendor-connect-invite' })
 
   const claim = await claimVendorConnectInvite(supabase, params.vendorId, params.orgId)
   if (!claim.claimed) {

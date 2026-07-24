@@ -27,7 +27,7 @@ export const crewScoreRecompute = inngest.createFunction(
   { cron: '0 9 * * *' }, // ~3-4am CT, off-hours
   async ({ step, logger }) => {
     const flagged = await step.run('flag-missed-assignments', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:crew-score-recompute' })
       const cutoff = new Date(Date.now() - MISSED_ASSIGNMENT_HOURS * 60 * 60 * 1000).toISOString()
 
       const { data: missedTurnovers } = await supabase
@@ -60,7 +60,7 @@ export const crewScoreRecompute = inngest.createFunction(
     })
 
     const { scored, crewUpdated, capacityUpdated } = await step.run('apply-score-deltas', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:crew-score-recompute' })
       const { data, error } = await supabase.rpc('apply_crew_score_recompute')
       if (error) throw new Error(`apply_crew_score_recompute failed: ${error.message}`)
       return data as { scored: number; crewUpdated: number; capacityUpdated: number }

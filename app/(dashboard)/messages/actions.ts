@@ -103,7 +103,7 @@ export async function sendMessageToPM(content: string): Promise<MessageActionRes
     // Crew members have no RLS visibility into organization_members (they're
     // not members of the org themselves), so this lookup intentionally
     // bypasses RLS via the service client to find a contact to route to.
-    const admin = createServiceClient()
+    const admin = createServiceClient({ crew: crewMember })
     const { data: recipient } = await admin
       .from('organization_members')
       .select('user_id')

@@ -8,7 +8,7 @@ export default async function GuestSmsOptInPage({
   params: Promise<{ token: string }>
 }) {
   const { token } = await params
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'g-b--token--opt-in' })
 
   const { data: booking } = await supabase
     .from('bookings')

@@ -24,7 +24,7 @@ export async function sendPushToUser(userId: string, payload: SendPushPayload): 
   }
   webpush.setVapidDetails(`mailto:${process.env.VAPID_EMAIL}`, vapidPublicKey, vapidPrivateKey)
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/push/send-push' })
 
   const { data: crewMember } = await supabase
     .from('crew_members')

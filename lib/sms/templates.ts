@@ -40,7 +40,7 @@ export {
  * Fetches the org's custom template for `key` (if any) and renders it with
  * `vars`. Falls back to the hardcoded default builder if no custom template exists.
  *
- * Always uses createServiceClient() — call only from Inngest steps or
+ * Always uses createServiceClient({ system: 'lib/sms/templates' }) — call only from Inngest steps or
  * server-side code where the service role key is available.
  */
 export interface CrewTurnoverAssignmentData {
@@ -58,7 +58,7 @@ export async function renderSmsBody(
   // {{assignments}} string) to preserve its pluralisation logic.
   turnoverData?: CrewTurnoverAssignmentData[]
 ): Promise<string> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/sms/templates' })
 
   const { data } = await supabase
     .from('org_sms_templates')

@@ -54,7 +54,7 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
 
   const { token, crewId, password } = parsed.data
   const submittedEmail = parsed.data.email || null
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'crew-invite--token--actions' })
 
   const { data: crew, error: crewError } = await supabase
     .from('crew_members')

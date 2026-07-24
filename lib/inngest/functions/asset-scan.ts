@@ -37,7 +37,7 @@ export const assetDataPlateScan = inngest.createFunction(
     const { org_id, asset_id, storage_path, media_type } = event.data
 
     await step.run('mark-processing', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:asset-scan' })
       await supabase
         .from('property_assets')
         .update({ scan_status: 'processing' })
@@ -50,7 +50,7 @@ export const assetDataPlateScan = inngest.createFunction(
         throw new Error(`Unsupported media type: ${media_type}`)
       }
 
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:asset-scan' })
       const { data: blob, error } = await supabase.storage.from(PHOTO_BUCKET).download(storage_path)
       if (error || !blob) throw new Error(`Could not download photo: ${error?.message ?? 'not found'}`)
 
@@ -60,7 +60,7 @@ export const assetDataPlateScan = inngest.createFunction(
     })
 
     await step.run('save-result', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:asset-scan' })
 
       const { data: asset } = await supabase
         .from('property_assets')

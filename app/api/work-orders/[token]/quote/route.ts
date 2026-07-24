@@ -29,7 +29,7 @@ export async function GET(
   if (rateLimited) return rateLimited
 
   const { token }  = await params
-  const supabase   = createServiceClient()
+  const supabase   = createServiceClient({ publicSurface: 'api-work-orders--token--quote' })
 
   const { data: qr } = await supabase
     .from('quote_requests')
@@ -69,7 +69,7 @@ export async function POST(
   if (rateLimited) return rateLimited
 
   const { token }  = await params
-  const supabase   = createServiceClient()
+  const supabase   = createServiceClient({ publicSurface: 'api-work-orders--token--quote' })
 
   const { data: qr } = await supabase
     .from('quote_requests')

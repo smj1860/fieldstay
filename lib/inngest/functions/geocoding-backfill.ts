@@ -26,7 +26,7 @@ export const geocodingBackfill = inngest.createFunction(
   async ({ step }) => {
 
     const propertiesResult = await step.run('geocode-properties', async (): Promise<{ geocoded: number; skipped: number }> => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:geocoding-backfill' })
       const pageSize = 1000
       const properties: { id: string; zip: string | null }[] = []
       for (let from = 0; ; from += pageSize) {
@@ -79,7 +79,7 @@ export const geocodingBackfill = inngest.createFunction(
     })
 
     const vendorsResult = await step.run('geocode-vendors', async (): Promise<{ geocoded: number; skipped: number }> => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:geocoding-backfill' })
       const pageSize = 1000
       const vendors: { id: string; service_zip: string | null }[] = []
       for (let from = 0; ; from += pageSize) {

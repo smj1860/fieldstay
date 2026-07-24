@@ -72,6 +72,53 @@ const eslintConfig = [
       }],
     },
   },
+  {
+    // ── Structural enforcement of CLAUDE.md's "Things That Will Break" ──────
+    // Each rule here is a convention promoted from prose to a compile-time
+    // failure. Scoped to shipped code — tests/e2e/scripts are exempt (a test
+    // may legitimately reference a forbidden pattern to assert against it).
+    // The string-level and cross-file invariants that AST rules can't
+    // express live in unit/guardrails/ — see CLAUDE.md's "Structural
+    // enforcement" section for the system and the meta-rule.
+    files: ['app/**/*.{ts,tsx}', 'lib/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error',
+        {
+          selector: "CallExpression[callee.property.name='from'] > Literal[value='memberships']",
+          message: "The table is organization_members — 'memberships' does not exist (CLAUDE.md: The Table That Breaks Everything If Wrong).",
+        },
+        {
+          selector: "Literal[value='assigned_crew_id']",
+          message: "work_orders.assigned_crew_id is deprecated — use assigned_crew_member_id.",
+        },
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: "This codebase's XSS defense depends on zero dangerouslySetInnerHTML uses. If raw HTML rendering is genuinely required, it needs DOMPurify and a CLAUDE.md update first.",
+        },
+        {
+          selector: "CallExpression[callee.property.name='raw'][callee.object.name='supabase']",
+          message: "supabase.raw() does not exist on the Supabase JS client — fetch rows and compare in JavaScript.",
+        },
+        {
+          selector: "MemberExpression[object.object.name='process'][object.property.name='env'][property.name='SUPABASE_SERVICE_ROLE_KEY']",
+          message: "The service-role key may only be read in lib/supabase/server.ts — use createServiceClient()/adminFetch() from there (eslint-disable with justification at the canonical site only).",
+        },
+      ],
+      'no-restricted-properties': ['error',
+        {
+          object: 'Math',
+          property: 'random',
+          message: 'Never use Math.random() for IDs, storage paths, or tokens — use crypto.randomUUID(). For genuine sampling/jitter, eslint-disable-next-line with a one-line justification.',
+        },
+      ],
+      'no-restricted-globals': ['error',
+        {
+          name: 'window',
+          message: 'Use globalThis — window throws a ReferenceError during SSR.',
+        },
+      ],
+    },
+  },
 ]
 
 export default eslintConfig

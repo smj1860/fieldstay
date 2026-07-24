@@ -109,7 +109,7 @@ export const ownerRezIncrementalSync = inngest.createFunction(
     }
 
     const connections = await step.run('fetch-connections', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
       let query = supabase
         .from('integration_connections')
         .select('id, user_id, org_id, external_user_id')
@@ -188,7 +188,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
     // properties that are fully set up.
     if (orgId && checkNewProperties) {
       const newPropertyIds = await step.run('check-new-properties', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
         try {
           const orProperties = await new OwnerRezApiClient(userId).getProperties()
           if (!orProperties.length) return []
@@ -231,7 +231,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
     }
     const syncResult: SyncSuccess | { skipped: boolean; reason: string } | null | undefined =
       await step.run('sync-connection', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
 
         // Re-fetch the connection: metadata (sync_cursor) and status may have
         // changed between dispatch and this run — a revoked/disconnected
@@ -569,7 +569,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
     // full booking list and can apply its two-pass pairing logic correctly.
     if (affectedIds.length && orgId) {
       const allNewTurnoverIds = await step.run('generate-turnovers', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
         const ids: string[] = []
         for (const propertyId of affectedIds) {
           try {
@@ -587,7 +587,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
 
       if (allNewTurnoverIds.length > 0) {
         const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
           type TurnoverRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
           const { data: turnovers } = await supabase
             .from('turnovers')

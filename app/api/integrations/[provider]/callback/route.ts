@@ -130,7 +130,7 @@ export async function GET(
   // ── 2. Validate the state token (CSRF protection) ──────────
   //    We use the service-role client here because oauth_states has no
   //    RLS policy for reads — it is a server-side-only table.
-  const admin = createServiceClient()
+  const admin = createServiceClient({ publicSurface: 'integrations-oauth-callback' })
 
   const { data: stateRecord, error: stateError } = await admin
     .from('oauth_states')

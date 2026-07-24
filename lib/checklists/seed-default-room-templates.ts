@@ -96,7 +96,7 @@ async function fetchPlatformSeedTemplates(supabase: ServiceClient): Promise<Seed
  * itself can never duplicate (UNIQUE (org_id, name) + ignoreDuplicates).
  */
 export async function seedDefaultRoomTemplatesIfNeeded(orgId: string): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/checklists/seed-default-room-templates' })
 
   const seedTemplates = await fetchPlatformSeedTemplates(supabase)
   if (seedTemplates.length === 0) {

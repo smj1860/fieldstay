@@ -37,7 +37,7 @@ export const guidebookSmsMorningCron = inngest.createFunction(
 
     // ── Fetch eligible opt-ins with booking window validation ─────────────────
     const optins = await step.run('fetch-active-optins', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-sms-morning-cron' })
       const { data, error } = await supabase
         .from('guidebook_guest_sms_optins')
         .select(`
@@ -98,7 +98,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
     const { optin_id: optinId, org_id: orgId, property_id: propertyId, today_date: todayDate } = event.data
 
     const sent = await step.run('send-morning-sms', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-sms-morning-cron' })
 
       // Re-fetch instead of trusting the dispatch-time snapshot: is_active
       // may have flipped (guest texted STOP) since the cron ran.

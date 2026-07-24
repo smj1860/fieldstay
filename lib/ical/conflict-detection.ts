@@ -1,7 +1,7 @@
 import type { createServiceClient } from '@/lib/supabase/server'
 
 // Tied to the real factory's return type rather than a literal `any` —
-// createClient()/createServiceClient() both omit the <Database> generic
+// createClient()/createServiceClient({ system: 'lib/ical/conflict-detection' }) both omit the <Database> generic
 // (see the comment in lib/supabase/server.ts: the hand-written Database
 // type doesn't satisfy postgrest-js's GenericSchema constraint), so this
 // stays correct automatically if that's ever fixed, instead of hardcoding

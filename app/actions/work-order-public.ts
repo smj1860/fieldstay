@@ -171,7 +171,7 @@ export async function getWorkOrderByToken(token: string): Promise<{
 }> {
   if (!token || token.length !== 64) return { error: 'Invalid link' }
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'work-order-public-token' })
 
   const { data: wo, error } = await supabase
     .from('work_orders')
@@ -260,7 +260,7 @@ export async function submitWorkOrderSignOff(
     console.error('[submitWorkOrderSignOff] rate limit check failed', rlErr)
   }
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'work-order-public-token' })
 
   const { data: wo, error: fetchErr } = await supabase
     .from('work_orders')

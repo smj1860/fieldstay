@@ -9,7 +9,7 @@ export default async function VendorConnectStatusPage({
 }) {
   const { token }       = await params
   const { already_onboarded } = await searchParams
-  const supabase        = createServiceClient()
+  const supabase        = createServiceClient({ publicSurface: 'vendor-connect--token--status' })
 
   const { data: vendor } = await supabase
     .from('vendors')

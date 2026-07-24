@@ -9,7 +9,7 @@ export default async function MediaKitPage({
   params: Promise<{ media_kit_token: string }>
 }) {
   const { media_kit_token } = await params
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ publicSurface: 'g-kit--media-kit-token-' })
 
   const { data: sponsor } = await supabase
     .from('guidebook_sponsors')

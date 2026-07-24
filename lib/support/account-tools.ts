@@ -11,7 +11,7 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
  */
 
 export async function getPlanStatus(orgId: string) {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/support/account-tools' })
 
   const { data: org } = await supabase
     .from('organizations')
@@ -43,7 +43,7 @@ export async function getPlanStatus(orgId: string) {
 }
 
 export async function getRecentTurnovers(orgId: string) {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/support/account-tools' })
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
   const sevenDaysOut = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
@@ -74,7 +74,7 @@ export async function getRecentTurnovers(orgId: string) {
 }
 
 export async function getIntegrationStatus(orgId: string) {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/support/account-tools' })
 
   const { data, error } = await supabase
     .from('integration_connections')
@@ -94,7 +94,7 @@ export async function getIntegrationStatus(orgId: string) {
 }
 
 export async function getRecentPurchaseOrders(orgId: string) {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/support/account-tools' })
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
   const { data, error } = await supabase

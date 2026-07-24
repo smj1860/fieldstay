@@ -40,7 +40,7 @@ export async function seedPresentAssetsFromAmenities(
   orgId: string,
   propertyIds?: string[]
 ): Promise<{ seeded: number; total: number }> {
-  const supabase     = createServiceClient()
+  const supabase     = createServiceClient({ system: 'lib/asset-discovery/seed-from-amenities' })
   const presentTypes = Object.keys(PRESENT_ASSET_AMENITY_MAP) as AssetType[]
 
   let propertyQuery = supabase
@@ -139,7 +139,7 @@ export async function seedAbsentOptionalAssetsFromAmenities(
   orgId: string,
   propertyIds?: string[]
 ): Promise<{ seeded: number; total: number }> {
-  const supabase      = createServiceClient()
+  const supabase      = createServiceClient({ system: 'lib/asset-discovery/seed-from-amenities' })
   const optionalTypes = Object.keys(OPTIONAL_ASSET_AMENITY_MAP) as AssetType[]
 
   let propertyQuery = supabase

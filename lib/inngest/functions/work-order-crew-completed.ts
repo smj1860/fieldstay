@@ -14,7 +14,7 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
     })
 
     const context = await step.run('fetch-context', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-crew-completed' })
       const [woRes, crewRes] = await Promise.all([
         supabase
           .from('work_orders')
@@ -40,7 +40,7 @@ export const handleWorkOrderCrewCompleted = inngest.createFunction(
     })
 
     await step.run('notify-pm', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-crew-completed' })
       const crewName = context.crew?.name ?? 'A crew member'
       const woTitle  = context.wo?.title ?? 'a work order'
       const propName = context.property?.name ?? 'the property'

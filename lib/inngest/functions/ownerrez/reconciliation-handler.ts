@@ -48,7 +48,7 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
     // (rather than the other way around) keeps reconciliation reflecting
     // OwnerRez's real state regardless of FieldStay's local active flag.
     const propertyIds = await step.run('fetch-property-ids', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:reconciliation-handler' })
 
       const { data } = await supabase
         .from('properties')
@@ -90,7 +90,7 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
     const currentExternalIds = new Set(currentExternalIdList)
 
     const result = await step.run('cancel-stale-bookings', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:reconciliation-handler' })
 
       const { data: existing, error } = await supabase
         .from('bookings')

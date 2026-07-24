@@ -24,7 +24,7 @@ export const notifyVendorComplianceExpiring = inngest.createFunction(
     // document. Vendor nudge below is unchanged.
 
     await step.run('notify-vendor', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:notify-vendor-compliance-expiring' })
 
       const [vendorResult, orgResult] = await Promise.all([
         supabase.from('vendors').select('email').eq('id', vendor_id).eq('org_id', org_id).single(),

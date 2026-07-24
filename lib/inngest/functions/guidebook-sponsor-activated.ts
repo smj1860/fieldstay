@@ -10,7 +10,7 @@ export const guidebookSponsorActivated = inngest.createFunction(
     const { sponsorId, orgId, subscriptionId, customerId } = event.data
 
     await step.run('activate-sponsor-row', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-activated' })
       const { error } = await supabase
         .from('guidebook_sponsors')
         .update({
@@ -34,7 +34,7 @@ export const guidebookSponsorActivated = inngest.createFunction(
     // still within their 30-day free trial. Also clears any in-progress grace
     // period — a replaced sponsor cancels the countdown.
     const wasUnlocked = await step.run('evaluate-guidebook-lock', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-sponsor-activated' })
 
       const { data: config } = await supabase
         .from('guidebook_configurations')

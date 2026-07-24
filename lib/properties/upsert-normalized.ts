@@ -32,7 +32,7 @@ export async function upsertNormalizedProperties(
   const idMap: Record<string, string> = {}
   if (!normalized.length) return idMap
 
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/properties/upsert-normalized' })
 
   // Fetch existing content field values BEFORE the upsert, so we can diff
   // against what's about to be written.

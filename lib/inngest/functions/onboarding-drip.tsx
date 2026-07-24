@@ -56,7 +56,7 @@ export const onboardingDrip = inngest.createFunction(
 
     // ── Email 2: Guidebook (existing template, repurposed) ─────────────
     const unsubscribedAt72h = await step.run('check-suppression-72h', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
       const { data: profile } = await supabase
         .from('profiles')
         .select('email_unsubscribed_at')
@@ -101,7 +101,7 @@ export const onboardingDrip = inngest.createFunction(
 
     // ── Email 3: Behavioral split on PMS connection ────────────────────
     const unsubscribedAt168h = await step.run('check-suppression-168h', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
       const { data: profile } = await supabase
         .from('profiles')
         .select('email_unsubscribed_at')
@@ -116,7 +116,7 @@ export const onboardingDrip = inngest.createFunction(
     }
 
     const isConnected = await step.run('check-pms-connection', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:onboarding-drip' })
       const { data: connections } = await supabase
         .from('integration_connections')
         .select('provider_id')

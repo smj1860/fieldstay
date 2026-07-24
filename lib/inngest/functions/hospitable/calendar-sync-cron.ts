@@ -36,7 +36,7 @@ export const hospCalendarSyncCron = inngest.createFunction(
     // throws "No active connection ... Reconnect required" and exhausts
     // retries (see SENTRY-CRAZY-CUSHION-8).
     const activeOrgIds = await step.run('fetch-active-hospitable-org-ids', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:calendar-sync-cron' })
 
       const { data, error } = await supabase
         .from('integration_connections')
@@ -55,7 +55,7 @@ export const hospCalendarSyncCron = inngest.createFunction(
     if (activeOrgIds.length === 0) return { dispatched: 0, skipped_reason: 'no_active_connections' }
 
     const properties = await step.run('fetch-active-hospitable-properties', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:calendar-sync-cron' })
 
       const { data, error } = await supabase
         .from('properties')
@@ -72,7 +72,7 @@ export const hospCalendarSyncCron = inngest.createFunction(
     if (properties.length === 0) return { dispatched: 0 }
 
     const adminUserIdByOrg = await step.run('resolve-admins-by-org', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:calendar-sync-cron' })
       const orgIds   = Array.from(new Set(properties.map((p) => p.org_id)))
 
       // One batched query for all orgs instead of one sequential query per org.

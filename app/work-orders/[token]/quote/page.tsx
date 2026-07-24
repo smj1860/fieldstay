@@ -6,7 +6,7 @@ interface Props { params: Promise<{ token: string }> }
 
 export default async function QuotePortalPage({ params }: Props) {
   const { token }  = await params
-  const supabase   = createServiceClient()
+  const supabase   = createServiceClient({ publicSurface: 'work-orders--token--quote' })
 
   const { data: qr } = await supabase
     .from('quote_requests')

@@ -7,7 +7,7 @@ import { generateBaseSlug, generateUniqueSlugsForProperties } from '@/lib/guideb
  * existing trial. Call once per PMS connection (OwnerRez, Hospitable, ...).
  */
 export async function ensureGuidebookConfiguration(orgId: string): Promise<void> {
-  const supabase    = createServiceClient()
+  const supabase    = createServiceClient({ system: 'lib/guidebook/sync' })
   const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
 
   await supabase
@@ -29,7 +29,7 @@ export async function createGuidebookPropertyConfigsForProperties(
   orgId: string,
   propertyIds?: string[]
 ): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/guidebook/sync' })
 
   let propertyQuery = supabase
     .from('properties')
@@ -107,7 +107,7 @@ export async function syncGuidebookConfigsFromProperty(
   externalSource: string,
   propertyIds?: string[]
 ): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'lib/guidebook/sync' })
 
   let propertyQuery = supabase
     .from('properties')

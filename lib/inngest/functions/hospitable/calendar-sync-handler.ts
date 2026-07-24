@@ -56,7 +56,7 @@ export const hospCalendarSyncHandler = inngest.createFunction(
     })
 
     const result = await step.run('reconcile-blocks', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:calendar-sync-handler' })
       const ranges    = consolidateHospitableBlocks(days)
 
       const rows = ranges.map((r) => ({

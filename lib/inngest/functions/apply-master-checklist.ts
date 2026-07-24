@@ -25,7 +25,7 @@ export const applyMasterChecklistJob = inngest.createFunction(
     })
 
     const orgRoomData: OrgRoomTemplateData = await step.run('fetch-room-template-data', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:apply-master-checklist' })
       return fetchOrgRoomTemplateData(org_id, supabase)
     })
 
@@ -35,7 +35,7 @@ export const applyMasterChecklistJob = inngest.createFunction(
       const batch = property_ids.slice(i, i + BATCH_SIZE)
 
       const batchApplied = await step.run(`apply-batch-${i / BATCH_SIZE}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:apply-master-checklist' })
 
         // Explicit ownership check — service client bypasses RLS so we must
         // enforce org isolation ourselves. One bulk query per batch; no per-row calls.

@@ -11,7 +11,7 @@ export default async function OnboardingPage() {
   // A crew member has a crew_members.user_id record but no organization_members
   // row. If one lands here (e.g. via a back-button or stale URL), redirect them
   // before any onboarding logic runs.
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authenticatedUser: user })
 
   const { data: crewRecord } = await admin
     .from('crew_members')

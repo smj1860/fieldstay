@@ -18,7 +18,7 @@ export const sendSubscriberCheckin = inngest.createFunction(
 
     // Confirm they're still an active subscriber before sending
     const stillActive = await step.run('confirm-still-active', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:email-subscriber-checkin' })
       const { data: org } = await supabase
         .from('organizations')
         .select('plan_status')
@@ -30,7 +30,7 @@ export const sendSubscriberCheckin = inngest.createFunction(
     if (!stillActive) return { skipped: true, reason: 'no-longer-active' }
 
     const propertyCount = await step.run('get-property-count', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:email-subscriber-checkin' })
       const { count } = await supabase
         .from('properties')
         .select('id', { count: 'exact', head: true })

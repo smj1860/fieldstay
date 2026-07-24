@@ -43,16 +43,51 @@ export async function createClient() {
 }
 
 /**
+ * The typed justification every service-role call site must present.
+ * Structural types only (no imports from lib/auth — that would be a cycle);
+ * each variant matches what the corresponding auth helper already returns:
+ *
+ * - authorizedBy:      the membership from requireOrgMember()/requireOrgRole()
+ * - authenticatedUser: the user from requireAuth()/supabase.auth.getUser()
+ *                      on self-scoped routes (account delete, GDPR export)
+ * - crew:              the crew identity from requireCrewMember()
+ * - publicSurface:     a token-gated/webhook/public route that VALIDATES ITS
+ *                      OWN ACCESS in-file (the token lookup or signature
+ *                      check needs this client, so proof can't precede it) —
+ *                      the string names the surface for grep/audit
+ * - system:            background execution with ambient service authority:
+ *                      Inngest functions, crons, seeds, and internal lib
+ *                      helpers whose request-path callers are themselves
+ *                      gated — the string is the module/job audit handle
+ */
+export type ServiceRoleContext =
+  | { authorizedBy: { org_id: string; role: string } }
+  | { authenticatedUser: { id: string } }
+  | { crew: { id: string; org_id: string } }
+  | { publicSurface: string }
+  | { system: string }
+
+/**
  * Service-role client — bypasses RLS.
  * Only use in trusted server contexts: Inngest functions,
  * Stripe webhooks, iCal sync, vendor portal completion.
  * Never expose to the client.
+ *
+ * The required context parameter is COMPILE-TIME ONLY — runtime ignores it.
+ * It exists so obtaining the RLS-bypassing client forces the author to name
+ * why the bypass is justified, checkable by the compiler at every call site
+ * (see CLAUDE.md → Structural Enforcement; the unit/guardrails/
+ * service-role-authorization test is the cross-file belt to this per-site
+ * suspender). Passing a context you don't actually hold (e.g. a hardcoded
+ * object literal where a membership should be) is grep-visible and treated
+ * as a security-review finding.
  */
 // lib/supabase/server.ts — createServiceClient only, leave createClient unchanged
 
-export function createServiceClient() {
+export function createServiceClient(_ctx: ServiceRoleContext) {
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    // eslint-disable-next-line no-restricted-syntax -- the ONE canonical read of the service-role key (with adminFetch below); everywhere else goes through these helpers
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     {
       cookies: {
@@ -82,6 +117,7 @@ export function createServiceClient() {
  * Server-only — attaches the service role key. Never call from client code.
  */
 export function adminFetch(path: string, init?: RequestInit) {
+  // eslint-disable-next-line no-restricted-syntax -- see createServiceClient above: canonical key-read site
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
   return fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}${path}`, {

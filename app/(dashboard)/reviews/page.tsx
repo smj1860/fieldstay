@@ -49,7 +49,7 @@ interface ReviewResponseRow {
 
 export default async function ReviewsPage() {
   const { membership } = await requireOrgMember()
-  const admin = createServiceClient()
+  const admin = createServiceClient({ authorizedBy: membership })
 
   const manualUsedThisWeek = await getManualReviewsUsedThisWeek()
 

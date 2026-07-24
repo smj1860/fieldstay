@@ -24,7 +24,7 @@ export async function inviteTeamMember(
     if (!parsed.success) return { error: parsed.error.errors[0]?.message ?? 'Invalid email.' }
     const normalizedEmail = parsed.data
 
-    const admin = createServiceClient()
+    const admin = createServiceClient({ authorizedBy: membership })
 
     // H-3: Check not already a member using targeted lookup (not listUsers).
     // Supabase admin REST supports GET /auth/v1/admin/users?email=x for point lookups.
@@ -127,7 +127,7 @@ export async function removeMember(
       return { error: 'You cannot remove yourself from the organization.' }
     }
 
-    const admin = createServiceClient()
+    const admin = createServiceClient({ authorizedBy: membership })
 
     // Prevent removing another owner
     const { data: targetMember } = await admin
@@ -179,7 +179,7 @@ export async function revokeInvite(
       return { error: 'Only the account owner can revoke invitations.' }
     }
 
-    const admin = createServiceClient()
+    const admin = createServiceClient({ authorizedBy: membership })
     const { error } = await admin
       .from('org_invites')
       .delete()

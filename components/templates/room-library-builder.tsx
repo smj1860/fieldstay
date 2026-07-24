@@ -32,6 +32,9 @@ interface RoomState {
 
 function makeId() {
   if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID()
+  // Fallback for rare runtimes without crypto.randomUUID — these are
+  // ephemeral client-side React keys, never persisted ids or tokens.
+  // eslint-disable-next-line no-restricted-properties
   return `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 

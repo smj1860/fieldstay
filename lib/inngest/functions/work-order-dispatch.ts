@@ -51,7 +51,7 @@ export const workOrderDispatch = inngest.createFunction(
 
     // ── Step 2: Log to communication_logs ────────────────────────────────
     await step.run('log-to-comms', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-dispatch' })
 
       // Use PK (workOrderId) — not wo_number — to avoid cross-org ambiguity
       // if two orgs share the same wo_number string.
@@ -93,7 +93,7 @@ export const workOrderDispatch = inngest.createFunction(
     // day they were added would otherwise wait for the next 07:00 UTC cron
     // run before getting a payout setup link at all.
     await step.run('invite-vendor-to-connect-if-needed', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-dispatch' })
 
       const { data: wo } = await supabase
         .from('work_orders')
@@ -148,7 +148,7 @@ export const workOrderSignedOff = inngest.createFunction(
 
     // ── Step 1: Find PM email from org owner/admin/manager ───────────────
     const pmEmail = await step.run('find-pm-email', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-dispatch' })
       const [member] = await getPmMembers(supabase, orgId, { roles: ['owner', 'admin', 'manager'], limit: 1 })
       if (!member) return null
 
@@ -170,7 +170,7 @@ export const workOrderSignedOff = inngest.createFunction(
 
     // ── Step 2: Notify PM ─────────────────────────────────────────────────
     await step.run('notify-pm', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-dispatch' })
       await createPmNotification(supabase, {
         orgId,
         type:      'work_order_complete',
@@ -184,7 +184,7 @@ export const workOrderSignedOff = inngest.createFunction(
 
     // ── Step 3: Log sign-off to communication_logs ────────────────────────
     await step.run('log-signoff', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:work-order-dispatch' })
 
       const { data: wo } = await supabase
         .from('work_orders')

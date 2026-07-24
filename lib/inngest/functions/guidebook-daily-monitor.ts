@@ -15,7 +15,7 @@ export const guidebookDailyMonitor = inngest.createFunction(
 
     // Fetch all active guidebook orgs in one query
     const activeOrgs = await step.run('fetch-active-guidebook-orgs', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-daily-monitor' })
       const { data, error } = await supabase
         .from('guidebook_configurations')
         .select(`
@@ -111,7 +111,7 @@ export const guidebookDailyMonitor = inngest.createFunction(
       if (new Date(row.trial_ends_at) > new Date()) continue // still in trial
 
       await step.run(`check-trial-expired-${row.org_id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:guidebook-daily-monitor' })
         const activeSponsorCount = await getActiveSponsorCount(row.org_id)
         if (activeSponsorCount >= 3) return { skipped: true }
 

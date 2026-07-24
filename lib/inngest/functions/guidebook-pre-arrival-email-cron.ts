@@ -19,7 +19,7 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
     // tomorrow's bookings first, then separately check which orgs have an
     // active guidebook, and filter in JavaScript.
     const bookings = await step.run('fetch-tomorrow-bookings', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-pre-arrival-email-cron' })
       const { data, error } = await supabase
         .from('bookings')
         .select('id, org_id, property_id, guest_email, guest_name, checkin_date, guidebook_token, status')
@@ -37,7 +37,7 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
     if (bookings.length === 0) return { sent: 0 }
 
     const activeOrgIds = await step.run('fetch-active-guidebook-orgs', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-pre-arrival-email-cron' })
       const uniqueOrgIds = Array.from(new Set(bookings.map((b) => b.org_id)))
 
       const { data, error } = await supabase
@@ -54,7 +54,7 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
     const eligibleBookings = bookings.filter((b) => activeOrgIdSet.has(b.org_id))
 
     const propertyMap = await step.run('batch-fetch-properties', async () => {
-      const supabase = createServiceClient()
+      const supabase = createServiceClient({ system: 'inngest:guidebook-pre-arrival-email-cron' })
       const uniquePropertyIds = [...new Set(eligibleBookings.map((b) => b.property_id))]
 
       const { data, error } = await supabase
@@ -71,7 +71,7 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
 
     for (const booking of eligibleBookings) {
       const wasSent = await step.run(`send-pre-arrival-email-${booking.id}`, async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:guidebook-pre-arrival-email-cron' })
         const propertyName = propertyMap[booking.property_id]
         if (!propertyName || !booking.guest_email) return false
 

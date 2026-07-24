@@ -14,7 +14,7 @@ const clusterListeners = new Set<() => void>()
 let clusterSnapshot: Record<string, boolean> = readClusterStateFromStorage()
 
 function readClusterStateFromStorage(): Record<string, boolean> {
-  if (typeof window === 'undefined') return {}
+  if (typeof globalThis.window === 'undefined') return {}
   try {
     const raw = globalThis.localStorage.getItem(CLUSTER_STORAGE_KEY)
     return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}

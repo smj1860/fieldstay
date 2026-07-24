@@ -108,7 +108,7 @@ export async function POST(
         const appUserId = await findUserByExternalId(providerId, externalUserId)
 
         if (appUserId) {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
           const { data: existingConn } = await supabase
             .from('integration_connections')
             .select('status, org_id')
@@ -208,7 +208,7 @@ export async function POST(
   const webhookId    = createHash('sha256').update(dedupSource).digest('hex')
 
   {
-    const admin = createServiceClient()
+    const admin = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
 
     const { error: dedupErr } = await admin
       .from('processed_webhooks')
@@ -227,9 +227,10 @@ export async function POST(
 
   // Periodic TTL cleanup — fire-and-forget, runs on ~5% of ALL provider webhook
   // requests to amortise cleanup cost without a dedicated cron job.
+  // eslint-disable-next-line no-restricted-properties -- probabilistic sampling to amortise cleanup, not id/token generation
   if (Math.random() < 0.05) {
     void (async () => {
-      const { error } = await createServiceClient().rpc('cleanup_webhook_dedup')
+      const { error } = await createServiceClient({ publicSurface: 'api-webhooks--provider-' }).rpc('cleanup_webhook_dedup')
       if (error) {
         console.warn(`[Webhook:${providerId}] TTL cleanup failed (non-fatal): ${error.message}`)
       }

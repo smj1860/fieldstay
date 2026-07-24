@@ -99,14 +99,14 @@ export const hospInitialSync = inngest.createFunction(
         })
 
         hospitableOrgRoomData = await step.run('fetch-room-template-data', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           return fetchOrgRoomTemplateData(org_id, supabase)
         })
       }
 
       for (const propertyId of propertyIds) {
         await step.run(`apply-master-checklist-${propertyId}`, async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           await applyMasterChecklistToProperty(propertyId, org_id, supabase, {
             orgRoomData: hospitableOrgRoomData,
             skipSeed:    true,
@@ -155,7 +155,7 @@ export const hospInitialSync = inngest.createFunction(
         const rows = hospitableTeammatesToCrewRows(org_id, teammates)
         if (!rows.length) return 0
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
 
         const { error } = await supabase
           .from('crew_members')
@@ -181,7 +181,7 @@ export const hospInitialSync = inngest.createFunction(
 
         logger.info(`[Hospitable:${user_id}] Fetched ${reservations.length} reservations`)
 
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         let count = 0
         const revenueEligibleExternalIds: string[] = []
 
@@ -250,7 +250,7 @@ export const hospInitialSync = inngest.createFunction(
       // initial sync can't double-post.
       if (revenueEligibleExternalIds.length > 0) {
         const revenueEvents = await step.run('fetch-bookings-for-revenue', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           const { data: rows } = await supabase
             .from('bookings')
             .select('id, property_id, actual_total_amount')
@@ -280,7 +280,7 @@ export const hospInitialSync = inngest.createFunction(
 
       const newTurnoverIds = await step.run('generate-turnovers', async () => {
         if (!affectedPropertyIds.length) return []
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         const ids: string[] = []
         for (const propertyId of affectedPropertyIds) {
           try {
@@ -295,7 +295,7 @@ export const hospInitialSync = inngest.createFunction(
 
       if (newTurnoverIds.length > 0) {
         const turnoverEvents = await step.run('fetch-new-turnover-data', async () => {
-          const supabase = createServiceClient()
+          const supabase = createServiceClient({ system: 'inngest:initial-sync' })
           type TRow = { id: string; property_id: string; checkout_datetime: string; checkin_datetime: string; window_minutes: number | null }
           const { data: turnovers } = await supabase
             .from('turnovers')
@@ -372,7 +372,7 @@ export const hospInitialSync = inngest.createFunction(
       logger.error(`[Hospitable:${user_id}] initial sync failed: ${msg}`)
 
       await step.run('handle-failure', async () => {
-        const supabase = createServiceClient()
+        const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         await supabase
           .from('integration_connections')
           .update({ status: 'error' })
@@ -397,7 +397,7 @@ async function updateConnectionMeta(
   userId: string,
   patch:  Record<string, unknown>
 ): Promise<void> {
-  const supabase = createServiceClient()
+  const supabase = createServiceClient({ system: 'inngest:initial-sync' })
   const { data: existing } = await supabase
     .from('integration_connections')
     .select('metadata')

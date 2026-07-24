@@ -15,7 +15,7 @@ import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
 /** Service-role admin client, routed through the one central helper. */
 function getAdminClient() {
-  return createServiceClient()
+  return createServiceClient({ system: 'lib/integrations/vault' })
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
