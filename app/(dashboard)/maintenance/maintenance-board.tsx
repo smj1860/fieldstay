@@ -546,18 +546,22 @@ function AddScheduleModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title="Add Maintenance Schedule">
-        <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh] -m-6">
-          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
-            {error && (
-              <InlineAlert tone="error">{error}</InlineAlert>
-            )}
-            <ScheduleFormFields properties={properties} vendors={vendors} />
-          </div>{/* /scrollable content */}
-          <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
-            <Button type="submit" disabled={saving} className="flex-1">{saving ? 'Saving…' : 'Add Schedule'}</Button>
-            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          </div>
+    <Dialog
+      open
+      onClose={onClose}
+      title="Add Maintenance Schedule"
+      footer={
+        <>
+          <Button type="submit" form="add-schedule-form" disabled={saving} className="flex-1">{saving ? 'Saving…' : 'Add Schedule'}</Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
+        <form id="add-schedule-form" onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <InlineAlert tone="error">{error}</InlineAlert>
+          )}
+          <ScheduleFormFields properties={properties} vendors={vendors} />
         </form>
     </Dialog>
   )
@@ -600,18 +604,22 @@ function EditScheduleModal({
   }
 
   return (
-    <Dialog open onClose={onClose} title="Edit Schedule">
-        <form onSubmit={handleSubmit} className="flex flex-col max-h-[85vh] -m-6">
-          <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
-            {error && (
-              <InlineAlert tone="error">{error}</InlineAlert>
-            )}
-            <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
-          </div>{/* /scrollable content */}
-          <div className="flex gap-3 px-6 pb-6 pt-4 border-t border-themed flex-shrink-0">
-            <Button type="submit" disabled={saving} className="flex-1">{saving ? 'Saving…' : 'Save Changes'}</Button>
-            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          </div>
+    <Dialog
+      open
+      onClose={onClose}
+      title="Edit Schedule"
+      footer={
+        <>
+          <Button type="submit" form="edit-schedule-form" disabled={saving} className="flex-1">{saving ? 'Saving…' : 'Save Changes'}</Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
+        <form id="edit-schedule-form" onSubmit={handleSubmit} className="space-y-4">
+          {error && (
+            <InlineAlert tone="error">{error}</InlineAlert>
+          )}
+          <ScheduleFormFields properties={[]} vendors={vendors} defaults={schedule} />
         </form>
     </Dialog>
   )
@@ -1302,16 +1310,11 @@ export function MaintenanceBoard({
           title="Work Order Detail"
           maxWidthClassName="max-w-2xl"
         >
-          <div className="max-h-[85vh] -m-6 flex flex-col">
-            {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto min-h-0">
-              <WorkOrderDetail
-                workOrder={selectedWO}
-                userRole={role as 'admin' | 'manager' | 'crew' | 'viewer'}
-                vendors={vendors.map(v => ({ id: v.id, name: v.name, email: v.email }))}
-              />
-            </div>
-          </div>
+          <WorkOrderDetail
+            workOrder={selectedWO}
+            userRole={role as 'admin' | 'manager' | 'crew' | 'viewer'}
+            vendors={vendors.map(v => ({ id: v.id, name: v.name, email: v.email }))}
+          />
         </Dialog>
       )}
     </>

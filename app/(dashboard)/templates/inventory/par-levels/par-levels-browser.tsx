@@ -261,7 +261,18 @@ function PropertyParLevelEditor({
   }
 
   return (
-    <Dialog open onClose={onClose} title={property.name} maxWidthClassName="max-w-2xl" mobileSheet>
+    <Dialog
+      open
+      onClose={onClose}
+      title={property.name}
+      maxWidthClassName="max-w-2xl"
+      mobileSheet
+      footer={canManage ? (
+        <Button onClick={handleSave} disabled={saving || dirtyRows.length === 0}>
+          {saving ? 'Saving…' : `Save ${dirtyRows.length || ''} change${dirtyRows.length === 1 ? '' : 's'}`}
+        </Button>
+      ) : undefined}
+    >
       <div className="space-y-4">
         {error && <InlineAlert tone="error">{error}</InlineAlert>}
 
@@ -372,12 +383,6 @@ function PropertyParLevelEditor({
                 <Plus className="w-4 h-4" /> Add Custom Item
               </Button>
             )}
-
-            <div className="flex justify-end pt-2 border-t border-themed">
-              <Button onClick={handleSave} disabled={saving || dirtyRows.length === 0}>
-                {saving ? 'Saving…' : `Save ${dirtyRows.length || ''} change${dirtyRows.length === 1 ? '' : 's'}`}
-              </Button>
-            </div>
           </>
         )}
       </div>

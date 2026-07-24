@@ -184,7 +184,24 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
   if (state?.success) { onClose(); return null }
 
   return (
-    <Dialog open onClose={onClose} title={vendor.name} maxWidthClassName="max-w-sm">
+    <Dialog
+      open
+      onClose={onClose}
+      title={vendor.name}
+      maxWidthClassName="max-w-sm"
+      footer={
+        editing
+          ? (
+            <>
+              <Button type="submit" form="vendor-edit-form" disabled={pending} className="text-sm flex-1">
+                {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
+              </Button>
+              <Button variant="ghost" type="button" onClick={() => setEditing(false)} className="text-sm">Cancel</Button>
+            </>
+          )
+          : undefined
+      }
+    >
         {!editing && (
           <div className="flex items-center justify-between mb-4">
             <Badge tone="blue">{VENDOR_SPECIALTY_LABELS[vendor.specialty]}</Badge>
@@ -200,7 +217,7 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
         )}
 
         {editing ? (
-          <form action={formAction} className="space-y-3">
+          <form id="vendor-edit-form" action={formAction} className="space-y-3">
             <div>
               <label className="label">Vendor Name</label>
               <Input name="name" type="text" required defaultValue={vendor.name} />
@@ -250,12 +267,6 @@ function VendorCardModal({ vendor, onClose }: { vendor: Vendor; onClose: () => v
             <div>
               <label className="label">Notes</label>
               <textarea name="notes" rows={2} defaultValue={vendor.notes ?? ''} className="input resize-none" />
-            </div>
-            <div className="flex gap-2 pt-1">
-              <Button type="submit" disabled={pending} className="text-sm flex-1">
-                {pending ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving…</> : 'Save Changes'}
-              </Button>
-              <Button variant="ghost" type="button" onClick={() => setEditing(false)} className="text-sm">Cancel</Button>
             </div>
           </form>
         ) : (

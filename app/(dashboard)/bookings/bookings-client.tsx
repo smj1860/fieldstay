@@ -418,7 +418,19 @@ function AddBookingModal({
   if (state?.success) { onSuccess(); onClose(); return null }
 
   return (
-    <Dialog open onClose={onClose} title="Log Non-Synced Booking">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Log Non-Synced Booking"
+      footer={
+        <>
+          <Button type="submit" form="add-booking-form" disabled={pending} className="flex-1">
+            {pending ? 'Saving…' : 'Add Booking'}
+          </Button>
+          <Button type="button" onClick={onClose} variant="ghost">Cancel</Button>
+        </>
+      }
+    >
         {state?.error && (
           <div
             className="text-sm rounded-lg px-3 py-2 mb-4"
@@ -433,7 +445,7 @@ function AddBookingModal({
           (direct reservations, social media enquiries, etc.). A turnover will be automatically created.
         </p>
 
-        <form action={action} className="space-y-4">
+        <form id="add-booking-form" action={action} className="space-y-4">
           <div>
             <label className="label">Property <RequiredMark /></label>
             <select name="property_id" required className="input" defaultValue={initialPropertyId ?? ''}>
@@ -492,13 +504,6 @@ function AddBookingModal({
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             A turnover will be automatically generated for this booking.
           </p>
-
-          <div className="flex gap-3 pt-1">
-            <Button type="submit" disabled={pending} className="flex-1">
-              {pending ? 'Saving…' : 'Add Booking'}
-            </Button>
-            <Button type="button" onClick={onClose} variant="ghost">Cancel</Button>
-          </div>
         </form>
     </Dialog>
   )

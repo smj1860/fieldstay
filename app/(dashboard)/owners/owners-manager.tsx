@@ -549,14 +549,26 @@ function AddOwnerModal({
   }, [state?.success])
 
   return (
-    <Dialog open onClose={onClose} title="Add Property Owner">
+    <Dialog
+      open
+      onClose={onClose}
+      title="Add Property Owner"
+      footer={
+        <>
+          <Button type="submit" form="add-owner-form" disabled={pending} className="flex-1">
+            {pending ? 'Saving…' : 'Add Owner'}
+          </Button>
+          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+        </>
+      }
+    >
       {state?.error && (
         <InlineAlert tone="error" className="mb-4">
           {state.error}
         </InlineAlert>
       )}
 
-      <form action={formAction} className="space-y-4">
+      <form id="add-owner-form" action={formAction} className="space-y-4">
         <div>
           <label htmlFor="property_id" className="label">
             Property <RequiredMark />
@@ -595,13 +607,6 @@ function AddOwnerModal({
         <div>
           <label htmlFor="notes" className="label">Notes</label>
           <textarea id="notes" name="notes" rows={2} className="input resize-none" placeholder="Any additional notes…" />
-        </div>
-
-        <div className="flex gap-3 pt-2">
-          <Button type="submit" disabled={pending} className="flex-1">
-            {pending ? 'Saving…' : 'Add Owner'}
-          </Button>
-          <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
         </div>
       </form>
     </Dialog>
