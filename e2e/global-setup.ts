@@ -145,6 +145,13 @@ export default async function globalSetup(_config: FullConfig) {
     specialty:      'plumbing',
     portal_enabled: true,
     is_active:      true,
+    // stripe_connect_charges_enabled defaults to false — without this,
+    // VendorPortal (app/work-orders/[token]/vendor-portal.tsx) renders its
+    // "set up payouts before submitting" Connect gate instead of the
+    // invoice/line-items form, so the form's inputs (e.g.
+    // input[placeholder="Description"], used by
+    // 21-work-order-offline.spec.ts) never mount.
+    stripe_connect_charges_enabled: true,
   })
   if (vendorSeedErr) {
     throw new Error(`Failed to seed vendor [E2E] Reliable Plumbing Co.: ${vendorSeedErr.message}`)
