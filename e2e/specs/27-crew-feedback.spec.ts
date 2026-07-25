@@ -64,35 +64,52 @@ async function loginAsFreshCrew(orgId: string, browser: import('@playwright/test
     email: crewEmail, password: crewPassword, email_confirm: true,
   })
   if (createErr || !created.user) throw new Error(`Failed to create crew test user: ${createErr?.message}`)
+  const userId = created.user.id
 
-  const { error: cmErr } = await supabase.from('crew_members').insert({
-    org_id:             orgId,
-    user_id:            created.user.id,
-    name:               '[E2E] Crew Feedback Tester',
-    role:               'general',
-    is_active:          true,
-    invite_accepted_at: new Date().toISOString(),
-  })
-  if (cmErr) throw new Error(`Failed to create crew_members row: ${cmErr.message}`)
+  // Everything past this point can throw (crew_members insert, context
+  // creation, the login flow itself) — without this catch, a failure here
+  // would propagate and skip the `cleanup` this function never got to
+  // return, orphaning the just-created auth user in the E2E project.
+  let context: import('@playwright/test').BrowserContext | undefined
+  try {
+    const { error: cmErr } = await supabase.from('crew_members').insert({
+      org_id:             orgId,
+      user_id:            userId,
+      name:               '[E2E] Crew Feedback Tester',
+      role:               'general',
+      is_active:          true,
+      invite_accepted_at: new Date().toISOString(),
+    })
+    if (cmErr) throw new Error(`Failed to create crew_members row: ${cmErr.message}`)
 
-  // Fresh, unauthenticated context — the default `page` fixture carries the
-  // PM's storageState, which would put the crew layout's PM-guard redirect
-  // in the way of a crew login (see 21-work-order-offline.spec.ts).
-  const context = await browser.newContext()
-  const page    = await context.newPage()
+    // Fresh, unauthenticated context — the default `page` fixture carries the
+    // PM's storageState, which would put the crew layout's PM-guard redirect
+    // in the way of a crew login (see 21-work-order-offline.spec.ts).
+    context = await browser.newContext()
+    const page = await context.newPage()
 
-  await page.goto('/login?next=/crew')
-  await page.fill('#email', crewEmail)
-  await page.fill('#password', crewPassword)
-  await page.click('button[type="submit"]')
-  await page.waitForURL((url) => url.pathname === '/crew', { timeout: 15_000 })
-  await page.waitForLoadState('networkidle')
+    await page.goto('/login?next=/crew')
+    await page.fill('#email', crewEmail)
+    await page.fill('#password', crewPassword)
+    await page.click('button[type="submit"]')
+    await page.waitForURL((url) => url.pathname === '/crew', { timeout: 15_000 })
+    await page.waitForLoadState('networkidle')
 
-  return {
-    page,
-    cleanup: async () => {
-      await context.close()
-      await supabase.auth.admin.deleteUser(created.user!.id)
-    },
+    return {
+      page,
+      cleanup: async () => {
+        // context.close() throwing must not skip deleteUser — that's the
+        // same orphaned-user hazard this try/catch exists to close.
+        try {
+          await context!.close()
+        } finally {
+          await supabase.auth.admin.deleteUser(userId)
+        }
+      },
+    }
+  } catch (err) {
+    await context?.close().catch(() => {})
+    await supabase.auth.admin.deleteUser(userId).catch(() => {})
+    throw err
   }
 }
