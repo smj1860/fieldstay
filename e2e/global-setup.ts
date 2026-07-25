@@ -63,8 +63,7 @@ export default async function globalSetup(_config: FullConfig) {
   )
 
   // Find the test org from the PM account's membership
-  const { data: authUser } = await supabase.auth.admin.listUsers()
-  const pmUser = authUser.users.find((u) => u.email === email)
+  const pmUser = await findUserByEmail(supabase, email)
 
   if (!pmUser) {
     throw new Error(`Could not find Supabase user for ${email}`)
@@ -180,8 +179,7 @@ async function seedCrewLoginAndAssignment(
   // Reuse the auth user across runs rather than erroring on "already
   // registered" — this account is test-only and never has other state
   // attached to it beyond what this function seeds fresh each run.
-  const { data: existingUsers } = await supabase.auth.admin.listUsers()
-  let crewAuthUser = existingUsers.users.find((u) => u.email === crewEmail)
+  let crewAuthUser = await findUserByEmail(supabase, crewEmail)
 
   if (!crewAuthUser) {
     const { data: created, error: createErr } = await supabase.auth.admin.createUser({
@@ -297,4 +295,56 @@ async function cleanE2EData(supabase: SupabaseClient<any>, orgId: string): Promi
   await supabase.from('crew_members') .delete().eq('org_id', orgId).like('name',       '[E2E]%')
   await supabase.from('vendors')      .delete().eq('org_id', orgId).like('name',       '[E2E]%')
   await supabase.from('properties')   .delete().eq('org_id', orgId).like('name',       '[E2E]%')
+
+  await cleanOrphanedDisposableAuthUsers(supabase)
+}
+
+// Specs that create a disposable crew Supabase Auth user per test
+// (21-work-order-offline, 22-crew-logout-guard, 27-crew-feedback) delete it
+// in their own `finally`/cleanup block — but a CI run that gets killed or
+// cancelled mid-test (e.g. superseded by a newer push under this repo's
+// concurrency: cancel-in-progress workflow setting) never reaches that
+// block, orphaning the auth user permanently. These accumulate silently
+// until supabase.auth.admin.listUsers()'s pagination (newest-first) pushes
+// the long-lived seeded PM/crew accounts off the first page entirely,
+// which is exactly what broke every run in this session once enough
+// orphans had built up — findUserByEmail() below is the durable fix for
+// that symptom, but the orphans themselves are still waste worth sweeping.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function cleanOrphanedDisposableAuthUsers(supabase: SupabaseClient<any>): Promise<void> {
+  const disposablePrefixes = ['e2e-crew-wo-', 'e2e-crew-logout-', 'e2e-crew-feedback-']
+  let page = 1
+  for (;;) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 })
+    if (error || !data || data.users.length === 0) break
+
+    for (const user of data.users) {
+      if (!user.email) continue
+      if (disposablePrefixes.some((prefix) => user.email!.startsWith(prefix))) {
+        await supabase.auth.admin.deleteUser(user.id)
+      }
+    }
+
+    if (data.users.length < 200) break
+    page += 1
+  }
+}
+
+// supabase.auth.admin.listUsers() paginates (newest-first, ~50/page by
+// default) — with enough disposable test users in play, a plain
+// .find() over the first page alone can silently miss a long-lived
+// account like the seeded PM/crew logins. Page through until found.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function findUserByEmail(supabase: SupabaseClient<any>, email: string) {
+  let page = 1
+  for (;;) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 })
+    if (error || !data || data.users.length === 0) return undefined
+
+    const match = data.users.find((u) => u.email === email)
+    if (match) return match
+
+    if (data.users.length < 200) return undefined
+    page += 1
+  }
 }
