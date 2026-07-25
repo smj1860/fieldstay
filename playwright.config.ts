@@ -61,6 +61,14 @@ export default defineConfig({
         url:              'http://localhost:3000',
         reuseExistingServer: !process.env.CI,
         timeout:          process.env.CI ? 600_000 : 120_000,
+        // Playwright's default is to discard the web server's own
+        // stdout/stderr entirely, which meant every Server Action's
+        // console.error (createWorkOrder, etc.) was invisible in CI job
+        // logs — every "why did this mutation silently fail" investigation
+        // this session had to work around that blind spot instead of just
+        // reading the actual server error. Pipe it into the CI step output.
+        stdout:           'pipe',
+        stderr:           'pipe',
       },
     }
   ),
