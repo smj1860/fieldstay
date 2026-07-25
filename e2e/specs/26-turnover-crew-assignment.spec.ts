@@ -54,15 +54,24 @@ test.describe('Turnover crew assignment', () => {
     // work either since notes only render once the card is expanded
     // (turnover-board.tsx's `{expanded && ... turnover.notes}`). The id
     // is always present and unique regardless of what's rendered.
+    // Poll rather than a single query — this read goes over a separate
+    // service-role connection from the browser's own session that just
+    // wrote the row, and a single immediate .single() call intermittently
+    // found zero rows even though the insert had already succeeded
+    // (dialog closing proves createManualTurnover returned success).
     const supabase = getServiceClient()
-    const { data: turnover, error: findErr } = await supabase
-      .from('turnovers')
-      .select('id')
-      .eq('org_id', ctx.orgId)
-      .eq('notes', marker)
-      .single()
-    if (findErr || !turnover) throw new Error(`Failed to find just-created turnover by marker: ${findErr?.message}`)
-    const card = page.getByTestId(`turnover-card-${turnover.id}`)
+    let turnoverId: string | undefined
+    await expect(async () => {
+      const { data } = await supabase
+        .from('turnovers')
+        .select('id')
+        .eq('org_id', ctx.orgId)
+        .eq('notes', marker)
+        .maybeSingle()
+      turnoverId = data?.id
+      expect(turnoverId).toBeTruthy()
+    }).toPass({ timeout: 8_000 })
+    const card = page.getByTestId(`turnover-card-${turnoverId}`)
 
     // "Upcoming" (groups.upcoming, defaultOpen) is the only section a
     // 30-day-out turnover can land in per groupTurnovers() in
