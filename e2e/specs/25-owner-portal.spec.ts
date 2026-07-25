@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
+import { selectOptionWhenReady } from '../helpers/forms'
 
 // Covers the public, token-only owner portal (app/owner/[token]/page.tsx) —
 // a money-sensitive surface (owner_transactions P&L) reachable without any
@@ -41,7 +42,7 @@ test.describe('Owner portal token lifecycle', () => {
 
     const addDialog = page.getByRole('dialog')
     await expect(addDialog.getByRole('heading', { name: 'Add Property Owner' })).toBeVisible()
-    await addDialog.locator('[name="property_id"]').selectOption({ label: '[E2E] The Lakehouse' })
+    await selectOptionWhenReady(addDialog.locator('[name="property_id"]'), '[E2E] The Lakehouse')
     await addDialog.locator('[name="name"]').fill(ownerName)
     await addDialog.getByRole('button', { name: 'Add Owner', exact: true }).click()
     await expect(page.getByText(ownerName)).toBeVisible({ timeout: 8_000 })

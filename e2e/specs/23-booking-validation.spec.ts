@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
+import { selectOptionWhenReady } from '../helpers/forms'
 
 // Covers validation/boundary-condition gaps left by 03-bookings.spec.ts, which
 // only exercises the happy path. createBooking() (app/(dashboard)/bookings/actions.ts)
@@ -27,7 +28,7 @@ test.describe('Booking validation', () => {
     await page.getByRole('button', { name: /Add Booking/i }).first().click()
     await expect(page.getByRole('heading', { name: /Log Non-Synced Booking/i })).toBeVisible()
 
-    await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
+    await selectOptionWhenReady(page.locator('[name="property_id"]'), '[E2E] The Lakehouse')
 
     const sameDate = getFutureDate(30)
     await page.fill('[name="checkin_date"]',  sameDate)
@@ -51,7 +52,7 @@ test.describe('Booking validation', () => {
     // for why dismissing while a dialog is open can close the dialog instead.
     await dismissCookieBanner(page)
     await page.getByRole('button', { name: /Add Booking/i }).first().click()
-    await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
+    await selectOptionWhenReady(page.locator('[name="property_id"]'), '[E2E] The Lakehouse')
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
     await page.fill('[name="guest_name"]',    '[E2E] Dedup Guest One')
@@ -62,7 +63,7 @@ test.describe('Booking validation', () => {
     // The unique index is on (property_id, checkin_date, checkout_date), not
     // guest name, so this must still collide.
     await page.getByRole('button', { name: /Add Booking/i }).first().click()
-    await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
+    await selectOptionWhenReady(page.locator('[name="property_id"]'), '[E2E] The Lakehouse')
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
     await page.fill('[name="guest_name"]',    '[E2E] Dedup Guest Two')

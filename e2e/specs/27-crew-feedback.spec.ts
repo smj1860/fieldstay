@@ -110,7 +110,15 @@ async function loginAsFreshCrew(orgId: string, browser: import('@playwright/test
     await page.fill('#password', crewPassword)
     await page.click('button[type="submit"]')
     await page.waitForURL((url) => url.pathname === '/crew', { timeout: 15_000 })
-    await page.waitForLoadState('networkidle')
+    // Not waitForLoadState('networkidle') — the crew PWA's Dexie sync layer
+    // (lib/dexie/context.tsx) polls/syncs continuously in the background,
+    // so the page never actually reaches a genuinely idle network state and
+    // this hung for the test's entire remaining time budget every run.
+    // "Send feedback" is what every test in this file interacts with next
+    // (app/crew/page.tsx renders it unconditionally once mounted), so
+    // waiting for it directly is both a real readiness signal and exactly
+    // what's needed.
+    await page.getByRole('button', { name: 'Send feedback' }).waitFor({ timeout: 15_000 })
 
     return {
       page,

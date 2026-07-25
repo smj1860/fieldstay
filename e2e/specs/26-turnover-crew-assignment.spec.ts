@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
+import { selectOptionWhenReady } from '../helpers/forms'
 
 // Covers the core turnover -> crew assignment workflow, which 04-turnovers.spec.ts
 // never exercises (it only checks the board/calendar/filter render). Creates
@@ -29,7 +30,7 @@ test.describe('Turnover crew assignment', () => {
 
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Add Turnover' })).toBeVisible()
-    await dialog.locator('[name="property_id"]').selectOption({ label: '[E2E] The Lakehouse' })
+    await selectOptionWhenReady(dialog.locator('[name="property_id"]'), '[E2E] The Lakehouse')
     await dialog.locator('[name="checkout_date"]').fill(checkoutDate)
     await dialog.locator('[name="checkin_date"]').fill(checkinDate)
     await dialog.getByRole('button', { name: 'Create Turnover' }).click()

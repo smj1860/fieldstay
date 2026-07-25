@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
+import { selectOptionWhenReady } from '../helpers/forms'
 
 // Covers the vendor_compliance_status hard-block rule from CLAUDE.md
 // ("hard_blocked = expired 46+ days (no WO assignment)") — currently
@@ -27,7 +28,7 @@ test.describe('Vendor compliance hard-block', () => {
 
     await page.goto('/maintenance')
     await page.getByRole('button', { name: /New Work Order|Add Work Order|Create|New WO/i }).first().click()
-    await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
+    await selectOptionWhenReady(page.locator('[name="property_id"]'), '[E2E] The Lakehouse')
 
     const option = page.locator('#wo-vendor option', { hasText: vendorName })
     // Not toBeVisible() — Playwright reports native <option> elements as
@@ -61,7 +62,7 @@ test.describe('Vendor compliance hard-block', () => {
 
     await page.goto('/maintenance')
     await page.getByRole('button', { name: /New Work Order|Add Work Order|Create|New WO/i }).first().click()
-    await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
+    await selectOptionWhenReady(page.locator('[name="property_id"]'), '[E2E] The Lakehouse')
 
     // Force-enable and select in a single atomic evaluate() on the <select>
     // itself — doing this as two separate calls (option.evaluate() to clear
@@ -107,7 +108,7 @@ test.describe('Vendor compliance hard-block', () => {
 
     await page.goto('/maintenance')
     await page.getByRole('button', { name: /New Work Order|Add Work Order|Create|New WO/i }).first().click()
-    await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
+    await selectOptionWhenReady(page.locator('[name="property_id"]'), '[E2E] The Lakehouse')
 
     const option = page.locator('#wo-vendor option', { hasText: vendorName })
     await expect(option).toHaveJSProperty('disabled', false)

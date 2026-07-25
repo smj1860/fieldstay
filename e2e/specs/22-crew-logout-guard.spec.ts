@@ -241,7 +241,13 @@ async function loginAsFreshCrewWithTurnover(orgId: string, browser: import('@pla
     await page.fill('#password', crewPassword)
     await page.click('button[type="submit"]')
     await page.waitForURL((url) => url.pathname === '/crew', { timeout: 15_000 })
-    await page.waitForLoadState('networkidle')
+    // Not waitForLoadState('networkidle') — the crew PWA's Dexie sync layer
+    // (lib/dexie/context.tsx) polls/syncs continuously in the background,
+    // so the page never actually reaches a genuinely idle network state and
+    // this hung for the test's entire remaining time budget every run.
+    // "Log out" is in the crew shell's header, present as soon as the
+    // authenticated layout has rendered — a real signal the page is ready.
+    await page.getByRole('button', { name: 'Log out' }).waitFor({ timeout: 15_000 })
 
     return {
       page,
