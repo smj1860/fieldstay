@@ -48,7 +48,17 @@ test.describe('Work order offline support', () => {
       // Fresh, unauthenticated context — the default `page` fixture carries
       // the PM's storageState, which would put the crew layout's PM-guard
       // redirect in the way of a crew login.
-      const context = await browser.newContext()
+      //
+      // storageState: undefined is required, not optional — Playwright Test
+      // instruments every browser.newContext() created during a running
+      // test (not just the fixture-provided `context`/`page`) and silently
+      // re-applies the project's configured use.storageState
+      // ('e2e/.auth/pm.json') to it. A bare browser.newContext() here is
+      // therefore secretly PM-authenticated: page.goto('/login?next=/crew')
+      // 307s straight past the login form to /crew, which the crew layout's
+      // PM-guard then 307s again to /ops, so the next line's page.fill
+      // times out waiting for an #email that was never on that page.
+      const context = await browser.newContext({ storageState: undefined })
       const page    = await context.newPage()
 
       await page.goto('/login?next=/crew')

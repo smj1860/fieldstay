@@ -63,8 +63,16 @@ test.describe('Owner portal token lifecycle', () => {
     expect(portalUrl).toBeTruthy()
 
     // Visit the portal as an unauthenticated visitor — a fresh context
-    // without the PM's storageState.
-    const publicContext = await browser.newContext()
+    // without the PM's storageState. storageState: undefined is required,
+    // not optional — Playwright Test instruments every browser.newContext()
+    // created during a running test and silently re-applies the project's
+    // configured use.storageState ('e2e/.auth/pm.json') to it, so a bare
+    // browser.newContext() here would secretly carry the PM's session (see
+    // 21/22/27's identical fix — this route happens not to break today only
+    // because /owner/ is a proxy.ts TOKEN_ROUTE that bypasses the
+    // session-redirect logic entirely, not because the context is genuinely
+    // unauthenticated).
+    const publicContext = await browser.newContext({ storageState: undefined })
     const publicPage     = await publicContext.newPage()
     await publicPage.goto(portalUrl!)
 
@@ -110,7 +118,9 @@ test.describe('Owner portal token lifecycle', () => {
   })
 
   test('nonexistent portal token shows a 404, not owner data', async ({ browser }) => {
-    const publicContext = await browser.newContext()
+    // See the storageState: undefined comment above — same latent
+    // PM-storageState leak applies here.
+    const publicContext = await browser.newContext({ storageState: undefined })
     const publicPage     = await publicContext.newPage()
     await publicPage.goto('/owner/00000000-0000-0000-0000-000000000000')
 

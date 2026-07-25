@@ -208,7 +208,23 @@ async function loginAsFreshCrewWithTurnover(orgId: string, browser: import('@pla
     // Fresh, unauthenticated context — the default `page` fixture carries the
     // PM's storageState, which would put the crew layout's PM-guard redirect
     // in the way of a crew login.
-    context = await browser.newContext()
+    //
+    // storageState: undefined is NOT redundant with the bare call below it —
+    // Playwright Test instruments every browser.newContext() made during a
+    // running test (not just the fixture-provided `context`/`page`), and
+    // silently re-applies the project's configured `use.storageState`
+    // ('e2e/.auth/pm.json' — see playwright.config.ts) to it. A bare
+    // `browser.newContext()` here is therefore secretly PM-authenticated,
+    // not fresh: page.goto('/login?next=/crew') 307s straight past the
+    // login form (proxy.ts sees an authenticated user hitting a public
+    // route) to /crew, which the crew layout's PM-guard then 307s again to
+    // /ops — and #email never existed on that page, so the next line's
+    // page.fill() times out. Confirmed by a standalone repro against the
+    // installed @playwright/test package: a bare browser.newContext() came
+    // back carrying a cookie seeded only via the project's storageState
+    // config. Explicitly overriding it to undefined is the only way to get
+    // a genuinely blank context.
+    context = await browser.newContext({ storageState: undefined })
     const page = await context.newPage()
 
     await page.goto('/login?next=/crew')
