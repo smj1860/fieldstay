@@ -3,15 +3,13 @@
 import { useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { GuidebookSponsor } from '@/types/database'
+import { getKitCopy, getKitLedeContext, KIT_SLOT_BAND } from '@/lib/guidebook/kit-copy'
+import { GuestPhoneMock } from './guest-phone-mock'
+import styles from './media-kit-client.module.css'
 
-const CHARCOAL  = '#0E0E0E'
-const CARD      = '#17171A'
-const BORDER    = '#2A2A2E'
-const TEXT      = '#F4F4F5'
-const MUTED     = '#9A9AA2'
-const GOLD      = '#D4A537'
-const GREEN     = '#3FB97A'
-const RED       = '#E5534B'
+const GREEN = '#3F8F5C'
+const RED   = '#B84B3F'
+const MUTED = '#5C4A33'
 
 interface MediaKitClientProps {
   sponsor: GuidebookSponsor
@@ -26,6 +24,10 @@ export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
   const [error, setError]         = useState<string | null>(null)
 
   const isActive = sponsor.status === 'active'
+  const copy = getKitCopy(sponsor.slot_type, sponsor.slot_context)
+  const isNamedSlot = sponsor.slot_type !== 'general' && sponsor.slot_type !== 'other'
+
+  const lede = `Guests staying in our vacation rentals open a digital guidebook on their phone the moment they arrive. ${getKitLedeContext(sponsor.slot_type)}. We'd like that place to be ${sponsor.business_name}.`
 
   async function handleCheckout() {
     setIsLoading(true)
@@ -54,15 +56,13 @@ export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: CHARCOAL, color: TEXT, padding: '24px 16px' }}>
-      <div style={{ maxWidth: '560px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, margin: '0 0 8px' }}>
-          Sponsor the Guest Guidebook
-        </h1>
-        <p style={{ fontSize: '14px', color: MUTED, margin: '0 0 24px', lineHeight: 1.6 }}>
-          Get your business in front of every guest staying nearby — featured in their
-          digital guidebook for $15/month.
-        </p>
+    <div className={styles.pageOuter}>
+      <div className={styles.page}>
+        <div className={styles.strip}>
+          <div className={styles.brand}>
+            FieldStay <span className={styles.brandGold}>Guidebook</span>
+          </div>
+        </div>
 
         {success && (
           <Banner color={GREEN} text="Subscription started! Your listing will appear in the guidebook shortly." />
@@ -72,46 +72,75 @@ export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
         )}
         {error && <Banner color={RED} text={error} />}
 
-        <div
-          style={{
-            background: CARD, border: `1px solid ${BORDER}`, borderRadius: '12px',
-            padding: '20px', marginBottom: '24px',
-          }}
-        >
-          <h2 style={{ fontSize: '18px', fontWeight: 600, margin: '0 0 4px' }}>
-            {sponsor.business_name}
-          </h2>
+        <div className={styles.eyebrow}>{copy.categoryTag}</div>
+        <h1 className={styles.h1}>
+          {copy.headline[0]} <em>{copy.headline[1]}</em>
+        </h1>
+        <p className={styles.lede}>{lede}</p>
 
-          {sponsor.business_description && (
-            <p style={{ fontSize: '13px', color: MUTED, margin: '0 0 12px', lineHeight: 1.5 }}>
-              {sponsor.business_description}
-            </p>
-          )}
-          {sponsor.custom_offer_text && (
-            <p style={{ fontSize: '13px', color: GOLD, margin: '0 0 8px', fontWeight: 600 }}>
-              {sponsor.custom_offer_text}
-            </p>
-          )}
-          {sponsor.address && (
-            <p style={{ fontSize: '13px', color: MUTED, margin: 0 }}>{sponsor.address}</p>
+        <div className={styles.phoneWrap}>
+          <GuestPhoneMock sponsor={sponsor} copy={copy} />
+        </div>
+
+        <div className={styles.proof}>
+          <div>
+            <h3>No competitors next to you</h3>
+            <p>We list one business per category. If you take the {copy.label} spot, no other {copy.categoryTag.toLowerCase()} business appears. Ever.</p>
+          </div>
+          <div>
+            <h3>Shown at the right moment</h3>
+            <p>{copy.proofMoment}</p>
+          </div>
+          <div>
+            <h3>They walk in the door</h3>
+            <p>One tap opens directions to you. Your perk gives them a reason to pick you over the place they found on Google.</p>
+          </div>
+        </div>
+
+        <div className={styles.slotBand}>
+          <div className={styles.slotTitle}>
+            {isNamedSlot
+              ? `The ${copy.label} spot is open — and it's yours first.`
+              : 'One of only six local spots — and one is being held for you.'}
+          </div>
+          <div className={styles.slotSub}>Four exclusive spots per guidebook. Once each one is taken, it&apos;s taken.</div>
+          <div className={styles.slots}>
+            {KIT_SLOT_BAND.map((slot) => {
+              const isYours = isNamedSlot && slot.slotType === sponsor.slot_type
+              return (
+                <div
+                  key={slot.slotType}
+                  className={isYours ? `${styles.slot} ${styles.slotYours}` : styles.slot}
+                >
+                  <div className={styles.slotName}>{slot.name}</div>
+                  <div className={styles.slotTag}>{isYours ? 'Reserved for you' : slot.tag}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className={styles.close}>
+          <div className={styles.big}>
+            $15<small>/month</small>
+          </div>
+          <p className={styles.mathP}>About 50¢ a day. Cancel anytime — no contract, no setup fee.</p>
+
+          {isActive ? (
+            <Banner color={GREEN} text="This sponsorship is active. Thanks for supporting local guests!" />
+          ) : (
+            <button
+              onClick={handleCheckout}
+              disabled={isLoading}
+              className={styles.cta}
+            >
+              {isLoading ? 'Redirecting…' : `Claim the ${copy.label} spot — $15/month`}
+              <small>No contract · Cancel anytime</small>
+            </button>
           )}
         </div>
 
-        {isActive ? (
-          <Banner color={GREEN} text="This sponsorship is active. Thanks for supporting local guests!" />
-        ) : (
-          <button
-            onClick={handleCheckout}
-            disabled={isLoading}
-            style={{
-              width: '100%', padding: '14px', borderRadius: '8px', border: 'none',
-              background: GOLD, color: CHARCOAL, fontSize: '15px', fontWeight: 700,
-              cursor: isLoading ? 'default' : 'pointer', opacity: isLoading ? 0.6 : 1,
-            }}
-          >
-            {isLoading ? 'Redirecting…' : 'Subscribe — $15/month'}
-          </button>
-        )}
+        <div className={styles.foot}>FieldStay Guest Guidebook · Local Sponsor Program</div>
       </div>
     </div>
   )
@@ -119,12 +148,7 @@ export function MediaKitClient({ sponsor }: Readonly<MediaKitClientProps>) {
 
 function Banner({ color, text }: Readonly<{ color: string; text: string }>) {
   return (
-    <div
-      style={{
-        border: `1px solid ${color}`, borderRadius: '8px', padding: '12px 14px',
-        marginBottom: '16px', fontSize: '13px', color,
-      }}
-    >
+    <div className={styles.banner} style={{ borderColor: color, color }}>
       {text}
     </div>
   )

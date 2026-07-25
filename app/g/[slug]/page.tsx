@@ -4,24 +4,49 @@ import type { Metadata } from 'next'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getWeatherForLocation } from '@/lib/weather/tomorrow'
 import { GuestGuidebookView } from '@/components/guidebook/guest-guidebook-view'
+import type { GuidebookSponsorView } from '@/components/guidebook/guest-guidebook-view'
 import type { GuidebookSponsor, GuidebookPropertyConfig, Property } from '@/types/database'
 
 const FALLBACK_TIMEZONE = 'America/New_York'
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+
+function sponsorPhotoUrl(path: string | null): string | null {
+  if (!path || !SUPABASE_URL) return null
+  return `${SUPABASE_URL}/storage/v1/object/public/guidebook-sponsor-photos/${path}`
+}
+
+function heroPhotoUrl(path: string | null | undefined): string | null {
+  if (!path || !SUPABASE_URL) return null
+  return `${SUPABASE_URL}/storage/v1/object/public/guidebook-property-photos/${path}`
+}
+
+const CONFIG_FIELDS = `
+  id, slug, wifi_network, wifi_password, check_in_instructions,
+  check_out_instructions, house_rules, is_published, org_id,
+  properties(id, name, address, lat, lng, checkin_time, checkout_time)
+`
+
 const getGuidebookConfig = cache(async (slug: string) => {
   const supabase = createServiceClient({ publicSurface: 'g--slug-' })
 
-  const { data: config } = await supabase
+  const extended = await supabase
     .from('guidebook_property_configs')
-    .select(`
-      id, slug, wifi_network, wifi_password, check_in_instructions,
-      check_out_instructions, house_rules, is_published, org_id,
-      properties(id, name, address, lat, lng, checkin_time, checkout_time)
-    `)
+    .select(`${CONFIG_FIELDS}, hero_photo_storage_path`)
     .eq('slug', slug)
     .maybeSingle()
 
-  return config
+  if (!extended.error) return extended.data
+
+  // Migration not yet applied — degrade gracefully rather than 500ing the guest page.
+  console.error('[guidebook] hero photo column unavailable, falling back')
+  const fallback = await supabase
+    .from('guidebook_property_configs')
+    .select(CONFIG_FIELDS)
+    .eq('slug', slug)
+    .maybeSingle()
+
+  return fallback.data ? { ...fallback.data, hero_photo_storage_path: null as string | null } : null
 })
 
 export async function generateMetadata({
@@ -67,7 +92,7 @@ export default async function GuestGuidebookPage({
 
   const { data: sponsors } = await supabase
     .from('guidebook_sponsors')
-    .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item')
+    .select('id, status, slot_type, business_name, business_description, custom_offer_text, address, offer_type, offer_value, offer_item, featured_item, business_phone, business_website, lat, lng, photo_storage_path')
     .eq('org_id', config.org_id)
     .eq('status', 'active')
 
@@ -80,14 +105,35 @@ export default async function GuestGuidebookPage({
     ? await getWeatherForLocation(property.lat, property.lng).catch(() => null)
     : null
 
+  const sponsorViews: GuidebookSponsorView[] = ((sponsors ?? []) as GuidebookSponsor[]).map((s) => ({
+    id:                   s.id,
+    slot_type:            s.slot_type,
+    business_name:        s.business_name,
+    business_description: s.business_description,
+    custom_offer_text:    s.custom_offer_text,
+    offer_type:           s.offer_type,
+    offer_value:          s.offer_value,
+    offer_item:           s.offer_item,
+    featured_item:        s.featured_item,
+    address:              s.address,
+    business_phone:       s.business_phone,
+    business_website:     s.business_website,
+    lat:                  s.lat,
+    lng:                  s.lng,
+    photoUrl:             sponsorPhotoUrl(s.photo_storage_path),
+  }))
+
   return (
     <GuestGuidebookView
       property={property}
       config={config as unknown as GuidebookPropertyConfig}
-      sponsors={sponsors as GuidebookSponsor[] ?? []}
+      sponsors={sponsorViews}
       isActive={isActive}
       hourOfDay={hourOfDay}
       weather={weather}
+      heroPhotoUrl={heroPhotoUrl(config.hero_photo_storage_path)}
+      stay={null}
+      bookingToken={null}
     />
   )
 }
