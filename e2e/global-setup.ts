@@ -325,8 +325,18 @@ async function cleanE2EData(supabase: SupabaseClient<Database>, orgId: string): 
 // CI). Deleting a live run's own disposable user out from under it would
 // fail that run with a confusing "user not found" error instead of the
 // clean, expected orphan sweep this is meant to be.
+const DISPOSABLE_AUTH_USER_PREFIXES = ['e2e-crew-wo-', 'e2e-crew-logout-', 'e2e-crew-feedback-']
+
+function isStaleDisposableUser(
+  user: { email?: string | null; created_at?: string | null },
+  staleBeforeMs: number,
+): boolean {
+  if (!user.email || !user.created_at) return false
+  if (new Date(user.created_at).getTime() > staleBeforeMs) return false
+  return DISPOSABLE_AUTH_USER_PREFIXES.some((prefix) => user.email!.startsWith(prefix))
+}
+
 async function cleanOrphanedDisposableAuthUsers(supabase: SupabaseClient<Database>): Promise<void> {
-  const disposablePrefixes = ['e2e-crew-wo-', 'e2e-crew-logout-', 'e2e-crew-feedback-']
   const staleBeforeMs = Date.now() - 60 * 60 * 1000
   // listUsers() is offset-based pagination — deleting mid-page shifts later
   // pages' offsets and can skip a user who shifts into an already-visited
@@ -340,13 +350,7 @@ async function cleanOrphanedDisposableAuthUsers(supabase: SupabaseClient<Databas
     if (error) throw new Error(`listUsers() failed while sweeping orphaned disposable users (page ${page}): ${error.message}`)
     if (!data || data.users.length === 0) break
 
-    for (const user of data.users) {
-      if (!user.email || !user.created_at) continue
-      if (new Date(user.created_at).getTime() > staleBeforeMs) continue
-      if (disposablePrefixes.some((prefix) => user.email!.startsWith(prefix))) {
-        userIdsToDelete.push(user.id)
-      }
-    }
+    userIdsToDelete.push(...data.users.filter((u) => isStaleDisposableUser(u, staleBeforeMs)).map((u) => u.id))
 
     if (data.users.length < 200) break
     page += 1
