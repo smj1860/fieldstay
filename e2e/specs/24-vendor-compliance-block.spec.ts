@@ -17,8 +17,12 @@ import { dismissCookieBanner } from '../helpers/cookies'
 test.describe('Vendor compliance hard-block', () => {
 
   test('[E2E] hard-blocked vendor cannot be selected on a new work order', async ({ page }) => {
-    const vendorName = '[E2E] Hard Blocked Plumbing'
-    await addVendor(page, vendorName, 'hardblocked@e2e-test.invalid')
+    // Unique per attempt — CI sets retries: 2, and a Playwright retry
+    // re-runs this whole test from scratch without cleaning up the vendor
+    // the previous failed attempt already created, so a static name hits a
+    // strict-mode violation on the retry's own #wo-vendor option locator.
+    const vendorName = `[E2E] Hard Blocked Plumbing ${Date.now()}`
+    await addVendor(page, vendorName, `hardblocked-${Date.now()}@e2e-test.invalid`)
     await addComplianceDocument(page, vendorName, daysAgo(50))
 
     await page.goto('/maintenance')
@@ -26,7 +30,11 @@ test.describe('Vendor compliance hard-block', () => {
     await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
 
     const option = page.locator('#wo-vendor option', { hasText: vendorName })
-    await expect(option).toBeVisible()
+    // Not toBeVisible() — Playwright reports native <option> elements as
+    // "hidden" even when correctly rendered and disabled, since they have
+    // no layout box of their own outside an open <select> dropdown.
+    // toBeAttached() (present in the DOM) is the correct check here.
+    await expect(option).toBeAttached()
     await expect(option).toHaveText(new RegExp(`${escapeRegex(vendorName)}.*Blocked`))
     // Disabled options can't be chosen through the real UI — assert the
     // underlying disabled attribute rather than attempting selectOption(),
@@ -41,9 +49,15 @@ test.describe('Vendor compliance hard-block', () => {
     // must independently reject a hard-blocked vendor_id. Force-enable the
     // option (simulating a modified/bypassed client) and submit the real
     // Server Action to prove the server itself blocks it.
-    const vendorName = '[E2E] Hard Blocked Direct Submit'
-    await addVendor(page, vendorName, 'hardblocked-direct@e2e-test.invalid')
-    await addComplianceDocument(page, vendorName, daysAgo(35))
+    const vendorName = `[E2E] Hard Blocked Direct Submit ${Date.now()}`
+    await addVendor(page, vendorName, `hardblocked-direct-${Date.now()}@e2e-test.invalid`)
+    // 46+ days past expiry is hard_blocked (supabase/migrations/
+    // 20260720170645_widen_vendor_compliance_grace_period_to_45_days.sql);
+    // 1-45 days is only grace_period, which the server does NOT reject —
+    // daysAgo(35) here previously meant this test's own vendor was never
+    // actually hard-blocked, so the "compliance hard-blocked" assertion
+    // below was failing for the right reason with the wrong root cause.
+    await addComplianceDocument(page, vendorName, daysAgo(50))
 
     await page.goto('/maintenance')
     await page.getByRole('button', { name: /New Work Order|Add Work Order|Create|New WO/i }).first().click()
@@ -62,8 +76,8 @@ test.describe('Vendor compliance hard-block', () => {
   })
 
   test('[E2E] grace-period vendor is selectable with a warning banner', async ({ page }) => {
-    const vendorName = '[E2E] Grace Period Plumbing'
-    await addVendor(page, vendorName, 'graceperiod@e2e-test.invalid')
+    const vendorName = `[E2E] Grace Period Plumbing ${Date.now()}`
+    await addVendor(page, vendorName, `graceperiod-${Date.now()}@e2e-test.invalid`)
     await addComplianceDocument(page, vendorName, daysAgo(10))
 
     await page.goto('/maintenance')
