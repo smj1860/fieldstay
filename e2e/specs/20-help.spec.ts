@@ -16,11 +16,14 @@ test.describe('Help & Support', () => {
 
   test('can expand an FAQ item', async ({ page }) => {
     await page.goto('/help')
-    const firstQuestion = page.getByRole('button', { expanded: false }).first()
-    if (await firstQuestion.isVisible()) {
-      await firstQuestion.click()
-      await expect(firstQuestion).toHaveAttribute('aria-expanded', 'true')
-    }
+    // dashboard-shell.tsx (the layout wrapping every dashboard page) has its
+    // own aria-expanded toggle (a sidebar section) that renders before the
+    // page content in DOM order — an unscoped page-wide locator's .first()
+    // picks that instead of the actual first FAQ button. Scope to <main>.
+    const firstQuestion = page.getByRole('main').getByRole('button', { expanded: false }).first()
+    await expect(firstQuestion).toBeVisible()
+    await firstQuestion.click()
+    await expect(firstQuestion).toHaveAttribute('aria-expanded', 'true')
   })
 
 })

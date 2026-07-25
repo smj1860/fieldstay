@@ -20,6 +20,11 @@ test.describe('Turnover crew assignment', () => {
     const checkinDate  = getFutureDate(201)
 
     await page.goto('/turnovers')
+    // Dismiss before opening any dialog — the banner and the Dialog backdrop
+    // share z-50, and since the Dialog portal paints later in DOM order it
+    // sits on top; dismissing later (while a dialog is open) can land the
+    // click on the backdrop instead and close the dialog.
+    await dismissCookieBanner(page)
     await page.getByRole('button', { name: 'Add Turnover' }).click()
 
     const dialog = page.getByRole('dialog')
@@ -27,7 +32,6 @@ test.describe('Turnover crew assignment', () => {
     await dialog.locator('[name="property_id"]').selectOption({ label: '[E2E] The Lakehouse' })
     await dialog.locator('[name="checkout_date"]').fill(checkoutDate)
     await dialog.locator('[name="checkin_date"]').fill(checkinDate)
-    await dismissCookieBanner(page)
     await dialog.getByRole('button', { name: 'Create Turnover' }).click()
     await expect(dialog).not.toBeVisible({ timeout: 8_000 })
 

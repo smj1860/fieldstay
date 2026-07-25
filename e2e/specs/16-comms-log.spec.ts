@@ -11,6 +11,9 @@ test.describe('Comms Log', () => {
 
   test('[E2E] log a communication entry to seeded vendor', async ({ page }) => {
     await page.goto('/comms-log')
+    // Dismiss before opening any dialog — see 03-bookings.spec.ts for why
+    // dismissing while a dialog is open can close the dialog instead.
+    await dismissCookieBanner(page)
 
     await page.getByRole('button', { name: 'Log Communication' }).click()
 
@@ -30,7 +33,6 @@ test.describe('Comms Log', () => {
     await dialog.locator('[name="subject"]').fill('[E2E] Confirmed service window')
     await dialog.locator('[name="body"]').fill('[E2E] Called to confirm Tuesday appointment.')
 
-    await dismissCookieBanner(page)
     await dialog.getByRole('button', { name: 'Save Entry' }).click()
 
     await expect(page.getByText('[E2E] Confirmed service window')).toBeVisible({ timeout: 8_000 })

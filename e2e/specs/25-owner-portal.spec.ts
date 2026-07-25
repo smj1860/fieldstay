@@ -23,6 +23,11 @@ test.describe('Owner portal token lifecycle', () => {
 
   test('[E2E] generate link, view public portal, hide a transaction, then revoke', async ({ page, browser }) => {
     await page.goto('/owners')
+    // Dismiss before opening any dialog — the banner and the Dialog backdrop
+    // share z-50, and since the Dialog portal paints later in DOM order it
+    // sits on top; dismissing later (while a dialog is open) can land the
+    // click on the backdrop instead and close the dialog.
+    await dismissCookieBanner(page)
     const addBtn = page.getByRole('button', { name: /Add Owner|Add First Owner/i }).first()
     await addBtn.click()
 
@@ -30,7 +35,6 @@ test.describe('Owner portal token lifecycle', () => {
     await expect(addDialog.getByRole('heading', { name: 'Add Property Owner' })).toBeVisible()
     await addDialog.locator('[name="property_id"]').selectOption({ label: '[E2E] The Lakehouse' })
     await addDialog.locator('[name="name"]').fill('[E2E] Portal Test Owner')
-    await dismissCookieBanner(page)
     await addDialog.getByRole('button', { name: 'Add Owner', exact: true }).click()
     await expect(page.getByText('[E2E] Portal Test Owner')).toBeVisible({ timeout: 8_000 })
 
@@ -40,7 +44,6 @@ test.describe('Owner portal token lifecycle', () => {
     // this always writes visible_to_owner: true (addOwnerTransaction in
     // app/(dashboard)/owners/actions.ts hardcodes it for manual entries).
     await ownerCard.locator('#monthly-revenue-amount').fill('1500')
-    await dismissCookieBanner(page)
     await ownerCard.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(ownerCard.getByText(/\$1500\.00 recorded/)).toBeVisible({ timeout: 8_000 })
 

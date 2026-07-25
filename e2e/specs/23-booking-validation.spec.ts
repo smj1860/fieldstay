@@ -19,6 +19,11 @@ test.describe('Booking validation', () => {
 
   test('[E2E] checkout date equal to checkin date is rejected', async ({ page }) => {
     await page.goto('/bookings')
+    // Dismiss before opening any dialog — the banner and the Dialog backdrop
+    // share z-50, and since the Dialog portal paints later in DOM order it
+    // sits on top; dismissing later (while a dialog is open) can land the
+    // click on the backdrop instead and close the dialog.
+    await dismissCookieBanner(page)
     await page.getByRole('button', { name: /Add Booking/i }).first().click()
     await expect(page.getByRole('heading', { name: /Log Non-Synced Booking/i })).toBeVisible()
 
@@ -29,7 +34,6 @@ test.describe('Booking validation', () => {
     await page.fill('[name="checkout_date"]', sameDate)
     await page.fill('[name="guest_name"]',    '[E2E] Same Day Guest')
 
-    await dismissCookieBanner(page)
     await page.click('button[type="submit"]')
 
     await expect(page.getByText(/Check-out must be after check-in/i)).toBeVisible({ timeout: 8_000 })
@@ -43,12 +47,14 @@ test.describe('Booking validation', () => {
 
     // First booking — should succeed
     await page.goto('/bookings')
+    // Dismiss before opening any dialog — see the earlier test in this file
+    // for why dismissing while a dialog is open can close the dialog instead.
+    await dismissCookieBanner(page)
     await page.getByRole('button', { name: /Add Booking/i }).first().click()
     await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
     await page.fill('[name="guest_name"]',    '[E2E] Dedup Guest One')
-    await dismissCookieBanner(page)
     await page.click('button[type="submit"]')
     await expect(page.getByText(/Booking added/i)).toBeVisible({ timeout: 8_000 })
 
@@ -60,7 +66,6 @@ test.describe('Booking validation', () => {
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
     await page.fill('[name="guest_name"]',    '[E2E] Dedup Guest Two')
-    await dismissCookieBanner(page)
     await page.click('button[type="submit"]')
 
     await expect(page.getByText(/A booking already exists for these dates/i)).toBeVisible({ timeout: 8_000 })

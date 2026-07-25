@@ -23,7 +23,14 @@ test.describe('Crew logout guard', () => {
     await page.waitForLoadState('networkidle')
 
     // Open the seeded turnover, then its checklist — the counters item lives there.
-    await page.locator('a[href^="/crew/turnovers/"]').first().click()
+    // The crew home page is local-first (app/crew/page.tsx reads via
+    // useLiveQuery from the Dexie IndexedDB cache, not a direct Supabase
+    // fetch) — the initial DexieProvider sync + IndexedDB write settle
+    // asynchronously after `networkidle`, so wait for the turnover link to
+    // actually render rather than assuming networkidle already covers it.
+    const turnoverLink = page.locator('a[href^="/crew/turnovers/"]').first()
+    await turnoverLink.waitFor({ timeout: 15_000 })
+    await turnoverLink.click()
     await page.getByText('Turnover Checklist').click()
     await page.getByText('[E2E] Wipe kitchen counters').waitFor({ timeout: 10_000 })
 
@@ -54,7 +61,14 @@ test.describe('Crew logout guard', () => {
     await page.goto('/crew')
     await page.waitForLoadState('networkidle')
 
-    await page.locator('a[href^="/crew/turnovers/"]').first().click()
+    // The crew home page is local-first (app/crew/page.tsx reads via
+    // useLiveQuery from the Dexie IndexedDB cache, not a direct Supabase
+    // fetch) — the initial DexieProvider sync + IndexedDB write settle
+    // asynchronously after `networkidle`, so wait for the turnover link to
+    // actually render rather than assuming networkidle already covers it.
+    const turnoverLink = page.locator('a[href^="/crew/turnovers/"]').first()
+    await turnoverLink.waitFor({ timeout: 15_000 })
+    await turnoverLink.click()
     await page.getByText('Turnover Checklist').click()
     await page.getByText('[E2E] Wipe kitchen counters').waitFor({ timeout: 10_000 })
 

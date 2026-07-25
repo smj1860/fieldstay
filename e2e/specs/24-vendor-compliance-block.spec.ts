@@ -54,7 +54,6 @@ test.describe('Vendor compliance hard-block', () => {
     await page.selectOption('#wo-vendor', { label: vendorName })
 
     await page.fill('[name="title"]', '[E2E] Should Be Rejected By Server')
-    await dismissCookieBanner(page)
     await page.click('button[type="submit"]')
 
     await expect(page.getByText(/compliance hard-blocked/i)).toBeVisible({ timeout: 8_000 })
@@ -79,7 +78,6 @@ test.describe('Vendor compliance hard-block', () => {
 
     // Grace period still allows assignment — the WO can be created.
     await page.fill('[name="title"]', '[E2E] Grace Period Vendor WO')
-    await dismissCookieBanner(page)
     await page.click('button[type="submit"]')
 
     await page.waitForURL(/\/maintenance/, { timeout: 10_000 })
@@ -90,12 +88,16 @@ test.describe('Vendor compliance hard-block', () => {
 
 async function addVendor(page: import('@playwright/test').Page, name: string, email: string) {
   await page.goto('/vendors')
+  // Dismiss before opening any dialog — the banner and the Dialog backdrop
+  // share z-50, and since the Dialog portal paints later in DOM order it
+  // sits on top; dismissing later (while a dialog is open) can land the
+  // click on the backdrop instead and close the dialog.
+  await dismissCookieBanner(page)
   await page.getByRole('button', { name: '+ Add Vendor' }).click()
   await page.fill('#vendor-name',  name)
   await page.fill('#vendor-email', email)
-  await dismissCookieBanner(page)
   await page.click('button[type="submit"]')
-  await expect(page.getByText(name).first()).toBeVisible({ timeout: 8_000 })
+  await expect(page.getByText(name).filter({ visible: true }).first()).toBeVisible({ timeout: 8_000 })
 }
 
 async function addComplianceDocument(
@@ -104,8 +106,8 @@ async function addComplianceDocument(
   expiryDate: string,
 ) {
   await page.goto('/vendors')
-  await page.getByText(vendorName).first().click()
-  await expect(page.getByText(vendorName).first()).toBeVisible({ timeout: 8_000 })
+  await page.getByText(vendorName).filter({ visible: true }).first().click()
+  await expect(page.getByText(vendorName).filter({ visible: true }).first()).toBeVisible({ timeout: 8_000 })
 
   await page.getByRole('button', { name: 'Add Document' }).click()
   const dialog = page.getByRole('dialog')
@@ -115,7 +117,6 @@ async function addComplianceDocument(
   await dialog.locator('#document-name').fill('[E2E] General Liability COI')
   await dialog.locator('#expiry-date').fill(expiryDate)
 
-  await dismissCookieBanner(page)
   await dialog.getByRole('button', { name: 'Add Document' }).click()
   await expect(dialog).not.toBeVisible({ timeout: 8_000 })
 }

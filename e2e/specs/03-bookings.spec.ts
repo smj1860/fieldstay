@@ -13,6 +13,11 @@ test.describe('Bookings', () => {
 
   test('[E2E] add manual booking creates booking and success banner', async ({ page }) => {
     await page.goto('/bookings')
+    // Dismiss once, before any dialog opens — the banner and the Dialog
+    // backdrop share z-50, and since the Dialog portal paints later in DOM
+    // order it sits on top; dismissing later (while a dialog is open) can
+    // land the click on the backdrop instead and close the dialog.
+    await dismissCookieBanner(page)
     await page.getByRole('button', { name: /Add Booking/i }).first().click()
 
     await expect(page.getByRole('heading', { name: /Log Non-Synced Booking/i })).toBeVisible()
@@ -25,9 +30,6 @@ test.describe('Bookings', () => {
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
     await page.fill('[name="guest_name"]',    '[E2E] Jane Playwright')
-
-    // Cookie banner can intercept the submit click — dismiss it first
-    await dismissCookieBanner(page)
 
     await page.click('button[type="submit"]')
 

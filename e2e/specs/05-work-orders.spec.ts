@@ -13,6 +13,9 @@ test.describe('Work Orders / Maintenance', () => {
 
   test('[E2E] create work order appears on board', async ({ page }) => {
     await page.goto('/maintenance')
+    // Dismiss before opening any dialog — see 03-bookings.spec.ts for why
+    // dismissing while a dialog is open can close the dialog instead.
+    await dismissCookieBanner(page)
 
     const newBtn = page.getByRole('button', {
       name: /New Work Order|Add Work Order|Create|New WO/i,
@@ -27,7 +30,6 @@ test.describe('Work Orders / Maintenance', () => {
       await prioritySelect.selectOption('medium')
     }
 
-    await dismissCookieBanner(page)
     await page.click('button[type="submit"]')
 
     await page.waitForURL(/\/maintenance/, { timeout: 10_000 })
