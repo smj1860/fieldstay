@@ -23,18 +23,22 @@ status (checked against the live codebase, not assumed):
 | 7. Dexie delta sync + outbox backoff | 2 | 🔶 Half done — delta sync shipped as Crew Sync v2 Phase 1; **outbox backoff = Phase 4, still open** |
 | 8. Bound the unbounded queries | 2 | ✅ Done — `checklist-signals` has a 180-day rolling window, reviews/owners pages are `.limit()`-bounded |
 | 9. Enforcement Tiers 1–3 (ESLint/guardrails → typed ServiceRoleContext → DB invariant CI gate) | — | ✅ Done — Tier 3 is PR #505 |
-| 10. Tier 3 hygiene list | 3 | 🔶 Section 3 (Kroger rate limiter) done; sections 1, 2, 4, 5 remain — see below |
+| 10. Tier 3 hygiene list | 3 | ✅ Done — sections 1, 3, 4, 5 shipped; section 2 (Hostaway) deliberately disabled instead of built, see below |
 
-So the actual remaining work is: **Crew Sync v2 Phases 2–5** (the other
-document), plus the four Tier 3 hygiene items and one enforcement leftover
-below. Each section here is independent — they can be separate small PRs
-in any order.
+So the only work still open is **Crew Sync v2 Phase 5** (the other
+document) — everything in this doc is closed out.
 
 ---
 
 ## 1. `notifications` retention cron
 
-**Problem:** the `notifications` table (in-app bell events, added
+**Status: ✅ Done.** `lib/inngest/functions/cron/notifications-retention.ts`
+runs daily, deleting read notifications older than 90 days and all
+notifications older than 180 days, in bounded id-list batches (capped at
+20 batches/10k rows per run, resuming the remainder the next day). See
+`unit/inngest/cron-notifications-retention.test.ts`.
+
+**Original problem:** the `notifications` table (in-app bell events, added
 2026-07-15) has no retention job — it grows forever. Every other
 append-heavy table already has one (`audit-retention.ts`,
 `comms-retention.ts`, `guest-pii-retention.ts` in
@@ -57,11 +61,31 @@ append-heavy table already has one (`audit-retention.ts`,
 
 ## 2. Hostaway incremental sync
 
-**Problem:** Hostaway sync is initial-import only / full-refetch — no
-incremental cursor, unlike OwnerRez which has
+**Status: ⏸️ Deliberately NOT built — Hostaway fully disabled instead,
+per product decision (2026-07-25).** Hostaway isn't ready to be live yet.
+Rather than build incremental sync on top of an integration that
+shouldn't be reachable, the whole integration was commented out (not
+deleted) at its two chokepoints:
+- `lib/integrations/registry.ts` — `hostawayProvider` import + its
+  `['hostaway', hostawayProvider]` map entry.
+- `app/api/inngest/route.ts` — `hostawayInitialSync` import + its
+  `serve()` array entry.
+
+The connect UI (`setup/pms/page.tsx`, `settings/integrations/
+integrations-client.tsx`/`actions.ts`) was already disabled by an earlier,
+unrelated commit (no revenue-posting yet). The provider implementation
+(`lib/integrations/providers/hostaway.ts`) and the sync job
+(`lib/inngest/functions/hostaway/initial-sync.ts`) are untouched
+internally — each has a top-of-file note naming the exact lines to
+uncomment to re-enable. To resume this item once Hostaway is ready to
+launch: uncomment those two chokepoints, re-enable the connect UI, THEN
+come back to the original instructions below for incremental sync.
+
+**Original problem:** Hostaway sync is initial-import only / full-refetch —
+no incremental cursor, unlike OwnerRez which has
 `ownerrez/incremental-sync.ts`.
 
-**Instructions:**
+**Instructions (for when Hostaway is re-enabled):**
 
 1. Read `lib/integrations/providers/` for the Hostaway provider and the
    OwnerRez incremental sync function as the reference implementation.
@@ -117,7 +141,25 @@ orgs shares one IP/token budget, same class of problem as OwnerRez was.
 
 ## 4. Fail-closed outbound budgets on Redis outage
 
-**Problem:** budget/spend limiters (SMS budget chokepoint in
+**Status: ✅ Done.** The SMS nudge-budget chokepoint
+(`claimNudgeBudgetSlot` in `lib/sms/telnyx.ts`) already failed closed on a
+Redis error (shipped alongside item 1/5's SMS spend guard) — this pass
+added a `reportError` call alongside the existing `console.error` for
+observability, plus a runtime test and a one-line CLAUDE.md note. Every
+other limiter in `lib/rate-limit.ts`/`proxy.ts` was classified and
+confirmed to be an abuse/API-quota limiter (correctly fail-open, matching
+the Kroger limiter's own fail-open choice in section 3) — none needed to
+change. Three limiters (`repuguardLimiter`, `scanLimiter`,
+`supportChatLimiter`/`supportChatDailyLimiter`) gate paid Anthropic API
+calls but are framed as per-user abuse quotas rather than spend budgets;
+left alone as ambiguous rather than guessed on a money path — revisit if
+that framing changes. A PM notification on a skipped SMS send was
+considered and explicitly deferred (no `org_id` in scope at the call
+site; wiring it through three cron call sites was judged more than a
+small addition) — worth a follow-up if silent-skip visibility becomes a
+real problem in practice.
+
+**Original problem:** budget/spend limiters (SMS budget chokepoint in
 `lib/sms/telnyx.ts`, retailer/cart spend) currently follow the same
 fail-open-on-Redis-error convention as the abuse rate limiters in
 `proxy.ts`. For token-enumeration throttles fail-open is correct (an
@@ -143,7 +185,22 @@ nothing is watching.
 
 ## 5. Enforcement leftover: `types/database.ts` drift check
 
-**Problem:** PR #505's `db-invariants` CI job implemented checks 1–3 of
+**Status: ✅ Done.** `scripts/check-type-drift.mjs` (new) diffs a
+service-role-only `public.db_type_shape_report()` RPC (new migration,
+applied to both projects) against a parse of `types/database.ts` — enum
+labels both directions, table presence both directions, and column
+presence for every mapped table. Wired into the `db-invariants` CI job
+as a second step. The first real run found and fixed three genuinely
+live drift bugs beyond the original `wo_status` incident: `wo_source`
+missing `vacancy_gap_suggestion` (migration), `inventory_count_drafts`
+missing `reviewed_at`/`reviewed_by` entirely (migration — this was
+actively breaking every PM approve/reject of a pending inventory count),
+and `crew_feedback.created_at` vs. the real `submitted_at` column
+(breaking the support inbox feedback list — types/code fix, no
+migration). See the script's own header for exactly what it does and
+doesn't check.
+
+**Original problem:** PR #505's `db-invariants` CI job implemented checks 1–3 of
 the Tier 3 outline (RLS everywhere, FK covering indexes, zero anon
 grants). Check 4 — generating types from the e2e project and diffing the
 table/column shape against the committed `types/database.ts` — was
