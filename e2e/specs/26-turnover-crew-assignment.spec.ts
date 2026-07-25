@@ -90,10 +90,13 @@ test.describe('Turnover crew assignment', () => {
     // literal word "Assign" from this button, and a substring match
     // resolves to both elements.
     await card.getByRole('button', { name: 'Assign', exact: true }).click()
-    await card.getByRole('button', { name: '[E2E] Alex Cleaner' }).click()
+    // Same reasoning as above — the header wrapper's computed name/text
+    // also absorbs the crew-chip text once assigned (the crew-assignment
+    // UI, dropdown included, is nested inside that same role="button" div).
+    await card.getByRole('button', { name: '[E2E] Alex Cleaner', exact: true }).click()
 
     // Crew chip appears and the status badge flips off "Needs Crew".
-    await expect(card.getByText('[E2E] Alex Cleaner')).toBeVisible({ timeout: 8_000 })
+    await expect(card.getByText('[E2E] Alex Cleaner', { exact: true })).toBeVisible({ timeout: 8_000 })
     await expect(card.getByText('Needs Crew')).not.toBeVisible()
     await expect(card.getByText('Crew Assigned')).toBeVisible()
   })
