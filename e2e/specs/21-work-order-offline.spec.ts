@@ -129,6 +129,12 @@ test.describe('Work order offline support', () => {
 
     await page.locator('input[placeholder="Description"]').first().fill('[E2E] Replaced valve')
     await page.locator('input[placeholder="0.00"]').first().fill('125')
+    // #technician-name is a required native <input> (vendor-portal.tsx) —
+    // added after this spec was written, so the browser's own constraint
+    // validation was silently blocking the form submit before
+    // handleSubmit ever ran, and "Saved" never appeared for a reason that
+    // had nothing to do with the offline queueing being tested.
+    await page.locator('#technician-name').fill('[E2E] Tech')
 
     await page.route('**/api/work-orders/*/complete', (route) => route.abort())
 
@@ -184,6 +190,12 @@ test.describe('Work order offline support', () => {
 
     await page.locator('input[placeholder="Description"]').first().fill('[E2E] Replaced valve')
     await page.locator('input[placeholder="0.00"]').first().fill('125')
+    // #technician-name is a required native <input> (vendor-portal.tsx) —
+    // added after this spec was written, so the browser's own constraint
+    // validation was silently blocking the form submit before
+    // handleSubmit ever ran, and "Saved" never appeared for a reason that
+    // had nothing to do with the offline queueing being tested.
+    await page.locator('#technician-name').fill('[E2E] Tech')
 
     await page.route('**/api/work-orders/*/complete', (route) => route.abort())
     await page.getByRole('button', { name: /submit invoice/i }).click()
