@@ -33,7 +33,15 @@ test.describe('Bookings', () => {
 
     await page.click('button[type="submit"]')
 
-    await expect(page.getByText(/Booking added/i)).toBeVisible({ timeout: 8_000 })
+    // createBooking's critical path (property lookup, insert,
+    // logAuditEvent, detectAndFlagOverlaps, inngest.send, two
+    // revalidatePath calls) is fully awaited before the client sees
+    // success — under sustained E2E-project DB load this occasionally
+    // pushes past a tight timeout even though the insert itself always
+    // completes (confirmed: a "failed" attempt's booking still exists on
+    // the next attempt). 20s gives real headroom without masking an
+    // actual hang.
+    await expect(page.getByText(/Booking added/i)).toBeVisible({ timeout: 20_000 })
     await expect(page.getByText('[E2E] Jane Playwright')).toBeVisible()
   })
 

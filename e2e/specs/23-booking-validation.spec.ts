@@ -63,7 +63,11 @@ test.describe('Booking validation', () => {
     await page.fill('[name="checkout_date"]', checkout)
     await page.fill('[name="guest_name"]',    '[E2E] Dedup Guest One')
     await page.click('button[type="submit"]')
-    await expect(page.getByText(/Booking added/i)).toBeVisible({ timeout: 8_000 })
+    // createBooking's fully-awaited critical path occasionally exceeds a
+    // tight timeout under sustained E2E-project DB load even though the
+    // insert itself always completes — see the identical comment in
+    // 03-bookings.spec.ts for the confirmed evidence.
+    await expect(page.getByText(/Booking added/i)).toBeVisible({ timeout: 20_000 })
 
     // Second booking — same property + same dates, different guest name.
     // The unique index is on (property_id, checkin_date, checkout_date), not
