@@ -1,6 +1,7 @@
 import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
 import { selectOptionWhenReady } from '../helpers/forms'
+import { getServiceClient } from '../helpers/teardown'
 
 // Covers the core turnover -> crew assignment workflow, which 04-turnovers.spec.ts
 // never exercises (it only checks the board/calendar/filter render). Creates
@@ -23,18 +24,10 @@ import { selectOptionWhenReady } from '../helpers/forms'
 // is on that exact transition (CLAUDE.md's turnover_status enum).
 test.describe('Turnover crew assignment', () => {
 
-  test('[E2E] assigning crew moves a turnover from pending to assigned', async ({ page }) => {
+  test('[E2E] assigning crew moves a turnover from pending to assigned', async ({ page, ctx }) => {
     const checkoutDate = getFutureDate(30)
     const checkinDate  = getFutureDate(31)
-    // A unique marker in notes (rendered on the card — turnover-board.tsx's
-    // TurnoverCard, `{turnover.notes && ...}`) lets `card` below scope to
-    // exactly this turnover rather than assuming it's the only one in
-    // "Upcoming" — that assumption broke under CI load (2 elements matched
-    // '.bg-card-themed.rounded-xl' + "Needs Crew" inside the section on a
-    // clean first attempt, root cause not pinned down further), and
-    // scoping by unique text is this suite's established pattern anyway
-    // (property/vendor/guest names) rather than positional/count assumptions.
-    const marker = `[E2E] Crew Assignment Test ${Date.now()}`
+    const marker       = `[E2E] Crew Assignment Test ${Date.now()}`
 
     await page.goto('/turnovers')
     // Dismiss before opening any dialog — the banner and the Dialog backdrop
@@ -53,19 +46,30 @@ test.describe('Turnover crew assignment', () => {
     await dialog.getByRole('button', { name: 'Create Turnover' }).click()
     await expect(dialog).not.toBeVisible({ timeout: 8_000 })
 
+    // Scope to this exact turnover by ID (TurnoverCard's root
+    // data-testid="turnover-card-<id>") rather than by text/position —
+    // a "only card in Upcoming" assumption hit a strict-mode violation
+    // (2 elements) under CI load with no duplicate-insert or duplicate-
+    // render path found on investigation, and a notes-text filter doesn't
+    // work either since notes only render once the card is expanded
+    // (turnover-board.tsx's `{expanded && ... turnover.notes}`). The id
+    // is always present and unique regardless of what's rendered.
+    const supabase = getServiceClient()
+    const { data: turnover, error: findErr } = await supabase
+      .from('turnovers')
+      .select('id')
+      .eq('org_id', ctx.orgId)
+      .eq('notes', marker)
+      .single()
+    if (findErr || !turnover) throw new Error(`Failed to find just-created turnover by marker: ${findErr?.message}`)
+    const card = page.getByTestId(`turnover-card-${turnover.id}`)
+
     // "Upcoming" (groups.upcoming, defaultOpen) is the only section a
-    // 30-day-out turnover can land in — scope everything to it so this
-    // can't collide with the near-term seeded turnover from global-setup.ts
-    // (checkout ~2h out, lands in "Today") or any other spec's turnovers.
-    // BoardSection renders its heading button and its cards as siblings
-    // inside one wrapping div — walk from the "Upcoming" button up to that
-    // wrapper, then down to the single card by its root classes
-    // (turnover-board.tsx's TurnoverCard root: bg-card-themed rounded-xl),
-    // then filter to the one card carrying our own marker text.
-    const upcomingHeading = page.getByRole('button', { name: /^Upcoming/ })
-    await expect(upcomingHeading).toBeVisible({ timeout: 8_000 })
-    const upcomingSection = upcomingHeading.locator('xpath=..')
-    const card = upcomingSection.locator('.bg-card-themed.rounded-xl').filter({ hasText: marker })
+    // 30-day-out turnover can land in per groupTurnovers() in
+    // turnover-board.tsx — confirm the section itself renders before
+    // asserting on the card within it.
+    await expect(page.getByRole('button', { name: /^Upcoming/ })).toBeVisible({ timeout: 8_000 })
+    await expect(card).toBeVisible({ timeout: 8_000 })
 
     // Status badge text comes from TURNOVER_STATUS_LABELS (lib/utils.ts):
     // pending_assignment -> "Needs Crew", assigned -> "Crew Assigned".

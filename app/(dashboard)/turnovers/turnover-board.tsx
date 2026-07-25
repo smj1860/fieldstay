@@ -353,6 +353,7 @@ function TurnoverCard({
 
   return (
     <div
+      data-testid={`turnover-card-${turnover.id}`}
       className={cn(
         'bg-card-themed rounded-xl border transition-shadow',
         CARD_BORDER_CLASS[urgencyTone],
