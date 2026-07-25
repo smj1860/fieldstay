@@ -24,4 +24,4 @@ export async function isVendorHardBlocked(
 }
 
 export const VENDOR_HARD_BLOCKED_ERROR =
-  'This vendor is compliance hard-blocked (a required document has been expired 31+ days) and cannot be assigned to a work order. Update their compliance documents first.'
+  'This vendor is compliance hard-blocked (a required document has been expired 46+ days) and cannot be assigned to a work order. Update their compliance documents first.'
