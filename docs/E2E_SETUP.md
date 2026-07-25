@@ -20,6 +20,18 @@ matching `[E2E]%` patterns and the seeder flips org billing state.
 
 ## 1. Create the E2E Supabase project
 
+> ✅ **DONE 2026-07-22.** Project `fieldstay-e2e`, ref `syhthijeqlnltufdawyb`,
+> us-east-1, $10/month. URL: `https://syhthijeqlnltufdawyb.supabase.co`.
+> Steps 2 and 3 were also completed against it the same day (all 311
+> migrations applied in order via the Supabase MCP, versions registered in
+> `supabase_migrations.schema_migrations`, PM account + org seeded).
+> Bootstrap notes: two prod-only data seeds were intentionally skipped
+> (`20260630044714_add_stephen_as_platform_staff`, `20260718010000_seed_room_templates`
+> — both reference production identities; the app auto-seeds room templates
+> per-org at runtime), and powersync-publication statements were skipped
+> (that layer never exists on a fresh project and was dropped from prod).
+> What remains is steps 4–6 below.
+
 Dashboard → New project in the same org, or ask Claude to do it via the
 Supabase MCP. Suggested name: `fieldstay-e2e`, region `us-east-1` (same as
 prod). **Cost: $10/month** on the current org plan.
@@ -29,7 +41,7 @@ No extensions or manual schema work needed — migrations handle everything.
 ## 2. Apply all migrations
 
 ```bash
-supabase link --project-ref <e2e-project-ref>
+supabase link --project-ref syhthijeqlnltufdawyb
 supabase db push
 ```
 
