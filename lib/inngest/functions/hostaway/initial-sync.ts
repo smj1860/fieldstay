@@ -1,4 +1,18 @@
 /**
+ * DISABLED — not ready for launch (product decision, 2026-07-25). This
+ * function is intact and functional; it is simply unregistered so it can
+ * never run:
+ *   - Not registered in app/api/inngest/route.ts's serve() functions array
+ *     (the `hostawayInitialSync` import + array entry are commented out there)
+ *   - Its provider adapter (lib/integrations/providers/hostaway.ts) is not
+ *     registered in lib/integrations/registry.ts either
+ *   - Nothing sends the triggering event — connectWithApiKey() in
+ *     app/(dashboard)/settings/integrations/actions.ts (the only place that
+ *     used to send it) has its Hostaway credential-exchange path commented out
+ * To re-enable: uncomment the registry entry, the Inngest route
+ * registration, and the connect entry points (see hostaway.ts's top-of-file
+ * comment for the full list).
+ *
  * Hostaway Initial Sync
  *
  * Triggered by: integration/hostaway.sync.requested

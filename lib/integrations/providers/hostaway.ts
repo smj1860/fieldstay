@@ -1,5 +1,19 @@
 // lib/integrations/providers/hostaway.ts
 // ============================================================
+// DISABLED — not ready for launch (product decision, 2026-07-25). This
+// implementation is intact and functional; it is simply unreachable:
+//   - Not registered in lib/integrations/registry.ts (hostawayProvider
+//     import + map entry are commented out there)
+//   - Its Inngest sync job (lib/inngest/functions/hostaway/initial-sync.ts)
+//     is not registered in app/api/inngest/route.ts's serve() call
+//   - Every UI/server-action connect entry point (settings/integrations,
+//     setup/pms) already excludes 'hostaway' from its provider list
+// To re-enable: uncomment the registry entry and the Inngest route
+// registration, then re-add the connect UI/actions (see the "Hostaway is
+// not fully implemented yet" comments in
+// app/(dashboard)/settings/integrations/actions.ts and
+// app/(dashboard)/settings/integrations/integrations-client.tsx).
+// ============================================================
 // Hostaway API-key provider adapter.
 //
 // Hostaway specifics:
