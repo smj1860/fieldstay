@@ -26,6 +26,15 @@ test.describe('Turnover crew assignment', () => {
   test('[E2E] assigning crew moves a turnover from pending to assigned', async ({ page }) => {
     const checkoutDate = getFutureDate(30)
     const checkinDate  = getFutureDate(31)
+    // A unique marker in notes (rendered on the card — turnover-board.tsx's
+    // TurnoverCard, `{turnover.notes && ...}`) lets `card` below scope to
+    // exactly this turnover rather than assuming it's the only one in
+    // "Upcoming" — that assumption broke under CI load (2 elements matched
+    // '.bg-card-themed.rounded-xl' + "Needs Crew" inside the section on a
+    // clean first attempt, root cause not pinned down further), and
+    // scoping by unique text is this suite's established pattern anyway
+    // (property/vendor/guest names) rather than positional/count assumptions.
+    const marker = `[E2E] Crew Assignment Test ${Date.now()}`
 
     await page.goto('/turnovers')
     // Dismiss before opening any dialog — the banner and the Dialog backdrop
@@ -40,6 +49,7 @@ test.describe('Turnover crew assignment', () => {
     await selectOptionWhenReady(dialog.locator('[name="property_id"]'), '[E2E] The Lakehouse')
     await dialog.locator('[name="checkout_date"]').fill(checkoutDate)
     await dialog.locator('[name="checkin_date"]').fill(checkinDate)
+    await dialog.locator('[name="notes"]').fill(marker)
     await dialog.getByRole('button', { name: 'Create Turnover' }).click()
     await expect(dialog).not.toBeVisible({ timeout: 8_000 })
 
@@ -50,11 +60,12 @@ test.describe('Turnover crew assignment', () => {
     // BoardSection renders its heading button and its cards as siblings
     // inside one wrapping div — walk from the "Upcoming" button up to that
     // wrapper, then down to the single card by its root classes
-    // (turnover-board.tsx's TurnoverCard root: bg-card-themed rounded-xl).
+    // (turnover-board.tsx's TurnoverCard root: bg-card-themed rounded-xl),
+    // then filter to the one card carrying our own marker text.
     const upcomingHeading = page.getByRole('button', { name: /^Upcoming/ })
     await expect(upcomingHeading).toBeVisible({ timeout: 8_000 })
     const upcomingSection = upcomingHeading.locator('xpath=..')
-    const card = upcomingSection.locator('.bg-card-themed.rounded-xl')
+    const card = upcomingSection.locator('.bg-card-themed.rounded-xl').filter({ hasText: marker })
 
     // Status badge text comes from TURNOVER_STATUS_LABELS (lib/utils.ts):
     // pending_assignment -> "Needs Crew", assigned -> "Crew Assigned".
