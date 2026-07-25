@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
+import { getServiceClient } from '../helpers/teardown'
 
 test.describe('Work Orders / Maintenance', () => {
 
@@ -11,7 +12,7 @@ test.describe('Work Orders / Maintenance', () => {
     ).toBeVisible()
   })
 
-  test('[E2E] create work order appears on board', async ({ page }) => {
+  test('[E2E] create work order appears on board', async ({ page, ctx }) => {
     await page.goto('/maintenance')
     // Dismiss before opening any dialog — see 03-bookings.spec.ts for why
     // dismissing while a dialog is open can close the dialog instead.
@@ -40,7 +41,30 @@ test.describe('Work Orders / Maintenance', () => {
     // — that's the real signal the mutation (including its await'd
     // inngest.send() call) has finished, not just that the click dispatched.
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 })
-    await expect(page.getByText('[E2E] Fix Leaking Faucet')).toBeVisible({ timeout: 8_000 })
+
+    try {
+      await expect(page.getByText('[E2E] Fix Leaking Faucet')).toBeVisible({ timeout: 8_000 })
+    } catch (uiErr) {
+      // The dialog closing proves createWorkOrder returned success — but
+      // this assertion has failed repeatedly in CI with no server-side
+      // error (confirmed via playwright.config.ts's webServer stdout/
+      // stderr piping). Query the DB directly on failure so the CI log
+      // says definitively whether the row was ever persisted (a real
+      // create/RLS/visibility bug) or exists but isn't rendering (a
+      // client refresh/query-filter bug) — static code review alone
+      // couldn't distinguish these.
+      const supabase = getServiceClient()
+      const { data: rows, error: dbErr } = await supabase
+        .from('work_orders')
+        .select('id, title, status, org_id, property_id, created_at')
+        .eq('org_id', ctx.orgId)
+        .like('title', '[E2E] Fix Leaking Faucet%')
+      console.error(
+        '[05-work-orders diagnostic] DB rows for this org/title after UI assertion failed:',
+        JSON.stringify({ rows, dbErr }),
+      )
+      throw uiErr
+    }
   })
 
   test('[E2E] work order detail page opens', async ({ page }) => {

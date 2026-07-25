@@ -1,6 +1,7 @@
 import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
 import { selectOptionWhenReady } from '../helpers/forms'
+import { getServiceClient } from '../helpers/teardown'
 
 // Covers the vendor_compliance_status hard-block rule from CLAUDE.md
 // ("hard_blocked = expired 46+ days (no WO assignment)") — currently
@@ -101,7 +102,7 @@ test.describe('Vendor compliance hard-block', () => {
     await expect(page.getByText('[E2E] Should Be Rejected By Server')).not.toBeVisible()
   })
 
-  test('[E2E] grace-period vendor is selectable with a warning banner', async ({ page }) => {
+  test('[E2E] grace-period vendor is selectable with a warning banner', async ({ page, ctx }) => {
     const vendorName = `[E2E] Grace Period Plumbing ${Date.now()}`
     await addVendor(page, vendorName, `graceperiod-${Date.now()}@e2e-test.invalid`)
     await addComplianceDocument(page, vendorName, daysAgo(10))
@@ -131,7 +132,28 @@ test.describe('Vendor compliance hard-block', () => {
     // has finished — before doing any reload.
     await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 })
     await page.reload()
-    await expect(page.getByText('[E2E] Grace Period Vendor WO')).toBeVisible({ timeout: 10_000 })
+
+    try {
+      await expect(page.getByText('[E2E] Grace Period Vendor WO')).toBeVisible({ timeout: 10_000 })
+    } catch (uiErr) {
+      // Same diagnostic as 05-work-orders.spec.ts — the dialog closing
+      // proves createWorkOrder returned success, and this reload() is a
+      // real full server round trip (not router.refresh()), yet the row
+      // still doesn't render, with no server-side error in CI's now-piped
+      // webServer logs. Query the DB directly so the CI log says whether
+      // the row was ever persisted.
+      const supabase = getServiceClient()
+      const { data: rows, error: dbErr } = await supabase
+        .from('work_orders')
+        .select('id, title, status, org_id, property_id, vendor_id, created_at')
+        .eq('org_id', ctx.orgId)
+        .like('title', '[E2E] Grace Period Vendor WO%')
+      console.error(
+        '[24-vendor-compliance-block diagnostic] DB rows for this org/title after UI assertion failed:',
+        JSON.stringify({ rows, dbErr }),
+      )
+      throw uiErr
+    }
   })
 
 })
