@@ -205,7 +205,18 @@ export async function proxy(request: NextRequest) {
   // entry are unaffected (rateLimiterForPathname returns null for them).
   const tokenRouteLimiter = rateLimiterForPathname(pathname)
 
-  if (tokenRouteLimiter) {
+  // Skip the network round trip entirely when Upstash isn't configured
+  // (e.g. CI, or a local dev env without the KV addon) instead of letting
+  // the underlying @upstash/redis client attempt — and internally retry —
+  // a fetch against an undefined URL before the catch below fails open.
+  // That retry/backoff was measured adding ~4.3s to EVERY request on a
+  // rate-limited route, which was tight enough to blow several e2e tests'
+  // short (5-10s) post-mutation assertion timeouts on /work-orders/[token]
+  // and /owner/[token].
+  const upstashConfigured =
+    !!process.env.upstash_fieldstay_KV_REST_API_URL && !!process.env.upstash_fieldstay_KV_REST_API_TOKEN
+
+  if (tokenRouteLimiter && upstashConfigured) {
     const ip =
       request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
       request.headers.get('x-real-ip') ??

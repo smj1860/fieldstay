@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition, useEffect } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import {
   Plus, ChevronDown, X, Wrench, Calendar, DollarSign,
   User, ChevronRight, AlertTriangle, CheckCircle2, Clock,
@@ -855,6 +855,7 @@ export function MaintenanceBoard({
   orgId?:           string
   role:             string
 }) {
+  const router        = useRouter()
   const searchParams  = useSearchParams()
   const urlFilter     = searchParams.get('filter')
 
@@ -1240,6 +1241,7 @@ export function MaintenanceBoard({
           vendorCompliance={vendorCompliance}
           orgId={orgId}
           onClose={() => setShowCreate(false)}
+          onSuccess={() => router.refresh()}
           onWarning={setWarning}
         />
       )}

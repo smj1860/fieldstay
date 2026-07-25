@@ -2,6 +2,7 @@ import { chromium, type FullConfig } from '@playwright/test'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import * as fs                               from 'fs'
 import * as path                             from 'path'
+import type { Database } from '../types/database.generated'
 
 export default async function globalSetup(_config: FullConfig) {
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3000'
@@ -46,7 +47,16 @@ export default async function globalSetup(_config: FullConfig) {
         `trial_ends_at for the E2E PM org in the database.`
       )
     }
-    throw new Error(`Login failed — current URL: ${url}`)
+    // signInWithPassword() runs entirely client-side (login-form.tsx) — it
+    // never round-trips through the Next.js server, so a failed sign-in
+    // produces no server-side log even with webServer stdout/stderr now
+    // piped. The only place the actual reason (bad credentials, Supabase
+    // rate-limiting, an outage) is visible at all is this on-page error
+    // banner — grab it so a login failure doesn't come with `current URL:
+    // .../login` as its only clue.
+    const bannerText = await page.locator('.bg-red-50').first().textContent().catch(() => null)
+    const bannerSuffix = bannerText ? ` — page error: "${bannerText.trim()}"` : ' (no error banner found on page)'
+    throw new Error(`Login failed — current URL: ${url}${bannerSuffix}`)
   }
 
   await page.context().storageState({ path: 'e2e/.auth/pm.json' })
@@ -56,15 +66,14 @@ export default async function globalSetup(_config: FullConfig) {
   // Tear down any stale [E2E] data first, then re-seed.
   // This ensures a clean starting state even if a previous run aborted.
 
-  const supabase = createClient(
+  const supabase = createClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }
   )
 
   // Find the test org from the PM account's membership
-  const { data: authUser } = await supabase.auth.admin.listUsers()
-  const pmUser = authUser.users.find((u) => u.email === email)
+  const pmUser = await findUserByEmail(supabase, email)
 
   if (!pmUser) {
     throw new Error(`Could not find Supabase user for ${email}`)
@@ -120,25 +129,43 @@ export default async function globalSetup(_config: FullConfig) {
     throw new Error('Failed to create seed property [E2E] The Lakehouse')
   }
 
-  // Seed one crew member
-  await supabase.from('crew_members').insert({
-    org_id: orgId,
-    name:   '[E2E] Alex Cleaner',
-    phone:  '+15550001234',
-    email:  null,
-    role:   'cleaner',
-    status: 'active',
+  // Seed one crew member. role must be a real crew_role enum value
+  // ('cleaning', not 'cleaner') and the active flag is is_active — the
+  // original insert used 'cleaner' + a nonexistent status column and,
+  // with no error check, failed silently on every run, which is why the
+  // crew specs never found '[E2E] Alex Cleaner'.
+  const { error: crewSeedErr } = await supabase.from('crew_members').insert({
+    org_id:    orgId,
+    name:      '[E2E] Alex Cleaner',
+    phone:     '+15550001234',
+    email:     null,
+    role:      'cleaning',
+    specialty: 'cleaning',
+    is_active: true,
   })
+  if (crewSeedErr) {
+    throw new Error(`Failed to seed crew member [E2E] Alex Cleaner: ${crewSeedErr.message}`)
+  }
 
   // Seed one vendor
-  await supabase.from('vendors').insert({
+  const { error: vendorSeedErr } = await supabase.from('vendors').insert({
     org_id:         orgId,
     name:           '[E2E] Reliable Plumbing Co.',
     email:          'plumber@e2e-test.invalid',
     specialty:      'plumbing',
     portal_enabled: true,
     is_active:      true,
+    // stripe_connect_charges_enabled defaults to false — without this,
+    // VendorPortal (app/work-orders/[token]/vendor-portal.tsx) renders its
+    // "set up payouts before submitting" Connect gate instead of the
+    // invoice/line-items form, so the form's inputs (e.g.
+    // input[placeholder="Description"], used by
+    // 21-work-order-offline.spec.ts) never mount.
+    stripe_connect_charges_enabled: true,
   })
+  if (vendorSeedErr) {
+    throw new Error(`Failed to seed vendor [E2E] Reliable Plumbing Co.: ${vendorSeedErr.message}`)
+  }
 
   // ── 3. Seed a crew login + an assigned turnover/checklist item ───────────
   // Used by e2e/specs/22-crew-logout-guard.spec.ts to exercise the crew PWA
@@ -169,8 +196,7 @@ async function seedCrewLoginAndAssignment(
   // Reuse the auth user across runs rather than erroring on "already
   // registered" — this account is test-only and never has other state
   // attached to it beyond what this function seeds fresh each run.
-  const { data: existingUsers } = await supabase.auth.admin.listUsers()
-  let crewAuthUser = existingUsers.users.find((u) => u.email === crewEmail)
+  let crewAuthUser = await findUserByEmail(supabase, crewEmail)
 
   if (!crewAuthUser) {
     const { data: created, error: createErr } = await supabase.auth.admin.createUser({
@@ -271,12 +297,94 @@ async function seedCrewLoginAndAssignment(
   await browser.close()
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function cleanE2EData(supabase: SupabaseClient<any>, orgId: string): Promise<void> {
+async function cleanE2EData(supabase: SupabaseClient<Database>, orgId: string): Promise<void> {
   // Delete in FK-safe order. Properties cascade to bookings and turnovers.
+  // communication_logs was missing here entirely — 16-comms-log.spec.ts's
+  // hardcoded '[E2E] Confirmed service window' entry persisted across a CI
+  // retry (or a prior run) and collided with itself: the empty-state test
+  // found a stale row instead of nothing, and the create-entry test hit a
+  // strict-mode violation with two identical rows. Deleted before vendors
+  // since it FKs to vendors.id.
+  await supabase.from('communication_logs').delete().eq('org_id', orgId).like('subject', '[E2E]%')
   await supabase.from('work_orders')  .delete().eq('org_id', orgId).like('title',      '[E2E]%')
   await supabase.from('bookings')     .delete().eq('org_id', orgId).like('guest_name', '[E2E]%')
   await supabase.from('crew_members') .delete().eq('org_id', orgId).like('name',       '[E2E]%')
   await supabase.from('vendors')      .delete().eq('org_id', orgId).like('name',       '[E2E]%')
   await supabase.from('properties')   .delete().eq('org_id', orgId).like('name',       '[E2E]%')
+
+  await cleanOrphanedDisposableAuthUsers(supabase)
+}
+
+// Specs that create a disposable crew Supabase Auth user per test
+// (21-work-order-offline, 22-crew-logout-guard, 27-crew-feedback) delete it
+// in their own `finally`/cleanup block — but a CI run that gets killed or
+// cancelled mid-test (e.g. superseded by a newer push under this repo's
+// concurrency: cancel-in-progress workflow setting) never reaches that
+// block, orphaning the auth user permanently. These accumulate silently
+// until supabase.auth.admin.listUsers()'s pagination (newest-first) pushes
+// the long-lived seeded PM/crew accounts off the first page entirely,
+// which is exactly what broke every run in this session once enough
+// orphans had built up — findUserByEmail() below is the durable fix for
+// that symptom, but the orphans themselves are still waste worth sweeping.
+//
+// Only sweeps users older than an hour — anything younger could belong to
+// a still-in-progress concurrent run (this repo's CI concurrency group now
+// serializes runs of THIS workflow, but doesn't protect against a manually
+// triggered local run against the same shared E2E project overlapping with
+// CI). Deleting a live run's own disposable user out from under it would
+// fail that run with a confusing "user not found" error instead of the
+// clean, expected orphan sweep this is meant to be.
+const DISPOSABLE_AUTH_USER_PREFIXES = ['e2e-crew-wo-', 'e2e-crew-logout-', 'e2e-crew-feedback-']
+
+function isStaleDisposableUser(
+  user: { email?: string | null; created_at?: string | null },
+  staleBeforeMs: number,
+): boolean {
+  if (!user.email || !user.created_at) return false
+  if (new Date(user.created_at).getTime() > staleBeforeMs) return false
+  return DISPOSABLE_AUTH_USER_PREFIXES.some((prefix) => user.email!.startsWith(prefix))
+}
+
+async function cleanOrphanedDisposableAuthUsers(supabase: SupabaseClient<Database>): Promise<void> {
+  const staleBeforeMs = Date.now() - 60 * 60 * 1000
+  // listUsers() is offset-based pagination — deleting mid-page shifts later
+  // pages' offsets and can skip a user who shifts into an already-visited
+  // slot. Collect every ID across all pages first, then delete once
+  // pagination is done so no delete can affect an in-flight page fetch.
+  const userIdsToDelete: string[] = []
+
+  let page = 1
+  for (;;) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 })
+    if (error) throw new Error(`listUsers() failed while sweeping orphaned disposable users (page ${page}): ${error.message}`)
+    if (!data || data.users.length === 0) break
+
+    userIdsToDelete.push(...data.users.filter((u) => isStaleDisposableUser(u, staleBeforeMs)).map((u) => u.id))
+
+    if (data.users.length < 200) break
+    page += 1
+  }
+
+  for (const userId of userIdsToDelete) {
+    await supabase.auth.admin.deleteUser(userId)
+  }
+}
+
+// supabase.auth.admin.listUsers() paginates (newest-first, ~50/page by
+// default) — with enough disposable test users in play, a plain
+// .find() over the first page alone can silently miss a long-lived
+// account like the seeded PM/crew logins. Page through until found.
+async function findUserByEmail(supabase: SupabaseClient<Database>, email: string) {
+  let page = 1
+  for (;;) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 })
+    if (error) throw new Error(`listUsers() failed while looking up ${email} (page ${page}): ${error.message}`)
+    if (!data || data.users.length === 0) return undefined
+
+    const match = data.users.find((u) => u.email === email)
+    if (match) return match
+
+    if (data.users.length < 200) return undefined
+    page += 1
+  }
 }

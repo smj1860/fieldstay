@@ -8,13 +8,13 @@ export default async function MaintenancePage() {
   const { supabase, membership } = await requireOrgMember()
 
   const [
-    { data: workOrders },
-    { data: properties },
-    { data: vendors },
-    { data: schedules },
-    { data: crewMembers },
-    { data: propertyAssets },
-    { data: vendorCompliance },
+    workOrdersResult,
+    propertiesResult,
+    vendorsResult,
+    schedulesResult,
+    crewMembersResult,
+    propertyAssetsResult,
+    vendorComplianceResult,
   ] = await Promise.all([
     supabase
       .from('work_orders')
@@ -89,15 +89,28 @@ export default async function MaintenancePage() {
       .eq('org_id', membership.org_id),
   ])
 
+  // A query erroring (bad filter value, RLS misconfiguration, etc.) and a
+  // query legitimately returning zero rows both leave `data` empty — `?? []`
+  // below can't tell them apart, so without this the board just silently
+  // renders as if nothing exists instead of surfacing a real outage.
+  const results = [
+    ['work_orders', workOrdersResult], ['properties', propertiesResult], ['vendors', vendorsResult],
+    ['maintenance_schedules', schedulesResult], ['crew_members', crewMembersResult],
+    ['property_assets', propertyAssetsResult], ['vendor_compliance_status', vendorComplianceResult],
+  ] as const
+  for (const [name, result] of results) {
+    if (result.error) console.error(`[MaintenancePage] ${name} query failed:`, result.error)
+  }
+
   return (
     <MaintenanceBoard
-      workOrders={workOrders ?? []}
-      properties={properties ?? []}
-      vendors={vendors ?? []}
-      schedules={schedules ?? []}
-      crewMembers={crewMembers ?? []}
-      propertyAssets={propertyAssets ?? []}
-      vendorCompliance={vendorCompliance ?? []}
+      workOrders={workOrdersResult.data ?? []}
+      properties={propertiesResult.data ?? []}
+      vendors={vendorsResult.data ?? []}
+      schedules={schedulesResult.data ?? []}
+      crewMembers={crewMembersResult.data ?? []}
+      propertyAssets={propertyAssetsResult.data ?? []}
+      vendorCompliance={vendorComplianceResult.data ?? []}
       orgId={membership.org_id}
       role={membership.role}
     />

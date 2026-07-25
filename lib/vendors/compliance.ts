@@ -1,8 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-// vendor_compliance_status (migration 20260606051120) computes compliance_status
-// live off vendor_compliance_documents.expiry_date — 'hard_blocked' means the
-// vendor's oldest expired document has been expired 31+ days. Per CLAUDE.md this
+// vendor_compliance_status (migration 20260606051120, grace period widened to
+// 45 days by 20260720170645) computes compliance_status live off
+// vendor_compliance_documents.expiry_date — 'hard_blocked' means the vendor's
+// oldest expired document has been expired 46+ days. Per CLAUDE.md this
 // means "no WO assignment": every path that assigns a vendor to a work order
 // (manual create/edit, bulk assign, suggestion accept, maintenance-schedule
 // auto-assign) must check this server-side — the disabled option in the New/Edit
@@ -23,4 +24,4 @@ export async function isVendorHardBlocked(
 }
 
 export const VENDOR_HARD_BLOCKED_ERROR =
-  'This vendor is compliance hard-blocked (a required document has been expired 31+ days) and cannot be assigned to a work order. Update their compliance documents first.'
+  'This vendor is compliance hard-blocked (a required document has been expired 46+ days) and cannot be assigned to a work order. Update their compliance documents first.'

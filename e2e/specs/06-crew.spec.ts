@@ -17,23 +17,19 @@ test.describe('Crew Management', () => {
     await page.goto('/crew-manage')
     await page.waitForLoadState('networkidle')
 
-    // Broaden regex to cover: Add Crew Member, New Member, + Add, Invite, etc.
-    const addBtn = page.getByRole('button', {
-      name: /add|new|invite|crew|member|\+/i,
-    }).first()
-
-    await addBtn.waitFor({ state: 'visible', timeout: 8_000 })
+    // The original broad regex (/add|new|invite|crew|member|\+/i) matched
+    // page-level nav/header elements ahead of the real trigger in DOM order —
+    // the actual toggle button (crew-manage-client.tsx) reads exactly
+    // "+ Add Member".
+    const addBtn = page.getByRole('button', { name: '+ Add Member' })
     await addBtn.click()
 
-    // Fill whichever input is visible — name and phone are standard fields
-    const nameInput = page.locator('input[name="name"], input[placeholder*="name" i]').first()
-    await nameInput.waitFor({ state: 'visible', timeout: 5_000 })
-    await nameInput.fill('[E2E] Sam Housekeeper')
-
-    const phoneInput = page.locator('input[name="phone"], input[type="tel"]').first()
-    if (await phoneInput.isVisible()) {
-      await phoneInput.fill('+15550009999')
-    }
+    // AddCrewForm (crew-manage-client.tsx) — name and email are both
+    // `required`; email must be filled or native HTML5 validation blocks
+    // the submit.
+    await page.fill('input[name="name"]',  '[E2E] Sam Housekeeper')
+    await page.fill('input[name="email"]', 'sam-housekeeper@e2e-test.invalid')
+    await page.fill('input[name="phone"]', '+15550009999')
 
     await page.click('button[type="submit"]')
 

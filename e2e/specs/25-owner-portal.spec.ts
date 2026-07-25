@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures'
 import { dismissCookieBanner } from '../helpers/cookies'
+import { selectOptionWhenReady } from '../helpers/forms'
 
 // Covers the public, token-only owner portal (app/owner/[token]/page.tsx) —
 // a money-sensitive surface (owner_transactions P&L) reachable without any
@@ -22,25 +23,36 @@ import { dismissCookieBanner } from '../helpers/cookies'
 test.describe('Owner portal token lifecycle', () => {
 
   test('[E2E] generate link, view public portal, hide a transaction, then revoke', async ({ page, browser }) => {
+    // Unique per attempt — CI sets retries: 2, and a Playwright retry
+    // re-runs this whole test from scratch without cleaning up the owner
+    // the previous failed attempt already created (global teardown only
+    // runs once at the end of the whole suite). A static name meant a
+    // retry's ownerCard locator matched BOTH the stale and fresh cards,
+    // hitting a strict-mode violation on the first scoped click.
+    const ownerName = `[E2E] Portal Test Owner ${Date.now()}`
+
     await page.goto('/owners')
+    // Dismiss before opening any dialog — the banner and the Dialog backdrop
+    // share z-50, and since the Dialog portal paints later in DOM order it
+    // sits on top; dismissing later (while a dialog is open) can land the
+    // click on the backdrop instead and close the dialog.
+    await dismissCookieBanner(page)
     const addBtn = page.getByRole('button', { name: /Add Owner|Add First Owner/i }).first()
     await addBtn.click()
 
     const addDialog = page.getByRole('dialog')
     await expect(addDialog.getByRole('heading', { name: 'Add Property Owner' })).toBeVisible()
-    await addDialog.locator('[name="property_id"]').selectOption({ label: '[E2E] The Lakehouse' })
-    await addDialog.locator('[name="name"]').fill('[E2E] Portal Test Owner')
-    await dismissCookieBanner(page)
+    await selectOptionWhenReady(addDialog.locator('[name="property_id"]'), '[E2E] The Lakehouse')
+    await addDialog.locator('[name="name"]').fill(ownerName)
     await addDialog.getByRole('button', { name: 'Add Owner', exact: true }).click()
-    await expect(page.getByText('[E2E] Portal Test Owner')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(ownerName)).toBeVisible({ timeout: 8_000 })
 
-    const ownerCard = page.locator('.card').filter({ hasText: '[E2E] Portal Test Owner' })
+    const ownerCard = page.locator('.card').filter({ hasText: ownerName })
 
     // Record $1,500 of monthly revenue through the quick-entry field —
     // this always writes visible_to_owner: true (addOwnerTransaction in
     // app/(dashboard)/owners/actions.ts hardcodes it for manual entries).
     await ownerCard.locator('#monthly-revenue-amount').fill('1500')
-    await dismissCookieBanner(page)
     await ownerCard.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(ownerCard.getByText(/\$1500\.00 recorded/)).toBeVisible({ timeout: 8_000 })
 
@@ -52,17 +64,32 @@ test.describe('Owner portal token lifecycle', () => {
     expect(portalUrl).toBeTruthy()
 
     // Visit the portal as an unauthenticated visitor — a fresh context
-    // without the PM's storageState.
-    const publicContext = await browser.newContext()
+    // without the PM's storageState. storageState: undefined is required,
+    // not optional — Playwright Test instruments every browser.newContext()
+    // created during a running test and silently re-applies the project's
+    // configured use.storageState ('e2e/.auth/pm.json') to it, so a bare
+    // browser.newContext() here would secretly carry the PM's session (see
+    // 21/22/27's identical fix — this route happens not to break today only
+    // because /owner/ is a proxy.ts TOKEN_ROUTE that bypasses the
+    // session-redirect logic entirely, not because the context is genuinely
+    // unauthenticated).
+    const publicContext = await browser.newContext({ storageState: undefined })
     const publicPage     = await publicContext.newPage()
     await publicPage.goto(portalUrl!)
+
+    // Not getByRole('heading', ...) — app/owner/[token]/page.tsx only
+    // renders the owner's name as an <h1> in the multi-property branch
+    // (isMulti). This owner has exactly one linked property, so the <h1>
+    // is the PROPERTY name and the owner's name renders as a plain <p> in
+    // the header's top-right corner instead — confirmed against the
+    // actual rendered markup, not a timing issue.
+    await expect(publicPage.getByText(ownerName).first()).toBeVisible({ timeout: 10_000 })
 
     // Scope to the "Total Revenue" summary card specifically — with only
     // one revenue transaction and no expenses, Net Income equals the same
     // $1,500.00 amount, so an unscoped page-wide getByText('$1,500.00')
     // would match both cards (and the "+$1,500.00" line-item row) and hit
     // Playwright's strict-mode violation.
-    await expect(publicPage.getByRole('heading', { name: '[E2E] Portal Test Owner' })).toBeVisible({ timeout: 10_000 })
     const revenueCard = publicPage.locator('div').filter({ hasText: 'Total Revenue' }).last()
     await expect(revenueCard.getByText('$1,500.00')).toBeVisible()
 
@@ -99,11 +126,26 @@ test.describe('Owner portal token lifecycle', () => {
   })
 
   test('nonexistent portal token shows a 404, not owner data', async ({ browser }) => {
-    const publicContext = await browser.newContext()
+    // See the storageState: undefined comment above — same latent
+    // PM-storageState leak applies here.
+    const publicContext = await browser.newContext({ storageState: undefined })
     const publicPage     = await publicContext.newPage()
-    const response = await publicPage.goto('/owner/00000000-0000-0000-0000-000000000000')
+    await publicPage.goto('/owner/00000000-0000-0000-0000-000000000000')
 
-    expect(response?.status()).toBe(404)
+    // Not response?.status() — app/owner/[token]/loading.tsx wraps the page
+    // in an implicit Suspense boundary, so Next.js streams the route: the
+    // initial shell flushes with a 200 status before the async
+    // load-owner-portal-data.ts lookup resolves and notFound() actually
+    // fires deep in the tree. The HTTP status is already sent by then, so
+    // it stays 200 even though the correct not-found UI renders — a known
+    // Next.js App Router limitation with streamed notFound(), not a gap in
+    // this route's own auth/lookup logic (verified correct on inspection:
+    // it does call notFound() when no token row matches). Assert on the
+    // rendered content instead, since that's what actually guards against
+    // leaking owner data to a bogus token.
+    await expect(publicPage.getByRole('heading', { name: '404' })).toBeVisible({ timeout: 10_000 })
+    await expect(publicPage.getByRole('heading', { name: 'This page could not be found.' })).toBeVisible()
+
     await publicContext.close()
   })
 

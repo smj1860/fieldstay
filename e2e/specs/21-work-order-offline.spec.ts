@@ -48,7 +48,17 @@ test.describe('Work order offline support', () => {
       // Fresh, unauthenticated context — the default `page` fixture carries
       // the PM's storageState, which would put the crew layout's PM-guard
       // redirect in the way of a crew login.
-      const context = await browser.newContext()
+      //
+      // storageState: undefined is required, not optional — Playwright Test
+      // instruments every browser.newContext() created during a running
+      // test (not just the fixture-provided `context`/`page`) and silently
+      // re-applies the project's configured use.storageState
+      // ('e2e/.auth/pm.json') to it. A bare browser.newContext() here is
+      // therefore secretly PM-authenticated: page.goto('/login?next=/crew')
+      // 307s straight past the login form to /crew, which the crew layout's
+      // PM-guard then 307s again to /ops, so the next line's page.fill
+      // times out waiting for an #email that was never on that page.
+      const context = await browser.newContext({ storageState: undefined })
       const page    = await context.newPage()
 
       await page.goto('/login?next=/crew')
@@ -119,6 +129,12 @@ test.describe('Work order offline support', () => {
 
     await page.locator('input[placeholder="Description"]').first().fill('[E2E] Replaced valve')
     await page.locator('input[placeholder="0.00"]').first().fill('125')
+    // #technician-name is a required native <input> (vendor-portal.tsx) —
+    // added after this spec was written, so the browser's own constraint
+    // validation was silently blocking the form submit before
+    // handleSubmit ever ran, and "Saved" never appeared for a reason that
+    // had nothing to do with the offline queueing being tested.
+    await page.locator('#technician-name').fill('[E2E] Tech')
 
     await page.route('**/api/work-orders/*/complete', (route) => route.abort())
 
@@ -174,6 +190,12 @@ test.describe('Work order offline support', () => {
 
     await page.locator('input[placeholder="Description"]').first().fill('[E2E] Replaced valve')
     await page.locator('input[placeholder="0.00"]').first().fill('125')
+    // #technician-name is a required native <input> (vendor-portal.tsx) —
+    // added after this spec was written, so the browser's own constraint
+    // validation was silently blocking the form submit before
+    // handleSubmit ever ran, and "Saved" never appeared for a reason that
+    // had nothing to do with the offline queueing being tested.
+    await page.locator('#technician-name').fill('[E2E] Tech')
 
     await page.route('**/api/work-orders/*/complete', (route) => route.abort())
     await page.getByRole('button', { name: /submit invoice/i }).click()
