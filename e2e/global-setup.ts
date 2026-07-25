@@ -285,6 +285,13 @@ async function seedCrewLoginAndAssignment(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function cleanE2EData(supabase: SupabaseClient<any>, orgId: string): Promise<void> {
   // Delete in FK-safe order. Properties cascade to bookings and turnovers.
+  // communication_logs was missing here entirely — 16-comms-log.spec.ts's
+  // hardcoded '[E2E] Confirmed service window' entry persisted across a CI
+  // retry (or a prior run) and collided with itself: the empty-state test
+  // found a stale row instead of nothing, and the create-entry test hit a
+  // strict-mode violation with two identical rows. Deleted before vendors
+  // since it FKs to vendors.id.
+  await supabase.from('communication_logs').delete().eq('org_id', orgId).like('subject', '[E2E]%')
   await supabase.from('work_orders')  .delete().eq('org_id', orgId).like('title',      '[E2E]%')
   await supabase.from('bookings')     .delete().eq('org_id', orgId).like('guest_name', '[E2E]%')
   await supabase.from('crew_members') .delete().eq('org_id', orgId).like('name',       '[E2E]%')
