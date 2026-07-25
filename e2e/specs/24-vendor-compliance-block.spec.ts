@@ -63,9 +63,21 @@ test.describe('Vendor compliance hard-block', () => {
     await page.getByRole('button', { name: /New Work Order|Add Work Order|Create|New WO/i }).first().click()
     await page.selectOption('[name="property_id"]', { label: '[E2E] The Lakehouse' })
 
-    const option = page.locator('#wo-vendor option', { hasText: vendorName })
-    await option.evaluate((el: HTMLOptionElement) => { el.disabled = false })
-    await page.selectOption('#wo-vendor', { label: vendorName })
+    // Force-enable and select in a single atomic evaluate() on the <select>
+    // itself — doing this as two separate calls (option.evaluate() to clear
+    // `disabled`, then a plain selectOption()) leaves a gap where React can
+    // re-render this controlled option list between them and reset
+    // `disabled` back to true (it's driven by vendor.compliance_status,
+    // not local DOM state), which then makes selectOption's own
+    // disabled-option skip logic report "did not find some options."
+    const select = page.locator('#wo-vendor')
+    await select.evaluate((el: HTMLSelectElement, name: string) => {
+      const option = Array.from(el.options).find((o) => o.text.includes(name))
+      if (!option) throw new Error(`Option not found: ${name}`)
+      option.disabled = false
+      el.value = option.value
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    }, vendorName)
 
     await page.fill('[name="title"]', '[E2E] Should Be Rejected By Server')
     await page.click('button[type="submit"]')
