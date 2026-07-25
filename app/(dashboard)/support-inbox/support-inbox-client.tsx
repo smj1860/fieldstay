@@ -29,7 +29,7 @@ interface MessageRow {
 interface FeedbackRow {
   id:            string
   feedback_text: string
-  created_at:    string
+  submitted_at:  string
   crew_members:  { name: string } | { name: string }[] | null
   organizations: { name: string } | { name: string }[] | null
 }
@@ -379,7 +379,7 @@ export function SupportInboxClient({
                 <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> · {orgName(f.organizations)}</span>
               </span>
               <span style={{ fontSize: '11px', color: 'var(--text-muted)', flexShrink: 0 }}>
-                {new Date(f.created_at).toLocaleDateString()}
+                {new Date(f.submitted_at).toLocaleDateString()}
               </span>
             </div>
             <p style={{ fontSize: '13px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', margin: 0 }}>

@@ -74,6 +74,14 @@ const SOURCE_LABELS: Record<BookingSource, string> = {
   booking_com: 'Booking.com',
   direct:      'Direct',
   manual:      'Manual',
+  // 'ownerrez' on the booking_source enum predates
+  // mapOwnerRezChannelToSource() (lib/integrations/providers/ownerrez.ts),
+  // which normalizes every OwnerRez-synced booking into airbnb/vrbo/
+  // booking_com/direct/other by channel name — no current write path sets
+  // this value, but the enum label is live on both projects (see
+  // 20260616141406_add_ownerrez_booking_source.sql) so it must stay
+  // handled here rather than silently falling through to `undefined`.
+  ownerrez:    'OwnerRez',
   other:       'Other',
 }
 
@@ -83,6 +91,7 @@ const SOURCE_STYLE: Record<BookingSource, { bg: string; fg: string; border: stri
   booking_com: { bg: 'var(--accent-blue-dim)',  fg: 'var(--accent-blue)',  border: 'var(--accent-blue)'  },
   direct:      { bg: 'var(--accent-green-dim)', fg: 'var(--accent-green)', border: 'var(--accent-green)' },
   manual:      { bg: 'var(--accent-gold-dim)',  fg: 'var(--accent-gold)',  border: 'var(--accent-gold)'  },
+  ownerrez:    { bg: 'var(--bg-raised)',        fg: 'var(--text-muted)',  border: 'var(--border)'       },
   other:       { bg: 'var(--bg-raised)',        fg: 'var(--text-muted)',  border: 'var(--border)'       },
 }
 

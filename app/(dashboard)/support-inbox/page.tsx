@@ -31,11 +31,11 @@ export default async function SupportInboxPage() {
     supabase
       .from('crew_feedback')
       .select(`
-        id, feedback_text, created_at,
+        id, feedback_text, submitted_at,
         crew_members ( name ),
         organizations ( name )
       `)
-      .order('created_at', { ascending: false })
+      .order('submitted_at', { ascending: false })
       .limit(50),
   ])
 
