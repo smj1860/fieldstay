@@ -53,6 +53,12 @@ test.describe('Booking validation', () => {
     await dismissCookieBanner(page)
     await page.getByRole('button', { name: /Add Booking/i }).first().click()
     await selectOptionWhenReady(page.locator('[name="property_id"]'), '[E2E] The Lakehouse')
+    // bookings_manual_dates_unique only applies WHERE source = 'manual' —
+    // the form's Source <select> defaults to "Direct Booking", which never
+    // hits that partial index regardless of matching dates, so both
+    // submissions below silently succeeded as two separate direct bookings
+    // with no error, before this fix.
+    await page.selectOption('[name="source"]', { label: 'Manual Entry' })
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
     await page.fill('[name="guest_name"]',    '[E2E] Dedup Guest One')
@@ -64,6 +70,7 @@ test.describe('Booking validation', () => {
     // guest name, so this must still collide.
     await page.getByRole('button', { name: /Add Booking/i }).first().click()
     await selectOptionWhenReady(page.locator('[name="property_id"]'), '[E2E] The Lakehouse')
+    await page.selectOption('[name="source"]', { label: 'Manual Entry' })
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
     await page.fill('[name="guest_name"]',    '[E2E] Dedup Guest Two')

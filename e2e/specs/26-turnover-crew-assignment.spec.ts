@@ -5,11 +5,18 @@ import { selectOptionWhenReady } from '../helpers/forms'
 // Covers the core turnover -> crew assignment workflow, which 04-turnovers.spec.ts
 // never exercises (it only checks the board/calendar/filter render). Creates
 // its own turnover through the real "Add Turnover" UI (createManualTurnover
-// in app/(dashboard)/turnovers/actions.ts) with a checkout ~200 days out so
+// in app/(dashboard)/turnovers/actions.ts) with a checkout ~30 days out so
 // it lands in the board's "Upcoming" section (anything beyond 7 days,
 // per groupTurnovers() in turnover-board.tsx) — a section no other seeded
 // or spec-created turnover reaches, so it can be located unambiguously
 // without needing service-role seeding or fragile card-ordering assumptions.
+// Must stay under 60 days out — app/(dashboard)/turnovers/page.tsx's Server
+// Component query only fetches turnovers with checkout_datetime within
+// [-7, +60] days of now, so a turnover created further out than that (this
+// spec originally used +200/+201) is silently invisible to every
+// subsequent page load: not just its own card missing, but the entire
+// "Upcoming" section unmounting (BoardSection returns null when its
+// group is empty), which is exactly the symptom this spec was hitting.
 //
 // addCrewToTurnover() flips turnover_status from pending_assignment to
 // assigned as soon as the first crew member is added — the assertion below
@@ -17,8 +24,8 @@ import { selectOptionWhenReady } from '../helpers/forms'
 test.describe('Turnover crew assignment', () => {
 
   test('[E2E] assigning crew moves a turnover from pending to assigned', async ({ page }) => {
-    const checkoutDate = getFutureDate(200)
-    const checkinDate  = getFutureDate(201)
+    const checkoutDate = getFutureDate(30)
+    const checkinDate  = getFutureDate(31)
 
     await page.goto('/turnovers')
     // Dismiss before opening any dialog — the banner and the Dialog backdrop
@@ -37,7 +44,7 @@ test.describe('Turnover crew assignment', () => {
     await expect(dialog).not.toBeVisible({ timeout: 8_000 })
 
     // "Upcoming" (groups.upcoming, defaultOpen) is the only section a
-    // 200-day-out turnover can land in — scope everything to it so this
+    // 30-day-out turnover can land in — scope everything to it so this
     // can't collide with the near-term seeded turnover from global-setup.ts
     // (checkout ~2h out, lands in "Today") or any other spec's turnovers.
     // BoardSection renders its heading button and its cards as siblings
