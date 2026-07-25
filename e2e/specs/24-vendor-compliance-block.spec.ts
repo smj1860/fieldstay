@@ -80,7 +80,20 @@ test.describe('Vendor compliance hard-block', () => {
     }, vendorName)
 
     await page.fill('[name="title"]', '[E2E] Should Be Rejected By Server')
-    await page.click('button[type="submit"]')
+
+    // The submit button has a SECOND client-side guard beyond the disabled
+    // <option> — CreateWorkOrderModal.tsx disables it whenever
+    // selectedCompliance === 'hard_blocked', a state the select's onChange
+    // handler (which our dispatched 'change' event above legitimately
+    // triggers) sets from the vendor we just force-selected. Force it
+    // enabled and click in one atomic evaluate() — same reasoning as the
+    // select above: a separate page.click() call leaves a gap where
+    // React's next render could reset `disabled` back to true before the
+    // click registers.
+    await page.locator('button[type="submit"]').evaluate((el: HTMLButtonElement) => {
+      el.disabled = false
+      el.click()
+    })
 
     await expect(page.getByText(/compliance hard-blocked/i)).toBeVisible({ timeout: 8_000 })
     // The rejected work order must not have been created.
@@ -107,7 +120,16 @@ test.describe('Vendor compliance hard-block', () => {
     await page.click('button[type="submit"]')
 
     await page.waitForURL(/\/maintenance/, { timeout: 10_000 })
-    await expect(page.getByText('[E2E] Grace Period Vendor WO')).toBeVisible({ timeout: 8_000 })
+    // waitForURL above is a no-op here (we never left /maintenance — the
+    // Server Action closes the dialog client-side, it doesn't navigate),
+    // so it doesn't actually prove the create + revalidatePath round trip
+    // has landed. A plain toBeVisible() intermittently missed the new row
+    // under CI load with no error surfaced (network trace showed the
+    // create POST completing normally). Reload to force a guaranteed-fresh
+    // server round trip instead of relying on the client router's
+    // revalidation timing.
+    await page.reload()
+    await expect(page.getByText('[E2E] Grace Period Vendor WO')).toBeVisible({ timeout: 10_000 })
   })
 
 })
