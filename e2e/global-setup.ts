@@ -47,7 +47,15 @@ export default async function globalSetup(_config: FullConfig) {
         `trial_ends_at for the E2E PM org in the database.`
       )
     }
-    throw new Error(`Login failed — current URL: ${url}`)
+    // signInWithPassword() runs entirely client-side (login-form.tsx) — it
+    // never round-trips through the Next.js server, so a failed sign-in
+    // produces no server-side log even with webServer stdout/stderr now
+    // piped. The only place the actual reason (bad credentials, Supabase
+    // rate-limiting, an outage) is visible at all is this on-page error
+    // banner — grab it so a login failure doesn't come with `current URL:
+    // .../login` as its only clue.
+    const bannerText = await page.locator('.bg-red-50').first().textContent().catch(() => null)
+    throw new Error(`Login failed — current URL: ${url}${bannerText ? ` — page error: "${bannerText.trim()}"` : ' (no error banner found on page)'}`)
   }
 
   await page.context().storageState({ path: 'e2e/.auth/pm.json' })
