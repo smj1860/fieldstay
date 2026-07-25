@@ -84,7 +84,12 @@ test.describe('Turnover crew assignment', () => {
     // pending_assignment -> "Needs Crew", assigned -> "Crew Assigned".
     await expect(card.getByText('Needs Crew')).toBeVisible({ timeout: 8_000 })
 
-    await card.getByRole('button', { name: 'Assign' }).click()
+    // exact: true — the card header's own role="button" wrapper (used for
+    // expand/collapse) has no explicit aria-label of its own, so its
+    // computed accessible name absorbs all nested text including the
+    // literal word "Assign" from this button, and a substring match
+    // resolves to both elements.
+    await card.getByRole('button', { name: 'Assign', exact: true }).click()
     await card.getByRole('button', { name: '[E2E] Alex Cleaner' }).click()
 
     // Crew chip appears and the status badge flips off "Needs Crew".
