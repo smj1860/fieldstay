@@ -90,6 +90,17 @@ test.describe('Crew logout guard', () => {
       await page.getByRole('button', { name: 'Log out' }).click()
       await expect(page.getByText('Unsynced work on this device')).toBeVisible({ timeout: 10_000 })
 
+      // Restore connectivity before confirming — performLogout()
+      // (app/crew/crew-shell.tsx) calls supabase.auth.signOut() and then a
+      // client-side router.push('/login'), both of which need a network
+      // round trip (the router.push fetches the destination route's RSC
+      // payload). The offline simulation above only needs to hold long
+      // enough to queue the local mutation and trigger this warning — it
+      // isn't testing that the logout navigation itself works while
+      // offline, and previously ran the confirm-and-redirect step still
+      // offline, which failed on page.waitForURL with net::ERR_FAILED.
+      await page.context().setOffline(false)
+
       await page.getByRole('button', { name: 'Log Out Anyway' }).click()
 
       await page.waitForURL('**/login**', { timeout: 10_000 })
@@ -101,8 +112,6 @@ test.describe('Crew logout guard', () => {
         return dbs.map((d) => d.name)
       })
       expect(dbNames.some((name) => name?.startsWith('fieldstay-crew-'))).toBe(false)
-
-      await page.context().setOffline(false)
     } finally {
       await cleanup()
     }
