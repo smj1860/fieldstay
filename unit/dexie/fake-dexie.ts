@@ -7,13 +7,33 @@ interface FakeRow { [key: string]: unknown }
 
 export function fakeTable(pk = 'key') {
   const rows = new Map<unknown, FakeRow>()
+  // Auto-increment counter for add() on '++id'-style outbox tables.
+  let nextAutoId = 0
   return {
     rows,
     async get(id: unknown) { return rows.get(id) },
     async put(row: FakeRow) { rows.set(row[pk], row) },
+    async add(row: FakeRow) {
+      const id = row[pk] ?? ++nextAutoId
+      rows.set(id, { ...row, [pk]: id })
+      return id
+    },
+    async update(id: unknown, changes: FakeRow) {
+      const existing = rows.get(id)
+      if (!existing) return 0
+      rows.set(id, { ...existing, ...changes })
+      return 1
+    },
+    async delete(id: unknown) { rows.delete(id) },
     async bulkPut(list: FakeRow[]) { for (const r of list) rows.set(r[pk], r) },
     async bulkDelete(ids: unknown[]) { for (const id of ids) rows.delete(id) },
     async toArray() { return [...rows.values()] },
+    orderBy(field: string) {
+      return {
+        toArray: async () =>
+          [...rows.values()].sort((a, b) => ((a[field] as number) < (b[field] as number) ? -1 : 1)),
+      }
+    },
     where(field: string) {
       return {
         anyOf: (values: unknown[]) => {
@@ -38,6 +58,7 @@ export function makeFakeDexieDb() {
     inventory_items:          fakeTable('id'),
     crew_work_orders:         fakeTable('id'),
     sync_meta:                fakeTable('key'),
+    mutations:                fakeTable('id'),
   }
 }
 
@@ -58,7 +79,7 @@ export function makeFakeSupabase(queued: Record<string, { data?: unknown; error?
       calls.push({ table, method, args })
       return chain
     }
-    for (const m of ['select', 'eq', 'in', 'gt', 'not', 'or']) {
+    for (const m of ['select', 'eq', 'in', 'gt', 'not', 'or', 'update']) {
       chain[m] = (...a: unknown[]) => record(m, a)
     }
     const resolveNext = () => {

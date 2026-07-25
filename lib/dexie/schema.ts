@@ -186,6 +186,11 @@ export interface MutationRow {
   // queue) lets the UI surface "this didn't sync" instead of silently
   // discarding it.
   failed?:    boolean
+  // Retry backoff: epoch ms before which processOutbox() must not re-push
+  // this mutation. Set on push failure (exponential backoff with jitter),
+  // cleared by the row's deletion on successful push. Not indexed — the
+  // drain scans in insertion order and checks this in memory.
+  nextAttemptAt?: number
 }
 
 export class FieldStayDexie extends Dexie {
@@ -293,6 +298,28 @@ export class FieldStayDexie extends Dexie {
     // .filter() instead of a proper .where(...).or(...) compound query.
     this.version(7).stores({
       messages: 'id, org_id, turnover_id, recipient_id, sender_id, created_at',
+    })
+
+    // Outbox retry backoff (Crew Sync v2 Phase 4): MutationRow gains
+    // nextAttemptAt (epoch ms). Non-indexed — processOutbox() drains in
+    // insertion order and checks due-ness in memory — so the index strings
+    // are unchanged; the full store map is repeated here to keep this block
+    // a complete snapshot of the live schema.
+    this.version(8).stores({
+      turnovers:                'id, property_id, org_id, status',
+      checklist_instances:      'id, turnover_id, org_id, status',
+      checklist_instance_items: 'id, instance_id, turnover_id, is_completed',
+      inventory_items:          'id, property_id, org_id',
+      properties:               'id, org_id',
+      crew_availability:        'id, org_id, crew_member_id, available_date',
+      messages:                 'id, org_id, turnover_id, recipient_id, sender_id, created_at',
+      pending_photo_uploads:    'id, target_id, target_table, retry_count',
+      // ++id = auto-incrementing outbox key; table/targetId are indexed so
+      // processOutbox() can replay mutations in insertion order per record.
+      mutations:                '++id, table, targetId',
+      sync_meta:                'key',
+      crew_work_orders:         'id, property_id, org_id, status, scheduled_date',
+      property_assets:          'id, property_id, org_id, asset_type',
     })
   }
 }
