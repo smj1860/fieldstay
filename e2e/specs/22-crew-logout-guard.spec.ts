@@ -112,7 +112,11 @@ async function loginAsFreshCrewWithTurnover(orgId: string, browser: import('@pla
     .single()
   if (propertyErr || !property) throw new Error(`Seed property [E2E] The Lakehouse not found: ${propertyErr?.message}`)
 
-  const crewEmail    = `e2e-crew-logout-${Date.now()}@e2e-test.invalid`
+  // crypto.randomUUID() rather than Date.now() — this file's three tests
+  // could in principle run alongside another disposable-crew spec
+  // (27-crew-feedback.spec.ts) and a millisecond collision would fail
+  // createUser() on a duplicate email.
+  const crewEmail    = `e2e-crew-logout-${crypto.randomUUID()}@e2e-test.invalid`
   const crewPassword = 'E2E-Crew-Logout-Test-1!'
   const { data: created, error: createErr } = await supabase.auth.admin.createUser({
     email: crewEmail, password: crewPassword, email_confirm: true,
@@ -122,16 +126,25 @@ async function loginAsFreshCrewWithTurnover(orgId: string, browser: import('@pla
 
   // Everything past this point can throw — without this catch, a failure
   // here would skip the `cleanup` this function never got to return,
-  // orphaning the just-created auth user (and any rows already inserted)
-  // in the E2E project.
-  let context: import('@playwright/test').BrowserContext | undefined
+  // orphaning the just-created auth user and any rows already inserted in
+  // the E2E project. Track each row's id as soon as it's created so the
+  // catch block can roll all of them back, not just the auth user.
+  let context:       import('@playwright/test').BrowserContext | undefined
+  let crewMemberId:  string | undefined
+  let turnoverId:    string | undefined
   try {
     const { data: crewMember, error: cmErr } = await supabase
       .from('crew_members')
       .insert({
         org_id:             orgId,
         user_id:            userId,
-        name:               '[E2E] Logout Guard Crew',
+        // Distinct from the static "[E2E] Logout Guard Crew" name
+        // global-setup.ts's seedCrewLoginAndAssignment() seeds for
+        // e2e/.auth/crew.json — 18-messages.spec.ts asserts on that exact
+        // seeded row, and this helper creates a fresh one per test here,
+        // so sharing the name would leave ambiguous duplicates in the DB
+        // for the rest of the run.
+        name:               '[E2E] Fresh Logout Guard Crew',
         role:               'cleaning',
         specialty:          'cleaning',
         is_active:          true,
@@ -140,6 +153,7 @@ async function loginAsFreshCrewWithTurnover(orgId: string, browser: import('@pla
       .select('id')
       .single()
     if (cmErr || !crewMember) throw new Error(`Failed to create crew_members row: ${cmErr?.message}`)
+    crewMemberId = crewMember.id
 
     const checkout = new Date(Date.now() + 2 * 60 * 60 * 1000) // 2h from now
     const checkin  = new Date(Date.now() + 26 * 60 * 60 * 1000) // next day
@@ -158,6 +172,7 @@ async function loginAsFreshCrewWithTurnover(orgId: string, browser: import('@pla
       .select('id')
       .single()
     if (turnoverErr || !turnover) throw new Error(`Failed to create turnover: ${turnoverErr?.message}`)
+    turnoverId = turnover.id
 
     const { error: assignErr } = await supabase.from('turnover_assignments').insert({
       turnover_id:    turnover.id,
@@ -206,18 +221,27 @@ async function loginAsFreshCrewWithTurnover(orgId: string, browser: import('@pla
     return {
       page,
       cleanup: async () => {
-        // context.close() throwing must not skip deleteUser/the turnover
-        // delete — same orphaned-data hazard this try/catch exists to close.
+        // context.close() throwing must not skip the deletes below — same
+        // orphaned-data hazard this try/catch exists to close.
         try {
           await context!.close()
         } finally {
+          // turnovers first — turnover_assignments/checklist_instances/
+          // checklist_instance_items cascade from it (ON DELETE CASCADE).
           await supabase.from('turnovers').delete().eq('id', turnover.id)
+          // crew_members.user_id is ON DELETE SET NULL, not CASCADE — the
+          // auth user delete alone would leave this row behind orphaned.
+          await supabase.from('crew_members').delete().eq('id', crewMember.id)
           await supabase.auth.admin.deleteUser(userId)
         }
       },
     }
   } catch (err) {
     await context?.close().catch(() => {})
+    try {
+      if (turnoverId)   await supabase.from('turnovers').delete().eq('id', turnoverId)
+      if (crewMemberId) await supabase.from('crew_members').delete().eq('id', crewMemberId)
+    } catch { /* best-effort rollback — the outer error is what matters */ }
     await supabase.auth.admin.deleteUser(userId).catch(() => {})
     throw err
   }
