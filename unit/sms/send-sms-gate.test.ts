@@ -12,8 +12,12 @@ vi.mock('@upstash/redis', () => ({
     expire = mockExpire
   },
 }))
+vi.mock('@/lib/observability/report-error', () => ({
+  reportError: vi.fn(),
+}))
 
 import { sendSMS } from '@/lib/sms/telnyx'
+import { reportError } from '@/lib/observability/report-error'
 
 // CLAUDE.md: SMS_ENABLED is the single most safety-critical flag in this
 // codebase — every SMS send must be gated on it. These tests prove sendSMS()
@@ -189,6 +193,19 @@ describe('sendSMS — daily nudge budget', () => {
     expect(result).toEqual({ sent: false, reason: 'nudge budget check unavailable' })
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(errorSpy).toHaveBeenCalled()
+  })
+
+  it('reports the Redis outage to Sentry via reportError, not just console.error', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const redisError = new Error('redis down')
+    mockIncr.mockRejectedValue(redisError)
+
+    await sendSMS('+15551234567', 'Good morning!', { category: 'nudge' })
+
+    expect(reportError).toHaveBeenCalledWith(
+      redisError,
+      expect.objectContaining({ site: 'sms.telnyx.nudge_budget_unavailable' }),
+    )
   })
 
   it('transactional sends never consult the budget — door codes go out even if Redis is down', async () => {

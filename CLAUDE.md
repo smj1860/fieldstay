@@ -129,6 +129,11 @@ This flag is `false` until 10DLC campaign verification clears. Never send
 to guests without this gate in place. The flag lives in `lib/sms/telnyx.ts` —
 check that any new SMS-sending code respects it.
 
+The daily nudge budget check in `lib/sms/telnyx.ts` (`claimNudgeBudgetSlot`)
+fails CLOSED on a Redis error — the nudge is skipped, not sent — unlike the
+abuse-rate limiters in `lib/rate-limit.ts`/`proxy.ts`, which deliberately
+fail open; a spend ceiling must not disappear during an outage.
+
 ---
 
 ## The Table That Breaks Everything If Wrong
