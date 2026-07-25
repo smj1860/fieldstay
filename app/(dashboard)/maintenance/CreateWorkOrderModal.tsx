@@ -30,6 +30,7 @@ export function CreateWorkOrderModal({
   vendorCompliance = [],
   orgId = '',
   onClose,
+  onSuccess,
   onWarning,
 }: Readonly<{
   properties:       PropertyOptionWithCoords[]
@@ -39,6 +40,7 @@ export function CreateWorkOrderModal({
   vendorCompliance?: VendorComplianceRow[]
   orgId?:           string
   onClose:          () => void
+  onSuccess?:       () => void
   onWarning?:       (msg: string) => void
 }>) {
   const [state, action, pending]          = useActionState(createWorkOrder, null)
@@ -76,6 +78,13 @@ export function CreateWorkOrderModal({
   // After successful WO creation, upload photos
   useEffect(() => {
     if (!state?.success || !state.workOrderId) return
+
+    // revalidatePath() in the createWorkOrder Server Action refreshes the
+    // Server Component's data on the NEXT navigation, but this modal closes
+    // without one — the parent board's props otherwise go stale until some
+    // other navigation happens to trigger a refetch. router.refresh() (via
+    // onSuccess, wired in maintenance-board.tsx) forces that refetch now.
+    onSuccess?.()
 
     if (state.warning) onWarning?.(state.warning)
 

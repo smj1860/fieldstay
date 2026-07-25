@@ -120,15 +120,16 @@ test.describe('Vendor compliance hard-block', () => {
     await page.fill('[name="title"]', '[E2E] Grace Period Vendor WO')
     await page.click('button[type="submit"]')
 
-    await page.waitForURL(/\/maintenance/, { timeout: 10_000 })
-    // waitForURL above is a no-op here (we never left /maintenance — the
-    // Server Action closes the dialog client-side, it doesn't navigate),
-    // so it doesn't actually prove the create + revalidatePath round trip
-    // has landed. A plain toBeVisible() intermittently missed the new row
-    // under CI load with no error surfaced (network trace showed the
-    // create POST completing normally). Reload to force a guaranteed-fresh
-    // server round trip instead of relying on the client router's
-    // revalidation timing.
+    // Not waitForURL — the Server Action never navigates, it just
+    // revalidates and the modal closes itself client-side once
+    // useActionState resolves state.success. The previous reload() here
+    // fired before that resolution, which (per a CI artifact trace showing
+    // the reloaded board at "0 open work orders") could cancel the
+    // still-in-flight create request outright rather than just missing a
+    // stale read. Wait for the dialog to actually close first — that's the
+    // real signal the mutation (including its await'd inngest.send() call)
+    // has finished — before doing any reload.
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 })
     await page.reload()
     await expect(page.getByText('[E2E] Grace Period Vendor WO')).toBeVisible({ timeout: 10_000 })
   })

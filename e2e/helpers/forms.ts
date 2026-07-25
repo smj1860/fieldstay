@@ -15,6 +15,16 @@ export async function selectOptionWhenReady(
   label: string,
   timeout = 10_000,
 ): Promise<void> {
-  await select.locator('option', { hasText: label }).first().waitFor({ state: 'attached', timeout })
+  // hasText does a case-insensitive SUBSTRING match, not an exact match —
+  // waiting for label "Owner 1" would already resolve as soon as an
+  // "Owner 10" option is attached, so the later selectOption({ label })
+  // call (which does match exactly) could still race a not-yet-rendered
+  // "Owner 1" option. Anchor the regex to require an exact match.
+  const exact = new RegExp(`^${escapeRegex(label)}$`)
+  await select.locator('option', { hasText: exact }).first().waitFor({ state: 'attached', timeout })
   await select.selectOption({ label })
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

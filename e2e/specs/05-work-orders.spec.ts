@@ -32,7 +32,14 @@ test.describe('Work Orders / Maintenance', () => {
 
     await page.click('button[type="submit"]')
 
-    await page.waitForURL(/\/maintenance/, { timeout: 10_000 })
+    // Not waitForURL — createWorkOrder (Server Action) never redirects, it
+    // just revalidates and the modal closes itself client-side once
+    // useActionState resolves state.success (CreateWorkOrderModal.tsx), so
+    // waitForURL(/\/maintenance/) was a same-URL no-op that didn't actually
+    // wait for the create to complete. Wait for the dialog to close instead
+    // — that's the real signal the mutation (including its await'd
+    // inngest.send() call) has finished, not just that the click dispatched.
+    await expect(page.getByRole('dialog')).not.toBeVisible({ timeout: 10_000 })
     await expect(page.getByText('[E2E] Fix Leaking Faucet')).toBeVisible({ timeout: 8_000 })
   })
 

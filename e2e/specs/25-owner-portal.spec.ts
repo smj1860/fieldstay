@@ -77,12 +77,19 @@ test.describe('Owner portal token lifecycle', () => {
     const publicPage     = await publicContext.newPage()
     await publicPage.goto(portalUrl!)
 
+    // Not getByRole('heading', ...) — app/owner/[token]/page.tsx only
+    // renders the owner's name as an <h1> in the multi-property branch
+    // (isMulti). This owner has exactly one linked property, so the <h1>
+    // is the PROPERTY name and the owner's name renders as a plain <p> in
+    // the header's top-right corner instead — confirmed against the
+    // actual rendered markup, not a timing issue.
+    await expect(publicPage.getByText(ownerName).first()).toBeVisible({ timeout: 10_000 })
+
     // Scope to the "Total Revenue" summary card specifically — with only
     // one revenue transaction and no expenses, Net Income equals the same
     // $1,500.00 amount, so an unscoped page-wide getByText('$1,500.00')
     // would match both cards (and the "+$1,500.00" line-item row) and hit
     // Playwright's strict-mode violation.
-    await expect(publicPage.getByRole('heading', { name: ownerName })).toBeVisible({ timeout: 10_000 })
     const revenueCard = publicPage.locator('div').filter({ hasText: 'Total Revenue' }).last()
     await expect(revenueCard.getByText('$1,500.00')).toBeVisible()
 

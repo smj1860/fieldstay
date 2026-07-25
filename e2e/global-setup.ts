@@ -2,6 +2,7 @@ import { chromium, type FullConfig } from '@playwright/test'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import * as fs                               from 'fs'
 import * as path                             from 'path'
+import type { Database } from '../types/database.generated'
 
 export default async function globalSetup(_config: FullConfig) {
   const baseUrl = process.env.E2E_BASE_URL ?? 'http://localhost:3000'
@@ -56,7 +57,7 @@ export default async function globalSetup(_config: FullConfig) {
   // Tear down any stale [E2E] data first, then re-seed.
   // This ensures a clean starting state even if a previous run aborted.
 
-  const supabase = createClient(
+  const supabase = createClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }
@@ -287,8 +288,7 @@ async function seedCrewLoginAndAssignment(
   await browser.close()
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function cleanE2EData(supabase: SupabaseClient<any>, orgId: string): Promise<void> {
+async function cleanE2EData(supabase: SupabaseClient<Database>, orgId: string): Promise<void> {
   // Delete in FK-safe order. Properties cascade to bookings and turnovers.
   // communication_logs was missing here entirely — 16-comms-log.spec.ts's
   // hardcoded '[E2E] Confirmed service window' entry persisted across a CI
@@ -317,23 +317,43 @@ async function cleanE2EData(supabase: SupabaseClient<any>, orgId: string): Promi
 // which is exactly what broke every run in this session once enough
 // orphans had built up — findUserByEmail() below is the durable fix for
 // that symptom, but the orphans themselves are still waste worth sweeping.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function cleanOrphanedDisposableAuthUsers(supabase: SupabaseClient<any>): Promise<void> {
+//
+// Only sweeps users older than an hour — anything younger could belong to
+// a still-in-progress concurrent run (this repo's CI concurrency group now
+// serializes runs of THIS workflow, but doesn't protect against a manually
+// triggered local run against the same shared E2E project overlapping with
+// CI). Deleting a live run's own disposable user out from under it would
+// fail that run with a confusing "user not found" error instead of the
+// clean, expected orphan sweep this is meant to be.
+async function cleanOrphanedDisposableAuthUsers(supabase: SupabaseClient<Database>): Promise<void> {
   const disposablePrefixes = ['e2e-crew-wo-', 'e2e-crew-logout-', 'e2e-crew-feedback-']
+  const staleBeforeMs = Date.now() - 60 * 60 * 1000
+  // listUsers() is offset-based pagination — deleting mid-page shifts later
+  // pages' offsets and can skip a user who shifts into an already-visited
+  // slot. Collect every ID across all pages first, then delete once
+  // pagination is done so no delete can affect an in-flight page fetch.
+  const userIdsToDelete: string[] = []
+
   let page = 1
   for (;;) {
     const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 })
-    if (error || !data || data.users.length === 0) break
+    if (error) throw new Error(`listUsers() failed while sweeping orphaned disposable users (page ${page}): ${error.message}`)
+    if (!data || data.users.length === 0) break
 
     for (const user of data.users) {
-      if (!user.email) continue
+      if (!user.email || !user.created_at) continue
+      if (new Date(user.created_at).getTime() > staleBeforeMs) continue
       if (disposablePrefixes.some((prefix) => user.email!.startsWith(prefix))) {
-        await supabase.auth.admin.deleteUser(user.id)
+        userIdsToDelete.push(user.id)
       }
     }
 
     if (data.users.length < 200) break
     page += 1
+  }
+
+  for (const userId of userIdsToDelete) {
+    await supabase.auth.admin.deleteUser(userId)
   }
 }
 
@@ -341,12 +361,12 @@ async function cleanOrphanedDisposableAuthUsers(supabase: SupabaseClient<any>): 
 // default) — with enough disposable test users in play, a plain
 // .find() over the first page alone can silently miss a long-lived
 // account like the seeded PM/crew logins. Page through until found.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function findUserByEmail(supabase: SupabaseClient<any>, email: string) {
+async function findUserByEmail(supabase: SupabaseClient<Database>, email: string) {
   let page = 1
   for (;;) {
     const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 })
-    if (error || !data || data.users.length === 0) return undefined
+    if (error) throw new Error(`listUsers() failed while looking up ${email} (page ${page}): ${error.message}`)
+    if (!data || data.users.length === 0) return undefined
 
     const match = data.users.find((u) => u.email === email)
     if (match) return match

@@ -13,8 +13,16 @@ on:
 # under each other's still-in-progress tests, surfacing as unexplained
 # "did not find some options" / element-not-found flakes that have nothing
 # to do with the actual code under test.
+#
+# Not scoped to github.ref — github.ref differs between a pull_request event
+# (refs/pull/<pr>/merge) and a push event for the same branch/commit
+# (refs/heads/<branch>), so a per-ref group lets a push run and a
+# pull_request run for the same change execute concurrently, which is
+# exactly the race this block exists to prevent. A single group for the
+# whole workflow serializes every run (across all branches and PRs) that
+# touches the shared E2E Supabase project.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
