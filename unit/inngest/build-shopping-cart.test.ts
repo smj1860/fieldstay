@@ -36,6 +36,7 @@ import {
 } from '@/lib/kroger/client'
 import { getValidKrogerToken } from '@/lib/integrations/providers/kroger-token'
 import { reportError } from '@/lib/observability/report-error'
+import { RateLimitError } from '@/lib/integrations/types'
 import { resend } from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail } from '@/lib/resend/emails/shopping-cart-ready'
 import { invokeHandler } from './test-helpers'
@@ -330,6 +331,29 @@ describe('buildShoppingCart', () => {
     const revokeUpdate = supabase.calls.find((c) => c.table === 'integration_connections' && c.method === 'update')
     expect(revokeUpdate?.args[0]).toEqual({ status: 'revoked' })
     expect(addItemsToKrogerCart).not.toHaveBeenCalled()
+  })
+
+  it('rethrows a Kroger rate limit from token refresh so Inngest retries the step, instead of degrading to list-only', async () => {
+    const supabase = makeSupabase({
+      organizations:            [{ data: { id: 'org_1', preferred_retailer: 'kroger' }, error: null }],
+      inventory_items:          [{ data: [belowParInventoryItem], error: null }],
+      integration_connections:  [{ data: activeKrogerConnection, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(getValidKrogerToken as ReturnType<typeof vi.fn>).mockRejectedValue(new RateLimitError(30))
+
+    await expect(invokeHandler(buildShoppingCart, baseCtx())).rejects.toBeInstanceOf(RateLimitError)
+
+    // Rate limiting is a transient, retriable condition — must NOT be
+    // reported as an error or silently degrade to a list-only cart the
+    // way a genuinely revoked/expired token does.
+    expect(reportError).not.toHaveBeenCalled()
+    expect(getClientToken).not.toHaveBeenCalled()
+    expect(searchProducts).not.toHaveBeenCalled()
+    expect(addItemsToKrogerCart).not.toHaveBeenCalled()
+
+    const revokeUpdate = supabase.calls.find((c) => c.table === 'integration_connections' && c.method === 'update')
+    expect(revokeUpdate).toBeUndefined()
   })
 
   it('only scopes the inventory query to the requested properties when property_ids is provided', async () => {

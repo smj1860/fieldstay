@@ -23,7 +23,7 @@ status (checked against the live codebase, not assumed):
 | 7. Dexie delta sync + outbox backoff | 2 | 🔶 Half done — delta sync shipped as Crew Sync v2 Phase 1; **outbox backoff = Phase 4, still open** |
 | 8. Bound the unbounded queries | 2 | ✅ Done — `checklist-signals` has a 180-day rolling window, reviews/owners pages are `.limit()`-bounded |
 | 9. Enforcement Tiers 1–3 (ESLint/guardrails → typed ServiceRoleContext → DB invariant CI gate) | — | ✅ Done — Tier 3 is PR #505 |
-| 10. Tier 3 hygiene list | 3 | ⬜ **All open — sections below** |
+| 10. Tier 3 hygiene list | 3 | 🔶 Section 3 (Kroger rate limiter) done; sections 1, 2, 4, 5 remain — see below |
 
 So the actual remaining work is: **Crew Sync v2 Phases 2–5** (the other
 document), plus the four Tier 3 hygiene items and one enforcement leftover
@@ -79,7 +79,26 @@ incremental cursor, unlike OwnerRez which has
 
 ## 3. Kroger API rate limiter
 
-**Problem:** `lib/integrations/providers/kroger.ts` calls the Kroger API
+**Status: ✅ Done.** `lib/rate-limit.ts` gained four endpoint-class limiters
+(`krogerProductsApiLimiter` 9,000/day, `krogerLocationsApiLimiter` 1,440/day —
+both 90%-headroom off Kroger's confirmed published daily limits;
+`krogerCartApiLimiter` and `krogerAuthApiLimiter` use conservative defaults
+where Kroger's own docs don't publish a figure — see the comments in that
+file for sourcing). `lib/kroger/client.ts` now routes every outbound Kroger
+call through a shared `krogerFetch()` wrapper (same shape as
+`hospitableFetch` in `lib/integrations/providers/hospitable.ts`) that
+consults the relevant limiter first and reacts to a real 429 by parsing
+`Retry-After`, fails open on a Redis error, and throws the shared
+`RateLimitError` either way. `build-shopping-cart.ts`'s `get-customer-token`
+step now rethrows `RateLimitError` instead of swallowing it into the
+list-only fallback; the two OAuth callback routes (which run outside any
+Inngest step) now redirect to a distinct `rate_limited` reason instead of
+the generic `token_exchange_failed`/restart-connect-flow path. See
+`unit/lib/kroger-client-rate-limit.test.ts` and the added cases in
+`unit/inngest/build-shopping-cart.test.ts` /
+`unit/route-handlers/integrations-callback.test.ts`.
+
+**Original problem:** `lib/integrations/providers/kroger.ts` calls the Kroger API
 with no rate limiting or 429 handling — cart automation fanning out across
 orgs shares one IP/token budget, same class of problem as OwnerRez was.
 

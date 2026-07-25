@@ -1,6 +1,14 @@
 // lib/kroger/client.ts
 // Place at: lib/kroger/client.ts
 
+import type { Ratelimit } from '@upstash/ratelimit'
+import {
+  krogerAuthApiLimiter,
+  krogerProductsApiLimiter,
+  krogerLocationsApiLimiter,
+  krogerCartApiLimiter,
+} from '@/lib/rate-limit'
+import { RateLimitError } from '@/lib/integrations/types'
 import type {
   KrogerTokenResponse,
   KrogerProductSearchResponse,
@@ -11,6 +19,56 @@ import type {
 
 const KROGER_API_BASE  = 'https://api.kroger.com/v1'
 const KROGER_AUTH_BASE = 'https://api.kroger.com/v1/connect/oauth2'
+
+// ── Rate limiting ────────────────────────────────────────────────
+//
+// Every outbound Kroger call in this file goes through krogerFetch instead
+// of calling fetch() directly, so the shared platform-wide budget (see
+// lib/rate-limit.ts — one app-level Kroger client credential, not a
+// per-org allocation, same rationale as hospitableFetch in
+// lib/integrations/providers/hospitable.ts and OwnerRez's per-IP tracker
+// in lib/integrations/providers/ownerrez-api.ts) is enforced uniformly:
+//
+//   1. Proactively check the relevant endpoint-class limiter BEFORE the
+//      call. Throws RateLimitError before Kroger would actually 429 us.
+//   2. If Kroger 429s anyway, parse Retry-After and throw RateLimitError
+//      with that exact wait time.
+//
+// Fails OPEN if the limiter check itself errors (Redis unavailable) —
+// this is an abuse/external-quota limiter guarding Kroger's own rate
+// limit, not a spend-budget limiter (see
+// docs/SCALABILITY_TIERS_REMAINING.md item 4, which reserves fail-closed
+// behavior for money-spending paths only). Matches proxy.ts's
+// rateLimiterForPathname() convention: log and proceed rather than
+// blocking every Kroger call over an infrastructure outage.
+async function krogerFetch(
+  limiter:    Ratelimit,
+  identifier: string,
+  input:      string,
+  init:       RequestInit,
+): Promise<Response> {
+  try {
+    const { success, reset } = await limiter.limit(identifier)
+    if (!success) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
+      throw new RateLimitError(retryAfterSeconds)
+    }
+  } catch (err) {
+    if (err instanceof RateLimitError) throw err
+    // Redis unavailable or otherwise erroring — fail open. Don't block
+    // every Kroger call over an infrastructure issue on our side.
+    console.error('[Kroger] rate limit check failed — proceeding without it', err)
+  }
+
+  const res = await fetch(input, init)
+
+  if (res.status === 429) {
+    const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10)
+    throw new RateLimitError(retryAfter)
+  }
+
+  return res
+}
 
 // ── Token Management ────────────────────────────────────────────
 
@@ -29,7 +87,7 @@ export async function getClientToken(): Promise<string> {
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
 
-  const res = await fetch(`${KROGER_AUTH_BASE}/token`, {
+  const res = await krogerFetch(krogerAuthApiLimiter, 'kroger-auth', `${KROGER_AUTH_BASE}/token`, {
     method:  'POST',
     headers: {
       'Content-Type':  'application/x-www-form-urlencoded',
@@ -62,7 +120,7 @@ export async function exchangeCodeForCustomerToken(
   const clientSecret = process.env.KROGER_CLIENT_SECRET!
   const credentials  = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
 
-  const res = await fetch(`${KROGER_AUTH_BASE}/token`, {
+  const res = await krogerFetch(krogerAuthApiLimiter, 'kroger-auth', `${KROGER_AUTH_BASE}/token`, {
     method:  'POST',
     headers: {
       'Content-Type':  'application/x-www-form-urlencoded',
@@ -93,7 +151,7 @@ export async function refreshCustomerToken(
   const clientSecret = process.env.KROGER_CLIENT_SECRET!
   const credentials  = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
 
-  const res = await fetch(`${KROGER_AUTH_BASE}/token`, {
+  const res = await krogerFetch(krogerAuthApiLimiter, 'kroger-auth', `${KROGER_AUTH_BASE}/token`, {
     method:  'POST',
     headers: {
       'Content-Type':  'application/x-www-form-urlencoded',
@@ -135,7 +193,7 @@ export function buildKrogerAuthUrl(state: string, redirectUri: string): string {
 export async function getKrogerProfile(
   customerToken: string,
 ): Promise<{ id: string } | null> {
-  const res = await fetch(`${KROGER_API_BASE}/identity/profile`, {
+  const res = await krogerFetch(krogerAuthApiLimiter, 'kroger-auth', `${KROGER_API_BASE}/identity/profile`, {
     headers: {
       'Authorization': `Bearer ${customerToken}`,
       'Accept':        'application/json',
@@ -163,12 +221,17 @@ export async function searchProducts(
     'filter.fulfillment': 'ais',
   })
 
-  const res = await fetch(`${KROGER_API_BASE}/products?${params.toString()}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept':        'application/json',
+  const res = await krogerFetch(
+    krogerProductsApiLimiter,
+    'kroger-products',
+    `${KROGER_API_BASE}/products?${params.toString()}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept':        'application/json',
+      },
     },
-  })
+  )
 
   if (!res.ok) {
     console.error(`Kroger product search failed for "${query}": ${res.status}`)
@@ -191,12 +254,17 @@ export async function findNearestKrogerStore(
     'filter.limit':         '1',
   })
 
-  const res = await fetch(`${KROGER_API_BASE}/locations?${params.toString()}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept':        'application/json',
+  const res = await krogerFetch(
+    krogerLocationsApiLimiter,
+    'kroger-locations',
+    `${KROGER_API_BASE}/locations?${params.toString()}`,
+    {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept':        'application/json',
+      },
     },
-  })
+  )
 
   if (!res.ok) return null
 
@@ -216,7 +284,7 @@ export async function addItemsToKrogerCart(
 ): Promise<boolean> {
   if (!items.length) return true
 
-  const res = await fetch(`${KROGER_API_BASE}/cart/add`, {
+  const res = await krogerFetch(krogerCartApiLimiter, 'kroger-cart', `${KROGER_API_BASE}/cart/add`, {
     method:  'PUT',
     headers: {
       'Authorization': `Bearer ${customerToken}`,

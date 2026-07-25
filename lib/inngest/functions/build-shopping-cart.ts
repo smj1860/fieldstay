@@ -10,6 +10,7 @@ import {
 } from '@/lib/kroger/client'
 import { getValidKrogerToken }             from '@/lib/integrations/providers/kroger-token'
 import { reportError }                     from '@/lib/observability/report-error'
+import { RateLimitError }                  from '@/lib/integrations/types'
 import { NonRetriableError }               from 'inngest'
 import { resend, FROM }                    from '@/lib/resend/client'
 import { renderShoppingCartReadyEmail }    from '@/lib/resend/emails/shopping-cart-ready'
@@ -145,6 +146,16 @@ export const buildShoppingCart = inngest.createFunction(
       try {
         return await getValidKrogerToken(connection.user_id)
       } catch (err) {
+        if (err instanceof RateLimitError) {
+          // Kroger's own API quota (or our proactive guard in front of it,
+          // see lib/kroger/client.ts's krogerFetch) is exhausted. Rethrow
+          // so Inngest retries this step with backoff instead of silently
+          // degrading to the list-only fallback below — that would mask a
+          // transient condition as a permanent one and skip a retry that
+          // would likely succeed once the window resets.
+          throw err
+        }
+
         if (err instanceof NonRetriableError) {
           // Refresh token itself is revoked/expired — mark the connection so
           // the PM sees a reconnect prompt instead of the cart silently
