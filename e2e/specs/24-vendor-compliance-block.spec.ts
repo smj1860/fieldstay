@@ -106,8 +106,16 @@ async function addComplianceDocument(
   expiryDate: string,
 ) {
   await page.goto('/vendors')
-  await page.getByText(vendorName).filter({ visible: true }).first().click()
-  await expect(page.getByText(vendorName).filter({ visible: true }).first()).toBeVisible({ timeout: 8_000 })
+  // Clicking the vendor name/row opens vendors-client.tsx's quick-view
+  // dialog (name, email, portal toggle only) — it has no compliance
+  // section. "Add Document" lives on the vendor detail page
+  // (app/(dashboard)/vendors/[id]/compliance-section.tsx), reached via the
+  // row's "Details" link. vendors-client.tsx renders both a desktop <tr>
+  // and a mobile card (VendorRow/VendorCard) for the same vendor, so scope
+  // to whichever one is actually visible at the current viewport.
+  const vendorRow = page.locator('[role="button"]').filter({ hasText: vendorName }).filter({ visible: true }).first()
+  await vendorRow.getByRole('link', { name: 'Details' }).click()
+  await page.waitForURL(/\/vendors\/[0-9a-f-]+$/, { timeout: 10_000 })
 
   await page.getByRole('button', { name: 'Add Document' }).click()
   const dialog = page.getByRole('dialog')

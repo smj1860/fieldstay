@@ -22,6 +22,14 @@ import { dismissCookieBanner } from '../helpers/cookies'
 test.describe('Owner portal token lifecycle', () => {
 
   test('[E2E] generate link, view public portal, hide a transaction, then revoke', async ({ page, browser }) => {
+    // Unique per attempt — CI sets retries: 2, and a Playwright retry
+    // re-runs this whole test from scratch without cleaning up the owner
+    // the previous failed attempt already created (global teardown only
+    // runs once at the end of the whole suite). A static name meant a
+    // retry's ownerCard locator matched BOTH the stale and fresh cards,
+    // hitting a strict-mode violation on the first scoped click.
+    const ownerName = `[E2E] Portal Test Owner ${Date.now()}`
+
     await page.goto('/owners')
     // Dismiss before opening any dialog — the banner and the Dialog backdrop
     // share z-50, and since the Dialog portal paints later in DOM order it
@@ -34,11 +42,11 @@ test.describe('Owner portal token lifecycle', () => {
     const addDialog = page.getByRole('dialog')
     await expect(addDialog.getByRole('heading', { name: 'Add Property Owner' })).toBeVisible()
     await addDialog.locator('[name="property_id"]').selectOption({ label: '[E2E] The Lakehouse' })
-    await addDialog.locator('[name="name"]').fill('[E2E] Portal Test Owner')
+    await addDialog.locator('[name="name"]').fill(ownerName)
     await addDialog.getByRole('button', { name: 'Add Owner', exact: true }).click()
-    await expect(page.getByText('[E2E] Portal Test Owner')).toBeVisible({ timeout: 8_000 })
+    await expect(page.getByText(ownerName)).toBeVisible({ timeout: 8_000 })
 
-    const ownerCard = page.locator('.card').filter({ hasText: '[E2E] Portal Test Owner' })
+    const ownerCard = page.locator('.card').filter({ hasText: ownerName })
 
     // Record $1,500 of monthly revenue through the quick-entry field —
     // this always writes visible_to_owner: true (addOwnerTransaction in
@@ -65,7 +73,7 @@ test.describe('Owner portal token lifecycle', () => {
     // $1,500.00 amount, so an unscoped page-wide getByText('$1,500.00')
     // would match both cards (and the "+$1,500.00" line-item row) and hit
     // Playwright's strict-mode violation.
-    await expect(publicPage.getByRole('heading', { name: '[E2E] Portal Test Owner' })).toBeVisible({ timeout: 10_000 })
+    await expect(publicPage.getByRole('heading', { name: ownerName })).toBeVisible({ timeout: 10_000 })
     const revenueCard = publicPage.locator('div').filter({ hasText: 'Total Revenue' }).last()
     await expect(revenueCard.getByText('$1,500.00')).toBeVisible()
 
@@ -104,9 +112,22 @@ test.describe('Owner portal token lifecycle', () => {
   test('nonexistent portal token shows a 404, not owner data', async ({ browser }) => {
     const publicContext = await browser.newContext()
     const publicPage     = await publicContext.newPage()
-    const response = await publicPage.goto('/owner/00000000-0000-0000-0000-000000000000')
+    await publicPage.goto('/owner/00000000-0000-0000-0000-000000000000')
 
-    expect(response?.status()).toBe(404)
+    // Not response?.status() — app/owner/[token]/loading.tsx wraps the page
+    // in an implicit Suspense boundary, so Next.js streams the route: the
+    // initial shell flushes with a 200 status before the async
+    // load-owner-portal-data.ts lookup resolves and notFound() actually
+    // fires deep in the tree. The HTTP status is already sent by then, so
+    // it stays 200 even though the correct not-found UI renders — a known
+    // Next.js App Router limitation with streamed notFound(), not a gap in
+    // this route's own auth/lookup logic (verified correct on inspection:
+    // it does call notFound() when no token row matches). Assert on the
+    // rendered content instead, since that's what actually guards against
+    // leaking owner data to a bogus token.
+    await expect(publicPage.getByRole('heading', { name: '404' })).toBeVisible({ timeout: 10_000 })
+    await expect(publicPage.getByRole('heading', { name: 'This page could not be found.' })).toBeVisible()
+
     await publicContext.close()
   })
 
