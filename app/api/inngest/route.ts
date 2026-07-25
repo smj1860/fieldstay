@@ -18,6 +18,7 @@ import { dailyAssetHealth }              from '@/lib/inngest/functions/cron/asse
 import { dailyCommsRetention }           from '@/lib/inngest/functions/cron/comms-retention'
 import { dailyGuestPiiRetention }        from '@/lib/inngest/functions/cron/guest-pii-retention'
 import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audit-retention'
+import { notificationsRetentionCron }    from '@/lib/inngest/functions/cron/notifications-retention'
 import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale-feed-alert'
 import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turnover-priority-decay'
 import { notificationDigest }           from '@/lib/inngest/functions/cron/notification-digest'
@@ -180,6 +181,7 @@ export const { GET, POST, PUT } = serve({
     dailyCommsRetention,
     dailyGuestPiiRetention,
     auditRetentionCron,
+    notificationsRetentionCron,
     staleFeedAlert,
     turnoverPriorityDecay,
     notificationDigest,
