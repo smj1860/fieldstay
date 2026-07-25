@@ -191,7 +191,7 @@ describe('actions/guidebook', () => {
       const result = await upsertPropertyGuidebookConfig({
         propertyId: 'prop_1', slug: 'lakeview-cabin', checkInInstructions: null,
         checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
-        houseRules: null, isPublished: true,
+        houseRules: null, isPublished: true, heroPhotoStoragePath: null,
       })
 
       expect(result).toEqual({})
@@ -210,7 +210,7 @@ describe('actions/guidebook', () => {
       const result = await upsertPropertyGuidebookConfig({
         propertyId: 'other-orgs-property', slug: 'lakeview-cabin', checkInInstructions: null,
         checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
-        houseRules: null, isPublished: true,
+        houseRules: null, isPublished: true, heroPhotoStoragePath: null,
       })
 
       expect(result).toEqual({ error: 'Property not found.' })
@@ -223,7 +223,7 @@ describe('actions/guidebook', () => {
       const result = await upsertPropertyGuidebookConfig({
         propertyId: 'prop_1', slug: 'lakeview-cabin', checkInInstructions: null,
         checkOutInstructions: null, wifiNetwork: null, wifiPassword: null,
-        houseRules: null, isPublished: true,
+        houseRules: null, isPublished: true, heroPhotoStoragePath: null,
       })
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
