@@ -5,6 +5,18 @@ on:
   push:
     branches: [main]
 
+# Cancel a still-running CI run for this branch/PR when a new commit lands
+# on it, instead of letting both run to completion. Without this, rapid
+# successive pushes spawn overlapping e2e runs that all target the SAME
+# live E2E Supabase project (not per-run isolated) — two runs' global-setup/
+# global-teardown can race and delete [E2E]-prefixed seed rows out from
+# under each other's still-in-progress tests, surfacing as unexplained
+# "did not find some options" / element-not-found flakes that have nothing
+# to do with the actual code under test.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
