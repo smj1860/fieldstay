@@ -13,6 +13,15 @@ import { getServiceClient } from '../helpers/teardown'
 // throwaway per-test account with its own turnover has no such shared-state
 // hazard.
 test.describe('Crew logout guard', () => {
+  // loginAsFreshCrewWithTurnover() below does 5 sequential Supabase Admin
+  // API round trips (createUser, crew_members, turnovers,
+  // turnover_assignments, checklist_instances, checklist_instance_items)
+  // plus a full page navigation/login before a test's own assertions even
+  // start — under CI load that alone can eat most of the default 30s
+  // per-test budget, so these tests were reaching the correct destination
+  // (login genuinely succeeded) and still failing on "Test timeout of
+  // 30000ms exceeded."
+  test.describe.configure({ timeout: 60_000 })
 
   test('logout with no unsynced work redirects immediately, no warning dialog', async ({ ctx, browser }) => {
     const { page, cleanup } = await loginAsFreshCrewWithTurnover(ctx.orgId, browser)

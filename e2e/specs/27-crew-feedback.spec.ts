@@ -18,6 +18,13 @@ import { getServiceClient } from '../helpers/teardown'
 // deterministically. A throwaway per-test account has no such shared-state
 // hazard.
 test.describe('Crew feedback', () => {
+  // loginAsFreshCrew() below does a createUser + crew_members Admin API
+  // round trip plus a full page navigation/login before a test's own
+  // assertions even start — under CI load that alone can eat most of the
+  // default 30s per-test budget, so these tests were reaching the correct
+  // destination (login genuinely succeeded) and still failing on "Test
+  // timeout of 30000ms exceeded."
+  test.describe.configure({ timeout: 60_000 })
 
   test('[E2E] crew can submit feedback from the crew home screen', async ({ ctx, browser }) => {
     const { page, cleanup } = await loginAsFreshCrew(ctx.orgId, browser)
