@@ -262,7 +262,7 @@ function CrewAssignment({
                     onClick={() => handleAdd(c.id)}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-canvas-themed transition-colors flex items-center gap-2"
                   >
-                    <span className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                    <span aria-hidden="true" className="w-6 h-6 rounded-full bg-brand-100 text-brand-700 text-xs font-bold flex items-center justify-center flex-shrink-0">
                       {c.name[0]?.toUpperCase()}
                     </span>
                     {c.name}
