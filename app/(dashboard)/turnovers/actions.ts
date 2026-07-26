@@ -76,6 +76,20 @@ async function trackAssignmentAgainstSuggestions(
   }
 }
 
+// Shared by assignCrew/addCrewToTurnover — fire-and-forget, since the
+// assignment is already committed by the time either caller reaches this;
+// a slow/unreachable Inngest shouldn't stall or fail the action for the PM.
+function notifyCrewAssigned(orgId: string, crewMemberId: string, turnoverIds: string[]): void {
+  sendEventAsync({
+    name: 'turnover/crew-assigned',
+    data: {
+      crew_member_id: crewMemberId,
+      turnover_ids:   turnoverIds,
+      org_id:         orgId,
+    },
+  })
+}
+
 // ── Crew assignment ──────────────────────────────────────────────────────────
 
 export async function assignCrew(
@@ -153,16 +167,7 @@ export async function assignCrew(
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
-    // Fire-and-forget — the assignment is already committed; a slow/
-    // unreachable Inngest shouldn't stall or fail this action for the PM.
-    sendEventAsync({
-      name: 'turnover/crew-assigned',
-      data: {
-        crew_member_id: crewMemberId,
-        turnover_ids:   turnovers.map(t => t.id),
-        org_id:         membership.org_id,
-      },
-    })
+    notifyCrewAssigned(membership.org_id, crewMemberId, turnovers.map(t => t.id))
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -536,16 +541,7 @@ export async function addCrewToTurnover(
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
-    // Fire-and-forget — the assignment is already committed; a slow/
-    // unreachable Inngest shouldn't stall or fail this action for the PM.
-    sendEventAsync({
-      name: 'turnover/crew-assigned',
-      data: {
-        crew_member_id: crewMemberId,
-        turnover_ids:   turnovers.map(t => t.id),
-        org_id:         membership.org_id,
-      },
-    })
+    notifyCrewAssigned(membership.org_id, crewMemberId, turnovers.map(t => t.id))
 
     await logAuditEvent({
       orgId:      membership.org_id,
