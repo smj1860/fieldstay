@@ -169,6 +169,7 @@ export interface UpsertPropertyGuidebookConfigInput {
   wifiPassword:         string | null
   houseRules:           string | null
   isPublished:          boolean
+  heroPhotoStoragePath: string | null
 }
 
 /**
@@ -203,6 +204,7 @@ export async function upsertPropertyGuidebookConfig(
           wifi_password:          input.wifiPassword,
           house_rules:            input.houseRules,
           is_published:           input.isPublished,
+          hero_photo_storage_path: input.heroPhotoStoragePath,
           updated_at:             new Date().toISOString(),
         },
         { onConflict: 'org_id,property_id' }

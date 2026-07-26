@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
-import { QRCodeSVG, QRCodeCanvas } from 'qrcode.react'
+import { QRCodeSVG } from 'qrcode.react'
 import { Sun, Wine, CloudRain, Tent, MapPin, Pencil, Check, type LucideIcon } from 'lucide-react'
 import { SponsorFormModal } from './sponsor-form-modal'
 import { CelebrationModal } from './celebration-modal'
@@ -422,6 +422,7 @@ export function GuidebookClient({
             <PropertyGuidebookRow
               key={property.id}
               property={property}
+              orgId={orgId}
               appUrl={appUrl}
               isGuidebookActive={isGuidebookActive}
             />
@@ -448,10 +449,12 @@ export function GuidebookClient({
 
 function PropertyGuidebookRow({
   property,
+  orgId,
   appUrl,
   isGuidebookActive,
 }: {
   property: Property
+  orgId: string
   appUrl: string
   isGuidebookActive: boolean
 }) {
@@ -480,18 +483,24 @@ function PropertyGuidebookRow({
       </button>
 
       {expanded && (
-        <PropertyGuidebookForm property={property} appUrl={appUrl} isGuidebookActive={isGuidebookActive} />
+        <PropertyGuidebookForm property={property} orgId={orgId} appUrl={appUrl} isGuidebookActive={isGuidebookActive} />
       )}
     </div>
   )
 }
 
+const HERO_PHOTO_BUCKET = 'guidebook-property-photos'
+const HERO_PHOTO_MAX_BYTES = 5 * 1024 * 1024
+const HERO_PHOTO_ACCEPT = 'image/jpeg,image/png,image/webp'
+
 function PropertyGuidebookForm({
   property,
+  orgId,
   appUrl,
   isGuidebookActive,
 }: {
   property: Property
+  orgId:    string
   appUrl:   string
   isGuidebookActive: boolean
 }) {
@@ -504,7 +513,10 @@ function PropertyGuidebookForm({
     wifiPassword: string
     houseRules: string
     isPublished: boolean
+    heroPhotoStoragePath: string | null
   } | null>(null)
+  const [heroPhotoUploading, setHeroPhotoUploading] = useState(false)
+  const [heroPhotoError, setHeroPhotoError]         = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved]   = useState(false)
   const [error, setError]   = useState<string | null>(null)
@@ -547,6 +559,7 @@ function PropertyGuidebookForm({
           wifiPassword:         data.wifi_password ?? '',
           houseRules:           data.house_rules ?? '',
           isPublished:          data.is_published,
+          heroPhotoStoragePath: data.hero_photo_storage_path ?? null,
         })
       } else {
         const slug = property.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -555,6 +568,7 @@ function PropertyGuidebookForm({
           checkInInstructions: '', checkOutInstructions: '',
           wifiNetwork: '', wifiPassword: '', houseRules: '',
           isPublished: false,
+          heroPhotoStoragePath: null,
         })
       }
     }
@@ -587,6 +601,43 @@ function PropertyGuidebookForm({
   }
 
   const guestUrl = `${appUrl}/g/${config.slug}`
+  const heroPhotoUrl = config.heroPhotoStoragePath
+    ? supabase.storage.from(HERO_PHOTO_BUCKET).getPublicUrl(config.heroPhotoStoragePath).data.publicUrl
+    : null
+
+  async function handleHeroPhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file after an error
+    if (!file) return
+
+    if (file.size > HERO_PHOTO_MAX_BYTES) {
+      setHeroPhotoError('Image must be under 5 MB.')
+      return
+    }
+
+    setHeroPhotoUploading(true)
+    setHeroPhotoError(null)
+
+    const ext  = file.name.split('.').pop() ?? 'jpg'
+    const path = `${orgId}/${property.id}/${Date.now()}-${crypto.randomUUID()}.${ext}`
+
+    const { error: uploadError } = await supabase.storage
+      .from(HERO_PHOTO_BUCKET)
+      .upload(path, file, { contentType: file.type })
+
+    setHeroPhotoUploading(false)
+
+    if (uploadError) {
+      setHeroPhotoError(uploadError.message)
+      return
+    }
+
+    setConfig((c) => c && ({ ...c, heroPhotoStoragePath: path }))
+  }
+
+  function handleHeroPhotoRemove() {
+    setConfig((c) => c && ({ ...c, heroPhotoStoragePath: null }))
+  }
 
   async function handleSave() {
     if (!config) return
@@ -601,6 +652,7 @@ function PropertyGuidebookForm({
       wifiPassword:         config.wifiPassword || null,
       houseRules:           config.houseRules || null,
       isPublished:          config.isPublished,
+      heroPhotoStoragePath: config.heroPhotoStoragePath,
     })
     setSaving(false)
     if (result.error) {
@@ -647,6 +699,46 @@ function PropertyGuidebookForm({
               <GuidebookQrCode url={guestUrl} propertyName={property.name} />
             </>
           )}
+        </div>
+
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={labelStyle} htmlFor={`guidebook-hero-photo-${property.id}`}>Hero Photo (optional)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {heroPhotoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element -- dashboard preview of a guest-facing storage image, no next/image domain config on this page
+              <img
+                src={heroPhotoUrl}
+                alt=""
+                style={{ width: '96px', height: '64px', objectFit: 'cover', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
+              />
+            )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <input
+                id={`guidebook-hero-photo-${property.id}`}
+                type="file"
+                accept={HERO_PHOTO_ACCEPT}
+                onChange={handleHeroPhotoUpload}
+                disabled={heroPhotoUploading}
+                style={{ fontSize: '13px', color: 'var(--text-secondary)' }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {heroPhotoUploading && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Uploading…</span>}
+                {heroPhotoError && <span style={{ fontSize: '12px', color: 'var(--accent-red)' }}>{heroPhotoError}</span>}
+                {config.heroPhotoStoragePath && !heroPhotoUploading && (
+                  <button
+                    type="button"
+                    onClick={handleHeroPhotoRemove}
+                    style={{ fontSize: '12px', color: 'var(--accent-red)', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                Shown as the background photo on the guest guidebook. JPEG, PNG, or WebP, up to 5 MB.
+              </span>
+            </div>
+          </div>
         </div>
 
         <div>
@@ -907,12 +999,9 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
   )
 }
 
-// Renders a hidden QR canvas for the sponsor's media kit URL and, on click,
-// builds a printable one-pager PDF (pitch copy + the sponsor's own preview
-// info + the QR code) for the PM to hand a prospective business during an
-// in-person sponsor conversation. PDF assembly lives in
-// lib/guidebook/sponsor-one-pager.ts — this component only owns the DOM/canvas
-// plumbing pdf-lib can't do itself (reading the rendered QR as PNG bytes).
+// Opens the print-ready media kit (app/g/kit/[media_kit_token]/print) in a
+// new tab for the PM to hand a prospective business during an in-person
+// sponsor conversation — the browser's own print dialog produces the PDF.
 function SponsorOnePagerButton({
   sponsor,
   appUrl,
@@ -920,50 +1009,26 @@ function SponsorOnePagerButton({
   sponsor: GuidebookSponsor
   appUrl:  string
 }>) {
-  const canvasRef                     = useRef<HTMLCanvasElement>(null)
-  const [generating, setGenerating]   = useState(false)
   const kitUrl = `${appUrl}/g/kit/${sponsor.media_kit_token}`
 
-  async function handleDownload() {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    setGenerating(true)
-    try {
-      const { buildSponsorOnePagerPdf } = await import('@/lib/guidebook/sponsor-one-pager')
-      const qrPngBytes = await (await fetch(canvas.toDataURL('image/png'))).arrayBuffer()
-      const pdfBytes   = await buildSponsorOnePagerPdf(sponsor, qrPngBytes, kitUrl)
-
-      const blob    = new Blob([new Uint8Array(pdfBytes)], { type: 'application/pdf' })
-      const blobUrl = URL.createObjectURL(blob)
-      const fileSlug = sponsor.business_name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-
-      const a = document.createElement('a')
-      a.href     = blobUrl
-      a.download = `${fileSlug}-sponsor-one-pager.pdf`
-      a.click()
-      URL.revokeObjectURL(blobUrl)
-    } finally {
-      setGenerating(false)
-    }
+  function handleDownload() {
+    // The print route renders the full media kit; the browser's print dialog
+    // produces the PDF (replaces the old client-side pdf-lib build).
+    globalThis.open(`${kitUrl}/print`, '_blank', 'noopener,noreferrer')
   }
 
   return (
-    <>
-      <QRCodeCanvas ref={canvasRef} value={kitUrl} size={240} style={{ display: 'none' }} />
-      <button
-        onClick={handleDownload}
-        disabled={generating}
-        style={{
-          fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
-          border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-          padding: '6px 12px', backgroundColor: 'var(--bg-card)',
-          cursor: generating ? 'default' : 'pointer', opacity: generating ? 0.6 : 1,
-        }}
-      >
-        {generating ? 'Generating…' : 'One-Pager'}
-      </button>
-    </>
+    <button
+      onClick={handleDownload}
+      style={{
+        fontSize: '13px', fontWeight: '500', color: 'var(--text-primary)',
+        border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+        padding: '6px 12px', backgroundColor: 'var(--bg-card)',
+        cursor: 'pointer',
+      }}
+    >
+      Media Kit
+    </button>
   )
 }
 

@@ -156,6 +156,12 @@ export const guidebookRatelimit = new Ratelimit({
   prefix:    'rl:guidebook',
 })
 
+export const guidebookRedeemLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(30, '1 h'),  // per-IP; guests redeem a handful per stay
+  prefix:    'rl:guidebook-redeem',
+})
+
 // OAuth callback routes (/api/integrations/*/callback and /callback/oneclick)
 // — unauthenticated by nature (the provider redirects the browser here with
 // no FieldStay session). The oneclick route now stores the unexchanged

@@ -1,0 +1,100 @@
+.phone {
+  width: 252px;
+  border-radius: 34px;
+  background: #10161D;
+  padding: 10px;
+  box-shadow: 0 18px 40px rgba(38, 25, 12, .25), 0 0 0 1px rgba(0, 0, 0, .08);
+}
+
+.screen {
+  border-radius: 26px;
+  overflow: hidden;
+  background: linear-gradient(178deg, #F2E9DA 0%, #EAF1F6 60%, #E3ECF3 100%);
+  padding: 16px 14px 18px;
+}
+
+.phTime {
+  font-family: var(--font-archivo, 'Archivo', sans-serif);
+  font-weight: 700;
+  font-size: 11px;
+  color: #4E5B67;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.moment {
+  font-family: var(--font-archivo, 'Archivo', sans-serif);
+  font-weight: 700;
+  font-size: 10.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #7A6845;
+  background: rgba(223, 166, 59, .18);
+  border: 1px solid rgba(184, 126, 28, .35);
+  display: inline-block;
+  padding: 4px 9px;
+  border-radius: 99px;
+  margin-bottom: 10px;
+}
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 14px 14px 12px;
+  box-shadow: 0 6px 18px rgba(16, 22, 29, .10);
+}
+
+.label {
+  font-family: var(--font-archivo, 'Archivo', sans-serif);
+  font-weight: 600;
+  font-size: 9.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #8A93A0;
+  margin-bottom: 6px;
+}
+
+.name {
+  font-family: var(--font-archivo, 'Archivo', sans-serif);
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: -.01em;
+  margin-bottom: 3px;
+}
+
+.addr {
+  font-size: 12px;
+  color: #5C6672;
+  margin-bottom: 10px;
+}
+
+.perk {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #26190C;
+  background: #FBF3E1;
+  border-left: 3px solid #DFA63B;
+  padding: 7px 9px;
+  border-radius: 0 8px 8px 0;
+  margin-bottom: 11px;
+}
+
+.btn {
+  font-family: var(--font-archivo, 'Archivo', sans-serif);
+  font-weight: 700;
+  font-size: 12px;
+  text-align: center;
+  background: #26190C;
+  color: #FDFBF6;
+  border-radius: 10px;
+  padding: 9px 0;
+}
+
+.caption {
+  text-align: center;
+  font-size: 12px;
+  font-style: italic;
+  color: #5C4A33;
+  margin-top: 12px;
+}

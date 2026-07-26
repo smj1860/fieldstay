@@ -1389,18 +1389,27 @@ export interface GuidebookSponsor {
 }
 
 export interface GuidebookPropertyConfig {
-  id:                     string
-  org_id:                 string
-  property_id:            string
-  slug:                   string
-  check_in_instructions:  string | null
-  check_out_instructions: string | null
-  wifi_network:           string | null
-  wifi_password:          string | null
-  house_rules:            string | null
-  is_published:           boolean
-  created_at:             string
-  updated_at:             string
+  id:                        string
+  org_id:                    string
+  property_id:               string
+  slug:                      string
+  check_in_instructions:     string | null
+  check_out_instructions:    string | null
+  wifi_network:              string | null
+  wifi_password:             string | null
+  house_rules:               string | null
+  is_published:              boolean
+  hero_photo_storage_path:   string | null
+  created_at:                string
+  updated_at:                string
+}
+
+export interface GuidebookOfferRedemption {
+  id:         string
+  org_id:     string
+  sponsor_id: string
+  booking_id: string | null
+  opened_at:  string
 }
 
 export interface GuidebookGuestSmsOptin {
@@ -1733,6 +1742,7 @@ export interface Database {
       guidebook_sponsors:          { Row: GuidebookSponsor;         Insert: Partial<GuidebookSponsor>;         Update: Partial<GuidebookSponsor>;         Relationships: [] }
       guidebook_property_configs:  { Row: GuidebookPropertyConfig;  Insert: Partial<GuidebookPropertyConfig>;  Update: Partial<GuidebookPropertyConfig>;  Relationships: [] }
       guidebook_guest_sms_optins:  { Row: GuidebookGuestSmsOptin;   Insert: Partial<GuidebookGuestSmsOptin>;   Update: Partial<GuidebookGuestSmsOptin>;   Relationships: [] }
+      guidebook_offer_redemptions: { Row: GuidebookOfferRedemption; Insert: Partial<GuidebookOfferRedemption>; Update: Partial<GuidebookOfferRedemption>; Relationships: [] }
       stay_extension_requests:     { Row: StayExtensionRequest;     Insert: Partial<StayExtensionRequest>;     Update: Partial<StayExtensionRequest>;     Relationships: [] }
 
       // ── In-app notifications (bell) ─────────────────────────

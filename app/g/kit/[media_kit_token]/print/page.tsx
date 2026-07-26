@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import { Archivo, Source_Serif_4 } from 'next/font/google'
 import { createServiceClient } from '@/lib/supabase/server'
-import { MediaKitClient } from './media-kit-client'
+import { PrintKit } from './print-kit'
 import type { GuidebookSponsor } from '@/types/database'
 
 const archivo = Archivo({
@@ -18,25 +18,37 @@ const sourceSerif4 = Source_Serif_4({
   display: 'swap',
 })
 
-export default async function MediaKitPage({
+export default async function PrintKitPage({
   params,
 }: {
   params: Promise<{ media_kit_token: string }>
 }) {
   const { media_kit_token } = await params
-  const supabase = createServiceClient({ publicSurface: 'g-kit--media-kit-token-' })
+  const supabase = createServiceClient({ publicSurface: 'g-kit--media-kit-token-print' })
 
   const { data: sponsor } = await supabase
     .from('guidebook_sponsors')
-    .select('id, status, business_name, business_description, custom_offer_text, address, media_kit_token, slot_type, slot_context, offer_type, offer_value, offer_item')
+    .select('id, status, business_name, business_description, custom_offer_text, address, media_kit_token, slot_type, slot_context, offer_type, offer_value, offer_item, org_id')
     .eq('media_kit_token', media_kit_token)
     .maybeSingle()
 
   if (!sponsor) notFound()
 
+  const { data: org } = await supabase
+    .from('organizations')
+    .select('name')
+    .eq('id', sponsor.org_id)
+    .maybeSingle()
+
+  const kitUrl = `${process.env.NEXT_PUBLIC_APP_URL}/g/kit/${sponsor.media_kit_token}`
+
   return (
     <div className={`${archivo.variable} ${sourceSerif4.variable}`}>
-      <MediaKitClient sponsor={sponsor as GuidebookSponsor} />
+      <PrintKit
+        sponsor={sponsor as GuidebookSponsor}
+        orgName={org?.name ?? null}
+        kitUrl={kitUrl}
+      />
     </div>
   )
 }
