@@ -6,7 +6,10 @@ vi.mock('@/lib/auth', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => {
   const send = vi.fn()
-  return { inngest: { send }, sendEventAsync: (...args: unknown[]) => send(...args) }
+  return {
+    inngest: { send },
+    sendEventAsync: (...args: unknown[]) => { void Promise.resolve(send(...args)).catch(() => undefined) },
+  }
 })
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
 vi.mock('@/lib/ical/conflict-detection', () => ({ detectAndFlagOverlaps: vi.fn() }))
