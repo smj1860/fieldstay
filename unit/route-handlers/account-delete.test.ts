@@ -11,7 +11,7 @@ vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
 vi.mock('@/lib/audit', () => ({
-  logAuditEvent: vi.fn(async () => undefined),
+  logAuditEvents: vi.fn(async () => undefined),
 }))
 vi.mock('@/lib/integrations/vault', () => ({
   revokeIntegrationToken: vi.fn(async () => undefined),
@@ -26,7 +26,7 @@ vi.mock('@/lib/observability/report-error', () => ({
 import { DELETE } from '@/app/api/account/delete/route'
 import { createServerClient } from '@supabase/ssr'
 import { createServiceClient } from '@/lib/supabase/server'
-import { logAuditEvent } from '@/lib/audit'
+import { logAuditEvents } from '@/lib/audit'
 import { revokeIntegrationToken } from '@/lib/integrations/vault'
 import { stripe } from '@/lib/stripe/client'
 import { reportError } from '@/lib/observability/report-error'
@@ -155,7 +155,7 @@ describe('DELETE /api/account/delete', () => {
 
     expect(res.status).toBe(503)
     expect(admin.auth.admin.deleteUser).not.toHaveBeenCalled()
-    expect(logAuditEvent).not.toHaveBeenCalled()
+    expect(logAuditEvents).not.toHaveBeenCalled()
     expect(reportError).toHaveBeenCalledWith(
       expect.any(Error),
       expect.objectContaining({ site: 'route.account.delete.stripe_cancel' }),
@@ -181,9 +181,9 @@ describe('DELETE /api/account/delete', () => {
 
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith('sub_1')
     expect(stripe.subscriptions.cancel).toHaveBeenCalledWith('sub_rg_1')
-    expect(logAuditEvent).toHaveBeenCalledWith(
+    expect(logAuditEvents).toHaveBeenCalledWith([
       expect.objectContaining({ orgId: 'org_1', actorId: USER_ID, action: 'account.deleted' }),
-    )
+    ])
     expect(revokeIntegrationToken).toHaveBeenCalledWith(USER_ID, 'ownerrez')
     expect(revokeIntegrationToken).toHaveBeenCalledWith(USER_ID, 'kroger')
     expect(admin.auth.admin.deleteUser).toHaveBeenCalledWith(USER_ID)

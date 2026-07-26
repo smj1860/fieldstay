@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies }                   from 'next/headers'
 import { createServerClient }        from '@supabase/ssr'
 import { createServiceClient }       from '@/lib/supabase/server'
-import { logAuditEvent }             from '@/lib/audit'
+import { logAuditEvents }            from '@/lib/audit'
 import { revokeIntegrationToken }    from '@/lib/integrations/vault'
 import { stripe }                    from '@/lib/stripe/client'
 import { reportError }               from '@/lib/observability/report-error'
@@ -105,16 +105,15 @@ export async function DELETE(request: NextRequest) {
   // Only reached if all orgs' Stripe cancels succeeded — write audit events
   // after the full loop so a mid-loop 503 never leaves a premature
   // "account.deleted" record for an org whose subscription is still active.
-  for (const orgId of auditOrgIds) {
-    await logAuditEvent({
-      orgId:   orgId,
+  // logAuditEvents batches the whole set into one insert and never rejects
+  // (swallows and logs internally) — no per-item catch needed.
+  await logAuditEvents(
+    auditOrgIds.map((orgId) => ({
+      orgId,
       actorId: user.id,
-      action:  'account.deleted',
-    }).catch(err => {
-      console.error(`[Account:${user.id}] audit log failed for ${orgId}:`, err)
-      reportError(err, { site: 'route.account.delete.audit_log', orgId })
-    })
-  }
+      action:  'account.deleted' as const,
+    }))
+  )
 
   // Revoke integration tokens — user-level, done once after per-org cleanup
   const { data: connections } = await admin

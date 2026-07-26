@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verify as verifyEd25519, createPublicKey } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
-import { logAuditEvent } from '@/lib/audit'
+import { logAuditEvents } from '@/lib/audit'
 import { isTimestampFresh } from '@/lib/integrations/webhook-verification'
 import { reportError } from '@/lib/observability/report-error'
 
@@ -108,17 +108,16 @@ export async function POST(req: NextRequest) {
       .eq('is_active', true)
       .select('org_id')
 
-    for (const row of updated ?? []) {
-      await logAuditEvent({
+    // logAuditEvents batches the whole set into one insert and never
+    // rejects (swallows and logs internally) — no per-row catch needed.
+    await logAuditEvents(
+      (updated ?? []).map((row) => ({
         orgId:      row.org_id,
-        action:     'sms.consent.revoked',
+        action:     'sms.consent.revoked' as const,
         targetType: 'guidebook_guest_sms_optin',
         metadata:   { reason: text },
-      }).catch(err => {
-        console.error('[Telnyx] audit log failed:', err)
-        reportError(err, { site: 'webhook.telnyx.audit_log.opt_out', orgId: row.org_id ?? undefined })
-      })
-    }
+      }))
+    )
   } else if (text === 'START' || text === 'YES' || text === 'UNSTOP') {
     const { data: updated } = await supabase
       .from('guidebook_guest_sms_optins')
@@ -127,17 +126,16 @@ export async function POST(req: NextRequest) {
       .eq('is_active', false)
       .select('org_id')
 
-    for (const row of updated ?? []) {
-      await logAuditEvent({
+    // logAuditEvents batches the whole set into one insert and never
+    // rejects (swallows and logs internally) — no per-row catch needed.
+    await logAuditEvents(
+      (updated ?? []).map((row) => ({
         orgId:      row.org_id,
-        action:     'sms.consent.restored',
+        action:     'sms.consent.restored' as const,
         targetType: 'guidebook_guest_sms_optin',
         metadata:   { reason: text },
-      }).catch(err => {
-        console.error('[Telnyx] audit log failed:', err)
-        reportError(err, { site: 'webhook.telnyx.audit_log.opt_in', orgId: row.org_id ?? undefined })
-      })
-    }
+      }))
+    )
   }
 
   return NextResponse.json({ received: true })
