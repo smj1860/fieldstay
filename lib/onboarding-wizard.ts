@@ -52,7 +52,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     key:         'power_ups',
     label:       'Power-Ups',
     href:        'power-ups',
-    description: 'Optional integrations that add more automation',
+    description: 'Connect Kroger for inventory automation, plus a few things worth exploring next',
   },
 ]
 

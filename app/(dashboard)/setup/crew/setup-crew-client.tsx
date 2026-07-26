@@ -142,10 +142,17 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
           </form>
         </div>
       ) : (
-        <Button variant="secondary" onClick={() => setView('add')} className="text-sm flex items-center gap-2 w-full justify-center">
-          <Plus className="w-4 h-4" />
-          {crew.length === 0 ? 'Add First Crew Member' : 'Add Another'}
-        </Button>
+        <div className="space-y-2">
+          <Button variant="secondary" onClick={() => setView('add')} className="text-sm flex items-center gap-2 w-full justify-center">
+            <Plus className="w-4 h-4" />
+            {crew.length === 0 ? 'Add First Crew Member' : 'Add Another'}
+          </Button>
+          {crew.length === 0 && (
+            <p className="text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+              Tip: The <a href="/crew-manage" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: 'var(--accent-gold)' }}>Crew section</a> supports bulk CSV import.
+            </p>
+          )}
+        </div>
       )}
 
       <div className="flex items-center gap-3 pt-4 border-t border-themed">

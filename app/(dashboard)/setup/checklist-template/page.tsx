@@ -1,40 +1,10 @@
-import { requireOrgMember } from '@/lib/auth'
-import { RoomLibraryBuilder } from '@/components/templates/room-library-builder'
-import { getRoomTemplatesForOrg } from '@/lib/room-templates/get-room-templates'
-import { applyMasterChecklistToProperties } from './actions'
+import Link from 'next/link'
 import { markStepComplete } from '../actions'
+import { Button } from '@/components/ui/Button'
 
 export default async function OnboardingChecklistTemplatePage() {
-  const { supabase, membership } = await requireOrgMember()
-
-  const [roomsSorted, { data: org }, { data: properties }] = await Promise.all([
-    getRoomTemplatesForOrg(supabase, membership.org_id),
-    supabase
-      .from('organizations')
-      .select('bedroom_room_template_id, bathroom_room_template_id')
-      .eq('id', membership.org_id)
-      .single(),
-    supabase.from('properties').select('id').eq('org_id', membership.org_id).eq('is_active', true),
-  ])
-
-  const propertyIds = (properties ?? []).map((p) => p.id as string)
-  const hasRoomTemplateConfig =
-    !!org?.bedroom_room_template_id ||
-    !!org?.bathroom_room_template_id ||
-    roomsSorted.some((r) => r.autoInclude)
-
   async function continueAction() {
     'use server'
-    // hasRoomTemplateConfig/propertyIds close over the values fetched
-    // above — no re-query needed. Any room edit made on this page already
-    // revalidates this route (every room-template mutation in
-    // templates/checklist/actions.ts calls revalidatePath('/setup/
-    // checklist-template')), so continueAction is always bound to the
-    // render the PM is actually looking at when they click it — no
-    // staleness risk.
-    if (hasRoomTemplateConfig && propertyIds.length > 0) {
-      await applyMasterChecklistToProperties(propertyIds)
-    }
     await markStepComplete('checklist_template', '/setup/maintenance-template')
   }
 
@@ -42,7 +12,7 @@ export default async function OnboardingChecklistTemplatePage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-          Turnover Checklist — Room Library
+          Turnover Checklist
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Every property already has a real turnover checklist — nothing to
@@ -67,14 +37,28 @@ export default async function OnboardingChecklistTemplatePage() {
             </ul>
           </div>
         </div>
+        <div className="mt-4 rounded-xl border p-4" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            Want to build reusable room templates, or bulk-import a checklist
+            you already have written up for a property? Both live under{' '}
+            <Link href="/templates/checklist" className="underline font-medium" style={{ color: 'var(--accent-gold)' }}>
+              Templates → Turnover Checklist
+            </Link>
+            {' '}— the room library there works the same before or after
+            onboarding, so there&apos;s nothing you need to do here right now.
+            (A specific property&apos;s CSV/DOCX import lives on that
+            property&apos;s own Setup → Checklist page.)
+          </p>
+        </div>
       </div>
 
-      <RoomLibraryBuilder
-        initialRooms={roomsSorted}
-        canManage={membership.role !== 'viewer' && membership.role !== 'crew'}
-        continueAction={continueAction}
-        continuePropertyCount={propertyIds.length}
-      />
+      <div className="pt-4 border-t border-themed">
+        <form action={continueAction}>
+          <Button type="submit">
+            Continue →
+          </Button>
+        </form>
+      </div>
     </div>
   )
 }

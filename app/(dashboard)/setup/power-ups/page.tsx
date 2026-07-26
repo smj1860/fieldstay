@@ -3,39 +3,17 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { markStepComplete } from '../actions'
 import { PowerUpsStep } from './power-ups-step'
 
-const POWER_UP_DEFS = [
-  {
-    providerId: 'ownerrez',
-    title: 'OwnerRez',
-    description: 'Sync bookings and properties automatically from OwnerRez.',
-    href: '/settings/integrations',
-  },
-  {
-    providerId: 'kroger',
-    title: 'Kroger',
-    description: 'Automatically build a Kroger cart when inventory drops below par.',
-    href: '/settings/integrations',
-  },
-]
-
 export default async function PowerUpsPage() {
   const { membership } = await requireOrgMember()
 
   const admin = createServiceClient({ authorizedBy: membership })
-  const { data: connections } = await admin
+  const { data: krogerConnection } = await admin
     .from('integration_connections')
-    .select('provider_id, status')
+    .select('id')
     .eq('org_id', membership.org_id)
+    .eq('provider_id', 'kroger')
     .eq('status', 'active')
-
-  const connectedIds = new Set((connections ?? []).map((c) => c.provider_id))
-
-  const powerUps = POWER_UP_DEFS.map((def) => ({
-    title: def.title,
-    description: def.description,
-    href: def.href,
-    connected: connectedIds.has(def.providerId),
-  }))
+    .maybeSingle()
 
   async function finishAction() {
     'use server'
@@ -46,14 +24,16 @@ export default async function PowerUpsPage() {
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>
-          Power-Ups
+          You&apos;re All Set
         </h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Optional integrations that automate more of your workflow. Skip for now and connect later.
+          Your PMS is already connected from an earlier step, and your templates have a
+          head start. Kroger is the one optional integration left — everything else below
+          is just worth knowing about, not something to finish right now.
         </p>
       </div>
 
-      <PowerUpsStep powerUps={powerUps} finishAction={finishAction} />
+      <PowerUpsStep krogerConnected={!!krogerConnection} finishAction={finishAction} />
     </div>
   )
 }
