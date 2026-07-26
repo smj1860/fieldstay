@@ -101,7 +101,9 @@ lib/integrations/
   providers/
     ownerrez.ts / ownerrez-api.ts
     kroger.ts / kroger-token.ts
-    hostaway.ts             — authType: 'api_key', not OAuth
+    hostaway.ts             — authType: 'api_key', not OAuth. DISABLED — not
+                              registered in the providers map below. See
+                              "Hostaway Integration" section further down.
     hospitable.ts / hospitable-token.ts
 
 app/api/integrations/[provider]/
@@ -350,9 +352,41 @@ oneclick callback and `/connect/finish` routes.
 
 ## Hostaway Integration
 
-API-key auth (not OAuth) — `authType: 'api_key'` in the registry.
-`lib/integrations/providers/hostaway.ts`, initial sync in
-`lib/inngest/functions/hostaway/initial-sync.ts`.
+**Status: DISABLED (product decision, 2026-07-25) — not reachable anywhere
+in the app.** Do not build on top of this integration or point marketing/
+onboarding surfaces at it until it's re-enabled.
+
+API-key auth (not OAuth) — `authType: 'api_key'`. The implementation is
+intact and functional at `lib/integrations/providers/hostaway.ts`, with
+initial sync at `lib/inngest/functions/hostaway/initial-sync.ts` — it's
+just fully unregistered:
+- Not in `lib/integrations/registry.ts`'s providers map (import + entry
+  commented out)
+- Its Inngest sync job is not in `app/api/inngest/route.ts`'s `serve()`
+  call
+- Excluded from every connect entry point: `HIDDEN_PROVIDER_IDS` in
+  `app/(dashboard)/settings/integrations/integrations-client.tsx` and
+  `PMS_PROVIDER_IDS` in `app/(dashboard)/setup/pms/page.tsx`
+
+**Why:** `hostaway/initial-sync.ts` never fires `booking/confirmed` —
+unlike `hospitable/initial-sync.ts` and `hospitable/incremental-sync.ts`,
+which do — so a connected org would sync in properties/bookings with no
+automatic revenue posting to owner ledgers, unlike every other live PMS
+integration. That gap is what originally got it hidden from the UI; on
+2026-07-25 the call was made to fully unregister it (registry + Inngest)
+rather than leave a half-wired integration reachable by URL.
+
+**To re-enable:**
+1. Uncomment the registry entry in `lib/integrations/registry.ts` and the
+   Inngest route registration in `app/api/inngest/route.ts`.
+2. Re-add the connect UI/actions — see the commented-out blocks in
+   `app/(dashboard)/settings/integrations/integrations-client.tsx` and
+   `app/(dashboard)/setup/pms/page.tsx`.
+3. The actual blocker, not just paperwork: make
+   `hostaway/initial-sync.ts` fire `booking/confirmed` so revenue
+   automation works the same way it does for OwnerRez/Hospitable, then add
+   `'hostaway'` to `REVENUE_AUTOMATION_PROVIDER_IDS` in
+   `app/(dashboard)/ops/page.tsx`.
 
 ## Hospitable Integration
 

@@ -356,7 +356,7 @@ export default async function HospitablePage() {
           ) : (
             <div className="max-w-sm mx-auto">
               <Link
-                href="/signup?provider=hospitable&next=/api/integrations/hospitable/connect"
+                href="/signup?provider=hospitable&next=/onboarding"
                 className="block w-full bg-brand-800 text-white font-bold px-8 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg text-center mb-4"
               >
                 Create your FieldStay account

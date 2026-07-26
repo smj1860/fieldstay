@@ -90,7 +90,7 @@ export default function PricingSection({ isLoggedIn }: Readonly<PricingSectionPr
 
   const ctaHref = isLoggedIn
     ? "/api/integrations/hospitable/connect"
-    : "/signup?provider=hospitable&next=/api/integrations/hospitable/connect";
+    : "/signup?provider=hospitable&next=/onboarding";
 
   return (
     <div>

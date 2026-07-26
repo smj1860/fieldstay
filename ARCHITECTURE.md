@@ -328,10 +328,12 @@ Real-time and forecast weather used by the guidebook morning/evening SMS crons.
 Rain probability and temperature determine which sponsor slot type fires and whether
 a rain-alert override takes precedence over a dinner recommendation.
 
-### Hostaway (PMS)
+### Hostaway (PMS) — DISABLED
 
-OAuth2 connection with API key auth. Property and booking sync adapter built at
-`lib/inngest/functions/hostaway/`. Integration listing pending marketplace approval.
+API-key auth (not OAuth). Property and booking sync adapter built at
+`lib/inngest/functions/hostaway/`, but fully unregistered as of 2026-07-25 —
+not reachable anywhere in the app. See CLAUDE_INTEGRATIONS.md's "Hostaway
+Integration" section for why and the re-enable checklist.
 
 ### Dexie.js ↔ Supabase
 

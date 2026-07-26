@@ -84,7 +84,7 @@ export default function PricingSection({ isLoggedIn }: Readonly<PricingSectionPr
 
   const ctaHref = isLoggedIn
     ? "/api/integrations/ownerrez/connect"
-    : "/signup?provider=ownerrez&next=/api/integrations/ownerrez/connect";
+    : "/signup?provider=ownerrez&next=/onboarding";
 
   return (
     <div>

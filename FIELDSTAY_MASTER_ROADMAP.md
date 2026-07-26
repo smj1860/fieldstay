@@ -62,9 +62,17 @@ They are not represented in Tracks 1–9 below.
 - Per-property fan-out for detail API calls (memoized Inngest steps)
 - Guidebook property configs auto-created from sync with slug generation
 
-### Hostaway Integration ✅ (adapter built, marketplace listing pending)
-- Property and booking sync adapter at `lib/inngest/functions/hostaway/`
-- O(n²) array scan replaced with Map-based O(1) lookup
+### Hostaway Integration ⛔ DISABLED (2026-07-25) — not reachable, not live
+- Adapter is built and functional at `lib/integrations/providers/hostaway.ts`
+  and `lib/inngest/functions/hostaway/`, but fully unregistered: not in
+  `lib/integrations/registry.ts`, not in `app/api/inngest/route.ts`'s
+  `serve()` call, and excluded from every connect UI entry point
+- Blocker: its sync never fires `booking/confirmed`, so a connected org
+  would get properties/bookings synced in with no automatic revenue
+  posting — unlike OwnerRez/Hospitable. See CLAUDE_INTEGRATIONS.md's
+  "Hostaway Integration" section for the full re-enable checklist
+- O(n²) array scan replaced with Map-based O(1) lookup (this fix shipped;
+  it just isn't reachable while the integration is disabled)
 
 ### Crew PWA — Dexie.js ✅ (PowerSync replaced)
 - Full offline-first capability via Dexie.js IndexedDB + custom mutation outbox
@@ -406,7 +414,7 @@ No Google API integration needed until 2027.
 - Self-Funding Guidebook ✅
 - RepuGuard ✅
 - OwnerRez Integration (full) ✅
-- Hostaway adapter ✅
+- Hostaway adapter ⛔ built, but DISABLED (2026-07-25) — not live, not reachable
 - Crew PWA (Dexie) ✅
 - 10DLC submitted, pending carrier verification ✅
 
