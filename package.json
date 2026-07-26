@@ -67,6 +67,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^9.16.0",
     "eslint-config-next": "^16.2.9",
+    "eslint-plugin-sonarjs": "^4.2.0",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.10",
     "supabase": "^2.108.0",

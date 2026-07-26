@@ -1,6 +1,7 @@
 import nextCoreWebVitals from 'eslint-config-next/core-web-vitals'
 import nextTypescript from 'eslint-config-next/typescript'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
+import sonarjs from 'eslint-plugin-sonarjs'
 
 // eslint-config-next only wires up a handful of jsx-a11y rules (alt-text,
 // aria-props, aria-proptypes, aria-unsupported-elements,
@@ -81,7 +82,24 @@ const eslintConfig = [
     // express live in unit/guardrails/ — see CLAUDE.md's "Structural
     // enforcement" section for the system and the meta-rule.
     files: ['app/**/*.{ts,tsx}', 'lib/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}'],
+    plugins: { sonarjs },
     rules: {
+      // ── CLAUDE.md "Code Quality Standards" — previously SonarCloud-only,
+      // caught on the PR after the fact rather than locally in `npm run
+      // lint`. Same rule engine SonarCloud itself uses (sonarjs), same
+      // default thresholds CLAUDE.md documents.
+      //
+      // 'warn', not 'error': turning these on surfaced 236 pre-existing
+      // violations across the codebase (64 cognitive-complexity, 122
+      // no-nested-conditional, 27 no-nested-functions, 12
+      // no-nested-template-literals, 11 nested-control-flow) — same
+      // rollout shape as the jsx-a11y block above. Ratchet to 'error' once
+      // those are cleared; new code should not add to this count.
+      'sonarjs/cognitive-complexity': ['warn', 15],
+      'sonarjs/no-nested-functions': ['warn', { threshold: 4 }],
+      'sonarjs/nested-control-flow': ['warn', { maximumNestingLevel: 4 }],
+      'sonarjs/no-nested-conditional': 'warn',
+      'sonarjs/no-nested-template-literals': 'warn',
       'no-restricted-syntax': ['error',
         {
           selector: "CallExpression[callee.property.name='from'] > Literal[value='memberships']",

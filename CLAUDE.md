@@ -853,11 +853,20 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 
 ### Complexity & Structure
 - **Cognitive complexity ≤ 15** per function — extract named helper functions,
-  custom hooks, or named predicates to reduce branching
+  custom hooks, or named predicates to reduce branching. ESLint-enforced
+  (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) — currently `warn`
+  while the 236 pre-existing violations surfaced at rollout get cleared,
+  same pattern as the jsx-a11y block; new code should not add to that count
 - **Nesting depth ≤ 4** — use guard clauses and early returns to flatten nested
-  `if` blocks rather than indenting further
+  `if`/`for`/`while`/`switch`/`try` blocks rather than indenting further, and
+  extract named sibling functions rather than nesting closures more than 4
+  levels deep. ESLint-enforced (`sonarjs/nested-control-flow` for blocks,
+  `sonarjs/no-nested-functions` for closures) — `warn` for the same rollout
+  reason as above
 - **No nested template literals** — extract inner expressions to named variables
-  first, or use `cn()` for className construction if already imported in the file
+  first, or use `cn()` for className construction if already imported in the file.
+  ESLint-enforced (`sonarjs/no-nested-template-literals`) — `warn` for the same
+  rollout reason as above
 - **No invariant conditionals** — a ternary where both branches return the same
   value is always a bug; review intent before fixing
 
@@ -901,7 +910,9 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 - Remove all unused imports before committing — run `npx tsc --noEmit` to
   surface them if ESLint is not configured to catch them
 - No chained ternary expressions — break them into `if/else` blocks or a
-  named classification function
+  named classification function. ESLint-enforced (`sonarjs/no-nested-conditional`,
+  `eslint.config.mjs`) — `warn` while pre-existing violations get cleared,
+  same rollout pattern as the jsx-a11y block
 
 ### Accessibility Checklist (apply to all new UI)
 - Non-native click targets → `role`, `tabIndex`, `onKeyDown` or convert to `<button>`
@@ -1072,7 +1083,12 @@ following them stops being a memory test. Four layers, checked in CI via
    `supabase.raw()`, reading `SUPABASE_SERVICE_ROLE_KEY` outside
    `lib/supabase/server.ts`, `Math.random`, bare `window`. A legitimate
    exception gets an inline `eslint-disable-next-line` WITH a one-line
-   justification (see the sampling/jitter sites for the pattern).
+   justification (see the sampling/jitter sites for the pattern). The same
+   block also runs `eslint-plugin-sonarjs` for the Code Quality Standards
+   thresholds above (cognitive complexity, nesting depth, nested
+   ternaries/template literals) — previously SonarCloud-only (caught on the
+   PR, not locally); currently `warn` pending a cleanup pass on the 236
+   pre-existing violations the rollout surfaced, then ratchets to `error`.
 
 2. **Guardrail tests** (`unit/guardrails/`) — cross-file invariants no
    per-file rule can express:
