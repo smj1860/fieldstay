@@ -316,8 +316,7 @@ export async function submitWorkOrderSignOff(
     targetType: 'work_order',
     targetId:   wo.id,
     metadata:   {
-      actual_cost: actualCost ?? null,
-      has_photos:  Boolean(photos?.length),
+      has_photos: Boolean(photos?.length),
     },
   })
 

@@ -93,13 +93,13 @@ function findOffenders(): string[] {
 const EXCEPTIONS: Record<string, string> = {
   'app/api/account/delete/route.ts:44':
     'Per-org-membership loop (owner-only checks + Stripe subscription cancel) — bounded by the deleting user\'s own org count (almost always 1), and each iteration does genuinely different work (a distinct Stripe API call per subscription) that cannot be batched.',
-  'app/(dashboard)/maintenance/actions.ts:730':
+  'app/(dashboard)/maintenance/actions.ts:729':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:32':
     'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:730 — same reasoning.',
   'app/(dashboard)/properties/clone-actions.ts:113':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
-  'app/actions/work-order-public.ts:326':
+  'app/actions/work-order-public.ts:325':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
   'app/api/work-orders/[token]/photos/route.ts:105':
     'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:326.',

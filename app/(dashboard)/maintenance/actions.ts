@@ -607,7 +607,6 @@ export async function logActualCost(
       action:     'work_order.cost.logged',
       targetType: 'work_order',
       targetId:   workOrderId,
-      metadata:   { actual_cost: data.actual_cost },
     })
 
     revalidatePath(`/maintenance/${workOrderId}`)
