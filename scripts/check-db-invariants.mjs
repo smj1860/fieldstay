@@ -15,6 +15,10 @@
  *   3. any FK column without a covering index
  *   4. any anon grant on a public table (all were revoked by
  *      20260724130000_revoke_stale_anon_table_grants.sql; new ones are drift)
+ *   5. any column named like a dedup/idempotency key (dedupe_key, dedup_key,
+ *      source_reference_id) with no real UNIQUE/partial-unique index behind
+ *      it — CLAUDE.md documents these as the dedup mechanism, but nothing
+ *      previously verified the DB-level guarantee actually exists
  *
  * Runs in the CI `db-invariants` job against the DEDICATED E2E PROJECT
  * (docs/E2E_SETUP.md) — never production; CI must not hold prod credentials.
@@ -137,6 +141,20 @@ if (report.anon_grant_tables.length > 0) {
   )
 }
 
+// ── 5. Dedup/idempotency-key columns without a real unique index ──────────
+if (report.dedup_columns_without_unique_index.length > 0) {
+  const rows = report.dedup_columns_without_unique_index
+    .map((d) => `  ${d.table}.${d.column}`)
+    .join('\n')
+  failures.push(
+    `Dedup-key-named columns with no UNIQUE/partial-unique index:\n${rows}\n` +
+      '  A column named like a dedup key (dedupe_key/dedup_key/source_reference_id) ' +
+      'must actually be backed by a real UNIQUE or partial-unique index — see ' +
+      'notifications.dedupe_key or owner_transactions.source_reference_id for the ' +
+      'pattern. Without it, a retried/replayed write can silently create a duplicate row.'
+  )
+}
+
 // ── Verdict ───────────────────────────────────────────────────────────────
 if (failures.length > 0) {
   console.error(`DB invariant check FAILED (${failures.length} finding${failures.length === 1 ? '' : 's'}):\n`)
@@ -146,5 +164,5 @@ if (failures.length > 0) {
 
 console.log(
   'DB invariants OK — RLS on every table, no unexpected deny-all tables, ' +
-    'all FK columns indexed, zero anon grants.'
+    'all FK columns indexed, zero anon grants, all dedup-key columns indexed unique.'
 )
