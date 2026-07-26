@@ -29,6 +29,11 @@ export default async function OnboardingInventoryTemplatePage() {
             levels per property — no auto-apply, so nothing changes on a
             property until you assign one.
           </p>
+          <p className="text-sm mt-2" style={{ color: 'var(--text-primary)' }}>
+            Already have a supply list elsewhere? Choose the{' '}
+            <strong>From CSV</strong> tab when building a template to
+            bulk-import it instead of starting from the starter list.
+          </p>
         </div>
       </div>
 

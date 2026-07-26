@@ -4,6 +4,7 @@ import { AlertTriangle } from 'lucide-react'
 import { requireOrgMember } from '@/lib/auth'
 import { getRoomTemplatesForOrg } from '@/lib/room-templates/get-room-templates'
 import { RoomLibraryBuilder } from '@/components/templates/room-library-builder'
+import { ApplyToPropertiesButton } from './apply-to-properties-button'
 import { Card } from '@/components/ui/Card'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
@@ -70,9 +71,10 @@ export default async function TemplatesChecklistPage() {
         </p>
       </div>
 
-      <section>
+      <section className="space-y-4">
         <h2 className="section-header">Room Library</h2>
         <RoomLibraryBuilder initialRooms={roomsSorted} canManage={canManage} />
+        {canManage && <ApplyToPropertiesButton propertyIds={propertyRows.map((p) => p.id)} />}
       </section>
 
       <section>
