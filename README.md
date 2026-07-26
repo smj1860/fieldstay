@@ -297,9 +297,11 @@ Real-time and forecast weather data used to drive contextual guest SMS messages.
 Rain probability, temperature, and condition codes determine which sponsor slot
 type fires in the morning and evening cron functions.
 
-### Hostaway (PMS)
-OAuth2 connection with API key auth. Property and booking sync adapter built and
-in the codebase (`lib/inngest/functions/hostaway/`). Integration listing pending.
+### Hostaway (PMS) — DISABLED
+API-key auth (not OAuth). Property and booking sync adapter built and in the
+codebase (`lib/inngest/functions/hostaway/`), but fully unregistered as of
+2026-07-25 — not reachable anywhere in the app. See CLAUDE_INTEGRATIONS.md's
+"Hostaway Integration" section for why and the re-enable checklist.
 
 ### Hospitable (PMS)
 OAuth2 application submitted. Integration in design phase — not yet built.
