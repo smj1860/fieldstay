@@ -33,10 +33,10 @@ anything missed.
 |---|---|---|
 | 0 | DB prep: `property_assets` touch trigger, `updated_at` indexes | ✅ Done — migration `20260724100000_crew_sync_delta_foundation.sql`, applied to prod **and** e2e project |
 | 1 | Delta-sync foundation (cursors, delta pulls, reconciliation) | ✅ Done — merged and live in production since 2026-07-24 |
-| 2 | Broadcast infrastructure (DB triggers + RLS on `realtime.messages`) | ⬜ **This document, section 2** |
-| 3 | Client cutover (single private broadcast channel, behind a flag) | ⬜ Section 3 |
-| 4 | Outbox retry backoff | ⬜ Section 4 |
-| 5 | Rollout, acceptance test, old-code deletion, convention + guardrail | ⬜ Section 5 |
+| 2 | Broadcast infrastructure (DB triggers + RLS on `realtime.messages`) | ✅ Done — migration `20260725191358_crew_sync_broadcast_triggers.sql`, merged via PR #508 (2026-07-26), applied to prod **and** e2e project. Deploys dark per design — no client subscribes yet |
+| 3 | Client cutover (single private broadcast channel, behind a flag) | ✅ Done — merged via PR #508 (2026-07-26), `lib/dexie/context.tsx`. Ships dormant: `NEXT_PUBLIC_CREW_SYNC_V2` defaults off (unset in `.env.example`) |
+| 4 | Outbox retry backoff | ✅ Done — merged via PR #508 (2026-07-26), `lib/dexie/syncService.ts`'s `computeNextAttemptAt()` |
+| 5 | Rollout, acceptance test, old-code deletion, convention + guardrail | ⬜ **The only phase still open** — see section 5 below |
 
 ### Phase 1 artifacts you will build on (read these before touching code)
 
