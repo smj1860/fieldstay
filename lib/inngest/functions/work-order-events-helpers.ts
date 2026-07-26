@@ -252,7 +252,7 @@ export async function sendVendorDispatchSms(
       window_line:   windowLine,
       portal_url:    context.publicUrl,
     })
-    await sendSMS(e164, smsBody)
+    await sendSMS(e164, smsBody, { orgId })
   } catch (smsErr) {
     console.error('[WO dispatch-to-vendor] SMS failed (non-fatal):', smsErr)
     reportError(smsErr, { site: 'inngest.work-order-dispatch.sms', orgId })

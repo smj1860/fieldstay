@@ -110,18 +110,89 @@ interface SendSmsResult {
 }
 
 /**
+ * Returns a delivered-looking result (and writes demo_activity_log) when the
+ * org is the roadshow demo tenant; null when it is a real org and the send
+ * should proceed normally.
+ *
+ * The demo modules are imported lazily so this file — which is imported by
+ * template helpers across the app — does not pull the Supabase service client
+ * and its next/headers dependency into every module graph that touches SMS
+ * copy. On the overwhelmingly common path (no orgId, or a real org) nothing
+ * here is loaded at all.
+ */
+async function suppressIfDemoOrg(
+  orgId:    string,
+  toE164:   string,
+  body:     string,
+  category: SmsCategory | undefined,
+): Promise<SendSmsResult | null> {
+  try {
+    const [{ isDemoOrg }, { simulateOrSend, redactPhone }] = await Promise.all([
+      import('@/lib/demo/org'),
+      import('@/lib/demo/simulate'),
+    ])
+
+    if (!(await isDemoOrg(orgId))) return null
+
+    return await simulateOrSend<SendSmsResult>(
+      true,
+      {
+        orgId,
+        kind:    'sms',
+        // Redacted for the same reason the [sms:disabled] log below is:
+        // bodies carry door codes, and this row is readable by every member
+        // of the org. Length is enough to prove the send was composed.
+        payload: {
+          to:         redactPhone(toE164),
+          bodyLength: body.length,
+          category:   category ?? 'transactional',
+        },
+      },
+      // Unreachable — simulateOrSend only calls realSend when isDemo is false.
+      async () => ({ sent: false, reason: 'unreachable' }),
+      { sent: true },
+    )
+  } catch (err) {
+    // A failure to resolve demo status must not silently become a real send
+    // to a fake 555 number during the demo. Fail CLOSED: suppress the send
+    // and say why.
+    console.error('[sms:demo-check] failed — suppressing send', {
+      orgId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return { sent: false, reason: 'demo status check failed' }
+  }
+}
+
+/**
  * Sends an SMS via Telnyx. Gated behind SMS_ENABLED — until 10DLC registration
  * clears, this logs the would-be send instead of calling the Telnyx API.
  *
  * `category: 'nudge'` additionally subjects the send to the platform-wide
  * daily nudge budget (see claimNudgeBudgetSlot above). The default
  * 'transactional' never consults the budget.
+ *
+ * `orgId` opts the send into demo-org suppression: when that org has
+ * is_demo = true, the message is recorded in demo_activity_log and answered
+ * with a delivered-looking result instead of dispatched. This check lives
+ * HERE, at the same chokepoint as SMS_ENABLED, precisely so it cannot be
+ * forgotten at an individual call site — the same reasoning that put the
+ * SMS_ENABLED gate in this function rather than in its 12 callers.
  */
 export async function sendSMS(
   toE164: string,
   body: string,
-  opts?: { category?: SmsCategory }
+  opts?: { category?: SmsCategory; orgId?: string }
 ): Promise<SendSmsResult> {
+  // Demo suppression is checked BEFORE the SMS_ENABLED early-return: the
+  // demo's whole point is showing a completed send, so the activity row must
+  // be written even while SMS is globally disabled — and if SMS_ENABLED is
+  // flipped to true before the event, the demo org must still never dispatch.
+  if (opts?.orgId) {
+    const demoResult = await suppressIfDemoOrg(opts.orgId, toE164, body, opts.category)
+    if (demoResult) return demoResult
+  }
+
   if (process.env.SMS_ENABLED !== 'true') {
     // Never log the guest's phone number or message body — bodies can
     // contain door codes. Redacted to last 4 digits + length only, enough

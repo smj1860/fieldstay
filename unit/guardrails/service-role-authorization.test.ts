@@ -32,6 +32,7 @@ const PROOF_PATTERNS: RegExp[] = [
   /verify[A-Za-z]*Signature/,             // provider webhook HMAC/Ed25519 verification (e.g. Telnyx)
   /\.eq\(\s*['"][a-z_]*token['"]/,        // opaque-token lookup (owner portal, quote, guidebook, invite, completion)
   /platform_staff/,                       // staff-gated admin surfaces
+  /demoSecretMatches/,                    // /demo/* shared-secret gate (constant-time, fails closed when unset)
 ]
 
 // Files allowed to use the service client with NO authorization step, each

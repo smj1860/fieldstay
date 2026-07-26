@@ -83,7 +83,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
 
         // 'nudge': guest marketing message — counts against the platform-wide
         // daily SMS budget (the PM notification below is operational and doesn't)
-        const result = await sendSMS(guestPhoneE164, text, { category: 'nudge' })
+        const result = await sendSMS(guestPhoneE164, text, { category: 'nudge', orgId })
 
         if (!result.sent) {
           // SMS failed — roll back the claim so a retry can attempt again
@@ -141,7 +141,7 @@ export const guidebookStayExtensionHandler = inngest.createFunction(
             `${booking?.checkout_date}, ${gapDays} day${gapDays !== 1 ? 's' : ''} ` +
             `before next booking.${discountLine} Guest was messaged via the guidebook.`
 
-          const result = await sendSMS(e164, text)
+          const result = await sendSMS(e164, text, { orgId })
 
           if (!result.sent) {
             // SMS failed — roll back the claim so a retry can attempt again

@@ -118,7 +118,7 @@ describe('actions/work-order-public', () => {
       })
 
       expect(result.success).toBe(true)
-      expect(sendSMS).toHaveBeenCalledWith('+12065551234', 'sms body')
+      expect(sendSMS).toHaveBeenCalledWith('+12065551234', 'sms body', { orgId: 'org_1' })
     })
 
     it('rejects a work order id that does not belong to the caller org (IDOR check)', async () => {

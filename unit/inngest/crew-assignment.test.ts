@@ -115,7 +115,7 @@ describe('handleCrewAssigned', () => {
       expect.objectContaining({ org_name: 'Lake Martin Delivery' }),
       [{ propertyName: 'Lake House', checkoutDatetime: '2026-07-25T16:00:00.000Z', windowMinutes: 300 }],
     )
-    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'Your turnovers: rendered body')
+    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'Your turnovers: rendered body', { orgId: 'org_1' })
   })
 
   it('skips both channels when the crew member has no email and no phone', async () => {

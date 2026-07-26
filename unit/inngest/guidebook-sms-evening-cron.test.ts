@@ -189,7 +189,7 @@ describe('guidebookSmsEveningSend (per-guest handler)', () => {
       property_name: 'Lake House',
       offer_line:    'Try The Grill House — a local favorite.',
     })
-    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered sms body', { category: 'nudge' })
+    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered sms body', { category: 'nudge', orgId: 'org_1' })
     expect(releaseDailySmsSlot).not.toHaveBeenCalled()
   })
 

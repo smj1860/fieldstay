@@ -152,7 +152,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
             property_name: property.name,
             offer_line:    rainOfferLine,
           })
-          const res = await sendSMS(optin.phone_e164, rainBody, { category: 'nudge' })
+          const res = await sendSMS(optin.phone_e164, rainBody, { category: 'nudge', orgId })
           if (!res.sent) {
             await releaseDailySmsSlot(supabase, optinId, 'last_morning_sms_date')
           }
@@ -194,7 +194,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
         temperature:   Math.round(weather.temperature),
         offer_line:    offerLine ?? '',
       })
-      const res = await sendSMS(optin.phone_e164, morningBody, { category: 'nudge' })
+      const res = await sendSMS(optin.phone_e164, morningBody, { category: 'nudge', orgId })
 
       if (!res.sent) {
         await releaseDailySmsSlot(supabase, optinId, 'last_morning_sms_date')

@@ -77,27 +77,65 @@ export async function sendOwnerPortalEmail({
   })
 }
 
+/**
+ * Guest-facing pre-arrival email. `orgId` opts the send into demo-org
+ * suppression — the roadshow seed data uses @example.com addresses, and a
+ * live send to those would bounce and cost real domain reputation. Same
+ * chokepoint reasoning as sendSMS's orgId option in lib/sms/telnyx.ts.
+ *
+ * This is deliberately applied ONLY to guest-facing mail. Internal PM mail
+ * (team invites, digests, owner-portal links to the demo operator) stays real
+ * even for the demo org — those are useful to actually receive.
+ */
 export async function sendGuestPreArrivalEmail({
   toEmail,
   guestName,
   propertyName,
   optInUrl,
   guidebookUrl,
+  orgId,
 }: {
   toEmail:      string
   guestName:    string
   propertyName: string
   optInUrl:     string
   guidebookUrl: string
+  orgId?:       string
 }) {
   const html = await renderGuestPreArrivalEmail({ guestName, propertyName, optInUrl, guidebookUrl })
-  return resend.emails.send({
+
+  const dispatch = () => resend.emails.send({
     from:    FROM,
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
     subject: `Get your door code by text — ${propertyName}`,
     html,
   })
+
+  if (!orgId) return dispatch()
+
+  // Lazy import for the same reason as lib/sms/telnyx.ts's: this module is
+  // widely imported and should not drag the Supabase service client into
+  // every graph that sends any email.
+  const [{ isDemoOrg }, { simulateOrSend, redactEmail }] = await Promise.all([
+    import('@/lib/demo/org'),
+    import('@/lib/demo/simulate'),
+  ])
+
+  if (!(await isDemoOrg(orgId))) return dispatch()
+
+  return simulateOrSend(
+    true,
+    {
+      orgId,
+      kind:    'email',
+      payload: { to: redactEmail(toEmail), template: 'guest_pre_arrival', propertyName },
+    },
+    dispatch,
+    // Shaped like a Resend success so the caller's `error`/`data` branching
+    // takes the same path it would in production.
+    { data: { id: `demo_email_${crypto.randomUUID()}` }, error: null } as Awaited<ReturnType<typeof dispatch>>,
+  )
 }
 
 export async function sendGuidebookGracePeriodEmail({

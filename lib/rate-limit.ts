@@ -197,6 +197,20 @@ export const inviteAcceptRatelimit = new Ratelimit({
   prefix:    'rl:invite-accept',
 })
 
+// Roadshow demo surface (/demo/*) — unauthenticated and gated only by a
+// shared secret in a query string that will be printed on a QR code sitting
+// on a trade-show table. /demo/enter MINTS an authenticated session and
+// /demo/reset WIPES the demo org, so secret entropy alone isn't the whole
+// defense: this bounds brute-forcing the key and stops anyone who photographs
+// the QR code from turning reset into a denial-of-demo button mid-pitch.
+// 10/min per IP is far above one person scanning a code.
+export const demoRatelimit = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(10, '1 m'),
+  analytics: false,
+  prefix:    'rl:demo',
+})
+
 // Support chat — 20 messages per minute per user, plus a 100/day cap
 export const supportChatLimiter = new Ratelimit({
   redis,

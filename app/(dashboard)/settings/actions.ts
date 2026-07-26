@@ -765,7 +765,7 @@ export async function inviteCrewMember(
           invite_url: inviteUrl,
         })
         try {
-          await sendSMS(e164, smsBody)
+          await sendSMS(e164, smsBody, { orgId: membership.org_id })
         } catch (smsErr) {
           console.error('[inviteCrewMember] SMS failed (non-fatal):', smsErr)
           reportError(smsErr, { site: 'serverAction.settings.inviteCrewMember.inner', orgId: membership.org_id })
@@ -875,7 +875,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
             invite_url: inviteUrl,
           })
           try {
-            const result = await sendSMS(e164, smsBody)
+            const result = await sendSMS(e164, smsBody, { orgId: membership.org_id })
             if (result.sent) delivered = true
           } catch (smsErr) {
             console.error('[inviteAllUninvitedCrew] SMS failed (non-fatal):', smsErr)

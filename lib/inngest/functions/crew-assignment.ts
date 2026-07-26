@@ -150,7 +150,7 @@ export const handleCrewAssigned = inngest.createFunction(
         }, smsRows)
 
         try {
-          await sendSMS(e164, smsBody)
+          await sendSMS(e164, smsBody, { orgId: org_id })
         } catch (smsErr) {
           console.error('[handleCrewAssigned] SMS failed (non-fatal):', smsErr)
           reportError(smsErr, { site: 'inngest.crew-assigned.sms', orgId: org_id, extra: { crew_member_id } })

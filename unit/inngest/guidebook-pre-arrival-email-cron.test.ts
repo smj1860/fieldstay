@@ -98,6 +98,9 @@ describe('guidebookPreArrivalEmailCron', () => {
       propertyName: 'Lake House',
       optInUrl:     expect.stringContaining('/g/b/tok_abc123/opt-in'),
       guidebookUrl: expect.stringContaining('/g/b/tok_abc123'),
+      // Opts the guest-facing send into demo-org suppression — the roadshow
+      // seed uses @example.com addresses that must never be mailed for real.
+      orgId:        'org_1',
     })
 
     const updateCall = supabase.calls.find((c) => c.table === 'bookings' && c.method === 'update')
