@@ -1173,3 +1173,77 @@ worth adding to this file, add its ESLint rule or `unit/guardrails/` test in
 the same PR — and the CLAUDE.md prose for mechanically-checkable rules
 should stay one line pointing at the check. Prose is for judgment calls;
 enforcement is for everything else.
+
+---
+
+## Manual Audit Checklist — Items With No Guardrail Yet
+
+Every item in the Architectural Conventions & Standing Audit Checklist above
+is either fully automated (a check above catches every instance), partially
+automated (a check narrows the item but a real gap remains), or entirely
+manual (no mechanical check exists — usually because the item requires
+understanding intent/business logic, not just pattern-matching source text).
+This section exists so a self-audit or a fresh audit pass knows exactly
+which items still need a human/AI reviewer's judgment instead of assuming CI
+already covers them. When one of these becomes mechanically checkable, move
+it into Structural Enforcement above and delete it from here — per the
+meta-rule, prose is for judgment calls only.
+
+### Data Integrity & Concurrency
+
+- **Dedup — non-Inngest write paths.** `inngest-insert-idempotency` only
+  scans `.insert()` calls inside Inngest `step.run(...)` bodies. Whether a
+  generic provider webhook route actually checks `processed_webhooks`
+  before acting, or an ordinary Server Action write is safe against a
+  double-submit/retry, is unchecked.
+- **Concurrency / race conditions (TOCTOU).** Deliberately left manual —
+  a load-then-decide-then-write sequence being race-safe requires reasoning
+  about what else could run concurrently, which isn't a source-text pattern.
+- **Foreign keys — `ON DELETE` behavior.** The DB invariant gate checks that
+  every FK column has a covering index, but not whether its `ON DELETE`
+  clause was a deliberate choice (`CASCADE`/`SET NULL`/`RESTRICT`) versus
+  left to Postgres's default — there's no way to distinguish "considered
+  and chose default" from "never considered" at the SQL level.
+- **Atomic multi-step writes / rollback paths.** Whether a multi-table (or
+  table-plus-external-system) write has a real cleanup path for a partial
+  failure is architectural, evaluated case by case.
+
+### Security & Isolation
+
+- **IDOR (authorization by object ID).** Whether a specific ID-keyed lookup
+  re-verifies ownership (vs. just org membership) requires understanding
+  what the ID refers to and where it came from — this is exactly the class
+  of finding CodeRabbit's review caught manually on PR #512
+  (`trackAssignmentAgainstSuggestions`'s service-role write), which is the
+  right tool for this category, not a regex guardrail.
+- **Rate limiting — login/signup.** `public-route-rate-limiting` covers
+  every token-guessable route reachable through our own Next.js server, but
+  login/signup/forgot-password/reset-password call
+  `supabase.auth.signInWithPassword()`/`signUp()`/`resetPasswordForEmail()`
+  directly from the browser — there's no server-side code path in this repo
+  for our own limiter to attach to. The only throttle on those four
+  endpoints today is Supabase's own platform-level GoTrue rate limiting,
+  which isn't visible or verifiable from this codebase.
+- **Sanitization — input validation at the boundary.** The
+  `dangerouslySetInnerHTML`/`supabase.raw()` bans are enforced, but whether
+  a given Server Action/Route Handler actually validates and normalizes its
+  input (format-checks phone/email, enforces length limits, strips control
+  characters) at the boundary is unchecked.
+- **Audit logging coverage.** Whether every security- or account-relevant
+  action (role changes, integration connect/disconnect, billing changes,
+  data deletion) actually calls `logAuditEvent(s)()` can't be enumerated
+  mechanically — there's no fixed pattern distinguishing "this action is
+  audit-worthy" from "this one isn't."
+
+### Code Quality
+
+- **Silent failures — logged with real context.** `sensitive-data-logging`
+  checks that existing log calls don't leak banned fields, but not the
+  inverse: that a caught error actually gets logged with enough context to
+  debug, or that a zero-rows result is distinguished from a query error
+  rather than collapsed into the same empty-state UI.
+- **Component reuse over hand-rolling.** `check:ui-classes` greps for
+  literal `btn-*`/`badge-*`/`card` class strings outside `components/ui/*`,
+  but a hand-rolled tab bar or dialog built from raw Tailwind utilities that
+  reaches the same visual result slips past it entirely — this is the exact
+  gap called out in the Styling Conventions section's `Tabs.tsx` example.
