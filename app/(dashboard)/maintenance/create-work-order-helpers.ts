@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { inngest } from '@/lib/inngest/client'
+import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import type { WoStatus, WoCategory } from '@/types/database'
 import { WoStatusSchema } from '@/lib/schemas/work-order'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -112,8 +112,11 @@ interface DispatchWorkOrderEventsParams {
 export async function dispatchWorkOrderEvents(params: DispatchWorkOrderEventsParams): Promise<void> {
   const { workOrderId, propertyId, orgId, vendorId, usePortal, requestQuotes, category, assignedCrewMemberId } = params
 
+  // All three sends below are fire-and-forget — this function's only job is
+  // dispatching notifications for an already-created work order; nothing
+  // downstream in the caller depends on delivery having completed.
   if (usePortal) {
-    await inngest.send({
+    sendEventAsync({
       name: 'work-order/created',
       data: {
         work_order_id:  workOrderId,
@@ -131,7 +134,7 @@ export async function dispatchWorkOrderEvents(params: DispatchWorkOrderEventsPar
   // The Inngest function itself checks vendor_auto_assign_mode and no-ops if
   // vendor suggestions are disabled for this org.
   if (!requestQuotes && !vendorId && category) {
-    await inngest.send({
+    sendEventAsync({
       name: 'work-order/vendor-suggestion.requested',
       data: {
         work_order_id: workOrderId,
@@ -146,7 +149,7 @@ export async function dispatchWorkOrderEvents(params: DispatchWorkOrderEventsPar
   // surfaces in the crew PWA via Dexie sync; this event scaffolds push notify.
   const isCrew = !vendorId && !!assignedCrewMemberId
   if (isCrew) {
-    await inngest.send({
+    sendEventAsync({
       name: 'work-order/crew.assigned',
       data: {
         workOrderId,

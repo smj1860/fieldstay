@@ -1079,9 +1079,10 @@ following them stops being a memory test. Four layers, checked in CI via
 
 1. **ESLint rules** (`eslint.config.mjs`, the "Structural enforcement"
    config block) — AST-level bans scoped to `app/`, `lib/`, `components/`:
-   `.from('memberships')`, `assigned_crew_id`, `dangerouslySetInnerHTML`,
-   `supabase.raw()`, reading `SUPABASE_SERVICE_ROLE_KEY` outside
-   `lib/supabase/server.ts`, `Math.random`, bare `window`. A legitimate
+   `.from('memberships')`, `assigned_crew_id`, `.from('work_order_notes')`,
+   `dangerouslySetInnerHTML`, `supabase.raw()`, reading
+   `SUPABASE_SERVICE_ROLE_KEY` outside `lib/supabase/server.ts`,
+   `Math.random`, bare `window`. A legitimate
    exception gets an inline `eslint-disable-next-line` WITH a one-line
    justification (see the sampling/jitter sites for the pattern). The same
    block also runs `eslint-plugin-sonarjs` for the Code Quality Standards
@@ -1117,6 +1118,25 @@ following them stops being a memory test. Four layers, checked in CI via
      `23505` catch, a `dedup(e)?_key` column, or `createPmNotification()`)
      or a named, justified `EXCEPTIONS` entry — the structural backstop for
      the Inngest Functions section's idempotency rule.
+   - `sensitive-data-logging` — no `console.log`/`error`/`warn`/`info`,
+     `reportError()`, or `logAuditEvent(s)(` call references `actual_cost`,
+     a guest phone field, SMS body content, or a Stripe/client-secret token
+     without masking it — the structural backstop for the sensitive-data
+     rule in Code Quality Standards and the Standing Audit Checklist. A
+     clean-baseline ratchet, same model as `tailwind-color-ratchet`.
+   - `inventory-table-column-mixup` — a query against
+     `inventory_count_draft_items` or `inventory_count_items` may not
+     reference the other table's column names (the "do not mix them" pair
+     in Table and column names below) — scoped to the same `.from(...)`
+     call's own query chain, not the whole file, since both tables' column
+     names are individually valid TypeScript, just wrong for the table in
+     scope. Also a clean-baseline ratchet.
+   - `public-route-rate-limiting` — every prefix in `proxy.ts`'s
+     `TOKEN_ROUTES` has a matching branch in `rateLimiterForPathname()`,
+     and the two guessable-invite-token `BYPASS_ROUTES` entries
+     (`/accept-invite`, `/crew-invite`, which skip `TOKEN_ROUTES` entirely)
+     still rate-limit inline via `inviteAcceptRatelimit` — the structural
+     backstop for the Standing Audit Checklist's rate-limiting item.
 
 3. **`check:ui-classes`** — the raw `btn-*`/`badge-*`/`card` class grep.
 

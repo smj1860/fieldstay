@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
-import { inngest } from '@/lib/inngest/client'
+import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
@@ -34,9 +34,14 @@ async function trackAssignmentAgainstSuggestions(
     )
 
     if (overridden.length > 0) {
-      await service.from('turnovers')
+      const { error: overrideError } = await service.from('turnovers')
         .update({ suggestion_status: 'overridden' })
+        .eq('org_id', orgId)
         .in('id', overridden.map(t => t.id))
+      if (overrideError) {
+        console.error('[trackAssignmentAgainstSuggestions] override update failed', overrideError)
+        reportError(overrideError, { site: 'serverAction.turnovers.trackAssignmentAgainstSuggestions.override', orgId })
+      }
 
       const priorSuggestionRows = overridden.flatMap(t =>
         (t.suggested_crew_ids ?? []).map(suggestedCrewId => ({
@@ -48,10 +53,14 @@ async function trackAssignmentAgainstSuggestions(
         }))
       )
       if (priorSuggestionRows.length > 0) {
-        await service.from('assignment_outcomes').upsert(priorSuggestionRows, {
+        const { error: priorSuggestionError } = await service.from('assignment_outcomes').upsert(priorSuggestionRows, {
           onConflict:       'turnover_id,crew_member_id',
           ignoreDuplicates: false,
         })
+        if (priorSuggestionError) {
+          console.error('[trackAssignmentAgainstSuggestions] prior-suggestion upsert failed', priorSuggestionError)
+          reportError(priorSuggestionError, { site: 'serverAction.turnovers.trackAssignmentAgainstSuggestions.priorSuggestion', orgId })
+        }
       }
     }
 
@@ -65,15 +74,36 @@ async function trackAssignmentAgainstSuggestions(
     // ignoreDuplicates — don't clobber a row the suggestion algorithm already
     // scored (suggested_score/score_breakdown) just because it's being
     // touched again here.
-    await service.from('assignment_outcomes').upsert(ensureRows, {
+    const { error: ensureError } = await service.from('assignment_outcomes').upsert(ensureRows, {
       onConflict:       'turnover_id,crew_member_id',
       ignoreDuplicates: true,
     })
+    if (ensureError) {
+      console.error('[trackAssignmentAgainstSuggestions] ensure-rows upsert failed', ensureError)
+      reportError(ensureError, { site: 'serverAction.turnovers.trackAssignmentAgainstSuggestions.ensureRows', orgId })
+    }
   } catch (err) {
-    // Suggestion-state/outcome tracking must never break the actual assignment
+    // Suggestion-state/outcome tracking must never break the actual assignment —
+    // this catches thrown exceptions (network errors, bugs); the {error}-shaped
+    // Supabase failures above are logged individually since a query failing at
+    // the DB level resolves normally rather than throwing.
     console.error('[trackAssignmentAgainstSuggestions]', err)
     reportError(err, { site: 'serverAction.turnovers.trackAssignmentAgainstSuggestions', orgId })
   }
+}
+
+// Shared by assignCrew/addCrewToTurnover — fire-and-forget, since the
+// assignment is already committed by the time either caller reaches this;
+// a slow/unreachable Inngest shouldn't stall or fail the action for the PM.
+function notifyCrewAssigned(orgId: string, crewMemberId: string, turnoverIds: string[]): void {
+  sendEventAsync({
+    name: 'turnover/crew-assigned',
+    data: {
+      crew_member_id: crewMemberId,
+      turnover_ids:   turnoverIds,
+      org_id:         orgId,
+    },
+  })
 }
 
 // ── Crew assignment ──────────────────────────────────────────────────────────
@@ -153,14 +183,7 @@ export async function assignCrew(
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
-    await inngest.send({
-      name: 'turnover/crew-assigned',
-      data: {
-        crew_member_id: crewMemberId,
-        turnover_ids:   turnovers.map(t => t.id),
-        org_id:         membership.org_id,
-      },
-    })
+    notifyCrewAssigned(membership.org_id, crewMemberId, turnovers.map(t => t.id))
 
     await logAuditEvent({
       orgId:      membership.org_id,
@@ -439,7 +462,9 @@ export async function createManualTurnover(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await inngest.send({
+    // Fire-and-forget — the turnover row is already committed; a slow/
+    // unreachable Inngest shouldn't stall or fail this action for the PM.
+    sendEventAsync({
       name: 'turnover/created',
       data: {
         turnover_id:       turnover.id,
@@ -532,14 +557,7 @@ export async function addCrewToTurnover(
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
-    await inngest.send({
-      name: 'turnover/crew-assigned',
-      data: {
-        crew_member_id: crewMemberId,
-        turnover_ids:   turnovers.map(t => t.id),
-        org_id:         membership.org_id,
-      },
-    })
+    notifyCrewAssigned(membership.org_id, crewMemberId, turnovers.map(t => t.id))
 
     await logAuditEvent({
       orgId:      membership.org_id,

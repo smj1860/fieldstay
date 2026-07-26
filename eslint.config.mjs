@@ -110,6 +110,10 @@ const eslintConfig = [
           message: "work_orders.assigned_crew_id is deprecated — use assigned_crew_member_id.",
         },
         {
+          selector: "CallExpression[callee.property.name='from'] > Literal[value='work_order_notes']",
+          message: "The table is work_order_updates — 'work_order_notes' does not exist (CLAUDE.md: Table and column names).",
+        },
+        {
           selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
           message: "This codebase's XSS defense depends on zero dangerouslySetInnerHTML uses. If raw HTML rendering is genuinely required, it needs DOMPurify and a CLAUDE.md update first.",
         },
