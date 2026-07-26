@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
-import { inngest } from '@/lib/inngest/client'
+import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import type { BookingSource } from '@/types/database'
@@ -77,8 +77,10 @@ export async function createBooking(
 
     await detectAndFlagOverlaps(supabase, property_id)
 
-    // Fire booking/detected so Inngest auto-generates a turnover
-    await inngest.send({
+    // Fire booking/detected so Inngest auto-generates a turnover. Fire-and-
+    // forget — the booking is already committed; a slow/unreachable Inngest
+    // shouldn't stall or fail this action for the PM.
+    sendEventAsync({
       name: 'booking/detected',
       data: {
         booking_id:    booking.id,

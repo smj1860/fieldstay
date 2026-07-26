@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { requireOrgMember, requireOrgRole } from '@/lib/auth'
-import { inngest } from '@/lib/inngest/client'
+import { inngest, sendEventAsync } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
@@ -153,7 +153,9 @@ export async function assignCrew(
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
-    await inngest.send({
+    // Fire-and-forget — the assignment is already committed; a slow/
+    // unreachable Inngest shouldn't stall or fail this action for the PM.
+    sendEventAsync({
       name: 'turnover/crew-assigned',
       data: {
         crew_member_id: crewMemberId,
@@ -439,7 +441,9 @@ export async function createManualTurnover(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await inngest.send({
+    // Fire-and-forget — the turnover row is already committed; a slow/
+    // unreachable Inngest shouldn't stall or fail this action for the PM.
+    sendEventAsync({
       name: 'turnover/created',
       data: {
         turnover_id:       turnover.id,
@@ -532,7 +536,9 @@ export async function addCrewToTurnover(
     )
     await trackAssignmentAgainstSuggestions(membership.org_id, crewMemberId, crew.name, turnovers, propertyBedrooms)
 
-    await inngest.send({
+    // Fire-and-forget — the assignment is already committed; a slow/
+    // unreachable Inngest shouldn't stall or fail this action for the PM.
+    sendEventAsync({
       name: 'turnover/crew-assigned',
       data: {
         crew_member_id: crewMemberId,

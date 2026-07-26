@@ -21,7 +21,10 @@ vi.mock('@/lib/auth', () => ({
   requireOrgRole:   vi.fn(),
 }))
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }))
-vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+vi.mock('@/lib/inngest/client', () => {
+  const send = vi.fn()
+  return { inngest: { send }, sendEventAsync: (...args: unknown[]) => send(...args) }
+})
 vi.mock('@/lib/audit', () => ({ logAuditEvent: vi.fn() }))
 vi.mock('@/lib/observability/report-error', () => ({ reportError: vi.fn() }))
 vi.mock('@/lib/supabase/server', () => ({
