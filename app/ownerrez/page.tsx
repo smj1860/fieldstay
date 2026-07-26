@@ -362,7 +362,7 @@ export default async function OwnerRezPage() {
           ) : (
             <div className="max-w-sm mx-auto">
               <Link
-                href="/signup?provider=ownerrez&next=/api/integrations/ownerrez/connect"
+                href="/signup?provider=ownerrez&next=/onboarding"
                 className="block w-full bg-brand-800 text-white font-bold px-8 py-4 rounded-xl hover:bg-[#162a4a] transition-colors text-lg text-center mb-4"
               >
                 Create your FieldStay account
