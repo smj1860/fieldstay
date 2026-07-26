@@ -132,5 +132,5 @@ export function computeReconnectDelayMs(random: number): number {
 /** The one impure call site: draws the jitter sample. */
 export function reconnectDelayWithJitterMs(): number {
   // eslint-disable-next-line no-restricted-properties -- reconnect jitter to spread realtime rejoins, not id/token generation
-  return computeReconnectDelayMs(Math.random())
+  return computeReconnectDelayMs(Math.random()) // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
 }

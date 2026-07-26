@@ -20,7 +20,7 @@ const MAX_RETRY_DELAY_MS  = 300_000
 export function computeNextAttemptAt(retryCount: number, now: number): number {
   const baseDelay = Math.min(2 ** (retryCount - 1) * BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS)
   // eslint-disable-next-line no-restricted-properties -- retry backoff jitter to spread outbox retry storms after an outage, not id/token generation
-  const jitter = Math.random()
+  const jitter = Math.random() // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
   return now + baseDelay * (0.5 + jitter)
 }
 

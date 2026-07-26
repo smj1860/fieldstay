@@ -190,7 +190,9 @@ const src = readFileSync(TYPES_PATH, 'utf8')
 //    comment, or a new declaration).
 function parseUnionTypes(text) {
   const unions = {}
-  const re = /^export type (\w+)\s*=\s*([\s\S]*?)(?=\n(?:export |\/\/|$))/gm
+  // `text` is always this repo's own committed types/database.ts, never
+  // attacker-controlled input, so ReDoS is not a real risk here.
+  const re = /^export type (\w+)\s*=\s*([\s\S]*?)(?=\n(?:export |\/\/|$))/gm // NOSONAR
   for (const m of text.matchAll(re)) {
     const [, name, body] = m
     const values = [...body.matchAll(/'([^']+)'/g)].map((v) => v[1])
@@ -208,8 +210,10 @@ function parseInterfaces(text) {
   for (const m of text.matchAll(re)) {
     const [, name, body] = m
     const fields = {}
+    // `line` comes from this repo's own committed types/database.ts, never
+    // attacker-controlled input, so ReDoS is not a real risk here.
     for (const line of body.split('\n')) {
-      const f = line.match(/^\s{2}(\w+)\??:\s*(.+?)\s*$/)
+      const f = line.match(/^\s{2}(\w+)\??:\s*(.+?)\s*$/) // NOSONAR
       if (f) fields[f[1]] = f[2]
     }
     ifaces[name] = fields
@@ -222,7 +226,9 @@ function parseTableMap(text) {
   const tablesBlockMatch = text.match(/Tables:\s*\{([\s\S]*?)\n\s{4}\}\n\s{4}Views:/)
   const block = tablesBlockMatch ? tablesBlockMatch[1] : text
   const map = {}
-  const re = /^\s+(\w+):\s*\{\s*Row:\s*(\w+);/gm
+  // `block` comes from this repo's own committed types/database.ts, never
+  // attacker-controlled input, so ReDoS is not a real risk here.
+  const re = /^\s+(\w+):\s*\{\s*Row:\s*(\w+);/gm // NOSONAR
   for (const m of block.matchAll(re)) map[m[1]] = m[2]
   return map
 }

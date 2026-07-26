@@ -63,7 +63,7 @@ async function krogerFetch(
   const res = await fetch(input, init)
 
   if (res.status === 429) {
-    const retryAfter = parseInt(res.headers.get('Retry-After') ?? '60', 10)
+    const retryAfter = Number.parseInt(res.headers.get('Retry-After') ?? '60', 10)
     throw new RateLimitError(retryAfter)
   }
 

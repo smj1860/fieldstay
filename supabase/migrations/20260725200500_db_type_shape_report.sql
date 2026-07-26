@@ -28,6 +28,9 @@ STABLE
 SECURITY DEFINER
 SET search_path = ''
 AS $$
+  WITH target_schema AS (
+    SELECT 'public'::name AS schema_name
+  )
   SELECT jsonb_build_object(
     'tables', (
       SELECT coalesce(jsonb_object_agg(x.table_name, x.cols), '{}'::jsonb)
@@ -39,10 +42,10 @@ AS $$
                  'is_nullable', (c.is_nullable = 'YES')
                )) AS cols
         FROM information_schema.columns c
-        WHERE c.table_schema = 'public'
+        WHERE c.table_schema = (SELECT schema_name FROM target_schema)
           AND EXISTS (
             SELECT 1 FROM information_schema.tables t
-            WHERE t.table_schema = 'public'
+            WHERE t.table_schema = (SELECT schema_name FROM target_schema)
               AND t.table_name   = c.table_name
               AND t.table_type   = 'BASE TABLE'
           )
@@ -57,7 +60,7 @@ AS $$
         FROM pg_catalog.pg_type t
         JOIN pg_catalog.pg_enum en ON en.enumtypid = t.oid
         JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
-        WHERE n.nspname = 'public'
+        WHERE n.nspname = (SELECT schema_name FROM target_schema)
         GROUP BY t.typname
       ) e
     )

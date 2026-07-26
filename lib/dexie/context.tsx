@@ -311,6 +311,16 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       )
     }
 
+    // Retry helper for scheduleV2Reconnect's timer callback — kept as its
+    // own named function (a sibling, not nested inside the timer callback)
+    // to keep that callback's nesting depth within the project's ≤4 limit.
+    function retrySubscribeV2(crewMemberId: string): void {
+      void subscribeV2(crewMemberId).catch((err) => {
+        console.error('[DexieProvider] v2 resubscribe failed:', err)
+        scheduleV2Reconnect(crewMemberId)
+      })
+    }
+
     // Rejoin after base + uniform jitter (5–35 s) so a Realtime node restart
     // doesn't stampede every crew device back at the same instant. Tearing
     // down the old channel sets v2Channel to null FIRST, so the stale
@@ -326,10 +336,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
           v2Channel = null
           supabase.removeChannel(stale)
         }
-        void subscribeV2(crewMemberId).catch((err) => {
-          console.error('[DexieProvider] v2 resubscribe failed:', err)
-          scheduleV2Reconnect(crewMemberId)
-        })
+        retrySubscribeV2(crewMemberId)
       }, reconnectDelayWithJitterMs())
     }
 
@@ -362,23 +369,36 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       v2Channel = ch
     }
 
+    // Full CURRENT assigned-turnover set from the local cache (kept
+    // reconciled by syncAssignedTurnovers) — full scope, so advanceCursors
+    // is allowed. All ids are already cached locally, so none qualify as
+    // fresh. Kept as its own named function (a sibling, not nested inside
+    // runV2's signal-handler map) to keep nesting depth within the
+    // project's ≤4 limit.
+    async function syncChecklistsV2(crewMemberId: string): Promise<void> {
+      const db = getDexieDb(userId!)
+      const turnoverIds = (await db.turnovers.toArray()).map((t) => t.id)
+      await pullChecklistsForTurnovers(supabase, userId!, turnoverIds, crewMemberId, {
+        advanceCursors: true,
+      })
+    }
+
+    // Kept as its own named function (a sibling, not nested inside runV2)
+    // to keep nesting depth within the project's ≤4 limit.
+    function handleV2AuthStateChange(event: AuthChangeEvent): void {
+      if (event !== 'TOKEN_REFRESHED' || cancelled) return
+      void Promise.resolve(supabase.realtime.setAuth()).catch((err: unknown) =>
+        console.error('[DexieProvider] v2 realtime setAuth refresh failed:', err)
+      )
+    }
+
     async function runV2(crewMemberId: string): Promise<void> {
       // Signal → action map. Every action is a FULL-scope pull for its
       // entity, so cursor advancement is safe (cursor invariant: cursors
       // advance only from full-scope pulls).
       v2SignalHandler = createSyncSignalHandler({
         turnovers: () => syncAssignedTurnovers(supabase, userId!, crewMemberId),
-        checklists: async () => {
-          // Full CURRENT assigned-turnover set from the local cache (kept
-          // reconciled by syncAssignedTurnovers) — full scope, so
-          // advanceCursors is allowed. All ids are already cached locally,
-          // so none qualify as fresh.
-          const db = getDexieDb(userId!)
-          const turnoverIds = (await db.turnovers.toArray()).map((t) => t.id)
-          await pullChecklistsForTurnovers(supabase, userId!, turnoverIds, crewMemberId, {
-            advanceCursors: true,
-          })
-        },
+        checklists: () => syncChecklistsV2(crewMemberId),
         work_orders: () => syncWorkOrders(supabase, userId!, crewMemberId),
       })
 
@@ -392,14 +412,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       // provider's other onAuthStateChange listener is skipped entirely
       // when userIdProp is supplied — the crew layout's case — so the v2
       // path registers its own.)
-      const { data: authListener } = supabase.auth.onAuthStateChange(
-        (event: AuthChangeEvent) => {
-          if (event !== 'TOKEN_REFRESHED' || cancelled) return
-          void Promise.resolve(supabase.realtime.setAuth()).catch((err: unknown) =>
-            console.error('[DexieProvider] v2 realtime setAuth refresh failed:', err)
-          )
-        }
-      )
+      const { data: authListener } = supabase.auth.onAuthStateChange(handleV2AuthStateChange)
       v2AuthSubscription = authListener.subscription
 
       onlineHandler = () => resyncV2Safe(crewMemberId)

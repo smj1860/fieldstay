@@ -74,6 +74,25 @@ export function normalizePhoneToE164(raw: string): string | null {
   return null
 }
 
+function formatOfferPrice(value: number): string {
+  return value % 1 === 0 ? String(value) : value.toFixed(2)
+}
+
+function formatPercentageOffer(offerValue: number | null, offerItem: string | null): string | null {
+  if (!offerValue) return null
+  return offerItem
+    ? `${offerValue}% off ${offerItem} — just show this screen`
+    : `${offerValue}% off — just show this screen`
+}
+
+function formatFixedAmountOffer(offerValue: number | null, offerItem: string | null): string | null {
+  if (!offerValue) return null
+  const price = formatOfferPrice(offerValue)
+  return offerItem
+    ? `$${price} off ${offerItem} — just show this screen`
+    : `$${price} off — just show this screen`
+}
+
 export function formatOffer(
   offerType:       GuidebookOfferType,
   offerValue:      number | null,
@@ -82,16 +101,10 @@ export function formatOffer(
 ): string | null {
   switch (offerType) {
     case 'percentage':
-      if (!offerValue) return null
-      return offerItem
-        ? `${offerValue}% off ${offerItem} — just show this screen`
-        : `${offerValue}% off — just show this screen`
+      return formatPercentageOffer(offerValue, offerItem)
 
     case 'fixed_amount':
-      if (!offerValue) return null
-      return offerItem
-        ? `$${offerValue % 1 === 0 ? offerValue : offerValue.toFixed(2)} off ${offerItem} — just show this screen`
-        : `$${offerValue % 1 === 0 ? offerValue : offerValue.toFixed(2)} off — just show this screen`
+      return formatFixedAmountOffer(offerValue, offerItem)
 
     case 'item':
       return offerItem ? `Free ${offerItem} — just show this screen` : null
