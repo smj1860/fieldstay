@@ -1106,6 +1106,17 @@ following them stops being a memory test. Four layers, checked in CI via
    - `tailwind-color-ratchet` — files that predate the color-token rule
      are baselined; new files may not hardcode Tailwind color utilities,
      and cleaned-up files must leave the baseline. Never add entries.
+   - `n-plus-one-loops` — no Supabase query (or `rpc()` call) inside a
+     per-row loop body (`for...of`, `for await...of`, `.forEach`,
+     `.map(async`) outside a named, justified `EXCEPTIONS` entry. Classic
+     numeric pagination loops and a loop whose body is an Inngest
+     `step.run(...)` boundary are structurally exempt.
+   - `inngest-insert-idempotency` — every `.from(table).insert(...)` inside
+     an Inngest `step.run(...)` body is either guarded (a same-table
+     pre-check `select`/`delete`, `onConflict`/`ignoreDuplicates`, a
+     `23505` catch, a `dedup(e)?_key` column, or `createPmNotification()`)
+     or a named, justified `EXCEPTIONS` entry — the structural backstop for
+     the Inngest Functions section's idempotency rule.
 
 3. **`check:ui-classes`** — the raw `btn-*`/`badge-*`/`card` class grep.
 
@@ -1114,10 +1125,12 @@ following them stops being a memory test. Four layers, checked in CI via
    see, via `public.db_invariant_report()` against the dedicated E2E
    project: RLS enabled on every public table, no policy-less (deny-all)
    tables outside the script's shrink-only `SERVICE_ROLE_ONLY_TABLES`
-   allowlist, a covering index on every FK column, and zero `anon` table
+   allowlist, a covering index on every FK column, zero `anon` table
    grants (all revoked 2026-07-24 — no client reads tables
-   unauthenticated). Self-disarms with a warning when the E2E secrets are
-   absent, same as the e2e job.
+   unauthenticated), and every `dedupe_key`/`dedup_key`/
+   `source_reference_id`-named column backed by a real UNIQUE or
+   partial-unique index. Self-disarms with a warning when the E2E secrets
+   are absent, same as the e2e job.
 
    **Type drift gate** (`scripts/check-type-drift.mjs`, same
    `db-invariants` CI job, run as its own step after
