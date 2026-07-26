@@ -129,6 +129,11 @@ This flag is `false` until 10DLC campaign verification clears. Never send
 to guests without this gate in place. The flag lives in `lib/sms/telnyx.ts` —
 check that any new SMS-sending code respects it.
 
+The daily nudge budget check in `lib/sms/telnyx.ts` (`claimNudgeBudgetSlot`)
+fails CLOSED on a Redis error — the nudge is skipped, not sent — unlike the
+abuse-rate limiters in `lib/rate-limit.ts`/`proxy.ts`, which deliberately
+fail open; a spend ceiling must not disappear during an outage.
+
 ---
 
 ## The Table That Breaks Everything If Wrong
@@ -1058,7 +1063,8 @@ item below" as part of the definition of done for any non-trivial change.
 
 Conventions in this file are enforced in code wherever they can be, so
 following them stops being a memory test. Four layers, checked in CI via
-`npm run lint` and `vitest run` (plus the `db-invariants` CI job for layer 4):
+`npm run lint` and `vitest run` (plus the `db-invariants` CI job for layer
+4, which runs two scripts):
 
 1. **ESLint rules** (`eslint.config.mjs`, the "Structural enforcement"
    config block) — AST-level bans scoped to `app/`, `lib/`, `components/`:
@@ -1096,6 +1102,22 @@ following them stops being a memory test. Four layers, checked in CI via
    grants (all revoked 2026-07-24 — no client reads tables
    unauthenticated). Self-disarms with a warning when the E2E secrets are
    absent, same as the e2e job.
+
+   **Type drift gate** (`scripts/check-type-drift.mjs`, same
+   `db-invariants` CI job, run as its own step after
+   `check-db-invariants.mjs`) — diffs `types/database.ts` against the live
+   schema via `public.db_type_shape_report()`: every Postgres enum's labels
+   vs. its TS union (`ENUM_MAP`), every `public` table vs.
+   `Database.public.Tables` (`TABLE_ALLOWLIST` for the deliberately
+   unmodeled — `platform_admins`, `system_job_runs`,
+   `wo_number_counters`), and column presence for every mapped table
+   (`COLUMN_ALLOWLIST` for deliberate mismatches — e.g. the deprecated
+   `work_orders.assigned_crew_id`). Closes the exact class of bug that cost
+   real debugging time when the E2E project's `wo_status` enum silently
+   lacked `quote_requested` — see
+   `20260725043000_add_quote_requested_to_wo_status.sql`. Both allowlists
+   are shrink-only, same ratchet as `SERVICE_ROLE_ONLY_TABLES`. Self-disarms
+   the same way as the other two checks.
 
 **The meta-rule: a new convention ships WITH its guardrail.** If a rule is
 worth adding to this file, add its ESLint rule or `unit/guardrails/` test in

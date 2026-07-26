@@ -49,6 +49,74 @@ export const hospitableApiLimiter = new Ratelimit({
   prefix:    'hospitable-api',
 })
 
+// Proactive outbound budget for our own calls TO Kroger's API — same
+// rationale as hospitableApiLimiter/OwnerRez's per-IP tracker above: all
+// FieldStay tenants share one Vercel deployment's outbound identity (one
+// app-level Kroger client credential), so cart automation fanning out
+// across orgs shares a single external quota, not a per-org one. Kroger
+// publishes separate daily limits per endpoint class (confirmed against
+// developer.kroger.com 2026-07-25 — Products API: 10,000 calls/day;
+// Locations API: 1,600 calls/day per endpoint; Identity/profile: 5,000
+// calls/day), so each endpoint class gets its own limiter here rather than
+// one shared bucket, mirroring how Kroger itself enforces it. Each slides
+// at 90% of the documented ceiling (10% headroom) so FieldStay throws its
+// own RateLimitError before Kroger would actually 429 it — same headroom
+// convention as hospitableApiLimiter (54/60) and OwnerRez (270/300) above.
+// All four are called with a FIXED identifier string (not per-org) so the
+// budget is genuinely shared platform-wide, same as
+// hospitableApiLimiter.limit('hospitable-api').
+
+// Products API (product search, called per below-par item during cart
+// building) — 10,000/day confirmed at
+// developer.kroger.com/reference/api/product-api-public.
+export const krogerProductsApiLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(9_000, '1 d'),
+  analytics: true,
+  prefix:    'kroger-products',
+})
+
+// Locations API (nearest-store lookup on Kroger connect) — 1,600/day per
+// endpoint confirmed at
+// developer.kroger.com/reference/api/location-api-public.
+export const krogerLocationsApiLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(1_440, '1 d'),
+  analytics: true,
+  prefix:    'kroger-locations',
+})
+
+// Cart API (adding matched items to the customer's cart) — ⚠️ Kroger's
+// published Cart API rate limit could not be confirmed: developer.kroger.com's
+// Cart API reference page is JS-rendered and didn't return limit figures via
+// search/fetch at implementation time (2026-07-25); Kroger's own support
+// contact (APISupport@kroger.com) would be the way to confirm it directly.
+// Treating this as unverifiable for now — conservatively assumes the same
+// order of magnitude as the lowest CONFIRMED figure above (Locations'
+// 1,600/day) rather than guessing something higher. Revisit if real 429s
+// in production logs suggest the true ceiling is different.
+export const krogerCartApiLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(1_440, '1 d'),
+  analytics: true,
+  prefix:    'kroger-cart',
+})
+
+// OAuth token endpoint (client-credentials + customer code exchange +
+// refresh) and Identity/profile lookup, combined into one budget — both are
+// inherently low-volume (tokens are cached ~30min per getClientToken's own
+// doc comment; profile is fetched once per connect). Kroger's Identity API
+// is confirmed at 5,000 calls/day; the token endpoint itself has no
+// separately published figure, so this combined bucket conservatively
+// reuses the Identity figure as its basis rather than assuming an
+// unconfirmed higher number for token calls specifically.
+export const krogerAuthApiLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(4_500, '1 d'),
+  analytics: true,
+  prefix:    'kroger-auth',
+})
+
 // Public work order page — 20 requests per minute per IP
 // Allows a contractor to refresh and interact normally, blocks enumeration
 export const workOrderRatelimit = new Ratelimit({

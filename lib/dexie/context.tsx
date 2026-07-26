@@ -16,6 +16,23 @@ import { syncWorkOrders } from './sync/work-orders'
 import { syncMessages } from './sync/messages'
 import { syncCrewAvailability } from './sync/availability'
 import { computeAssignedPropertyIds, syncPropertyAssets } from './sync/assets'
+import {
+  createSyncSignalHandler,
+  reconnectDelayWithJitterMs,
+  type SyncSignalHandler,
+} from './sync/signals'
+
+// Crew Sync v2 (docs/CREW_SYNC_V2_PHASES.md Phase 3): broadcast signal +
+// delta pull instead of postgres_changes. Ships dormant — the flag defaults
+// off and the v1 path below stays the production behavior until Phase 5.
+// NEXT_PUBLIC_ vars are inlined at build time, so this is a build-time
+// constant, not a runtime toggle.
+const CREW_SYNC_V2 = process.env.NEXT_PUBLIC_CREW_SYNC_V2 === 'true'
+
+/** How often the v2 safety poll runs a full resync — the correctness
+ * backstop for missed broadcasts and the only freshness path for
+ * property_assets, which deliberately has no broadcast trigger. */
+const SAFETY_POLL_INTERVAL_MS = 5 * 60_000
 
 interface DexieContextValue {
   db:           FieldStayDexie | null
@@ -226,6 +243,14 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
     let checklistRefreshGeneration = 0
     let assetsRefreshGeneration = 0
 
+    // ── Crew Sync v2 state (all stays null/untouched when the flag is off) ─
+    let v2Channel: ReturnType<typeof supabase.channel> | null = null
+    let v2ReconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let v2SafetyPollTimer: ReturnType<typeof setInterval> | null = null
+    let v2VisibilityHandler: (() => void) | null = null
+    let v2AuthSubscription: { unsubscribe: () => void } | null = null
+    let v2SignalHandler: SyncSignalHandler | null = null
+
     // Realtime's postgres_changes subscriptions never replay events fired
     // while the socket was disconnected — a crew member offline for a
     // stretch (a reassignment, a co-crew-member's checklist completion)
@@ -254,6 +279,158 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       await refreshAssetsSubscription()
     }
 
+    // ── Crew Sync v2 (flag on): broadcast signal + delta pull ──────────────
+    // No postgres_changes channels at all. One private broadcast channel
+    // (`crew:{userId}`) delivers tiny `{ entity }` wake-up signals; the
+    // client answers each with a debounced full-scope delta pull. A 5-minute
+    // safety poll plus resyncs on mount/online/visible/(re)subscribe are the
+    // correctness backstops — a missed broadcast only ever costs latency.
+
+    // Full v2 resync: all entities + reconciliation. Unlike v1's resync()
+    // this never touches channel subscriptions — the single broadcast
+    // channel's scope is the user id, which never changes mid-session — and
+    // it also covers property_assets (no broadcast trigger; see the doc's
+    // section 1) directly instead of via refreshAssetsSubscription.
+    async function resyncV2(crewMemberId: string): Promise<void> {
+      await Promise.all([
+        syncAssignedTurnovers(supabase, userId!, crewMemberId),
+        syncWorkOrders(supabase, userId!, crewMemberId),
+        syncMessages(supabase, userId!),
+        syncCrewAvailability(supabase, userId!, crewMemberId),
+      ])
+      if (cancelled) return
+      const propertyIds = await computeAssignedPropertyIds(userId!)
+      if (cancelled) return
+      await syncPropertyAssets(supabase, userId!, propertyIds)
+    }
+
+    function resyncV2Safe(crewMemberId: string): void {
+      if (cancelled) return
+      void resyncV2(crewMemberId).catch((err) =>
+        console.error('[DexieProvider] v2 resync failed:', err)
+      )
+    }
+
+    // Retry helper for scheduleV2Reconnect's timer callback — kept as its
+    // own named function (a sibling, not nested inside the timer callback)
+    // to keep that callback's nesting depth within the project's ≤4 limit.
+    function retrySubscribeV2(crewMemberId: string): void {
+      void subscribeV2(crewMemberId).catch((err) => {
+        console.error('[DexieProvider] v2 resubscribe failed:', err)
+        scheduleV2Reconnect(crewMemberId)
+      })
+    }
+
+    // Rejoin after base + uniform jitter (5–35 s) so a Realtime node restart
+    // doesn't stampede every crew device back at the same instant. Tearing
+    // down the old channel sets v2Channel to null FIRST, so the stale
+    // channel's own CLOSED status callback (fired by removeChannel) can't
+    // schedule a second, competing reconnect loop.
+    function scheduleV2Reconnect(crewMemberId: string): void {
+      if (cancelled || v2ReconnectTimer !== null) return
+      v2ReconnectTimer = setTimeout(() => {
+        v2ReconnectTimer = null
+        if (cancelled) return
+        if (v2Channel) {
+          const stale = v2Channel
+          v2Channel = null
+          supabase.removeChannel(stale)
+        }
+        retrySubscribeV2(crewMemberId)
+      }, reconnectDelayWithJitterMs())
+    }
+
+    async function subscribeV2(crewMemberId: string): Promise<void> {
+      if (cancelled) return
+      // Private channels authorize against RLS on realtime.messages — the
+      // realtime socket needs the user's JWT attached before joining.
+      // Newer supabase-js versions refresh realtime auth automatically, but
+      // the explicit call is harmless and version-proof.
+      await supabase.realtime.setAuth()
+      if (cancelled) return
+
+      const ch = supabase
+        .channel(`crew:${userId}`, { config: { private: true } })
+        .on('broadcast', { event: 'sync' }, (message: { payload?: { entity?: unknown } }) => {
+          v2SignalHandler?.handleSignal(message.payload?.entity)
+        })
+        .subscribe((status: string) => {
+          // Ignore callbacks from a channel that's been superseded (or a
+          // deliberate unmount teardown) — only the current channel may
+          // trigger resyncs/reconnects.
+          if (cancelled || ch !== v2Channel) return
+          if (status === 'SUBSCRIBED') {
+            // The gap while disconnected may have swallowed signals.
+            resyncV2Safe(crewMemberId)
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            scheduleV2Reconnect(crewMemberId)
+          }
+        })
+      v2Channel = ch
+    }
+
+    // Full CURRENT assigned-turnover set from the local cache (kept
+    // reconciled by syncAssignedTurnovers) — full scope, so advanceCursors
+    // is allowed. All ids are already cached locally, so none qualify as
+    // fresh. Kept as its own named function (a sibling, not nested inside
+    // runV2's signal-handler map) to keep nesting depth within the
+    // project's ≤4 limit.
+    async function syncChecklistsV2(crewMemberId: string): Promise<void> {
+      const db = getDexieDb(userId!)
+      const turnoverIds = (await db.turnovers.toArray()).map((t) => t.id)
+      await pullChecklistsForTurnovers(supabase, userId!, turnoverIds, crewMemberId, {
+        advanceCursors: true,
+      })
+    }
+
+    // Kept as its own named function (a sibling, not nested inside runV2)
+    // to keep nesting depth within the project's ≤4 limit.
+    function handleV2AuthStateChange(event: AuthChangeEvent): void {
+      if (event !== 'TOKEN_REFRESHED' || cancelled) return
+      void Promise.resolve(supabase.realtime.setAuth()).catch((err: unknown) =>
+        console.error('[DexieProvider] v2 realtime setAuth refresh failed:', err)
+      )
+    }
+
+    async function runV2(crewMemberId: string): Promise<void> {
+      // Signal → action map. Every action is a FULL-scope pull for its
+      // entity, so cursor advancement is safe (cursor invariant: cursors
+      // advance only from full-scope pulls).
+      v2SignalHandler = createSyncSignalHandler({
+        turnovers: () => syncAssignedTurnovers(supabase, userId!, crewMemberId),
+        checklists: () => syncChecklistsV2(crewMemberId),
+        work_orders: () => syncWorkOrders(supabase, userId!, crewMemberId),
+      })
+
+      // Delta on mount, same as v1: cursors make this cheap, scope
+      // reconciliation makes it correct.
+      await resyncV2(crewMemberId)
+      if (cancelled) return
+
+      // Re-attach the realtime JWT whenever Supabase refreshes the session
+      // token, so the private channel doesn't die with the old token. (The
+      // provider's other onAuthStateChange listener is skipped entirely
+      // when userIdProp is supplied — the crew layout's case — so the v2
+      // path registers its own.)
+      const { data: authListener } = supabase.auth.onAuthStateChange(handleV2AuthStateChange)
+      v2AuthSubscription = authListener.subscription
+
+      onlineHandler = () => resyncV2Safe(crewMemberId)
+      globalThis.addEventListener('online', onlineHandler)
+
+      // PWA returning from background has likely missed broadcasts.
+      v2VisibilityHandler = () => {
+        if (globalThis.document?.visibilityState === 'visible') resyncV2Safe(crewMemberId)
+      }
+      globalThis.document?.addEventListener('visibilitychange', v2VisibilityHandler)
+
+      // Safety poll: correctness backstop for missed broadcasts and the
+      // freshness path for property_assets.
+      v2SafetyPollTimer = setInterval(() => resyncV2Safe(crewMemberId), SAFETY_POLL_INTERVAL_MS)
+
+      await subscribeV2(crewMemberId)
+    }
+
     async function run() {
       const { data: crewMember } = await supabase
         .from('crew_members')
@@ -264,6 +441,11 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (!crewMember || cancelled) return
 
       setCrewMemberId(crewMember.id as string)
+
+      if (CREW_SYNC_V2) {
+        await runV2(crewMember.id)
+        return
+      }
 
       // Delta on mount too: a device with cursors only fetches what changed
       // since it last synced; a fresh device (no cursors) naturally does a
@@ -311,6 +493,17 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
       if (checklistChannel) supabase.removeChannel(checklistChannel)
       if (assetsChannel) supabase.removeChannel(assetsChannel)
       if (onlineHandler) globalThis.removeEventListener('online', onlineHandler)
+      // Crew Sync v2 teardown — everything here is null when the flag is off.
+      if (v2Channel) {
+        const ch = v2Channel
+        v2Channel = null // deliberate unmount: the CLOSED callback must not reconnect
+        supabase.removeChannel(ch)
+      }
+      if (v2ReconnectTimer !== null) clearTimeout(v2ReconnectTimer)
+      if (v2SafetyPollTimer !== null) clearInterval(v2SafetyPollTimer)
+      if (v2VisibilityHandler) globalThis.document?.removeEventListener('visibilitychange', v2VisibilityHandler)
+      v2AuthSubscription?.unsubscribe()
+      v2SignalHandler?.dispose()
     }
   }, [userId])
 

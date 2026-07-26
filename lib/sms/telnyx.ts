@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis'
+import { reportError } from '@/lib/observability/report-error'
 import type { GuidebookOfferType } from '@/types/database'
 import { formatOffer } from '@/lib/guidebook/offer'
 
@@ -139,6 +140,7 @@ export async function sendSMS(
       console.error('[sms:nudge-budget] Redis unavailable — skipping nudge send', {
         error: err instanceof Error ? err.message : String(err),
       })
+      reportError(err, { site: 'sms.telnyx.nudge_budget_unavailable' })
       return { sent: false, reason: 'nudge budget check unavailable' }
     }
     if (!claimed) {

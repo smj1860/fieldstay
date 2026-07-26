@@ -18,6 +18,7 @@ import { dailyAssetHealth }              from '@/lib/inngest/functions/cron/asse
 import { dailyCommsRetention }           from '@/lib/inngest/functions/cron/comms-retention'
 import { dailyGuestPiiRetention }        from '@/lib/inngest/functions/cron/guest-pii-retention'
 import { auditRetentionCron }            from '@/lib/inngest/functions/cron/audit-retention'
+import { notificationsRetentionCron }    from '@/lib/inngest/functions/cron/notifications-retention'
 import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale-feed-alert'
 import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turnover-priority-decay'
 import { notificationDigest }           from '@/lib/inngest/functions/cron/notification-digest'
@@ -34,7 +35,10 @@ import { ownerRezReconciliationCron }    from '@/lib/inngest/functions/ownerrez/
 import { ownerRezReconciliationHandler } from '@/lib/inngest/functions/ownerrez/reconciliation-handler'
 
 // Hostaway integration
-import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sync'
+// Disabled — not ready for launch. Re-enable by uncommenting this import and
+// the hostawayInitialSync entry in the serve() functions array below. Do not
+// delete lib/inngest/functions/hostaway/initial-sync.ts.
+// import { hostawayInitialSync } from '@/lib/inngest/functions/hostaway/initial-sync'
 
 // Hospitable integration
 import { hospInitialSync }              from '@/lib/inngest/functions/hospitable/initial-sync'
@@ -180,6 +184,7 @@ export const { GET, POST, PUT } = serve({
     dailyCommsRetention,
     dailyGuestPiiRetention,
     auditRetentionCron,
+    notificationsRetentionCron,
     staleFeedAlert,
     turnoverPriorityDecay,
     notificationDigest,
@@ -200,7 +205,9 @@ export const { GET, POST, PUT } = serve({
     ownerRezReconciliationHandler,
 
     // Hostaway sync
-    hostawayInitialSync,
+    // Disabled — not ready for launch. Re-enable by uncommenting this line
+    // and the import above.
+    // hostawayInitialSync,
 
     // Hospitable sync
     hospInitialSync,

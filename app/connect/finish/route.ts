@@ -34,6 +34,7 @@ import { claimPendingOAuthCode, cleanupExpiredPendingIntegrationArtifacts } from
 import { finalizeIntegrationConnection } from '@/lib/integrations/finalize-connection'
 import { logAuditEvent } from '@/lib/audit'
 import { revalidatePath } from 'next/cache'
+import { RateLimitError } from '@/lib/integrations/types'
 
 export async function GET(request: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL!
@@ -98,6 +99,17 @@ export async function GET(request: NextRequest) {
   try {
     tokenData = await providerAdapter.exchangeCodeForToken({ code, redirectUri })
   } catch (err) {
+    // This runs outside any Inngest step — there's no retry mechanism to
+    // lean on, and unlike the "code expired" case below, immediately
+    // bouncing through a fresh /connect flow would likely just hit the
+    // same rate limit again. Show a clear, actionable error instead.
+    if (err instanceof RateLimitError) {
+      console.warn(`[connect/finish] Token exchange rate limited for ${providerId} (retry after ${err.retryAfter}s)`)
+      const url = new URL('/connect/error', appUrl)
+      url.searchParams.set('provider', providerId)
+      url.searchParams.set('error', 'rate_limited')
+      return NextResponse.redirect(url)
+    }
     // The code expired or was already used on the provider's side (signup —
     // especially with email confirmation — can outlive a provider code's
     // ~10 min lifetime). Restart the standard connect flow: the user is

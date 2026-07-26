@@ -43,6 +43,7 @@ import { getProvider }                    from '@/lib/integrations/registry'
 import { holdPendingOAuthCode }           from '@/lib/integrations/vault'
 import { finalizeIntegrationConnection }  from '@/lib/integrations/finalize-connection'
 import { logAuditEvent }                  from '@/lib/audit'
+import { RateLimitError }                 from '@/lib/integrations/types'
 
 export async function GET(
   request: NextRequest,
@@ -214,6 +215,14 @@ export async function GET(
   try {
     tokenData = await providerAdapter.exchangeCodeForToken({ code, redirectUri })
   } catch (err) {
+    // This runs outside any Inngest step — there's no retry mechanism to
+    // lean on here, so a rate limit gets its own clear reason instead of
+    // the generic failure message, telling the PM it's transient and to
+    // just try again shortly rather than suggesting something is broken.
+    if (err instanceof RateLimitError) {
+      console.warn(`[OAuth:${providerId}] Token exchange rate limited (retry after ${err.retryAfter}s)`)
+      return errorRedirect('rate_limited')
+    }
     console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
     return errorRedirect('token_exchange_failed')
   }

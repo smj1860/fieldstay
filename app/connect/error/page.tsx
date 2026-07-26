@@ -12,6 +12,7 @@ const REASON_MESSAGES: Record<string, string> = {
   token_exchange_failed:  'We couldn’t complete the connection with the provider. Please try again.',
   storage_failed:         'We connected successfully but couldn’t save the connection securely. Please try again.',
   claim_failed:           'We couldn’t finish linking your connection to your new account. Please reconnect from Settings.',
+  rate_limited:           'This integration is temporarily rate-limited. Please wait a few minutes and try connecting again.',
 }
 
 export default async function ConnectErrorPage({

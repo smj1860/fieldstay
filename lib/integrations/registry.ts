@@ -13,14 +13,20 @@
 import type { IntegrationProvider } from './types'
 import { ownerRezProvider } from './providers/ownerrez'
 import { krogerProvider } from './providers/kroger'
-import { hostawayProvider }   from './providers/hostaway'
+// Hostaway disabled — not ready for launch. Re-enable by uncommenting this
+// import and the 'hostaway' map entry below. Do not delete
+// lib/integrations/providers/hostaway.ts.
+// import { hostawayProvider }   from './providers/hostaway'
 import { hospitableProvider } from './providers/hospitable'
 // Future: import { guestyProvider } from './providers/guesty'
 
 const providers = new Map<string, IntegrationProvider>([
   ['ownerrez',   ownerRezProvider],
   ['kroger',     krogerProvider],
-  ['hostaway',   hostawayProvider],
+  // Hostaway disabled — not ready for launch. Re-enable by uncommenting this
+  // line and the import above. Do not delete
+  // lib/integrations/providers/hostaway.ts.
+  // ['hostaway',   hostawayProvider],
   ['hospitable', hospitableProvider],
   // ['guesty',   guestyProvider],
 ])

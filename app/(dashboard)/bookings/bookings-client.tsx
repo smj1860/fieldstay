@@ -91,6 +91,10 @@ const SOURCE_LABELS: Record<BookingSource, string> = {
   booking_com: 'Booking.com',
   direct:      'Direct',
   manual:      'Manual',
+  // See bookings-calendar.tsx's SOURCE_LABELS comment — 'ownerrez' is a live
+  // enum label (20260616141406_add_ownerrez_booking_source.sql) with no
+  // current write path, kept here so it doesn't fall through to `undefined`.
+  ownerrez:    'OwnerRez',
   other:       'Other',
 }
 
@@ -102,6 +106,7 @@ const SOURCE_COLORS: Record<BookingSource, BadgeTone> = {
   booking_com: 'blue',
   direct:      'green',
   manual:      'gold',
+  ownerrez:    'slate',
   other:       'slate',
 }
 

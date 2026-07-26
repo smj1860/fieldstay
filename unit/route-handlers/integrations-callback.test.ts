@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
-import type { IntegrationProvider } from '@/lib/integrations/types'
+import { RateLimitError, type IntegrationProvider } from '@/lib/integrations/types'
 
 vi.mock('server-only', () => ({}))
 vi.mock('@supabase/ssr', () => ({
@@ -229,6 +229,25 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     const res = await callGet('ownerrez', '?code=bad-code&state=s1')
 
     expect(locationOf(res)).toContain('error=token_exchange_failed')
+    expect(storeIntegrationToken).not.toHaveBeenCalled()
+  })
+
+  it('redirects to rate_limited (not the generic token_exchange_failed) when the provider adapter throws a RateLimitError during exchange — this route runs outside any Inngest step, so there is no retry to lean on and the UI needs a clear, distinct reason', async () => {
+    const admin = makeAdmin({
+      oauth_states: [{ data: { state: 's1', provider_id: 'kroger', user_id: 'state_user', return_to: null }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(getProvider).mockReturnValue(
+      oauthProvider({
+        id: 'kroger',
+        exchangeCodeForToken: vi.fn(async () => { throw new RateLimitError(30) }),
+      }),
+    )
+
+    const res = await callGet('kroger', '?code=abc123&state=s1')
+
+    expect(locationOf(res)).toContain('error=rate_limited')
+    expect(locationOf(res)).not.toContain('token_exchange_failed')
     expect(storeIntegrationToken).not.toHaveBeenCalled()
   })
 

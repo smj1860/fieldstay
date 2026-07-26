@@ -21,7 +21,7 @@ export type PropertyType        = 'house' | 'condo' | 'cabin' | 'cottage' | 'tow
 export type IcalSource          = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'other'
 export type SyncStatus          = 'pending' | 'success' | 'error'
 export type BookingStatus       = 'confirmed' | 'cancelled' | 'blocked' | 'tentative'
-export type BookingSource       = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'manual' | 'other'
+export type BookingSource       = 'airbnb' | 'vrbo' | 'booking_com' | 'direct' | 'manual' | 'ownerrez' | 'other'
 export type TurnoverStatus      = 'pending_assignment' | 'assigned' | 'in_progress' | 'completed' | 'flagged' | 'cancelled'
 export type PriorityLevel       = 'low' | 'medium' | 'high' | 'urgent'
 export type ContactPref         = 'email' | 'sms' | 'both'
@@ -74,7 +74,9 @@ export type IntegrationStatus   = 'active' | 'revoked' | 'error' | 'disconnected
 
 // Support bot
 export type SupportCategory    = 'faq' | 'technical' | 'account_specific'
-export type SupportMessageRole = 'user' | 'assistant'
+// 'human' = a platform staff member replying from the support inbox
+// (app/api/support-inbox/reply/route.ts) — distinct from the bot 'assistant'.
+export type SupportMessageRole = 'user' | 'assistant' | 'human'
 
 // ─────────────────────────────────────────────────────────────
 // Row interfaces — one per Supabase table
@@ -106,7 +108,9 @@ export interface Organization {
   bathroom_room_template_id:       string | null
   default_room_templates_seeded_at: string | null
   preferred_retailer:           string | null
+  kroger_location_id:           string | null
   kroger_location_name:         string | null
+  auto_assign_enabled:          boolean
   auto_assign_mode:             AutoAssignMode
   vendor_auto_assign_mode:      VendorAutoAssignMode
   comms_log_retention_days:     number
@@ -137,7 +141,6 @@ export interface Property {
   org_id:                  string
   name:                    string
   address:                 string | null
-  address_line1:           string | null
   city:                    string | null
   state:                   string | null
   zip:                     string | null
@@ -172,6 +175,8 @@ export interface Property {
   max_pets:                number | null
   events_allowed:          boolean | null
   min_renter_age:          number | null
+  external_id:             string | null
+  external_source:         string | null
   created_at:              string
   updated_at:              string
 }
@@ -242,6 +247,8 @@ export interface Booking {
   guidebook_pre_arrival_email_sent_at: string | null
   actual_total_amount:  number | null
   door_code_secret_id:  string | null
+  door_code_lock:       string | null
+  door_code_synced_at:  string | null
   guest_pii_anonymized_at: string | null
   created_at:           string
   updated_at:           string
@@ -290,7 +297,12 @@ export interface CrewFeedback {
   crew_member_id: string
   property_id:    string | null
   feedback_text:  string
-  created_at:     string
+  // Renamed from created_at → submitted_at on prod out-of-band, then
+  // replicated to e2e by 20260724160000_capture_prod_drift_functions_columns_seed.sql.
+  // types/database.ts and app/(dashboard)/support-inbox/{page,support-inbox-client}.tsx
+  // still referenced the old name until the drift check caught it — see
+  // 20260725200500_db_type_shape_report.sql / scripts/check-type-drift.mjs.
+  submitted_at:   string
 }
 
 export interface CrewAvailabilityEntry {
@@ -502,6 +514,11 @@ export interface Turnover {
   suggestion_reasoning:  string | null
   suggestion_status:     SuggestionStatus | null
   is_archived:           boolean
+  // Booking date-change reconciliation (pending new window until PM acks)
+  dates_changed_at:              string | null
+  dates_change_acknowledged_at:  string | null
+  pending_checkin_datetime:      string | null
+  pending_checkout_datetime:     string | null
   created_at:            string
   updated_at:            string
   turnover_assignments:  TurnoverAssignment[]
@@ -509,8 +526,11 @@ export interface Turnover {
 
 export interface TurnoverAssignment {
   id:                string
+  org_id:            string | null
   turnover_id:       string
   crew_member_id:    string
+  user_id:           string | null
+  property_id:       string | null
   assigned_at:       string
   notified_at:       string | null
   notification_type: ContactPref | null
@@ -627,27 +647,41 @@ export interface InventoryCountItem {
   created_at:        string
 }
 
+// Field names match the live schema (submitted_by, item_id, counted_qty) —
+// not the never-applied crew_member_id/submitted_at/inventory_item_id/
+// submitted_quantity names from the superseded schema_history_gaps
+// migrations (20260609000003/20260609111810), whose CREATE TABLE IF NOT
+// EXISTS no-op'd against the table 20260604223326_add_inventory_count_drafts.sql
+// had already created. reviewed_at/reviewed_by were added for real by
+// 20260725201500_add_reviewed_columns_to_inventory_count_drafts.sql, after
+// the drift check caught app/(dashboard)/inventory/actions.ts writing to
+// them against columns that didn't exist yet.
 export interface InventoryCountDraft {
-  id:             string
-  org_id:         string
-  property_id:    string
-  crew_member_id: string | null
-  status:         'pending_review' | 'approved' | 'rejected'
-  submitted_at:   string | null
-  reviewed_at:    string | null
-  reviewed_by:    string | null
-  notes:          string | null
-  created_at:     string
-  updated_at:     string
+  id:           string
+  org_id:       string
+  property_id:  string
+  submitted_by: string | null
+  status:       'pending_review' | 'approved' | 'rejected'
+  reviewed_at:  string | null
+  reviewed_by:  string | null
+  notes:        string | null
+  created_at:   string
+  updated_at:   string
 }
 
 export interface InventoryCountDraftItem {
-  id:                 string
-  draft_id:           string
-  inventory_item_id:  string
-  previous_quantity:  number
-  submitted_quantity: number
-  created_at:         string
+  id:                string
+  draft_id:          string
+  item_id:           string
+  previous_quantity: number
+  counted_qty:       number
+  // `note` (singular) is a legacy duplicate column nobody writes or reads —
+  // app/api/crew/inventory-count/route.ts and app/(dashboard)/inventory/
+  // page.tsx both use `notes` (plural) exclusively. Kept here only so the
+  // interface doesn't silently drop a real live column (see CLAUDE.md's
+  // "Two inventory tables with different column names" section).
+  note:              string | null
+  notes:             string | null
 }
 
 export interface PurchaseOrder {
@@ -746,10 +780,8 @@ export interface WorkOrder {
   completion_notes:            string | null
   completed_by_name:           string | null
   invoice_reference:           string | null
-  quote_token:                 string | null
-  quote_token_expires_at:      string | null
-  quoted_amount:               number | null
-  quote_notes:                 string | null
+  // Quote fields live on the quote_requests table — work_orders itself has
+  // no quote_token/quoted_amount columns (removed 2026-07-25 drift fix).
   vendor_acknowledged_at:      string | null
   vendor_acknowledged_by:      string | null
   completion_verified_at:      string | null
@@ -768,6 +800,7 @@ export interface WorkOrder {
   suggested_vendor_ids:        string[] | null
   suggestion_reasoning:        string | null
   suggestion_status:           SuggestionStatus | null
+  client_report_id:            string | null
   created_at:                  string
   updated_at:                  string
 }
@@ -876,6 +909,7 @@ export interface MaintenanceSchedule {
   property_id:               string
   org_id:                    string
   assigned_vendor_id:        string | null
+  vendor_specialty_hint:     VendorSpecialty | null
   name:                      string
   description:               string | null
   schedule_type:             ScheduleType
@@ -1148,18 +1182,30 @@ export interface InventoryTemplateItem {
   template_id:     string
   catalog_item_id: string | null
   name:            string
-  category:        InventoryCategory
-  unit:            string
+  // category/unit are nullable at the DB level, but every write path
+  // (app/(dashboard)/templates/inventory/actions.ts) always copies both
+  // from the source catalog row, so a null in practice means a bug, not an
+  // expected state.
+  category:        InventoryCategory | null
+  unit:            string | null
   par_level:       number
+  // Legacy column from the original 20260604223335_add_inventory_templates.sql
+  // schema, superseded by par_level (added later) — never read or written
+  // by current app code (see actions.ts's "par_qty (unused, see Pass 1/3
+  // self-audit)" comment). No created_at column exists on this table.
+  par_qty:         number
   sort_order:      number
   notes:           string | null
   preferred_brand: string | null
-  created_at:      string
 }
 
+// Two disjoint subscriber shapes share this table: crew (crew_member_id set,
+// user_id null — app/api/crew/push-subscribe/route.ts) and PM dashboard
+// users (user_id set, crew_member_id null — app/api/dashboard/push-subscribe/route.ts).
 export interface PushSubscription {
   id:             string
-  crew_member_id: string
+  crew_member_id: string | null
+  user_id:        string | null
   org_id:         string
   endpoint:       string
   p256dh:         string
@@ -1519,22 +1565,31 @@ export interface SupportKbChunk {
 }
 
 export interface SupportConversation {
-  id:              string
-  org_id:          string
-  user_id:         string
-  status:          string
-  created_at:      string
-  last_message_at: string
+  id:                 string
+  org_id:             string
+  user_id:            string
+  status:             string
+  needs_human:        boolean
+  escalation_reason:  string | null
+  escalated_at:       string | null
+  resolved_at:        string | null
+  assigned_staff_id:  string | null
+  staff_notified_at:  string | null
+  created_at:         string
+  last_message_at:    string
 }
 
 export interface SupportMessage {
-  id:              string
-  conversation_id: string
-  role:            SupportMessageRole
-  content:         string
-  category:        SupportCategory | null
-  model_used:      string | null
-  created_at:      string
+  id:               string
+  conversation_id:  string
+  role:             SupportMessageRole
+  content:          string
+  category:         SupportCategory | null
+  model_used:       string | null
+  // Set only for role='human' (a platform staff reply via
+  // app/api/support-inbox/reply/route.ts) — null for bot/guest messages.
+  sent_by_user_id:  string | null
+  created_at:       string
 }
 
 // ── In-app notifications (bell) ─────────────────────────────────────────────
@@ -1556,6 +1611,19 @@ export interface NotificationDigestState {
   org_id:     string
   category:   string
   snapshot:   Record<string, unknown>
+  updated_at: string
+}
+
+// ── Org-level SMS template overrides ────────────────────────────────────────
+// Per-org customization of the default guest SMS copy in lib/sms/templates.ts.
+// UNIQUE(org_id, key) — an org may override any subset of template keys;
+// resetOrgSmsTemplate() deletes the row to fall back to the built-in default.
+export interface OrgSmsTemplate {
+  id:         string
+  org_id:     string
+  key:        string
+  body:       string
+  created_at: string
   updated_at: string
 }
 
@@ -1622,6 +1690,31 @@ export interface Database {
       communication_logs:          { Row: CommunicationLog;              Insert: Partial<CommunicationLog>;              Update: Partial<CommunicationLog>;              Relationships: [] }
       messages:                    { Row: Message;                       Insert: Partial<Message>;                       Update: Partial<Message>;                       Relationships: [] }
       push_subscriptions:          { Row: PushSubscription;              Insert: Partial<PushSubscription>;              Update: Partial<PushSubscription>;              Relationships: [] }
+      org_sms_templates:           { Row: OrgSmsTemplate;                Insert: Partial<OrgSmsTemplate>;                Update: Partial<OrgSmsTemplate>;                Relationships: [] }
+
+      // ── Crew learning loop / feedback ───────────────────────
+      assignment_outcomes:         { Row: AssignmentOutcome;             Insert: Partial<AssignmentOutcome>;             Update: Partial<AssignmentOutcome>;             Relationships: [] }
+      vendor_assignment_outcomes:  { Row: VendorAssignmentOutcome;       Insert: Partial<VendorAssignmentOutcome>;       Update: Partial<VendorAssignmentOutcome>;       Relationships: [] }
+      crew_feedback:               { Row: CrewFeedback;                  Insert: Partial<CrewFeedback>;                  Update: Partial<CrewFeedback>;                  Relationships: [] }
+      checklist_item_signals:      { Row: ChecklistItemSignal;           Insert: Partial<ChecklistItemSignal>;           Update: Partial<ChecklistItemSignal>;           Relationships: [] }
+
+      // ── Inventory templates ─────────────────────────────────
+      inventory_templates:         { Row: InventoryTemplate;             Insert: Partial<InventoryTemplate>;             Update: Partial<InventoryTemplate>;             Relationships: [] }
+      inventory_template_items:    { Row: InventoryTemplateItem;         Insert: Partial<InventoryTemplateItem>;         Update: Partial<InventoryTemplateItem>;         Relationships: [] }
+
+      // ── Maintenance ──────────────────────────────────────────
+      maintenance_catalog_items:   { Row: MaintenanceCatalogItem;        Insert: Partial<MaintenanceCatalogItem>;        Update: Partial<MaintenanceCatalogItem>;        Relationships: [] }
+      maintenance_completions:     { Row: MaintenanceCompletion;         Insert: Partial<MaintenanceCompletion>;         Update: Partial<MaintenanceCompletion>;         Relationships: [] }
+
+      // ── Work order billing ──────────────────────────────────
+      work_order_invoices:         { Row: WorkOrderInvoice;              Insert: Partial<WorkOrderInvoice>;              Update: Partial<WorkOrderInvoice>;              Relationships: [] }
+
+      // ── Guest messaging ──────────────────────────────────────
+      reservation_messages:        { Row: ReservationMessage;            Insert: Partial<ReservationMessage>;            Update: Partial<ReservationMessage>;            Relationships: [] }
+
+      // ── RepuGuard ────────────────────────────────────────────
+      reviews:                     { Row: Review;                        Insert: Partial<Review>;                        Update: Partial<Review>;                        Relationships: [] }
+      review_responses:            { Row: ReviewResponse;                Insert: Partial<ReviewResponse>;                Update: Partial<ReviewResponse>;                Relationships: [] }
 
       // ── Asset Health ───────────────────────────────────────
       property_assets:             { Row: PropertyAsset;            Insert: Partial<PropertyAsset>;            Update: Partial<PropertyAsset>;            Relationships: [] }

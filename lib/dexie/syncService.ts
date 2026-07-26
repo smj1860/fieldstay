@@ -3,15 +3,51 @@ import { getDexieDb, type MutationRow } from './schema'
 
 type DexieSupabaseClient = ReturnType<typeof createClient>
 
+const MAX_RETRIES = 5
+
+// Retry backoff: 5 s base doubling per retry, capped at 5 min, each delay
+// scaled by a uniform 0.5–1.5× jitter factor so a fleet of crew devices
+// coming back from the same outage doesn't retry in lockstep.
+const BASE_RETRY_DELAY_MS = 5_000
+const MAX_RETRY_DELAY_MS  = 300_000
+
+/**
+ * Computes the epoch-ms timestamp before which a failed mutation must not be
+ * re-pushed. `retryCount` is the ALREADY-incremented count for the failure
+ * being handled — the `- 1` keeps the first retry at the 5 s base (growth:
+ * 5 s → 10 s → 20 s … capped at 5 min, each scaled 0.5–1.5×).
+ */
+export function computeNextAttemptAt(retryCount: number, now: number): number {
+  const baseDelay = Math.min(2 ** (retryCount - 1) * BASE_RETRY_DELAY_MS, MAX_RETRY_DELAY_MS)
+  // eslint-disable-next-line no-restricted-properties -- retry backoff jitter to spread outbox retry storms after an outage, not id/token generation
+  const jitter = Math.random() // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
+  return now + baseDelay * (0.5 + jitter)
+}
+
 // Mirrors the upstream sync logic in lib/powersync/client.ts (SupabaseConnector.uploadData),
 // replacing PowerSync's CRUD transaction queue with the local `mutations` outbox table.
 export class SyncEngine {
   private supabase = createClient()
   private userId: string
   private isProcessing = false
+  // Single pending wake-up for a drain that stopped on a not-yet-due
+  // mutation. One handle only — scheduleRetry() clears any previous timer
+  // before setting a new one; the existing `online` listener and
+  // enqueueMutation()'s fire-and-forget drains remain additional entry
+  // points, so an overwritten (later) wake-up self-corrects on the next
+  // drain, which stops on the still-not-due head and reschedules.
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(userId: string) {
     this.userId = userId
+  }
+
+  private scheduleRetry(nextAttemptAt: number): void {
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer)
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      void this.processOutbox()
+    }, Math.max(0, nextAttemptAt - Date.now()))
   }
 
   /**
@@ -22,6 +58,14 @@ export class SyncEngine {
    * marked `failed` (dead-lettered on a prior run) are excluded rather than
    * retried forever — retryFailedMutation() in helpers.ts is the only way
    * back into the queue for those.
+   *
+   * Failed (non-dead-lettered) mutations back off exponentially via
+   * nextAttemptAt: a mutation whose backoff window hasn't elapsed stops the
+   * drain entirely — never skip-and-continue, because later mutations against
+   * the same record must not jump ahead (the same ordering rule as the
+   * stop-on-first-error semantics below; "not due yet" is just an additional
+   * stop reason). A stopped drain schedules a one-shot timer to resume at
+   * nextAttemptAt.
    */
   async processOutbox(): Promise<void> {
     if (this.isProcessing) return
@@ -34,8 +78,18 @@ export class SyncEngine {
       for (const mutation of pending) {
         // Auto-incrementing key — always populated once read back from the table.
         const id = mutation.id as number
+
+        // Backoff gate: a mutation still inside its retry window stops the
+        // drain entirely (never skip-and-continue — later mutations against
+        // the same record must not jump ahead). Resume when it comes due.
+        if (mutation.nextAttemptAt !== undefined && mutation.nextAttemptAt > Date.now()) {
+          this.scheduleRetry(mutation.nextAttemptAt)
+          return
+        }
+
         try {
           await uploadOne(this.supabase, mutation)
+          // Successful push clears the whole row — nextAttemptAt with it.
           await db.mutations.delete(id)
         } catch (err) {
           const newRetryCount = mutation.retryCount + 1
@@ -44,7 +98,6 @@ export class SyncEngine {
             `(attempt ${newRetryCount}):`, err
           )
 
-          const MAX_RETRIES = 5
           if (newRetryCount >= MAX_RETRIES) {
             // Dead-letter: keep the row (marked failed) rather than deleting
             // it, so a write that never reached the server leaves a durable,
@@ -57,13 +110,16 @@ export class SyncEngine {
             )
             await db.mutations.update(id, { retryCount: newRetryCount, failed: true })
           } else {
-            await db.mutations.update(id, { retryCount: newRetryCount })
+            const nextAttemptAt = computeNextAttemptAt(newRetryCount, Date.now())
+            await db.mutations.update(id, { retryCount: newRetryCount, nextAttemptAt })
             // Only block the queue on transient failures, not permanent ones.
             // If we've retried >= 3 times, skip this mutation and continue
             // draining so later mutations (which may be independent) still go through.
             if (newRetryCount >= 3) continue
             // Stop draining on first/second failure so later mutations against
-            // the same record aren't applied out of order.
+            // the same record aren't applied out of order; wake up again when
+            // the backoff window elapses.
+            this.scheduleRetry(nextAttemptAt)
             break
           }
         }
