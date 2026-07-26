@@ -16,11 +16,11 @@ status (checked against the live codebase, not assumed):
 |---|---|---|
 | 1. Serial per-org crons → event fan-out | 1 | ✅ Done — `daily-wrapup.ts`, SMS morning/evening crons, `ownerrez/incremental-sync`, `turnover-priority-decay` all converted to `step.sendEvent` fan-out |
 | 2. OwnerRez/Hospitable shared-IP budget fair-share | 1 | ✅ Done |
-| 3. Crew PWA Realtime footprint | 1 | 🔶 In progress — redesigned as Crew Sync v2; Phases 0–1 live, Phases 2–5 remain (see `CREW_SYNC_V2_PHASES.md`) |
+| 3. Crew PWA Realtime footprint | 1 | 🔶 In progress — redesigned as Crew Sync v2; Phases 0–4 live (Phase 4 merged via PR #508, 2026-07-26), only Phase 5 (rollout) remains (see `CREW_SYNC_V2_PHASES.md`) |
 | 4. Drop redundant per-row `is_org_member()` from SELECT policies | 1 | ✅ Done — migration applied |
 | 5. SMS spend/throughput guard before `SMS_ENABLED=true` | 1 | ✅ Done (flag itself stays false until 10DLC clears) |
 | 6. Memoize `requireOrgMember()` + fix layout waterfall | 2 | ✅ Done — `lib/auth.ts` wraps auth context in React `cache()` |
-| 7. Dexie delta sync + outbox backoff | 2 | 🔶 Half done — delta sync shipped as Crew Sync v2 Phase 1; **outbox backoff = Phase 4, still open** |
+| 7. Dexie delta sync + outbox backoff | 2 | ✅ Done — delta sync shipped as Crew Sync v2 Phase 1; outbox backoff shipped as Phase 4 (PR #508, 2026-07-26) |
 | 8. Bound the unbounded queries | 2 | ✅ Done — `checklist-signals` has a 180-day rolling window, reviews/owners pages are `.limit()`-bounded |
 | 9. Enforcement Tiers 1–3 (ESLint/guardrails → typed ServiceRoleContext → DB invariant CI gate) | — | ✅ Done — Tier 3 is PR #505 |
 | 10. Tier 3 hygiene list | 3 | ✅ Done — sections 1, 3, 4, 5 shipped; section 2 (Hostaway) deliberately disabled instead of built, see below |

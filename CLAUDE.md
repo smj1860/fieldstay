@@ -853,11 +853,20 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 
 ### Complexity & Structure
 - **Cognitive complexity ≤ 15** per function — extract named helper functions,
-  custom hooks, or named predicates to reduce branching
+  custom hooks, or named predicates to reduce branching. ESLint-enforced
+  (`sonarjs/cognitive-complexity`, `eslint.config.mjs`) — currently `warn`
+  while the 236 pre-existing violations surfaced at rollout get cleared,
+  same pattern as the jsx-a11y block; new code should not add to that count
 - **Nesting depth ≤ 4** — use guard clauses and early returns to flatten nested
-  `if` blocks rather than indenting further
+  `if`/`for`/`while`/`switch`/`try` blocks rather than indenting further, and
+  extract named sibling functions rather than nesting closures more than 4
+  levels deep. ESLint-enforced (`sonarjs/nested-control-flow` for blocks,
+  `sonarjs/no-nested-functions` for closures) — `warn` for the same rollout
+  reason as above
 - **No nested template literals** — extract inner expressions to named variables
-  first, or use `cn()` for className construction if already imported in the file
+  first, or use `cn()` for className construction if already imported in the file.
+  ESLint-enforced (`sonarjs/no-nested-template-literals`) — `warn` for the same
+  rollout reason as above
 - **No invariant conditionals** — a ternary where both branches return the same
   value is always a bug; review intent before fixing
 
@@ -901,7 +910,9 @@ and refactors. Violations will appear as SonarQube findings on the next scan.
 - Remove all unused imports before committing — run `npx tsc --noEmit` to
   surface them if ESLint is not configured to catch them
 - No chained ternary expressions — break them into `if/else` blocks or a
-  named classification function
+  named classification function. ESLint-enforced (`sonarjs/no-nested-conditional`,
+  `eslint.config.mjs`) — `warn` while pre-existing violations get cleared,
+  same rollout pattern as the jsx-a11y block
 
 ### Accessibility Checklist (apply to all new UI)
 - Non-native click targets → `role`, `tabIndex`, `onKeyDown` or convert to `<button>`
@@ -1072,7 +1083,12 @@ following them stops being a memory test. Four layers, checked in CI via
    `supabase.raw()`, reading `SUPABASE_SERVICE_ROLE_KEY` outside
    `lib/supabase/server.ts`, `Math.random`, bare `window`. A legitimate
    exception gets an inline `eslint-disable-next-line` WITH a one-line
-   justification (see the sampling/jitter sites for the pattern).
+   justification (see the sampling/jitter sites for the pattern). The same
+   block also runs `eslint-plugin-sonarjs` for the Code Quality Standards
+   thresholds above (cognitive complexity, nesting depth, nested
+   ternaries/template literals) — previously SonarCloud-only (caught on the
+   PR, not locally); currently `warn` pending a cleanup pass on the 236
+   pre-existing violations the rollout surfaced, then ratchets to `error`.
 
 2. **Guardrail tests** (`unit/guardrails/`) — cross-file invariants no
    per-file rule can express:
@@ -1090,6 +1106,17 @@ following them stops being a memory test. Four layers, checked in CI via
    - `tailwind-color-ratchet` — files that predate the color-token rule
      are baselined; new files may not hardcode Tailwind color utilities,
      and cleaned-up files must leave the baseline. Never add entries.
+   - `n-plus-one-loops` — no Supabase query (or `rpc()` call) inside a
+     per-row loop body (`for...of`, `for await...of`, `.forEach`,
+     `.map(async`) outside a named, justified `EXCEPTIONS` entry. Classic
+     numeric pagination loops and a loop whose body is an Inngest
+     `step.run(...)` boundary are structurally exempt.
+   - `inngest-insert-idempotency` — every `.from(table).insert(...)` inside
+     an Inngest `step.run(...)` body is either guarded (a same-table
+     pre-check `select`/`delete`, `onConflict`/`ignoreDuplicates`, a
+     `23505` catch, a `dedup(e)?_key` column, or `createPmNotification()`)
+     or a named, justified `EXCEPTIONS` entry — the structural backstop for
+     the Inngest Functions section's idempotency rule.
 
 3. **`check:ui-classes`** — the raw `btn-*`/`badge-*`/`card` class grep.
 
@@ -1098,10 +1125,12 @@ following them stops being a memory test. Four layers, checked in CI via
    see, via `public.db_invariant_report()` against the dedicated E2E
    project: RLS enabled on every public table, no policy-less (deny-all)
    tables outside the script's shrink-only `SERVICE_ROLE_ONLY_TABLES`
-   allowlist, a covering index on every FK column, and zero `anon` table
+   allowlist, a covering index on every FK column, zero `anon` table
    grants (all revoked 2026-07-24 — no client reads tables
-   unauthenticated). Self-disarms with a warning when the E2E secrets are
-   absent, same as the e2e job.
+   unauthenticated), and every `dedupe_key`/`dedup_key`/
+   `source_reference_id`-named column backed by a real UNIQUE or
+   partial-unique index. Self-disarms with a warning when the E2E secrets
+   are absent, same as the e2e job.
 
    **Type drift gate** (`scripts/check-type-drift.mjs`, same
    `db-invariants` CI job, run as its own step after
