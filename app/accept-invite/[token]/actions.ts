@@ -7,6 +7,7 @@ import { redirect }            from 'next/navigation'
 import { headers }             from 'next/headers'
 import { inviteAcceptRatelimit } from '@/lib/rate-limit'
 
+import { reportError } from '@/lib/observability/report-error'
 const AcceptSchema = z.object({
   token:    z.string().uuid('Invite link is invalid or expired'),
   fullName: z.string().min(1, 'Full name is required').max(200),
@@ -41,6 +42,7 @@ export async function acceptTeamInvite(formData: FormData): Promise<{ error?: st
     }
   } catch (rlErr) {
     console.error('[acceptTeamInvite] rate limit check failed', rlErr)
+    reportError(rlErr, { site: 'serverAction.accept-invite.acceptTeamInvite' })
   }
 
   const { token, fullName, password } = parsed.data

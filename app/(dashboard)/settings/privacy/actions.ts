@@ -4,6 +4,7 @@ import { requireOrgMember }    from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent }       from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 /**
  * Anonymize a guest's PII across all bookings in this org.
  * Matches by email — finds all bookings where guest_email = the provided address.
@@ -71,6 +72,7 @@ export async function anonymizeGuestData(
     return { success: true, bookingsAnonymized: ids.length }
   } catch (err) {
     console.error('[anonymizeGuestData]', err)
+    reportError(err, { site: 'serverAction.settings.privacy.anonymizeGuestData' })
     return { success: false, bookingsAnonymized: 0, error: 'Operation failed. Please try again.' }
   }
 }

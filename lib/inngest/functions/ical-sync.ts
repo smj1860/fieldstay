@@ -8,6 +8,7 @@ import { resend, FROM } from '@/lib/resend/client'
 import { renderPmAlert } from '@/lib/resend/emails/pm-alert'
 import type { BookingSource } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 // H-2: Reject non-HTTPS URLs and private/loopback IP ranges to prevent SSRF
 function assertSafeIcalUrl(url: string): void {
   let parsed: URL
@@ -160,6 +161,7 @@ export const syncIcalFeed = inngest.createFunction(
       }).eq('id', feed_id)
 
       logger.error(`Feed ${feed_id} fetch failed: ${err}`)
+      reportError(err, { site: 'inngest.ical-sync-all.download-ical' })
       throw err
     }
 

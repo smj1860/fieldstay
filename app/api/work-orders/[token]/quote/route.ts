@@ -5,6 +5,7 @@ import { workOrderRatelimit }        from '@/lib/rate-limit'
 import { extractClientIp }           from '@/lib/integrations/webhook-verification'
 import { unwrapJoin }                from '@/lib/utils/supabase-joins'
 
+import { reportError } from '@/lib/observability/report-error'
 // Public, unauthenticated, token-gated route — rate limit by IP so a
 // leaked/enumerated token can't drive unbounded repeated lookups or
 // submissions. Fails open on a Redis outage.
@@ -17,6 +18,7 @@ async function checkRateLimit(request: NextRequest, key: string): Promise<NextRe
     }
   } catch (rlErr) {
     console.error(`[work-orders/quote] rate limit check failed (${key})`, rlErr)
+    reportError(rlErr, { site: 'route.work-orders.quote.checkRateLimit' })
   }
   return null
 }

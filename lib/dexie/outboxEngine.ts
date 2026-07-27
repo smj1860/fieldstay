@@ -1,5 +1,6 @@
 import type { Table, UpdateSpec } from 'dexie'
 
+import { reportError } from '@/lib/observability/report-error'
 export interface BaseMutationRow {
   id?:        number
   createdAt:  string
@@ -68,6 +69,7 @@ export class OutboxEngine<TMutation extends BaseMutationRow> {
         } catch (err) {
           if (this.config.isTerminal?.(err)) {
             console.error(`[OutboxEngine] mutation ${id} terminal failure:`, err)
+            reportError(err, { site: 'lib.dexie.outboxEngine.OutboxEngine' })
             await this.patch(id, { failed: true })
             continue
           }

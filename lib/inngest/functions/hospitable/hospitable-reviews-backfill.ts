@@ -24,6 +24,7 @@ import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable
 import { RateLimitError, translateSyncError } from '@/lib/integrations/types'
 import { hospFetchReviews } from '@/lib/integrations/providers/hospitable'
 
+import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'hospitable'
 
 export const hospReviewsBackfill = inngest.createFunction(
@@ -148,6 +149,7 @@ export const hospReviewsBackfill = inngest.createFunction(
     } catch (err) {
       const friendlyMsg = translateSyncError(err, 'Hospitable')
       logger.error(`[Hospitable:${user_id}] Reviews backfill failed: ${err instanceof Error ? err.message : String(err)}`)
+      reportError(err, { site: 'inngest.hospitable-reviews-backfill.record-backfill-success' })
 
       await step.run('record-backfill-error', async () => {
         await updateConnectionMeta(user_id, {

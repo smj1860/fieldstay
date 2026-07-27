@@ -8,6 +8,7 @@ import { headers }             from 'next/headers'
 import { z }                   from 'zod'
 import { inviteAcceptRatelimit } from '@/lib/rate-limit'
 
+import { reportError } from '@/lib/observability/report-error'
 const ActivateSchema = z.object({
   token:    z.string().uuid('Invite link is invalid or expired'),
   crewId:   z.string().uuid(),
@@ -50,6 +51,7 @@ export async function activateCrewAccount(formData: FormData): Promise<{ error?:
     }
   } catch (rlErr) {
     console.error('[activateCrewAccount] rate limit check failed', rlErr)
+    reportError(rlErr, { site: 'serverAction.crew-invite.activateCrewAccount' })
   }
 
   const { token, crewId, password } = parsed.data

@@ -6,6 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 
+import { reportError } from '@/lib/observability/report-error'
 export type CrewState = { error?: string; success?: boolean }
 
 export async function addCrewMember(
@@ -45,6 +46,7 @@ export async function addCrewMember(
     return { success: true }
   } catch (err) {
     console.error('[addCrewMember]', err)
+    reportError(err, { site: 'serverAction.properties.setup.crew.addCrewMember' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -56,6 +58,7 @@ export async function completeCrewStep(propertyId: string): Promise<void> {
   } catch (err) {
     unstable_rethrow(err)
     console.error('[completeCrewStep]', err)
+    reportError(err, { site: 'serverAction.properties.setup.crew.completeCrewStep' })
     throw err
   }
 }

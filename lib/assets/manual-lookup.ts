@@ -28,6 +28,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { DBClient } from '@/lib/supabase/server'
 import type { AssetType } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 const MODEL = 'claude-haiku-4-5-20251001'
 
 export interface ManualLookupResult {
@@ -76,6 +77,7 @@ export async function findManualUrl(
       assetType, make, model,
       error: err instanceof Error ? err.message : String(err),
     })
+    reportError(err, { site: 'lib.assets.manual-lookup.findManualUrl' })
     return { sourceUrl: null, foundVia: null }
   }
 }

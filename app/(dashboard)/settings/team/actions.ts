@@ -7,6 +7,7 @@ import { sendTeamInviteEmail }       from '@/lib/resend/client'
 import { revalidatePath }            from 'next/cache'
 import { logAuditEvent }             from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 const EmailSchema = z.string().email('Invalid email address.')
 
 export async function inviteTeamMember(
@@ -92,6 +93,7 @@ export async function inviteTeamMember(
       })
     } catch (_err) {
       console.error(`[Team:${user.id}] invite email failed`)
+      reportError(_err, { site: 'serverAction.settings.team.inviteTeamMember' })
       // Non-fatal — invite record exists, user can resend
     }
 
@@ -109,6 +111,7 @@ export async function inviteTeamMember(
     return { ok: true }
   } catch (err) {
     console.error('[inviteTeamMember]', err)
+    reportError(err, { site: 'serverAction.settings.team.inviteTeamMember' })
     return { error: 'Failed to create invitation. Please try again.' }
   }
 }
@@ -165,6 +168,7 @@ export async function removeMember(
     return { ok: true }
   } catch (err) {
     console.error('[removeMember]', err)
+    reportError(err, { site: 'serverAction.settings.team.removeMember' })
     return { error: 'Failed to remove member. Please try again.' }
   }
 }
@@ -204,6 +208,7 @@ export async function revokeInvite(
     return { ok: true }
   } catch (err) {
     console.error('[revokeInvite]', err)
+    reportError(err, { site: 'serverAction.settings.team.revokeInvite' })
     return { error: 'Failed to revoke invitation. Please try again.' }
   }
 }

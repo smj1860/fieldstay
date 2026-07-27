@@ -5,6 +5,7 @@ import { vendorConnectRatelimit }    from '@/lib/rate-limit'
 import { extractClientIp }           from '@/lib/integrations/webhook-verification'
 import { logAuditEvent }             from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 /**
  * GET /api/vendor-connect/[token]/onboard
  *
@@ -37,6 +38,7 @@ export async function GET(
     }
   } catch (rlErr) {
     console.error('[vendor-connect/onboard] rate limit check failed', rlErr)
+    reportError(rlErr, { site: 'route.vendor-connect.onboard.GET' })
   }
 
   const supabase = createServiceClient({ publicSurface: 'api-vendor-connect--token--onboard' })
@@ -141,6 +143,7 @@ export async function GET(
         .eq('stripe_connect_account_id', 'pending')
     }
     console.error('[vendor-connect/onboard] Stripe error:', err)
+    reportError(err, { site: 'route.vendor-connect.onboard.GET' })
     return NextResponse.json(
       { error: 'Could not generate onboarding link. Please try again.' },
       { status: 500 }

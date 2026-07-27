@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { getDexieDb, type MutationRow } from './schema'
 
+import { reportError } from '@/lib/observability/report-error'
 type DexieSupabaseClient = ReturnType<typeof createClient>
 
 const MAX_RETRIES = 5
@@ -97,6 +98,7 @@ export class SyncEngine {
             `[SyncEngine] mutation ${id} (${mutation.table}) failed ` +
             `(attempt ${newRetryCount}):`, err
           )
+          reportError(err, { site: 'lib.dexie.syncService.SyncEngine' })
 
           if (newRetryCount >= MAX_RETRIES) {
             // Dead-letter: keep the row (marked failed) rather than deleting

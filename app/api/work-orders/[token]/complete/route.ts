@@ -5,6 +5,7 @@ import { extractClientIp } from '@/lib/integrations/webhook-verification'
 import type { WoStatus } from '@/types/database'
 import { createVendorInvoice, dispatchCompletionEvents } from './helpers'
 
+import { reportError } from '@/lib/observability/report-error'
 /**
  * POST /api/work-orders/[token]/complete
  *
@@ -30,6 +31,7 @@ export async function POST(
     }
   } catch (rlErr) {
     console.error('[work-orders/complete] rate limit check failed', rlErr)
+    reportError(rlErr, { site: 'route.work-orders.complete.POST' })
   }
 
   const supabase = createServiceClient({ publicSurface: 'api-work-orders--token--complete' })

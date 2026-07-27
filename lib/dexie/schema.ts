@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 
+import { reportError } from '@/lib/observability/report-error'
 // Mirrors lib/powersync/schema.ts table-for-table. Column types follow the
 // same convention PowerSync uses: column.integer for booleans (0/1) and
 // column.text for everything else, including ids and timestamps.
@@ -350,6 +351,7 @@ export async function closeDexieDb(): Promise<void> {
       await Dexie.delete(dbName)
     } catch (err) {
       console.error('[Dexie] Failed to delete DB on logout:', err)
+      reportError(err, { site: 'lib.dexie.schema.Dexie' })
       // Non-fatal: the closed connection already prevents reads;
       // the delete just ensures no residual storage remains.
     }
@@ -359,6 +361,7 @@ export async function closeDexieDb(): Promise<void> {
         await Dexie.delete(`fieldstay-photo-queue-${formerUserId}`)
       } catch (err) {
         console.error('[Dexie] Failed to delete photo blob store on logout:', err)
+        reportError(err, { site: 'lib.dexie.schema.Dexie' })
       }
     }
   }

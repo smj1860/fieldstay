@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { requireOrgMember } from '@/lib/auth'
 import { ONBOARDING_STEPS } from '@/lib/onboarding-wizard'
 
+import { reportError } from '@/lib/observability/report-error'
 export async function markStepComplete(
   stepKey: string,
   nextHref?: string
@@ -41,6 +42,7 @@ export async function markStepComplete(
   } catch (err) {
     unstable_rethrow(err)
     console.error('[markStepComplete]', err)
+    reportError(err, { site: 'serverAction.setup.markStepComplete' })
     throw err
   }
 }

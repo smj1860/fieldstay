@@ -4,6 +4,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent }    from '@/lib/audit'
 import { revalidatePath }   from 'next/cache'
 
+import { reportError } from '@/lib/observability/report-error'
 export async function clonePropertySetup(
   sourcePropertyId: string,
   targetPropertyId: string
@@ -189,6 +190,7 @@ export async function clonePropertySetup(
     return { success: true }
   } catch (err) {
     console.error('[clonePropertySetup]', err)
+    reportError(err, { site: 'serverAction.properties.clonePropertySetup' })
     return { success: false, error: 'An unexpected error occurred.' }
   }
 }

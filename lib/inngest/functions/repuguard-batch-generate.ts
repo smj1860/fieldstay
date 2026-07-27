@@ -3,6 +3,7 @@ import { createServiceClient }       from '@/lib/supabase/server'
 import { generateReviewResponse }    from '@/lib/repuguard/generate-response'
 import { unwrapJoin }                from '@/lib/utils/supabase-joins'
 
+import { reportError } from '@/lib/observability/report-error'
 const BATCH_LIMIT = 25
 
 export const repuguardBatchGenerate = inngest.createFunction(
@@ -75,6 +76,7 @@ export const repuguardBatchGenerate = inngest.createFunction(
             // Re-throw transient errors so the step.run retries them
             // (each review is its own step.run, so this only retries that review)
             logger.warn(`RepuGuard batch: transient failure for review ${review.id}, will retry: ${msg}`)
+            reportError(err, { site: 'inngest.repuguard-batch-generate.fetch-pending-reviews' })
             throw err
           }
 

@@ -2,6 +2,7 @@ import 'server-only'
 import { createServiceClient } from '@/lib/supabase/server'
 import { embedText }           from './embed'
 
+import { reportError } from '@/lib/observability/report-error'
 /**
  * Phase 2 retrieval — real embedding similarity search.
  * Embeds the query using text-embedding-3-small, then runs cosine similarity
@@ -36,6 +37,7 @@ export async function retrieveContext(query: string): Promise<string[]> {
     return (data as Array<{ content: string }>).map((row) => row.content)
   } catch (err) {
     console.error('[support/retrieve] embedding failed, using fallback:', err)
+    reportError(err, { site: 'lib.support.retrieve.retrieveContext' })
     return await fallbackRetrieve(supabase)
   }
 }

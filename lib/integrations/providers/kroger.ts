@@ -19,6 +19,7 @@ import {
 } from '@/lib/kroger/client'
 import { fail } from '../webhook-verification'
 
+import { reportError } from '@/lib/observability/report-error'
 const FALLBACK_EXTERNAL_USER_ID = 'kroger_customer'
 
 export const krogerProvider: IntegrationProvider = {
@@ -41,6 +42,7 @@ export const krogerProvider: IntegrationProvider = {
       if (profile?.id) externalUserId = profile.id
     } catch (err) {
       console.error('[Kroger] Failed to fetch customer profile', err instanceof Error ? err.message : err)
+      reportError(err, { site: 'lib.integrations.providers.kroger.Kroger' })
     }
 
     return {

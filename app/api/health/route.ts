@@ -1,6 +1,7 @@
 import { NextResponse }    from 'next/server'
 import { createClient }    from '@/lib/supabase/server'
 
+import { reportError } from '@/lib/observability/report-error'
 // Lightweight health check — pinged by uptime monitoring every 3 minutes.
 // Returns 200 if the app and database are reachable, 503 otherwise.
 // Does NOT require auth — intentionally public.
@@ -31,6 +32,7 @@ export async function GET() {
     )
   } catch (err) {
     console.error('[health] unexpected error:', err)
+    reportError(err, { site: 'route.health.GET' })
     return NextResponse.json(
       { status: 'error' },
       { status: 503 }

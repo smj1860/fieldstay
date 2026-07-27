@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSponsorCheckoutSession } from '@/app/actions/guidebook'
 
+import { reportError } from '@/lib/observability/report-error'
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = await req.json() as { mediaKitToken?: string }
@@ -21,6 +22,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ url: result.url })
   } catch (err) {
     console.error('[sponsor-checkout] unexpected error:', err)
+    reportError(err, { site: 'route.guidebook.sponsor-checkout.POST' })
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

@@ -5,6 +5,7 @@ import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 import { slugify } from '@/lib/utils'
 
+import { reportError } from '@/lib/observability/report-error'
 export type OnboardingState = { error?: string; success?: boolean }
 
 export async function createOrganization(
@@ -71,6 +72,7 @@ export async function createOrganization(
   } catch (err) {
     unstable_rethrow(err)
     console.error('[createOrganization]', err)
+    reportError(err, { site: 'serverAction.onboarding.createOrganization' })
     return { error: 'Failed to create organization. Please try again.' }
   }
 }

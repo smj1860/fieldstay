@@ -37,6 +37,7 @@ import {
   seedAbsentOptionalAssetsFromAmenities,
 } from '@/lib/asset-discovery/seed-from-amenities'
 
+import { reportError } from '@/lib/observability/report-error'
 const HOSPITABLE_API_BASE = 'https://public.api.hospitable.com/v2'
 const PROVIDER            = 'hospitable'
 
@@ -496,6 +497,7 @@ export const hospIncrementalSync = inngest.createFunction(
             await syncGuidebookConfigsFromProperty(orgId, PROVIDER, [propertyId])
           } catch (err) {
             logger.error(`[Hospitable incremental] guidebook config sync failed for property ${propertyId}: ${err instanceof Error ? err.message : String(err)}`)
+            reportError(err, { site: 'inngest.hospitable-incremental-sync.sync-guidebook-config-for-property' })
             // Non-fatal — don't throw, don't block the sync
           }
         })
@@ -506,6 +508,7 @@ export const hospIncrementalSync = inngest.createFunction(
             logger.info(`[Hospitable incremental] Asset discovery seeded for property ${propertyId}: ${seeded ? 'yes' : 'no new assets'}`)
           } catch (err) {
             logger.error(`[Hospitable incremental] asset discovery seed failed for property ${propertyId}: ${err instanceof Error ? err.message : String(err)}`)
+            reportError(err, { site: 'inngest.hospitable-incremental-sync.seed-asset-discovery-for-property' })
             // Non-fatal — don't throw, don't block the sync
           }
         })
@@ -515,6 +518,7 @@ export const hospIncrementalSync = inngest.createFunction(
             await seedAbsentOptionalAssetsFromAmenities(orgId, [propertyId])
           } catch (err) {
             logger.warn(`[Hospitable incremental] absent-optional-asset seeding failed for property ${propertyId}: ${err instanceof Error ? err.message : String(err)}`)
+            reportError(err, { site: 'inngest.hospitable-incremental-sync.seed-absent-optional-assets-for-property' })
             // Non-fatal — don't throw, don't block the sync
           }
         })
@@ -543,6 +547,7 @@ export const hospIncrementalSync = inngest.createFunction(
               if (error) throw new Error(error.message)
             } catch (err) {
               logger.error(`[Hospitable incremental] new-property milestone write failed for property ${propertyId}: ${err instanceof Error ? err.message : String(err)}`)
+              reportError(err, { site: 'inngest.hospitable-incremental-sync.notify-new-property-setup' })
               // Non-fatal — don't throw, don't block the sync
             }
           })

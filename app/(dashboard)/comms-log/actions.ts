@@ -5,6 +5,7 @@ import { requireOrgMember }   from '@/lib/auth'
 import { logAuditEvent }      from '@/lib/audit'
 import type { CommChannel, CommRecipientType } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 export type CommsActionState = { error?: string; success?: boolean }
 
 // ── Create manual communication log entry ────────────────────────────────────
@@ -73,6 +74,7 @@ export async function createCommunicationLog(
     return { success: true }
   } catch (err) {
     console.error('[createCommunicationLog]', err)
+    reportError(err, { site: 'serverAction.comms-log.createCommunicationLog' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -109,6 +111,7 @@ export async function deleteCommunicationLog(
     return {}
   } catch (err) {
     console.error('[deleteCommunicationLog]', err)
+    reportError(err, { site: 'serverAction.comms-log.deleteCommunicationLog' })
     return { error: 'Operation failed. Please try again.' }
   }
 }

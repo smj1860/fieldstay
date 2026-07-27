@@ -6,6 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 export type DetailsState = { error?: string; success?: boolean }
 
 export async function saveDetails(
@@ -122,6 +123,7 @@ export async function saveDetails(
   } catch (err) {
     unstable_rethrow(err)
     console.error('[saveDetails]', err)
+    reportError(err, { site: 'serverAction.properties.setup.details.saveDetails' })
     return { error: 'Operation failed. Please try again.' }
   }
 }

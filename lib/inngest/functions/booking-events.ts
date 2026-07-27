@@ -137,6 +137,7 @@ export const handleBookingDetected = inngest.createFunction(
             checkout_date: booking.checkout_date,
             error: String(err),
           })
+          reportError(err, { site: 'inngest.booking-confirmed.create-booking-revenue-transaction' })
           return { skipped: 'invalid_date' }
         }
 
@@ -174,6 +175,7 @@ export const handleBookingDetected = inngest.createFunction(
         logger.error('[booking-detected] revenue step threw (non-fatal)', {
           error: String(err), booking_id,
         })
+        reportError(err, { site: 'inngest.booking-confirmed.create-booking-revenue-transaction' })
         return { error: String(err) }
       }
     })
@@ -188,6 +190,7 @@ export const handleBookingDetected = inngest.createFunction(
         logger.error('[booking-detected] generate-turnovers threw', {
           error: String(err), property_id,
         })
+        reportError(err, { site: 'inngest.booking-confirmed.generate-turnovers' })
         throw err  // re-throw so Inngest retries this step
       }
     })

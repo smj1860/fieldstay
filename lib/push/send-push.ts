@@ -2,6 +2,7 @@ import 'server-only'
 import webpush from 'web-push'
 import { createServiceClient } from '@/lib/supabase/server'
 
+import { reportError } from '@/lib/observability/report-error'
 export interface SendPushPayload {
   title: string
   body:  string
@@ -56,6 +57,7 @@ export async function sendPushToUser(userId: string, payload: SendPushPayload): 
           await supabase.from('push_subscriptions').delete().eq('id', sub.id)
         } else {
           console.error('[sendPushToUser] send failed:', statusCode)
+          reportError(err, { site: 'lib.push.send-push.sendPushToUser' })
         }
       }
     })

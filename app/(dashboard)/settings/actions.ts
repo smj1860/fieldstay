@@ -57,6 +57,7 @@ export async function updateOrgSettings(
     return { success: true }
   } catch (err) {
     console.error('[updateOrgSettings]', err)
+    reportError(err, { site: 'serverAction.settings.updateOrgSettings' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -101,6 +102,7 @@ export async function updateSlackWebhook(
     return { success: true }
   } catch (err) {
     console.error('[updateSlackWebhook]', err)
+    reportError(err, { site: 'serverAction.settings.updateSlackWebhook' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -138,6 +140,7 @@ export async function changePassword(
     return { success: true }
   } catch (err) {
     console.error('[changePassword]', err)
+    reportError(err, { site: 'serverAction.settings.changePassword' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -171,6 +174,7 @@ export async function updateNotificationPrefs(
     return { success: true }
   } catch (err) {
     console.error('[updateNotificationPrefs]', err)
+    reportError(err, { site: 'serverAction.settings.updateNotificationPrefs' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -246,6 +250,7 @@ export async function addCrewMember(
     }
   } catch (err) {
     console.error('[addCrewMember]', err)
+    reportError(err, { site: 'serverAction.settings.addCrewMember' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -319,6 +324,7 @@ export async function updateCrewMember(
     return { success: true }
   } catch (err) {
     console.error('[updateCrewMember]', err)
+    reportError(err, { site: 'serverAction.settings.updateCrewMember' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -345,6 +351,7 @@ export async function deactivateCrewMember(crewId: string): Promise<void> {
     revalidatePath('/settings')
   } catch (err) {
     console.error('[deactivateCrewMember]', err)
+    reportError(err, { site: 'serverAction.settings.deactivateCrewMember' })
     throw err
   }
 }
@@ -392,6 +399,7 @@ export async function bulkImportCrew(
     return { imported: valid.length, skipped }
   } catch (err) {
     console.error('[bulkImportCrew]', err)
+    reportError(err, { site: 'serverAction.settings.bulkImportCrew' })
     return { imported: 0, skipped: rows.length, error: 'Operation failed. Please try again.' }
   }
 }
@@ -470,6 +478,7 @@ export async function addVendor(
     }
   } catch (err) {
     console.error('[addVendor]', err)
+    reportError(err, { site: 'serverAction.settings.addVendor' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -538,6 +547,7 @@ export async function updateVendor(
     return { success: true }
   } catch (err) {
     console.error('[updateVendor]', err)
+    reportError(err, { site: 'serverAction.settings.updateVendor' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -565,6 +575,7 @@ export async function updateVendorPortal(vendorId: string, enabled: boolean): Pr
     revalidatePath('/settings')
   } catch (err) {
     console.error('[updateVendorPortal]', err)
+    reportError(err, { site: 'serverAction.settings.updateVendorPortal' })
     throw err
   }
 }
@@ -591,6 +602,7 @@ export async function deactivateVendor(vendorId: string): Promise<void> {
     revalidatePath('/settings')
   } catch (err) {
     console.error('[deactivateVendor]', err)
+    reportError(err, { site: 'serverAction.settings.deactivateVendor' })
     throw err
   }
 }
@@ -639,6 +651,7 @@ export async function bulkImportVendors(
     return { imported: valid.length, skipped }
   } catch (err) {
     console.error('[bulkImportVendors]', err)
+    reportError(err, { site: 'serverAction.settings.bulkImportVendors' })
     return { imported: 0, skipped: rows.length, error: 'Operation failed. Please try again.' }
   }
 }
@@ -670,6 +683,7 @@ export async function openBillingPortal(): Promise<void> {
     portalUrl = session.url
   } catch (err) {
     console.error('[openBillingPortal]', err)
+    reportError(err, { site: 'serverAction.settings.openBillingPortal' })
     throw err
   }
 
@@ -786,6 +800,7 @@ export async function inviteCrewMember(
     return { success: true }
   } catch (err) {
     console.error('[inviteCrewMember]', err)
+    reportError(err, { site: 'serverAction.settings.inviteCrewMember' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -928,6 +943,7 @@ export async function inviteAllUninvitedCrew(): Promise<{ sent: number; error?: 
     return { sent }
   } catch (err) {
     console.error('[inviteAllUninvitedCrew]', err)
+    reportError(err, { site: 'serverAction.settings.inviteAllUninvitedCrew' })
     return { sent: 0, error: 'Operation failed. Please try again.' }
   }
 }
@@ -962,6 +978,7 @@ export async function updateAutoAssignMode(
     return { success: true }
   } catch (err) {
     console.error('[updateAutoAssignMode]', err)
+    reportError(err, { site: 'serverAction.settings.updateAutoAssignMode' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -996,6 +1013,7 @@ export async function updateVendorAutoAssignMode(
     return { success: true }
   } catch (err) {
     console.error('[updateVendorAutoAssignMode]', err)
+    reportError(err, { site: 'serverAction.settings.updateVendorAutoAssignMode' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1028,6 +1046,7 @@ export async function updateCommsRetention(days: number): Promise<SettingsAction
     return { success: true }
   } catch (err) {
     console.error('[updateCommsRetention]', err)
+    reportError(err, { site: 'serverAction.settings.updateCommsRetention' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1071,6 +1090,7 @@ export async function createCheckoutSession(
     return { redirectUrl: session.url }
   } catch (err) {
     console.error('[createCheckoutSession]', err)
+    reportError(err, { site: 'serverAction.settings.createCheckoutSession' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -1089,6 +1109,7 @@ export async function getOrgSmsTemplates(): Promise<
     return data ?? []
   } catch (err) {
     console.error('[getOrgSmsTemplates]', err)
+    reportError(err, { site: 'serverAction.settings.getOrgSmsTemplates' })
     throw err
   }
 }
@@ -1125,6 +1146,7 @@ export async function saveOrgSmsTemplate(
     return {}
   } catch (err) {
     console.error('[saveOrgSmsTemplate]', err)
+    reportError(err, { site: 'serverAction.settings.saveOrgSmsTemplate' })
     return { error: 'Failed to save template. Please try again.' }
   }
 }
@@ -1151,6 +1173,7 @@ export async function resetOrgSmsTemplate(
     return {}
   } catch (err) {
     console.error('[resetOrgSmsTemplate]', err)
+    reportError(err, { site: 'serverAction.settings.resetOrgSmsTemplate' })
     return { error: 'Failed to reset template.' }
   }
 }

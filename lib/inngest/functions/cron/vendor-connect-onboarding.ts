@@ -32,6 +32,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { ensureVendorConnectInvited } from '@/lib/stripe/vendor-connect-invite'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 
+import { reportError } from '@/lib/observability/report-error'
 const BATCH_SIZE = 25
 
 export const vendorConnectOnboardingCron = inngest.createFunction(
@@ -120,6 +121,7 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
               error:    err instanceof Error ? err.message : String(err),
               // No email logged — PII rule
             })
+            reportError(err, { site: 'inngest.cron-vendor-connect-onboarding.fetch-uninvited-vendors' })
           }
         }
 

@@ -2,6 +2,7 @@ import { Inngest, EventSchemas } from 'inngest'
 import { after } from 'next/server'
 import type { FieldStayEvents } from './events'
 
+import { reportError } from '@/lib/observability/report-error'
 /**
  * Inngest client — single instance shared across all functions.
  * Import this wherever you need to send events or define functions.
@@ -39,6 +40,7 @@ export function sendEventAsync(...args: Parameters<typeof inngest.send>): void {
       await inngest.send(...args)
     } catch (err) {
       console.error('[inngest.send] fire-and-forget send failed', err)
+      reportError(err, { site: 'lib.inngest.client.sendEventAsync' })
     }
   })
 }

@@ -7,6 +7,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import type { BookingSource } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 export type BookingActionState = { error?: string; success?: boolean }
 
 // ── Create manual booking ────────────────────────────────────────────────────
@@ -98,6 +99,7 @@ export async function createBooking(
     return { success: true }
   } catch (err) {
     console.error('[createBooking]', err)
+    reportError(err, { site: 'serverAction.bookings.createBooking' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -189,6 +191,7 @@ export async function cancelBooking(
     return {}
   } catch (err) {
     console.error('[cancelBooking]', err)
+    reportError(err, { site: 'serverAction.bookings.cancelBooking' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -201,6 +204,7 @@ export async function triggerSync(): Promise<void> {
     await inngest.send({ name: 'ical/sync.all.requested', data: { org_id: membership.org_id } })
   } catch (err) {
     console.error('[triggerSync]', err)
+    reportError(err, { site: 'serverAction.bookings.triggerSync' })
     throw err
   }
 }

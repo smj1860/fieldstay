@@ -45,6 +45,7 @@ import { finalizeIntegrationConnection }  from '@/lib/integrations/finalize-conn
 import { logAuditEvent }                  from '@/lib/audit'
 import { RateLimitError }                 from '@/lib/integrations/types'
 
+import { reportError } from '@/lib/observability/report-error'
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
@@ -200,6 +201,7 @@ export async function GET(
       pendingLinkToken = await holdPendingOAuthCode({ providerId, code, redirectUri })
     } catch (err) {
       console.error(`[OAuth:${providerId}] Failed to hold pending authorization code:`, err)
+      reportError(err, { site: 'route.integrations.callback.errorRedirect' })
       return errorRedirect('storage_failed')
     }
 
@@ -224,6 +226,7 @@ export async function GET(
       return errorRedirect('rate_limited')
     }
     console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
+    reportError(err, { site: 'route.integrations.callback.errorRedirect' })
     return errorRedirect('token_exchange_failed')
   }
 
@@ -234,6 +237,7 @@ export async function GET(
     await finalizeIntegrationConnection({ userId: appUserId, providerId, tokenData })
   } catch (err) {
     console.error(`[OAuth:${providerId}] Vault storage failed:`, err)
+    reportError(err, { site: 'route.integrations.callback.errorRedirect' })
     return errorRedirect('storage_failed')
   }
 

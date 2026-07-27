@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 
+import { reportError } from '@/lib/observability/report-error'
 export type AuditAction =
   | 'auth.invite.accepted'
   | 'auth.oauth.callback'
@@ -205,5 +206,6 @@ export async function logAuditEvents(entries: AuditParams[]): Promise<void> {
   } catch (err) {
     // Audit failures must never crash the main flow — log and continue
     console.error('[Audit] Failed to write audit event:', err)
+    reportError(err, { site: 'lib.audit.Audit' })
   }
 }

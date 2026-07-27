@@ -24,6 +24,7 @@ import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
 import { cancelTurnoversForBooking } from '@/lib/turnovers/generator'
 
+import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'ownerrez'
 
 export const ownerRezReconciliationHandler = inngest.createFunction(
@@ -78,6 +79,7 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
     } catch (err) {
       if (err instanceof RateLimitError) {
         logger.warn(`[OwnerRez reconciliation] org ${org_id} rate limited — will retry next cycle`)
+        reportError(err, { site: 'inngest.ownerrez-reconciliation-handler.fetch-current-bookings' })
         return { skipped: true, reason: 'rate_limited' }
       }
       if (err instanceof TokenRevokedError) {

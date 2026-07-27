@@ -5,6 +5,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { inngest }          from '@/lib/inngest/client'
 import { logAuditEvent }    from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 export async function triggerDepreciationLedger(taxYear: number, orgId: string): Promise<void> {
   try {
     const { membership } = await requireOrgMember()
@@ -15,6 +16,7 @@ export async function triggerDepreciationLedger(taxYear: number, orgId: string):
     })
   } catch (err) {
     console.error('[triggerDepreciationLedger]', err)
+    reportError(err, { site: 'serverAction.capital-planning.triggerDepreciationLedger' })
     throw err
   }
 }
@@ -39,6 +41,7 @@ export async function triggerCapexProjections(): Promise<void> {
     })
   } catch (err) {
     console.error('[triggerCapexProjections]', err)
+    reportError(err, { site: 'serverAction.capital-planning.triggerCapexProjections' })
     throw err
   }
 }
@@ -92,6 +95,7 @@ export async function updateReplacementStatus(
     return {}
   } catch (err) {
     console.error('[updateReplacementStatus]', err)
+    reportError(err, { site: 'serverAction.capital-planning.updateReplacementStatus' })
     return { error: 'Update failed' }
   }
 }

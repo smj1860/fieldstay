@@ -6,6 +6,7 @@ import { REQUIRED_ASSET_TYPES, assetTypeDisplayName } from '@/lib/asset-discover
 import { logAuditEvent } from '@/lib/audit'
 import type { AssetType } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 // Crew auth comes from the canonical requireCrewMember() in lib/crew-auth.ts.
 // A previous local reimplementation here added an invite_accepted_at filter
 // that the canonical helper deliberately omits (~a third of live crew rows
@@ -58,6 +59,7 @@ export async function reportTurnoverIssue(
     return { success: true }
   } catch (err) {
     console.error('[reportTurnoverIssue]', err)
+    reportError(err, { site: 'serverAction.crew.turnovers.reportTurnoverIssue' })
     return { error: 'Failed to report issue' }
   }
 }
@@ -160,6 +162,7 @@ export async function submitAssetDiscovery(
     return { success: true }
   } catch (err) {
     console.error('[submitAssetDiscovery]', err)
+    reportError(err, { site: 'serverAction.crew.turnovers.submitAssetDiscovery' })
     return { error: 'Failed to submit asset discovery' }
   }
 }

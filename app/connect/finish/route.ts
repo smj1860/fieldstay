@@ -36,6 +36,7 @@ import { logAuditEvent } from '@/lib/audit'
 import { revalidatePath } from 'next/cache'
 import { RateLimitError } from '@/lib/integrations/types'
 
+import { reportError } from '@/lib/observability/report-error'
 export async function GET(request: NextRequest) {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL!
   const pendingLinkToken = request.nextUrl.searchParams.get('pending_link')
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
     claimed = await claimPendingOAuthCode(pendingLinkToken)
   } catch (err) {
     console.error('[connect/finish] Claim failed:', err)
+    reportError(err, { site: 'page.connect.finish.route.GET' })
     const url = new URL('/connect/error', appUrl)
     url.searchParams.set('error', 'claim_failed')
     return NextResponse.redirect(url)
@@ -133,6 +135,7 @@ export async function GET(request: NextRequest) {
     await finalizeIntegrationConnection({ userId: user.id, providerId, tokenData })
   } catch (err) {
     console.error(`[connect/finish] Vault storage failed for ${providerId}:`, err)
+    reportError(err, { site: 'page.connect.finish.route.GET' })
     const url = new URL('/connect/error', appUrl)
     url.searchParams.set('provider', providerId)
     url.searchParams.set('error', 'storage_failed')

@@ -3,6 +3,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { getAnthropicClient } from './anthropic-client'
 import type { SupportCategory } from './types'
 
+import { reportError } from '@/lib/observability/report-error'
 const ROUTE_TOOL = {
   name: 'route_support_request',
   description: 'Classify the support request type',
@@ -41,6 +42,7 @@ export async function classifyIntent(message: string): Promise<SupportCategory> 
     return 'faq'
   } catch (err) {
     console.error('[support/classify] classification failed, defaulting to faq', err)
+    reportError(err, { site: 'lib.support.classify.category' })
     return 'faq'
   }
 }

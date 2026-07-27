@@ -5,6 +5,7 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import type { InventoryCategory } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 export interface CatalogItemInput {
   name:              string
   category:          InventoryCategory
@@ -63,6 +64,7 @@ export async function createCatalogItem(
     return { id: data.id }
   } catch (err) {
     console.error('[createCatalogItem]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-catalog.createCatalogItem' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -111,6 +113,7 @@ export async function updateCatalogItem(
     return {}
   } catch (err) {
     console.error('[updateCatalogItem]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-catalog.updateCatalogItem' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -177,6 +180,7 @@ export async function bulkImportCatalogItems(
     }
   } catch (err) {
     console.error('[bulkImportCatalogItems]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-catalog.bulkImportCatalogItems' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -211,6 +215,7 @@ export async function deleteCatalogItem(
     return {}
   } catch (err) {
     console.error('[deleteCatalogItem]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-catalog.deleteCatalogItem' })
     return { error: 'Operation failed. Please try again.' }
   }
 }

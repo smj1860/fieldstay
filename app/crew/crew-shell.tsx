@@ -14,6 +14,7 @@ import { cn }                       from '@/lib/utils'
 import { InstallBanner }            from '@/components/pwa/install-banner'
 import { Dialog }                   from '@/components/ui/Dialog'
 
+import { reportError } from '@/lib/observability/report-error'
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -133,6 +134,7 @@ export function CrewShell({
         await Promise.all([caches.delete('fieldstay-shell-v1'), caches.delete('fieldstay-assets-v1')])
       } catch (err) {
         console.error('[crew-shell] Failed to clear service worker cache on logout:', err)
+        reportError(err, { site: 'page.crew.crew-shell.performLogout' })
       }
     }
     const supabase = createClient()
@@ -163,6 +165,7 @@ export function CrewShell({
         // 'denied' — respect the user's choice, don't prompt
       } catch (err) {
         console.error('[sw] registration failed:', err)
+        reportError(err, { site: 'page.crew.crew-shell.sw' })
       }
     }
 
@@ -191,6 +194,7 @@ export function CrewShell({
       await subscribeToPush(swReg)
     } catch (err) {
       console.error('[push] subscription failed:', err)
+      reportError(err, { site: 'page.crew.crew-shell.push' })
     }
   }
 

@@ -24,6 +24,7 @@ import type {
   OwnerRezListing,
 } from '../types'
 
+import { reportError } from '@/lib/observability/report-error'
 const BASE_URL   = 'https://api.ownerrez.com'
 const PROVIDER   = 'ownerrez'
 
@@ -258,6 +259,7 @@ export class OwnerRezApiClient {
       if (err instanceof RateLimitError || err instanceof TokenRevokedError) throw err
       // Non-fatal — return null and let the sync continue with partial data
       console.error(`[OwnerRez:${this.userId}] getPropertyDetail(${propertyId}) failed:`, err)
+      reportError(err, { site: 'lib.integrations.providers.ownerrez-api.checkAndIncrementRequestBudget' })
       return null
     }
   }
