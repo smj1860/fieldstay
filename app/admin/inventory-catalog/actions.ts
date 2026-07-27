@@ -6,11 +6,20 @@ import { logAuditEvent } from '@/lib/audit'
 import type { InventoryCategory } from '@/types/database'
 
 export interface CatalogItemInput {
-  name:         string
-  category:     InventoryCategory
-  default_unit: string
-  description:  string
-  is_active:    boolean
+  name:              string
+  category:          InventoryCategory
+  default_unit:      string
+  default_par_level: number
+  description:       string
+  is_active:         boolean
+}
+
+// A non-finite or non-positive input (empty field, stray text) falls back to
+// 1 rather than writing NaN/0/a negative number — matches the
+// Number.isFinite(...) ? ... : 1 guard already used for CSV-imported par
+// levels in templates/inventory/create/create-template-builder.tsx.
+function normalizeParLevel(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 1
 }
 
 export async function createCatalogItem(
@@ -22,15 +31,17 @@ export async function createCatalogItem(
     const name = input.name.trim()
     if (!name) return { error: 'Item name is required.' }
     const defaultUnit = input.default_unit.trim() || 'units'
+    const defaultParLevel = normalizeParLevel(input.default_par_level)
 
     const { data, error } = await supabase
       .from('inventory_catalog')
       .insert({
         name,
-        category:     input.category,
-        default_unit: defaultUnit,
-        description:  input.description.trim() || null,
-        is_active:    input.is_active,
+        category:          input.category,
+        default_unit:      defaultUnit,
+        default_par_level: defaultParLevel,
+        description:       input.description.trim() || null,
+        is_active:         input.is_active,
       })
       .select('id')
       .single()
@@ -66,15 +77,17 @@ export async function updateCatalogItem(
     const name = input.name.trim()
     if (!name) return { error: 'Item name is required.' }
     const defaultUnit = input.default_unit.trim() || 'units'
+    const defaultParLevel = normalizeParLevel(input.default_par_level)
 
     const { data, error } = await supabase
       .from('inventory_catalog')
       .update({
         name,
-        category:     input.category,
-        default_unit: defaultUnit,
-        description:  input.description.trim() || null,
-        is_active:    input.is_active,
+        category:          input.category,
+        default_unit:      defaultUnit,
+        default_par_level: defaultParLevel,
+        description:       input.description.trim() || null,
+        is_active:         input.is_active,
       })
       .eq('id', itemId)
       .select('id')
@@ -98,6 +111,72 @@ export async function updateCatalogItem(
     return {}
   } catch (err) {
     console.error('[updateCatalogItem]', err)
+    return { error: 'Operation failed. Please try again.' }
+  }
+}
+
+export interface BulkImportCatalogRow {
+  name:              string
+  category:          InventoryCategory
+  default_unit:      string
+  default_par_level: number
+  description:       string
+}
+
+export interface BulkImportedCatalogItem extends CatalogItemInput {
+  id: string
+}
+
+export async function bulkImportCatalogItems(
+  rows: BulkImportCatalogRow[]
+): Promise<{ items?: BulkImportedCatalogItem[]; error?: string }> {
+  try {
+    const { user, supabase } = await requirePlatformAdmin()
+
+    const cleaned = rows
+      .map((row) => ({
+        name:              row.name.trim(),
+        category:          row.category,
+        default_unit:      row.default_unit.trim() || 'units',
+        default_par_level: normalizeParLevel(row.default_par_level),
+        description:       row.description.trim() || null,
+        is_active:         true,
+      }))
+      .filter((row) => row.name)
+
+    if (!cleaned.length) return { error: 'No valid rows to import.' }
+
+    const { data, error } = await supabase
+      .from('inventory_catalog')
+      .insert(cleaned)
+      .select('id, name, category, default_unit, default_par_level, description, is_active')
+
+    if (error) {
+      console.error('[bulkImportCatalogItems]', error)
+      return { error: 'Operation failed. Please try again.' }
+    }
+
+    await logAuditEvent({
+      actorId:    user.id,
+      action:     'platform_admin.inventory_catalog_item.bulk_imported',
+      targetType: 'inventory_catalog',
+      metadata:   { count: data?.length ?? 0 },
+    })
+
+    revalidatePath('/admin/inventory-catalog')
+    return {
+      items: (data ?? []).map((item) => ({
+        id:                item.id,
+        name:              item.name,
+        category:          item.category,
+        default_unit:      item.default_unit,
+        default_par_level: item.default_par_level,
+        description:       item.description ?? '',
+        is_active:         item.is_active,
+      })),
+    }
+  } catch (err) {
+    console.error('[bulkImportCatalogItems]', err)
     return { error: 'Operation failed. Please try again.' }
   }
 }

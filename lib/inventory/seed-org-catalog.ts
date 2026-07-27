@@ -30,7 +30,7 @@ export async function seedOrgInventoryCatalogIfNeeded(orgId: string): Promise<vo
 
   const { data: platformItems, error } = await supabase
     .from('inventory_catalog')
-    .select('id, name, category, default_unit, description')
+    .select('id, name, category, default_unit, default_par_level, description')
     .eq('is_active', true)
 
   if (error) {
@@ -48,6 +48,7 @@ export async function seedOrgInventoryCatalogIfNeeded(orgId: string): Promise<vo
         name:                     item.name,
         category:                 item.category,
         default_unit:             item.default_unit,
+        default_par_level:        item.default_par_level,
         description:              item.description,
       })),
       { onConflict: 'org_id,name', ignoreDuplicates: true }

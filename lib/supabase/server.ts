@@ -59,6 +59,14 @@ export async function createClient() {
  *                      Inngest functions, crons, seeds, and internal lib
  *                      helpers whose request-path callers are themselves
  *                      gated — the string is the module/job audit handle
+ * - platformAdmin:     the staff admin from requirePlatformAdmin(), used only
+ *                      for writes that cross org boundaries (e.g. broadcasting
+ *                      a platform inventory template to other orgs' own
+ *                      inventory_templates rows) — requirePlatformAdmin()'s
+ *                      own RLS-scoped client covers everything that stays
+ *                      within is_platform_staff_admin()-gated tables; this
+ *                      variant is only for the narrow case where the target
+ *                      row's RLS is scoped to a DIFFERENT org than the caller
  */
 export type ServiceRoleContext =
   | { authorizedBy: { org_id: string; role: string } }
@@ -66,6 +74,7 @@ export type ServiceRoleContext =
   | { crew: { id: string; org_id: string } }
   | { publicSurface: string }
   | { system: string }
+  | { platformAdmin: { id: string } }
 
 /**
  * Service-role client — bypasses RLS.
