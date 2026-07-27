@@ -267,8 +267,12 @@ export const DEMO_ASSETS: DemoAssetSeed[] = [
   { propertyKey: 'mariner', name: 'HVAC Air Handler', asset_type: 'hvac', make: 'Carrier', model: 'FB4CNP030', installed_years_ago: 10, purchase_price: 3900, estimated_replacement_cost: 5300, expected_lifespan_years: 15, macrs_class: '15_year' },
   { propertyKey: 'mariner', name: 'Dishwasher', asset_type: 'dishwasher', make: 'Whirlpool', model: 'WDT750SAKZ', installed_years_ago: 9, purchase_price: 700, estimated_replacement_cost: 850, expected_lifespan_years: 10, macrs_class: '5_year' },
 
-  { propertyKey: 'seaoats', name: 'Main HVAC Condenser (Upstairs)', asset_type: 'hvac', make: 'Trane', model: 'XR16-048', installed_years_ago: 4, purchase_price: 8200, estimated_replacement_cost: 10500, expected_lifespan_years: 15, macrs_class: '15_year' },
-  { propertyKey: 'seaoats', name: 'Main HVAC Condenser (Downstairs)', asset_type: 'hvac', make: 'Trane', model: 'XR16-036', installed_years_ago: 4, purchase_price: 7100, estimated_replacement_cost: 9200, expected_lifespan_years: 15, macrs_class: '15_year' },
+  // A single row, not two — property_assets has a UNIQUE (property_id,
+  // asset_type) WHERE is_active constraint (one canonical active asset per
+  // type per property), so two physically-separate condensers on this
+  // 2-zone house are modeled as one combined asset rather than a real
+  // upstairs/downstairs split.
+  { propertyKey: 'seaoats', name: 'Main HVAC Condensers (2-Zone, Upstairs & Downstairs)', asset_type: 'hvac', make: 'Trane', model: 'XR16-048 / XR16-036', installed_years_ago: 4, purchase_price: 15300, estimated_replacement_cost: 19700, expected_lifespan_years: 15, macrs_class: '15_year' },
   { propertyKey: 'seaoats', name: 'Pool Pump', asset_type: 'pool_pump', make: 'Hayward', model: 'TriStar VS 950', installed_years_ago: 6, purchase_price: 1800, estimated_replacement_cost: 2300, expected_lifespan_years: 10, macrs_class: '15_year' },
   { propertyKey: 'seaoats', name: 'Standby Generator', asset_type: 'generator', make: 'Generac', model: 'Guardian 24kW', installed_years_ago: 3, purchase_price: 9400, estimated_replacement_cost: 11800, expected_lifespan_years: 20, macrs_class: '15_year' },
   { propertyKey: 'seaoats', name: 'Roof (Metal Standing Seam)', asset_type: 'roof', make: 'McElroy', model: 'Medallion-Lok', installed_years_ago: 7, purchase_price: 41000, estimated_replacement_cost: 52000, expected_lifespan_years: 40, macrs_class: '27_5_year' },
@@ -303,7 +307,7 @@ export const DEMO_SPONSORS: DemoSponsorSeed[] = [
     business_description: 'Gulf-to-table seafood on the west end — hush puppies worth the wait.',
     business_phone: '+12515550130', business_website: 'https://example.com/salty-mullet',
     address: '1520 W Beach Blvd, Gulf Shores, AL 36542', lat: 30.2449, lng: -87.7142,
-    slot_type: 'dining', offer_type: 'percent_off', offer_value: 10, offer_item: null,
+    slot_type: 'dinner_pints', offer_type: 'percentage', offer_value: 10, offer_item: null,
     custom_offer_text: null, featured_item: 'Blackened grouper basket',
   },
   {
@@ -311,7 +315,7 @@ export const DEMO_SPONSORS: DemoSponsorSeed[] = [
     business_description: 'Half-day inshore charters, rods and bait included.',
     business_phone: '+12515550131', business_website: 'https://example.com/pelican-charter',
     address: '27 Marina Way, Orange Beach, AL 36561', lat: 30.2864, lng: -87.5821,
-    slot_type: 'activity', offer_type: 'dollar_off', offer_value: 25, offer_item: null,
+    slot_type: 'outdoor_adventure', offer_type: 'fixed_amount', offer_value: 25, offer_item: null,
     custom_offer_text: null, featured_item: 'Half-day inshore charter',
   },
   {
@@ -319,7 +323,7 @@ export const DEMO_SPONSORS: DemoSponsorSeed[] = [
     business_description: 'Small-batch roaster and espresso bar two blocks off the beach.',
     business_phone: '+12515550132', business_website: 'https://example.com/driftwood-coffee',
     address: '308 E 2nd Ave, Gulf Shores, AL 36542', lat: 30.2483, lng: -87.6967,
-    slot_type: 'dining', offer_type: 'free_item', offer_value: null, offer_item: 'pastry with any latte',
+    slot_type: 'morning_brew', offer_type: 'item', offer_value: null, offer_item: 'pastry with any latte',
     custom_offer_text: null, featured_item: 'Honey lavender latte',
   },
   {
@@ -327,7 +331,7 @@ export const DEMO_SPONSORS: DemoSponsorSeed[] = [
     business_description: 'Beach cruisers, paddleboards, and umbrellas delivered to your door.',
     business_phone: '+12515550133', business_website: 'https://example.com/barefoot-rentals',
     address: '905 Gulf Shores Pkwy, Gulf Shores, AL 36542', lat: 30.2561, lng: -87.7008,
-    slot_type: 'activity', offer_type: 'percent_off', offer_value: 15, offer_item: null,
+    slot_type: 'general', offer_type: 'percentage', offer_value: 15, offer_item: null,
     custom_offer_text: null, featured_item: 'Two-bike day rental',
   },
   {
@@ -335,7 +339,7 @@ export const DEMO_SPONSORS: DemoSponsorSeed[] = [
     business_description: 'Hand-churned scoops and dole whip, open till 10.',
     business_phone: '+12515550134', business_website: 'https://example.com/cotton-bayou-ice-cream',
     address: '450 Perdido Beach Blvd, Orange Beach, AL 36561', lat: 30.2736, lng: -87.5602,
-    slot_type: 'dining', offer_type: 'custom', offer_value: null, offer_item: null,
+    slot_type: 'rainy_day', offer_type: 'custom', offer_value: null, offer_item: null,
     custom_offer_text: 'Kids scoop free with any adult cone', featured_item: 'Satsuma sorbet',
   },
 ]
