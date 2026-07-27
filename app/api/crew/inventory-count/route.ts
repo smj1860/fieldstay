@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
 
   if (submitAsDraft) {
     // Idempotency — same as the legacy commit path below: a double-tap submit or a
-    // PowerSync/Dexie retry after a connectivity blip must not create a second draft.
+    // Dexie outbox retry after a connectivity blip must not create a second draft.
     const draftWindowStart = new Date(Date.now() - 5 * 60 * 1000).toISOString()
     const { data: recentDraft } = await supabase
       .from('inventory_count_drafts')

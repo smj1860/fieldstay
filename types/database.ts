@@ -1253,7 +1253,8 @@ export interface PushSubscription {
 //
 // These three tables are SERVER-SIDE ONLY:
 //   - integration_connections and oauth_states must NEVER be
-//     added to PowerSync sync rules or the powersync publication
+//     synced to the client: keep them out of lib/dexie/schema.ts and
+//     out of any crew/vendor pull in lib/dexie/sync/
 //   - Token read/write/revoke functions are service_role only
 // ─────────────────────────────────────────────────────────────
 

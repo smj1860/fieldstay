@@ -1,9 +1,9 @@
 import Dexie, { type Table } from 'dexie'
 
 import { reportError } from '@/lib/observability/report-error'
-// Mirrors lib/powersync/schema.ts table-for-table. Column types follow the
-// same convention PowerSync uses: column.integer for booleans (0/1) and
-// column.text for everything else, including ids and timestamps.
+// Table shapes mirror the Supabase tables they cache. Booleans are stored as
+// integers (0/1) and everything else — including ids and timestamps — as text,
+// so rows round-trip through IndexedDB without type coercion surprises.
 
 export interface TurnoverRow {
   id:                string
@@ -123,7 +123,7 @@ export interface PropertyAssetRow {
   photo_url:   string
 }
 
-// localOnly in PowerSync — never synced as its own table, purely a local queue.
+// Local-only: never synced as its own table, purely a local queue.
 export interface PendingPhotoUploadRow {
   id:             string
   target_table:   string
