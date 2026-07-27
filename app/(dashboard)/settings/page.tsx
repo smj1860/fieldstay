@@ -4,6 +4,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { SettingsTabs, type ConnectionInfo } from './settings-tabs'
 import type { Organization } from '@/types/database'
+import { getHospitablePromoStatus } from '@/lib/queries/hospitable-promo'
 
 export const metadata: Metadata = { title: 'Settings' }
 
@@ -34,6 +35,8 @@ export default async function SettingsPage() {
     .eq('milestone', 'kroger_store_needed')
     .maybeSingle()
 
+  const hospitablePromo = await getHospitablePromoStatus(membership.org_id)
+
   return (
     <div>
       <div className="page-header">
@@ -46,6 +49,7 @@ export default async function SettingsPage() {
           org={org as unknown as Organization}
           connections={connectionsByProvider}
           krogerNeedsStore={!!krogerStoreNeeded}
+          hospitablePromo={hospitablePromo}
         />
       </Suspense>
     </div>

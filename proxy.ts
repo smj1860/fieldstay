@@ -256,7 +256,25 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) return withCsp(NextResponse.next({ request }), nonce)
+  if (BYPASS_ROUTES.some((r) => pathname.startsWith(r))) {
+    const response = withCsp(NextResponse.next({ request }), nonce)
+
+    // Hospitable launch promo attribution — set on every /hospitable visit so
+    // createCheckoutSession() can later tell a landing-page-driven signup
+    // apart from a marketplace one-click connect or a manual connect. See
+    // lib/inngest/functions/promo-hospitable-tag-trial.ts.
+    if (pathname.startsWith('/hospitable')) {
+      response.cookies.set('fs_promo_attribution', 'hospitable_landing_page', {
+        maxAge:   60 * 60 * 24 * 30, // 30-day attribution window
+        httpOnly: true,
+        secure:   process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path:     '/',
+      })
+    }
+
+    return response
+  }
 
   if (TOKEN_ROUTES.some((r)  => pathname.startsWith(r)))  return withCsp(NextResponse.next({ request }), nonce)
 

@@ -163,6 +163,7 @@ export type AuditAction =
   // a trail even though the blast radius is confined to the demo tenant.
   | 'demo.session.minted'
   | 'demo.org.reset'
+  | 'billing.hospitable_price_lock.awarded'
 
 interface AuditParams {
   orgId?:         string

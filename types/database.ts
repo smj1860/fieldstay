@@ -1805,6 +1805,13 @@ export interface Database {
 
       // ── Roadshow demo ───────────────────────────────────────
       demo_activity_log:           { Row: DemoActivityLog;          Insert: Partial<DemoActivityLog>;          Update: Partial<DemoActivityLog>;          Relationships: [] }
+      // hospitable_launch_promo + promo_hospitable_launch_counter: deliberately
+      // not modeled yet. Migration 20260727150000_hospitable_launch_promo.sql
+      // is written and committed but not applied to the live project (applying
+      // it starts the tier-2 90-day clock, held until explicit launch
+      // go-ahead) — add these back in the same commit as applying it, per the
+      // type-drift gate, which checks types against the live DB, not the
+      // migration ledger.
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }

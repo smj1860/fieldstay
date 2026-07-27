@@ -3,6 +3,7 @@ import { renderTeamInviteEmail }   from '@/emails/team-invite'
 import { renderOwnerPortalEmail } from '@/emails/owner-portal'
 import { renderGuestPreArrivalEmail } from '@/emails/guest-pre-arrival'
 import { renderGuidebookGracePeriodEmail } from '@/emails/guidebook-grace-period'
+import { renderHospitablePriceLockEmail } from '@/emails/hospitable-price-lock'
 
 /**
  * Resend client — single instance for all transactional email.
@@ -157,6 +158,43 @@ export async function sendGuidebookGracePeriodEmail({
     to:      toEmail,
     replyTo: 'help@fieldstay.app',
     subject: `Action needed: your guidebook needs sponsors — FieldStay`,
+    html,
+  })
+}
+
+export async function sendHospitablePriceLockEmail({
+  toEmail,
+  organizationName,
+  sequenceNumber,
+  lockYears,
+  lockedTierName,
+  lockedPriceCents,
+}: {
+  toEmail:          string
+  organizationName: string
+  sequenceNumber:    number | null // null for the tier-2 (1-year) lock
+  lockYears:         1 | 2
+  lockedTierName:    string
+  lockedPriceCents:  number
+}) {
+  const lockedPriceDisplay = `$${(lockedPriceCents / 100).toFixed(0)}/mo`
+  const html = await renderHospitablePriceLockEmail({
+    organizationName,
+    sequenceNumber,
+    lockYears,
+    lockedTierName,
+    lockedPriceDisplay,
+  })
+
+  const subject = sequenceNumber !== null
+    ? `You're locked in, ${organizationName} — FieldStay + Hospitable launch`
+    : `Your plan's price-locked, ${organizationName} — thanks for connecting via Hospitable`
+
+  return resend.emails.send({
+    from:    FROM,
+    to:      toEmail,
+    replyTo: 'stephen@fieldstay.app',
+    subject,
     html,
   })
 }
