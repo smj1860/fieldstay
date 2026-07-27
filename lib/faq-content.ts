@@ -25,7 +25,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'or-sync-time',
         question: 'How long does the initial sync take?',
         answer:
-          'Initial sync typically completes within 3–5 minutes for portfolios under 50 properties. You\'ll see a status indicator on the Properties page while it runs. Larger portfolios may take up to 15 minutes on the first pass.',
+          'Initial sync typically completes within a few minutes for most portfolios. You\'ll see a status indicator on the Properties page while it runs. Larger portfolios typically sync within 15 minutes.',
       },
       {
         id:       'or-no-properties',

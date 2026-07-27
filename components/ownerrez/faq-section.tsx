@@ -10,7 +10,7 @@ const MARKETING_FAQ = [
   },
   {
     q: 'How long does setup take?',
-    a: 'Connecting OwnerRez takes about 2 minutes via OAuth. Your properties and upcoming bookings appear automatically within 5 minutes. Most property managers complete full setup — crew invites, checklists, and inventory — in under an hour.',
+    a: 'Connecting OwnerRez takes about 2 minutes via OAuth. Your properties and upcoming bookings typically sync within a few minutes — for larger portfolios, typically within 15 minutes. Most property managers complete full setup — crew invites, checklists, and inventory — in under an hour.',
   },
   {
     q: 'What data syncs from OwnerRez?',
