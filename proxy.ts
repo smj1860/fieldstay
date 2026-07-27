@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { updateSession } from '@/lib/supabase/middleware'
 import {
   workOrderRatelimit, vendorConnectRatelimit, ownerPortalRatelimit, guidebookRatelimit,
-  oauthCallbackRatelimit,
+  oauthCallbackRatelimit, demoRatelimit,
 } from '@/lib/rate-limit'
 
 // ── Content Security Policy ────────────────────────────────────────────────
@@ -164,6 +164,13 @@ const BYPASS_ROUTES = [
 
   // Account deletion — handles its own auth verification server-side
   '/api/account/delete',
+
+  // Roadshow demo entry/reset — reached with NO session by definition
+  // (/demo/enter exists to create one). Both routes verify DEMO_ENTRY_SECRET
+  // themselves in constant time and 404 when it's unset or wrong, and both
+  // are rate-limited above via rateLimiterForPathname — bypass here only
+  // skips the session redirect, not the throttle.
+  '/demo/',
 ]
 
 // Guest-facing guidebook routes (media kit signup + guest guidebook pages,
@@ -182,6 +189,7 @@ function rateLimiterForPathname(pathname: string) {
   if (pathname.startsWith('/api/vendor-connect')) return vendorConnectRatelimit
   if (pathname.startsWith('/owner/'))             return ownerPortalRatelimit
   if (pathname.startsWith('/g/'))                 return guidebookRatelimit
+  if (pathname.startsWith('/demo/'))              return demoRatelimit
   // OAuth callbacks are BYPASS_ROUTES (no session to check) but must still be
   // throttled — the oneclick route stores unvalidated authorization codes in
   // Vault, so the limiter check below runs BEFORE the bypass early-return.

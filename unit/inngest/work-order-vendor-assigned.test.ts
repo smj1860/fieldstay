@@ -155,7 +155,7 @@ describe('handleWorkOrderVendorAssigned', () => {
       expect.objectContaining({ to: ['vendor@example.com'] }),
       expect.objectContaining({ idempotencyKey: 'wo-dispatch-vendor-assigned-wo_1-v1' }),
     )
-    expect(sendSMS).toHaveBeenCalledWith('+15125551234', 'rendered sms body')
+    expect(sendSMS).toHaveBeenCalledWith('+15125551234', 'rendered sms body', { orgId: 'org_1' })
     expect(createPmNotification).toHaveBeenCalledWith(
       supabase,
       expect.objectContaining({ orgId: 'org_1', type: 'work_order_dispatched' })

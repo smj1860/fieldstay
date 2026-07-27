@@ -85,6 +85,7 @@ export const guidebookPreArrivalEmailCron = inngest.createFunction(
           propertyName,
           optInUrl,
           guidebookUrl,
+          orgId:        booking.org_id,
         })
 
         await supabase

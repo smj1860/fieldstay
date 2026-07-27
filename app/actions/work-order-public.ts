@@ -129,7 +129,7 @@ export async function dispatchWorkOrderToVendor(input: {
             window_line:   '',
             portal_url:    portalUrl,
           })
-          await sendSMS(e164, smsBody)
+          await sendSMS(e164, smsBody, { orgId: membership.org_id })
         } catch (smsErr) {
           console.error('[dispatchWorkOrderToVendor] SMS failed (non-fatal):', smsErr)
         }

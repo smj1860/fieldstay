@@ -76,7 +76,7 @@ export const guidebookGuestOptedIn = inngest.createFunction(
         door_code:     doorCode,
         portal_url:    portalUrl,
       })
-      const result = await sendSMS(phoneE164, body)
+      const result = await sendSMS(phoneE164, body, { orgId: property.org_id })
 
       if (!result.sent) {
         // SMS failed — roll back the claim so a retry can attempt again

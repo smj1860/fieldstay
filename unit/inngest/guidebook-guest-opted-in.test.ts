@@ -103,7 +103,7 @@ describe('guidebookGuestOptedIn', () => {
       door_code:     '4321',
       portal_url:    expect.stringContaining('/g/b/tok_abc123'),
     })
-    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered door code sms')
+    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered door code sms', { orgId: 'org_1' })
     expect(result).toEqual({ optinId: 'optin_1', sentDoorCode: true })
   })
 

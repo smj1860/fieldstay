@@ -208,7 +208,7 @@ export const handleWorkOrderVendorAssigned = inngest.createFunction(
         })
 
         try {
-          await sendSMS(e164, smsBody)
+          await sendSMS(e164, smsBody, { orgId })
         } catch (smsErr) {
           console.error('[WO vendor-assigned] SMS failed (non-fatal):', smsErr)
           reportError(smsErr, { site: 'inngest.work-order-vendor-assigned.sms', orgId })

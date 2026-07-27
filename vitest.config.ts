@@ -14,6 +14,10 @@ export default defineConfig({
     alias: {
       // Mirrors tsconfig.json's "@/*": ["./*"] path alias.
       '@': path.resolve(__dirname, '.'),
+      // `server-only` is a Next.js build-time marker, not an installed
+      // runtime package — without this alias any test that imports a module
+      // guarded by `import 'server-only'` fails to resolve at import time.
+      'server-only': path.resolve(__dirname, 'unit/stubs/server-only.ts'),
     },
   },
   test: {

@@ -158,6 +158,11 @@ export type AuditAction =
   | 'maintenance_template.item_created'
   | 'maintenance_template.item_updated'
   | 'maintenance_template.item_deleted'
+  // Roadshow demo surface — /demo/enter mints a session and /demo/reset wipes
+  // and reseeds the demo org. Both are public-but-secret-gated, so both leave
+  // a trail even though the blast radius is confined to the demo tenant.
+  | 'demo.session.minted'
+  | 'demo.org.reset'
 
 interface AuditParams {
   orgId?:         string

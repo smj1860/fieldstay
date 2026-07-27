@@ -196,7 +196,7 @@ describe('guidebookSmsMorningSend (per-guest handler)', () => {
       temperature:   75,
       offer_line:    "Try Joe's Coffee — a local favorite.",
     })
-    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered sms body', { category: 'nudge' })
+    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered sms body', { category: 'nudge', orgId: 'org_1' })
     expect(releaseDailySmsSlot).not.toHaveBeenCalled()
   })
 
@@ -247,7 +247,7 @@ describe('guidebookSmsMorningSend (per-guest handler)', () => {
     expect(renderSmsBody).toHaveBeenCalledWith('org_1', 'rain_alert', expect.objectContaining({
       property_name: 'Lake House',
     }))
-    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered sms body', { category: 'nudge' })
+    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered sms body', { category: 'nudge', orgId: 'org_1' })
   })
 
   it('rolls back the claimed slot when the SMS send fails so a retry can attempt again', async () => {

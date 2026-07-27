@@ -146,7 +146,7 @@ export const guidebookSmsEveningSend = inngest.createFunction(
         property_name: property.name,
         offer_line:    offerLine ?? '',
       })
-      const res = await sendSMS(optin.phone_e164, eveningBody, { category: 'nudge' })
+      const res = await sendSMS(optin.phone_e164, eveningBody, { category: 'nudge', orgId })
 
       if (!res.sent) {
         await releaseDailySmsSlot(supabase, optinId, 'last_evening_sms_date')

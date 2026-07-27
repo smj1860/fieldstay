@@ -117,7 +117,7 @@ describe('guidebookStayExtensionHandler', () => {
       checkout_date: '2026-07-25',
       portal_url:    expect.stringContaining('/g/b/tok_abc123'),
     }))
-    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered stay extension sms', { category: 'nudge' })
+    expect(sendSMS).toHaveBeenCalledWith('+15551234567', 'rendered stay extension sms', { category: 'nudge', orgId: 'org_1' })
 
     expect(renderPmAlert).toHaveBeenCalledWith(expect.objectContaining({ heading: 'Stay Extension Opportunity' }))
     expect(resend.emails.send).toHaveBeenCalledWith(
@@ -208,7 +208,7 @@ describe('guidebookStayExtensionHandler', () => {
     })
 
     expect(normalizePhoneToE164).toHaveBeenCalledWith('512-555-9999')
-    expect(sendSMS).toHaveBeenCalledWith('+15125559999', expect.stringContaining('Lake House'))
+    expect(sendSMS).toHaveBeenCalledWith('+15125559999', expect.stringContaining('Lake House'), { orgId: 'org_1' })
     expect(resend.emails.send).not.toHaveBeenCalled()
     expect(result).toEqual({ requestId: 'req_1', smsSent: false, pmNotified: true })
   })
