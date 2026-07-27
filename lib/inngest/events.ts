@@ -876,4 +876,15 @@ export type FieldStayEvents = {
     }
   }
 
+  // Hospitable launch promo — fired (fire-and-forget) from
+  // createCheckoutSession() at every checkout attempt. Idempotently tags the
+  // org for the promo if it's Hospitable-connected; a no-op otherwise. The
+  // award side reuses the existing 'billing/first-payment-confirmed' event.
+  'promo/hospitable.checkout-started': {
+    data: {
+      org_id:                       string
+      landing_page_cookie_present:  boolean
+    }
+  }
+
 }

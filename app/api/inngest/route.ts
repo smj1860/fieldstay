@@ -164,6 +164,11 @@ import { handleSupportEscalation } from '@/lib/inngest/functions/support-convers
 // Grafana Cloud metrics snapshot
 import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
 
+// Hospitable launch promo — two-tier price lock for converted trials
+import { tagHospitableTrialSignup }   from '@/lib/inngest/functions/promo-hospitable-tag-trial'
+import { awardHospitablePriceLock }   from '@/lib/inngest/functions/promo-hospitable-award-lock'
+import { expireHospitablePriceLocks } from '@/lib/inngest/functions/promo-hospitable-expire-locks'
+
 export const { GET, POST, PUT } = serve({
   client: inngest,
   functions: [
@@ -326,5 +331,10 @@ export const { GET, POST, PUT } = serve({
 
     // Grafana Cloud metrics snapshot
     metricsSnapshot,
+
+    // Hospitable launch promo
+    tagHospitableTrialSignup,
+    awardHospitablePriceLock,
+    expireHospitablePriceLocks,
   ],
 })

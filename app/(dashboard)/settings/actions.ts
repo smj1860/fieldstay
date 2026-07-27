@@ -2,9 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { requireOrgMember } from '@/lib/auth'
 import { createClient } from '@/lib/supabase/server'
 import { stripe, PLANS } from '@/lib/stripe/client'
+import { inngest } from '@/lib/inngest/client'
 import { geocodeZip } from '@/lib/geocoding'
 import { logAuditEvent, logAuditEvents } from '@/lib/audit'
 import { reportError } from '@/lib/observability/report-error'
@@ -1053,6 +1055,21 @@ export async function createCheckoutSession(
       .select('stripe_customer_id, billing_email')
       .eq('id', membership.org_id)
       .single()
+
+    // Hospitable launch promo — fire-and-forget tagging event. A failure
+    // here must never block checkout; the tag itself is idempotent and safe
+    // to attempt on every checkout call (upgrades included), since it only
+    // ever writes once per org (see tag_hospitable_trial_signup()).
+    const cookieStore = await cookies()
+    const landingPageCookiePresent =
+      cookieStore.get('fs_promo_attribution')?.value === 'hospitable_landing_page'
+
+    inngest.send({
+      name: 'promo/hospitable.checkout-started',
+      data: { org_id: membership.org_id, landing_page_cookie_present: landingPageCookiePresent },
+    }).catch((err) => {
+      console.error(`[promo/hospitable] Failed to send checkout-started event for org ${membership.org_id}:`, err)
+    })
 
     const session = await stripe.checkout.sessions.create({
       mode:                 'subscription',

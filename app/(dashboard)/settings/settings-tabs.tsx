@@ -12,6 +12,8 @@ import { Input } from '@/components/ui/Input'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { RequiredMark } from '@/components/ui/RequiredMark'
 import type { Organization } from '@/types/database'
+import type { HospitablePromoStatus } from '@/lib/queries/hospitable-promo'
+import { PriceLockBadge } from '@/components/settings/price-lock-badge'
 import {
   updateOrgSettings,
   changePassword,
@@ -62,9 +64,10 @@ interface Props {
   org:               Organization
   connections?:      Record<string, ConnectionInfo>
   krogerNeedsStore?: boolean
+  hospitablePromo?:  HospitablePromoStatus | null
 }
 
-export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }: Props) {
+export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false, hospitablePromo = null }: Props) {
   const searchParams = useSearchParams()
   const requestedTab = searchParams.get('tab') as Tab | null
   const initialTab   = requestedTab && (TABS as readonly string[]).includes(requestedTab)
@@ -111,7 +114,7 @@ export function SettingsTabs({ org, connections = {}, krogerNeedsStore = false }
 
       {/* Tab panels */}
       {activeTab === 'Organization'  && <OrgTab org={org} connections={connections} krogerNeedsStore={krogerNeedsStore} />}
-      {activeTab === 'Billing'       && <BillingTab org={org} />}
+      {activeTab === 'Billing'       && <BillingTab org={org} hospitablePromo={hospitablePromo} />}
       {activeTab === 'Security'      && <SecurityTab />}
       {activeTab === 'Notifications' && <NotificationsTab org={org} />}
       {activeTab === 'Team'          && <TeamTabRedirect />}
@@ -1133,7 +1136,7 @@ const DISPLAY_PLANS = [
   },
 ]
 
-function BillingTab({ org }: { org: Organization }) {
+function BillingTab({ org, hospitablePromo }: Readonly<{ org: Organization; hospitablePromo: HospitablePromoStatus | null }>) {
   const currentPlan = PLAN_INFO[org.plan as keyof typeof PLAN_INFO] ?? PLAN_INFO.starter
   const statusBadge = PLAN_STATUS_BADGES[org.plan_status] ?? 'slate'
   const isTrialing  = org.plan_status === 'trialing'
@@ -1176,6 +1179,7 @@ function BillingTab({ org }: { org: Organization }) {
             {org.plan_status.replace('_', ' ')}
           </Badge>
           <span className="text-sm text-secondary-themed">{currentPlan.description}</span>
+          <PriceLockBadge promo={hospitablePromo} />
         </div>
 
         {isTrialing && org.trial_ends_at && (
