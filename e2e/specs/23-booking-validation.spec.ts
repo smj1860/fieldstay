@@ -42,9 +42,17 @@ test.describe('Booking validation', () => {
     await expect(page.getByText('[E2E] Same Day Guest')).not.toBeVisible()
   })
 
-  test('[E2E] duplicate manual booking for same property and dates is rejected', async ({ page }) => {
-    const checkin  = getFutureDate(50)
-    const checkout = getFutureDate(53)
+  test('[E2E] duplicate manual booking for same property and dates is rejected', async ({ page }, testInfo) => {
+    // Offset by retry count — this job never cleans up between retries (only
+    // between whole CI runs, in global-setup/teardown), so a first attempt
+    // that times out on the 'Booking added' assertion below still leaves its
+    // manual booking committed (confirmed: the row shows up in the next
+    // attempt's list). Without this offset, a retry's own "should succeed"
+    // first submission would collide with that leftover row and fail for an
+    // unrelated reason (a real duplicate) instead of getting a clean run.
+    const dayOffset = testInfo.retry * 10
+    const checkin  = getFutureDate(50 + dayOffset)
+    const checkout = getFutureDate(53 + dayOffset)
 
     // First booking — should succeed
     await page.goto('/bookings')
@@ -66,8 +74,10 @@ test.describe('Booking validation', () => {
     // createBooking's fully-awaited critical path occasionally exceeds a
     // tight timeout under sustained E2E-project DB load even though the
     // insert itself always completes — see the identical comment in
-    // 03-bookings.spec.ts for the confirmed evidence.
-    await expect(page.getByText(/Booking added/i)).toBeVisible({ timeout: 20_000 })
+    // 03-bookings.spec.ts for the confirmed evidence. 20s wasn't always
+    // enough (observed all 3 attempts miss it in one CI run); 30s gives
+    // more headroom without masking an actual hang.
+    await expect(page.getByText(/Booking added/i)).toBeVisible({ timeout: 30_000 })
 
     // Second booking — same property + same dates, different guest name.
     // The unique index is on (property_id, checkin_date, checkout_date), not
