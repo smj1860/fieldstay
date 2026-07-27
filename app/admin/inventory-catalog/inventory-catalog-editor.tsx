@@ -1,24 +1,92 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { Plus, Trash2, Check } from 'lucide-react'
+import { useMemo, useRef, useState, useTransition, type ChangeEvent } from 'react'
+import { Plus, Trash2, Check, Upload, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Checkbox } from '@/components/ui/Checkbox'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { INVENTORY_CATEGORY_LABELS } from '@/lib/utils'
-import { createCatalogItem, updateCatalogItem, deleteCatalogItem, type CatalogItemInput } from './actions'
+import {
+  createCatalogItem, updateCatalogItem, deleteCatalogItem, bulkImportCatalogItems,
+  type CatalogItemInput,
+} from './actions'
 import type { InventoryCategory } from '@/types/database'
 
 const CATEGORIES = Object.keys(INVENTORY_CATEGORY_LABELS) as InventoryCategory[]
 
 interface RowState {
-  id:           string
-  name:         string
-  category:     InventoryCategory
-  default_unit: string
-  description:  string
-  is_active:    boolean
-  dirty:        boolean
+  id:                string
+  name:              string
+  category:          InventoryCategory
+  default_unit:      string
+  default_par_level: number
+  description:       string
+  is_active:         boolean
+  dirty:             boolean
+}
+
+// ── CSV parsing ──────────────────────────────────────────────────────────────
+// Same quoted-field splitting approach as vendors-client.tsx/crew-manage-
+// client.tsx/create-template-builder.tsx's parseCSV — no new parsing
+// dependency introduced here.
+
+interface ParsedCatalogRow {
+  name:              string
+  categoryRaw:       string
+  category:          InventoryCategory
+  categoryInvalid:   boolean
+  default_unit:      string
+  default_par_level: number
+  description:       string
+}
+
+function splitCatalogCSVLine(line: string): string[] {
+  return (line.match(/(".*?"|[^,]+|(?<=,)(?=,)|(?<=,)$|^(?=,))/g) ?? line.split(','))
+    .map((c) => c.replace(/^"|"$/g, '').trim())
+}
+
+function normalizeCatalogCategory(raw: string): { category: InventoryCategory; invalid: boolean } {
+  const match = CATEGORIES.find((c) => c === raw.toLowerCase().replaceAll(' ', '_'))
+  return match ? { category: match, invalid: false } : { category: 'other', invalid: true }
+}
+
+function parseCatalogCSV(text: string): ParsedCatalogRow[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim())
+  if (!lines.length) return []
+
+  const header = lines[0]!.toLowerCase()
+  const looksLikeHeader = header.includes('name') && (header.includes('category') || header.includes('unit'))
+  const dataLines = looksLikeHeader ? lines.slice(1) : lines
+
+  const cols0 = looksLikeHeader ? splitCatalogCSVLine(lines[0]!) : []
+  const nameIdx = looksLikeHeader ? cols0.findIndex((c) => c.toLowerCase() === 'name') : -1
+  const catIdx  = looksLikeHeader ? cols0.findIndex((c) => c.toLowerCase() === 'category') : -1
+  const unitIdx = looksLikeHeader ? cols0.findIndex((c) => c.toLowerCase() === 'unit') : -1
+  const parIdx  = looksLikeHeader ? cols0.findIndex((c) => c.toLowerCase().replace(/\s/g, '') === 'parlevel') : -1
+  const descIdx = looksLikeHeader ? cols0.findIndex((c) => c.toLowerCase() === 'description') : -1
+
+  return dataLines
+    .map((line) => {
+      const cols = splitCatalogCSVLine(line)
+      const name = nameIdx >= 0 ? (cols[nameIdx] ?? '') : (cols[0] ?? '')
+      const categoryRaw = catIdx >= 0 ? (cols[catIdx] ?? '') : (cols[1] ?? '')
+      const { category, invalid } = normalizeCatalogCategory(categoryRaw || 'other')
+      const parRaw = parIdx >= 0 ? (cols[parIdx] ?? '') : (cols[3] ?? '')
+      const parParsed = Number.parseFloat(parRaw)
+
+      return {
+        name,
+        categoryRaw,
+        category,
+        categoryInvalid:   invalid,
+        default_unit:      unitIdx >= 0 ? (cols[unitIdx] || 'units') : (cols[2] || 'units'),
+        // Number.isFinite guard, not `|| 1` — an explicit "0" in the CSV is
+        // a real par level of zero, not a falsy placeholder to fall back on.
+        default_par_level: Number.isFinite(parParsed) ? parParsed : 1,
+        description:       descIdx >= 0 ? (cols[descIdx] ?? '') : (cols[4] ?? ''),
+      }
+    })
+    .filter((r) => r.name)
 }
 
 function toRowState(item: Omit<RowState, 'dirty'>): RowState {
@@ -38,7 +106,7 @@ function matchesFilter(row: RowState, search: string, categoryFilter: string): b
 export function InventoryCatalogEditor({
   initialItems,
 }: Readonly<{
-  initialItems: Array<{ id: string; name: string; category: InventoryCategory; default_unit: string; description: string; is_active: boolean }>
+  initialItems: Array<{ id: string; name: string; category: InventoryCategory; default_unit: string; default_par_level: number; description: string; is_active: boolean }>
 }>) {
   const [rows, setRows] = useState<RowState[]>(() => initialItems.map(toRowState))
   const [search, setSearch] = useState('')
@@ -48,8 +116,13 @@ export function InventoryCatalogEditor({
   const [savedRowId, setSavedRowId] = useState<string | null>(null)
 
   const [newItem, setNewItem] = useState<CatalogItemInput>({
-    name: '', category: 'other', default_unit: 'units', description: '', is_active: true,
+    name: '', category: 'other', default_unit: 'units', default_par_level: 1, description: '', is_active: true,
   })
+
+  const [csvOpen, setCsvOpen] = useState(false)
+  const [csvRows, setCsvRows] = useState<ParsedCatalogRow[]>([])
+  const [csvImporting, startCsvImport] = useTransition()
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const visibleRows = useMemo(
     () => rows.filter((r) => matchesFilter(r, search, categoryFilter)),
@@ -64,11 +137,12 @@ export function InventoryCatalogEditor({
     startSave(async () => {
       setError(null)
       const result = await updateCatalogItem(row.id, {
-        name:         row.name,
-        category:     row.category,
-        default_unit: row.default_unit,
-        description:  row.description,
-        is_active:    row.is_active,
+        name:              row.name,
+        category:          row.category,
+        default_unit:      row.default_unit,
+        default_par_level: row.default_par_level,
+        description:       row.description,
+        is_active:         row.is_active,
       })
       if (result.error) { setError(result.error); return }
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, dirty: false } : r)))
@@ -96,7 +170,39 @@ export function InventoryCatalogEditor({
         return
       }
       setRows((prev) => [...prev, toRowState({ id: result.id!, ...newItem })])
-      setNewItem({ name: '', category: 'other', default_unit: 'units', description: '', is_active: true })
+      setNewItem({ name: '', category: 'other', default_unit: 'units', default_par_level: 1, description: '', is_active: true })
+    })
+  }
+
+  function handleCsvFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      setError(null)
+      setCsvRows(parseCatalogCSV(String(reader.result ?? '')))
+    }
+    reader.readAsText(file)
+  }
+
+  function handleCsvImport() {
+    if (!csvRows.length) return
+    startCsvImport(async () => {
+      setError(null)
+      const result = await bulkImportCatalogItems(
+        csvRows.map((r) => ({
+          name:              r.name,
+          category:          r.category,
+          default_unit:      r.default_unit,
+          default_par_level: r.default_par_level,
+          description:       r.description,
+        }))
+      )
+      if (result.error || !result.items) { setError(result.error ?? 'Import failed.'); return }
+      setRows((prev) => [...prev, ...result.items!.map(toRowState)])
+      setCsvRows([])
+      setCsvOpen(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
     })
   }
 
@@ -130,6 +236,7 @@ export function InventoryCatalogEditor({
               <th className="px-3 py-2 font-medium text-muted-themed">Name</th>
               <th className="px-3 py-2 font-medium text-muted-themed">Category</th>
               <th className="px-3 py-2 font-medium text-muted-themed">Unit</th>
+              <th className="px-3 py-2 font-medium text-muted-themed">Par Level</th>
               <th className="px-3 py-2 font-medium text-muted-themed">Description</th>
               <th className="px-3 py-2 font-medium text-muted-themed">Active</th>
               <th className="px-3 py-2" />
@@ -162,6 +269,17 @@ export function InventoryCatalogEditor({
                     onChange={(e) => handleFieldChange(row.id, 'default_unit', e.target.value)}
                     className="input text-sm w-20"
                     aria-label="Default unit"
+                  />
+                </td>
+                <td className="px-3 py-2">
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={row.default_par_level}
+                    onChange={(e) => handleFieldChange(row.id, 'default_par_level', Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1)}
+                    className="input text-sm w-20"
+                    aria-label="Par level"
                   />
                 </td>
                 <td className="px-3 py-2">
@@ -204,7 +322,7 @@ export function InventoryCatalogEditor({
             ))}
             {visibleRows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-muted-themed text-sm">
+                <td colSpan={7} className="px-3 py-6 text-center text-muted-themed text-sm">
                   No items match this filter.
                 </td>
               </tr>
@@ -215,7 +333,7 @@ export function InventoryCatalogEditor({
 
       <div className="border border-themed rounded-xl p-4">
         <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Add New Item</h3>
-        <div className="grid gap-2 sm:grid-cols-5">
+        <div className="grid gap-2 sm:grid-cols-6">
           <input
             value={newItem.name}
             onChange={(e) => setNewItem((prev) => ({ ...prev, name: e.target.value }))}
@@ -236,6 +354,16 @@ export function InventoryCatalogEditor({
             className="input text-sm"
           />
           <input
+            type="number"
+            min={0}
+            step="any"
+            value={newItem.default_par_level}
+            onChange={(e) => setNewItem((prev) => ({ ...prev, default_par_level: Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 1 }))}
+            placeholder="Par level"
+            aria-label="Par level"
+            className="input text-sm"
+          />
+          <input
             value={newItem.description}
             onChange={(e) => setNewItem((prev) => ({ ...prev, description: e.target.value }))}
             placeholder="Description (optional)"
@@ -250,6 +378,79 @@ export function InventoryCatalogEditor({
         >
           <Plus className="w-4 h-4" /> Add Item
         </Button>
+      </div>
+
+      <div className="border border-themed rounded-xl p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Bulk Upload via CSV</h3>
+          <Button
+            variant="ghost"
+            onClick={() => setCsvOpen((prev) => !prev)}
+            className="text-xs inline-flex items-center gap-1.5"
+          >
+            <Upload className="w-3.5 h-3.5" /> {csvOpen ? 'Close' : 'Upload CSV'}
+          </Button>
+        </div>
+
+        {csvOpen && (
+          <div className="mt-3 space-y-3">
+            <p className="text-xs text-muted-themed">
+              Columns: name, category, unit, par_level, description. A header row is optional.
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleCsvFileChange}
+              className="text-sm"
+              aria-label="CSV file"
+            />
+
+            {csvRows.length > 0 && (
+              <>
+                <div className="border border-themed rounded-lg overflow-x-auto max-h-64 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-themed text-left">
+                        <th className="px-2 py-1.5 font-medium text-muted-themed">Name</th>
+                        <th className="px-2 py-1.5 font-medium text-muted-themed">Category</th>
+                        <th className="px-2 py-1.5 font-medium text-muted-themed">Unit</th>
+                        <th className="px-2 py-1.5 font-medium text-muted-themed">Par Level</th>
+                        <th className="px-2 py-1.5 font-medium text-muted-themed">Description</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-themed">
+                      {csvRows.map((r, i) => (
+                        <tr key={`${r.name}-${i}`}>
+                          <td className="px-2 py-1.5 flex items-center gap-1.5">
+                            <FileText className="w-3 h-3 text-muted-themed shrink-0" />
+                            {r.name}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {r.categoryInvalid
+                              ? <span style={{ color: 'var(--accent-red)' }}>{r.categoryRaw || 'other'} → other</span>
+                              : INVENTORY_CATEGORY_LABELS[r.category]}
+                          </td>
+                          <td className="px-2 py-1.5">{r.default_unit}</td>
+                          <td className="px-2 py-1.5">{r.default_par_level}</td>
+                          <td className="px-2 py-1.5">{r.description}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={handleCsvImport}
+                  disabled={csvImporting}
+                  className="inline-flex items-center gap-1.5"
+                >
+                  <Plus className="w-4 h-4" /> Import {csvRows.length} Item{csvRows.length === 1 ? '' : 's'}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

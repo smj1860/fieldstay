@@ -7,7 +7,7 @@ export default async function InventoryCatalogPage() {
 
   const { data: items } = await supabase
     .from('inventory_catalog')
-    .select('id, name, category, default_unit, description, is_active')
+    .select('id, name, category, default_unit, default_par_level, description, is_active')
     .order('category')
     .order('name')
 
@@ -24,12 +24,13 @@ export default async function InventoryCatalogPage() {
       </p>
       <InventoryCatalogEditor
         initialItems={(items ?? []).map((i) => ({
-          id:           i.id,
-          name:         i.name,
-          category:     i.category,
-          default_unit: i.default_unit,
-          description:  i.description ?? '',
-          is_active:    i.is_active,
+          id:                i.id,
+          name:              i.name,
+          category:          i.category,
+          default_unit:      i.default_unit,
+          default_par_level: i.default_par_level,
+          description:       i.description ?? '',
+          is_active:         i.is_active,
         }))}
       />
     </Card>

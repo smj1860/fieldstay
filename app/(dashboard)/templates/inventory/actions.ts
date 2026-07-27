@@ -144,8 +144,11 @@ export async function deleteCatalogItem(itemId: string): Promise<{ error?: strin
 // ── Create Template ──────────────────────────────────────────────────────────
 
 // Checkbox-select only, matching the confirmed design — no quantities
-// collected here. inventory_template_items.par_level is left at its
-// column default (1) and par_qty (unused, see Pass 1/3 self-audit) is
+// collected in this form. par_level pre-fills from the org catalog row's own
+// default_par_level (20260727120000_platform_inventory_templates.sql), not
+// a flat column default, so items the platform catalog suggests a real par
+// for don't all start at 1 — still editable per template afterward via the
+// par-levels editor below. par_qty (unused, see Pass 1/3 self-audit) is
 // never written by this codebase at all.
 //
 // CORRECTION (Pass 3 Addendum self-audit): the original version of this
@@ -174,7 +177,7 @@ export async function createInventoryTemplate(
 
     const { data: catalogItems, error: catalogError } = await supabase
       .from('org_inventory_catalog')
-      .select('id, name, category, default_unit, platform_catalog_item_id')
+      .select('id, name, category, default_unit, default_par_level, platform_catalog_item_id')
       .eq('org_id', membership.org_id)
       .in('id', selectedCatalogItemIds)
 
@@ -205,6 +208,7 @@ export async function createInventoryTemplate(
         name:            item.name,
         category:        item.category,
         unit:            item.default_unit,
+        par_level:       item.default_par_level,
         preferred_brand: brandByItemId[item.id]?.trim() || null,
       }))
     )

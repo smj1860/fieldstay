@@ -12,6 +12,7 @@ import {
   createCatalogItem,
   updateCatalogItem,
   deleteCatalogItem,
+  bulkImportCatalogItems,
   type CatalogItemInput,
 } from '@/app/admin/inventory-catalog/actions'
 
@@ -37,7 +38,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
 function itemInput(overrides: Partial<CatalogItemInput> = {}): CatalogItemInput {
   return {
     name: 'Paper towels', category: 'paper_goods', default_unit: 'roll',
-    description: 'Standard 2-ply roll', is_active: true,
+    default_par_level: 2, description: 'Standard 2-ply roll', is_active: true,
     ...overrides,
   }
 }
@@ -165,6 +166,62 @@ describe('admin/inventory-catalog/actions', () => {
       const result = await deleteCatalogItem('item_1')
 
       expect(result).toEqual({ error: 'Operation failed. Please try again.' })
+      expect(supabase.from).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('bulkImportCatalogItems', () => {
+    it('inserts every valid row and returns the created items', async () => {
+      const inserted = [
+        { id: 'item_1', name: 'Paper Towels', category: 'paper_goods', default_unit: 'roll', default_par_level: 2, description: null, is_active: true },
+      ]
+      const supabase = makeSupabase({
+        inventory_catalog: [{ data: inserted, error: null }],
+      })
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      const result = await bulkImportCatalogItems([
+        { name: 'Paper Towels', category: 'paper_goods', default_unit: 'roll', default_par_level: 2, description: '' },
+      ])
+
+      expect(result.items).toEqual([
+        { id: 'item_1', name: 'Paper Towels', category: 'paper_goods', default_unit: 'roll', default_par_level: 2, description: '', is_active: true },
+      ])
+      expect(logAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        action: 'platform_admin.inventory_catalog_item.bulk_imported', metadata: { count: 1 },
+      }))
+    })
+
+    it('drops rows with a blank name and normalizes a non-positive par level to 1', async () => {
+      const inserted = [
+        { id: 'item_1', name: 'Trash Bags', category: 'cleaning', default_unit: 'box', default_par_level: 1, description: null, is_active: true },
+      ]
+      const supabase = makeSupabase({
+        inventory_catalog: [{ data: inserted, error: null }],
+      })
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      const result = await bulkImportCatalogItems([
+        { name: '   ', category: 'other', default_unit: 'units', default_par_level: 1, description: '' },
+        { name: 'Trash Bags', category: 'cleaning', default_unit: 'box', default_par_level: -3, description: '' },
+      ])
+
+      expect(result.items).toHaveLength(1)
+      const chain = supabase.from.mock.results[0]!.value
+      expect(chain.insert).toHaveBeenCalledWith([
+        expect.objectContaining({ name: 'Trash Bags', default_par_level: 1 }),
+      ])
+    })
+
+    it('returns an error when every row is invalid', async () => {
+      const supabase = makeSupabase({})
+      vi.mocked(requirePlatformAdmin).mockResolvedValue({ supabase, user: { id: 'admin_1' } } as never)
+
+      const result = await bulkImportCatalogItems([
+        { name: '  ', category: 'other', default_unit: 'units', default_par_level: 1, description: '' },
+      ])
+
+      expect(result).toEqual({ error: 'No valid rows to import.' })
       expect(supabase.from).not.toHaveBeenCalled()
     })
   })

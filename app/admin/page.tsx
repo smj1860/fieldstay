@@ -37,6 +37,18 @@ export default function AdminOverviewPage() {
             </p>
           </Link>
         </Card>
+        <Card>
+          <Link href="/admin/inventory-templates" className="block">
+            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+              Inventory Templates
+            </h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+              Build a reusable template from the catalog and broadcast it to
+              every account or a selected set — e.g. the Standard FieldStay
+              Inventory Template.
+            </p>
+          </Link>
+        </Card>
       </div>
     </div>
   )

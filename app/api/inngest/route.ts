@@ -101,6 +101,9 @@ import { logMessageCommunication } from '@/lib/inngest/functions/log-message-com
 import { broadcastChecklistTemplateJob } from '@/lib/inngest/functions/checklist-broadcast'
 import { applyMasterChecklistJob }       from '@/lib/inngest/functions/apply-master-checklist'
 
+// Platform inventory template broadcasting
+import { broadcastPlatformInventoryTemplate } from '@/lib/inngest/functions/platform-inventory-template-broadcast'
+
 // Integration error notifications
 import { notifyIntegrationError }  from '@/lib/inngest/functions/notify-integration-error'
 import { notifyAssignmentGap }     from '@/lib/inngest/functions/notify-assignment-gap'
@@ -266,6 +269,9 @@ export const { GET, POST, PUT } = serve({
     // Checklist broadcasting
     broadcastChecklistTemplateJob,
     applyMasterChecklistJob,
+
+    // Platform inventory template broadcasting
+    broadcastPlatformInventoryTemplate,
 
     // Integration error notifications
     notifyIntegrationError,

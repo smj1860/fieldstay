@@ -864,4 +864,16 @@ export type FieldStayEvents = {
     }
   }
 
+  // Platform-managed inventory templates (e.g. "Standard FieldStay Inventory
+  // Template") broadcast from /admin/inventory-templates to every org that
+  // already has a linked copy, or a specific selection — see
+  // lib/inngest/functions/platform-inventory-template-broadcast.ts.
+  'platform_inventory_template/broadcast_requested': {
+    data: {
+      platform_template_id: string
+      target_org_ids:        string[] | null   // null = every org in the system
+      requested_by:          string
+    }
+  }
+
 }

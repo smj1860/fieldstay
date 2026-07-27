@@ -8,6 +8,7 @@ const NAV_LINKS = [
   { href: '/admin',                  label: 'Overview' },
   { href: '/admin/seed-templates',   label: 'Default Room Templates' },
   { href: '/admin/inventory-catalog', label: 'Inventory Catalog' },
+  { href: '/admin/inventory-templates', label: 'Inventory Templates' },
 ]
 
 export default async function AdminLayout({

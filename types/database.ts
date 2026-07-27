@@ -434,6 +434,7 @@ export interface OrgInventoryCatalogItem {
   name:                      string
   category:                  InventoryCategory
   default_unit:              string
+  default_par_level:         number
   description:               string | null
   is_active:                 boolean
   created_at:                string
@@ -607,13 +608,14 @@ export interface ChecklistItemSignal {
 }
 
 export interface InventoryCatalogItem {
-  id:           string
-  name:         string
-  category:     InventoryCategory
-  default_unit: string
-  description:  string | null
-  is_active:    boolean
-  created_at:   string
+  id:                string
+  name:              string
+  category:          InventoryCategory
+  default_unit:      string
+  default_par_level: number
+  description:       string | null
+  is_active:         boolean
+  created_at:        string
 }
 
 export interface InventoryItem {
@@ -1176,11 +1178,37 @@ export interface Message {
 
 // ── Inventory template ───────────────────────────────────────────────────────
 export interface InventoryTemplate {
+  id:                          string
+  org_id:                      string
+  name:                        string
+  description:                 string | null
+  // NULL for an org's own custom templates. Set when the template originated
+  // from a platform admin broadcast (20260727120000_platform_inventory_
+  // templates.sql) — lets the broadcast Inngest function find every org
+  // that already has a given platform template when pushing an update.
+  source_platform_template_id: string | null
+  created_at:                  string
+}
+
+// ── Platform-managed, broadcastable inventory template ──────────────────────
+// e.g. "Standard FieldStay Inventory Template" (HD Supply purchasable items).
+// See 20260727120000_platform_inventory_templates.sql.
+export interface PlatformInventoryTemplate {
   id:          string
-  org_id:      string
   name:        string
   description: string | null
   created_at:  string
+  updated_at:  string
+}
+
+export interface PlatformInventoryTemplateItem {
+  id:                             string
+  platform_inventory_template_id: string
+  catalog_item_id:                string
+  par_level:                      number
+  preferred_brand:                string | null
+  sort_order:                     number
+  created_at:                     string
 }
 
 // ── Inventory template item ──────────────────────────────────────────────────
@@ -1725,6 +1753,8 @@ export interface Database {
       // ── Inventory templates ─────────────────────────────────
       inventory_templates:         { Row: InventoryTemplate;             Insert: Partial<InventoryTemplate>;             Update: Partial<InventoryTemplate>;             Relationships: [] }
       inventory_template_items:    { Row: InventoryTemplateItem;         Insert: Partial<InventoryTemplateItem>;         Update: Partial<InventoryTemplateItem>;         Relationships: [] }
+      platform_inventory_templates:      { Row: PlatformInventoryTemplate;      Insert: Partial<PlatformInventoryTemplate>;      Update: Partial<PlatformInventoryTemplate>;      Relationships: [] }
+      platform_inventory_template_items: { Row: PlatformInventoryTemplateItem;  Insert: Partial<PlatformInventoryTemplateItem>;  Update: Partial<PlatformInventoryTemplateItem>;  Relationships: [] }
 
       // ── Maintenance ──────────────────────────────────────────
       maintenance_catalog_items:   { Row: MaintenanceCatalogItem;        Insert: Partial<MaintenanceCatalogItem>;        Update: Partial<MaintenanceCatalogItem>;        Relationships: [] }
