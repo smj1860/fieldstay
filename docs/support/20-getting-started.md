@@ -19,7 +19,7 @@ See: **Connecting OwnerRez to FieldStay** or **Connecting Hospitable to FieldSta
 Once your properties sync in, go through each one and set:
 
 - Cleaning cost and same-day premium
-- A default crew member
+- Your org's Crew Auto-Assignment mode (Settings → Crew Auto-Assignment — this is a one-time, org-wide setting, not something you configure per property)
 - Review and publish the guidebook
 
 You don't need to do this for every property on day one — start with one or two and get comfortable with the flow before doing the rest.
@@ -32,7 +32,7 @@ See: **Setting Up Your First Property**
 
 Get your crew members invited and their phones set up before your first real turnover happens. This avoids a scramble when a checkout is approaching and crew can't access their checklist.
 
-Invite crew from **Settings → Crew**, then walk them through installing the PWA on their phone.
+Go to **Crew** (top-level nav, not under Settings), add each person with **Add Crew Member**, then click **Invite to App** on their row (or **Invite All** to send every pending invite at once). Walk them through installing the PWA on their phone once they've accepted.
 
 See: **Installing the Crew App**
 

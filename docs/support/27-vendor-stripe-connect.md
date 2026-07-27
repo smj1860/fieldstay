@@ -46,10 +46,10 @@ Vendors click the link in their setup email and complete the process on Stripe's
 
 ## How to Tell If a Vendor Has Completed Setup
 
-In your FieldStay dashboard, go to **Settings → Vendors** and open the vendor's profile. The payment status will show one of:
+In your FieldStay dashboard, go to **Vendors (top-level nav, not under Settings)** and open the vendor's profile. The payment status will show one of:
 
 - **Connected** — setup is complete, they can receive electronic payment
-- **Pending** — they started but haven't finished the Stripe flow
+- **Pending Setup** — they started but haven't finished the Stripe flow
 - **Not Connected** — they haven't started setup yet
 
 ---
@@ -58,7 +58,7 @@ In your FieldStay dashboard, go to **Settings → Vendors** and open the vendor'
 
 If a vendor lost the original setup email or never received it:
 
-1. Go to **Settings → Vendors**
+1. Go to **Vendors (top-level nav, not under Settings)**
 2. Open the vendor's profile
 3. Click **Resend Payment Setup Email**
 

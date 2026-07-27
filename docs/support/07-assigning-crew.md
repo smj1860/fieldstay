@@ -6,18 +6,16 @@
 
 ## How Assignment Works
 
-When FieldStay creates a turnover from a booking (OwnerRez or Hospitable), it starts in **Pending** status with no crew assigned. You assign crew manually, or FieldStay can suggest assignments based on availability and familiarity with the property.
+When FieldStay creates a turnover from a booking (OwnerRez or Hospitable), it starts in **Pending Assignment** status with no crew assigned. What happens next depends on your org's Crew Auto-Assignment setting (Settings → Crew Auto-Assignment): **Suggest** scores every available crew member on proximity, reliability, workload, and past familiarity with the property and shows the best match right on the turnover card for a one-click assign; **Autopilot** assigns that best match automatically; **Off** leaves it fully manual.
 
 ---
 
 ## Assigning a Single Turnover
 
-1. Click the turnover card on the Turnovers Board
-2. Click **Assign Crew** in the detail panel
-3. Select the crew member from the dropdown
-4. Click **Save**
+1. On the turnover card, click **Assign** (or **+ Add** if someone's already assigned)
+2. Pick a crew member from the list that appears
 
-The crew member receives a notification immediately (if they have notifications enabled) and the turnover appears in their app.
+The assignment happens immediately when you click a name — there's no separate save step. The crew member receives a notification immediately (if they have notifications enabled) and the turnover appears in their app.
 
 ---
 
@@ -26,17 +24,15 @@ The crew member receives a notification immediately (if they have notifications 
 To assign the same crew member to multiple turnovers at once:
 
 1. Check the boxes on multiple turnover cards
-2. Click **Assign** in the action bar that appears
-3. Select the crew member
-4. Click **Apply**
+2. In the action bar that appears at the bottom, use the **Assign to:** dropdown and choose a crew member
 
-This is useful after a sync with OwnerRez that generates a batch of new turnovers.
+The assignment applies as soon as you pick a name — there's no separate Apply step. This is useful after a sync with OwnerRez that generates a batch of new turnovers.
 
 ---
 
-## Default Crew per Property
+## Crew Auto-Assignment
 
-Setting a default crew member on a property means FieldStay pre-fills the assignment suggestion whenever a new turnover is created. Go to **Properties → [Property Name] → Crew** to set the default.
+FieldStay doesn't use a fixed default crew member per property — assignment suggestions are computed per turnover, not configured per property. See **How Assignment Works** above for the three modes, or go to Settings → Crew Auto-Assignment to change yours.
 
 ---
 

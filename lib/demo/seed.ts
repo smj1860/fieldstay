@@ -5,6 +5,11 @@ import {
   DEMO_ORG_NAME, DEMO_PROPERTIES, DEMO_CREW, DEMO_VENDORS,
   DEMO_ASSETS, DEMO_SPONSORS, DEMO_GUEST_NAMES, demoOwnerContact,
 } from '@/lib/demo/seed-data'
+import { seedDefaultRoomTemplatesIfNeeded } from '@/lib/checklists/seed-default-room-templates'
+import { applyMasterChecklistToProperty, fetchOrgRoomTemplateData } from '@/lib/checklists/apply-master-template'
+import { seedOrgInventoryCatalogIfNeeded } from '@/lib/inventory/seed-org-catalog'
+import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
+import { REQUIRED_ASSET_TYPES, ASSET_TYPE_DISPLAY_NAMES } from '@/lib/asset-discovery/config'
 
 /**
  * Wipe + reseed the roadshow demo org.
@@ -147,6 +152,24 @@ async function wipeDemoOrg(supabase: ServiceClient, orgId: string): Promise<void
   }
 }
 
+/**
+ * Up to 2 items per category from the org's catalog — enough for a realistic
+ * per-property list (~14-18 items across the catalog's 11 categories)
+ * without hardcoding specific item names that could drift from the platform
+ * catalog's actual contents.
+ */
+export function pickDemoInventorySelection<T extends { category: string }>(items: T[]): T[] {
+  const perCategory = new Map<string, T[]>()
+  for (const item of items) {
+    const bucket = perCategory.get(item.category) ?? []
+    if (bucket.length < 2) {
+      bucket.push(item)
+      perCategory.set(item.category, bucket)
+    }
+  }
+  return [...perCategory.values()].flat()
+}
+
 /** Insert helper that surfaces the failing table instead of a bare PostgREST error. */
 async function insertRows(
   supabase: ServiceClient,
@@ -245,6 +268,93 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
     const row = properties[i]
     if (row) propertyIdByKey.set(p.key, row.id)
   })
+
+  // ── Checklist templates ──────────────────────────────────────────────────
+  // Every property needs a real default checklist_templates row before a
+  // turnover can carry an actual checklist — snapshotChecklist() in
+  // lib/turnovers/generator.ts silently no-ops without one
+  // (`if (!templateId) return`), which otherwise leaves every generated
+  // turnover with zero checklist items. Seeded once per org
+  // (seedDefaultRoomTemplatesIfNeeded + fetchOrgRoomTemplateData), then
+  // applied per property — same batch shape as
+  // lib/inngest/functions/apply-master-checklist.ts.
+  await seedDefaultRoomTemplatesIfNeeded(orgId)
+  const orgRoomData = await fetchOrgRoomTemplateData(orgId, supabase)
+  for (const property of properties) {
+    await applyMasterChecklistToProperty(property.id, orgId, supabase, {
+      force:    true,
+      orgRoomData,
+      skipSeed: true,
+    })
+  }
+
+  // applyMasterChecklistToProperty() is a defensive no-op (returns void,
+  // logs and bails) when composeSections() produces zero sections for a
+  // property — don't just trust the loop ran; verify every property actually
+  // ended up with a default template, or a "successful" reset silently
+  // leaves some properties generating checklist-less turnovers.
+  const { data: appliedTemplates, error: appliedTemplatesError } = await supabase
+    .from('checklist_templates')
+    .select('property_id')
+    .eq('org_id', orgId)
+    .eq('is_default', true)
+    .in('property_id', properties.map((p) => p.id))
+
+  if (appliedTemplatesError) {
+    throw new Error(`Failed to verify seeded checklist templates: ${appliedTemplatesError.message}`)
+  }
+  if ((appliedTemplates ?? []).length < properties.length) {
+    const covered = new Set((appliedTemplates ?? []).map((t) => t.property_id))
+    const missing = properties.filter((p) => !covered.has(p.id)).map((p) => p.id)
+    throw new Error(
+      `Checklist template seeding incomplete — missing default templates for ${missing.length} ` +
+      `of ${properties.length} properties: ${missing.join(', ')}`
+    )
+  }
+  counts.checklist_templates = appliedTemplates!.length
+
+  // ── Inventory ────────────────────────────────────────────────────────────
+  // Every property gets a realistic, deliberately-mixed stock count: most
+  // items comfortably at or above par, the first two per property below par
+  // so the crew inventory-count screen and the low-stock/restock-cart
+  // automation have something real to show instead of an all-green board.
+  await seedOrgInventoryCatalogIfNeeded(orgId)
+  const { data: orgCatalogItems, error: orgCatalogError } = await supabase
+    .from('org_inventory_catalog')
+    // inventory_items.catalog_item_id references the GLOBAL inventory_catalog,
+    // not org_inventory_catalog — platform_catalog_item_id is the column that
+    // points back to it (see CLAUDE.md's "do not mix" inventory-table pair).
+    .select('platform_catalog_item_id, name, category, default_unit, default_par_level')
+    .eq('org_id', orgId)
+    .eq('is_active', true)
+    .order('category')
+    .order('name')
+  if (orgCatalogError) {
+    throw new Error(`Failed to fetch demo inventory catalog: ${orgCatalogError.message}`)
+  }
+  const demoInventoryItems = pickDemoInventorySelection(orgCatalogItems ?? [])
+
+  const inventoryRows = properties.flatMap((property, pi) =>
+    demoInventoryItems.map((item, ii) => {
+      const belowPar = ii < 2
+      const currentQuantity = belowPar
+        ? Math.max(0, Math.floor(item.default_par_level * 0.35))
+        : Math.round(item.default_par_level * (1 + ((pi + ii) % 3) * 0.1))
+      return {
+        org_id:                  orgId,
+        property_id:             property.id,
+        catalog_item_id:         item.platform_catalog_item_id,
+        name:                    item.name,
+        category:                item.category,
+        unit:                    item.default_unit,
+        par_level:               item.default_par_level,
+        current_quantity:        currentQuantity,
+        low_stock_threshold_pct: 30,
+        is_active:               true,
+      }
+    })
+  )
+  counts.inventory_items = (await insertRows(supabase, 'inventory_items', inventoryRows)).length
 
   // ── Property owners ──────────────────────────────────────────────────────
   const ownerRows = DEMO_PROPERTIES.map((p, i) => {
@@ -361,12 +471,76 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
   })
   counts.property_assets = (await insertRows(supabase, 'property_assets', assetRows)).length
 
+  // ── Asset-discovery backstop ─────────────────────────────────────────────
+  // snapshotChecklist() (lib/turnovers/generator.ts) injects a permanent,
+  // non_deletable checklist item for any REQUIRED_ASSET_TYPES not yet
+  // "verified" (make/model/photo_url set, or is_na) on a property — and once
+  // created, that row can NEVER be deleted:
+  // prevent_non_deletable_checklist_mutation() (20260628195657_non_deletable_
+  // enforcement_inventory_order_aggregation.sql) blocks it unconditionally,
+  // "regardless of the calling role," which also blocks the CASCADE delete a
+  // demo reset relies on (turnovers → checklist_instances →
+  // checklist_instance_items). A demo org that ever generates one of these
+  // can never be wiped again. DEMO_ASSETS is a deliberately curated, realistic
+  // subset per property — not every property covers all 26 required types —
+  // so anything it left uncovered gets an explicit "verified, not
+  // applicable" row here instead, exactly like a crew member marking N/A on
+  // an asset that genuinely doesn't exist at that property.
+  const naAssetRows = properties.flatMap((property) => {
+    const covered = new Set(
+      assetRows.filter((a) => a.property_id === property.id).map((a) => a.asset_type)
+    )
+    return REQUIRED_ASSET_TYPES.filter((assetType) => !covered.has(assetType)).map((assetType) => ({
+      org_id:      orgId,
+      property_id: property.id,
+      name:        `${ASSET_TYPE_DISPLAY_NAMES[assetType] ?? assetType} (N/A)`,
+      asset_type:  assetType,
+      is_na:       true,
+      is_active:   true,
+    }))
+  })
+  counts.property_assets += (await insertRows(supabase, 'property_assets', naAssetRows)).length
+
   // ── Bookings ─────────────────────────────────────────────────────────────
   // Spread past / current / future, and — critically — the first flagship
   // property checks out TOMORROW so a live turnover can fire naturally during
   // the demo without anyone fabricating a date.
   const bookingRows = buildBookingRows(orgId, propertyIdByKey)
   counts.bookings = (await insertRows(supabase, 'bookings', bookingRows)).length
+
+  // ── Turnovers + checklists ───────────────────────────────────────────────
+  // Generated through the same code path production uses
+  // (generateTurnoversForProperty, which snapshots a real checklist per
+  // turnover now that every property has a default checklist_templates row
+  // above) — raw-inserted bookings never fire the booking-created event
+  // pipeline that would otherwise trigger this, so without this step the
+  // demo org would have zero turnovers and zero checklist instances right
+  // after a reset: nothing for the crew PWA to sync before airplane mode,
+  // and nothing to click into on the web dashboard either.
+  let turnoversGenerated = 0
+  for (const property of properties) {
+    const newIds = await generateTurnoversForProperty(property.id, orgId, supabase)
+    turnoversGenerated += newIds.length
+  }
+  counts.turnovers = turnoversGenerated
+
+  // Every new turnover starts 'pending_assignment' regardless of how far in
+  // the past its checkout is (see insertStandaloneTurnover/insertPairTurnover
+  // in lib/turnovers/generator.ts) — without this, the "recent past" booking
+  // cluster seeded above for owner-report realism would surface as a
+  // month-old backlog of unassigned turnovers, which is a worse look than no
+  // history at all. Only turnovers whose checkout has already passed are
+  // touched; the current/future ones stay pending, which is exactly the
+  // state the live "watch a turnover generate" and crew-offline demo
+  // moments need.
+  const { error: completePastError } = await supabase
+    .from('turnovers')
+    .update({ status: 'completed', completed_at: new Date().toISOString() })
+    .eq('org_id', orgId)
+    .lt('checkout_datetime', new Date().toISOString())
+  if (completePastError) {
+    console.error('[seedDemoOrg] failed to mark past turnovers completed:', completePastError.message)
+  }
 
   // ── Guidebook ────────────────────────────────────────────────────────────
   await insertRows(supabase, 'guidebook_configurations', [{

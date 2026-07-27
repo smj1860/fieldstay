@@ -39,7 +39,9 @@ When you're happy with the response, click **Mark as Ready** to save it, then **
 
 ## Regenerating a Response
 
-If the first draft misses the mark, click **Regenerate**. You have up to 2 regenerations per review. After 2 regenerations, edit the response manually — at that point you know better than the AI what you want to say.
+If the first draft misses the mark, click **Regenerate**. For a review that synced in automatically from OwnerRez or Hospitable, you have up to 2 regenerations. After 2, edit the response manually — at that point you know better than the AI what you want to say.
+
+**Manually-added reviews work differently: they can't be regenerated at all.** If you added a review yourself (see below), you get the one draft RepuGuard generates and edit it by hand from there — clicking Regenerate on a manual review returns an error rather than a new draft.
 
 ---
 

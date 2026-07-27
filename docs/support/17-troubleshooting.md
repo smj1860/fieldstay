@@ -81,7 +81,7 @@ Click **Sync** on the Turnovers dashboard to trigger an immediate re-sync. If th
 
 **Check first:**
 - Has the work order been cancelled? Cancelled work orders deactivate the portal link.
-- Is the link older than 90 days? Portal links expire after 90 days.
+- Is the link older than 30 days? Vendor portal links expire after 30 days.
 
 **Fix:**
 Go to the work order in FieldStay and click **Resend Dispatch**. This generates a fresh dispatch email with a new valid link to the vendor.

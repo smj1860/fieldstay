@@ -18,8 +18,8 @@ Guests are never texted without explicit consent. The opt-in flow is:
 
 1. Guest receives a pre-arrival email from FieldStay a few days before check-in
 2. The email contains a prominent prompt: *"Want your door code texted directly to your phone?"*
-3. Guest taps the link, enters their mobile number, and taps the consent button
-4. The consent form displays this text: *"By submitting your number you agree to receive SMS messages about your stay including your door access code, WiFi information, and local recommendations. Message and data rates may apply. Reply STOP at any time to unsubscribe."*
+3. Guest taps the link, enters their mobile number, and taps **Text Me My Door Code**
+4. Directly below that button, the form displays this text: *"By submitting, you consent to receive automated text messages. Msg & data rates may apply. Reply STOP to opt out."*
 5. Guest receives a confirmation text immediately
 
 No messages are sent until step 4 is completed. Consent records are stored with a timestamp and the booking ID.

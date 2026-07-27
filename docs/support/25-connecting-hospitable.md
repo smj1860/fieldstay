@@ -65,7 +65,7 @@ FieldStay receives real-time updates from Hospitable via webhooks. You don't nee
 - **Property changes** — name, address, and timing updates sync automatically
 - **New reviews** — sync automatically and trigger a RepuGuard draft response
 
-Crew/teammate changes in Hospitable do not sync automatically after the initial connection. If you add or update teammates in Hospitable, disconnect and reconnect FieldStay to re-run the crew sync.
+Crew/teammate changes in Hospitable also resync automatically — a daily sync at 9am checks for new, updated, or removed teammates and keeps your FieldStay crew list current. You don't need to disconnect and reconnect for a teammate change to show up.
 
 ---
 

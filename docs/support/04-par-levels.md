@@ -20,9 +20,12 @@ under-ordering (empty shelves at guest arrival).
    (larger properties need higher par levels)
 
 ## What Happens Below Par
-When a count falls below par, FieldStay creates a purchase order and — if Kroger
-is connected — builds a shopping cart automatically. An end-of-day email lists all
-below-par items across all properties.
+When a count falls below par, FieldStay creates a purchase order automatically.
+An end-of-day email lists all below-par items across all properties. If Kroger
+is connected, you can then go to **Inventory → Portfolio** and click
+**Build Cart** to add every below-par item across your properties to your
+Kroger cart — this is a manual step you trigger, not something that happens
+on its own.
 
 Same-day flip exception: if a property has a checkout and check-in on the same day,
 the order email fires immediately instead of waiting for end of day.

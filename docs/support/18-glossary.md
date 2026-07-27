@@ -44,7 +44,7 @@ A maintenance schedule is a recurring task template that automatically creates w
 
 ## Vendor Portal
 
-The vendor portal is a secure, tokenized web page that a vendor accesses through the link in their dispatch email. It does not require a FieldStay account. Through the portal, the vendor can review work order details, submit line items and a completion photo, and sign off when work is complete. The portal link is unique to each work order and expires after 90 days.
+The vendor portal is a secure, tokenized web page that a vendor accesses through the link in their dispatch email. It does not require a FieldStay account. Through the portal, the vendor can review work order details, submit line items and a completion photo, and sign off when work is complete. The portal link is unique to each work order and expires after 30 days.
 
 ---
 
@@ -68,7 +68,7 @@ The Guest Guidebook is a personalized, mobile-friendly page delivered to guests 
 
 ## Par Level
 
-A par level is the minimum quantity of a supply item that should be on hand at a property before triggering a restock order. Crew members count inventory during each turnover. Items that fall below par are added to a purchase order and — if Kroger is connected — automatically added to a shopping cart. Par levels are set per item per property and can be adjusted at any time.
+A par level is the minimum quantity of a supply item that should be on hand at a property before triggering a restock order. Crew members count inventory during each turnover. Items that fall below par are added to a purchase order automatically — if Kroger is connected, you then click **Build Cart** on the Inventory → Portfolio page to add those items to your Kroger cart yourself; cart-building is a manual step, not an automatic one. Par levels are set per item per property and can be adjusted at any time.
 
 ---
 

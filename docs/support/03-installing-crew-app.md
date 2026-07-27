@@ -4,7 +4,7 @@ The FieldStay Crew App puts turnover checklists, inventory counts, and work orde
 in your crew's hands — and works even without cell service or WiFi.
 
 ## Getting Access
-Invite crew from Settings → Crew → Invite Crew Member. Share the crew app link:
+Go to **Crew** (top-level nav, not under Settings), add the person with **Add Crew Member**, then click **Invite to App** on their row (or **Invite All** to send every pending invite at once). Share the crew app link:
 https://app.fieldstay.app/crew
 
 ## Installing on iPhone (Safari Required)

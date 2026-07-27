@@ -15,9 +15,14 @@ Go to Properties → [Property Name] → Settings and enter:
 - Standard cleaning cost (flat fee per turnover)
 - Same-day premium percentage (markup for same-day checkout/checkin)
 
-### Default Crew Member
-Go to Properties → [Property Name] → Crew and select the crew member who most
-frequently cleans this property.
+### Crew Assignment
+FieldStay doesn't use a fixed default crew member per property. Instead, go to
+Settings → Crew Auto-Assignment and choose how new turnovers get staffed:
+"Suggest" scores your crew on proximity, reliability, workload, and past
+familiarity with the property and shows the best match on the Turnovers
+board for you to confirm; "Autopilot" assigns that best match automatically;
+"Off" leaves every turnover unassigned for manual pick. This is an org-wide
+setting, not something you configure per property.
 
 ### Guest Guidebook
 Go to Guidebook → [Property Name] and review WiFi, check-in instructions, and
@@ -26,6 +31,6 @@ it's published.
 
 ## Setup Checklist
 - Cleaning cost and same-day premium set
-- Default crew assigned
+- Crew Auto-Assignment mode chosen (Settings → Crew Auto-Assignment)
 - Guidebook reviewed and published
 - Inventory template applied (optional)
