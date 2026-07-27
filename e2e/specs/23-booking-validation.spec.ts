@@ -43,6 +43,13 @@ test.describe('Booking validation', () => {
   })
 
   test('[E2E] duplicate manual booking for same property and dates is rejected', async ({ page }, testInfo) => {
+    // The default project timeout (playwright.config.ts) is 30_000ms for the
+    // whole test, not per-assertion — so the 'Booking added' wait below's own
+    // 30_000ms only gets a fresh window if the test-level timeout is raised
+    // first; otherwise the setup steps before it (goto, dismiss banner, open
+    // dialog, fill form) eat into that same 30s budget.
+    testInfo.setTimeout(60_000)
+
     // Offset by retry count — this job never cleans up between retries (only
     // between whole CI runs, in global-setup/teardown), so a first attempt
     // that times out on the 'Booking added' assertion below still leaves its
