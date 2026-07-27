@@ -1,3 +1,4 @@
+import { Badge } from '@/components/ui/Badge'
 import type { HospitablePromoStatus } from '@/lib/queries/hospitable-promo'
 
 interface Props {
@@ -25,19 +26,10 @@ export function PriceLockBadge({ promo }: Readonly<Props>) {
     : `${promo.priceLockYears ?? 1}-Year Price Lock`
 
   return (
-    <div
-      className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-medium"
-      style={{
-        border:     '1px solid var(--accent-gold)',
-        background: 'var(--accent-amber-dim)',
-        color:      'var(--accent-amber)',
-      }}
-    >
+    <Badge tone="gold" className="text-sm px-3 py-1">
       <span aria-hidden>🔒</span>
-      <span>
-        {label}
-        {expiresLabel ? ` — locked through ${expiresLabel}` : ''}
-      </span>
-    </div>
+      {label}
+      {expiresLabel ? ` — locked through ${expiresLabel}` : ''}
+    </Badge>
   )
 }

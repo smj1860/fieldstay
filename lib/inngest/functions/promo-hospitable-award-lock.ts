@@ -118,6 +118,20 @@ export const awardHospitablePriceLock = inngest.createFunction(
         throw new Error(`Org ${org_id} has no billing_email — cannot send price lock email`)
       }
 
+      const supabase = createServiceClient({ system: 'inngest:promo-hospitable-award-price-lock' })
+
+      // Check-before-send guard, same idiom as add-items-to-kroger-cart's
+      // milestone check in build-shopping-cart.ts: a step that throws after
+      // the external send succeeds re-runs its whole body on retry, so the
+      // send itself must be guarded, not just split into a later step.
+      const { data: existing } = await supabase
+        .from('hospitable_launch_promo')
+        .select('congrats_email_sent_at')
+        .eq('org_id', org_id)
+        .maybeSingle()
+
+      if (existing?.congrats_email_sent_at) return
+
       await sendHospitablePriceLockEmail({
         toEmail:          orgBilling.billing_email,
         organizationName: orgBilling.name,
@@ -127,7 +141,6 @@ export const awardHospitablePriceLock = inngest.createFunction(
         lockedPriceCents: priceCents,
       })
 
-      const supabase = createServiceClient({ system: 'inngest:promo-hospitable-award-price-lock' })
       await supabase
         .from('hospitable_launch_promo')
         .update({ congrats_email_sent_at: new Date().toISOString() })
