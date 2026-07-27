@@ -68,7 +68,7 @@ The Guest Guidebook is a personalized, mobile-friendly page delivered to guests 
 
 ## Par Level
 
-A par level is the minimum quantity of a supply item that should be on hand at a property before triggering a restock order. Crew members count inventory during each turnover. Items that fall below par are added to a purchase order and — if Kroger is connected — automatically added to a shopping cart. Par levels are set per item per property and can be adjusted at any time.
+A par level is the minimum quantity of a supply item that should be on hand at a property before triggering a restock order. Crew members count inventory during each turnover. Items that fall below par are added to a purchase order automatically — if Kroger is connected, you then click **Build Cart** on the Inventory → Portfolio page to add those items to your Kroger cart yourself; cart-building is a manual step, not an automatic one. Par levels are set per item per property and can be adjusted at any time.
 
 ---
 

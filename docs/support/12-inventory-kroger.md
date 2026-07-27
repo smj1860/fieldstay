@@ -68,7 +68,7 @@ automatically — no separate setup required.
 
 ## How the Cart Builds
 
-Below-par items are flagged automatically as counts come in, and a purchase order is created for each one — but building the actual Kroger cart is a step you trigger yourself:
+Below-par items are flagged automatically as counts come in, and a purchase order is created per property with every below-par item listed on it — but building the actual Kroger cart is a step you trigger yourself:
 
 1. Go to **Inventory → Portfolio** and click **Build Cart**
 2. FieldStay identifies all below-par items across your properties

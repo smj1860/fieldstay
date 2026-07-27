@@ -29,8 +29,9 @@ All plans include the complete FieldStay platform:
 - OwnerRez integration (Hostaway integration in progress)
 - RepuGuard AI review response drafting
 - Guest Guidebook with SMS delivery — unlocked during your trial, and
-  permanently after that once you have 3 active sponsors (see **Guidebook
-  Sponsor Credits** below); it isn't included by default on every plan
+  after that once you have 3 active sponsors, staying unlocked for as long
+  as you keep at least 3 (see **Guidebook Sponsor Credits** below); it isn't
+  included by default on every plan
 - Crew mobile PWA (offline-capable)
 
 There are no plan-tier feature gates — pricing is by property count only. The one feature with its own unlock condition is the Guest Guidebook, described above.

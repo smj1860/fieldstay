@@ -29,7 +29,7 @@ The link in the dispatch email is unique to each work order and vendor. When the
 - The scope of work and authorized spending amount
 - A **Sign Off** button to mark the work complete when they're done
 
-The link is valid for 30 days. If a vendor needs a new link after it expires, go to the work order detail page and click **Resend to Vendor** to generate a fresh one.
+The link is valid for 30 days. If a vendor needs a new link after it expires, go to the work order detail page and click **Send to Vendor** to generate a fresh one.
 
 **The link is for the vendor's eyes only.** Do not forward it or share it publicly — it grants access to property access information including lockbox codes.
 

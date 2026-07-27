@@ -44,7 +44,7 @@ You can change the visibility on any transaction from the same **Owner Portal** 
 Most expenses post to the owner ledger automatically:
 
 - **Cleaning fees** — posted when a turnover is marked complete, using the cleaning cost set on the property
-- **Work order costs** — posted when a vendor work order is approved, using the actual cost submitted by the vendor
+- **Work order costs** — posted the moment a vendor signs off on a work order, using the actual cost they submitted — there's no separate PM approval step in between
 - **Same-day premium** — added to the cleaning fee automatically when checkout and check-in are on the same day
 
 Revenue from OwnerRez bookings posts automatically when a booking is confirmed.

@@ -287,7 +287,31 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
       skipSeed: true,
     })
   }
-  counts.checklist_templates = properties.length
+
+  // applyMasterChecklistToProperty() is a defensive no-op (returns void,
+  // logs and bails) when composeSections() produces zero sections for a
+  // property — don't just trust the loop ran; verify every property actually
+  // ended up with a default template, or a "successful" reset silently
+  // leaves some properties generating checklist-less turnovers.
+  const { data: appliedTemplates, error: appliedTemplatesError } = await supabase
+    .from('checklist_templates')
+    .select('property_id')
+    .eq('org_id', orgId)
+    .eq('is_default', true)
+    .in('property_id', properties.map((p) => p.id))
+
+  if (appliedTemplatesError) {
+    throw new Error(`Failed to verify seeded checklist templates: ${appliedTemplatesError.message}`)
+  }
+  if ((appliedTemplates ?? []).length < properties.length) {
+    const covered = new Set((appliedTemplates ?? []).map((t) => t.property_id))
+    const missing = properties.filter((p) => !covered.has(p.id)).map((p) => p.id)
+    throw new Error(
+      `Checklist template seeding incomplete — missing default templates for ${missing.length} ` +
+      `of ${properties.length} properties: ${missing.join(', ')}`
+    )
+  }
+  counts.checklist_templates = appliedTemplates!.length
 
   // ── Inventory ────────────────────────────────────────────────────────────
   // Every property gets a realistic, deliberately-mixed stock count: most
@@ -295,7 +319,7 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
   // so the crew inventory-count screen and the low-stock/restock-cart
   // automation have something real to show instead of an all-green board.
   await seedOrgInventoryCatalogIfNeeded(orgId)
-  const { data: orgCatalogItems } = await supabase
+  const { data: orgCatalogItems, error: orgCatalogError } = await supabase
     .from('org_inventory_catalog')
     // inventory_items.catalog_item_id references the GLOBAL inventory_catalog,
     // not org_inventory_catalog — platform_catalog_item_id is the column that
@@ -305,6 +329,9 @@ export async function seedDemoOrg(opts: SeedOptions = {}): Promise<SeedResult> {
     .eq('is_active', true)
     .order('category')
     .order('name')
+  if (orgCatalogError) {
+    throw new Error(`Failed to fetch demo inventory catalog: ${orgCatalogError.message}`)
+  }
   const demoInventoryItems = pickDemoInventorySelection(orgCatalogItems ?? [])
 
   const inventoryRows = properties.flatMap((property, pi) =>

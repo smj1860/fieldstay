@@ -14,11 +14,11 @@ const MARKETING_FAQ = [
   },
   {
     q: 'What data syncs from OwnerRez?',
-    a: 'FieldStay syncs your properties, active and upcoming bookings, and guest checkout and check-in events in real time. Booking changes in OwnerRez — modifications, cancellations — update in FieldStay automatically via webhooks.',
+    a: 'FieldStay syncs your properties and your full booking history — not just upcoming stays — on initial connection, so past bookings are already there for reporting from day one. Booking changes in OwnerRez — modifications, cancellations — update in FieldStay automatically via webhooks.',
   },
   {
     q: 'How do my crew members access the app?',
-    a: 'You invite crew members by email from the Crew section. They receive a link, create a free account, and install the app to their phone home screen — no App Store required. Crew see only their assigned turnovers and checklists, nothing else.',
+    a: 'Go to Crew, add the person with the "Add Crew Member" form, then click "Invite to App" on their row. They receive a link, create a free account, and install the app to their phone home screen — no App Store required. Crew see only their assigned turnovers and checklists, nothing else.',
   },
   {
     q: 'Does it work without cell service?',
