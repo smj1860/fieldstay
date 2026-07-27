@@ -10,6 +10,68 @@ export interface FaqCategory {
   items: FaqItem[]
 }
 
+/**
+ * Crew visibility — the single source of truth for this answer.
+ *
+ * It appears on three PM-facing surfaces (the OwnerRez and Hospitable landing
+ * pages, and the in-app help page), and it makes specific claims about what
+ * crew can and cannot reach. Defining it once means a correction lands
+ * everywhere instead of leaving two stale copies behind.
+ *
+ * Each claim below is enforced in the database, not just hidden in the UI
+ * (verified 2026-07-27):
+ *   - assigned turnovers only    → turnovers_select uses get_crew_turnover_ids(),
+ *                                  which joins turnover_assignments to crew_members
+ *   - no unassigned listings     → properties_select's crew branch is limited to
+ *                                  properties of assigned turnovers
+ *   - no guest contact info      → bookings is the only table holding guest_name /
+ *                                  guest_email, and bookings_select requires
+ *                                  get_user_org_ids(); crew hold no
+ *                                  organization_members row, so it returns empty
+ *                                  and the table is denied outright
+ *   - can submit work orders     → work_orders_insert has a crew branch requiring
+ *                                  source = 'crew_flag'
+ *   - messaging                  → messages_select is sender/recipient = auth.uid()
+ *
+ * Payout wording is deliberately scoped to the app rather than stated
+ * absolutely. RLS is row-level, not column-level: the crew sync never pulls
+ * cost columns (see lib/dexie/sync/turnovers.ts), but a crew token querying
+ * Supabase directly could still read properties.cleaning_cost and
+ * work_orders.actual_cost on rows already visible to them. If column-level
+ * grants or a crew-facing view are added later, this can become absolute.
+ */
+export const CREW_VISIBILITY_FAQ = {
+  question: 'What do my cleaners see when I invite them?',
+  answer:
+    'Cleaners only see their actively assigned turnovers, associated checklists, and inventory lists. They can submit work orders during a turnover and use in-app messaging, but they never see guest contact information or listings they aren\'t assigned to, and the app never shows them payout details.',
+} as const
+
+/**
+ * Team-member access — companion to CREW_VISIBILITY_FAQ, same three surfaces.
+ *
+ * Describes only what the product can actually do today (verified 2026-07-27):
+ *   - Invites hardcode role: 'admin' (app/(dashboard)/settings/team/actions.ts).
+ *     There is no role picker, and no action anywhere changes a member's role
+ *     after the fact — so Owner and Admin are the only roles a customer can
+ *     produce. The member_role enum also contains 'manager' and 'viewer', and
+ *     RLS has policies referencing them, but neither is assignable through the
+ *     app. Deliberately not mentioned here: describing a read-only "viewer"
+ *     seat customers cannot create would be a false product claim.
+ *   - Owner-exclusive: inviteTeamMember, removeMember and revokeInvite all
+ *     check membership.role !== 'owner'; account deletion does the same.
+ *   - Billing is NOT owner-only — openBillingPortal and createCheckoutSession
+ *     gate on requireOrgMember() alone, so any admin reaches it. Called out
+ *     explicitly because it is the one access surprise worth knowing before
+ *     you invite someone.
+ *   - Org scoping is DB-enforced: every team-facing policy resolves through
+ *     get_user_org_ids(), which reads organization_members for auth.uid().
+ */
+export const TEAM_ACCESS_FAQ = {
+  question: 'What can team members see and do?',
+  answer:
+    'Anyone you invite to your team joins as an Admin with full access to the app — properties, turnovers, work orders, crew scheduling, inventory, owner reporting, and billing. Two things stay with the account Owner: only the Owner can invite or remove team members, and only the Owner can delete the account. Everything a team member sees is scoped to your organization, so they never have access to another company\'s data.',
+} as const
+
 export const FAQ_CATEGORIES: FaqCategory[] = [
   {
     id:    'pms-sync',
@@ -58,10 +120,14 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
           'Go to Crew → Invite Crew Member and enter their email. They\'ll receive a link to create their account and install the app. Crew members see only their assigned turnovers and checklists — not financial data, owner reports, or other crew members\' work.',
       },
       {
+        // Replaces an earlier answer that claimed crew "cannot view ...
+        // maintenance work orders". That was wrong on both counts: crew can
+        // raise a work order from a turnover (work_orders_insert permits
+        // source = 'crew_flag') and can see the ones assigned to them
+        // (work_orders_select's assigned_crew_member_id branch).
         id:       'crew-permissions',
-        question: 'What exactly can crew members see and do?',
-        answer:
-          'Crew members can view their assigned turnovers, step through checklists, capture photos at each section, and mark tasks complete. They cannot view any other crew assignments, property financials, owner portals, maintenance work orders, or billing information.',
+        question: CREW_VISIBILITY_FAQ.question,
+        answer:   CREW_VISIBILITY_FAQ.answer,
       },
       {
         id:       'crew-assignment',
@@ -80,6 +146,23 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         question: 'Does the crew app need to be installed from the App Store?',
         answer:
           'No. It\'s a Progressive Web App (PWA). After accepting the invite, crew open the link in Safari (iPhone) or Chrome (Android) and tap "Add to Home Screen." It installs like a native app with offline support — no App Store or Google Play account required.',
+      },
+    ],
+  },
+  {
+    id:    'team',
+    label: 'Team & Access',
+    items: [
+      {
+        id:       'team-permissions',
+        question: TEAM_ACCESS_FAQ.question,
+        answer:   TEAM_ACCESS_FAQ.answer,
+      },
+      {
+        id:       'team-vs-crew',
+        question: 'What\'s the difference between a team member and a crew member?',
+        answer:
+          'Team members are office staff — they sign in to the full dashboard and manage the business. Crew members are the people doing turnovers in the field; they use a separate phone app and only see the jobs assigned to them. They are two different account types, so adding a cleaner as a team member would give them far more access than they need. Add cleaners under Crew, and office staff under Team.',
       },
     ],
   },
