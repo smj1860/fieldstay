@@ -37,7 +37,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'or-historical',
         question: 'Will historical bookings sync over, or only future ones?',
         answer:
-          'FieldStay syncs all active and upcoming bookings, plus bookings from the past 90 days. Older records are excluded to keep initial setup fast. All future booking changes sync in real time as your PMS sends webhook events.',
+          'FieldStay syncs your full booking history from your PMS on initial connection, not just upcoming stays — so past bookings are already there for reporting from day one. All future booking changes sync in real time as your PMS sends webhook events.',
       },
       {
         id:       'or-not-updating',
@@ -55,7 +55,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'crew-invite',
         question: 'How do crew members access FieldStay?',
         answer:
-          'Go to Crew → Invite Crew Member and enter their email. They\'ll receive a link to create their account and install the app. Crew members see only their assigned turnovers and checklists — not financial data, owner reports, or other crew members\' work.',
+          'Go to Crew, add the person with the "Add Crew Member" form, then click "Invite to App" on their row (or "Invite All" to send every pending invite at once). They\'ll receive a link to create their account and install the app. Crew members see only their assigned turnovers and checklists — not financial data, owner reports, or other crew members\' work.',
       },
       {
         id:       'crew-permissions',
@@ -67,7 +67,7 @@ export const FAQ_CATEGORIES: FaqCategory[] = [
         id:       'crew-assignment',
         question: 'How are turnovers assigned after a guest checks out?',
         answer:
-          'When your connected PMS sends a checkout event, FieldStay creates a turnover automatically. You assign it from the Turnovers board. If you\'ve set a default crew member per property in Property Settings, assignment happens automatically with no manual step required.',
+          'When your connected PMS sends a checkout event, FieldStay creates a turnover automatically. What happens next depends on your Crew Auto-Assignment setting: "Suggest" scores every available crew member on proximity, reliability, workload, and past familiarity with the property, then shows you the best match on the Turnovers board so you can assign with one click. "Autopilot" assigns that best match automatically with no manual step. "Off" leaves every turnover unassigned for you to pick manually.',
       },
       {
         id:       'crew-offline',

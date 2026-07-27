@@ -1,6 +1,6 @@
 # Inventory Templates and the Kroger Cart
 
-**Inventory templates define what supplies you track at each property, and the Kroger integration turns below-par counts into a ready-to-order shopping cart with one click.**
+**Inventory templates define what supplies you track at each property, and the Kroger integration turns below-par counts into a ready-to-order shopping cart when you click Build Cart.**
 
 ---
 
@@ -36,7 +36,7 @@ After applying, go to **Inventory → [Property Name]** to review and adjust par
 
 ## Connecting Kroger
 
-To enable automatic cart building, connect your Kroger account:
+To enable Kroger cart building, connect your Kroger account:
 
 1. Go to **Settings → Integrations → Kroger**
 2. Click **Connect Kroger Account**
@@ -68,16 +68,16 @@ automatically — no separate setup required.
 
 ## How the Cart Builds
 
-When an inventory count comes in with items below par, FieldStay:
+Below-par items are flagged automatically as counts come in, and a purchase order is created for each one — but building the actual Kroger cart is a step you trigger yourself:
 
-1. Identifies all below-par items across all properties with counts submitted that day
-2. Calculates the quantity needed to reach par (par level minus current count)
-3. Searches Kroger for each item using the preferred brand if set
-4. Adds the correct quantity to your Kroger cart
+1. Go to **Inventory → Portfolio** and click **Build Cart**
+2. FieldStay identifies all below-par items across your properties
+3. It calculates the quantity needed to reach par (par level minus current count) for each
+4. It searches Kroger for each item using the preferred brand if set, and adds the correct quantity to your Kroger cart
 
-You receive an email with the full restock list. The email includes a link directly to your Kroger cart where the items are already loaded — you review and checkout.
+You receive an email once the cart is built, with a link directly to your Kroger cart where the items are already loaded — you review and checkout.
 
-**You always approve before ordering.** FieldStay builds the cart and notifies you. The purchase only happens when you complete checkout in Kroger.
+**You always approve before ordering.** Building the cart never places an order by itself. The purchase only happens when you complete checkout in Kroger.
 
 ---
 

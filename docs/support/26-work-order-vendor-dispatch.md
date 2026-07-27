@@ -17,7 +17,7 @@ The vendor gets an email from FieldStay containing:
 - **Your name** as the dispatcher and your organization name
 - **A secure portal link** to view the full work order and sign off when complete
 
-The email is branded as TradeSuite, FieldStay's vendor-facing platform, so it looks professional to your contractors regardless of whether they've worked with FieldStay before.
+The email is a standard FieldStay dispatch email with a "powered by TradeSuite" footer credit — it isn't a separately-branded vendor platform experience, just a professional, clearly-sourced email regardless of whether the contractor has worked with FieldStay before.
 
 ---
 
@@ -29,7 +29,7 @@ The link in the dispatch email is unique to each work order and vendor. When the
 - The scope of work and authorized spending amount
 - A **Sign Off** button to mark the work complete when they're done
 
-The link is valid for 90 days. If a vendor needs a new link after it expires, go to the work order detail page and click **Resend to Vendor** to generate a fresh one.
+The link is valid for 30 days. If a vendor needs a new link after it expires, go to the work order detail page and click **Resend to Vendor** to generate a fresh one.
 
 **The link is for the vendor's eyes only.** Do not forward it or share it publicly — it grants access to property access information including lockbox codes.
 
@@ -37,12 +37,7 @@ The link is valid for 90 days. If a vendor needs a new link after it expires, go
 
 ## What Happens When the Vendor Signs Off
 
-When the vendor clicks Sign Off on their portal page:
-
-1. The work order status changes to **Pending Review** in your FieldStay dashboard
-2. You receive a notification to review the completed work
-3. You can approve, request changes, or reject the sign-off from the work order detail page
-4. Once you approve, the work order status moves to **Completed** and the invoice flow begins
+When the vendor clicks Sign Off on their portal page, the work order status moves straight to **Completed** and the actual cost posts to the owner financial ledger automatically. There's no separate "pending review" or approval step in between — sign-off is the completion event. You get a notification once it's done, so review what the vendor submitted at that point rather than beforehand.
 
 ---
 
@@ -76,13 +71,13 @@ If the scope grows beyond the NTE during the job, the vendor is expected to cont
 ## Troubleshooting
 
 **The vendor says they didn't receive the dispatch email.**
-Check their spam folder first. If it's not there, open the work order detail panel and use **Send to Vendor** to resend. Confirm the email address on file for the vendor in Settings → Vendors.
+Check their spam folder first. If it's not there, open the work order detail panel and use **Send to Vendor** to resend. Confirm the email address on file for the vendor in Vendors (top-level nav, not under Settings).
 
 **The vendor's link isn't working.**
-Links expire after 90 days. Use **Send to Vendor** to generate a fresh link.
+Links expire after 30 days. Use **Send to Vendor** to generate a fresh link.
 
 **The dispatch email didn't send when I created the work order.**
-The vendor must have an email address on file and the portal option must be enabled when creating the work order. Check the vendor's profile in Settings → Vendors to confirm their email is set. Then use **Send to Vendor** from the work order detail panel to dispatch manually.
+The vendor must have an email address on file and the portal option must be enabled when creating the work order. Check the vendor's profile in Vendors (top-level nav, not under Settings) to confirm their email is set. Then use **Send to Vendor** from the work order detail panel to dispatch manually.
 
 ---
 

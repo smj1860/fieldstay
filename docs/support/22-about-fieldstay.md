@@ -30,7 +30,7 @@ The operations between turnovers are just as important. They just haven't had a 
 
 ## Pricing Philosophy
 
-FieldStay runs on flat tiers — up to 15 properties, 16 to 50, and 51 to 100. Every plan includes the full platform with no feature gating.
+FieldStay runs on flat tiers — up to 15 properties, 16 to 50, and 51 to 100. Every plan includes the full platform with no plan-tier feature gating. (The Guest Guidebook is the one feature with its own separate unlock condition — free during your trial, and permanently once you have 3 active sponsors.)
 
 Per-property pricing punishes growth. Feature gating punishes smaller operations. Most software does both. FieldStay doesn't.
 

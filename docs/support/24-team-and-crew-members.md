@@ -36,7 +36,7 @@ Crew members never see financial data, owner information, booking details beyond
 
 ### Inviting a Crew Member
 
-Go to **Settings → Crew → Invite Crew Member**, enter their name and email address, and send the invite. They'll receive an email invitation to create their crew account.
+Go to **Crew** (a top-level nav item, not under Settings) and click **Add Crew Member** to enter their name and contact details — this adds them to your roster but doesn't send anything yet. Then click **Invite to App** on their row (or **Invite All** to send every pending invite at once) to actually email them the invitation.
 
 After they accept the invite, share the crew app link with them:
 
@@ -96,7 +96,7 @@ A properly installed crew app will:
 |---|---|---|
 | **Where they work** | Dashboard (app.fieldstay.app) | Crew App (app.fieldstay.app/crew) |
 | **What they see** | Properties, bookings, financials, reports (based on role) | Their assigned turnovers, checklists, inventory, work orders |
-| **How they're invited** | Settings → Team → Invite Member | Settings → Crew → Invite Crew Member |
+| **How they're invited** | Settings → Team → Invite Member | Crew → Add Crew Member, then Invite to App |
 | **Install required?** | No — just a browser login | Yes — PWA install on home screen required for offline use |
 | **Notification permission** | Optional | Strongly recommended |
 

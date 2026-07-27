@@ -44,7 +44,7 @@ A maintenance schedule is a recurring task template that automatically creates w
 
 ## Vendor Portal
 
-The vendor portal is a secure, tokenized web page that a vendor accesses through the link in their dispatch email. It does not require a FieldStay account. Through the portal, the vendor can review work order details, submit line items and a completion photo, and sign off when work is complete. The portal link is unique to each work order and expires after 90 days.
+The vendor portal is a secure, tokenized web page that a vendor accesses through the link in their dispatch email. It does not require a FieldStay account. Through the portal, the vendor can review work order details, submit line items and a completion photo, and sign off when work is complete. The portal link is unique to each work order and expires after 30 days.
 
 ---
 

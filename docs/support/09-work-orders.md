@@ -40,7 +40,7 @@ When you assign a vendor, FieldStay sends them a dispatch email containing:
 - NTE amount if set
 - A secure link to their vendor portal
 
-The vendor portal link allows the vendor to review the order and submit their completion details without needing a FieldStay account. The link is unique to this work order and expires after 90 days.
+The vendor portal link allows the vendor to review the order and submit their completion details without needing a FieldStay account. The link is unique to this work order and expires after 30 days.
 
 If you later assign a different vendor, or assign a vendor to a work order that was initially created without one, a new dispatch email goes out automatically.
 
@@ -73,7 +73,7 @@ Add and manage vendor compliance documents under **Vendors → [Vendor Name] →
 
 ## How Completion Works
 
-**Vendor path:** The vendor submits their completion details through the portal — line items, notes, and a photo. Once submitted, you receive a notification to review and approve. Approving the work order posts the actual cost to the owner financial ledger automatically.
+**Vendor path:** The vendor submits their completion details through the portal — line items, notes, and a photo — and signs off. Signing off completes the work order immediately and posts the actual cost to the owner financial ledger automatically; there's no separate PM approval step to review before that happens. You receive a notification once it's done.
 
 **Crew path:** The crew member taps Mark Complete in their app, optionally adds notes, and you receive an email notification. The work order moves to Completed status.
 

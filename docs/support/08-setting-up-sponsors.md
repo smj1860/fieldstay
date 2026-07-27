@@ -25,7 +25,7 @@ Choose the slot type when setting up a sponsor. This controls when and how they 
 |---|---|
 | Morning Brew | Morning recommendation (coffee shops, breakfast spots) |
 | Dinner & Pints | Evening recommendation (restaurants, bars) |
-| Rainy Day | When precipitation is 60%+ (indoor activities, delivery) |
+| Rainy Day | When precipitation is 40%+ (indoor activities, delivery) |
 | Outdoor Adventure | Activity outfitters, bike rentals, kayak tours |
 | General | Any recommendation context |
 

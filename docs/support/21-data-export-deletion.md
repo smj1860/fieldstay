@@ -6,13 +6,15 @@ What happens to your data when you cancel, how to request an export, and how acc
 
 ## Requesting a Data Export
 
-If you'd like a copy of your FieldStay data — properties, bookings, turnovers, financial records, inventory history — email **support@fieldstay.app** with the subject line "Data Export Request." Exports are provided as CSV files and are typically delivered within 3 business days.
+For your own personal account data — profile, org memberships, your crew member record if applicable, and your audit log — go to **Settings → Audit Log** and click **Export My Data**. This is self-serve and returns your data immediately, no waiting required.
+
+That export covers your user-level data only. If you need a full export of your organization's operational data — properties, bookings, turnovers, financial records, inventory history — email **support@fieldstay.app** with the subject line "Data Export Request" and we'll put that together for you.
 
 ---
 
 ## What Happens When You Cancel Your Subscription
 
-Cancelling your subscription stops billing but does not immediately delete your data. Go to **Settings → Billing → Cancel Plan** to cancel — your access continues through the end of your current billing period.
+Cancelling your subscription stops billing but does not immediately delete your data. Go to **Settings → Billing**, click **Manage Billing** to open Stripe's hosted portal, and cancel from there — your access continues through the end of your current billing period.
 
 After cancellation:
 - Your account becomes read-only at the end of the billing period
@@ -29,11 +31,13 @@ If you need an export, request it before the 30-day window closes.
 Account deletion is a separate, more permanent action than cancelling a subscription. Deleting your account:
 
 - Immediately cancels any active subscriptions (including Guidebook sponsor billing if applicable)
-- Revokes all connected integrations (OwnerRez, Hostaway, Kroger)
+- Revokes all connected integrations (OwnerRez, Kroger — Hostaway isn't a live integration yet, so there's nothing to revoke there)
 - Removes your access to FieldStay
 - Permanently deletes all associated data
 
 **This action cannot be undone.** There is no 30-day grace period for account deletion — unlike subscription cancellation, deletion is immediate and final.
+
+**If you're an org owner and other team members are still on the account, deletion is blocked.** You'll need to transfer ownership or remove the other team members first — FieldStay won't delete an org out from under people who still have access to it.
 
 To delete your account, go to **Settings → Account → Delete Account**, or contact support@fieldstay.app if you'd prefer assistance with the process.
 
