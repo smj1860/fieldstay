@@ -116,9 +116,9 @@ supabase link --project-ref vpmznjktllhmmbfnxuvk
 supabase db push
 ```
 
-> `fieldstay_migration_v1.SUPERSEDED.sql` and `fieldstay_migration_v2.SUPERSEDED.sql`
-> at the repo root are SUPERSEDED and must not be run. Current schema is
-> maintained as timestamped files in `supabase/migrations/`.
+> `docs/archive/schema/fieldstay_migration_v1.SUPERSEDED.sql` and
+> `fieldstay_migration_v2.SUPERSEDED.sql` are SUPERSEDED and must not be run.
+> Current schema is maintained as timestamped files in `supabase/migrations/`.
 
 **Migration rollback policy:** migrations in this repo are forward-only —
 there are no paired "down" migrations. To undo a bad migration, write and
@@ -204,10 +204,9 @@ fieldstay/
 │   ├── sms/                # Telnyx SMS client, message builders, NANP validation
 │   └── weather/            # Tomorrow.io weather client
 ├── types/
-│   ├── database.ts         # Hand-maintained DB types (being migrated to generated)
-│   └── supabase.ts         # Generated from schema — do not edit manually
-├── fieldstay_migration_v1.SUPERSEDED.sql   # Initial schema — historical reference only, do not run
-├── fieldstay_migration_v2.SUPERSEDED.sql   # Incremental schema updates — historical reference only, do not run
+│   ├── database.ts         # Hand-maintained DB types — what the app imports
+│   └── database.generated.ts  # Generated from schema (pnpm run types:supabase) — do not edit manually
+├── docs/archive/schema/    # Superseded pre-migration schema dumps — do not run
 └── CLAUDE.md               # AI coding assistant instructions (read before touching code)
 ```
 
