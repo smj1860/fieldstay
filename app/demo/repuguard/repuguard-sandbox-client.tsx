@@ -273,7 +273,7 @@ function ResponsePanel({ review }: Readonly<{ review: SandboxReview }>) {
                           style={{ background: 'var(--accent-gold)' }} aria-hidden="true" />
                   )}
                 </p>
-                {phase === 'done' && <span className="sr-only" role="status">Response generated.</span>}
+                {phase === 'done' && <output className="sr-only">Response generated.</output>}
               </div>
             )}
 

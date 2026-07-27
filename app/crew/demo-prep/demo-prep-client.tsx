@@ -126,10 +126,9 @@ export function DemoPrepClient() {
 function ReadinessBanner({ ready }: Readonly<{ ready: boolean }>) {
   const tone = ready ? 'var(--accent-green)' : 'var(--accent-amber)'
   return (
-    <div
+    <output
       className="rounded-lg p-3 flex items-center gap-3"
       style={{ background: 'var(--bg-raised)', border: `1px solid ${tone}` }}
-      role="status"
     >
       {ready
         ? <Check className="w-5 h-5 flex-shrink-0" style={{ color: tone }} aria-hidden="true" />
@@ -139,6 +138,6 @@ function ReadinessBanner({ ready }: Readonly<{ ready: boolean }>) {
           ? 'Fully synced — safe for offline demo'
           : 'Not ready — resolve the items below before going offline'}
       </p>
-    </div>
+    </output>
   )
 }
