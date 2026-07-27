@@ -41,7 +41,7 @@ FieldStay is a local-first, multi-tenant SaaS platform that automates turnover o
 | AI | Anthropic Claude (data plate OCR, RepuGuard draft generation) |
 | SMS | Telnyx (A2P 10DLC) |
 | Weather | Tomorrow.io |
-| Observability | Axiom (Inngest logs) + Sentry (errors + performance traces) + Grafana Cloud (custom business metrics) |
+| Observability | Axiom (Inngest logs) + Sentry (errors, performance traces, and business metrics) |
 
 ---
 
@@ -135,7 +135,7 @@ for the full migration workflow.
 pnpm run types:supabase
 ```
 
-This writes `types/supabase.ts` from the live schema. Re-run after every migration.
+This writes `types/database.generated.ts` from the live schema. Re-run after every migration.
 
 ### 5. Start the development servers
 

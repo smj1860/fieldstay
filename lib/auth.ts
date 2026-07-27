@@ -5,6 +5,7 @@ import type { MemberRole } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
 import { reportError } from '@/lib/observability/report-error'
+import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
 
 export interface OrgMembership {
   org_id: string
@@ -35,6 +36,12 @@ export interface OrgMembership {
 const getAuthContext = cache(async () => {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+
+  // Attach the actor to this request's Sentry scope. Every issue previously
+  // reported "Users: 0" because nothing ever set one, so impact was invisible.
+  // UUID only — see setActorContext for why email is deliberately excluded.
+  if (user) setActorContext(user.id)
+
   return { supabase, user }
 })
 
@@ -95,6 +102,14 @@ const getMembershipContext = cache(async () => {
   const row = rows[0]!
 
   const orgData = unwrapJoin(row.organizations)
+
+  // Tag the request with its tenant so "is this one org or all of them" is
+  // answerable from the Sentry issue list, without opening an event.
+  setTenantContext({
+    orgId: row.org_id,
+    role:  row.role as string,
+    plan:  orgData?.plan ?? undefined,
+  })
 
   const membership: OrgMembership = {
     org_id: row.org_id,
