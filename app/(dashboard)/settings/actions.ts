@@ -1056,20 +1056,36 @@ export async function createCheckoutSession(
       .eq('id', membership.org_id)
       .single()
 
-    // Hospitable launch promo — fire-and-forget tagging event. A failure
-    // here must never block checkout; the tag itself is idempotent and safe
-    // to attempt on every checkout call (upgrades included), since it only
-    // ever writes once per org (see tag_hospitable_trial_signup()).
-    const cookieStore = await cookies()
-    const landingPageCookiePresent =
-      cookieStore.get('fs_promo_attribution')?.value === 'hospitable_landing_page'
+    // Hospitable launch promo — fire-and-forget tagging event, but only for
+    // orgs that actually have Hospitable connected. Every other checkout
+    // (the overwhelming majority) has nothing to do with this promo, so
+    // there's no reason to spend an Inngest invocation and a
+    // hospitable_tagged=false row tagging it. tag_hospitable_trial_signup()
+    // re-verifies connection status itself as the atomic source of truth —
+    // this is just a cheap pre-filter, not a substitute for that check.
+    // Fires on every checkout call (upgrades included) since a checkout can
+    // happen either before or after the org connects Hospitable; the RPC
+    // itself is idempotent and only ever writes the tag once per org.
+    const { data: hospitableConnection } = await supabase
+      .from('integration_connections')
+      .select('id')
+      .eq('org_id', membership.org_id)
+      .eq('provider_id', 'hospitable')
+      .eq('status', 'active')
+      .maybeSingle()
 
-    inngest.send({
-      name: 'promo/hospitable.checkout-started',
-      data: { org_id: membership.org_id, landing_page_cookie_present: landingPageCookiePresent },
-    }).catch((err) => {
-      console.error(`[promo/hospitable] Failed to send checkout-started event for org ${membership.org_id}:`, err)
-    })
+    if (hospitableConnection) {
+      const cookieStore = await cookies()
+      const landingPageCookiePresent =
+        cookieStore.get('fs_promo_attribution')?.value === 'hospitable_landing_page'
+
+      inngest.send({
+        name: 'promo/hospitable.checkout-started',
+        data: { org_id: membership.org_id, landing_page_cookie_present: landingPageCookiePresent },
+      }).catch((err) => {
+        console.error(`[promo/hospitable] Failed to send checkout-started event for org ${membership.org_id}:`, err)
+      })
+    }
 
     const session = await stripe.checkout.sessions.create({
       mode:                 'subscription',

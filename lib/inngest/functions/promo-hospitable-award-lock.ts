@@ -35,6 +35,36 @@ export const awardHospitablePriceLock = inngest.createFunction(
       throw new NonRetriableError('Missing org_id in first-payment-confirmed event')
     }
 
+    // billing/first-payment-confirmed fires for EVERY trial->paid conversion
+    // on the platform, not just Hospitable ones — this cheap early exit skips
+    // the Stripe API call and the claim RPC for the overwhelming majority of
+    // conversions that were never tagged. claim_hospitable_promo_slot() would
+    // reach the same not_eligible conclusion, just after doing unnecessary
+    // work first.
+    const isTagged = await step.run('check-hospitable-tagged', async () => {
+      const supabase = createServiceClient({ system: 'inngest:promo-hospitable-award-price-lock' })
+      const { data, error } = await supabase
+        .from('hospitable_launch_promo')
+        .select('hospitable_tagged')
+        .eq('org_id', org_id)
+        .maybeSingle()
+
+      // Fail open to "not eligible" rather than throw/retry — a promo
+      // eligibility check must never hold up the core billing event this
+      // function shares with every other conversion on the platform. Still
+      // logged, so a real outage (vs. the expected "no row yet") is visible.
+      if (error) {
+        console.error(`[promo/hospitable] Failed to check tag status for org ${org_id}:`, error.message)
+        return false
+      }
+
+      return data?.hospitable_tagged === true
+    })
+
+    if (!isTagged) {
+      return { org_id, status: 'not_awarded' as const, reason: 'not_eligible' as const }
+    }
+
     const orgBilling = await step.run('load-org-billing', async () => {
       const supabase = createServiceClient({ system: 'inngest:promo-hospitable-award-price-lock' })
       const { data: org, error } = await supabase
