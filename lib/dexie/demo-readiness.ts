@@ -64,51 +64,50 @@ export async function checkDemoOfflineReadiness(
     db.property_assets.count(),
   ])
 
-  // An outbox with pending work means the local cache holds writes the server
-  // hasn't seen. Going offline now is safe for the demo itself, but the
-  // laptop-dashboard-updates-live finale depends on the outbox being EMPTY
-  // beforehand — otherwise old queued writes flush alongside the new ones and
-  // the reveal is muddied.
-  checks.push({
-    label:  'Outbox drained',
-    ok:     pendingMutations === 0,
-    detail: pendingMutations > 0
-      ? `${pendingMutations} unsynced local ${plural(pendingMutations, 'change', 'changes')} still queued. ` +
-        `Stay on wifi until this reaches zero.`
-      : undefined,
-  })
-
-  // Dead-lettered mutations are a different failure: they will never flush on
-  // their own, so they'd sit in the queue forever and make the outbox counter
-  // look permanently stuck.
-  checks.push({
-    label:  'No dead-lettered writes',
-    ok:     failedMutations === 0,
-    detail: failedMutations > 0
-      ? `${failedMutations} ${plural(failedMutations, 'mutation', 'mutations')} exhausted all retries ` +
-        `and will not flush. Resolve before the event.`
-      : undefined,
-  })
-
-  checks.push(countCheck('Turnovers cached',        turnovers,          MIN_TURNOVERS))
-  checks.push(countCheck('Properties cached',       properties,         MIN_PROPERTIES))
-  checks.push(countCheck('Checklist instances',     checklistInstances, MIN_CHECKLIST_ITEM))
-  checks.push(countCheck('Checklist items cached',  checklistItems,     MIN_CHECKLIST_ITEM))
-  checks.push(countCheck('Inventory items cached',  inventoryItems,     MIN_INVENTORY_ITEM))
-
-  // Work orders and assets back secondary crew screens. Their absence doesn't
-  // block the core checklist/inventory demo, so they're reported as
-  // informational rather than folded into `ready`.
-  checks.push({
-    label:  'Work orders cached (optional)',
-    ok:     true,
-    detail: workOrders === 0 ? 'None cached — the crew work-order screen will be empty.' : undefined,
-  })
-  checks.push({
-    label:  'Assets cached (optional)',
-    ok:     true,
-    detail: assets === 0 ? 'None cached — the crew assets screen will be empty.' : undefined,
-  })
+  checks.push(
+    // An outbox with pending work means the local cache holds writes the
+    // server hasn't seen. Going offline now is safe for the demo itself, but
+    // the laptop-dashboard-updates-live finale depends on the outbox being
+    // EMPTY beforehand — otherwise old queued writes flush alongside the new
+    // ones and the reveal is muddied.
+    {
+      label:  'Outbox drained',
+      ok:     pendingMutations === 0,
+      detail: pendingMutations > 0
+        ? `${pendingMutations} unsynced local ${plural(pendingMutations, 'change', 'changes')} still queued. ` +
+          `Stay on wifi until this reaches zero.`
+        : undefined,
+    },
+    // Dead-lettered mutations are a different failure: they will never flush
+    // on their own, so they'd sit in the queue forever and make the outbox
+    // counter look permanently stuck.
+    {
+      label:  'No dead-lettered writes',
+      ok:     failedMutations === 0,
+      detail: failedMutations > 0
+        ? `${failedMutations} ${plural(failedMutations, 'mutation', 'mutations')} exhausted all retries ` +
+          `and will not flush. Resolve before the event.`
+        : undefined,
+    },
+    countCheck('Turnovers cached',        turnovers,          MIN_TURNOVERS),
+    countCheck('Properties cached',       properties,         MIN_PROPERTIES),
+    countCheck('Checklist instances',     checklistInstances, MIN_CHECKLIST_ITEM),
+    countCheck('Checklist items cached',  checklistItems,     MIN_CHECKLIST_ITEM),
+    countCheck('Inventory items cached',  inventoryItems,     MIN_INVENTORY_ITEM),
+    // Work orders and assets back secondary crew screens. Their absence
+    // doesn't block the core checklist/inventory demo, so they're reported
+    // as informational rather than folded into `ready`.
+    {
+      label:  'Work orders cached (optional)',
+      ok:     true,
+      detail: workOrders === 0 ? 'None cached — the crew work-order screen will be empty.' : undefined,
+    },
+    {
+      label:  'Assets cached (optional)',
+      ok:     true,
+      detail: assets === 0 ? 'None cached — the crew assets screen will be empty.' : undefined,
+    },
+  )
 
   return { ready: checks.every((c) => c.ok), checks }
 }
