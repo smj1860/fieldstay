@@ -1679,45 +1679,6 @@ export interface OrgSmsTemplate {
   updated_at: string
 }
 
-// ── Hospitable launch promo ──────────────────────────────────────────────────
-// Singleton counter enforcing both promo tiers — see
-// supabase/migrations/20260727150000_hospitable_launch_promo.sql.
-// Tier 1: first 100 converters, 2-year lock, no time limit.
-// Tier 2: next 100 converters, 1-year lock, only within second_tier_window_days
-// of launch_at — whichever limit (count or window) is hit first closes tier 2.
-export interface PromoHospitableLaunchCounter {
-  id:                        number
-  first_tier_awarded_count:  number
-  first_tier_max:            number
-  second_tier_awarded_count: number
-  second_tier_max:           number
-  launch_at:                 string
-  second_tier_window_days:   number
-}
-
-// Per-org enrollment/award record for the Hospitable launch promo.
-// price_lock_sequence is numbered 1-100 for the tier-1 (2-year) lock only;
-// NULL for the tier-2 (1-year) lock, which is capped/time-boxed internally
-// but not surfaced as "#N of 100" in the UI or congrats email.
-export interface HospitableLaunchPromo {
-  org_id:                  string
-  hospitable_tagged:       boolean
-  hospitable_tagged_at:    string | null
-  attribution_source:      'hospitable_marketplace_oneclick' | 'hospitable_landing_page' | 'manual_connect' | null
-  converted_to_paid_at:    string | null
-  price_lock_awarded:      boolean
-  price_lock_active:       boolean
-  price_lock_sequence:     number | null
-  price_lock_years:        1 | 2 | null
-  price_lock_tier:         string | null
-  price_lock_amount_cents: number | null
-  awarded_at:              string | null
-  price_lock_expires_at:   string | null
-  congrats_email_sent_at:  string | null
-  created_at:              string
-  updated_at:              string
-}
-
 // ─────────────────────────────────────────────────────────────
 // Supabase Database interface — used by createClient()
 //
@@ -1844,8 +1805,13 @@ export interface Database {
 
       // ── Roadshow demo ───────────────────────────────────────
       demo_activity_log:           { Row: DemoActivityLog;          Insert: Partial<DemoActivityLog>;          Update: Partial<DemoActivityLog>;          Relationships: [] }
-      promo_hospitable_launch_counter: { Row: PromoHospitableLaunchCounter; Insert: Partial<PromoHospitableLaunchCounter>; Update: Partial<PromoHospitableLaunchCounter>; Relationships: [] }
-      hospitable_launch_promo:     { Row: HospitableLaunchPromo;     Insert: Partial<HospitableLaunchPromo>;     Update: Partial<HospitableLaunchPromo>;     Relationships: [] }
+      // hospitable_launch_promo + promo_hospitable_launch_counter: deliberately
+      // not modeled yet. Migration 20260727150000_hospitable_launch_promo.sql
+      // is written and committed but not applied to the live project (applying
+      // it starts the tier-2 90-day clock, held until explicit launch
+      // go-ahead) — add these back in the same commit as applying it, per the
+      // type-drift gate, which checks types against the live DB, not the
+      // migration ledger.
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }
