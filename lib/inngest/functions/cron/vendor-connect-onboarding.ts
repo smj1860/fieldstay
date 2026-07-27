@@ -1,7 +1,12 @@
 /**
  * Nightly Vendor Connect Onboarding Cron (CLAUDE_58_0)
  *
- * Cron: 07:00 UTC daily (≈ 2:00 AM CT)
+ * Cron: 14:00 UTC daily (9am CT / 8am CST) — this is the one cron in the
+ * off-hours batch family that sends a vendor-facing email (a Stripe Connect
+ * invite), not just internal processing, so it needs a business-hours slot
+ * unlike its neighbors. Previously ran at 07:00 UTC (≈2am CT), landing
+ * Stripe onboarding emails in vendors' inboxes in the middle of the night —
+ * fixed 2026-07-27 after real vendor accounts received exactly that.
  *
  * Finds all vendors with:
  *   - email IS NOT NULL
@@ -35,7 +40,7 @@ export const vendorConnectOnboardingCron = inngest.createFunction(
     name:    'Cron: Nightly Vendor Connect Invite',
     retries: 2,
   },
-  { cron: '0 7 * * *' },
+  { cron: '0 14 * * *' },  // 9am CT (UTC-5) / 8am CST — see header comment
   async ({ step, logger }) => {
 
     // ── Step 1: Fetch uninvited vendors with email ───────────────────────────

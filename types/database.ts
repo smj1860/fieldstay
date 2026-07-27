@@ -121,6 +121,13 @@ export interface Organization {
   repuguard_trial_end:          string | null
   repuguard_stripe_subscription_id: string | null
   repuguard_founding_member:    boolean
+  /**
+   * Roadshow demo tenant marker (20260726160000_demo_org_support.sql).
+   * NOT an RLS bypass — the demo org is an ordinary tenant. Gates
+   * guest/vendor-facing side effects into demo_activity_log and scopes the
+   * one-tap reset. NOT NULL DEFAULT false, so non-null here.
+   */
+  is_demo:                      boolean
   created_at:                   string
   updated_at:                   string
 }
@@ -1614,6 +1621,23 @@ export interface NotificationDigestState {
   updated_at: string
 }
 
+// ── Roadshow demo activity log ──────────────────────────────────────────────
+// Append-only record of side effects simulated for a demo org instead of
+// dispatched to a real provider (20260726160000_demo_org_support.sql).
+// Service-role writes only; org members have SELECT via RLS.
+export type DemoSideEffectKind =
+  | 'sms'
+  | 'email'
+  | 'stripe_payout_simulated'
+
+export interface DemoActivityLog {
+  id:           string
+  org_id:       string
+  kind:         DemoSideEffectKind
+  payload:      Record<string, unknown>
+  simulated_at: string
+}
+
 // ── Org-level SMS template overrides ────────────────────────────────────────
 // Per-org customization of the default guest SMS copy in lib/sms/templates.ts.
 // UNIQUE(org_id, key) — an org may override any subset of template keys;
@@ -1748,6 +1772,9 @@ export interface Database {
       // ── In-app notifications (bell) ─────────────────────────
       notifications:               { Row: Notification;             Insert: Partial<Notification>;             Update: Partial<Notification>;             Relationships: [] }
       notification_digest_state:   { Row: NotificationDigestState;  Insert: Partial<NotificationDigestState>; Update: Partial<NotificationDigestState>; Relationships: [] }
+
+      // ── Roadshow demo ───────────────────────────────────────
+      demo_activity_log:           { Row: DemoActivityLog;          Insert: Partial<DemoActivityLog>;          Update: Partial<DemoActivityLog>;          Relationships: [] }
     }
     Views: {
       vendor_compliance_status: { Row: VendorComplianceStatus }
