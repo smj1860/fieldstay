@@ -164,6 +164,24 @@ export async function createPmNotification(
 
   // 23505 = unique_violation on the partial dedupe_key index — expected
   // on retries/duplicate triggers, not a real error.
+  //
+  // 23503 = foreign_key_violation on org_id. Confirmed live (2026-07-25,
+  // 92 occurrences across 9 users): a background Inngest step can still be
+  // in flight holding an org_id from before that org was deleted — no
+  // application code path deletes organizations rows directly, so this was
+  // an out-of-band deletion (e.g. a direct DB cleanup), but work_orders and
+  // notifications both cascade on organizations(id) ON DELETE, so any event
+  // payload captured before the delete becomes stale the moment it lands.
+  // There's no one left to notify; skip rather than throw so this doesn't
+  // retry and fail forever for a condition that can never resolve.
+  if (error?.code === '23503') {
+    console.warn(
+      `[createPmNotification] org ${input.orgId} no longer exists — skipping notification`,
+      { type: input.type }
+    )
+    return
+  }
+
   if (error && error.code !== '23505') {
     throw new Error(`Failed to create notification: ${error.message}`)
   }
