@@ -7,13 +7,14 @@ vi.mock('@/lib/integrations/providers/ownerrez-api', () => ({
   OwnerRezApiClient: vi.fn(),
 }))
 vi.mock('@/lib/turnovers/generator', () => ({
-  cancelTurnoversForBooking: vi.fn(),
+  cancelTurnoversForBooking:      vi.fn().mockResolvedValue([]),
+  notifyCrewOfCancelledTurnovers: vi.fn(),
 }))
 
 import { ownerRezReconciliationHandler } from '@/lib/inngest/functions/ownerrez/reconciliation-handler'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient } from '@/lib/integrations/providers/ownerrez-api'
-import { cancelTurnoversForBooking } from '@/lib/turnovers/generator'
+import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers } from '@/lib/turnovers/generator'
 import { RateLimitError } from '@/lib/integrations/types'
 import { invokeHandler } from './test-helpers'
 
@@ -73,10 +74,13 @@ describe('ownerRezReconciliationHandler', () => {
     vi.clearAllMocks()
   })
 
-  const ALLOWED = ['fetch-property-ids', 'fetch-current-bookings', 'cancel-stale-bookings']
+  const ALLOWED = ['fetch-property-ids', 'fetch-current-bookings', 'cancel-stale-bookings', 'notify-crew-cancelled-turnovers']
 
   it('cancels a FieldStay booking (and its turnover) whose external_id no longer appears in OwnerRez\'s current full listing', async () => {
     baseMocks(async () => [{ id: 100 }])
+    ;(cancelTurnoversForBooking as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' },
+    ])
 
     const supabase = makeSupabase({
       properties: [{ data: [{ external_id: '42' }], error: null }],
@@ -98,6 +102,9 @@ describe('ownerRezReconciliationHandler', () => {
     expect(supabase.updateSpy).toHaveBeenCalledWith('bookings', { status: 'cancelled' })
     expect(cancelTurnoversForBooking).toHaveBeenCalledWith('b2', supabase)
     expect(cancelTurnoversForBooking).toHaveBeenCalledTimes(1)
+    expect(notifyCrewOfCancelledTurnovers).toHaveBeenCalledWith([
+      { turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' },
+    ])
     expect(result).toEqual({ cancelledCount: 1 })
   })
 
@@ -122,6 +129,7 @@ describe('ownerRezReconciliationHandler', () => {
 
     expect(supabase.updateSpy).not.toHaveBeenCalled()
     expect(cancelTurnoversForBooking).not.toHaveBeenCalled()
+    expect(notifyCrewOfCancelledTurnovers).toHaveBeenCalledWith([])
     expect(result).toEqual({ cancelledCount: 0 })
   })
 
@@ -144,6 +152,7 @@ describe('ownerRezReconciliationHandler', () => {
     expect(result).toEqual({ skipped: true, reason: 'rate_limited' })
     expect(step.run).not.toHaveBeenCalledWith('cancel-stale-bookings', expect.any(Function))
     expect(cancelTurnoversForBooking).not.toHaveBeenCalled()
+    expect(notifyCrewOfCancelledTurnovers).not.toHaveBeenCalled()
   })
 
   it('regression: does not filter fetch-property-ids to is_active properties — a booking on a property deactivated in FieldStay but still live in OwnerRez must not look stale', async () => {

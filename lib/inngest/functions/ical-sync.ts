@@ -1,7 +1,7 @@
 import { inngest } from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { parseIcalFeed, toDateString, toTimeString, isAllDay, type ParsedBooking } from '@/lib/ical/parser'
-import { cancelTurnoversForBooking } from '@/lib/turnovers/generator'
+import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers, type CancelledTurnoverAssignment } from '@/lib/turnovers/generator'
 import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import { getPmEmails } from '@/lib/inngest/helpers'
 import { resend, FROM } from '@/lib/resend/client'
@@ -278,11 +278,17 @@ export const syncIcalFeed = inngest.createFunction(
     // ── Step 4: Cancel turnovers for any cancelled bookings ─────────────────
 
     if (cancelledBookingIds.length > 0) {
-      await step.run('cancel-affected-turnovers', async () => {
+      const cancelledAssignments = await step.run('cancel-affected-turnovers', async () => {
         const supabase = createServiceClient({ system: 'inngest:ical-sync' })
+        const allCancelled: CancelledTurnoverAssignment[] = []
         for (const bookingId of cancelledBookingIds) {
-          await cancelTurnoversForBooking(bookingId, supabase)
+          allCancelled.push(...(await cancelTurnoversForBooking(bookingId, supabase)))
         }
+        return allCancelled
+      })
+
+      await step.run('notify-crew-cancelled-turnovers', async () => {
+        await notifyCrewOfCancelledTurnovers(cancelledAssignments)
       })
     }
 
