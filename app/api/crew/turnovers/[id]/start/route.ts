@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
+import { isCrewAssignedToTurnover } from '@/lib/turnovers/assignment'
 import { logAuditEvent } from '@/lib/audit'
 
 /**
@@ -29,18 +30,7 @@ export async function POST(
 
   if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
 
-  // Org scoping alone lets ANY active crew member in the org start ANY
-  // turnover in it — same gap as the complete route (see H-7). Same 404 as
-  // an unknown turnover — an unassigned crew member should not learn the
-  // id exists.
-  const { data: assignment } = await supabase
-    .from('turnover_assignments')
-    .select('id')
-    .eq('turnover_id',    turnover_id)
-    .eq('crew_member_id', crew.id)
-    .maybeSingle()
-
-  if (!assignment) {
+  if (!(await isCrewAssignedToTurnover(supabase, turnover_id, crew.id))) {
     return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
   }
 
