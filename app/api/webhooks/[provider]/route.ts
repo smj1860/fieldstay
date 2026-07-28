@@ -77,8 +77,20 @@ export async function POST(
 
   // Extract standardized fields.
   // OwnerRez revocation format: { "action": "application_authorization_revoked", "user_id": 12345 }
+  // (top-level, numeric) — Hospitable's revocation payloads instead carry the
+  // connected account's user id nested under data.user.id (the same value as
+  // integration_connections.external_user_id, captured at OAuth-connect
+  // time). Without this fallback, revocation for Hospitable always resolved
+  // to an empty string and logged "Revocation event missing user_id" on
+  // every occurrence (confirmed live, 2026-07-27) — this is purely additive
+  // for OwnerRez, whose payload never has a data.user.id to begin with.
   const action         = String(payload.action ?? payload.event_type ?? '')
-  const externalUserId = String(payload.user_id ?? payload.account_id ?? '')
+  const externalUserId = String(
+    payload.user_id
+      ?? payload.account_id
+      ?? (payload.data as { user?: { id?: string } } | undefined)?.user?.id
+      ?? '',
+  )
   const correlationId  = payload.id ? String(payload.id) : crypto.randomUUID()
 
   const safeAction        = action.slice(0, 100)

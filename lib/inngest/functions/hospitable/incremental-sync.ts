@@ -204,9 +204,13 @@ export const hospIncrementalSync = inngest.createFunction(
           )
         }
 
+        // Scoped to the resolved org — an unscoped lookup could hit a
+        // co-hosted twin reservation belonging to a different customer and
+        // read the wrong existing dates, feeding a false datesChanged result.
         const { data: existing } = await supabase
           .from('bookings')
           .select('checkin_date, checkout_date')
+          .eq('org_id',          orgId)
           .eq('external_id',     entity_id)
           .eq('external_source', PROVIDER)
           .maybeSingle()

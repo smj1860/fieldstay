@@ -21,6 +21,7 @@ import { RateLimitError, type IntegrationProvider, type TokenResponse } from '@/
 import { hospitableApiLimiter } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { reportError } from '@/lib/observability/report-error'
 import type {
   HospitableUser,
   HospitableProperty,
@@ -253,11 +254,16 @@ export const hospitableProvider: IntegrationProvider = {
   // ⚠️ reservation.changed sends a PARTIAL payload — confirmed from
   // Hospitable's own docs example: a checkin-time-only change delivers
   // data: { check_in: "..." }, with no `id` field on data at all. The
-  // reservation's own id is on the TOP-LEVEL payload.id instead for this
-  // event (differs from review.created, where the top-level id is the
-  // webhook's own ULID and the entity id is nested under data.id) — check
-  // data.id first for reservation.created (which may send the fuller
-  // object) and fall back to the top-level id.
+  // top-level payload `id` is NEVER the reservation's own id, though — it's
+  // the webhook DELIVERY's own id (confirmed via two independent live
+  // captures across two event types: a property.changed delivery and a
+  // reservation.changed delivery both had top-level id ≠ the entity's real
+  // id). Falling back to it (as this used to) sends a GET for the wrong
+  // reservation, gets a 404, and the missing-reservation branch in
+  // incremental-sync.ts silently treats that as a cancellation — discarding
+  // every real partial update (date changes, checkout-time changes, real
+  // cancellations) on an already-synced reservation. Do NOT reintroduce a
+  // `?? data.id` fallback here.
   async handleWebhookEvent({ action, payload }) {
     const data = payload as Record<string, unknown>
 
@@ -278,9 +284,26 @@ export const hospitableProvider: IntegrationProvider = {
     switch (action) {
       case 'reservation.created':
       case 'reservation.changed': {
-        const reservationId = entityId ?? (data.id as string | undefined)
+        // entityId comes from data.data.id — only reliably present on
+        // reservation.created (which may send the fuller object). A partial
+        // reservation.changed payload has NO id anywhere that identifies the
+        // reservation: data.data has no `id` field, and the top-level `id` is
+        // the webhook DELIVERY's own id, not the reservation's id (see the
+        // header comment above). With no identifiable id in the payload,
+        // there is no way to know which reservation changed — drop it
+        // loudly rather than guessing with a 404-then-fake-cancel.
+        const reservationId = entityId
         if (!reservationId) {
-          console.warn('[Hospitable webhook] reservation event missing id (checked data.id and payload.id):', { action, keys: Object.keys(data) })
+          console.warn(
+            '[Hospitable webhook] reservation.changed has no resolvable id ' +
+            '(data.data.id absent — partial payload). Dropping; entity cannot ' +
+            'be identified from this payload alone.',
+            { action, keys: Object.keys(data) },
+          )
+          reportError(
+            new Error('Unresolvable reservation.changed payload — no data.data.id'),
+            { site: 'lib.integrations.providers.hospitable.handleWebhookEvent', extra: { action } },
+          )
           break
         }
         const { inngest } = await import('@/lib/inngest/client')
@@ -343,6 +366,7 @@ export const hospitableProvider: IntegrationProvider = {
             provider_id:          'hospitable',
             previous_external_id: previousId,
             new_external_id:      newId,
+            external_user_id:     externalUserId,
             triggered_at:         new Date().toISOString(),
           },
         })

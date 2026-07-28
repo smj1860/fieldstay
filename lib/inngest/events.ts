@@ -658,6 +658,11 @@ export type FieldStayEvents = {
       provider_id:           string
       previous_external_id:  string
       new_external_id:       string
+      // See external_user_id on integration/hospitable.sync.requested above —
+      // same field, same purpose: scopes property-merge.ts's org lookup so a
+      // co-hosted property (one row per org under the same external_id) can't
+      // collide across tenants. Optional for the same reason.
+      external_user_id?:     string
       triggered_at:          string
     }
   }

@@ -156,6 +156,51 @@ describe('hospPropertyMerge', () => {
     )
   })
 
+  it('resolves the org from external_user_id and scopes both property lookups to it', async () => {
+    const supabase = makeSupabase({
+      integration_connections: [{ data: { org_id: 'org_1' }, error: null }],
+      properties: [
+        { data: { id: 'prop_1', org_id: 'org_1', name: 'Lakehouse' }, error: null },
+        { data: null, error: null },
+        { error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(hospPropertyMerge, {
+      event: { data: { ...EVENT_DATA, external_user_id: 'hosp_user_1' } },
+      step:  runAllStep(),
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ action: 'remapped', propertyId: 'prop_1' })
+
+    const propertyCalls = supabase.calls.filter((c) => c.table === 'properties' && c.method === 'eq')
+    expect(propertyCalls.some((c) => c.args[0] === 'org_id' && c.args[1] === 'org_1')).toBe(true)
+  })
+
+  it('falls through to the unscoped lookup when external_user_id matches no active connection', async () => {
+    const supabase = makeSupabase({
+      integration_connections: [{ data: null, error: null }],
+      properties: [
+        { data: { id: 'prop_1', org_id: 'org_1', name: 'Lakehouse' }, error: null },
+        { data: null, error: null },
+        { error: null },
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    const result = await invokeHandler(hospPropertyMerge, {
+      event: { data: { ...EVENT_DATA, external_user_id: 'hosp_user_disconnected' } },
+      step:  runAllStep(),
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ action: 'remapped', propertyId: 'prop_1' })
+    const propertyCalls = supabase.calls.filter((c) => c.table === 'properties' && c.method === 'eq')
+    expect(propertyCalls.some((c) => c.args[0] === 'org_id')).toBe(false)
+  })
+
   it('throws when the external_id update itself fails, instead of returning a false "remapped" result', async () => {
     const supabase = makeSupabase({
       properties: [
