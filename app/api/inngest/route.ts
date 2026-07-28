@@ -10,6 +10,7 @@ import { handleBookingDetected, handleBookingConfirmed } from '@/lib/inngest/fun
 // Turnover events
 import { handleTurnoverCreated, handleTurnoverCompleted } from '@/lib/inngest/functions/turnover-events'
 import { handleCrewAssigned } from '@/lib/inngest/functions/crew-assignment'
+import { handleCrewTurnoverCancelled } from '@/lib/inngest/functions/crew-turnover-cancelled'
 
 // Maintenance — split from the old dailyMaintenanceCheck god function into 4 focused crons
 import { dailyMaintenanceScheduleCheck } from '@/lib/inngest/functions/cron/maintenance-schedules'
@@ -185,6 +186,7 @@ export const { GET, POST, PUT } = serve({
     handleTurnoverCreated,
     handleTurnoverCompleted,
     handleCrewAssigned,
+    handleCrewTurnoverCancelled,
 
     // Maintenance crons (replaces dailyMaintenanceCheck)
     dailyMaintenanceScheduleCheck,

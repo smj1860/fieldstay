@@ -16,7 +16,8 @@ vi.mock('@/lib/ical/parser', () => ({
   isAllDay:       vi.fn(() => false),
 }))
 vi.mock('@/lib/turnovers/generator', () => ({
-  cancelTurnoversForBooking: vi.fn(),
+  cancelTurnoversForBooking:      vi.fn().mockResolvedValue([]),
+  notifyCrewOfCancelledTurnovers: vi.fn(),
 }))
 vi.mock('@/lib/ical/conflict-detection', () => ({
   detectAndFlagOverlaps: vi.fn(),
@@ -35,7 +36,7 @@ vi.mock('@/lib/resend/emails/pm-alert', () => ({
 import { syncAllIcalFeeds, syncIcalFeed } from '@/lib/inngest/functions/ical-sync'
 import { createServiceClient } from '@/lib/supabase/server'
 import { parseIcalFeed } from '@/lib/ical/parser'
-import { cancelTurnoversForBooking } from '@/lib/turnovers/generator'
+import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers } from '@/lib/turnovers/generator'
 import { detectAndFlagOverlaps } from '@/lib/ical/conflict-detection'
 import { getPmEmails } from '@/lib/inngest/helpers'
 import { resend } from '@/lib/resend/client'
@@ -319,7 +320,46 @@ describe('syncIcalFeed', () => {
     expect(supabase.updateSpy).toHaveBeenCalledWith('bookings', { status: 'cancelled' })
     expect(cancelTurnoversForBooking).toHaveBeenCalledWith('booking_gone', supabase)
     expect(cancelTurnoversForBooking).toHaveBeenCalledTimes(1)
+    expect(notifyCrewOfCancelledTurnovers).toHaveBeenCalledWith([])
     expect(result).toEqual({ feed_id: 'feed_1', newBookings: 0, cancelled: 1 })
+  })
+
+  it('batches the crew notification across every cancelled booking in a single sync into one call', async () => {
+    ;(parseIcalFeed as ReturnType<typeof vi.fn>).mockReturnValue([])
+    ;(detectAndFlagOverlaps as ReturnType<typeof vi.fn>).mockResolvedValue([])
+    ;(cancelTurnoversForBooking as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce([{ turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' }])
+      .mockResolvedValueOnce([{ turnoverId: 'to_2', orgId: 'org_1', crewMemberId: 'crew_2' }])
+
+    const supabase = makeSupabase({
+      ical_feeds: [
+        { data: { url: 'https://feeds.example.com/foo.ics', source: 'airbnb', org_id: 'org_1' }, error: null },
+        { data: null, error: null },
+      ],
+      bookings: [
+        {
+          data: [
+            { id: 'booking_gone_1', ical_uid: 'uid_gone_1', status: 'confirmed', guest_email: null },
+            { id: 'booking_gone_2', ical_uid: 'uid_gone_2', status: 'confirmed', guest_email: null },
+          ],
+          error: null,
+        }, // existing bookings for this feed — both absent from the (empty) feed pull below
+        { data: [], error: null }, // upsert([]).select() — nothing currently in the feed
+        { data: null, error: null }, // bulk-cancel update for both gone bookings
+      ],
+      org_milestones: [{ data: null, error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+
+    await invokeHandler(syncIcalFeed, { event: baseEvent(), step: makeStep(), logger: makeLogger() })
+
+    expect(cancelTurnoversForBooking).toHaveBeenCalledTimes(2)
+    expect(cancelTurnoversForBooking).toHaveBeenCalledWith('booking_gone_1', supabase)
+    expect(cancelTurnoversForBooking).toHaveBeenCalledWith('booking_gone_2', supabase)
+    expect(notifyCrewOfCancelledTurnovers).toHaveBeenCalledWith([
+      { turnoverId: 'to_1', orgId: 'org_1', crewMemberId: 'crew_1' },
+      { turnoverId: 'to_2', orgId: 'org_1', crewMemberId: 'crew_2' },
+    ])
   })
 
   it('marks the feed errored and re-throws when the feed URL is unreachable (non-2xx response)', async () => {

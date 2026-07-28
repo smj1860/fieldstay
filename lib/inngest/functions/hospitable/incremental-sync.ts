@@ -28,7 +28,7 @@ import {
   type HospitableProperty,
 } from '@/lib/integrations/providers/hospitable'
 import { upsertNormalizedProperties } from '@/lib/properties/upsert-normalized'
-import { generateTurnoversForProperty, cancelTurnoversForBooking } from '@/lib/turnovers/generator'
+import { generateTurnoversForProperty, cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers } from '@/lib/turnovers/generator'
 import {
   createGuidebookPropertyConfigsForProperties,
   syncGuidebookConfigsFromProperty,
@@ -167,9 +167,13 @@ export const hospIncrementalSync = inngest.createFunction(
         })
 
         if (cancelledBookingId) {
-          await step.run('cancel-turnovers-for-deleted-reservation', async () => {
+          const cancelledAssignments = await step.run('cancel-turnovers-for-deleted-reservation', async () => {
             const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-            await cancelTurnoversForBooking(cancelledBookingId, supabase)
+            return cancelTurnoversForBooking(cancelledBookingId, supabase)
+          })
+
+          await step.run('notify-crew-deleted-reservation', async () => {
+            await notifyCrewOfCancelledTurnovers(cancelledAssignments)
           })
         }
 
@@ -286,10 +290,15 @@ export const hospIncrementalSync = inngest.createFunction(
       // cancelled status. Check status explicitly and short-circuit before
       // the datesChanged regeneration path below.
       if (upsertResult.status === 'cancelled') {
-        await step.run('cancel-turnovers-for-status-change', async () => {
+        const cancelledAssignments = await step.run('cancel-turnovers-for-status-change', async () => {
           const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
-          await cancelTurnoversForBooking(upsertResult.bookingId, supabase)
+          return cancelTurnoversForBooking(upsertResult.bookingId, supabase)
         })
+
+        await step.run('notify-crew-status-change', async () => {
+          await notifyCrewOfCancelledTurnovers(cancelledAssignments)
+        })
+
         return { action: 'cancelled-via-status', entity_id }
       }
 

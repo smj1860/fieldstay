@@ -15,6 +15,24 @@ It exists to make the schema of those tables readable from the repo. It was
 never meant to run: the tables it describes already exist in the live project,
 which is exactly why the snapshot was needed in the first place.
 
+**68 additional files** (2026-07-28) — round-number-timestamped draft
+migrations (e.g. `20260609000002_idempotency_hardening.sql`,
+`20260714160500_property_assets_replaced_by_on_delete.sql`) that were never
+recorded in `supabase_migrations.schema_migrations` under their own filename
+timestamp. For each one, every table/column/index/function/policy it targets
+was confirmed to already exist live (via `information_schema`, `pg_proc`,
+`pg_indexes` introspection against project `vpmznjktllhmmbfnxuvk` on
+2026-07-28) — the change these files describe was applied, just under a
+different, real-timestamped migration elsewhere in `supabase/migrations/`
+(the same drift pattern the June 18 snapshot above closes, but for files that
+each already had their own dedicated local copy rather than none at all).
+Each moved file has a one-line header recording this. See
+`CLAUDE_LAUNCH_AUDIT_FIXES_1_CRITICAL.md` Task 4 for the full reconciliation
+pass this came from — that pass also found and flagged one **genuine** gap
+(`hospitable_launch_promo`, NOT moved here — see the task notes) where the
+live database was actually missing schema that application code depends on,
+underscoring that "local-only" is not automatically "safe to file away."
+
 ## Will it ever ship?
 
 No. If the drift it documents ever needs to be re-closed, regenerate against

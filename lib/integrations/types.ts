@@ -283,6 +283,22 @@ export class RateLimitError extends Error {
   }
 }
 
+/**
+ * Thrown when a provider adapter can't even attempt a call because our own
+ * server-side credentials (CLIENT_ID/CLIENT_SECRET env vars) are missing —
+ * an operational misconfiguration, never something the end user caused or
+ * can fix by retrying. Kept distinct from a plain Error so callers that
+ * surface provider-reported failure text to the user (e.g. the OAuth
+ * callback route's /connect/error `detail` param) can exclude this case
+ * rather than showing an internal config detail to an external visitor.
+ */
+export class IntegrationMisconfiguredError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'IntegrationMisconfiguredError'
+  }
+}
+
 // ── Sync error → PM-friendly message ────────────────────────────────────────
 // Shared by all provider sync functions (OwnerRez, Hospitable — initial,
 // incremental, reviews) so integration_connections.metadata.last_sync_error

@@ -157,6 +157,14 @@ function renderDefault(
       ].join('\n')
     }
 
+    case 'crew_turnover_cancelled':
+      return [
+        `${vars.org_name ?? 'Your property manager'}: A cancelled booking removed ${vars.count ?? '1'} of your assigned turnover(s).`,
+        'No need to go.',
+        '',
+        'Reply STOP to opt out.',
+      ].join('\n')
+
     default: {
       const _exhaustive: never = key
       throw new Error(`Unhandled SMS template key: ${_exhaustive}`)

@@ -16,8 +16,9 @@ vi.mock('@/lib/properties/upsert-normalized', () => ({
   upsertNormalizedProperties: vi.fn(),
 }))
 vi.mock('@/lib/turnovers/generator', () => ({
-  generateTurnoversForProperty: vi.fn(),
-  cancelTurnoversForBooking:    vi.fn(),
+  generateTurnoversForProperty:   vi.fn(),
+  cancelTurnoversForBooking:      vi.fn().mockResolvedValue([]),
+  notifyCrewOfCancelledTurnovers: vi.fn(),
 }))
 vi.mock('@/lib/guidebook/sync', () => ({
   createGuidebookPropertyConfigsForProperties: vi.fn(),

@@ -22,7 +22,7 @@ import { inngest }             from '@/lib/inngest/client'
 import { createServiceClient } from '@/lib/supabase/server'
 import { OwnerRezApiClient }    from '@/lib/integrations/providers/ownerrez-api'
 import { RateLimitError, TokenRevokedError, translateSyncError } from '@/lib/integrations/types'
-import { cancelTurnoversForBooking } from '@/lib/turnovers/generator'
+import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers, type CancelledTurnoverAssignment } from '@/lib/turnovers/generator'
 
 import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'ownerrez'
@@ -108,6 +108,7 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
       )
 
       let cancelledCount = 0
+      const cancelledAssignments: CancelledTurnoverAssignment[] = []
 
       for (const booking of stale) {
         const { error: cancelErr } = await supabase
@@ -120,17 +121,21 @@ export const ownerRezReconciliationHandler = inngest.createFunction(
           continue
         }
 
-        await cancelTurnoversForBooking(booking.id, supabase)
+        cancelledAssignments.push(...(await cancelTurnoversForBooking(booking.id, supabase)))
         cancelledCount++
       }
 
-      return { cancelledCount }
+      return { cancelledCount, cancelledAssignments }
+    })
+
+    await step.run('notify-crew-cancelled-turnovers', async () => {
+      await notifyCrewOfCancelledTurnovers(result.cancelledAssignments)
     })
 
     logger.info(
       `[OwnerRez reconciliation] org ${org_id}: ${result.cancelledCount} stale booking(s)/hold(s) cancelled`
     )
 
-    return result
+    return { cancelledCount: result.cancelledCount }
   }
 )

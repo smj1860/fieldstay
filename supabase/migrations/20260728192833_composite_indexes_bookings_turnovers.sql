@@ -1,0 +1,22 @@
+-- Composite index for the hottest tenant-scoped query pattern not yet
+-- covered, flagged in the July 2026 launch readiness audit (M-2).
+--
+-- Of the audit's three proposed indexes, two turned out to already be
+-- covered on the live database (confirmed via pg_indexes against project
+-- vpmznjktllhmmbfnxuvk 2026-07-28) and are deliberately NOT repeated here:
+--   - idx_bookings_org_checkin (org_id, checkin_date) — already exists,
+--     added by 20260625174650_composite_indexes_audit_remediation.sql.
+--   - idx_turnovers_org_status (org_id, status) — would be redundant with
+--     the existing idx_turnovers_org_status_checkout (org_id, status,
+--     checkout_datetime) from the same prior migration: a query filtering
+--     only org_id + status can already use that composite index via its
+--     leading-column prefix, so a separate 2-column index adds write/
+--     storage overhead with no read benefit.
+--
+-- "Today's checkouts for org X" from the turnovers side, without a status
+-- predicate (used by generateTurnoversForProperty / auto-assignment cron
+-- sweeps that scan by checkout_datetime across all statuses) — not covered
+-- by idx_turnovers_org_status_checkout, since that index requires an
+-- equality predicate on status before checkout_datetime becomes useful.
+CREATE INDEX IF NOT EXISTS idx_turnovers_org_checkout
+  ON public.turnovers (org_id, checkout_datetime);
