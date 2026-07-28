@@ -188,7 +188,26 @@ describe('resolveHospitableOwner', () => {
     ).rejects.toThrow(RateLimitError)
   })
 
-  it('throws on an unexpected non-404/403 probe response rather than silently skipping', async () => {
+  it('treats a non-404/403 probe response as inconclusive and tries the next candidate instead of aborting', async () => {
+    const supabase = makeSupabase({
+      integration_connections: [{ data: [CONN_A, CONN_B], error: null }],
+      integration_entity_owners: [{ data: null, error: null }],
+      reviews: [{ data: [], error: null }],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(hospitableFetch as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: true, status: 200 })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+
+    const result = await resolveHospitableOwner({ entityKind: 'review', externalId: 'rev_x' })
+
+    expect(result).toEqual({ orgId: 'org_b', userId: 'user_b', token: 'token_for_user_b' })
+    expect(hospitableFetch).toHaveBeenCalledTimes(2)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('HTTP 500'))
+  })
+
+  it('returns null when every candidate is inconclusive (non-404/403 errors), rather than throwing', async () => {
     const supabase = makeSupabase({
       integration_connections: [{ data: [CONN_A], error: null }],
       integration_entity_owners: [{ data: null, error: null }],
@@ -196,10 +215,11 @@ describe('resolveHospitableOwner', () => {
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
     ;(hospitableFetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, status: 500 })
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
 
-    await expect(
-      resolveHospitableOwner({ entityKind: 'review', externalId: 'rev_x' }),
-    ).rejects.toThrow(/HTTP 500/)
+    const result = await resolveHospitableOwner({ entityKind: 'review', externalId: 'rev_x' })
+
+    expect(result).toBeNull()
   })
 
   it('skips a connection whose token is unusable instead of failing the whole resolution', async () => {

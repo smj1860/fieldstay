@@ -68,6 +68,16 @@ interface ActiveConnection {
 type Supabase = ReturnType<typeof createServiceClient>
 
 async function listActiveConnections(supabase: Supabase): Promise<ActiveConnection[]> {
+  // Ordered most-recently-active first. This is a HEURISTIC ONLY — it makes
+  // the common case (the entity belongs to whichever org was syncing most
+  // recently) cheap by probing the likely owner first, but it is not a
+  // correctness property. Steps 0-2 above (webhook user id, cache, local
+  // match) are what actually determine ownership; this ordering only affects
+  // how many probe calls step 3 burns before it finds the right one — never
+  // which connection is ultimately accepted. At larger connection counts a
+  // handful of consistently-busy orgs could end up probed first on every
+  // cold resolution even when they're rarely the actual owner; revisit this
+  // ordering if probe call volume becomes worth optimizing further.
   const { data, error } = await supabase
     .from('integration_connections')
     .select('user_id, org_id, external_user_id, updated_at')
@@ -135,14 +145,35 @@ async function probeConnections(
       continue
     }
 
-    const res = await hospitableFetch(probeUrl(entityKind, externalId), token)
+    let res: Response
+    try {
+      res = await hospitableFetch(probeUrl(entityKind, externalId), token)
+    } catch (err) {
+      // RateLimitError must still bubble — the caller (resolveHospitableOwner's
+      // caller, hospIncrementalSync) is set up to step.sleep and retry the
+      // whole resolution on it, which is correct: a genuine budget exhaustion
+      // affects every candidate equally, so skipping ahead wouldn't help.
+      throw err
+    }
 
     if (res.status === 404 || res.status === 403) continue
 
     if (!res.ok) {
-      throw new Error(
-        `Hospitable ownership probe for ${entityKind} ${externalId} returned HTTP ${res.status}`,
+      // A transient failure on THIS candidate (500, or a 429 that slipped
+      // past hospitableApiLimiter's proactive check) does not mean no
+      // candidate owns the entity — it means this one couldn't be checked.
+      // hospitableApiLimiter is a single platform-wide budget shared across
+      // every connected org, so a transient error on whichever connection
+      // happens to be probed first is not rare at scale. Previously this
+      // threw and aborted the entire resolution, forcing Inngest to retry
+      // from scratch even when the next candidate would have answered
+      // cleanly. Warn (so a genuine pattern of provider errors is still
+      // visible) and continue to the next candidate instead.
+      console.warn(
+        `[HospitableOwner] probe for ${entityKind} ${externalId} against connection ` +
+        `${conn.org_id} returned HTTP ${res.status} — treating as inconclusive, trying next candidate`,
       )
+      continue
     }
 
     return { conn, token }
