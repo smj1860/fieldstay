@@ -143,6 +143,18 @@ export function mapHospitableStatus(
     case 'request':
     case 'unknown':
     case 'checkpoint':    return 'tentative'
+    // ⚠️ KNOWN AMBIGUITY (recorded, not fixed — flagged as a follow-up during
+    // the BLOCKER-6 audit): 'cancelled' (a genuinely confirmed booking the
+    // guest later cancelled) and 'not accepted' (a request/inquiry that was
+    // simply declined or expired — never a real booking to begin with) both
+    // collapse to bookings.status = 'cancelled' here. The bookings UI
+    // (app/(dashboard)/bookings/bookings-client.tsx) renders this as a bare
+    // "Cancelled" badge either way, which reads to a PM as "your guest
+    // cancelled their stay" even for a request that was never accepted.
+    // Distinguishing the two would need either a new status value or a
+    // separate metadata field carrying the original category/sub_category —
+    // out of scope for this fix, but the ambiguity should stay on record
+    // rather than get rediscovered from scratch later.
     case 'cancelled':
     case 'not accepted':  return 'cancelled'
     default:              return unmappedBookingStatus('hospitable', category)
