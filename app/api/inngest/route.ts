@@ -23,6 +23,7 @@ import { staleFeedAlert }               from '@/lib/inngest/functions/cron/stale
 import { turnoverPriorityDecay }        from '@/lib/inngest/functions/cron/turnover-priority-decay'
 import { notificationDigest }           from '@/lib/inngest/functions/cron/notification-digest'
 import { dailyWrapUp, dailyWrapUpOrg }  from '@/lib/inngest/functions/cron/daily-wrapup'
+import { webhookDedupCleanup }          from '@/lib/inngest/functions/cron/webhook-dedup-cleanup'
 
 // Inventory
 import { handleInventoryCountSubmitted, handlePurchaseOrderApproved } from '@/lib/inngest/functions/inventory-events'
@@ -199,6 +200,7 @@ export const { GET, POST, PUT } = serve({
     dailyWrapUp,
     dailyWrapUpOrg,
     computeChecklistSignals,
+    webhookDedupCleanup,
 
     // Inventory → PO
     handleInventoryCountSubmitted,

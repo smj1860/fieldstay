@@ -8,6 +8,9 @@
     "app/api/webhooks/stripe/route.ts": {
       "maxDuration": 30
     },
+    "app/api/webhooks/[provider]/route.ts": {
+      "maxDuration": 15
+    },
     "app/api/work-orders/[token]/complete/route.ts": {
       "maxDuration": 30
     },

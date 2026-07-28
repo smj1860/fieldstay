@@ -225,17 +225,9 @@ export async function POST(
     }
   }
 
-  // Periodic TTL cleanup — fire-and-forget, runs on ~5% of ALL provider webhook
-  // requests to amortise cleanup cost without a dedicated cron job.
-  // eslint-disable-next-line no-restricted-properties -- probabilistic sampling to amortise cleanup, not id/token generation
-  if (Math.random() < 0.05) {
-    void (async () => {
-      const { error } = await createServiceClient({ publicSurface: 'api-webhooks--provider-' }).rpc('cleanup_webhook_dedup')
-      if (error) {
-        console.warn(`[Webhook:${providerId}] TTL cleanup failed (non-fatal): ${error.message}`)
-      }
-    })()
-  }
+  // TTL cleanup for processed_webhooks now runs on a daily cron
+  // (lib/inngest/functions/cron/webhook-dedup-cleanup.ts) instead of a
+  // probabilistic roll on the hot webhook path — see H-5.
 
   // ── 5. Delegate provider-specific events ──────────────────
   //    OwnerRez's real non-revocation actions, per OwnerRez's own webhooks
