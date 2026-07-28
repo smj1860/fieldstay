@@ -79,7 +79,7 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
           aria-hidden="true"
         />
         <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
-          <span className="font-semibold">Crew view — </span>
+          <span className="font-semibold">Crew view —</span>{' '}
           Crew only see turnovers and inventory for properties actively assigned
           to them. Guest details and unassigned listings remain completely
           hidden, and the crew app never shows financials.

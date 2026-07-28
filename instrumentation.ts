@@ -1,17 +1,27 @@
 import * as Sentry from '@sentry/nextjs'
 
-// Trace sampling: 100% is right for pre-launch and for preview/staging, where
-// volume is low and every trace is worth having. Production is driven by
-// SENTRY_TRACES_SAMPLE_RATE so the rate can be dialled from Vercel env vars
-// without a deploy — raise it temporarily while investigating an incident,
-// then lower it again. An unset or unparseable value falls back to the
-// environment default rather than silently disabling tracing (note Number('')
-// is 0, not NaN, which is why the presence check comes first).
-const parsedTracesSampleRate = Number(process.env.SENTRY_TRACES_SAMPLE_RATE)
-const tracesSampleRate =
-  process.env.SENTRY_TRACES_SAMPLE_RATE && Number.isFinite(parsedTracesSampleRate)
-    ? parsedTracesSampleRate
-    : process.env.VERCEL_ENV === 'production' ? 0.1 : 1.0
+/**
+ * Trace sampling: 100% is right for pre-launch and for preview/staging, where
+ * volume is low and every trace is worth having. Production is driven by
+ * SENTRY_TRACES_SAMPLE_RATE so the rate can be dialled from Vercel env vars
+ * without a code deploy — raise it temporarily while investigating an
+ * incident, then lower it again.
+ *
+ * An unset or unparseable value falls back to the environment default rather
+ * than silently disabling tracing. The presence check comes first because
+ * Number('') is 0, not NaN — without it an empty-but-defined var would parse
+ * as a valid 0 and turn tracing off.
+ */
+function resolveTracesSampleRate(): number {
+  const override = process.env.SENTRY_TRACES_SAMPLE_RATE
+  if (override) {
+    const parsed = Number(override)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return process.env.VERCEL_ENV === 'production' ? 0.1 : 1.0
+}
+
+const tracesSampleRate = resolveTracesSampleRate()
 
 /**
  * Next.js signals redirect() and notFound() by THROWING a control-flow error

@@ -81,7 +81,12 @@ const eslintConfig = [
     // The string-level and cross-file invariants that AST rules can't
     // express live in unit/guardrails/ — see CLAUDE.md's "Structural
     // enforcement" section for the system and the meta-rule.
-    files: ['app/**/*.{ts,tsx}', 'lib/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}'],
+    // Root-level modules (instrumentation.ts, instrumentation-client.ts,
+    // proxy.ts) are in scope too: they were previously excluded, so a nested
+    // ternary in instrumentation.ts passed `pnpm run lint` clean and was only
+    // caught by SonarCloud on the PR — the exact after-the-fact feedback loop
+    // this block exists to close.
+    files: ['app/**/*.{ts,tsx}', 'lib/**/*.{ts,tsx}', 'components/**/*.{ts,tsx}', '*.{ts,tsx}'],
     plugins: { sonarjs },
     rules: {
       // ── CLAUDE.md "Code Quality Standards" — previously SonarCloud-only,

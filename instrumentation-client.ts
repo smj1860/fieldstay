@@ -1,14 +1,24 @@
 import * as Sentry from '@sentry/nextjs'
 
-// Client bundles can only read NEXT_PUBLIC_ vars, so the browser rate has its
-// own env var. Same policy as the server (see instrumentation.ts): 100% in
-// preview/dev, 10% in production unless overridden. The presence check comes
-// first because Number('') is 0, not NaN.
-const parsedTracesSampleRate = Number(process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE)
-const tracesSampleRate =
-  process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE && Number.isFinite(parsedTracesSampleRate)
-    ? parsedTracesSampleRate
-    : process.env.NEXT_PUBLIC_VERCEL_ENV === 'production' ? 0.1 : 1.0
+/**
+ * Client bundles can only read NEXT_PUBLIC_ vars, so the browser rate has its
+ * own env var. Same policy as the server (see instrumentation.ts): 100% in
+ * preview/dev, 10% in production unless explicitly overridden.
+ *
+ * The presence check comes first because Number('') is 0, not NaN — without it
+ * an empty-but-defined var would parse as a valid 0 and silently disable
+ * tracing entirely.
+ */
+function resolveTracesSampleRate(): number {
+  const override = process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE
+  if (override) {
+    const parsed = Number(override)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return process.env.NEXT_PUBLIC_VERCEL_ENV === 'production' ? 0.1 : 1.0
+}
+
+const tracesSampleRate = resolveTracesSampleRate()
 
 Sentry.init({
   dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
