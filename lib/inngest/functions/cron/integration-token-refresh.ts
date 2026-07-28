@@ -16,12 +16,20 @@ export const integrationTokenRefreshCron = inngest.createFunction(
     // Prevent overlapping runs if manually triggered while a scheduled run is active
     concurrency: { limit: 1, key: '"integration-token-refresh-cron"' },
   },
-  { cron: '0 */2 * * *' },   // every 2 hours at :00
+  { cron: '0 * * * *' },   // every hour at :00 (was every 2 hours — see windowEdge below)
   async ({ step, logger }) => {
 
     const connections = await step.run('fetch-expiring-connections', async () => {
       const supabase   = createServiceClient({ system: 'inngest:integration-token-refresh' })
-      const windowEdge = new Date(Date.now() + 60 * 60 * 1_000).toISOString()
+      // Window (90min) is wider than the cron cadence (60min) so every
+      // token gets caught by at least one run before it can expire — a
+      // token landing just past a narrower window would otherwise expire
+      // in the gap before the next tick. Previously 60min window on a
+      // 120min cadence left up to a 60min expired-but-not-yet-refreshed
+      // gap for Hospitable (12h token lifetime, no reactive refresh
+      // fallback in readIntegrationToken()). Kroger is unaffected either
+      // way — it refreshes reactively at call time regardless of this cron.
+      const windowEdge = new Date(Date.now() + 90 * 60 * 1_000).toISOString()
 
       const { data, error } = await supabase
         .from('integration_connections')
@@ -37,7 +45,7 @@ export const integrationTokenRefreshCron = inngest.createFunction(
     })
 
     logger.info(
-      `[TokenRefreshCron] Found ${connections.length} connections expiring within 60 min`
+      `[TokenRefreshCron] Found ${connections.length} connections expiring within 90 min`
     )
 
     if (connections.length === 0) return { dispatched: 0 }

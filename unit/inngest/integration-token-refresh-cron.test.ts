@@ -133,7 +133,7 @@ describe('integrationTokenRefreshCron', () => {
     ).rejects.toThrow('Token refresh cron: DB query failed: db unavailable')
   })
 
-  describe('60-minute expiry window boundary', () => {
+  describe('90-minute expiry window boundary', () => {
     beforeEach(() => {
       vi.useFakeTimers()
       vi.setSystemTime(new Date('2026-07-22T00:00:00.000Z'))
@@ -142,7 +142,7 @@ describe('integrationTokenRefreshCron', () => {
       vi.useRealTimers()
     })
 
-    it('queries expires_at <= now + 60 minutes', async () => {
+    it('queries expires_at <= now + 90 minutes', async () => {
       const supabase = makeSupabase({
         integration_connections: [{ data: [], error: null }],
       })
@@ -157,7 +157,7 @@ describe('integrationTokenRefreshCron', () => {
       const lteCall = supabase.calls.find(
         (c) => c.table === 'integration_connections' && c.method === 'lte' && c.args[0] === 'expires_at',
       )
-      expect(lteCall?.args[1]).toBe('2026-07-22T01:00:00.000Z')
+      expect(lteCall?.args[1]).toBe('2026-07-22T01:30:00.000Z')
     })
 
     it('only queries the two providers with expiring access tokens (OwnerRez tokens never expire)', async () => {

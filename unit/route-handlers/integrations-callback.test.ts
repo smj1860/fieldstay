@@ -232,6 +232,46 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     expect(storeIntegrationToken).not.toHaveBeenCalled()
   })
 
+  it('threads the provider-reported failure reason through as `detail` for a provider on the safe-detail allowlist (ownerrez)', async () => {
+    const admin = makeAdmin({
+      oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: 'state_user', return_to: null }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(getProvider).mockReturnValue(
+      oauthProvider({
+        exchangeCodeForToken: vi.fn(async () => {
+          throw new Error('OwnerRez token exchange failed: invalid_grant')
+        }),
+      }),
+    )
+
+    const res = await callGet('ownerrez', '?code=bad-code&state=s1')
+    const detailParam = new URL(locationOf(res)).searchParams.get('detail')
+
+    expect(locationOf(res)).toContain('error=token_exchange_failed')
+    expect(detailParam).toBe('OwnerRez token exchange failed: invalid_grant')
+  })
+
+  it('does NOT thread `detail` through for kroger — its exchangeCodeForToken message embeds the raw provider response body, not a verified-safe extracted field', async () => {
+    const admin = makeAdmin({
+      oauth_states: [{ data: { state: 's1', provider_id: 'kroger', user_id: 'state_user', return_to: null }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(getProvider).mockReturnValue(
+      oauthProvider({
+        id: 'kroger',
+        exchangeCodeForToken: vi.fn(async () => {
+          throw new Error('Kroger customer token exchange failed 400: {"raw":"response body"}')
+        }),
+      }),
+    )
+
+    const res = await callGet('kroger', '?code=bad-code&state=s1')
+
+    expect(locationOf(res)).toContain('error=token_exchange_failed')
+    expect(locationOf(res)).not.toContain('detail=')
+  })
+
   it('redirects to rate_limited (not the generic token_exchange_failed) when the provider adapter throws a RateLimitError during exchange — this route runs outside any Inngest step, so there is no retry to lean on and the UI needs a clear, distinct reason', async () => {
     const admin = makeAdmin({
       oauth_states: [{ data: { state: 's1', provider_id: 'kroger', user_id: 'state_user', return_to: null }, error: null }],
@@ -248,6 +288,7 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
 
     expect(locationOf(res)).toContain('error=rate_limited')
     expect(locationOf(res)).not.toContain('token_exchange_failed')
+    expect(locationOf(res)).not.toContain('detail=')
     expect(storeIntegrationToken).not.toHaveBeenCalled()
   })
 

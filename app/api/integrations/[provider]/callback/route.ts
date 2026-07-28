@@ -46,6 +46,14 @@ import { logAuditEvent }                  from '@/lib/audit'
 import { RateLimitError }                 from '@/lib/integrations/types'
 
 import { reportError } from '@/lib/observability/report-error'
+
+// Providers whose exchangeCodeForToken error message is confirmed to carry
+// only a parsed error_description/error field from the provider's response
+// (never raw response text) — safe to surface to the user via the
+// /connect/error `detail` query param. kroger.ts is deliberately excluded;
+// see the token-exchange catch block below.
+const SAFE_DETAIL_PROVIDERS = new Set(['hospitable', 'ownerrez'])
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
@@ -108,10 +116,16 @@ export async function GET(
     return res
   }
 
-  function errorRedirect(reason: string): NextResponse {
+  function errorRedirect(reason: string, detail?: string): NextResponse {
     const url = new URL('/connect/error', appUrl)
     url.searchParams.set('provider', providerId)
     url.searchParams.set('error',    reason)
+    // Cap length — this becomes a URL query param and gets rendered as
+    // plain text on /connect/error. Never pass anything that could contain
+    // a secret; exchangeCodeForToken's thrown message is built from
+    // Hospitable's own error_description field, which is documented as a
+    // human-readable reason string, not a credential.
+    if (detail) url.searchParams.set('detail', detail.slice(0, 200))
     return makeRedirect(url)
   }
 
@@ -227,7 +241,23 @@ export async function GET(
     }
     console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
     reportError(err, { site: 'route.integrations.callback.errorRedirect' })
-    return errorRedirect('token_exchange_failed')
+    // Thread the actual provider-reported reason through — e.g. a plan
+    // restriction (Hospitable Essentials tier lacks API access) — so the
+    // PM sees something actionable instead of a generic "try again" that
+    // sends them into a reconnect loop that can never succeed.
+    //
+    // Only for providers whose exchangeCodeForToken message is confirmed to
+    // extract a specific error_description/error field from the provider's
+    // response (hospitable.ts, ownerrez.ts) rather than embedding raw
+    // response text — kroger.ts's exchangeCodeForCustomerToken
+    // (lib/kroger/client.ts) throws with the unparsed response body
+    // verbatim, which hasn't been verified to never contain anything
+    // beyond a plain error reason, so it's excluded here rather than
+    // assumed safe.
+    const detail = SAFE_DETAIL_PROVIDERS.has(providerId) && err instanceof Error
+      ? err.message
+      : undefined
+    return errorRedirect('token_exchange_failed', detail)
   }
 
   // ── 6. Store the token, link the org, kick off initial sync ──
