@@ -19,6 +19,7 @@ export type SmsTemplateKey =
   | 'vendor_work_order'
   | 'crew_invite'
   | 'crew_turnover_assigned'
+  | 'crew_turnover_cancelled'
 
 export interface SmsTemplateVariable {
   token:       string   // e.g. "{{property_name}}"
@@ -184,6 +185,22 @@ export const SMS_TEMPLATE_REGISTRY: SmsTemplateConfig[] = [
       '{{assignments}}',
       '',
       'Open your crew app for details & checklist.',
+      '',
+      'Reply STOP to opt out.',
+    ].join('\n'),
+  },
+  {
+    key:         'crew_turnover_cancelled',
+    label:       'Turnover Cancelled — Crew',
+    description: 'Sent to a crew member when a booking cancellation removes one or more of their assigned turnovers.',
+    audience:    'crew',
+    variables: [
+      { token: '{{org_name}}', description: 'Organization name',                    example: 'Summit Property Management' },
+      { token: '{{count}}',    description: 'Number of turnovers cancelled',         example: '1' },
+    ],
+    defaultBody: [
+      '{{org_name}}: A cancelled booking removed {{count}} of your assigned turnover(s).',
+      'No need to go.',
       '',
       'Reply STOP to opt out.',
     ].join('\n'),

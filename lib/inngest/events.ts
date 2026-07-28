@@ -68,6 +68,14 @@ export type FieldStayEvents = {
     }
   }
 
+  'turnover/cancelled': {
+    data: {
+      crew_member_id: string
+      turnover_ids:   string[]
+      org_id:         string
+    }
+  }
+
   'turnover/created': {
     data: {
       turnover_id: string

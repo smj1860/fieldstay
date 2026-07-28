@@ -2,6 +2,7 @@ import type { DBClient } from '@/lib/supabase/server'
 import type { PriorityLevel } from '@/types/database'
 import { getMissingAssetDiscoveryTypes, buildAssetDiscoveryItems } from '@/lib/asset-discovery/engine'
 import { propertyLocalToUtc } from '@/lib/utils/timezone'
+import { unwrapJoinArray } from '@/lib/utils/supabase-joins'
 
 export interface GeneratedTurnover {
   id:                string
@@ -473,15 +474,77 @@ export async function snapshotChecklist(
  * If the prev booking disappears, the turnover no longer has a checkout to clean after.
  * If the next booking disappears, there's no arrival to prep for.
  */
+export interface CancelledTurnoverAssignment {
+  turnoverId:   string
+  orgId:        string
+  crewMemberId: string
+}
+
 export async function cancelTurnoversForBooking(
   bookingId: string,
   supabase:  DBClient
-): Promise<void> {
+): Promise<CancelledTurnoverAssignment[]> {
+  // Capture who's currently assigned to the turnovers about to be
+  // cancelled BEFORE flipping status, so the caller can notify them. Only
+  // 'assigned' turnovers can have a crew_member_id worth notifying —
+  // 'pending_assignment' ones have none. Read via the reverse FK embed
+  // (turnovers -> turnover_assignments), which comes back as an array.
+  const { data: affected } = await supabase
+    .from('turnovers')
+    .select('id, org_id, turnover_assignments(crew_member_id)')
+    .or(`booking_id.eq.${bookingId},prev_booking_id.eq.${bookingId}`)
+    .eq('status', 'assigned')
+
   await supabase
     .from('turnovers')
     .update({ status: 'cancelled' })
     .or(`booking_id.eq.${bookingId},prev_booking_id.eq.${bookingId}`)
     .in('status', ['pending_assignment', 'assigned'])
+
+  const cancelled: CancelledTurnoverAssignment[] = []
+  for (const t of affected ?? []) {
+    const assignments = unwrapJoinArray<{ crew_member_id: string }>(t.turnover_assignments)
+    for (const a of assignments) {
+      cancelled.push({ turnoverId: t.id, orgId: t.org_id, crewMemberId: a.crew_member_id })
+    }
+  }
+  return cancelled
+}
+
+/**
+ * Fires one turnover/cancelled event per affected crew member, batching
+ * every turnover cancelled out from under them by the same booking event
+ * into a single notification — mirrors turnover/crew-assigned's own
+ * batching so a crew member with two stacked turnovers on the same
+ * cancelled booking gets one push/SMS, not two. Call this from an Inngest
+ * step.run() after cancelTurnoversForBooking(); kept separate from that
+ * function so generator.ts's DB-only functions stay free of the Inngest
+ * import except where a notification is the whole point.
+ */
+export async function notifyCrewOfCancelledTurnovers(
+  cancelled: CancelledTurnoverAssignment[]
+): Promise<void> {
+  if (cancelled.length === 0) return
+
+  const byCrewMember = new Map<string, { orgId: string; turnoverIds: string[] }>()
+  for (const c of cancelled) {
+    const existing = byCrewMember.get(c.crewMemberId)
+    if (existing) {
+      existing.turnoverIds.push(c.turnoverId)
+    } else {
+      byCrewMember.set(c.crewMemberId, { orgId: c.orgId, turnoverIds: [c.turnoverId] })
+    }
+  }
+
+  const { inngest } = await import('@/lib/inngest/client')
+  await Promise.all(
+    Array.from(byCrewMember.entries()).map(([crewMemberId, { orgId, turnoverIds }]) =>
+      inngest.send({
+        name: 'turnover/cancelled',
+        data: { crew_member_id: crewMemberId, turnover_ids: turnoverIds, org_id: orgId },
+      })
+    )
+  )
 }
 
 /**

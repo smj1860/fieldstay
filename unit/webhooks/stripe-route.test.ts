@@ -42,19 +42,37 @@ import { handleCheckoutSessionBilling } from '@/app/api/webhooks/stripe/handlers
 // Minimal chainable Supabase mock — every builder method returns itself,
 // and the chain resolves (via `then`) to whatever result was configured for
 // that table. Good enough for routes that never branch on query filters.
-function makeSupabase(perTable: Record<string, { data?: unknown; error?: unknown }>) {
+// A `.delete()` call on a table is tracked separately (with its `.eq(...)`
+// args) and resolves against `deleteResult` rather than the table's normal
+// `perTable` result, so tests can assert the dedup-release path indepen-
+// dently of the insert path on the same table.
+function makeSupabase(
+  perTable: Record<string, { data?: unknown; error?: unknown }>,
+  deleteResult: { data?: unknown; error?: unknown } = { data: null, error: null },
+) {
+  const deleteCalls: { table: string; eqArgs: unknown[] }[] = []
   const from = vi.fn((table: string) => {
     const result = perTable[table] ?? { data: null, error: null }
+    let isDelete = false
     const chain: Record<string, unknown> = {}
     chain.select = vi.fn(() => chain)
     chain.insert = vi.fn(() => chain)
     chain.update = vi.fn(() => chain)
-    chain.eq     = vi.fn(() => chain)
+    chain.delete = vi.fn(() => {
+      isDelete = true
+      deleteCalls.push({ table, eqArgs: [] })
+      return chain
+    })
+    chain.eq     = vi.fn((...args: unknown[]) => {
+      if (isDelete) deleteCalls[deleteCalls.length - 1].eqArgs = args
+      return chain
+    })
     chain.single = vi.fn(() => Promise.resolve(result))
-    chain.then   = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve)
+    chain.then   = (resolve: (v: unknown) => unknown) =>
+      Promise.resolve(isDelete ? deleteResult : result).then(resolve)
     return chain
   })
-  return { from }
+  return { from, deleteCalls }
 }
 
 function postRequest(body: string, signature: string | null) {
@@ -169,5 +187,70 @@ describe('POST /api/webhooks/stripe', () => {
     await POST(postRequest('{}', 'valid-signature'))
 
     expect(handleCheckoutSessionBilling).toHaveBeenCalledWith(expect.anything(), 'org_1', 'cus_1')
+  })
+
+  it('happy path leaves the dedup row in place and returns 200', async () => {
+    const supabaseMock = makeSupabase({ stripe_processed_events: { error: null } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabaseMock)
+    ;(stripe.webhooks.constructEvent as ReturnType<typeof vi.fn>).mockReturnValue({
+      id:   'evt_ok',
+      type: 'checkout.session.completed',
+      data: { object: { id: 'cs_ok', metadata: { org_id: 'org_1' }, customer: 'cus_1' } },
+    })
+
+    const res  = await POST(postRequest('{}', 'valid-signature'))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body).toEqual({ received: true })
+    expect(supabaseMock.deleteCalls).toHaveLength(0)
+  })
+
+  it('releases the dedup claim and returns 500 when a handler throws', async () => {
+    const supabaseMock = makeSupabase({ stripe_processed_events: { error: null } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabaseMock)
+    ;(stripe.webhooks.constructEvent as ReturnType<typeof vi.fn>).mockReturnValue({
+      id:   'evt_fail',
+      type: 'checkout.session.completed',
+      data: { object: { id: 'cs_fail', metadata: { org_id: 'org_1' }, customer: 'cus_1' } },
+    })
+    ;(handleCheckoutSessionBilling as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('transient DB error'))
+
+    const res  = await POST(postRequest('{}', 'valid-signature'))
+    const body = await res.json()
+
+    expect(res.status).toBe(500)
+    expect(body).toEqual({ error: 'Handler failed' })
+    expect(supabaseMock.deleteCalls).toEqual([
+      { table: 'stripe_processed_events', eqArgs: ['stripe_event_id', 'evt_fail'] },
+    ])
+  })
+
+  it('re-enters the handler on a second delivery after the dedup claim was released', async () => {
+    ;(handleCheckoutSessionBilling as ReturnType<typeof vi.fn>).mockReset()
+
+    // First delivery: handler throws, dedup row is released (delete succeeds).
+    const firstAttemptSupabase = makeSupabase({ stripe_processed_events: { error: null } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValueOnce(firstAttemptSupabase)
+    ;(stripe.webhooks.constructEvent as ReturnType<typeof vi.fn>).mockReturnValue({
+      id:   'evt_retry',
+      type: 'checkout.session.completed',
+      data: { object: { id: 'cs_retry', metadata: { org_id: 'org_1' }, customer: 'cus_1' } },
+    })
+    ;(handleCheckoutSessionBilling as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('transient DB error'))
+
+    const firstRes = await POST(postRequest('{}', 'valid-signature'))
+    expect(firstRes.status).toBe(500)
+
+    // Second delivery of the same event.id: dedup insert succeeds again
+    // (the row was deleted), so it re-enters the switch and actually runs
+    // the handler instead of being silently discarded as a duplicate.
+    const secondAttemptSupabase = makeSupabase({ stripe_processed_events: { error: null } })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValueOnce(secondAttemptSupabase)
+
+    const secondRes = await POST(postRequest('{}', 'valid-signature'))
+
+    expect(secondRes.status).toBe(200)
+    expect(handleCheckoutSessionBilling).toHaveBeenCalledTimes(2)
   })
 })
