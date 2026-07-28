@@ -468,7 +468,7 @@ export async function hospitableFetch(url: string, token: string): Promise<Respo
     // thundering herd that re-exhausts it instantly. Matters most when
     // several orgs' initial syncs collide.
     // eslint-disable-next-line no-restricted-properties -- retry jitter to de-synchronise blocked callers, not id/token generation
-    const jitter            = 1 + Math.random() * 0.5
+    const jitter            = 1 + Math.random() * 0.5 // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
     const baseSeconds       = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
     const retryAfterSeconds = Math.ceil(baseSeconds * jitter)
     throw new RateLimitError(retryAfterSeconds)

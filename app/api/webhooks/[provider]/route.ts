@@ -27,6 +27,14 @@ import { inngest }                                   from '@/lib/inngest/client'
 import { reportError }                               from '@/lib/observability/report-error'
 import type { WebhookVerificationResult }            from '@/lib/integrations/webhook-verification'
 
+// Accepts only string/number id candidates — payload fields are `unknown`,
+// and a bare `String(a ?? b ?? c ?? '')` chain would silently stringify an
+// unexpected object into the useless literal "[object Object]" instead of
+// falling through to the next candidate (or to '').
+function asIdString(value: unknown): string | undefined {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : undefined
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
@@ -84,13 +92,12 @@ export async function POST(
   // to an empty string and logged "Revocation event missing user_id" on
   // every occurrence (confirmed live, 2026-07-27) — this is purely additive
   // for OwnerRez, whose payload never has a data.user.id to begin with.
-  const action         = String(payload.action ?? payload.event_type ?? '')
-  const externalUserId = String(
-    payload.user_id
-      ?? payload.account_id
-      ?? (payload.data as { user?: { id?: string } } | undefined)?.user?.id
-      ?? '',
-  )
+  const action         = asIdString(payload.action) ?? asIdString(payload.event_type) ?? ''
+  const externalUserId =
+    asIdString(payload.user_id)
+      ?? asIdString(payload.account_id)
+      ?? asIdString((payload.data as { user?: { id?: string } } | undefined)?.user?.id)
+      ?? ''
   const correlationId  = payload.id ? String(payload.id) : crypto.randomUUID()
 
   const safeAction        = action.slice(0, 100)
