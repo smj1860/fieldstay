@@ -7,11 +7,11 @@ vi.mock('@/lib/inngest/client', () => ({
 import { inngest } from '@/lib/inngest/client'
 import { cancelTurnoversForBooking, notifyCrewOfCancelledTurnovers } from '@/lib/turnovers/generator'
 
-// Queue-based `.from(table)` mock: cancelTurnoversForBooking makes exactly
-// two calls against 'turnovers' in order — a select (affected rows) then an
-// update (status flip) — so responses are consumed in call order.
-function makeSupabase(turnoverResponses: { data?: unknown; error?: unknown }[]) {
-  let call = 0
+// Queue-based `.from(table)` mock: cancelTurnoversForBooking now makes a
+// single atomic .update().select() call against 'turnovers' — an
+// UPDATE ... RETURNING, not a separate SELECT-then-UPDATE — so there's
+// exactly one response to queue per test.
+function makeSupabase(response: { data?: unknown; error?: unknown }) {
   const from = vi.fn(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
@@ -21,13 +21,7 @@ function makeSupabase(turnoverResponses: { data?: unknown; error?: unknown }[]) 
     chain.or     = record
     chain.eq     = record
     chain.in     = record
-
-    const resolveNext = () => {
-      const res = turnoverResponses[call] ?? { data: null, error: null }
-      call += 1
-      return Promise.resolve(res)
-    }
-    chain.then = (resolve: (v: unknown) => unknown) => resolveNext().then(resolve)
+    chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(response).then(resolve)
     return chain
   })
   return { from }
@@ -37,10 +31,10 @@ describe('cancelTurnoversForBooking', () => {
   beforeEach(() => vi.clearAllMocks())
 
   it('returns the assigned crew member for a single cancelled turnover', async () => {
-    const supabase = makeSupabase([
-      { data: [{ id: 'to_1', org_id: 'org_1', turnover_assignments: [{ crew_member_id: 'crew_1' }] }], error: null },
-      { data: null, error: null },
-    ])
+    const supabase = makeSupabase({
+      data: [{ id: 'to_1', org_id: 'org_1', turnover_assignments: [{ crew_member_id: 'crew_1' }] }],
+      error: null,
+    })
 
     const result = await cancelTurnoversForBooking('booking_1', supabase as never)
 
@@ -48,10 +42,10 @@ describe('cancelTurnoversForBooking', () => {
   })
 
   it('flattens the reverse-FK object shape (non-array embed) the same as the array shape', async () => {
-    const supabase = makeSupabase([
-      { data: [{ id: 'to_1', org_id: 'org_1', turnover_assignments: { crew_member_id: 'crew_1' } }], error: null },
-      { data: null, error: null },
-    ])
+    const supabase = makeSupabase({
+      data: [{ id: 'to_1', org_id: 'org_1', turnover_assignments: { crew_member_id: 'crew_1' } }],
+      error: null,
+    })
 
     const result = await cancelTurnoversForBooking('booking_1', supabase as never)
 
@@ -59,12 +53,13 @@ describe('cancelTurnoversForBooking', () => {
   })
 
   it('returns nothing for a booking whose affected turnovers were never assigned', async () => {
-    // 'pending_assignment' turnovers are filtered out by the .eq('status', 'assigned')
-    // clause before this function ever sees them — the query returns no rows.
-    const supabase = makeSupabase([
-      { data: [], error: null },
-      { data: null, error: null },
-    ])
+    // A 'pending_assignment' turnover has no turnover_assignments rows to
+    // embed, regardless of matching the .in('status', [...]) update filter
+    // — unwrapJoinArray sees an empty/null embed and contributes nothing.
+    const supabase = makeSupabase({
+      data: [{ id: 'to_1', org_id: 'org_1', turnover_assignments: [] }],
+      error: null,
+    })
 
     const result = await cancelTurnoversForBooking('booking_1', supabase as never)
 
@@ -72,16 +67,13 @@ describe('cancelTurnoversForBooking', () => {
   })
 
   it('returns one entry per crew member across multiple affected turnovers', async () => {
-    const supabase = makeSupabase([
-      {
-        data: [
-          { id: 'to_1', org_id: 'org_1', turnover_assignments: [{ crew_member_id: 'crew_1' }] },
-          { id: 'to_2', org_id: 'org_1', turnover_assignments: [{ crew_member_id: 'crew_1' }] },
-        ],
-        error: null,
-      },
-      { data: null, error: null },
-    ])
+    const supabase = makeSupabase({
+      data: [
+        { id: 'to_1', org_id: 'org_1', turnover_assignments: [{ crew_member_id: 'crew_1' }] },
+        { id: 'to_2', org_id: 'org_1', turnover_assignments: [{ crew_member_id: 'crew_1' }] },
+      ],
+      error: null,
+    })
 
     const result = await cancelTurnoversForBooking('booking_1', supabase as never)
 

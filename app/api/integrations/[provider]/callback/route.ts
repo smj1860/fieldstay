@@ -43,7 +43,7 @@ import { getProvider }                    from '@/lib/integrations/registry'
 import { holdPendingOAuthCode }           from '@/lib/integrations/vault'
 import { finalizeIntegrationConnection }  from '@/lib/integrations/finalize-connection'
 import { logAuditEvent }                  from '@/lib/audit'
-import { RateLimitError }                 from '@/lib/integrations/types'
+import { RateLimitError, IntegrationMisconfiguredError } from '@/lib/integrations/types'
 
 import { reportError } from '@/lib/observability/report-error'
 
@@ -241,6 +241,16 @@ export async function GET(
     }
     console.error(`[OAuth:${providerId}] Token exchange failed:`, err)
     reportError(err, { site: 'route.integrations.callback.errorRedirect' })
+    if (err instanceof IntegrationMisconfiguredError) {
+      // Our own server-side credentials (CLIENT_ID/SECRET env vars) are
+      // missing — an operational bug, not something the provider reported
+      // or the user caused. Never surface this as `detail`: it's an
+      // internal config detail, not an actionable reason, and showing it
+      // to an unauthenticated visitor is pure information disclosure with
+      // no upside (they can't fix a missing env var by retrying).
+      console.error(`[OAuth:${providerId}] MISCONFIGURED — check ${providerId.toUpperCase()}_CLIENT_ID/SECRET env vars`)
+      return errorRedirect('token_exchange_failed')
+    }
     // Thread the actual provider-reported reason through — e.g. a plan
     // restriction (Hospitable Essentials tier lacks API access) — so the
     // PM sees something actionable instead of a generic "try again" that

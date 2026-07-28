@@ -17,7 +17,7 @@
 // keeps working unchanged.
 // ============================================================
 
-import { RateLimitError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
+import { RateLimitError, IntegrationMisconfiguredError, type IntegrationProvider, type TokenResponse } from '@/lib/integrations/types'
 import { hospitableApiLimiter } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
@@ -76,7 +76,7 @@ export const hospitableProvider: IntegrationProvider = {
     const clientSecret = process.env.HOSPITABLE_CLIENT_SECRET
 
     if (!clientId || !clientSecret) {
-      throw new Error('Missing HOSPITABLE_CLIENT_ID or HOSPITABLE_CLIENT_SECRET')
+      throw new IntegrationMisconfiguredError('Missing HOSPITABLE_CLIENT_ID or HOSPITABLE_CLIENT_SECRET')
     }
 
     const response = await fetch(HOSPITABLE_TOKEN_URL, {
@@ -155,7 +155,7 @@ export const hospitableProvider: IntegrationProvider = {
     const clientSecret = process.env.HOSPITABLE_CLIENT_SECRET
 
     if (!clientId || !clientSecret) {
-      throw new Error('Missing HOSPITABLE_CLIENT_ID or HOSPITABLE_CLIENT_SECRET')
+      throw new IntegrationMisconfiguredError('Missing HOSPITABLE_CLIENT_ID or HOSPITABLE_CLIENT_SECRET')
     }
 
     const response = await fetch(HOSPITABLE_TOKEN_URL, {

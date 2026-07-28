@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
-import { RateLimitError, type IntegrationProvider } from '@/lib/integrations/types'
+import { RateLimitError, IntegrationMisconfiguredError, type IntegrationProvider } from '@/lib/integrations/types'
 
 vi.mock('server-only', () => ({}))
 vi.mock('@supabase/ssr', () => ({
@@ -267,6 +267,25 @@ describe('GET /api/integrations/[provider]/callback (OAuth CSRF state validation
     )
 
     const res = await callGet('kroger', '?code=bad-code&state=s1')
+
+    expect(locationOf(res)).toContain('error=token_exchange_failed')
+    expect(locationOf(res)).not.toContain('detail=')
+  })
+
+  it('does NOT thread `detail` through when exchangeCodeForToken throws IntegrationMisconfiguredError, even for a provider on the safe-detail allowlist — a missing CLIENT_ID/SECRET env var is an internal bug, not a provider-reported reason', async () => {
+    const admin = makeAdmin({
+      oauth_states: [{ data: { state: 's1', provider_id: 'ownerrez', user_id: 'state_user', return_to: null }, error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(admin as never)
+    vi.mocked(getProvider).mockReturnValue(
+      oauthProvider({
+        exchangeCodeForToken: vi.fn(async () => {
+          throw new IntegrationMisconfiguredError('Missing OWNERREZ_CLIENT_ID or OWNERREZ_CLIENT_SECRET environment variables')
+        }),
+      }),
+    )
+
+    const res = await callGet('ownerrez', '?code=bad-code&state=s1')
 
     expect(locationOf(res)).toContain('error=token_exchange_failed')
     expect(locationOf(res)).not.toContain('detail=')

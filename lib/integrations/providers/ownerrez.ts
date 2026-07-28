@@ -19,6 +19,7 @@ import type {
   OwnerRezListingAmenityCategory,
   OwnerRezBooking,
 } from '../types'
+import { IntegrationMisconfiguredError } from '../types'
 import type { NormalizedBooking } from '@/lib/bookings/normalize'
 import { unmappedBookingStatus } from '@/lib/bookings/normalize'
 import { ok, fail, timingSafeEqual } from '../webhook-verification'
@@ -41,7 +42,7 @@ function buildBasicAuth(): string {
   const clientSecret = process.env.OWNERREZ_CLIENT_SECRET
 
   if (!clientId || !clientSecret) {
-    throw new Error(
+    throw new IntegrationMisconfiguredError(
       'Missing OWNERREZ_CLIENT_ID or OWNERREZ_CLIENT_SECRET environment variables'
     )
   }

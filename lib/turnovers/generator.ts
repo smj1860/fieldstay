@@ -484,25 +484,23 @@ export async function cancelTurnoversForBooking(
   bookingId: string,
   supabase:  DBClient
 ): Promise<CancelledTurnoverAssignment[]> {
-  // Capture who's currently assigned to the turnovers about to be
-  // cancelled BEFORE flipping status, so the caller can notify them. Only
-  // 'assigned' turnovers can have a crew_member_id worth notifying —
-  // 'pending_assignment' ones have none. Read via the reverse FK embed
-  // (turnovers -> turnover_assignments), which comes back as an array.
-  const { data: affected } = await supabase
-    .from('turnovers')
-    .select('id, org_id, turnover_assignments(crew_member_id)')
-    .or(`booking_id.eq.${bookingId},prev_booking_id.eq.${bookingId}`)
-    .eq('status', 'assigned')
-
-  await supabase
+  // Single atomic UPDATE ... RETURNING (via .update().select()) rather than
+  // a separate SELECT-then-UPDATE — captures who was assigned in the same
+  // statement that flips status, so there's no window for a concurrent
+  // unassignment to slip in between "read who's assigned" and "cancel".
+  // Only turnovers that were actually 'assigned' have any
+  // turnover_assignments rows to embed — a 'pending_assignment' turnover
+  // never had a crew member, regardless of its post-update status here, so
+  // no separate status check is needed on the returned rows.
+  const { data: updated } = await supabase
     .from('turnovers')
     .update({ status: 'cancelled' })
     .or(`booking_id.eq.${bookingId},prev_booking_id.eq.${bookingId}`)
     .in('status', ['pending_assignment', 'assigned'])
+    .select('id, org_id, turnover_assignments(crew_member_id)')
 
   const cancelled: CancelledTurnoverAssignment[] = []
-  for (const t of affected ?? []) {
+  for (const t of updated ?? []) {
     const assignments = unwrapJoinArray<{ crew_member_id: string }>(t.turnover_assignments)
     for (const a of assignments) {
       cancelled.push({ turnoverId: t.id, orgId: t.org_id, crewMemberId: a.crew_member_id })
