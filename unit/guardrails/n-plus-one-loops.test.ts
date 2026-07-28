@@ -96,13 +96,13 @@ const EXCEPTIONS: Record<string, string> = {
   'app/(dashboard)/maintenance/actions.ts:729':
     'Per-vendor quote_requests insert — each row needs its own randomly generated quote_token before its own Inngest event fires; the insert could theoretically be batched with the token generated client-side, but that\'s a sync-logic change, not a lint fix.',
   'app/(dashboard)/maintenance/create-work-order-helpers.ts:32':
-    'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:730 — same reasoning.',
-  'app/(dashboard)/properties/clone-actions.ts:113':
+    'Extracted-helper twin of app/(dashboard)/maintenance/actions.ts:729 — same reasoning.',
+  'app/(dashboard)/properties/clone-actions.ts:114':
     'Per-section checklist_template_sections insert — each section needs its own DB-generated id before the child checklist_template_items insert can reference it as section_id. Parent-before-child dependency, not a batchable read.',
-  'app/actions/work-order-public.ts:325':
+  'app/actions/work-order-public.ts:329':
     'Per-photo storage upload + work_order_photos row — each photo is a distinct uploaded file with its own generated storage path; there is no batched form of a storage upload.',
-  'app/api/work-orders/[token]/photos/route.ts:105':
-    'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:326.',
+  'app/api/work-orders/[token]/photos/route.ts:107':
+    'Same per-photo storage-upload + row pattern as app/actions/work-order-public.ts:329.',
   'app/(dashboard)/maintenance/CreateWorkOrderModal.tsx:102':
     'Same per-photo storage-upload + row pattern, client-side.',
   'lib/asset-discovery/seed-from-amenities.ts:62':
@@ -111,21 +111,21 @@ const EXCEPTIONS: Record<string, string> = {
     'Second pass (absent-asset-types) of the same function — same reasoning as line 62.',
   'lib/inngest/functions/guidebook-stay-extension-cron.ts:52':
     'Real N+1 (existence check, next-booking lookup, opt-in lookup, insert — 4 queries per booking) left as a known, bounded cost — deferred rather than fixed blind, touches live guest-messaging sync logic. Bounded by same-day checkouts per org per day.',
-  'lib/inngest/functions/ownerrez/reconciliation-handler.ts:110':
+  'lib/inngest/functions/ownerrez/reconciliation-handler.ts:112':
     'Real N+1 (cancel booking + cancel its turnovers, per stale booking) left as a known, bounded cost — deferred rather than fixed blind. Contrast lib/inngest/functions/ical-sync.ts, which batches the equivalent booking-cancel via .update().in(\'id\', ids) — a good template for fixing this one later.',
   'lib/inngest/functions/checklist-broadcast.ts:103':
-    'Per-section insert (parent-before-child, same reasoning as clone-actions.ts:113) — additionally guarded by a template-signature equality check just above that skips the whole delete-then-recreate rebuild when nothing changed.',
+    'Per-section insert (parent-before-child, same reasoning as clone-actions.ts:114) — additionally guarded by a template-signature equality check just above that skips the whole delete-then-recreate rebuild when nothing changed.',
   'lib/inngest/functions/cron/guest-pii-retention.ts:57':
     'Per-booking delete_vault_secret RPC call — each is a distinct external Vault secret; structurally cannot be batched into one call any more than "one API call per distinct external resource" ever can.',
-  'lib/inngest/functions/ownerrez/initial-sync.ts:168':
+  'lib/inngest/functions/ownerrez/initial-sync.ts:170':
     'Per-property conditional field patch (bedrooms/bathrooms/square_footage) — each property\'s patch object contains different values, so it is not a uniform batched update. Pre-fetch of existing rows just above IS already batched via .in(\'external_id\', ids).',
   'lib/guidebook/sync.ts:135':
-    'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:168 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
+    'Per-property conditional guidebook-config patch — same shape as ownerrez/initial-sync.ts:170 (differing patch per row); the read side just above is already batched via .in(\'property_id\', ids).',
   'lib/properties/upsert-normalized.ts:129':
     'Per-property conditional cleaning_cost backfill — same differing-patch-per-row shape as the two entries above.',
   'lib/inngest/functions/turnover-events.ts:208':
     'Milestone-flag upserts — the milestones array has at most 3 possible entries (first_turnover_complete/_10/_50) and is almost always exactly 1; negligible enough that batching would add more complexity than it saves.',
-  'lib/push/send-push.ts:47':
+  'lib/push/send-push.ts:48':
     'Per-subscription webpush.sendNotification call (+ conditional delete on a 410) — each subscription is a distinct external Web Push endpoint; inherently one call per endpoint, like the Vault-secret case above.',
   'lib/inngest/functions/geocoding-backfill.ts:73':
     'Per-unique-coordinate-group update — already the optimized end state (grouped from one geocode call per property down to one per distinct resolved lat/lng); a single UPDATE cannot set different coordinate values across differently-grouped id sets without a CASE expression, which is a bigger and less readable change for the same 3-4 typical groups per run.',

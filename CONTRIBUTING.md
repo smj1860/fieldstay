@@ -73,7 +73,7 @@ Before marking a PR ready for review, confirm every item:
 ### Database
 - [ ] Every new table has `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` and four policies (SELECT, INSERT, UPDATE, DELETE) using `get_user_org_ids()` and `is_org_member()`
 - [ ] Every migration that adds a column also updates the matching interface in `types/database.ts` in the same commit
-- [ ] New migration files are named `YYYYMMDDHHMMSS_description.sql` (e.g. `20260723140000_add_widget_column.sql`) and are safe to re-run (idempotent SQL) — the older `fieldstay_migration_vN.sql` convention is retired; the two `fieldstay_migration_v1/v2.SUPERSEDED.sql` files at the repo root are historical only, do not run them
+- [ ] New migration files are named `YYYYMMDDHHMMSS_description.sql` (e.g. `20260723140000_add_widget_column.sql`) and are safe to re-run (idempotent SQL) — the older `fieldstay_migration_vN.sql` convention is retired; the two `fieldstay_migration_v1/v2.SUPERSEDED.sql` files under `docs/archive/schema/` are historical only, do not run them
 - [ ] No new `.from('memberships')` calls — the table is `organization_members`
 
 ### Security

@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/client'
 import { getDexieDb, type MutationRow } from './schema'
 
+import { reportError } from '@/lib/observability/report-error'
 type DexieSupabaseClient = ReturnType<typeof createClient>
 
 const MAX_RETRIES = 5
@@ -24,8 +25,8 @@ export function computeNextAttemptAt(retryCount: number, now: number): number {
   return now + baseDelay * (0.5 + jitter)
 }
 
-// Mirrors the upstream sync logic in lib/powersync/client.ts (SupabaseConnector.uploadData),
-// replacing PowerSync's CRUD transaction queue with the local `mutations` outbox table.
+// Drains the local `mutations` outbox to Supabase. This is the only path by
+// which a crew-side write reaches the server — see enqueueMutation().
 export class SyncEngine {
   private supabase = createClient()
   private userId: string
@@ -54,7 +55,8 @@ export class SyncEngine {
    * Drains the local `mutations` outbox in chronological (insertion) order.
    * Each mutation is removed from the outbox only after it is successfully
    * pushed upstream — a failed mutation is left in place and retried on the
-   * next call, mirroring PowerSync's per-record retry behavior. Rows already
+   * next call, so a transient failure retries per record rather than blocking
+   * the whole outbox. Rows already
    * marked `failed` (dead-lettered on a prior run) are excluded rather than
    * retried forever — retryFailedMutation() in helpers.ts is the only way
    * back into the queue for those.
@@ -97,6 +99,7 @@ export class SyncEngine {
             `[SyncEngine] mutation ${id} (${mutation.table}) failed ` +
             `(attempt ${newRetryCount}):`, err
           )
+          reportError(err, { site: 'lib.dexie.syncService.SyncEngine' })
 
           if (newRetryCount >= MAX_RETRIES) {
             // Dead-letter: keep the row (marked failed) rather than deleting

@@ -273,7 +273,7 @@ reviews / review_responses  — guest reviews + PM responses
 ### Supporting
 ```
 org_milestones              — key-value store for org state flags + async job results
-                              Used by PowerSync to surface Inngest job completions to UI
+                              Polled by the UI to surface Inngest job completions
 audit_events                — append-only audit log
 push_subscriptions          — PWA push notification endpoints
 oauth_states                — CSRF state tokens for OAuth flows
@@ -405,11 +405,11 @@ const supabase = createServiceClient({ publicSurface: 'owner-portal' })      // 
 ```
 
 ### Dexie — Client-Side Data Access (Crew PWA)
-The crew PWA (`app/crew/*`) is local-first, but it does **not** use PowerSync —
-that was the original design and is referenced in `lib/dexie/*` code comments
-purely as a frame of reference (those comments document which parts of the
-PowerSync design Dexie's tables/sync logic mirror). The actual sync layer is a
-hand-rolled Dexie (IndexedDB) cache plus a local mutation outbox:
+The crew PWA (`app/crew/*`) is local-first. PowerSync was the original design
+and is **fully gone** — no dependency, no `lib/powersync/` directory, no
+`powersync_crew_*` tables, and as of 2026-07-27 no references left in
+`lib/dexie/*` comments either. The sync layer is a hand-rolled Dexie
+(IndexedDB) cache plus a local mutation outbox:
 
 - `lib/dexie/schema.ts` — `FieldStayDexie`, the Dexie database class. Table
   shapes mirror the Supabase tables they cache. Get an instance via
@@ -720,9 +720,10 @@ Key functions in `public` schema:
 **Current state:** 310+ migrations applied to project `vpmznjktllhmmbfnxuvk` (as of 2026-07-23 — check `ls supabase/migrations/ | wc -l` rather than trusting this number as it ages).
 All migrations live in `supabase/migrations/` as `YYYYMMDDHHMMSS_description.sql`.
 
-`fieldstay_migration_v1.SUPERSEDED.sql` and `fieldstay_migration_v2.SUPERSEDED.sql`
-at the repo root are early hand-written schema dumps. Do not run them — they are
-kept for historical reference only and no longer match the live schema.
+`docs/archive/schema/` holds the two early hand-written schema dumps
+(`fieldstay_migration_v1.SUPERSEDED.sql`, `fieldstay_migration_v2.SUPERSEDED.sql`;
+moved there from the repo root 2026-07-27). Do not run them — they are kept for
+historical reference only and no longer match the live schema.
 
 ### Schema Reference File
 

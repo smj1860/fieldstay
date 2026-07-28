@@ -5,6 +5,7 @@ import { renderWelcomeEmailV2 }                    from '@/emails/welcome-v2'
 import { renderGuidebookFeatureAnnouncementEmail } from '@/emails/guidebook-feature-announcement'
 import { renderReengagementEmail }                 from '@/emails/reengagement-drip'
 
+import { reportError } from '@/lib/observability/report-error'
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.app'
 
 // Personal sender drives opens — never the generic "FieldStay" FROM constant
@@ -48,6 +49,7 @@ export const onboardingDrip = inngest.createFunction(
         }
       } catch (err) {
         logger.error(`[Drip:${org_id}] Welcome email threw: ${String(err)}`)
+        reportError(err, { site: 'inngest.onboarding-drip.send-welcome' })
       }
     })
 
@@ -93,6 +95,7 @@ export const onboardingDrip = inngest.createFunction(
         }
       } catch (err) {
         logger.error(`[Drip:${org_id}] Guidebook email threw: ${String(err)}`)
+        reportError(err, { site: 'inngest.onboarding-drip.send-guidebook' })
       }
     })
 
@@ -155,6 +158,7 @@ export const onboardingDrip = inngest.createFunction(
         }
       } catch (err) {
         logger.error(`[Drip:${org_id}] Reengagement email threw: ${String(err)}`)
+        reportError(err, { site: 'inngest.onboarding-drip.send-reengagement' })
       }
     })
 

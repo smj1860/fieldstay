@@ -205,6 +205,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
             .filter((id) => !knownIds.has(id))
         } catch (err) {
           logger.warn(`[OwnerRez:${userId}] new-property check failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.ownerrez-incremental-sync.check-new-properties' })
           return []
         }
       })
@@ -404,6 +405,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
                     logger.error(
                       `[OwnerRez] Failed to send owner-block email for booking ${row.external_id}: ${err instanceof Error ? err.message : String(err)}`
                     )
+                    reportError(err, { site: 'inngest.ownerrez-incremental-sync.sync-connection' })
                     // Non-fatal — log and continue; don't fail the whole step for one email
                   }
                 })
@@ -427,6 +429,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
           } catch (cursorErr) {
             // Non-fatal: data was written correctly; log and continue
             logger.error(`[OwnerRez:${userId}] cursor update failed: ${cursorErr instanceof Error ? cursorErr.message : String(cursorErr)}`)
+            reportError(cursorErr, { site: 'inngest.ownerrez-incremental-sync.sync-connection' })
           }
 
           logger.info(`[OwnerRez:${userId}] sync complete — ${bookings.length} bookings`, {
@@ -452,6 +455,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
             // (this was the old serial loop's `break`-the-whole-tick
             // failure mode).
             logger.warn(`[OwnerRez:${userId}] Rate limited (retry after ${err.retryAfter}s) — will retry with backoff`)
+            reportError(err, { site: 'inngest.ownerrez-incremental-sync.sync-connection' })
 
             // Write transient rate-limit status — don't change connection status to 'error'
             await mergeIntegrationConnectionMetadata({
@@ -579,6 +583,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
             logger.error(
               `[OwnerRez:${userId}] Turnover generation failed for property ${propertyId}: ${err}`
             )
+            reportError(err, { site: 'inngest.ownerrez-incremental-sync.generate-turnovers' })
             // Don't let one property's failure block the others
           }
         }
@@ -618,6 +623,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
           await createGuidebookPropertyConfigsForProperties(orgId, affectedIds)
         } catch (err) {
           logger.error(`[OwnerRez:${userId}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.ownerrez-incremental-sync.create-guidebook-property-configs' })
         }
       })
 
@@ -629,6 +635,7 @@ export const ownerRezConnectionSync = inngest.createFunction(
           await seedPresentAssetsFromAmenities(orgId, affectedIds)
         } catch (err) {
           logger.error(`[OwnerRez:${userId}] present-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.ownerrez-incremental-sync.seed-present-assets-from-amenities' })
         }
       })
     }

@@ -160,6 +160,7 @@ async function suppressIfDemoOrg(
       orgId,
       error: err instanceof Error ? err.message : String(err),
     })
+    reportError(err, { site: 'lib.sms.telnyx.suppressIfDemoOrg' })
     return { sent: false, reason: 'demo status check failed' }
   }
 }

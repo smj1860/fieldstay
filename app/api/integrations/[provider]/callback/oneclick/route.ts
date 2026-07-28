@@ -47,6 +47,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getProvider } from '@/lib/integrations/registry'
 import { holdPendingOAuthCode, cleanupExpiredPendingIntegrationArtifacts } from '@/lib/integrations/vault'
 
+import { reportError } from '@/lib/observability/report-error'
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
@@ -108,6 +109,7 @@ export async function GET(
     pendingLinkToken = await holdPendingOAuthCode({ providerId, code, redirectUri })
   } catch (err) {
     console.error(`[OAuth:${providerId}:oneclick] Failed to hold pending authorization code:`, err)
+    reportError(err, { site: 'route.integrations.callback.oneclick.errorRedirect' })
     return errorRedirect('storage_failed')
   }
 

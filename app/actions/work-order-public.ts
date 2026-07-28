@@ -10,6 +10,7 @@ import { renderSmsBody }       from '@/lib/sms/templates'
 import { getManualUrlForAsset } from '@/lib/assets/manual-lookup'
 import { unwrapJoin }          from '@/lib/utils/supabase-joins'
 
+import { reportError } from '@/lib/observability/report-error'
 const TOKEN_TTL_DAYS = 30
 const APP_URL        = process.env.NEXT_PUBLIC_APP_URL ?? 'https://app.fieldstay.com'
 
@@ -132,6 +133,7 @@ export async function dispatchWorkOrderToVendor(input: {
           await sendSMS(e164, smsBody, { orgId: membership.org_id })
         } catch (smsErr) {
           console.error('[dispatchWorkOrderToVendor] SMS failed (non-fatal):', smsErr)
+          reportError(smsErr, { site: 'serverAction.work-order-public.dispatchWorkOrderToVendor' })
         }
       }
     }
@@ -141,6 +143,7 @@ export async function dispatchWorkOrderToVendor(input: {
 
   } catch (err) {
     console.error('[dispatchWorkOrderToVendor]', err)
+    reportError(err, { site: 'serverAction.work-order-public.dispatchWorkOrderToVendor' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -258,6 +261,7 @@ export async function submitWorkOrderSignOff(
     // If Redis is unavailable, log and continue — a degraded rate limiting
     // service must never block legitimate contractor sign-offs
     console.error('[submitWorkOrderSignOff] rate limit check failed', rlErr)
+    reportError(rlErr, { site: 'serverAction.work-order-public.submitWorkOrderSignOff' })
   }
 
   const supabase = createServiceClient({ publicSurface: 'work-order-public-token' })

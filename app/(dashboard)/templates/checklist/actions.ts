@@ -5,6 +5,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 
+import { reportError } from '@/lib/observability/report-error'
 function revalidateRoomTemplateSurfaces() {
   revalidatePath('/templates/checklist')
 }
@@ -61,6 +62,7 @@ export async function createRoomTemplate(
     return { id: data.id }
   } catch (err) {
     console.error('[createRoomTemplate]', err)
+    reportError(err, { site: 'serverAction.templates.checklist.createRoomTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -107,6 +109,7 @@ export async function renameRoomTemplate(
     return {}
   } catch (err) {
     console.error('[renameRoomTemplate]', err)
+    reportError(err, { site: 'serverAction.templates.checklist.renameRoomTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -149,6 +152,7 @@ export async function setRoomTemplateAutoInclude(
     return {}
   } catch (err) {
     console.error('[setRoomTemplateAutoInclude]', err)
+    reportError(err, { site: 'serverAction.templates.checklist.setRoomTemplateAutoInclude' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -191,6 +195,7 @@ export async function deleteRoomTemplate(
     return {}
   } catch (err) {
     console.error('[deleteRoomTemplate]', err)
+    reportError(err, { site: 'serverAction.templates.checklist.deleteRoomTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -243,6 +248,7 @@ export async function saveRoomTemplateItems(
     return { saved: items.length }
   } catch (err) {
     console.error('[saveRoomTemplateItems]', err)
+    reportError(err, { site: 'serverAction.templates.checklist.saveRoomTemplateItems' })
     return { error: 'Operation failed. Please try again.', saved: 0 }
   }
 }
@@ -291,6 +297,7 @@ export async function applyMasterChecklistToProperties(
     return { queued: propertyIds.length }
   } catch (err) {
     console.error('[applyMasterChecklistToProperties]', err)
+    reportError(err, { site: 'serverAction.templates.checklist.applyMasterChecklistToProperties' })
     return { error: 'Operation failed. Please try again.', queued: 0 }
   }
 }

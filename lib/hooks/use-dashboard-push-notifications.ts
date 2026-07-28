@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
+import { reportError } from '@/lib/observability/report-error'
 function urlBase64ToUint8Array(base64String: string) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -55,6 +56,7 @@ export function useDashboardPushNotifications() {
         }
       } catch (err) {
         console.error('[sw] dashboard registration failed:', err)
+        reportError(err, { site: 'lib.hooks.use-dashboard-push-notifications.sw' })
       }
     }
 
@@ -70,6 +72,7 @@ export function useDashboardPushNotifications() {
       await subscribeToDashboardPush(swReg)
     } catch (err) {
       console.error('[push] dashboard subscription failed:', err)
+      reportError(err, { site: 'lib.hooks.use-dashboard-push-notifications.push' })
     }
   }
 

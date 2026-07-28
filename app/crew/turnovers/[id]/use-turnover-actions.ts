@@ -13,6 +13,7 @@ import type { ChecklistInstanceItemRow as ChecklistItem, InventoryItemRow as Inv
 import { assetTypeDisplayName, missingAssetTypesFromDiscoveredSet } from '@/lib/asset-discovery/config'
 import type { AssetType } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 function isAssetDiscovered(asset: Pick<PropertyAssetRow, 'make' | 'model' | 'is_na' | 'photo_url'>): boolean {
   return asset.is_na === 1 || asset.make !== '' || asset.model !== '' || asset.photo_url !== ''
 }
@@ -202,6 +203,7 @@ export function useTurnoverActions(id: string) {
       void processPendingPhotoUploads(supabase, userId)
     } catch (err) {
       console.error('Section photo queueing failed:', err)
+      reportError(err, { site: 'serverAction.crew.turnovers.handleSectionPhoto' })
       setUploadError('Could not save section photo. Please try again.')
     } finally {
       setSectionPhotoPrompt(null)
@@ -237,6 +239,7 @@ export function useTurnoverActions(id: string) {
       void processPendingPhotoUploads(supabase, userId)
     } catch (err) {
       console.error('Photo queueing failed:', err)
+      reportError(err, { site: 'serverAction.crew.turnovers.handlePhotoCapture' })
       setUploadError('Could not save photo. Please try again.')
     } finally {
       setUploadingItemId(null)
@@ -296,6 +299,7 @@ export function useTurnoverActions(id: string) {
       await startTurnover(userId, id)
     } catch (err) {
       console.error('[Crew] startTurnover failed:', err)
+      reportError(err, { site: 'serverAction.crew.turnovers.Crew' })
       setActionError('Could not start this turnover. Please check your connection and try again.')
     }
   }
@@ -308,6 +312,7 @@ export function useTurnoverActions(id: string) {
       onDone()
     } catch (err) {
       console.error('[Crew] completeTurnover failed:', err)
+      reportError(err, { site: 'serverAction.crew.turnovers.Crew' })
       setCompleting(false)
       setActionError('Could not mark complete. Please check your connection and try again.')
     }

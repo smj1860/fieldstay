@@ -3,6 +3,7 @@ import { demoSecretMatches, isDemoSurfaceEnabled } from '@/lib/demo/config'
 import { seedDemoOrg } from '@/lib/demo/seed'
 import { logAuditEvent } from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 /**
  * One-tap demo reset — bookmark this on a phone and fire it between booth
  * conversations so added bookings and work orders don't accumulate into a
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, counts })
   } catch (err) {
     console.error('[demo reset] failed', err)
+    reportError(err, { site: 'page.demo.reset.route.notFound' })
     // The seeder's refusal messages ("REFUSING TO WIPE: org ... is_demo =
     // false") are operator-facing and carry no tenant data, but the generic
     // failure path might, so only the message is surfaced and only to a

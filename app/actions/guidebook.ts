@@ -8,6 +8,7 @@ import { normalizePhoneToE164 } from '@/lib/sms/telnyx'
 import { logAuditEvent } from '@/lib/audit'
 import type { GuidebookSlotType, GuidebookOfferType } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 /**
  * Creates a Stripe Checkout Session for a sponsor slot.
  * The media kit page is unauthenticated (no PM session), so this is
@@ -75,6 +76,7 @@ export async function createSponsorCheckoutSession(
     return { url: session.url }
   } catch (err) {
     console.error('[createSponsorCheckoutSession]', err)
+    reportError(err, { site: 'serverAction.guidebook.createSponsorCheckoutSession' })
     return { error: 'Unable to start checkout. Please try again.' }
   }
 }
@@ -156,6 +158,7 @@ export async function upsertSponsor(
     return { mediaKitToken: data.media_kit_token }
   } catch (err) {
     console.error('[upsertSponsor]', err)
+    reportError(err, { site: 'serverAction.guidebook.upsertSponsor' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -228,6 +231,7 @@ export async function upsertPropertyGuidebookConfig(
     return {}
   } catch (err) {
     console.error('[upsertPropertyGuidebookConfig]', err)
+    reportError(err, { site: 'serverAction.guidebook.upsertPropertyGuidebookConfig' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -294,6 +298,7 @@ export async function updateStayExtensionSettings(
     return {}
   } catch (err) {
     console.error('[updateStayExtensionSettings]', err)
+    reportError(err, { site: 'serverAction.guidebook.updateStayExtensionSettings' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -359,6 +364,7 @@ export async function optInGuestSms(
     return { success: true }
   } catch (err) {
     console.error('[optInGuestSms]', err)
+    reportError(err, { site: 'serverAction.guidebook.optInGuestSms' })
     return { error: 'Something went wrong. Please try again.' }
   }
 }

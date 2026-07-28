@@ -162,6 +162,19 @@ export const guidebookRedeemLimiter = new Ratelimit({
   prefix:    'rl:guidebook-redeem',
 })
 
+// Sponsor checkout (/api/guidebook/sponsor-checkout) — public, unauthenticated,
+// gated only by a mediaKitToken, and it creates a real Stripe Checkout Session
+// per call. Unthrottled that is both a Stripe API abuse vector and a token
+// oracle: a valid token returns a checkout URL while an invalid one returns a
+// 400, so the response distinguishes them and the token is brute-forceable at
+// whatever rate Stripe will accept. 10/hour per IP is far above any real
+// sponsor's signup rate.
+export const guidebookSponsorCheckoutLimiter = new Ratelimit({
+  redis,
+  limiter:   Ratelimit.slidingWindow(10, '1 h'),
+  prefix:    'rl:guidebook-sponsor-checkout',
+})
+
 // OAuth callback routes (/api/integrations/*/callback and /callback/oneclick)
 // — unauthenticated by nature (the provider redirects the browser here with
 // no FieldStay session). The oneclick route now stores the unexchanged

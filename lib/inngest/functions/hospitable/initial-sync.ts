@@ -44,6 +44,7 @@ import {
   seedAbsentOptionalAssetsFromAmenities,
 } from '@/lib/asset-discovery/seed-from-amenities'
 
+import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'hospitable'
 
 export const hospInitialSync = inngest.createFunction(
@@ -78,6 +79,7 @@ export const hospInitialSync = inngest.createFunction(
           return await upsertNormalizedProperties(org_id, PROVIDER, normalized)
         } catch (err) {
           logger.error(`[Hospitable:${user_id}] properties upsert failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.hospitable-initial-sync.fetch-and-upsert-properties' })
           throw err
         }
       })
@@ -125,6 +127,7 @@ export const hospInitialSync = inngest.createFunction(
           logger.info(`[Hospitable:${user_id}] Asset discovery seeded for ${seeded}/${total} properties`)
         } catch (err) {
           logger.error(`[Hospitable:${user_id}] asset discovery seed failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.hospitable-initial-sync.seed-asset-discovery-from-amenities' })
           // Non-fatal — don't throw, don't block the sync
         }
       })
@@ -140,6 +143,7 @@ export const hospInitialSync = inngest.createFunction(
           logger.info(`[Hospitable:${user_id}] Absent-optional-asset seeding: ${seeded}/${total} properties`)
         } catch (err) {
           logger.warn(`[Hospitable:${user_id}] absent-optional-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.hospitable-initial-sync.seed-absent-optional-assets-from-amenities' })
           // Non-fatal — don't throw, don't block the sync
         }
       })
@@ -288,6 +292,7 @@ export const hospInitialSync = inngest.createFunction(
             ids.push(...newIds)
           } catch (err) {
             logger.error(`[Hospitable:${user_id}] Turnover generation failed for ${propertyId}: ${err}`)
+            reportError(err, { site: 'inngest.hospitable-initial-sync.generate-turnovers' })
           }
         }
         return ids
@@ -336,6 +341,7 @@ export const hospInitialSync = inngest.createFunction(
           await createGuidebookPropertyConfigsForProperties(org_id)
         } catch (err) {
           logger.error(`[Hospitable:${user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.hospitable-initial-sync.create-guidebook-property-configs' })
           // Non-fatal — don't throw, don't block the sync
         }
       })
@@ -370,6 +376,7 @@ export const hospInitialSync = inngest.createFunction(
       const msg         = err instanceof Error ? err.message : String(err)
       const friendlyMsg = translateSyncError(err, 'Hospitable')
       logger.error(`[Hospitable:${user_id}] initial sync failed: ${msg}`)
+      reportError(err, { site: 'inngest.hospitable-initial-sync.mark-complete' })
 
       await step.run('handle-failure', async () => {
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })

@@ -161,7 +161,7 @@ import { guidebookStayExtensionHandler }    from '@/lib/inngest/functions/guideb
 // Support bot — human escalation
 import { handleSupportEscalation } from '@/lib/inngest/functions/support-conversation-escalated'
 
-// Grafana Cloud metrics snapshot
+// Business metrics snapshot (Sentry Application Metrics)
 import { metricsSnapshot } from '@/lib/inngest/functions/cron/metrics-snapshot'
 
 // Hospitable launch promo — two-tier price lock for converted trials
@@ -329,7 +329,7 @@ export const { GET, POST, PUT } = serve({
     // Support bot — human escalation
     handleSupportEscalation,
 
-    // Grafana Cloud metrics snapshot
+    // Business metrics snapshot (Sentry Application Metrics)
     metricsSnapshot,
 
     // Hospitable launch promo

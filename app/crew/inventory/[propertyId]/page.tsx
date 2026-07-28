@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/Button'
 import { CrewLoading } from '@/components/crew/CrewLoading'
 import type { InventoryCategory } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 export default function CrewInventoryPage() {
   const { propertyId } = useParams<{ propertyId: string }>()
   const db             = useDexieDb()
@@ -56,6 +57,7 @@ export default function CrewInventoryPage() {
       router.push('/crew')
     } catch (err) {
       console.error('[Crew] inventory submit failed:', err)
+      reportError(err, { site: 'page.crew.inventory.page.Crew' })
       setSubmitting(false)
       setSubmitError('Could not submit inventory count. Please check your connection and try again.')
     }

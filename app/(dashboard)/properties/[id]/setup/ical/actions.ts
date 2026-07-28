@@ -7,6 +7,7 @@ import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 
+import { reportError } from '@/lib/observability/report-error'
 export type IcalState = { error?: string; success?: boolean }
 
 export async function addIcalFeed(
@@ -58,6 +59,7 @@ export async function addIcalFeed(
     return { success: true }
   } catch (err) {
     console.error('[addIcalFeed]', err)
+    reportError(err, { site: 'serverAction.properties.setup.ical.addIcalFeed' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -82,6 +84,7 @@ export async function deleteIcalFeed(feedId: string, propertyId: string): Promis
     revalidatePath(`/properties/${propertyId}/setup/ical`)
   } catch (err) {
     console.error('[deleteIcalFeed]', err)
+    reportError(err, { site: 'serverAction.properties.setup.ical.deleteIcalFeed' })
     throw err
   }
 }
@@ -93,6 +96,7 @@ export async function completeIcalStep(propertyId: string): Promise<void> {
   } catch (err) {
     unstable_rethrow(err)
     console.error('[completeIcalStep]', err)
+    reportError(err, { site: 'serverAction.properties.setup.ical.completeIcalStep' })
     throw err
   }
 }
@@ -119,6 +123,7 @@ export async function triggerSingleFeedSync(feedId: string, propertyId: string):
     revalidatePath(`/properties/${propertyId}/setup/ical`)
   } catch (err) {
     console.error('[triggerSingleFeedSync]', err)
+    reportError(err, { site: 'serverAction.properties.setup.ical.triggerSingleFeedSync' })
     throw err
   }
 }

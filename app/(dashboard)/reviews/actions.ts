@@ -5,6 +5,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { createServiceClient } from '@/lib/supabase/server'
 import { inngest } from '@/lib/inngest/client'
 
+import { reportError } from '@/lib/observability/report-error'
 const MANUAL_WEEKLY_LIMIT = 2
 
 export async function requestBatchGeneration(): Promise<{ success: boolean; error?: string }> {
@@ -29,6 +30,7 @@ export async function requestBatchGeneration(): Promise<{ success: boolean; erro
     return { success: true }
   } catch (err) {
     console.error('[requestBatchGeneration]', err)
+    reportError(err, { site: 'serverAction.reviews.requestBatchGeneration' })
     return { success: false, error: 'Operation failed. Please try again.' }
   }
 }
@@ -115,6 +117,7 @@ export async function submitManualReview(input: {
     return { reviewId: review.id }
   } catch (err) {
     console.error('[submitManualReview]', err)
+    reportError(err, { site: 'serverAction.reviews.submitManualReview' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -135,6 +138,7 @@ export async function getManualReviewsUsedThisWeek(): Promise<number> {
     return count ?? 0
   } catch (err) {
     console.error('[getManualReviewsUsedThisWeek]', err)
+    reportError(err, { site: 'serverAction.reviews.getManualReviewsUsedThisWeek' })
     throw err
   }
 }

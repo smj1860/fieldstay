@@ -6,6 +6,7 @@ import { resendVendorConnectInvite as sendResendConnectInvite } from '@/lib/stri
 import { logAuditEvent } from '@/lib/audit'
 import type { ComplianceDocType } from '@/types/database'
 
+import { reportError } from '@/lib/observability/report-error'
 export type ComplianceDocActionState = { error?: string; success?: boolean }
 
 export async function createComplianceDocument(
@@ -77,6 +78,7 @@ export async function createComplianceDocument(
     return { success: true }
   } catch (err) {
     console.error('[createComplianceDocument]', err)
+    reportError(err, { site: 'serverAction.vendors.createComplianceDocument' })
     return { error: 'Failed to save document' }
   }
 }
@@ -106,6 +108,7 @@ export async function deleteComplianceDocument(
     revalidatePath('/vendors')
   } catch (err) {
     console.error('[deleteComplianceDocument]', err)
+    reportError(err, { site: 'serverAction.vendors.deleteComplianceDocument' })
     throw err
   }
 }
@@ -135,6 +138,7 @@ export async function verifyComplianceDocument(
     return {}
   } catch (err) {
     console.error('[verifyComplianceDocument]', err)
+    reportError(err, { site: 'serverAction.vendors.verifyComplianceDocument' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -177,6 +181,7 @@ export async function resendVendorConnectInvite(
     return { success: true }
   } catch (err) {
     console.error('[resendVendorConnectInvite]', err)
+    reportError(err, { site: 'serverAction.vendors.resendVendorConnectInvite' })
     return { error: 'Failed to resend invite. Please try again.' }
   }
 }

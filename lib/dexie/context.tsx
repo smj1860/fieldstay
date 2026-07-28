@@ -43,11 +43,10 @@ interface DexieContextValue {
 const DexieContext = createContext<DexieContextValue>({ db: null, userId: null, crewMemberId: null })
 
 /**
- * Mirrors PowerSyncContext.Provider in app/crew/crew-shell.tsx: resolves the
- * active user's session the same way SupabaseConnector.fetchCredentials()
- * does in lib/powersync/client.ts (gracefully returning null rather than
- * throwing when there's no session yet), then hands the per-user Dexie
- * instance down through context.
+ * Resolves the active user's session — returning null rather than throwing
+ * when there is no session yet, since the provider mounts before auth has
+ * necessarily settled — then hands the per-user Dexie instance down through
+ * context.
  *
  * If the caller already knows the user id (e.g. a server-rendered layout
  * that called `auth.getUser()` and passed it down as a prop, as
@@ -516,7 +515,7 @@ export function DexieProvider({ userId: userIdProp, children }: { userId?: strin
   )
 }
 
-/** Mirrors usePowerSync() from @powersync/react. */
+/** Returns the current user's Dexie instance from context. */
 export function useDexieDb(): FieldStayDexie {
   const { db } = useContext(DexieContext)
   if (!db) {

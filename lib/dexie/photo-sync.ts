@@ -3,8 +3,8 @@
 // Drains the pending_photo_uploads queue: attempts each queued photo's
 // Supabase Storage upload, and on success writes the resulting path to the
 // local Dexie row and queues a mutation so it reaches Supabase too — Dexie
-// has no equivalent of PowerSync's automatic CRUD-queue tracking, so every
-// local write that needs to reach the server has to be queued explicitly.
+// does not track local writes automatically, so every local write that needs
+// to reach the server has to be queued explicitly.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { getDexieDb } from './schema'

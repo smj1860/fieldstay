@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
 
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>
 
@@ -43,6 +44,13 @@ export async function requireCrewMember(): Promise<CrewAuthResult> {
   if (!crew) {
     return { ok: false, response: NextResponse.json({ error: 'Crew member not found' }, { status: 403 }) }
   }
+
+  // Crew requests are the ones most likely to fail in ways nobody reports —
+  // a cleaner on a job site with bad signal closes the PWA rather than filing
+  // a ticket. Tagging actor and tenant here is what makes those failures
+  // countable. IDs only; see lib/observability/sentry-context.ts.
+  setActorContext(user.id)
+  setTenantContext({ orgId: crew.org_id, role: 'crew' })
 
   return { ok: true, user, supabase, crew }
 }

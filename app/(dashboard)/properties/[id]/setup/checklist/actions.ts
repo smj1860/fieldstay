@@ -8,6 +8,7 @@ import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { inngest } from '@/lib/inngest/client'
 import { logAuditEvent } from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 export type ChecklistState = { error?: string; success?: boolean }
 
 export interface ChecklistItemInput {
@@ -183,6 +184,7 @@ export async function saveChecklistTemplate(
     return { success: true }
   } catch (err) {
     console.error('[saveChecklistTemplate]', err)
+    reportError(err, { site: 'serverAction.properties.setup.checklist.saveChecklistTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -194,6 +196,7 @@ export async function completeChecklistStep(propertyId: string): Promise<void> {
   } catch (err) {
     unstable_rethrow(err)
     console.error('[completeChecklistStep]', err)
+    reportError(err, { site: 'serverAction.properties.setup.checklist.completeChecklistStep' })
     throw err
   }
 }
@@ -230,6 +233,7 @@ export async function broadcastChecklistTemplate(
     return { broadcast: targetPropertyIds.length }
   } catch (err) {
     console.error('[broadcastChecklistTemplate]', err)
+    reportError(err, { site: 'serverAction.properties.setup.checklist.broadcastChecklistTemplate' })
     return { broadcast: 0, error: 'Operation failed. Please try again.' }
   }
 }
@@ -256,6 +260,7 @@ export async function cloneChecklistFromProperty(
     return result
   } catch (err) {
     console.error('[cloneChecklistFromProperty]', err)
+    reportError(err, { site: 'serverAction.properties.setup.checklist.cloneChecklistFromProperty' })
     return { broadcast: 0, error: 'Operation failed. Please try again.' }
   }
 }

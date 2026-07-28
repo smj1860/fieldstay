@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { requirePlatformAdmin } from '@/lib/auth'
 import { logAuditEvent } from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 export interface SeedTemplateItemInput {
   task:           string
   requires_photo: boolean
@@ -50,6 +51,7 @@ export async function createSeedTemplate(
     return { id: data.id }
   } catch (err) {
     console.error('[createSeedTemplate]', err)
+    reportError(err, { site: 'serverAction.admin.seed-templates.createSeedTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -89,6 +91,7 @@ export async function renameSeedTemplate(
     return {}
   } catch (err) {
     console.error('[renameSeedTemplate]', err)
+    reportError(err, { site: 'serverAction.admin.seed-templates.renameSeedTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -125,6 +128,7 @@ export async function setSeedTemplateAutoInclude(
     return {}
   } catch (err) {
     console.error('[setSeedTemplateAutoInclude]', err)
+    reportError(err, { site: 'serverAction.admin.seed-templates.setSeedTemplateAutoInclude' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -159,6 +163,7 @@ export async function deleteSeedTemplate(
     return {}
   } catch (err) {
     console.error('[deleteSeedTemplate]', err)
+    reportError(err, { site: 'serverAction.admin.seed-templates.deleteSeedTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -205,6 +210,7 @@ export async function saveSeedTemplateItems(
     return { saved: items.length }
   } catch (err) {
     console.error('[saveSeedTemplateItems]', err)
+    reportError(err, { site: 'serverAction.admin.seed-templates.saveSeedTemplateItems' })
     return { error: 'Operation failed. Please try again.', saved: 0 }
   }
 }

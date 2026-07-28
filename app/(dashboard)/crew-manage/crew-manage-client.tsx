@@ -475,11 +475,23 @@ function InviteButton({ memberId, inviteSentAt }: { memberId: string; inviteSent
 
 function AddCrewForm({ onSuccess }: { onSuccess: () => void }) {
   const [state, formAction, pending] = useActionState(addCrewMember, null)
+  const succeeded = state?.success === true
 
-  if (state?.success) {
-    onSuccess()
-    return null
-  }
+  // onSuccess() used to be called inline during render. That is a setState on
+  // the PARENT while a child is rendering — React disallows it, and here it
+  // raced the RSC refresh: addCrewMember() calls revalidatePath('/crew-manage'),
+  // and the parent renders `crew` straight from props, so switching to the list
+  // view during render could commit the old prop and leave the just-added member
+  // invisible until the next navigation. Nothing re-renders it afterwards, which
+  // is exactly the "added crew member never appears" e2e failure.
+  //
+  // In an effect the view switch happens after commit, in the same pass that
+  // applies the refreshed props.
+  useEffect(() => {
+    if (succeeded) onSuccess()
+  }, [succeeded, onSuccess])
+
+  if (succeeded) return null
 
   return (
     <div className="mb-6 p-4 rounded-lg border border-themed" style={{ background: 'var(--bg-canvas)' }}>

@@ -35,6 +35,7 @@ import {
 import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { unmappedBookingStatus }        from '@/lib/bookings/normalize'
 
+import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'hostaway'
 
 export const hostawayInitialSync = inngest.createFunction(
@@ -187,6 +188,7 @@ export const hostawayInitialSync = inngest.createFunction(
             ids.push(...newIds)
           } catch (err) {
             logger.error(`[Hostaway:${user_id}] Turnover generation failed for ${propertyId}: ${err}`)
+            reportError(err, { site: 'inngest.hostaway-initial-sync.generate-turnovers' })
             // Don't let one property's failure block the others
           }
         }
@@ -238,6 +240,7 @@ export const hostawayInitialSync = inngest.createFunction(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       logger.error(`[Hostaway:${user_id}] initial sync failed: ${msg}`)
+      reportError(err, { site: 'inngest.hostaway-initial-sync.mark-complete' })
 
       await step.run('handle-sync-failure', async () => {
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })

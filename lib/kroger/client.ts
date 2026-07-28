@@ -17,6 +17,7 @@ import type {
   KrogerCartItem,
 } from './types'
 
+import { reportError } from '@/lib/observability/report-error'
 const KROGER_API_BASE  = 'https://api.kroger.com/v1'
 const KROGER_AUTH_BASE = 'https://api.kroger.com/v1/connect/oauth2'
 
@@ -58,6 +59,7 @@ async function krogerFetch(
     // Redis unavailable or otherwise erroring — fail open. Don't block
     // every Kroger call over an infrastructure issue on our side.
     console.error('[Kroger] rate limit check failed — proceeding without it', err)
+    reportError(err, { site: 'lib.kroger.client.Kroger' })
   }
 
   const res = await fetch(input, init)

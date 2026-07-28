@@ -6,6 +6,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { logAuditEvent } from '@/lib/audit'
 import { inngest } from '@/lib/inngest/client'
 
+import { reportError } from '@/lib/observability/report-error'
 export interface PlatformTemplateItemInput {
   catalog_item_id: string
   par_level:       number
@@ -46,6 +47,7 @@ export async function createPlatformInventoryTemplate(
     return { id: data.id }
   } catch (err) {
     console.error('[createPlatformInventoryTemplate]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-templates.createPlatformInventoryTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -86,6 +88,7 @@ export async function renamePlatformInventoryTemplate(
     return {}
   } catch (err) {
     console.error('[renamePlatformInventoryTemplate]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-templates.renamePlatformInventoryTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -120,6 +123,7 @@ export async function deletePlatformInventoryTemplate(
     return {}
   } catch (err) {
     console.error('[deletePlatformInventoryTemplate]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-templates.deletePlatformInventoryTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -167,6 +171,7 @@ export async function savePlatformInventoryTemplateItems(
     return { saved: items.length }
   } catch (err) {
     console.error('[savePlatformInventoryTemplateItems]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-templates.savePlatformInventoryTemplateItems' })
     return { error: 'Operation failed. Please try again.', saved: 0 }
   }
 }
@@ -206,6 +211,7 @@ export async function broadcastPlatformInventoryTemplate(
     return { dispatched: true }
   } catch (err) {
     console.error('[broadcastPlatformInventoryTemplate]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-templates.broadcastPlatformInventoryTemplate' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -234,6 +240,7 @@ export async function listOrgsForBroadcast(): Promise<{ orgs?: { id: string; nam
     return { orgs: data ?? [] }
   } catch (err) {
     console.error('[listOrgsForBroadcast]', err)
+    reportError(err, { site: 'serverAction.admin.inventory-templates.listOrgsForBroadcast' })
     return { error: 'Failed to load accounts.' }
   }
 }

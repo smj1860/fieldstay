@@ -1,8 +1,9 @@
 import Dexie, { type Table } from 'dexie'
 
-// Mirrors lib/powersync/schema.ts table-for-table. Column types follow the
-// same convention PowerSync uses: column.integer for booleans (0/1) and
-// column.text for everything else, including ids and timestamps.
+import { reportError } from '@/lib/observability/report-error'
+// Table shapes mirror the Supabase tables they cache. Booleans are stored as
+// integers (0/1) and everything else — including ids and timestamps — as text,
+// so rows round-trip through IndexedDB without type coercion surprises.
 
 export interface TurnoverRow {
   id:                string
@@ -122,7 +123,7 @@ export interface PropertyAssetRow {
   photo_url:   string
 }
 
-// localOnly in PowerSync — never synced as its own table, purely a local queue.
+// Local-only: never synced as its own table, purely a local queue.
 export interface PendingPhotoUploadRow {
   id:             string
   target_table:   string
@@ -350,6 +351,7 @@ export async function closeDexieDb(): Promise<void> {
       await Dexie.delete(dbName)
     } catch (err) {
       console.error('[Dexie] Failed to delete DB on logout:', err)
+      reportError(err, { site: 'lib.dexie.schema.Dexie' })
       // Non-fatal: the closed connection already prevents reads;
       // the delete just ensures no residual storage remains.
     }
@@ -359,6 +361,7 @@ export async function closeDexieDb(): Promise<void> {
         await Dexie.delete(`fieldstay-photo-queue-${formerUserId}`)
       } catch (err) {
         console.error('[Dexie] Failed to delete photo blob store on logout:', err)
+        reportError(err, { site: 'lib.dexie.schema.Dexie' })
       }
     }
   }

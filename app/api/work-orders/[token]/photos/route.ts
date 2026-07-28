@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { workOrderRatelimit } from '@/lib/rate-limit'
 import { extractClientIp } from '@/lib/integrations/webhook-verification'
 
+import { reportError } from '@/lib/observability/report-error'
 /**
  * POST /api/work-orders/[token]/photos — upload completion photos, one call
  * per file. Uploaded eagerly as the vendor selects each photo (not bundled
@@ -34,6 +35,7 @@ async function checkPhotoRateLimit(request: NextRequest): Promise<NextResponse |
     }
   } catch (rlErr) {
     console.error('[work-orders/photos] rate limit check failed', rlErr)
+    reportError(rlErr, { site: 'route.work-orders.photos.checkPhotoRateLimit' })
   }
   return null
 }

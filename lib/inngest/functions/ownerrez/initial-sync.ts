@@ -39,6 +39,7 @@ import {
 } from '@/lib/guidebook/sync'
 import { mergeIntegrationConnectionMetadata } from '@/lib/integrations/connection-metadata'
 
+import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'ownerrez'
 
 async function writeSyncCount(
@@ -97,6 +98,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           logger.warn(
             `[OwnerRez:${user_id}] writeSyncCount properties_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
           )
+          reportError(countErr, { site: 'inngest.ownerrez-initial-sync.fetch-properties' })
         }
 
         if (!properties.length) return { ids: [] as number[], patchData: [] as typeof patchData }
@@ -258,6 +260,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           ) as Record<string, OwnerRezListing>
         } catch (err) {
           logger.warn(`[OwnerRez:${user_id}] getListings failed — continuing without amenities: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.ownerrez-initial-sync.fetch-listings-batch' })
           return {} as Record<string, OwnerRezListing>
         }
       })
@@ -382,6 +385,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           logger.info(`[OwnerRez:${user_id}] Asset discovery seeded for ${seeded}/${total} properties`)
         } catch (err) {
           logger.warn(`[OwnerRez:${user_id}] asset discovery seed failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.ownerrez-initial-sync.seed-asset-discovery-from-amenities' })
         }
       })
 
@@ -397,6 +401,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           logger.info(`[OwnerRez:${user_id}] Present-asset seeding: ${seeded}/${total} properties`)
         } catch (err) {
           logger.error(`[OwnerRez:${user_id}] present-asset seeding failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.ownerrez-initial-sync.seed-present-assets-from-amenities' })
           // Non-fatal — don't throw, don't block the sync
         }
       })
@@ -415,6 +420,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           await createGuidebookPropertyConfigsForProperties(org_id)
         } catch (err) {
           logger.error(`[OwnerRez:${user_id}] guidebook config creation failed: ${err instanceof Error ? err.message : String(err)}`)
+          reportError(err, { site: 'inngest.ownerrez-initial-sync.create-guidebook-property-configs' })
           // Non-fatal — don't throw, don't block the sync
         }
       })
@@ -438,6 +444,7 @@ export const ownerRezInitialSync = inngest.createFunction(
             logger.warn(
               `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
             )
+            reportError(countErr, { site: 'inngest.ownerrez-initial-sync.fetch-bookings' })
           }
           return {
             cursor: new Date().toISOString(), count: 0,
@@ -522,6 +529,7 @@ export const ownerRezInitialSync = inngest.createFunction(
           logger.warn(
             `[OwnerRez:${user_id}] writeSyncCount bookings_found failed: ${countErr instanceof Error ? countErr.message : String(countErr)}`
           )
+          reportError(countErr, { site: 'inngest.ownerrez-initial-sync.fetch-bookings' })
         }
 
         return { cursor: fetchStartedAt, count: bookings.length, affectedPropertyIds, bookingsToPostRevenue }  // MEDIUM-3: pre-fetch timestamp
@@ -586,6 +594,7 @@ export const ownerRezInitialSync = inngest.createFunction(
             logger.error(
               `[OwnerRez:${user_id}] Turnover generation failed for property ${propertyId}: ${err}`
             )
+            reportError(err, { site: 'inngest.ownerrez-initial-sync.generate-turnovers' })
             // Don't let one property's failure block the others
           }
         }
@@ -623,6 +632,7 @@ export const ownerRezInitialSync = inngest.createFunction(
       logger.error(
         `[OwnerRez:${user_id}] initial sync failed: ${err instanceof Error ? err.message : String(err)}`
       )
+      reportError(err, { site: 'inngest.ownerrez-initial-sync.fetch-new-turnover-data' })
 
       await step.run('handle-sync-failure', async () => {
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })

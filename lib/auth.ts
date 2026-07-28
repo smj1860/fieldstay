@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation'
 import type { MemberRole } from '@/types/database'
 import { logAuditEvent } from '@/lib/audit'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { reportError } from '@/lib/observability/report-error'
+import { setActorContext, setTenantContext } from '@/lib/observability/sentry-context'
 
 export interface OrgMembership {
   org_id: string
@@ -34,6 +36,12 @@ export interface OrgMembership {
 const getAuthContext = cache(async () => {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+
+  // Attach the actor to this request's Sentry scope. Every issue previously
+  // reported "Users: 0" because nothing ever set one, so impact was invisible.
+  // UUID only — see setActorContext for why email is deliberately excluded.
+  if (user) setActorContext(user.id)
+
   return { supabase, user }
 })
 
@@ -41,19 +49,67 @@ const getMembershipContext = cache(async () => {
   const { supabase, user } = await getAuthContext()
   if (!user) return { supabase, user, membership: null }
 
-  const { data: row } = await supabase
+  // organization_members is a many-to-many join table, so a user CAN hold more
+  // than one accepted membership — anyone managing properties under two legal
+  // entities, an agency serving multiple clients, or any account merge.
+  //
+  // This used to be .single(), which returns a PGRST116 error rather than a row
+  // as soon as a second accepted membership exists. The error was discarded
+  // (only `data` was destructured), so the user fell through to membership:null
+  // and requireOrgMember() redirected them to /onboarding — locked out of BOTH
+  // orgs, silently, with nothing thrown to explain it.
+  //
+  // Ordering by invite_accepted_at makes the choice deterministic (oldest
+  // membership wins) instead of leaving it to Postgres row order, so a
+  // single-org user's behaviour is byte-identical to before. There is no org
+  // switcher yet: a genuine multi-org user lands in their oldest org and cannot
+  // reach the others. That is strictly better than being locked out of all of
+  // them, but it is an interim state — the real fix needs a persisted
+  // active-org selection and a switcher in the layout.
+  const { data: rows, error } = await supabase
     .from('organization_members')
     .select(`
-      org_id, role,
+      org_id, role, invite_accepted_at,
       organizations ( name, plan, plan_status, max_properties, trial_ends_at, repuguard_status, onboarding_steps_completed )
     `)
     .eq('user_id', user.id)
     .not('invite_accepted_at', 'is', null)
-    .single()
+    .order('invite_accepted_at', { ascending: true })
 
-  if (!row) return { supabase, user, membership: null }
+  if (error) {
+    // Distinguish a real query failure from "this user has no memberships" —
+    // both used to collapse into the same silent redirect to /onboarding.
+    reportError(error, { site: 'lib.auth.getMembershipContext' })
+    return { supabase, user, membership: null }
+  }
+
+  if (!rows || rows.length === 0) return { supabase, user, membership: null }
+
+  if (rows.length > 1) {
+    // Not an error, but we have no UI for it yet and the user is silently
+    // confined to one org. Surfacing it means we find out from Sentry rather
+    // than from a support ticket.
+    reportError(
+      new Error('User holds multiple accepted org memberships; no org switcher exists yet'),
+      {
+        site:  'lib.auth.getMembershipContext',
+        orgId: rows[0]!.org_id,
+        extra: { membership_count: rows.length },
+      },
+    )
+  }
+
+  const row = rows[0]!
 
   const orgData = unwrapJoin(row.organizations)
+
+  // Tag the request with its tenant so "is this one org or all of them" is
+  // answerable from the Sentry issue list, without opening an event.
+  setTenantContext({
+    orgId: row.org_id,
+    role:  row.role as string,
+    plan:  orgData?.plan ?? undefined,
+  })
 
   const membership: OrgMembership = {
     org_id: row.org_id,

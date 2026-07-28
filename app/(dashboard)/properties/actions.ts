@@ -126,6 +126,7 @@ export async function createProperty(
     // actually happens; only genuine failures fall through below.
     unstable_rethrow(err)
     console.error('[createProperty]', err)
+    reportError(err, { site: 'serverAction.properties.createProperty' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -209,6 +210,7 @@ export async function updateProperty(
     return { success: true }
   } catch (err) {
     console.error('[updateProperty]', err)
+    reportError(err, { site: 'serverAction.properties.updateProperty' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -258,6 +260,7 @@ export async function revealPropertyDoorCode(
     return { doorCode: (doorCode as string | null) ?? null }
   } catch (err) {
     console.error('[revealPropertyDoorCode]', err)
+    reportError(err, { site: 'serverAction.properties.revealPropertyDoorCode' })
     return { error: 'Operation failed. Please try again.' }
   }
 }
@@ -314,6 +317,7 @@ export async function markStepComplete(
     revalidatePath(`/properties/${propertyId}`)
   } catch (err) {
     console.error('[markStepComplete]', err)
+    reportError(err, { site: 'serverAction.properties.markStepComplete' })
     throw err
   }
 }
@@ -684,6 +688,7 @@ export async function archiveProperty(propertyId: string): Promise<void> {
     // so throw a generic message rather than the raw error.
     unstable_rethrow(err)
     console.error('[archiveProperty]', err)
+    reportError(err, { site: 'serverAction.properties.archiveProperty' })
     throw new Error('Failed to archive property. Please try again.')
   }
 }

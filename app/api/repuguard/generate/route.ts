@@ -6,6 +6,7 @@ import { repuguardLimiter } from '@/lib/rate-limit'
 import { logAuditEvent } from '@/lib/audit'
 import { generateReviewResponse } from '@/lib/repuguard/generate-response'
 
+import { reportError } from '@/lib/observability/report-error'
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies()
   const supabase = createServerClient(
@@ -125,6 +126,7 @@ export async function POST(request: NextRequest) {
     // retirement run undiagnosed for a month behind a generic message.
     // Never collapse this back to a bare `catch {}`.
     console.error('[RepuGuard] Response generation failed:', err instanceof Error ? err.message : err)
+    reportError(err, { site: 'route.repuguard.generate.RepuGuard' })
     const message = err instanceof Error && err.message.toLowerCase().includes('json')
       ? 'The AI response could not be parsed. Try regenerating.'
       : 'Response generation failed. Please try again in a moment.'

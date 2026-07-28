@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { CREW_VISIBILITY_FAQ, TEAM_ACCESS_FAQ } from '@/lib/faq-content'
 
 const MARKETING_FAQ = [
   {
@@ -27,6 +28,16 @@ const MARKETING_FAQ = [
   {
     q: 'What happens when my trial ends?',
     a: 'After 14 days you\'ll be prompted to choose a plan. If you don\'t subscribe, your account is paused and your data is retained for 30 days so you can pick back up without losing anything. No credit card is required to start.',
+  },
+  {
+    // Shared verbatim with the other landing page and the in-app help page —
+    // see lib/faq-content.ts for the claim-by-claim RLS backing.
+    q: CREW_VISIBILITY_FAQ.question,
+    a: CREW_VISIBILITY_FAQ.answer,
+  },
+  {
+    q: TEAM_ACCESS_FAQ.question,
+    a: TEAM_ACCESS_FAQ.answer,
   },
 ] as const
 

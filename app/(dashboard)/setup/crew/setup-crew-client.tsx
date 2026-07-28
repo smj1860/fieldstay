@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useActionState } from 'react'
-import { Plus, Check, AlertTriangle } from 'lucide-react'
+import { Plus, Check, AlertTriangle, Eye } from 'lucide-react'
 import {
   addCrewMember,
   inviteCrewMember,
@@ -51,6 +51,38 @@ export function SetupCrewStep({ crew: initialCrew, continueAction }: Props) {
           Add cleaning and maintenance team members. Invite them to the crew app after adding.
           These team members belong to your organization and can be assigned to any property —
           you&apos;ll choose who works which turnover as bookings come in.
+        </p>
+      </div>
+
+      {/*
+        Answers the question every PM asks before inviting an outside cleaner:
+        what will this person be able to see? Placed above the add form so it
+        is read before the decision, not after.
+
+        Same claim set as CREW_VISIBILITY_FAQ in lib/faq-content.ts — if the
+        access model changes, both need updating. That file carries the
+        claim-by-claim note on which RLS policy backs each one. Financials are
+        scoped to "the crew app" rather than stated absolutely, because RLS is
+        row-level, not column-level: the crew sync never pulls cost columns,
+        but a crew token could still read them on rows already visible to it.
+      */}
+      <div
+        className="flex items-start gap-3 px-4 py-3 rounded-xl"
+        style={{
+          backgroundColor: 'var(--accent-blue-dim)',
+          border:          '1px solid var(--accent-blue)',
+        }}
+      >
+        <Eye
+          className="w-4 h-4 flex-shrink-0 mt-0.5"
+          style={{ color: 'var(--accent-blue)' }}
+          aria-hidden="true"
+        />
+        <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+          <span className="font-semibold">Crew view —</span>{' '}
+          Crew only see turnovers and inventory for properties actively assigned
+          to them. Guest details and unassigned listings remain completely
+          hidden, and the crew app never shows financials.
         </p>
       </div>
 

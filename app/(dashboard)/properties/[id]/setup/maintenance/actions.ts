@@ -6,6 +6,7 @@ import { requireOrgMember } from '@/lib/auth'
 import { markStepComplete } from '@/app/(dashboard)/properties/actions'
 import { logAuditEvent } from '@/lib/audit'
 
+import { reportError } from '@/lib/observability/report-error'
 export type MaintenanceState = { error?: string; success?: boolean }
 
 export async function addMaintenanceSchedule(
@@ -72,6 +73,7 @@ export async function addMaintenanceSchedule(
     return { success: true }
   } catch (err) {
     console.error('[addMaintenanceSchedule]', err)
+    reportError(err, { site: 'serverAction.properties.setup.maintenance.addMaintenanceSchedule' })
     return { error: 'Failed to save schedule. Please try again.' }
   }
 }
@@ -93,6 +95,7 @@ export async function deleteMaintenanceSchedule(id: string, propertyId: string):
     revalidatePath(`/properties/${propertyId}/setup/maintenance`)
   } catch (err) {
     console.error('[deleteMaintenanceSchedule]', err)
+    reportError(err, { site: 'serverAction.properties.setup.maintenance.deleteMaintenanceSchedule' })
     throw err
   }
 }
@@ -104,6 +107,7 @@ export async function completeMaintenanceStep(propertyId: string): Promise<void>
   } catch (err) {
     unstable_rethrow(err)
     console.error('[completeMaintenanceStep]', err)
+    reportError(err, { site: 'serverAction.properties.setup.maintenance.completeMaintenanceStep' })
     throw err
   }
 }
@@ -189,6 +193,7 @@ export async function cloneMaintenanceFromProperty(
     return { added: toInsert.length, skipped }
   } catch (err) {
     console.error('[cloneMaintenanceFromProperty]', err)
+    reportError(err, { site: 'serverAction.properties.setup.maintenance.cloneMaintenanceFromProperty' })
     return { added: 0, skipped: 0, error: 'Operation failed. Please try again.' }
   }
 }

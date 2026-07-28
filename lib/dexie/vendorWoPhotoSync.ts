@@ -9,6 +9,7 @@ import {
 } from './vendorPhotoQueue'
 import { compressPhotoForQueue } from './photo-queue'
 
+import { reportError } from '@/lib/observability/report-error'
 const MAX_RETRIES = 5
 
 // Mirrors uploadVendorCompletion's terminal/transient split in
@@ -77,6 +78,7 @@ export async function processPendingVendorPhotoUploads(token: string): Promise<v
       } catch (err) {
         if (err instanceof TerminalPhotoError) {
           console.error(`[vendorWoPhotoSync] photo ${id} terminal failure:`, err.message)
+          reportError(err, { site: 'lib.dexie.vendorWoPhotoSync.vendorWoPhotoSync' })
           await db.pendingPhotos.update(id, { status: 'failed' })
           continue
         }
@@ -158,6 +160,7 @@ export async function removeVendorPendingPhoto(token: string, photoRowId: number
       }
     } catch (err) {
       console.error(`[vendorWoPhotoSync] network error deleting photo row ${photoRowId} — keeping local row`, err)
+      reportError(err, { site: 'lib.dexie.vendorWoPhotoSync.vendorWoPhotoSync' })
       return false
     }
   }

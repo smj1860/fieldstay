@@ -6,6 +6,7 @@ import { createServiceClient }           from '@/lib/supabase/server'
 import { readIntegrationToken, disconnectIntegrationToken } from '@/lib/integrations/vault'
 import { getProvider }                   from '@/lib/integrations/registry'
 import { logAuditEvent }                 from '@/lib/audit'
+import { reportError } from '@/lib/observability/report-error'
 // Hostaway is not fully implemented yet (see connectWithApiKey below) —
 // storeIntegrationToken and hostawayExchangeCredentials are unused while
 // it's disabled. Re-add both imports when re-enabling.
@@ -213,6 +214,7 @@ export async function disconnectIntegration(
         }
       } catch (err) {
         console.error(`[disconnect:${providerId}] Provider revocation failed:`, err instanceof Error ? err.message : err)
+        reportError(err, { site: 'serverAction.settings.integrations.disconnectIntegration' })
         // Non-fatal — continue with local cleanup
       }
     }
@@ -238,6 +240,7 @@ export async function disconnectIntegration(
 
   } catch (err) {
     console.error(`[disconnect:${providerId}] Failed:`, err instanceof Error ? err.message : err)
+    reportError(err, { site: 'serverAction.settings.integrations.disconnectIntegration' })
     return { error: 'Failed to disconnect. Please try again.' }
   }
 }

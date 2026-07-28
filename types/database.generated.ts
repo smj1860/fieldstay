@@ -1,18 +1,32 @@
 /**
  * FieldStay — Generated Supabase Types (Reference)
  *
- * Auto-generated from the live Supabase project (vpmznjktllhmmbfnxuvk)
- * via the Supabase MCP generate_typescript_types tool on 2026-07-16.
+ * Auto-generated from the live Supabase project (vpmznjktllhmmbfnxuvk).
+ * DO NOT EDIT BY HAND. Regenerate with:  pnpm run types:supabase
+ * (requires a logged-in Supabase CLI: `supabase login`, or a
+ * SUPABASE_ACCESS_TOKEN in the environment.)
  *
- * This file is NOT imported anywhere in the app. types/database.ts is the
- * hand-maintained file that the codebase actually imports from (flat
- * per-table interfaces). Use this file as a drift-check reference: when
- * adding/changing columns, cross-check the Row/Insert/Update shapes here
- * against types/database.ts to make sure the hand-written types match the
- * live schema.
+ * ⚠️  STALE — generated 2026-07-16. The schema has moved on since: this file
+ * is missing platform_inventory_templates and everything else added by the 44
+ * migrations dated after that. Regenerate before relying on it, and
+ * especially before wiring it into lib/supabase/server.ts.
  *
- * Do not import from this file. Regenerate by re-running
- * generate_typescript_types against vpmznjktllhmmbfnxuvk.
+ * Not currently imported by the app. types/database.ts is the hand-maintained
+ * file the codebase actually imports from (flat per-table interfaces, plus the
+ * domain scalar unions MemberRole/WoStatus/...). Use this file as a drift-check
+ * reference: when adding or changing columns, cross-check the Row/Insert/Update
+ * shapes here against types/database.ts.
+ *
+ * The intended end state is for this file to type the wire — createClient() and
+ * createServiceClient() in lib/supabase/server.ts currently omit the <Database>
+ * generic, so every .from(...).select(...) in the app resolves to `any`.
+ * Measured 2026-07-27: applying the generic against THIS (stale) file surfaces
+ * 384 type errors. A large share are artifacts of the staleness above — one
+ * missing column on work_orders cascades into ~40 errors in a single file — so
+ * regenerating is a prerequisite for getting a real number, not an optional
+ * first step. See scripts/check-type-drift.mjs, which already gates enum and
+ * column presence in CI; what the generic would add on top is nullability and
+ * write-shape correctness.
  */
 
 export type Json =
