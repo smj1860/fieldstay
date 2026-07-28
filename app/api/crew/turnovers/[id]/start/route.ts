@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
+import { isCrewAssignedToTurnover } from '@/lib/turnovers/assignment'
 import { logAuditEvent } from '@/lib/audit'
 
 /**
@@ -28,6 +29,10 @@ export async function POST(
     .single()
 
   if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
+
+  if (!(await isCrewAssignedToTurnover(supabase, turnover_id, crew.id))) {
+    return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
+  }
 
   // Already in progress or further along — no-op (safe for retried uploads)
   if (turnover.status !== 'assigned') {

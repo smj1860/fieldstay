@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireCrewMember } from '@/lib/crew-auth'
 import { inngest } from '@/lib/inngest/client'
 import { resolveTurnoverCompletedAt } from '@/lib/turnovers/completion'
+import { isCrewAssignedToTurnover } from '@/lib/turnovers/assignment'
 import { logAuditEvent } from '@/lib/audit'
 
 /**
@@ -31,6 +32,10 @@ export async function POST(
     .single()
 
   if (!turnover) return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
+
+  if (!(await isCrewAssignedToTurnover(supabase, turnover_id, crew.id))) {
+    return NextResponse.json({ error: 'Turnover not found' }, { status: 404 })
+  }
 
   // Already completed (e.g. retried upload) — no-op, don't re-fire the event.
   if (turnover.status === 'completed') {

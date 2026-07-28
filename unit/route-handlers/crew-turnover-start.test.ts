@@ -83,9 +83,25 @@ describe('POST /api/crew/turnovers/[id]/start', () => {
     expect(lookupCall?.args).toEqual(['org_id', 'org_1'])
   })
 
+  it('H-7: returns 404 when the crew member has no turnover_assignments row for this turnover', async () => {
+    const supabase = makeSupabase({
+      turnovers:            [{ data: { id: 'turnover_1', org_id: 'org_1', status: 'assigned' }, error: null }],
+      turnover_assignments: [{ data: null, error: null }], // not assigned
+    })
+    authOk(supabase)
+
+    const res = await call('turnover_1')
+    const json = await res.json()
+
+    expect(res.status).toBe(404)
+    expect(json).toEqual({ error: 'Turnover not found' })
+    expect(inngest.send).not.toHaveBeenCalled()
+  })
+
   it('no-ops without re-firing the event when the turnover is not in the assigned state', async () => {
     const supabase = makeSupabase({
-      turnovers: [{ data: { id: 'turnover_1', org_id: 'org_1', status: 'in_progress' }, error: null }],
+      turnovers:            [{ data: { id: 'turnover_1', org_id: 'org_1', status: 'in_progress' }, error: null }],
+      turnover_assignments: [{ data: { id: 'assignment_1' }, error: null }],
     })
     authOk(supabase)
 
@@ -102,6 +118,7 @@ describe('POST /api/crew/turnovers/[id]/start', () => {
         { data: { id: 'turnover_1', org_id: 'org_1', status: 'assigned' }, error: null },
         { data: null, error: null }, // claim update — lost the race
       ],
+      turnover_assignments: [{ data: { id: 'assignment_1' }, error: null }],
     })
     authOk(supabase)
 
@@ -118,6 +135,7 @@ describe('POST /api/crew/turnovers/[id]/start', () => {
         { data: { id: 'turnover_1', org_id: 'org_1', status: 'assigned' }, error: null },
         { data: null, error: { message: 'db down' } },
       ],
+      turnover_assignments: [{ data: { id: 'assignment_1' }, error: null }],
     })
     authOk(supabase)
 
@@ -133,6 +151,7 @@ describe('POST /api/crew/turnovers/[id]/start', () => {
         { data: { id: 'turnover_1', org_id: 'org_1', status: 'assigned' }, error: null },
         { data: { id: 'turnover_1' }, error: null },
       ],
+      turnover_assignments: [{ data: { id: 'assignment_1' }, error: null }],
     })
     authOk(supabase, 'org_1')
 
