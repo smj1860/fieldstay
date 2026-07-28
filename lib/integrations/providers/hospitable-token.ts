@@ -15,6 +15,7 @@
 // ============================================================
 
 import { createServiceClient }         from '@/lib/supabase/server'
+import { redis }                       from '@/lib/rate-limit'
 import {
   readIntegrationToken,
   readIntegrationRefreshToken,
@@ -25,6 +26,19 @@ import {
 const HOSPITABLE_TOKEN_URL   = 'https://auth.hospitable.com/oauth/token'
 const HOSPITABLE_PROVIDER_ID = 'hospitable'
 const REFRESH_WINDOW_MINUTES = 30
+
+// Refresh-token rotation makes concurrent refreshes for the SAME user unsafe:
+// if two exchanges interleave, the loser's now-superseded refresh token is what
+// ends up in Vault, and the next refresh (up to an hour later, once Hospitable's
+// 60-min old-token grace expires) fails with invalid_grant. Several Inngest
+// functions can hit getValidHospitableToken() for one user simultaneously, so
+// the window is real, not theoretical.
+//
+// 20s TTL: comfortably longer than a token exchange + two Vault writes, short
+// enough that a crashed holder self-heals within one Inngest step retry.
+const REFRESH_LOCK_TTL_SECONDS = 20
+const REFRESH_LOCK_WAIT_MS     = 250
+const REFRESH_LOCK_MAX_WAITS   = 60   // ~15s ceiling
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -55,17 +69,100 @@ export async function getValidHospitableToken(userId: string): Promise<string> {
     const token = await readIntegrationToken(userId, HOSPITABLE_PROVIDER_ID)
     if (!token) {
       // Connection row exists but Vault secret was deleted — treat as expired
-      return refreshHospitableToken(userId, connection.external_user_id ?? '')
+      return refreshHospitableTokenLocked(userId, connection.external_user_id ?? '')
     }
     return token
   }
 
-  return refreshHospitableToken(userId, connection.external_user_id ?? '')
+  return refreshHospitableTokenLocked(userId, connection.external_user_id ?? '')
+}
+
+/**
+ * Best-effort mutual exclusion around a per-user token refresh.
+ *
+ * Returns true if the lock was acquired. On Redis failure it returns TRUE
+ * (fail-open) — losing the lock degrades to today's behaviour, whereas
+ * fail-closed would block every sync in the platform on a Redis blip. The
+ * lock is an optimisation against a rare race, not a correctness barrier.
+ */
+async function acquireRefreshLock(userId: string): Promise<boolean> {
+  try {
+    const result = await redis.set(
+      `hospitable:refresh-lock:${userId}`,
+      '1',
+      { nx: true, ex: REFRESH_LOCK_TTL_SECONDS },
+    )
+    return result === 'OK'
+  } catch (err) {
+    console.warn('[Hospitable] refresh lock unavailable, proceeding unlocked:', err)
+    return true
+  }
+}
+
+async function releaseRefreshLock(userId: string): Promise<void> {
+  try {
+    await redis.del(`hospitable:refresh-lock:${userId}`)
+  } catch {
+    // Non-fatal — the TTL expires it.
+  }
+}
+
+/**
+ * Wraps refreshHospitableToken() in a short Redis lock so concurrent callers
+ * for the same user don't interleave two refresh-token exchanges (Hospitable
+ * rotates refresh tokens, so the loser's token is superseded and silently
+ * stops working an hour later — see the REFRESH_LOCK_* comment above).
+ *
+ * A caller that loses the race polls the connection row instead of racing
+ * the exchange itself, and only refreshes unlocked if the wait ceiling is
+ * hit (the lock holder likely died mid-refresh).
+ */
+async function refreshHospitableTokenLocked(
+  userId:         string,
+  externalUserId: string,
+): Promise<string> {
+  const acquired = await acquireRefreshLock(userId)
+
+  if (acquired) {
+    try {
+      return await refreshHospitableToken(userId, externalUserId)
+    } finally {
+      await releaseRefreshLock(userId)
+    }
+  }
+
+  const admin = getAdminClient()
+  for (let i = 0; i < REFRESH_LOCK_MAX_WAITS; i++) {
+    await new Promise((resolve) => setTimeout(resolve, REFRESH_LOCK_WAIT_MS))
+
+    const { data: connection } = await admin
+      .from('integration_connections')
+      .select('expires_at')
+      .eq('user_id',     userId)
+      .eq('provider_id', HOSPITABLE_PROVIDER_ID)
+      .eq('status',      'active')
+      .single()
+
+    if (connection && !shouldRefresh(connection.expires_at)) {
+      const token = await readIntegrationToken(userId, HOSPITABLE_PROVIDER_ID)
+      if (token) return token
+    }
+  }
+
+  console.warn(
+    `[Hospitable] refresh lock wait ceiling hit for user ${userId} — lock holder likely died, proceeding unlocked`
+  )
+  return refreshHospitableToken(userId, externalUserId)
 }
 
 /**
  * Force-refresh the Hospitable access + refresh token pair for `userId`.
- * Called by the weekly cron regardless of current expiry state.
+ * Called by the weekly cron regardless of current expiry state — deliberately
+ * NOT routed through refreshHospitableTokenLocked(): the cron force-refreshes
+ * on its own schedule regardless of what any concurrent sync call is doing,
+ * and taking a lock the cron itself would immediately contend with every
+ * other caller is a separate concern from the interleaved-exchange race this
+ * lock exists to prevent.
  *
  * @param userId          FieldStay user UUID
  * @param externalUserId  Hospitable account UUID — must be passed to avoid
@@ -107,6 +204,11 @@ export async function refreshHospitableToken(
       break
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
+      // invalid_grant / invalid_client will not become valid on a second
+      // attempt with the same token — fail fast so markConnectionError()
+      // runs immediately and the PM sees "reconnect" without the extra
+      // round trip.
+      if (err instanceof TerminalRefreshError) break
     }
   }
 
@@ -149,6 +251,20 @@ interface HospitableTokenResponse {
   token_type:    string
 }
 
+/**
+ * invalid_grant / invalid_client mean the refresh token itself is dead — a
+ * second attempt with the same token cannot succeed. Distinguished from a
+ * transient failure (network blip, 5xx) so the retry loop can fail fast.
+ */
+class TerminalRefreshError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TerminalRefreshError'
+  }
+}
+
+const TERMINAL_OAUTH_ERRORS = new Set(['invalid_grant', 'invalid_client'])
+
 async function exchangeRefreshToken(params: {
   clientId:     string
   clientSecret: string
@@ -167,10 +283,16 @@ async function exchangeRefreshToken(params: {
 
   if (!response.ok) {
     let detail = `HTTP ${response.status}`
+    let errorCode: string | undefined
     try {
       const body = await response.json() as { error?: string; error_description?: string }
+      errorCode  = body.error
       detail     = body.error_description ?? body.error ?? detail
     } catch { /* ignore parse failure */ }
+
+    if ((response.status === 400 || response.status === 401) && errorCode && TERMINAL_OAUTH_ERRORS.has(errorCode)) {
+      throw new TerminalRefreshError(`Hospitable token refresh returned: ${detail}`)
+    }
     throw new Error(`Hospitable token refresh returned: ${detail}`)
   }
 

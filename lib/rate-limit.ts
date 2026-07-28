@@ -6,6 +6,13 @@ const redis = new Redis({
   token: process.env.upstash_fieldstay_KV_REST_API_TOKEN!,
 })
 
+/**
+ * Exported so token-refresh paths can take a short mutual-exclusion lock.
+ * Deliberately the same client instance as the limiters above — one
+ * connection pool, not two.
+ */
+export { redis }
+
 export const repuguardLimiter = new Ratelimit({
   redis,
   limiter:   Ratelimit.slidingWindow(50, '24 h'),

@@ -140,4 +140,26 @@ describe('hospitableReservationToNormalized', () => {
   it('always returns is_block: false (Hospitable has no owner-block concept)', () => {
     expect(hospitableReservationToNormalized(baseReservation()).is_block).toBe(false)
   })
+
+  // BLOCKER-6 regression fixture: a real captured reservation.changed
+  // delivery (triggers: ["financials_changed"]) for an expired
+  // request-to-book — reservation_status.current: { category: "not accepted",
+  // sub_category: "expired" }. This is exactly the "expired RTB firing a real
+  // financials_changed refetch" scenario the IRRELEVANT_RESERVATION_TRIGGERS
+  // comment in incremental-sync.ts describes needing to handle correctly —
+  // it must never be treated as a confirmed guest stay worth posting revenue
+  // for, regardless of which trigger caused the refetch.
+  it('normalizes an expired request-to-book (financials_changed trigger) to a status that never qualifies for revenue posting', () => {
+    const result = hospitableReservationToNormalized(baseReservation({
+      reservation_status: { current: { category: 'not accepted', sub_category: 'expired' } },
+      stay_type: 'guest_stay',
+    }))
+
+    expect(result.status).toBe('cancelled')
+    // Mirrors incremental-sync.ts's shouldPostRevenue derivation exactly —
+    // status must never combine with stay_type to look like a real,
+    // revenue-worthy confirmed guest stay.
+    const shouldPostRevenue = result.status === 'confirmed' && result.stay_type === 'guest_stay'
+    expect(shouldPostRevenue).toBe(false)
+  })
 })

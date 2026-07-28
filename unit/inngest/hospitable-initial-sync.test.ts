@@ -8,7 +8,8 @@ vi.mock('@/lib/integrations/vault', () => ({
 }))
 vi.mock('@/lib/integrations/providers/hospitable', () => ({
   hospFetchProperties:               vi.fn(),
-  hospFetchReservations:             vi.fn(),
+  hospReservationWindows:            vi.fn(),
+  fetchReservationsWindow:           vi.fn(),
   hospFetchTeammates:                vi.fn(),
   hospitablePropertyToNormalized:    vi.fn(),
   hospitableReservationToNormalized: vi.fn(),
@@ -42,7 +43,8 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { readIntegrationToken } from '@/lib/integrations/vault'
 import {
   hospFetchProperties,
-  hospFetchReservations,
+  hospReservationWindows,
+  fetchReservationsWindow,
   hospFetchTeammates,
   hospitablePropertyToNormalized,
   hospitableReservationToNormalized,
@@ -160,7 +162,12 @@ describe('hospInitialSync', () => {
       { id: 'res_2', __normalized: { external_id: 'res_2', property_external_id: 'hosp_p1', checkin_date: '2026-08-06', checkout_date: '2026-08-08', checkin_time: '16:00', checkout_time: '10:00', status: 'confirmed', guest_name: 'Owner', guest_email: null, source: 'airbnb', is_block: false, stay_type: 'owner_stay', actual_total_amount: null } },
       { id: 'res_3', __normalized: { external_id: 'res_3', property_external_id: 'hosp_unknown', checkin_date: '2026-08-10', checkout_date: '2026-08-12', checkin_time: '16:00', checkout_time: '10:00', status: 'confirmed', guest_name: 'Nowhere', guest_email: null, source: 'airbnb', is_block: false, stay_type: 'guest_stay', actual_total_amount: 200 } },
     ]
-    ;(hospFetchReservations as ReturnType<typeof vi.fn>).mockResolvedValue(rawReservations)
+    // Single window keeps this test focused on the merge/upsert logic
+    // downstream of the fetch — the windowing itself (one Inngest step per
+    // window, no re-fetch of already-fetched windows on a later throw) is
+    // covered by the "one step per window" test below.
+    ;(hospReservationWindows as ReturnType<typeof vi.fn>).mockReturnValue(['2026-08-01'])
+    ;(fetchReservationsWindow as ReturnType<typeof vi.fn>).mockResolvedValue(rawReservations)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(hospitableReservationToNormalized as ReturnType<typeof vi.fn>).mockImplementation((res: any) => res.__normalized)
 
@@ -229,5 +236,87 @@ describe('hospInitialSync', () => {
 
     // Never got past reading the token — no properties/reservations fetched
     expect(hospFetchProperties).not.toHaveBeenCalled()
+  })
+
+  it('runs one step.run per reservation window, and a throw on a later window does not re-invoke earlier windows on retry', async () => {
+    // Real Inngest memoizes each named step's result across a function's
+    // retried invocations — a step that already succeeded is never re-run.
+    // This mock reproduces that specific behavior (persisted across two
+    // invokeHandler calls sharing the same memo Map) to prove the fix: with
+    // one step per window, a throw on window 3 must not cost windows 1-2
+    // their already-consumed rate-limit budget on retry.
+    function makeMemoizingStep(memo: Map<string, unknown>) {
+      return {
+        run: vi.fn(async (name: string, cb: () => unknown) => {
+          if (memo.has(name)) return memo.get(name)
+          const result = await cb()
+          memo.set(name, result)
+          return result
+        }),
+        sleep:     vi.fn(),
+        sendEvent: vi.fn(),
+      }
+    }
+
+    const supabase = makeSupabase({
+      integration_connections: [
+        { error: null },                          // handle-failure: status update (1st attempt)
+        { data: { metadata: {} }, error: null },  // handle-failure -> updateConnectionMeta: read
+        { error: null },                          // handle-failure -> updateConnectionMeta: write
+        { data: { metadata: {} }, error: null },  // mark-complete: read (2nd attempt, succeeds)
+        { error: null },                          // mark-complete: write
+      ],
+    })
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(readIntegrationToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
+
+    ;(hospFetchProperties as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'hosp_p1', name: 'Lakehouse' }])
+    ;(hospitablePropertyToNormalized as ReturnType<typeof vi.fn>).mockImplementation(
+      (p: { id: string; name: string }) => ({ external_id: p.id, name: p.name })
+    )
+    ;(upsertNormalizedProperties as ReturnType<typeof vi.fn>).mockResolvedValue({ hosp_p1: 'prop_uuid_1' })
+    ;(hospReservationWindows as ReturnType<typeof vi.fn>).mockReturnValue(['2026-08-01', '2026-08-08', '2026-08-15'])
+    ;(hospitableReservationToNormalized as ReturnType<typeof vi.fn>).mockReturnValue({
+      external_id: 'res_x', property_external_id: 'hosp_p1', checkin_date: '2026-08-01', checkout_date: '2026-08-02',
+      checkin_time: '16:00', checkout_time: '10:00', status: 'confirmed', guest_name: 'G', guest_email: null,
+      source: 'airbnb', is_block: false, stay_type: 'guest_stay', actual_total_amount: null,
+    })
+    ;(generateTurnoversForProperty as ReturnType<typeof vi.fn>).mockResolvedValue([])
+
+    let windowThreeAttempts = 0
+    ;(fetchReservationsWindow as ReturnType<typeof vi.fn>).mockImplementation(async (_token: string, startDate: string) => {
+      if (startDate === '2026-08-15') {
+        windowThreeAttempts++
+        if (windowThreeAttempts === 1) throw new Error('Hospitable /reservations failed (429)')
+        return []
+      }
+      return []
+    })
+
+    const memo = new Map<string, unknown>()
+
+    // First attempt: window 3 throws, function rejects.
+    await expect(invokeHandler(hospInitialSync, {
+      event:  { data: EVENT_DATA },
+      step:   makeMemoizingStep(memo),
+      logger: makeLogger(),
+    })).rejects.toThrow('429')
+
+    expect(fetchReservationsWindow).toHaveBeenCalledTimes(3)
+    expect(memo.has('fetch-reservations-window-2026-08-01')).toBe(true)
+    expect(memo.has('fetch-reservations-window-2026-08-08')).toBe(true)
+    expect(memo.has('fetch-reservations-window-2026-08-15')).toBe(false) // failed step — never memoized
+
+    // Retry: reuses the SAME memo, simulating Inngest resuming the function.
+    const result = await invokeHandler(hospInitialSync, {
+      event:  { data: EVENT_DATA },
+      step:   makeMemoizingStep(memo),
+      logger: makeLogger(),
+    })
+
+    expect(result).toEqual({ properties: 1, crew_members: 0, reservations: 0 })
+    // Windows 1-2 were NOT re-fetched; only window 3 (previously failed) ran again.
+    expect(fetchReservationsWindow).toHaveBeenCalledTimes(4)
+    expect(windowThreeAttempts).toBe(2)
   })
 })

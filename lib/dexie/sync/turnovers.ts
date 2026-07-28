@@ -33,6 +33,8 @@ import {
   type InventoryItemRow,
 } from '../schema'
 import { getCursor, advanceCursor, partitionByKnown } from './cursors'
+import { fetchInChunks } from './chunked'
+import { reportError } from '@/lib/observability/report-error'
 
 const TURNOVER_COLUMNS =
   'id, property_id, org_id, checkout_datetime, checkin_datetime, window_minutes, status, priority, notes, ' +
@@ -102,28 +104,27 @@ export async function syncAssignedTurnovers(
   if (fresh.length || cursor === null) {
     // No cursor yet (or forced): one full pull of the whole scope
     const fullIds = cursor === null ? assignedIds : fresh
-    const { data, error } = await supabase
-      .from('turnovers')
-      .select(TURNOVER_COLUMNS)
-      .in('id', fullIds)
-    if (error) {
-      console.error('[turnoverSync] turnovers fetch failed:', error)
+    const data = await fetchInChunks<string, Record<string, unknown>>(fullIds, (chunk) =>
+      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk),
+    )
+    if (data === null) {
+      console.error('[turnoverSync] turnovers fetch failed')
+      reportError(new Error('turnovers fetch failed'), { site: 'dexie.sync.turnovers.full' })
       return
     }
-    fetched.push(...(data ?? []))
+    fetched.push(...data)
   }
 
   if (cursor !== null && known.length) {
-    const { data, error } = await supabase
-      .from('turnovers')
-      .select(TURNOVER_COLUMNS)
-      .in('id', known)
-      .gt('updated_at', cursor)
-    if (error) {
-      console.error('[turnoverSync] turnovers delta fetch failed:', error)
+    const data = await fetchInChunks<string, Record<string, unknown>>(known, (chunk) =>
+      supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk).gt('updated_at', cursor),
+    )
+    if (data === null) {
+      console.error('[turnoverSync] turnovers delta fetch failed')
+      reportError(new Error('turnovers delta fetch failed'), { site: 'dexie.sync.turnovers.delta' })
       return
     }
-    fetched.push(...(data ?? []))
+    fetched.push(...data)
   }
 
   if (fetched.length) {
@@ -146,27 +147,33 @@ export async function syncAssignedTurnovers(
       : propertyIds.filter((id) => !cachedPropertyIds.has(id))
 
     if (missingPropertyIds.length) {
-      const { data: properties, error: pErr } = await supabase
-        .from('properties')
-        .select('id, org_id, name, address, city, state, lat, lng, timezone')
-        .in('id', missingPropertyIds)
-      if (pErr) {
-        console.error('[turnoverSync] properties fetch failed:', pErr)
+      const properties = await fetchInChunks(missingPropertyIds, (chunk) =>
+        supabase
+          .from('properties')
+          .select('id, org_id, name, address, city, state, lat, lng, timezone')
+          .in('id', chunk),
+      )
+      if (properties === null) {
+        console.error('[turnoverSync] properties fetch failed')
+        reportError(new Error('properties fetch failed'), { site: 'dexie.sync.turnovers.properties' })
         return
       }
-      if (properties?.length) await db.properties.bulkPut(properties as PropertyRow[])
+      if (properties.length) await db.properties.bulkPut(properties as PropertyRow[])
     }
 
-    const { data: inventory, error: invErr } = await supabase
-      .from('inventory_items')
-      .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
-      .in('property_id', propertyIds)
-      .eq('is_active', true)
-    if (invErr) {
-      console.error('[turnoverSync] inventory fetch failed:', invErr)
+    const inventory = await fetchInChunks(propertyIds, (chunk) =>
+      supabase
+        .from('inventory_items')
+        .select('id, property_id, org_id, name, category, unit, par_level, current_quantity')
+        .in('property_id', chunk)
+        .eq('is_active', true),
+    )
+    if (inventory === null) {
+      console.error('[turnoverSync] inventory fetch failed')
+      reportError(new Error('inventory fetch failed'), { site: 'dexie.sync.turnovers.inventory' })
       return
     }
-    if (inventory?.length) await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
+    if (inventory.length) await db.inventory_items.bulkPut(inventory as InventoryItemRow[])
   }
 
   // ── 5. Checklists ride along; fresh turnover ids skip the cursor ───────
@@ -279,23 +286,27 @@ async function fetchWithCursorSplit(
 
   const fullIds = cursor === null ? [...knownIds, ...freshIds] : freshIds
   if (fullIds.length) {
-    const { data, error } = await supabase
-      .from(table).select(columns).in(scopeColumn, fullIds)
-    if (error) {
-      console.error(`[turnoverSync] ${table} fetch failed:`, error)
+    const data = await fetchInChunks(fullIds, (chunk) =>
+      supabase.from(table).select(columns).in(scopeColumn, chunk),
+    )
+    if (data === null) {
+      console.error(`[turnoverSync] ${table} fetch failed`)
+      reportError(new Error(`${table} fetch failed`), { site: 'dexie.sync.turnovers.checklist_full' })
       return null
     }
-    rows.push(...((data ?? []) as unknown as Record<string, unknown>[]))
+    rows.push(...(data as unknown as Record<string, unknown>[]))
   }
 
   if (cursor !== null && knownIds.length) {
-    const { data, error } = await supabase
-      .from(table).select(columns).in(scopeColumn, knownIds).gt('updated_at', cursor)
-    if (error) {
-      console.error(`[turnoverSync] ${table} delta fetch failed:`, error)
+    const data = await fetchInChunks(knownIds, (chunk) =>
+      supabase.from(table).select(columns).in(scopeColumn, chunk).gt('updated_at', cursor),
+    )
+    if (data === null) {
+      console.error(`[turnoverSync] ${table} delta fetch failed`)
+      reportError(new Error(`${table} delta fetch failed`), { site: 'dexie.sync.turnovers.checklist_delta' })
       return null
     }
-    rows.push(...((data ?? []) as unknown as Record<string, unknown>[]))
+    rows.push(...(data as unknown as Record<string, unknown>[]))
   }
 
   return rows
@@ -316,15 +327,15 @@ export async function pullTurnoversOnly(
   if (!turnoverIds.length) return
   const db = getDexieDb(userId)
 
-  const { data: turnovers, error } = await supabase
-    .from('turnovers')
-    .select(TURNOVER_COLUMNS)
-    .in('id', turnoverIds)
-  if (error) {
-    console.error('[turnoverSync] turnovers re-fetch failed:', error)
+  const turnovers = await fetchInChunks(turnoverIds, (chunk) =>
+    supabase.from('turnovers').select(TURNOVER_COLUMNS).in('id', chunk),
+  )
+  if (turnovers === null) {
+    console.error('[turnoverSync] turnovers re-fetch failed')
+    reportError(new Error('turnovers re-fetch failed'), { site: 'dexie.sync.turnovers.refetch' })
     return
   }
-  if (turnovers?.length) {
+  if (turnovers.length) {
     await db.turnovers.bulkPut(normalizeTurnovers(turnovers as Record<string, unknown>[]))
   }
 }

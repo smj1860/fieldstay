@@ -36,28 +36,50 @@ export const hospPropertyMerge = inngest.createFunction(
   },
   { event: 'integration/hospitable.property_merged' as const },
   async ({ event, step, logger }) => {
-    const { previous_external_id, new_external_id } = event.data
+    const { previous_external_id, new_external_id, external_user_id } = event.data
 
     const result = await step.run('remap-or-flag', async () => {
       const supabase = createServiceClient({ system: 'inngest:property-merge' })
 
-      const { data: previousProperty } = await supabase
+      // When the webhook carries the connected account's own user id, resolve
+      // the org up front and scope both lookups below to it — same co-host
+      // collision risk BLOCKER-1 closes for incremental-sync.ts: an unscoped
+      // (external_id, external_source) match can hit more than one row when
+      // a property is co-hosted across two customers, and .maybeSingle()
+      // throws on more than one match. Falls through to the previous
+      // unscoped behavior when absent (older payload shapes, or a value that
+      // no longer matches an active connection) — no worse than before.
+      let scopedOrgId: string | null = null
+      if (external_user_id) {
+        const { data: connection } = await supabase
+          .from('integration_connections')
+          .select('org_id')
+          .eq('provider_id',      PROVIDER)
+          .eq('external_user_id', external_user_id)
+          .eq('status',           'active')
+          .maybeSingle()
+        scopedOrgId = connection?.org_id ?? null
+      }
+
+      let previousQuery = supabase
         .from('properties')
         .select('id, org_id, name')
         .eq('external_id',     previous_external_id)
         .eq('external_source', PROVIDER)
-        .maybeSingle()
+      if (scopedOrgId) previousQuery = previousQuery.eq('org_id', scopedOrgId)
+      const { data: previousProperty } = await previousQuery.maybeSingle()
 
       if (!previousProperty) {
         return { action: 'skipped', reason: 'no_previous_property' as const }
       }
 
-      const { data: existingNewProperty } = await supabase
+      let newPropertyQuery = supabase
         .from('properties')
         .select('id')
         .eq('external_id',     new_external_id)
         .eq('external_source', PROVIDER)
-        .maybeSingle()
+      if (scopedOrgId) newPropertyQuery = newPropertyQuery.eq('org_id', scopedOrgId)
+      const { data: existingNewProperty } = await newPropertyQuery.maybeSingle()
 
       if (existingNewProperty) {
         // Both sides of the merge already exist as separate FieldStay

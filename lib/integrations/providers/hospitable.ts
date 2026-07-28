@@ -21,6 +21,7 @@ import { RateLimitError, type IntegrationProvider, type TokenResponse } from '@/
 import { hospitableApiLimiter } from '@/lib/rate-limit'
 import { ok, fail, timingSafeEqual, extractClientIp, isIpInCidr } from '@/lib/integrations/webhook-verification'
 import { unwrapJoin } from '@/lib/utils/supabase-joins'
+import { reportError } from '@/lib/observability/report-error'
 import type {
   HospitableUser,
   HospitableProperty,
@@ -253,23 +254,56 @@ export const hospitableProvider: IntegrationProvider = {
   // ⚠️ reservation.changed sends a PARTIAL payload — confirmed from
   // Hospitable's own docs example: a checkin-time-only change delivers
   // data: { check_in: "..." }, with no `id` field on data at all. The
-  // reservation's own id is on the TOP-LEVEL payload.id instead for this
-  // event (differs from review.created, where the top-level id is the
-  // webhook's own ULID and the entity id is nested under data.id) — check
-  // data.id first for reservation.created (which may send the fuller
-  // object) and fall back to the top-level id.
+  // top-level payload `id` is NEVER the reservation's own id, though — it's
+  // the webhook DELIVERY's own id (confirmed via two independent live
+  // captures across two event types: a property.changed delivery and a
+  // reservation.changed delivery both had top-level id ≠ the entity's real
+  // id). Falling back to it (as this used to) sends a GET for the wrong
+  // reservation, gets a 404, and the missing-reservation branch in
+  // incremental-sync.ts silently treats that as a cancellation — discarding
+  // every real partial update (date changes, checkout-time changes, real
+  // cancellations) on an already-synced reservation. Do NOT reintroduce a
+  // `?? data.id` fallback here.
   async handleWebhookEvent({ action, payload }) {
     const data = payload as Record<string, unknown>
 
     const entityData = unwrapJoin(data.data as Record<string, unknown> | Record<string, unknown>[] | null | undefined) ?? undefined
     const entityId   = entityData?.id as string | undefined
 
+    // The connected account's own user id — confirmed present on live
+    // webhook payloads as data.user.id. This is the SAME value stored as
+    // integration_connections.external_user_id at OAuth-connect time (see
+    // exchangeCodeForToken below: externalUserId: user.id), so it lets
+    // resolveHospitableOwner() attribute the entity directly rather than
+    // falling to its cache/local-table/probe chain. Not confirmed present
+    // on every payload shape (message.created's shape is itself unconfirmed
+    // — see the case below), so this is threaded through as optional.
+    const webhookUser     = entityData?.user as { id?: string } | undefined
+    const externalUserId  = webhookUser?.id
+
     switch (action) {
       case 'reservation.created':
       case 'reservation.changed': {
-        const reservationId = entityId ?? (data.id as string | undefined)
+        // entityId comes from data.data.id — only reliably present on
+        // reservation.created (which may send the fuller object). A partial
+        // reservation.changed payload has NO id anywhere that identifies the
+        // reservation: data.data has no `id` field, and the top-level `id` is
+        // the webhook DELIVERY's own id, not the reservation's id (see the
+        // header comment above). With no identifiable id in the payload,
+        // there is no way to know which reservation changed — drop it
+        // loudly rather than guessing with a 404-then-fake-cancel.
+        const reservationId = entityId
         if (!reservationId) {
-          console.warn('[Hospitable webhook] reservation event missing id (checked data.id and payload.id):', { action, keys: Object.keys(data) })
+          console.warn(
+            '[Hospitable webhook] reservation.changed has no resolvable id ' +
+            '(data.data.id absent — partial payload). Dropping; entity cannot ' +
+            'be identified from this payload alone.',
+            { action, keys: Object.keys(data) },
+          )
+          reportError(
+            new Error('Unresolvable reservation.changed payload — no data.data.id'),
+            { site: 'lib.integrations.providers.hospitable.handleWebhookEvent', extra: { action } },
+          )
           break
         }
         const { inngest } = await import('@/lib/inngest/client')
@@ -282,6 +316,7 @@ export const hospitableProvider: IntegrationProvider = {
             entity_type:  'reservation',
             entity_id:    reservationId,
             triggers,
+            external_user_id: externalUserId,
             triggered_at: new Date().toISOString(),
           },
         })
@@ -304,6 +339,7 @@ export const hospitableProvider: IntegrationProvider = {
             event_type:   action,
             entity_type:  'property',
             entity_id:    entityId,
+            external_user_id: externalUserId,
             triggered_at: new Date().toISOString(),
           },
         })
@@ -330,6 +366,7 @@ export const hospitableProvider: IntegrationProvider = {
             provider_id:          'hospitable',
             previous_external_id: previousId,
             new_external_id:      newId,
+            external_user_id:     externalUserId,
             triggered_at:         new Date().toISOString(),
           },
         })
@@ -350,6 +387,7 @@ export const hospitableProvider: IntegrationProvider = {
             event_type:   action,
             entity_type:  'review',
             entity_id:    entityId,
+            external_user_id: externalUserId,
             triggered_at: new Date().toISOString(),
           },
         })
@@ -386,6 +424,7 @@ export const hospitableProvider: IntegrationProvider = {
             event_type:   action,
             entity_type:  'message',
             entity_id:    messageReservationId,
+            external_user_id: externalUserId,
             triggered_at: new Date().toISOString(),
           },
         })
@@ -423,7 +462,15 @@ export const hospitableProvider: IntegrationProvider = {
 export async function hospitableFetch(url: string, token: string): Promise<Response> {
   const { success, reset } = await hospitableApiLimiter.limit('hospitable-api')
   if (!success) {
-    const retryAfterSeconds = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
+    // Jitter (1.0-1.5x) on top of the exact window reset. Without it, every
+    // caller blocked by the same sliding window computes an IDENTICAL
+    // retry-after and they all re-enter the budget on the same tick — a
+    // thundering herd that re-exhausts it instantly. Matters most when
+    // several orgs' initial syncs collide.
+    // eslint-disable-next-line no-restricted-properties -- retry jitter to de-synchronise blocked callers, not id/token generation
+    const jitter            = 1 + Math.random() * 0.5 // NOSONAR -- timing jitter only, not security-sensitive (see eslint-disable justification above)
+    const baseSeconds       = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
+    const retryAfterSeconds = Math.ceil(baseSeconds * jitter)
     throw new RateLimitError(retryAfterSeconds)
   }
 
@@ -518,10 +565,45 @@ export async function hospFetchReservations(
   return Array.from(byId.values())
 }
 
+/**
+ * Enumerates the start_date windows hospFetchReservations() would iterate.
+ *
+ * Exported so hospInitialSync can run ONE Inngest step per window instead of
+ * wrapping the whole ~26-window loop in a single step. Under the shared
+ * hospitableApiLimiter budget, a rate-limit throw mid-loop previously restarted
+ * the entire fetch from window 1, re-spending budget it had already consumed
+ * and burning the function's retry allowance on work it had already done.
+ */
+export function hospReservationWindows(
+  since?:          string,
+  lookaheadMonths: number = RESERVATION_LOOKAHEAD_MONTHS,
+): string[] {
+  const rangeStart = since
+    ? new Date(`${since}T00:00:00Z`)
+    : new Date(Date.now() - RESERVATION_WINDOW_DAYS * 86_400_000)
+
+  const rangeEnd = new Date(rangeStart)
+  rangeEnd.setUTCMonth(rangeEnd.getUTCMonth() + lookaheadMonths)
+
+  const windows: string[] = []
+  for (
+    let windowStart = rangeStart;
+    windowStart < rangeEnd;
+    windowStart = new Date(windowStart.getTime() + RESERVATION_WINDOW_DAYS * 86_400_000)
+  ) {
+    windows.push(windowStart.toISOString().split('T')[0]!)
+  }
+
+  return windows
+}
+
 // Single start_date window, fully paginated. See RESERVATION_WINDOW_DAYS'
 // doc comment above for why hospFetchReservations() calls this in a loop
 // rather than once with one big range.
-async function fetchReservationsWindow(
+//
+// Exported (was module-private) so hospInitialSync can drive the loop from
+// Inngest steps — see hospReservationWindows() above.
+export async function fetchReservationsWindow(
   token: string,
   startDate: string,
   propertyIds?: string[]

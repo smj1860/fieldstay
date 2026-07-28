@@ -6,6 +6,8 @@
 
 import type { DexieSupabaseClient } from './types'
 import { getDexieDb, type PropertyAssetRow } from '../schema'
+import { fetchInChunks } from './chunked'
+import { reportError } from '@/lib/observability/report-error'
 
 // Properties this crew member currently has a stake in — same derivation as
 // assignedPropertyIds in app/crew/page.tsx (active turnovers ∪ assigned work
@@ -32,17 +34,20 @@ export async function syncPropertyAssets(
   if (!propertyIds.length) return
   const db = getDexieDb(userId)
 
-  const { data: assets, error } = await supabase
-    .from('property_assets')
-    .select('id, org_id, property_id, asset_type, make, model, is_na, photo_url')
-    .in('property_id', propertyIds)
-    .eq('is_active', true)
-  if (error) {
-    console.error('[asset sync] property_assets fetch failed:', error)
+  const assets = await fetchInChunks<string, Record<string, unknown>>(propertyIds, (chunk) =>
+    supabase
+      .from('property_assets')
+      .select('id, org_id, property_id, asset_type, make, model, is_na, photo_url')
+      .in('property_id', chunk)
+      .eq('is_active', true),
+  )
+  if (assets === null) {
+    console.error('[asset sync] property_assets fetch failed')
+    reportError(new Error('property_assets fetch failed'), { site: 'dexie.sync.assets.property_assets' })
     return
   }
 
-  if (assets?.length) {
+  if (assets.length) {
     const normalized = assets.map((a: Record<string, unknown>) => ({
       ...a,
       make:      a.make ?? '',

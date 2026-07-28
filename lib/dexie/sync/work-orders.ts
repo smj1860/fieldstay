@@ -15,6 +15,8 @@
 import type { DexieSupabaseClient } from './types'
 import { getDexieDb, type CrewWorkOrderRow, type PropertyRow } from '../schema'
 import { getCursor, advanceCursor } from './cursors'
+import { fetchInChunks } from './chunked'
+import { reportError } from '@/lib/observability/report-error'
 
 const WO_COLUMNS =
   'id, org_id, property_id, assigned_crew_member_id, title, description, ' +
@@ -99,11 +101,18 @@ export async function syncWorkOrders(
       ...new Set(fetched.map((w) => w.property_id as string)),
     ].filter((id) => force || !cachedPropertyIds.has(id))
     if (propertyIds.length) {
-      const { data: properties } = await supabase
-        .from('properties')
-        .select('id, org_id, name, address, city, state, lat, lng, timezone')
-        .in('id', propertyIds)
-      if (properties?.length) await db.properties.bulkPut(properties as PropertyRow[])
+      const properties = await fetchInChunks(propertyIds, (chunk) =>
+        supabase
+          .from('properties')
+          .select('id, org_id, name, address, city, state, lat, lng, timezone')
+          .in('id', chunk),
+      )
+      if (properties === null) {
+        console.error('[work-orders sync] properties fetch failed')
+        reportError(new Error('properties fetch failed'), { site: 'dexie.sync.work_orders.properties' })
+        return
+      }
+      if (properties.length) await db.properties.bulkPut(properties as PropertyRow[])
     }
   }
   await advanceCursor(userId, 'cursor:work_orders', fetched as { updated_at?: string | null }[])

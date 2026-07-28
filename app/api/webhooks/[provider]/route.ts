@@ -27,6 +27,14 @@ import { inngest }                                   from '@/lib/inngest/client'
 import { reportError }                               from '@/lib/observability/report-error'
 import type { WebhookVerificationResult }            from '@/lib/integrations/webhook-verification'
 
+// Accepts only string/number id candidates — payload fields are `unknown`,
+// and a bare `String(a ?? b ?? c ?? '')` chain would silently stringify an
+// unexpected object into the useless literal "[object Object]" instead of
+// falling through to the next candidate (or to '').
+function asIdString(value: unknown): string | undefined {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : undefined
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ provider: string }> }
@@ -77,8 +85,19 @@ export async function POST(
 
   // Extract standardized fields.
   // OwnerRez revocation format: { "action": "application_authorization_revoked", "user_id": 12345 }
-  const action         = String(payload.action ?? payload.event_type ?? '')
-  const externalUserId = String(payload.user_id ?? payload.account_id ?? '')
+  // (top-level, numeric) — Hospitable's revocation payloads instead carry the
+  // connected account's user id nested under data.user.id (the same value as
+  // integration_connections.external_user_id, captured at OAuth-connect
+  // time). Without this fallback, revocation for Hospitable always resolved
+  // to an empty string and logged "Revocation event missing user_id" on
+  // every occurrence (confirmed live, 2026-07-27) — this is purely additive
+  // for OwnerRez, whose payload never has a data.user.id to begin with.
+  const action         = asIdString(payload.action) ?? asIdString(payload.event_type) ?? ''
+  const externalUserId =
+    asIdString(payload.user_id)
+      ?? asIdString(payload.account_id)
+      ?? asIdString((payload.data as { user?: { id?: string } } | undefined)?.user?.id)
+      ?? ''
   const correlationId  = payload.id ? String(payload.id) : crypto.randomUUID()
 
   const safeAction        = action.slice(0, 100)
@@ -225,17 +244,9 @@ export async function POST(
     }
   }
 
-  // Periodic TTL cleanup — fire-and-forget, runs on ~5% of ALL provider webhook
-  // requests to amortise cleanup cost without a dedicated cron job.
-  // eslint-disable-next-line no-restricted-properties -- probabilistic sampling to amortise cleanup, not id/token generation
-  if (Math.random() < 0.05) {
-    void (async () => {
-      const { error } = await createServiceClient({ publicSurface: 'api-webhooks--provider-' }).rpc('cleanup_webhook_dedup')
-      if (error) {
-        console.warn(`[Webhook:${providerId}] TTL cleanup failed (non-fatal): ${error.message}`)
-      }
-    })()
-  }
+  // TTL cleanup for processed_webhooks now runs on a daily cron
+  // (lib/inngest/functions/cron/webhook-dedup-cleanup.ts) instead of a
+  // probabilistic roll on the hot webhook path — see H-5.
 
   // ── 5. Delegate provider-specific events ──────────────────
   //    OwnerRez's real non-revocation actions, per OwnerRez's own webhooks
@@ -257,6 +268,26 @@ export async function POST(
     // Again: log, don't 500 — provider is not responsible for our processing errors
     console.error(`[Webhook:${providerId}] Handler threw for action "${action}":`, err)
     reportError(err, { site: 'webhook.provider.handler', extra: { provider: providerId, action: safeAction } })
+
+    // Release the dedup claim. The claim is written BEFORE the handler runs so
+    // concurrent redeliveries collapse to one, but a handler failure (Inngest
+    // unreachable, malformed event) would otherwise leave the claim in place —
+    // and the provider's retry, which resends a byte-identical body and so
+    // hashes identically, would be discarded as a duplicate. That silently
+    // drops a real event forever. Deleting the claim lets the retry through.
+    const releaseClient = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
+    const { error: releaseErr } = await releaseClient
+      .from('processed_webhooks')
+      .delete()
+      .eq('webhook_id', `${providerId}:${webhookId}`)
+
+    if (releaseErr) {
+      console.error(`[Webhook:${providerId}] Failed to release dedup claim: ${releaseErr.message}`)
+      reportError(new Error(releaseErr.message), {
+        site:  'webhook.provider.dedup_release',
+        extra: { provider: providerId, action: safeAction },
+      })
+    }
   }
 
   return NextResponse.json({ received: true }, { status: 200 })

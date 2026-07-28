@@ -3,8 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
-vi.mock('@/lib/integrations/providers/hospitable-token', () => ({
-  getValidHospitableToken: vi.fn(),
+vi.mock('@/lib/integrations/providers/hospitable-owner', () => ({
+  resolveHospitableOwner: vi.fn(),
 }))
 vi.mock('@/lib/integrations/providers/hospitable', () => ({
   hospitableFetch: vi.fn(),
@@ -30,7 +30,7 @@ vi.mock('@/lib/asset-discovery/seed-from-amenities', () => ({
 
 import { hospIncrementalSync } from '@/lib/inngest/functions/hospitable/incremental-sync'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
+import { resolveHospitableOwner } from '@/lib/integrations/providers/hospitable-owner'
 import {
   hospitableFetch,
   hospitablePropertyToNormalized,
@@ -41,17 +41,18 @@ import { generateTurnoversForProperty } from '@/lib/turnovers/generator'
 import { invokeHandler } from './test-helpers'
 
 // This function fans out into four disjoint entity-type branches
-// (reservation/property/review/message), each of which does its own
-// org/token resolution, fetches from the live Hospitable API, and upserts
-// into a different table with its own idempotency conflict target. Rather
-// than an allowlist-single-step stub (which doesn't work here — later
-// steps depend on real data returned by earlier steps, e.g. upsert-booking
-// needs the reservation payload fetch-reservation actually returned), this
-// stub executes every step for real and relies on mocking every external
-// module boundary (Supabase, the Hospitable HTTP client, the pure
-// normalizers, turnover generation, guidebook/asset-discovery seeding).
-// This exercises the function's own control flow and query shapes exactly
-// as it runs in production, without hitting a real DB or network.
+// (reservation/property/review/message). Org/token resolution is delegated
+// entirely to resolveHospitableOwner() (mocked here — its own resolution
+// logic is covered by unit/integrations/hospitable-owner.test.ts), so these
+// tests only need to exercise what each branch does AFTER ownership
+// resolves: fetch from the live Hospitable API, upsert into a different
+// table with its own idempotency conflict target, and any downstream event
+// firing. Rather than an allowlist-single-step stub (which doesn't work
+// here — later steps depend on real data returned by earlier steps, e.g.
+// upsert-booking needs the reservation payload fetch-reservation actually
+// returned), this stub executes every step for real and relies on mocking
+// every external module boundary (Supabase, the Hospitable HTTP client, the
+// pure normalizers, turnover generation, guidebook/asset-discovery seeding).
 function makeRunAllStep() {
   return {
     run:       vi.fn((_name: string, cb: () => unknown) => cb()),
@@ -95,6 +96,7 @@ function makeSupabase(queued: QueuedByTable) {
     chain.in     = (...a: unknown[]) => record('in', a)
     chain.not    = (...a: unknown[]) => record('not', a)
     chain.limit  = (...a: unknown[]) => record('limit', a)
+    chain.order  = (...a: unknown[]) => record('order', a)
 
     const resolveNext = () => {
       const idx = counters[table] ?? 0
@@ -136,6 +138,8 @@ const RAW_RESERVATION = {
   properties: [{ id: 'hosp_prop_1', name: 'Lakehouse', public_name: 'Lakehouse' }],
 }
 
+const RESOLVED_OWNER = { orgId: 'org_1', userId: 'user_1', token: 'token_abc' }
+
 describe('hospIncrementalSync', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -144,13 +148,10 @@ describe('hospIncrementalSync', () => {
   it('upserts a booking with the idempotent conflict target and regenerates turnovers when dates changed', async () => {
     const supabase = makeSupabase({
       bookings: [
-        { data: { org_id: 'org_1' }, error: null },                                    // resolve-org-and-token: booking already exists
         { data: { checkin_date: '2026-08-01', checkout_date: '2026-08-05' }, error: null }, // upsert-booking: existing dates (different from new)
         { data: { id: 'booking_1' }, error: null },                                     // upsert-booking: upserted row
       ],
-      integration_connections: [{ data: { org_id: 'org_1' }, error: null }],            // resolve-org-and-token: org_1's connection still active
-      organization_members: [{ data: { user_id: 'user_1' }, error: null }],
-      properties:           [{ data: { id: 'prop_1' }, error: null }],
+      properties: [{ data: { id: 'prop_1' }, error: null }],
       turnovers: [{
         data: [{
           id: 'to_1', property_id: 'prop_1',
@@ -161,7 +162,7 @@ describe('hospIncrementalSync', () => {
       }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
+    ;(resolveHospitableOwner as ReturnType<typeof vi.fn>).mockResolvedValue(RESOLVED_OWNER)
     ;(hospitableFetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ data: RAW_RESERVATION }))
     ;(hospitableReservationToNormalized as ReturnType<typeof vi.fn>).mockReturnValue({
       ...NORMALIZED_RESERVATION_BASE,
@@ -178,6 +179,7 @@ describe('hospIncrementalSync', () => {
     })
 
     expect(result).toEqual({ action: 'upserted', entity_id: 'res_1', datesChanged: true })
+    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'reservation', externalId: 'res_1', externalUserId: undefined })
 
     const bookingUpsert = supabase.calls.find((c) => c.table === 'bookings' && c.method === 'upsert')
     expect(bookingUpsert?.args[1]).toEqual({ onConflict: 'org_id,external_id,external_source' })
@@ -196,16 +198,13 @@ describe('hospIncrementalSync', () => {
   it('skips turnover regeneration when the reservation dates are unchanged', async () => {
     const supabase = makeSupabase({
       bookings: [
-        { data: { org_id: 'org_1' }, error: null },
         { data: { checkin_date: '2026-08-10', checkout_date: '2026-08-14' }, error: null }, // same as normalized below
         { data: { id: 'booking_1' }, error: null },
       ],
-      integration_connections: [{ data: { org_id: 'org_1' }, error: null }],
-      organization_members: [{ data: { user_id: 'user_1' }, error: null }],
-      properties:           [{ data: { id: 'prop_1' }, error: null }],
+      properties: [{ data: { id: 'prop_1' }, error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
+    ;(resolveHospitableOwner as ReturnType<typeof vi.fn>).mockResolvedValue(RESOLVED_OWNER)
     ;(hospitableFetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ data: RAW_RESERVATION }))
     ;(hospitableReservationToNormalized as ReturnType<typeof vi.fn>).mockReturnValue({
       ...NORMALIZED_RESERVATION_BASE,
@@ -230,13 +229,10 @@ describe('hospIncrementalSync', () => {
       properties: [
         { data: null, error: null }, // resolve-org-and-token: no existing property row → new property
       ],
-      integration_connections: [
-        { data: { user_id: 'user_1', org_id: 'org_1' }, error: null },
-      ],
       org_milestones: [{ data: null, error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
+    ;(resolveHospitableOwner as ReturnType<typeof vi.fn>).mockResolvedValue(RESOLVED_OWNER)
     ;(hospitableFetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       jsonResponse({ data: { id: 'hosp_prop_2', name: 'Cabin' } })
     )
@@ -256,6 +252,7 @@ describe('hospIncrementalSync', () => {
     })
 
     expect(result).toEqual({ action: 'synced', entity_id: 'hosp_prop_2' })
+    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'property', externalId: 'hosp_prop_2', externalUserId: undefined })
     expect(upsertNormalizedProperties).toHaveBeenCalledWith('org_1', 'hospitable', [{ external_id: 'hosp_prop_2', name: 'Cabin' }])
     // Routing proof: the reservation-only normalizer must never be invoked for a property webhook
     expect(hospitableReservationToNormalized).not.toHaveBeenCalled()
@@ -265,16 +262,12 @@ describe('hospIncrementalSync', () => {
   it('routes a review entity to the review upsert branch and fires repuguard batch generation', async () => {
     const supabase = makeSupabase({
       reviews: [
-        { data: null, error: null },              // resolve-org-and-token: new review, fast path misses
         { data: { id: 'review_1' }, error: null }, // fetch-and-upsert-review: upserted row
-      ],
-      integration_connections: [
-        { data: { user_id: 'user_1', org_id: 'org_1' }, error: null },
       ],
       properties: [{ data: { id: 'prop_1' }, error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
-    ;(getValidHospitableToken as ReturnType<typeof vi.fn>).mockResolvedValue('token_abc')
+    ;(resolveHospitableOwner as ReturnType<typeof vi.fn>).mockResolvedValue(RESOLVED_OWNER)
     ;(hospitableFetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({
       data: {
         public:       { rating: 5, review: 'Great stay' },
@@ -292,6 +285,7 @@ describe('hospIncrementalSync', () => {
     })
 
     expect(result).toEqual({ action: 'synced', entity_id: 'rev_1' })
+    expect(resolveHospitableOwner).toHaveBeenCalledWith({ entityKind: 'review', externalId: 'rev_1', externalUserId: undefined })
 
     const reviewUpsert = supabase.calls.find((c) => c.table === 'reviews' && c.method === 'upsert')
     expect(reviewUpsert?.args[1]).toEqual({ onConflict: 'org_id,external_id,external_source' })
@@ -308,12 +302,44 @@ describe('hospIncrementalSync', () => {
     expect(hospitableReservationToNormalized).not.toHaveBeenCalled()
   })
 
-  it('skips cleanly (no throw, no retry) instead of crashing when no active Hospitable connection can be found for a brand-new reservation', async () => {
+  it('threads external_user_id from the webhook event through to resolveHospitableOwner', async () => {
     const supabase = makeSupabase({
-      bookings:                 [{ data: null, error: null }], // new reservation, no existing booking to resolve org from
-      integration_connections:  [{ data: null, error: null }], // no active connection either
+      bookings: [
+        { data: { checkin_date: '2026-08-01', checkout_date: '2026-08-05' }, error: null },
+        { data: { id: 'booking_1' }, error: null },
+      ],
+      properties: [{ data: { id: 'prop_1' }, error: null }],
     })
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(resolveHospitableOwner as ReturnType<typeof vi.fn>).mockResolvedValue(RESOLVED_OWNER)
+    ;(hospitableFetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ data: RAW_RESERVATION }))
+    ;(hospitableReservationToNormalized as ReturnType<typeof vi.fn>).mockReturnValue({
+      ...NORMALIZED_RESERVATION_BASE,
+      checkin_date:  '2026-08-10',
+      checkout_date: '2026-08-14',
+    })
+
+    const step = makeRunAllStep()
+    await invokeHandler(hospIncrementalSync, {
+      event: {
+        data: {
+          provider_id: 'hospitable', event_type: 'reservation.created', entity_type: 'reservation',
+          entity_id: 'res_1', external_user_id: 'hosp_user_42',
+        },
+      },
+      step,
+      logger: makeLogger(),
+    })
+
+    expect(resolveHospitableOwner).toHaveBeenCalledWith({
+      entityKind: 'reservation', externalId: 'res_1', externalUserId: 'hosp_user_42',
+    })
+  })
+
+  it('skips cleanly (no throw, no retry) instead of crashing when no active Hospitable connection can be found for a brand-new reservation', async () => {
+    const supabase = makeSupabase({})
+    ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(resolveHospitableOwner as ReturnType<typeof vi.fn>).mockResolvedValue(null)
 
     const step = makeRunAllStep()
     const result = await invokeHandler(hospIncrementalSync, {
@@ -323,22 +349,20 @@ describe('hospIncrementalSync', () => {
     })
 
     expect(result).toEqual({ skipped: true, reason: 'no_active_connection', entity_id: 'res_2' })
-    // Never got far enough to fetch a token or hit the Hospitable API
-    expect(getValidHospitableToken).not.toHaveBeenCalled()
+    // Never got far enough to hit the Hospitable API
     expect(hospitableFetch).not.toHaveBeenCalled()
   })
 
   it('skips cleanly instead of throwing when an existing booking resolves to an org whose Hospitable connection has since been disconnected', async () => {
     // Mirrors the real production bug (SENTRY-CRAZY-CUSHION-9): Hospitable
     // keeps sending webhooks for an org's existing bookings long after the
-    // PM disconnected in Settings — disconnectIntegration() never touches
-    // `bookings`, so resolve-org-and-token still finds org_1 here, but
-    // org_1's integration_connections row is no longer 'active'.
-    const supabase = makeSupabase({
-      bookings:                [{ data: { org_id: 'org_1' }, error: null }],
-      integration_connections: [{ data: null, error: null }], // org_1 has no active connection anymore
-    })
+    // PM disconnected in Settings. resolveHospitableOwner() now owns this
+    // check (its own disconnected-connection behavior is covered by
+    // unit/integrations/hospitable-owner.test.ts) — from this function's
+    // perspective, a disconnected org just looks like a null resolution.
+    const supabase = makeSupabase({})
     ;(createServiceClient as ReturnType<typeof vi.fn>).mockReturnValue(supabase)
+    ;(resolveHospitableOwner as ReturnType<typeof vi.fn>).mockResolvedValue(null)
 
     const step = makeRunAllStep()
     const result = await invokeHandler(hospIncrementalSync, {
@@ -348,7 +372,6 @@ describe('hospIncrementalSync', () => {
     })
 
     expect(result).toEqual({ skipped: true, reason: 'no_active_connection', entity_id: 'res_3' })
-    expect(getValidHospitableToken).not.toHaveBeenCalled()
     expect(hospitableFetch).not.toHaveBeenCalled()
   })
 })

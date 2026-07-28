@@ -20,6 +20,21 @@ export async function acceptOrgInvite(
   if (!invite) return { accepted: false }
   if (invite.email.toLowerCase() !== userEmail.toLowerCase()) return { accepted: false }
 
+  // Crew are onboarded through /crew-invite, which creates a crew_members row
+  // and NO organization_members row. That distinction is load-bearing: the
+  // SELECT policies in 20260723090000_drop_redundant_is_org_member_from_select_
+  // policies.sql grant every accepted org member read access to the whole org's
+  // turnovers, bookings (incl. guest_name/guest_email), and work_orders. Crew
+  // are scoped instead by the get_crew_turnover_ids() branch, which only works
+  // because they hold no membership row. Accepting a crew-role org invite would
+  // silently hand a cleaner portfolio-wide guest PII. Refuse it here.
+  if (invite.role === 'crew') {
+    console.error(
+      `[acceptOrgInvite] Refused crew-role org invite ${invite.id} — crew must onboard via /crew-invite`,
+    )
+    return { accepted: false }
+  }
+
   const { data: existing } = await admin
     .from('organization_members')
     .select('id')
