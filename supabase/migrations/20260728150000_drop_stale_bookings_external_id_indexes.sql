@@ -1,0 +1,36 @@
+-- Fix live OwnerRez upsert collision: two STALE unique indexes on
+-- (external_id, external_source) — narrower than the correct, org-scoped
+-- bookings_org_id_external_id_external_source_key constraint added by
+-- 20260714130000_bookings_external_id_org_scoped.sql — were never dropped
+-- when that migration landed. Confirmed live via pg_constraint/pg_indexes:
+--
+--   bookings_external_id_source_idx  UNIQUE (external_id, external_source)
+--                                    WHERE (external_id IS NOT NULL)
+--   idx_bookings_external_source     UNIQUE (external_id, external_source)
+--                                    WHERE (external_id IS NOT NULL AND external_source IS NOT NULL)
+--
+-- Both predate the org-scoped fix (added in
+-- 20260602062722_add_external_id_to_properties_bookings.sql and
+-- 20260611155941_ownerrez_upsert_unique_constraints.sql respectively) and
+-- are plain CREATE UNIQUE INDEX statements, not named table constraints —
+-- 20260714130000's `DROP CONSTRAINT bookings_external_id_external_source_key`
+-- only ever removed the constraint by that specific name, not these two
+-- indexes.
+--
+-- Postgres enforces EVERY applicable unique index on insert, not just the
+-- one named in an upsert's ON CONFLICT target. So even though
+-- lib/inngest/functions/ownerrez/initial-sync.ts's bookings upsert already
+-- correctly targets onConflict: 'org_id,external_id,external_source', two
+-- different orgs' bookings sharing the same OwnerRez external_id still hard-
+-- collide on these leftover narrow indexes before the upsert's own conflict
+-- resolution ever gets a chance to run — confirmed live 2026-07-26:
+-- "duplicate key value violates unique constraint bookings_external_id_source_idx"
+-- (4 occurrences), immediately followed by an OwnerRez initial sync failure
+-- and a 300-second function timeout.
+--
+-- Mirrors the same "drop the stale narrow index, keep the org-scoped one"
+-- pattern already applied to properties
+-- (20260714160000_properties_reviews_external_id_org_scoped.sql).
+
+DROP INDEX IF EXISTS public.bookings_external_id_source_idx;
+DROP INDEX IF EXISTS public.idx_bookings_external_source;
