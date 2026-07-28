@@ -1,0 +1,47 @@
+# Ramping load against the app's unauthenticated marketing/entry pages
+# (PUBLIC_ROUTES in proxy.ts) — none of these carry a per-IP rate limiter,
+# so this exercises Next.js rendering + middleware under sustained
+# concurrency rather than any throttle.
+#
+# Run: LOAD_BASE_URL=http://localhost:3000 npx artillery run load-tests/artillery/public-pages.yml
+config:
+  target: "{{ $processEnvironment.LOAD_BASE_URL }}"
+  http:
+    timeout: 10
+  phases:
+    - duration: 30
+      arrivalRate: 2
+      rampTo: 10
+      name: "Ramp up"
+    - duration: 60
+      arrivalRate: 10
+      name: "Sustained"
+    - duration: 30
+      arrivalRate: 10
+      rampTo: 0
+      name: "Ramp down"
+  plugins:
+    expect: {}
+
+scenarios:
+  - name: "Home"
+    weight: 3
+    flow:
+      - get:
+          url: "/"
+          expect:
+            - statusCode: 200
+  - name: "Login page"
+    weight: 2
+    flow:
+      - get:
+          url: "/login"
+          expect:
+            - statusCode: 200
+  - name: "Signup page"
+    weight: 1
+    flow:
+      - get:
+          url: "/signup"
+          expect:
+            - statusCode: 200

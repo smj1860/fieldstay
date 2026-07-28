@@ -1,0 +1,42 @@
+# Deliberately exceeds workOrderRatelimit (20 req/min/IP, lib/rate-limit.ts)
+# on the public work-order token page (a TOKEN_ROUTE in proxy.ts) to confirm
+# the 429 actually engages rather than letting the route accept unlimited
+# traffic. LOAD_WORK_ORDER_TOKEN is a well-formed but fake UUID — see
+# load-tests/.env.load.example — so responses are expected to be a
+# "not found" state, not real work order data.
+#
+# Only point this at an environment you control (local dev or a
+# staging/preview deploy with its own Upstash instance). It is designed to
+# trip the limiter, which is the point, but that also burns real Upstash
+# request quota — do not run it against production.
+#
+# Run:
+#   LOAD_BASE_URL=http://localhost:3000 \
+#   LOAD_WORK_ORDER_TOKEN=00000000-0000-0000-0000-000000000000 \
+#   npx artillery run load-tests/artillery/token-route-rate-limit.yml
+config:
+  target: "{{ $processEnvironment.LOAD_BASE_URL }}"
+  http:
+    timeout: 10
+  phases:
+    - duration: 90
+      arrivalRate: 1
+      name: "Exceed 20/min token route limit (~60/min from one IP)"
+  processor: "./processor.js"
+  plugins:
+    ensure: {}
+  ensure:
+    conditions:
+      # Proves the limiter actually engaged rather than accepting unlimited traffic
+      - expression: "custom.rate_limited_responses > 0"
+        strict: true
+      - expression: "custom.server_errors == 0"
+        strict: true
+
+scenarios:
+  - name: "Hammer work-order token page"
+    beforeScenario: "initCounters"
+    flow:
+      - get:
+          url: "/work-orders/{{ $processEnvironment.LOAD_WORK_ORDER_TOKEN }}"
+          afterResponse: "trackRateLimitResponses"
