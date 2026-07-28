@@ -1310,6 +1310,24 @@ export interface ProcessedWebhook {
 }
 
 /**
+ * Maps a provider-side entity id to the FieldStay org that owns it —
+ * memoizes resolveHospitableOwner()'s resolution (webhook payload's own
+ * user id, local-table match, or token probe) so it never repeats for the
+ * same entity. Service-role only: RLS is enabled with no permissive
+ * policies (deliberate deny-all for anon/authenticated).
+ */
+export interface IntegrationEntityOwner {
+  id:           string
+  provider_id:  string
+  entity_kind:  'reservation' | 'property' | 'review'
+  external_id:  string
+  org_id:       string
+  resolved_via: 'webhook_user_id' | 'local' | 'probe'
+  created_at:   string
+  updated_at:   string
+}
+
+/**
  * LEGACY marketplace-install holding area (exchanged tokens). No longer
  * written to as of 2026-07-22 — replaced by PendingOAuthAuthorization, which
  * holds the UNEXCHANGED code instead so the provider never registers a
@@ -1785,6 +1803,7 @@ export interface Database {
       integration_connections:        { Row: IntegrationConnection;       Insert: Partial<IntegrationConnection>;       Update: Partial<IntegrationConnection>;       Relationships: [] }
       oauth_states:                   { Row: OAuthState;                  Insert: Partial<OAuthState>;                  Update: Partial<OAuthState>;                  Relationships: [] }
       processed_webhooks:             { Row: ProcessedWebhook;            Insert: Partial<ProcessedWebhook>;            Update: Partial<ProcessedWebhook>;            Relationships: [] }
+      integration_entity_owners:      { Row: IntegrationEntityOwner;      Insert: Partial<IntegrationEntityOwner>;      Update: Partial<IntegrationEntityOwner>;      Relationships: [] }
       pending_integration_links:      { Row: PendingIntegrationLink;      Insert: Partial<PendingIntegrationLink>;      Update: Partial<PendingIntegrationLink>;      Relationships: [] }
       pending_oauth_authorizations:   { Row: PendingOAuthAuthorization;   Insert: Partial<PendingOAuthAuthorization>;   Update: Partial<PendingOAuthAuthorization>;   Relationships: [] }
 

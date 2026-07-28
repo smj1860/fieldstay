@@ -29,7 +29,14 @@ export const hospTeammateSyncHandler = inngest.createFunction(
     id:      'hospitable-teammate-sync-handler',
     name:    'Hospitable: Teammate Resync Handler',
     retries: 2,
-    concurrency: { limit: 2, key: 'event.data.org_id' },
+    // Cron-fanned across every active connection — at 100 customers this
+    // would otherwise burst 100-wide into the single shared
+    // hospitableApiLimiter budget. Platform cap plus the existing per-org
+    // limit, same shape as hospInitialSync's.
+    concurrency: [
+      { limit: 4 },
+      { limit: 2, key: 'event.data.org_id' },
+    ],
   },
   { event: 'integration/hospitable.teammate_sync.requested' as const },
   async ({ event, step, logger }) => {

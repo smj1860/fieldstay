@@ -638,6 +638,13 @@ export type FieldStayEvents = {
       // array naming what changed (e.g. "checkin_changed"), lets the
       // handler skip re-fetching when nothing FieldStay stores changed.
       triggers?:    string[]
+      // The connected account's own user id, read off the webhook payload's
+      // data.user.id (confirmed present on live payloads) — the SAME value
+      // stored as integration_connections.external_user_id at OAuth-connect
+      // time. Lets resolveHospitableOwner() attribute the entity directly
+      // instead of falling to the cache/local-table/probe chain. Optional:
+      // not every payload shape is confirmed to carry it.
+      external_user_id?: string
       triggered_at: string
     }
   }

@@ -183,6 +183,14 @@ export async function disconnectIntegration(
   const user = authUser
   if (!user) return { error: 'Not authenticated' }
 
+  // Gated tighter than triggerResync (owner/admin/manager) on purpose:
+  // disconnecting revokes the provider token and deletes the Vault secret,
+  // and the only way back is a fresh OAuth round trip by someone holding the
+  // provider credentials. 'manager' is deliberately excluded.
+  if (!['owner', 'admin'].includes(membership.role)) {
+    return { error: 'Permission denied' }
+  }
+
   try {
     // Resolve the connection's owner — the user who originally went through OAuth
     // may differ from the current user (e.g. an org admin disconnecting a connection

@@ -7,7 +7,10 @@
 //  3. apply-master-checklist  — applyMasterChecklistToProperty per new property
 //  3b. seed-asset-discovery-from-amenities — seedPresentAssetsFromAmenities per confirmed amenity
 //  4. fetch-and-upsert-teammates — hospFetchTeammates → upsert to crew_members
-//  5. fetch-and-upsert-res    — hospFetchReservations → upsert to bookings
+//  5. fetch-reservations-window-<date> (one step per window) + upsert-reservations
+//     — hospReservationWindows/fetchReservationsWindow → upsert to bookings.
+//     One step per window so a rate-limit throw on a later window doesn't
+//     re-fetch windows already fetched successfully.
 //  6. generate-turnovers      — generateTurnoversForProperty per affected property
 //  7. guidebook config sync   — ensureGuidebookConfiguration / createGuidebookPropertyConfigsForProperties / syncGuidebookConfigsFromProperty
 //  8. mark-complete           — write last_sync_status to integration_connections
@@ -20,7 +23,8 @@ import { readIntegrationToken } from '@/lib/integrations/vault'
 import { translateSyncError } from '@/lib/integrations/types'
 import {
   hospFetchProperties,
-  hospFetchReservations,
+  hospReservationWindows,
+  fetchReservationsWindow,
   hospFetchTeammates,
   hospitablePropertyToNormalized,
   hospitableReservationToNormalized,
@@ -47,12 +51,32 @@ import {
 import { reportError } from '@/lib/observability/report-error'
 const PROVIDER = 'hospitable'
 
+// Initial sync backfills 3 months forward, not the 6 that
+// RESERVATION_LOOKAHEAD_MONTHS uses for resyncs. Anything further out still
+// arrives via the incremental webhook path (which fetches a single
+// reservation by id and is unaffected by windowing), so this only bounds how
+// much of the future a FIRST sync pre-loads — halving time-to-first-render
+// on a large portfolio and halving the shared rate-limit budget one connect
+// consumes.
+const INITIAL_SYNC_LOOKAHEAD_MONTHS = 3
+
 export const hospInitialSync = inngest.createFunction(
   {
     id:      'hospitable-initial-sync',
     name:    'Hospitable: Initial Sync',
-    retries: 2,
-    concurrency: { limit: 1, key: 'event.data.org_id' },
+    // 4 retries (was 2): hospitableApiLimiter is a single platform-wide
+    // budget, so two orgs connecting in the same minute WILL rate-limit each
+    // other. With per-window steps (below) a retry resumes rather than
+    // restarts, so the extra attempts are cheap.
+    retries: 4,
+    // Two limits: per-org (unchanged — one sync per org at a time) plus a
+    // PLATFORM cap. Without the second, N simultaneous connects fan out N-wide
+    // against one shared 54-req/min Hospitable budget and every one of them
+    // fails. Queueing is strictly better than collective starvation.
+    concurrency: [
+      { limit: 2 },
+      { limit: 1, key: 'event.data.org_id' },
+    ],
   },
   { event: 'integration/hospitable.connected' as const },
   async ({ event, step, logger }) => {
@@ -177,13 +201,30 @@ export const hospInitialSync = inngest.createFunction(
         return rows.length
       })
 
-      // ── 5. Fetch reservations and upsert bookings ─────────────────────────
-      const { reservationCount, revenueEligibleExternalIds } = await step.run('fetch-and-upsert-reservations', async () => {
-        const hospPropertyIds = Object.keys(propertyIdMap)
-        if (!hospPropertyIds.length) return { reservationCount: 0, revenueEligibleExternalIds: [] as string[] }
-        const reservations = await hospFetchReservations(token, undefined, hospPropertyIds)
+      // ── 5. Fetch reservations, one Inngest step per start_date window ─────
+      //     Each window retries independently: a rate-limit throw on window 20
+      //     no longer discards windows 1-19 and restarts the whole fetch.
+      const hospPropertyIds = Object.keys(propertyIdMap)
 
-        logger.info(`[Hospitable:${user_id}] Fetched ${reservations.length} reservations`)
+      const windows = hospPropertyIds.length
+        ? hospReservationWindows(undefined, INITIAL_SYNC_LOOKAHEAD_MONTHS)
+        : []
+
+      const reservationsById = new Map<string, Awaited<ReturnType<typeof fetchReservationsWindow>>[number]>()
+
+      for (const startDate of windows) {
+        const windowReservations = await step.run(
+          `fetch-reservations-window-${startDate}`,
+          () => fetchReservationsWindow(token, startDate, hospPropertyIds),
+        )
+        for (const r of windowReservations) reservationsById.set(r.id, r)
+      }
+
+      const reservations = Array.from(reservationsById.values())
+      logger.info(`[Hospitable:${user_id}] Fetched ${reservations.length} reservations across ${windows.length} windows`)
+
+      const { reservationCount, revenueEligibleExternalIds } = await step.run('upsert-reservations', async () => {
+        if (!hospPropertyIds.length) return { reservationCount: 0, revenueEligibleExternalIds: [] as string[] }
 
         const supabase = createServiceClient({ system: 'inngest:initial-sync' })
         let count = 0

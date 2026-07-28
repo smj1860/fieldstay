@@ -62,6 +62,14 @@ const SERVICE_ROLE_ONLY_TABLES = new Set([
   'pending_integration_links',
   'pending_oauth_authorizations',
   'processed_webhooks',
+  // Singleton counter for the Hospitable launch promo — written only by the
+  // claim_hospitable_promo_slot() SECURITY DEFINER RPC. See
+  // supabase/migrations/20260727150000_hospitable_launch_promo.sql.
+  'promo_hospitable_launch_counter',
+  // Internal webhook-attribution routing cache — written/read only by
+  // resolveHospitableOwner() via service role. See
+  // supabase/migrations/20260728120000_integration_entity_owners.sql.
+  'integration_entity_owners',
 ])
 
 const res = await fetch(new URL('/rest/v1/rpc/db_invariant_report', url), {

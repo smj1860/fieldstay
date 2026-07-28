@@ -8,7 +8,8 @@
 //   property    → update property fields from Hospitable API
 //   review      → upsert review, fire repuguard/batch_generate.requested
 //
-// Token validity is ensured before every API fetch via getValidHospitableToken.
+// Org + token resolution goes through resolveHospitableOwner() (see
+// hospitable-owner.ts) — never pick an active connection directly here.
 //
 // All step.run() calls are at outer function scope — no helper receives step.
 // ============================================================
@@ -16,7 +17,7 @@
 import { inngest }                 from '@/lib/inngest/client'
 import { NonRetriableError }       from 'inngest'
 import { createServiceClient }     from '@/lib/supabase/server'
-import { getValidHospitableToken } from '@/lib/integrations/providers/hospitable-token'
+import { resolveHospitableOwner }  from '@/lib/integrations/providers/hospitable-owner'
 import { createHash } from 'crypto'
 import {
   hospitableFetch,
@@ -67,12 +68,22 @@ export const hospIncrementalSync = inngest.createFunction(
   {
     id:          'hospitable-incremental-sync',
     name:        'Hospitable: Incremental Sync',
-    retries:     3,
-    concurrency: { limit: 2, key: 'event.data.entity_id' },
+    // 5 retries (was 3): the ownership probe in resolveHospitableOwner() can
+    // hit hospitableApiLimiter's shared platform budget during a concurrent
+    // initial sync. The probe memoizes its result, so a retry is cheap — but
+    // exhausting the budget must not permanently drop a real webhook.
+    retries:     5,
+    // Per-entity concurrency prevents duplicate work on the same id. The
+    // second, unkeyed limit is a PLATFORM cap: without it, 100 orgs' webhooks
+    // fan out unbounded against one shared Hospitable rate-limit budget.
+    concurrency: [
+      { limit: 8 },
+      { limit: 2, key: 'event.data.entity_id' },
+    ],
   },
   { event: 'integration/hospitable.sync.requested' as const },
   async ({ event, step, logger }) => {
-    const { provider_id, event_type, entity_type, entity_id, triggers } = event.data
+    const { provider_id, event_type, entity_type, entity_id, triggers, external_user_id } = event.data
 
     if (provider_id !== PROVIDER) {
       logger.warn(`[Hospitable incremental] Unexpected provider_id: ${provider_id}`)
@@ -96,66 +107,20 @@ export const hospIncrementalSync = inngest.createFunction(
         return { action: 'skipped', reason: 'irrelevant_trigger', entity_id, triggers }
       }
 
+      // Ownership is resolved by resolveHospitableOwner(), never by picking an
+      // active connection here. Hospitable's webhooks carry no account id, so
+      // "any active connection" silently misattributes every new reservation
+      // once a second org is connected. See hospitable-owner.ts.
       const resolved = await step.run('resolve-org-and-token', async () => {
-        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
+        const owner = await resolveHospitableOwner({
+          entityKind:     'reservation',
+          externalId:     entity_id,
+          externalUserId: external_user_id,
+        })
 
-        const { data: booking } = await supabase
-          .from('bookings')
-          .select('org_id')
-          .eq('external_id',     entity_id)
-          .eq('external_source', PROVIDER)
-          .maybeSingle()
+        if (!owner) return { skipped: true as const }
 
-        let resolvedOrgId: string | null = booking?.org_id ?? null
-        let pmUserId: string | null      = null
-
-        if (resolvedOrgId) {
-          // Disconnecting an integration never touches `bookings` — a
-          // resolved org here can still point at a since-disconnected
-          // connection indefinitely. Check before doing anything else so
-          // this returns a clean skip instead of letting
-          // getValidHospitableToken() throw below, which otherwise retries
-          // 3x and lands in Sentry for every webhook Hospitable keeps
-          // sending after disconnect (SENTRY-CRAZY-CUSHION-9).
-          const { data: activeConnection } = await supabase
-            .from('integration_connections')
-            .select('org_id')
-            .eq('org_id',      resolvedOrgId)
-            .eq('provider_id', PROVIDER)
-            .eq('status',      'active')
-            .maybeSingle()
-
-          if (!activeConnection) return { skipped: true as const }
-
-          const { data: member } = await supabase
-            .from('organization_members')
-            .select('user_id')
-            .eq('org_id', resolvedOrgId)
-            .in('role', ['owner', 'admin'])
-            .not('invite_accepted_at', 'is', null)
-            .limit(1)
-            .single()
-
-          if (!member) throw new NonRetriableError(`No admin for org ${resolvedOrgId}`)
-          pmUserId = member.user_id
-        } else {
-          // New reservation — find via an active Hospitable connection
-          const { data: connection } = await supabase
-            .from('integration_connections')
-            .select('user_id, org_id')
-            .eq('provider_id', PROVIDER)
-            .eq('status',      'active')
-            .not('org_id',     'is', null)
-            .limit(1)
-            .single()
-
-          if (!connection) return { skipped: true as const }
-          pmUserId      = connection.user_id
-          resolvedOrgId = connection.org_id
-        }
-
-        const validToken = await getValidHospitableToken(pmUserId!)
-        return { skipped: false as const, orgId: resolvedOrgId!, token: validToken }
+        return { skipped: false as const, orgId: owner.orgId, token: owner.token }
       })
 
       if (resolved.skipped) {
@@ -373,66 +338,37 @@ export const hospIncrementalSync = inngest.createFunction(
     // ── PROPERTY ─────────────────────────────────────────────────────────────
     if (entity_type === 'property') {
 
+      // See the reservation branch — ownership must come from
+      // resolveHospitableOwner(), never from an arbitrary active connection.
       const resolved = await step.run('resolve-org-and-token', async () => {
-        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
+        const owner = await resolveHospitableOwner({
+          entityKind:     'property',
+          externalId:     entity_id,
+          externalUserId: external_user_id,
+        })
 
-        const { data: property } = await supabase
+        if (!owner) return { skipped: true as const }
+
+        // isNewProperty drives the post-upsert seeding steps below (master
+        // checklist, guidebook config, amenity-derived assets). Recomputed
+        // here against the RESOLVED org rather than an unscoped lookup, so a
+        // co-hosted property already synced by a different customer is still
+        // correctly treated as new for this org.
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
+        const { data: existingProperty } = await supabase
           .from('properties')
-          .select('org_id')
+          .select('id')
+          .eq('org_id',          owner.orgId)
           .eq('external_id',     entity_id)
           .eq('external_source', PROVIDER)
           .maybeSingle()
 
-        let resolvedOrgId: string | null = property?.org_id ?? null
-        let pmUserId: string | null      = null
-
-        if (resolvedOrgId) {
-          // See the reservation branch above for why this check exists —
-          // disconnecting an integration never touches `properties`, so a
-          // resolved org here can still point at a since-disconnected
-          // connection indefinitely (SENTRY-CRAZY-CUSHION-9).
-          const { data: activeConnection } = await supabase
-            .from('integration_connections')
-            .select('org_id')
-            .eq('org_id',      resolvedOrgId)
-            .eq('provider_id', PROVIDER)
-            .eq('status',      'active')
-            .maybeSingle()
-
-          if (!activeConnection) return { skipped: true as const }
-
-          const { data: member } = await supabase
-            .from('organization_members')
-            .select('user_id')
-            .eq('org_id', resolvedOrgId)
-            .in('role', ['owner', 'admin'])
-            .not('invite_accepted_at', 'is', null)
-            .limit(1)
-            .single()
-
-          if (!member) throw new NonRetriableError(`No admin for org ${resolvedOrgId}`)
-          pmUserId = member.user_id
-        } else {
-          // New property (property.created / property.merged for a property
-          // FieldStay hasn't synced yet) — find via an active Hospitable
-          // connection, same fallback used by the reservation and review
-          // handlers below.
-          const { data: connection } = await supabase
-            .from('integration_connections')
-            .select('user_id, org_id')
-            .eq('provider_id', PROVIDER)
-            .eq('status',      'active')
-            .not('org_id',     'is', null)
-            .limit(1)
-            .single()
-
-          if (!connection) return { skipped: true as const }
-          pmUserId      = connection.user_id
-          resolvedOrgId = connection.org_id
+        return {
+          skipped:       false as const,
+          orgId:         owner.orgId,
+          token:         owner.token,
+          isNewProperty: !existingProperty,
         }
-
-        const validToken = await getValidHospitableToken(pmUserId!)
-        return { skipped: false as const, orgId: resolvedOrgId!, token: validToken, isNewProperty: !property }
       })
 
       if (resolved.skipped) {
@@ -560,60 +496,20 @@ export const hospIncrementalSync = inngest.createFunction(
     // ── REVIEW ────────────────────────────────────────────────────────────────
     if (entity_type === 'review') {
 
+      // See the reservation branch — ownership must come from
+      // resolveHospitableOwner(), never from an arbitrary active connection.
+      // The downstream property_id resolution already scopes to this orgId,
+      // so a correct org here is load-bearing for review attribution too.
       const resolved = await step.run('resolve-org-and-token', async () => {
-        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
+        const owner = await resolveHospitableOwner({
+          entityKind:     'review',
+          externalId:     entity_id,
+          externalUserId: external_user_id,
+        })
 
-        // Fast path: review already in FieldStay
-        const { data: existingReview } = await supabase
-          .from('reviews')
-          .select('org_id')
-          .eq('external_id',     entity_id)
-          .eq('external_source', PROVIDER)
-          .maybeSingle()
+        if (!owner) return { skipped: true as const }
 
-        if (existingReview) {
-          // See the reservation branch above for why this check exists —
-          // disconnecting an integration never touches `reviews`, so a
-          // resolved org here can still point at a since-disconnected
-          // connection indefinitely (SENTRY-CRAZY-CUSHION-9).
-          const { data: activeConnection } = await supabase
-            .from('integration_connections')
-            .select('org_id')
-            .eq('org_id',      existingReview.org_id)
-            .eq('provider_id', PROVIDER)
-            .eq('status',      'active')
-            .maybeSingle()
-
-          if (!activeConnection) return { skipped: true as const }
-
-          const { data: member } = await supabase
-            .from('organization_members')
-            .select('user_id')
-            .eq('org_id', existingReview.org_id)
-            .in('role', ['owner', 'admin'])
-            .not('invite_accepted_at', 'is', null)
-            .limit(1)
-            .single()
-
-          if (!member) throw new NonRetriableError(`No admin for org ${existingReview.org_id}`)
-          const validToken = await getValidHospitableToken(member.user_id)
-          return { skipped: false as const, orgId: existingReview.org_id, token: validToken }
-        }
-
-        // New review — use any active connection; org will be resolved via property in next step
-        const { data: connection } = await supabase
-          .from('integration_connections')
-          .select('user_id, org_id')
-          .eq('provider_id', PROVIDER)
-          .eq('status',      'active')
-          .not('org_id',     'is', null)
-          .limit(1)
-          .single()
-
-        if (!connection) return { skipped: true as const }
-
-        const validToken = await getValidHospitableToken(connection.user_id)
-        return { skipped: false as const, orgId: connection.org_id!, token: validToken }
+        return { skipped: false as const, orgId: owner.orgId, token: owner.token }
       })
 
       if (resolved.skipped) {
@@ -733,62 +629,35 @@ export const hospIncrementalSync = inngest.createFunction(
     // conversation a no-op for messages already stored.
     if (entity_type === 'message') {
 
+      // entity_id here is the RESERVATION id (see handleWebhookEvent's
+      // message.created case), so ownership resolves as a reservation. Same
+      // rule as every other branch: never pick an arbitrary active connection.
       const resolved = await step.run('resolve-org-booking-and-token', async () => {
-        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
+        const owner = await resolveHospitableOwner({
+          entityKind:     'reservation',
+          externalId:     entity_id,
+          externalUserId: external_user_id,
+        })
 
+        if (!owner) return { skipped: true as const }
+
+        // bookingId is scoped to the resolved org — an unscoped lookup would
+        // return a co-hosted twin belonging to a different customer.
+        const supabase = createServiceClient({ system: 'inngest:incremental-sync' })
         const { data: booking } = await supabase
           .from('bookings')
-          .select('id, org_id')
+          .select('id')
+          .eq('org_id',          owner.orgId)
           .eq('external_id',     entity_id)
           .eq('external_source', PROVIDER)
           .maybeSingle()
 
-        let resolvedOrgId: string | null = booking?.org_id ?? null
-        let pmUserId: string | null      = null
-
-        if (resolvedOrgId) {
-          // See the reservation branch above for why this check exists —
-          // disconnecting an integration never touches `bookings`, so a
-          // resolved org here can still point at a since-disconnected
-          // connection indefinitely (SENTRY-CRAZY-CUSHION-9).
-          const { data: activeConnection } = await supabase
-            .from('integration_connections')
-            .select('org_id')
-            .eq('org_id',      resolvedOrgId)
-            .eq('provider_id', PROVIDER)
-            .eq('status',      'active')
-            .maybeSingle()
-
-          if (!activeConnection) return { skipped: true as const }
-
-          const { data: member } = await supabase
-            .from('organization_members')
-            .select('user_id')
-            .eq('org_id', resolvedOrgId)
-            .in('role', ['owner', 'admin'])
-            .not('invite_accepted_at', 'is', null)
-            .limit(1)
-            .single()
-
-          if (!member) throw new NonRetriableError(`No admin for org ${resolvedOrgId}`)
-          pmUserId = member.user_id
-        } else {
-          const { data: connection } = await supabase
-            .from('integration_connections')
-            .select('user_id, org_id')
-            .eq('provider_id', PROVIDER)
-            .eq('status',      'active')
-            .not('org_id',     'is', null)
-            .limit(1)
-            .single()
-
-          if (!connection) return { skipped: true as const }
-          pmUserId      = connection.user_id
-          resolvedOrgId = connection.org_id
+        return {
+          skipped:   false as const,
+          orgId:     owner.orgId,
+          bookingId: booking?.id ?? null,
+          token:     owner.token,
         }
-
-        const validToken = await getValidHospitableToken(pmUserId!)
-        return { skipped: false as const, orgId: resolvedOrgId!, bookingId: booking?.id ?? null, token: validToken }
       })
 
       if (resolved.skipped) {

@@ -94,9 +94,11 @@ interface Connection {
 export function IntegrationsClient({
   providers,
   connectionsByProvider,
+  canDisconnect,
 }: {
   providers:             Provider[]
   connectionsByProvider: Record<string, Connection>
+  canDisconnect:         boolean
 }) {
   const searchParams = useSearchParams()
   const router       = useRouter()
@@ -136,6 +138,7 @@ export function IntegrationsClient({
             provider={provider}
             connection={connection ?? null}
             onConnectClick={() => setConnectingProvider(provider.id)}
+            canDisconnect={canDisconnect}
           />
         )
       })}
@@ -314,10 +317,12 @@ function IntegrationCard({
   provider,
   connection,
   onConnectClick,
+  canDisconnect,
 }: {
   provider:       Provider
   connection:     Connection | null
   onConnectClick: () => void
+  canDisconnect:  boolean
 }) {
   const [disconnecting, startDisconnect] = useTransition()
   const [confirming, setConfirming]      = useState(false)
@@ -352,7 +357,13 @@ function IntegrationCard({
     if (!shouldPoll) return
 
     const POLL_INTERVAL_MS = 2500
-    const TIMEOUT_MS       = 3 * 60 * 1000 // 3 minutes — well past the 30-90s worst case
+    // 10 minutes. The old 3-minute ceiling assumed a 30-90s sync, which only
+    // holds when hospitableApiLimiter's shared platform budget is uncontended.
+    // Two orgs connecting in the same window push a 50-property initial sync
+    // well past three minutes, and the timeout was firing on a sync that was
+    // still running perfectly well — showing an error to a customer on their
+    // very first screen.
+    const TIMEOUT_MS       = 10 * 60 * 1000
     const startedAt        = Date.now()
 
     const poll = async () => {
@@ -473,7 +484,15 @@ function IntegrationCard({
               )}
               <span className="text-xs max-w-[220px] text-right" style={{ color: 'var(--text-muted)' }}>
                 {syncTimedOut
-                  ? 'Taking longer than expected — try refreshing or contact support.'
+                  // Reassurance, not an error — a large portfolio can
+                  // genuinely still be syncing well past 10 minutes when the
+                  // shared Hospitable rate-limit budget is contended by other
+                  // orgs connecting at the same time. No promise of a
+                  // completion email here: the only Hospitable-connected
+                  // notification fires at OAuth-callback time (in parallel
+                  // with the sync starting), not on sync completion — see
+                  // email-hospitable-connected.tsx.
+                  ? 'Still working. Large portfolios can take several minutes — check back here shortly.'
                   : getSyncCopy(effectivePropsFound, effectiveBookingsFound)}
               </span>
             </div>
@@ -536,15 +555,17 @@ function IntegrationCard({
                 )}
                 Trigger Resync
               </Button>
-              <Button
-                variant="ghost"
-                onClick={() => setConfirming(true)}
-                className="text-sm flex items-center gap-1.5"
-                style={{ color: 'var(--text-muted)' }}
-              >
-                <Unplug className="w-3.5 h-3.5" />
-                Disconnect
-              </Button>
+              {canDisconnect && (
+                <Button
+                  variant="ghost"
+                  onClick={() => setConfirming(true)}
+                  className="text-sm flex items-center gap-1.5"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  <Unplug className="w-3.5 h-3.5" />
+                  Disconnect
+                </Button>
+              )}
             </div>
           )}
         </div>

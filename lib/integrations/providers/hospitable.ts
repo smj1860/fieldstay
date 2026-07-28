@@ -264,6 +264,17 @@ export const hospitableProvider: IntegrationProvider = {
     const entityData = unwrapJoin(data.data as Record<string, unknown> | Record<string, unknown>[] | null | undefined) ?? undefined
     const entityId   = entityData?.id as string | undefined
 
+    // The connected account's own user id — confirmed present on live
+    // webhook payloads as data.user.id. This is the SAME value stored as
+    // integration_connections.external_user_id at OAuth-connect time (see
+    // exchangeCodeForToken below: externalUserId: user.id), so it lets
+    // resolveHospitableOwner() attribute the entity directly rather than
+    // falling to its cache/local-table/probe chain. Not confirmed present
+    // on every payload shape (message.created's shape is itself unconfirmed
+    // — see the case below), so this is threaded through as optional.
+    const webhookUser     = entityData?.user as { id?: string } | undefined
+    const externalUserId  = webhookUser?.id
+
     switch (action) {
       case 'reservation.created':
       case 'reservation.changed': {
@@ -282,6 +293,7 @@ export const hospitableProvider: IntegrationProvider = {
             entity_type:  'reservation',
             entity_id:    reservationId,
             triggers,
+            external_user_id: externalUserId,
             triggered_at: new Date().toISOString(),
           },
         })
@@ -304,6 +316,7 @@ export const hospitableProvider: IntegrationProvider = {
             event_type:   action,
             entity_type:  'property',
             entity_id:    entityId,
+            external_user_id: externalUserId,
             triggered_at: new Date().toISOString(),
           },
         })
@@ -350,6 +363,7 @@ export const hospitableProvider: IntegrationProvider = {
             event_type:   action,
             entity_type:  'review',
             entity_id:    entityId,
+            external_user_id: externalUserId,
             triggered_at: new Date().toISOString(),
           },
         })
@@ -386,6 +400,7 @@ export const hospitableProvider: IntegrationProvider = {
             event_type:   action,
             entity_type:  'message',
             entity_id:    messageReservationId,
+            external_user_id: externalUserId,
             triggered_at: new Date().toISOString(),
           },
         })
@@ -423,7 +438,15 @@ export const hospitableProvider: IntegrationProvider = {
 export async function hospitableFetch(url: string, token: string): Promise<Response> {
   const { success, reset } = await hospitableApiLimiter.limit('hospitable-api')
   if (!success) {
-    const retryAfterSeconds = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
+    // Jitter (1.0-1.5x) on top of the exact window reset. Without it, every
+    // caller blocked by the same sliding window computes an IDENTICAL
+    // retry-after and they all re-enter the budget on the same tick — a
+    // thundering herd that re-exhausts it instantly. Matters most when
+    // several orgs' initial syncs collide.
+    // eslint-disable-next-line no-restricted-properties -- retry jitter to de-synchronise blocked callers, not id/token generation
+    const jitter            = 1 + Math.random() * 0.5
+    const baseSeconds       = Math.max(1, Math.ceil((reset - Date.now()) / 1000))
+    const retryAfterSeconds = Math.ceil(baseSeconds * jitter)
     throw new RateLimitError(retryAfterSeconds)
   }
 
@@ -518,10 +541,45 @@ export async function hospFetchReservations(
   return Array.from(byId.values())
 }
 
+/**
+ * Enumerates the start_date windows hospFetchReservations() would iterate.
+ *
+ * Exported so hospInitialSync can run ONE Inngest step per window instead of
+ * wrapping the whole ~26-window loop in a single step. Under the shared
+ * hospitableApiLimiter budget, a rate-limit throw mid-loop previously restarted
+ * the entire fetch from window 1, re-spending budget it had already consumed
+ * and burning the function's retry allowance on work it had already done.
+ */
+export function hospReservationWindows(
+  since?:          string,
+  lookaheadMonths: number = RESERVATION_LOOKAHEAD_MONTHS,
+): string[] {
+  const rangeStart = since
+    ? new Date(`${since}T00:00:00Z`)
+    : new Date(Date.now() - RESERVATION_WINDOW_DAYS * 86_400_000)
+
+  const rangeEnd = new Date(rangeStart)
+  rangeEnd.setUTCMonth(rangeEnd.getUTCMonth() + lookaheadMonths)
+
+  const windows: string[] = []
+  for (
+    let windowStart = rangeStart;
+    windowStart < rangeEnd;
+    windowStart = new Date(windowStart.getTime() + RESERVATION_WINDOW_DAYS * 86_400_000)
+  ) {
+    windows.push(windowStart.toISOString().split('T')[0]!)
+  }
+
+  return windows
+}
+
 // Single start_date window, fully paginated. See RESERVATION_WINDOW_DAYS'
 // doc comment above for why hospFetchReservations() calls this in a loop
 // rather than once with one big range.
-async function fetchReservationsWindow(
+//
+// Exported (was module-private) so hospInitialSync can drive the loop from
+// Inngest steps — see hospReservationWindows() above.
+export async function fetchReservationsWindow(
   token: string,
   startDate: string,
   propertyIds?: string[]

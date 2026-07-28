@@ -257,6 +257,26 @@ export async function POST(
     // Again: log, don't 500 — provider is not responsible for our processing errors
     console.error(`[Webhook:${providerId}] Handler threw for action "${action}":`, err)
     reportError(err, { site: 'webhook.provider.handler', extra: { provider: providerId, action: safeAction } })
+
+    // Release the dedup claim. The claim is written BEFORE the handler runs so
+    // concurrent redeliveries collapse to one, but a handler failure (Inngest
+    // unreachable, malformed event) would otherwise leave the claim in place —
+    // and the provider's retry, which resends a byte-identical body and so
+    // hashes identically, would be discarded as a duplicate. That silently
+    // drops a real event forever. Deleting the claim lets the retry through.
+    const releaseClient = createServiceClient({ publicSurface: 'api-webhooks--provider-' })
+    const { error: releaseErr } = await releaseClient
+      .from('processed_webhooks')
+      .delete()
+      .eq('webhook_id', `${providerId}:${webhookId}`)
+
+    if (releaseErr) {
+      console.error(`[Webhook:${providerId}] Failed to release dedup claim: ${releaseErr.message}`)
+      reportError(new Error(releaseErr.message), {
+        site:  'webhook.provider.dedup_release',
+        extra: { provider: providerId, action: safeAction },
+      })
+    }
   }
 
   return NextResponse.json({ received: true }, { status: 200 })

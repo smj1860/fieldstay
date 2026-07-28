@@ -55,6 +55,7 @@ export default async function IntegrationsPage() {
         <IntegrationsClient
           providers={providers ?? []}
           connectionsByProvider={connectionsByProvider}
+          canDisconnect={['owner', 'admin'].includes(membership.role)}
         />
       </Suspense>
 
