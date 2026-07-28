@@ -65,13 +65,22 @@ export async function loadDispatchContext(
       properties ( name, address, timezone )
     `)
     .eq('id', workOrderId)
-    .single()
+    .maybeSingle()
 
-  if (woErr || !wo) {
-    throw new NonRetriableError(
-      `Work order ${workOrderId} query failed: ${woErr?.message ?? 'not found'} ` +
-      `(code: ${woErr?.code ?? 'unknown'})`
-    )
+  if (woErr) {
+    // A real query failure (not "zero rows") — worth Inngest's normal retry.
+    throw new Error(`Work order ${workOrderId} query failed: ${woErr.message} (code: ${woErr.code})`)
+  }
+
+  if (!wo) {
+    // Confirmed live 2026-07-25: the work order no longer exists by the
+    // time this step runs — most likely an org-level cascade delete (see
+    // FINDING-1's notifications_org_id_fkey fix) removed it out from under
+    // an in-flight event. Non-retriable: retrying can't make a deleted row
+    // reappear, and this reads as a clear one-line reason instead of
+    // PostgREST's generic PGRST116 "Cannot coerce the result to a single
+    // JSON object".
+    throw new NonRetriableError(`Work order ${workOrderId} no longer exists — skipping vendor dispatch`)
   }
 
   const vendor   = unwrapJoin(wo.vendors)
