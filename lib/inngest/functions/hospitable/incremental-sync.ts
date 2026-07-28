@@ -71,7 +71,7 @@ export const hospIncrementalSync = inngest.createFunction(
   },
   { event: 'integration/hospitable.sync.requested' as const },
   async ({ event, step, logger }) => {
-    const { provider_id, event_type, entity_type, entity_id, triggers } = event.data
+    const { provider_id, event_type, entity_type, entity_id, triggers, external_user_id } = event.data
 
     if (provider_id !== PROVIDER) {
       logger.warn(`[Hospitable incremental] Unexpected provider_id: ${provider_id}`)
@@ -121,15 +121,25 @@ export const hospIncrementalSync = inngest.createFunction(
           if (!member) throw new NonRetriableError(`No admin for org ${resolvedOrgId}`)
           pmUserId = member.user_id
         } else {
-          // New reservation — find via an active Hospitable connection
-          const { data: connection } = await supabase
+          // New reservation — find via an active Hospitable connection,
+          // scoped to the account that actually sent this webhook when
+          // known (see hospitable.ts's externalUserId extraction). Never
+          // fall back to an arbitrary connection once we have a real
+          // identifier to match against — with more than one org connected
+          // to Hospitable, an unscoped pick can silently attribute a
+          // brand-new reservation to the wrong org.
+          let connectionQuery = supabase
             .from('integration_connections')
             .select('user_id, org_id')
             .eq('provider_id', PROVIDER)
             .eq('status',      'active')
             .not('org_id',     'is', null)
-            .limit(1)
-            .single()
+
+          if (external_user_id) {
+            connectionQuery = connectionQuery.eq('external_user_id', external_user_id)
+          }
+
+          const { data: connection } = await connectionQuery.limit(1).single()
 
           if (!connection) {
             throw new NonRetriableError('No active Hospitable connection found')
@@ -378,16 +388,20 @@ export const hospIncrementalSync = inngest.createFunction(
         } else {
           // New property (property.created / property.merged for a property
           // FieldStay hasn't synced yet) — find via an active Hospitable
-          // connection, same fallback used by the reservation and review
-          // handlers below.
-          const { data: connection } = await supabase
+          // connection, scoped to the sending account when known — same
+          // fallback used by the reservation, review, and message handlers.
+          let connectionQuery = supabase
             .from('integration_connections')
             .select('user_id, org_id')
             .eq('provider_id', PROVIDER)
             .eq('status',      'active')
             .not('org_id',     'is', null)
-            .limit(1)
-            .single()
+
+          if (external_user_id) {
+            connectionQuery = connectionQuery.eq('external_user_id', external_user_id)
+          }
+
+          const { data: connection } = await connectionQuery.limit(1).single()
 
           if (!connection) {
             throw new NonRetriableError('No active Hospitable connection found')
@@ -540,15 +554,22 @@ export const hospIncrementalSync = inngest.createFunction(
           return { orgId: existingReview.org_id, token: validToken }
         }
 
-        // New review — use any active connection; org will be resolved via property in next step
-        const { data: connection } = await supabase
+        // New review — find via an active connection, scoped to the
+        // sending account when known (see reservation handler above for
+        // why this scoping matters); org will be resolved via property in
+        // next step.
+        let connectionQuery = supabase
           .from('integration_connections')
           .select('user_id, org_id')
           .eq('provider_id', PROVIDER)
           .eq('status',      'active')
           .not('org_id',     'is', null)
-          .limit(1)
-          .single()
+
+        if (external_user_id) {
+          connectionQuery = connectionQuery.eq('external_user_id', external_user_id)
+        }
+
+        const { data: connection } = await connectionQuery.limit(1).single()
 
         if (!connection) {
           throw new NonRetriableError('No active Hospitable connection found for review sync')
@@ -694,14 +715,20 @@ export const hospIncrementalSync = inngest.createFunction(
           if (!member) throw new NonRetriableError(`No admin for org ${resolvedOrgId}`)
           pmUserId = member.user_id
         } else {
-          const { data: connection } = await supabase
+          // New message thread — same account-scoped fallback as the other
+          // entity types above.
+          let connectionQuery = supabase
             .from('integration_connections')
             .select('user_id, org_id')
             .eq('provider_id', PROVIDER)
             .eq('status',      'active')
             .not('org_id',     'is', null)
-            .limit(1)
-            .single()
+
+          if (external_user_id) {
+            connectionQuery = connectionQuery.eq('external_user_id', external_user_id)
+          }
+
+          const { data: connection } = await connectionQuery.limit(1).single()
 
           if (!connection) {
             throw new NonRetriableError('No active Hospitable connection found for message sync')

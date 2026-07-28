@@ -632,6 +632,13 @@ export type FieldStayEvents = {
       // array naming what changed (e.g. "checkin_changed"), lets the
       // handler skip re-fetching when nothing FieldStay stores changed.
       triggers?:    string[]
+      // The Hospitable account (entityData.user.id) that owns this webhook
+      // event, matching integration_connections.external_user_id — used to
+      // scope which org a brand-new (never-before-synced) entity belongs
+      // to. Confirmed present on reservation.changed payloads via a live
+      // example; not yet confirmed for property/review/message payloads,
+      // so may be undefined for those.
+      external_user_id?: string
       triggered_at: string
     }
   }

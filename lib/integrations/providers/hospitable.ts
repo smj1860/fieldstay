@@ -263,6 +263,17 @@ export const hospitableProvider: IntegrationProvider = {
     const entityData = (Array.isArray(data.data) ? data.data[0] : data.data) as Record<string, unknown> | undefined
     const entityId   = entityData?.id as string | undefined
 
+    // The Hospitable account that owns this event — matches
+    // integration_connections.external_user_id (set to this same value at
+    // OAuth-connect time, see exchangeCode below). Lets the incremental-sync
+    // handler scope which FieldStay org a brand-new entity belongs to,
+    // instead of guessing via an arbitrary active connection. Confirmed
+    // present as entityData.user.id on a live reservation.changed payload;
+    // not yet confirmed for property/review/message payloads, which may not
+    // carry a `user` field at all — undefined here just preserves today's
+    // existing (unscoped) fallback behavior for those, not a regression.
+    const externalUserId = (entityData?.user as { id?: string } | undefined)?.id
+
     switch (action) {
       case 'reservation.created':
       case 'reservation.changed': {
@@ -276,12 +287,13 @@ export const hospitableProvider: IntegrationProvider = {
         await inngest.send({
           name: 'integration/hospitable.sync.requested',
           data: {
-            provider_id:  'hospitable',
-            event_type:   action,
-            entity_type:  'reservation',
-            entity_id:    reservationId,
+            provider_id:      'hospitable',
+            event_type:       action,
+            entity_type:      'reservation',
+            entity_id:        reservationId,
             triggers,
-            triggered_at: new Date().toISOString(),
+            external_user_id: externalUserId,
+            triggered_at:     new Date().toISOString(),
           },
         })
         break
@@ -299,11 +311,12 @@ export const hospitableProvider: IntegrationProvider = {
         await inngest.send({
           name: 'integration/hospitable.sync.requested',
           data: {
-            provider_id:  'hospitable',
-            event_type:   action,
-            entity_type:  'property',
-            entity_id:    entityId,
-            triggered_at: new Date().toISOString(),
+            provider_id:      'hospitable',
+            event_type:       action,
+            entity_type:      'property',
+            entity_id:        entityId,
+            external_user_id: externalUserId,
+            triggered_at:     new Date().toISOString(),
           },
         })
         break
@@ -345,11 +358,12 @@ export const hospitableProvider: IntegrationProvider = {
         await inngest.send({
           name: 'integration/hospitable.sync.requested',
           data: {
-            provider_id:  'hospitable',
-            event_type:   action,
-            entity_type:  'review',
-            entity_id:    entityId,
-            triggered_at: new Date().toISOString(),
+            provider_id:      'hospitable',
+            event_type:       action,
+            entity_type:      'review',
+            entity_id:        entityId,
+            external_user_id: externalUserId,
+            triggered_at:     new Date().toISOString(),
           },
         })
         break
@@ -381,11 +395,12 @@ export const hospitableProvider: IntegrationProvider = {
         await inngest.send({
           name: 'integration/hospitable.sync.requested',
           data: {
-            provider_id:  'hospitable',
-            event_type:   action,
-            entity_type:  'message',
-            entity_id:    messageReservationId,
-            triggered_at: new Date().toISOString(),
+            provider_id:      'hospitable',
+            event_type:       action,
+            entity_type:      'message',
+            entity_id:        messageReservationId,
+            external_user_id: externalUserId,
+            triggered_at:     new Date().toISOString(),
           },
         })
         break
