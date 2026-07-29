@@ -70,7 +70,16 @@ export function buildFeaturedAmenityLine(
   // likely to contain a comma ("takes 45 min to heat, so start it early")
   // than a semicolon — a note with an internal comma would otherwise shift
   // every note after it out of position.
-  const notes = (notesRaw ?? '').split(';').map((n) => n.trim()).filter(Boolean)
+  //
+  // Deliberately NOT .filter(Boolean)-ing empty segments out: a PM who
+  // leaves a middle amenity's note blank (or fat-fingers a double
+  // semicolon) would otherwise have every note after that position
+  // silently compacted leftward — the same class of positional-shift bug
+  // the comma-vs-semicolon choice above exists to avoid, just triggered a
+  // different way. An empty segment at a given index just falls through to
+  // the generic-mention fallback for that position instead, same as if
+  // nothing had been typed there at all.
+  const notes = (notesRaw ?? '').split(';').map((n) => n.trim())
   const idx   = ((rotationIndex % amenityKeys.length) + amenityKeys.length) % amenityKeys.length
   const note  = notes[idx]
 

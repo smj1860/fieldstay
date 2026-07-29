@@ -124,6 +124,7 @@ export const guidebookSmsMorningSend = inngest.createFunction(
       const { data: guidebookConfig } = await supabase
         .from('guidebook_property_configs')
         .select('featured_amenities, featured_amenity_notes')
+        .eq('org_id', orgId)
         .eq('property_id', propertyId)
         .maybeSingle()
 

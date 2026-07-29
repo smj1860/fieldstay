@@ -98,6 +98,15 @@ describe('buildFeaturedAmenityLine', () => {
     expect(line).toBe('This property has a Fire Pit.')
   })
 
+  it('does not let a blank middle note shift a later note into the wrong position', () => {
+    const keys = ['Hot Tub', 'Fire Pit', 'Kayaks']
+    // Fire Pit's note deliberately left blank — Kayaks' note must stay at
+    // index 2, not get compacted into index 1.
+    const notes = 'Takes 45 min to heat.;;Life jackets in the shed.'
+    expect(buildFeaturedAmenityLine(keys, notes, 1)).toBe('This property has a Fire Pit.')
+    expect(buildFeaturedAmenityLine(keys, notes, 2)).toBe('Life jackets in the shed.')
+  })
+
   it('falls back to a generic mention when no notes were written at all', () => {
     const line = buildFeaturedAmenityLine(['Hot Tub'], null, 0)
     expect(line).toBe('This property has a Hot Tub.')
