@@ -21,8 +21,10 @@ load-tests/
     public-pages.yml       same coverage as k6/public-pages.js
     token-route-rate-limit.yml   same coverage as k6/token-route-rate-limit.js
     processor.js           custom counters used by the rate-limit scenario
-  step-load.sh             finds the breaking point — see "Finding the
+    step-load.yml          single load level, driven by ../step-load-artillery.sh
+  step-load.sh             k6 breaking-point finder — see "Finding the
                             breaking point" below
+  step-load-artillery.sh   same idea, driven by Artillery instead
 ```
 
 Each pair (`k6/x.js` / `artillery/x.yml`) targets the same route(s) with a
@@ -99,6 +101,37 @@ Needs `k6` and `jq` on PATH. Output goes to
 `load-tests/results/step-load-<timestamp>/` (gitignored) — a CSV plus each
 level's raw k6 JSON summary and log, in case you need to dig into one level.
 
+### The Artillery version
+
+`step-load-artillery.sh` does the same thing with Artillery instead of k6 —
+same table shape, same env vars (`LOAD_BASE_URL`, `LOAD_PATH`, `STEP_LEVELS`,
+`STEP_DURATION`, `STEP_SLEEP`), same per-level output directory layout.
+
+```bash
+LOAD_BASE_URL=https://your-preview.vercel.app \
+LOAD_PATH=/ \
+pnpm run load:artillery:step
+```
+
+**The levels mean something different, though.** k6's `--vus` holds a fixed
+number of concurrent virtual users looping requests (a "closed" model) —
+`step-load.sh`'s levels are concurrent users. Artillery's `arrivalRate` is
+an "open" model: it injects that many *new* virtual users per second
+regardless of whether earlier ones have finished — `step-load-artillery.sh`'s
+levels are arrivals/sec, not held concurrency. Under saturation these
+diverge a lot (arrival rate lets concurrency pile up unbounded instead of
+capping it), which is actually a more realistic way to simulate a real
+traffic spike. Run both if you want the comparison, not just one — a
+target that looks fine under a fixed-VU closed model can still fall over
+under an open model's pile-up behavior, and vice versa.
+
+The printed `pct_200` column only makes sense for a target that returns 200
+on success (`/`, `/login`, `/api/health` after its `BYPASS_ROUTES` fix). For
+a target that legitimately returns something else on success (e.g. a
+work-order token page 404ing on an unknown token), read the per-level raw
+JSON's `aggregate.counters` (`http.codes.*`) directly instead — or use
+`token-route-rate-limit.yml`, which already expects `[200, 404, 429]`.
+
 ### Running this from a GitHub Codespace
 
 If you're testing a Vercel preview URL and this sandbox's network policy
@@ -119,7 +152,11 @@ k6 version
 sudo apt-get install -y jq   # usually already present in Codespaces
 
 LOAD_BASE_URL=https://your-preview.vercel.app pnpm run load:k6:step
+LOAD_BASE_URL=https://your-preview.vercel.app pnpm run load:artillery:step
 ```
+
+Artillery needs no separate install — it's a devDependency, so `pnpm install`
+already pulled it in and `pnpm run load:artillery:step` runs it via `npx`.
 
 Before running, check the preview deployment doesn't have Vercel's
 **Deployment Protection** (password/SSO) turned on — if it does, every
