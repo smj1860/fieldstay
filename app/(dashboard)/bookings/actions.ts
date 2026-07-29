@@ -67,16 +67,23 @@ export async function createBooking(
       return { error: 'Operation failed. Please try again.' }
     }
 
-    await logAuditEvent({
-      orgId:      membership.org_id,
-      actorId:    user.id,
-      action:     'booking.created',
-      targetType: 'booking',
-      targetId:   booking.id,
-      metadata:   { property_id, checkin_date, checkout_date, source, guest_name },
-    })
-
-    await detectAndFlagOverlaps(supabase, property_id)
+    // Independent side effects — logAuditEvent never throws (it swallows its
+    // own errors) and detectAndFlagOverlaps's return value is unused here, so
+    // neither needs to block the other. Running them concurrently instead of
+    // sequentially removes one full network round trip from this action's
+    // critical path, the same "serialize awaited Supabase calls" pattern
+    // that shows up as tail-latency under DB load elsewhere in the app.
+    await Promise.all([
+      logAuditEvent({
+        orgId:      membership.org_id,
+        actorId:    user.id,
+        action:     'booking.created',
+        targetType: 'booking',
+        targetId:   booking.id,
+        metadata:   { property_id, checkin_date, checkout_date, source, guest_name },
+      }),
+      detectAndFlagOverlaps(supabase, property_id),
+    ])
 
     // Fire booking/detected so Inngest auto-generates a turnover. Fire-and-
     // forget — the booking is already committed; a slow/unreachable Inngest

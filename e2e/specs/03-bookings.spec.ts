@@ -27,9 +27,18 @@ test.describe('Bookings', () => {
     const checkin  = getFutureDate(7)
     const checkout = getFutureDate(10)
 
+    // Unique per test execution (including each Playwright retry, since the
+    // whole test body reruns from scratch on retry) — a "failed" attempt's
+    // booking still exists on the next attempt (createBooking() itself
+    // always completes; see below), so a fixed name here means every retry
+    // after the first is a guaranteed failure: getByText('[E2E] Jane
+    // Playwright') matches one more stale element each time and hits a
+    // strict-mode violation, unrelated to whether the retry itself worked.
+    const guestName = `[E2E] Jane Playwright ${Date.now()}`
+
     await page.fill('[name="checkin_date"]',  checkin)
     await page.fill('[name="checkout_date"]', checkout)
-    await page.fill('[name="guest_name"]',    '[E2E] Jane Playwright')
+    await page.fill('[name="guest_name"]',    guestName)
 
     await page.click('button[type="submit"]')
 
@@ -42,7 +51,7 @@ test.describe('Bookings', () => {
     // the next attempt). 20s gives real headroom without masking an
     // actual hang.
     await expect(page.getByText(/Booking added/i)).toBeVisible({ timeout: 20_000 })
-    await expect(page.getByText('[E2E] Jane Playwright')).toBeVisible()
+    await expect(page.getByText(guestName)).toBeVisible()
   })
 
   test('can switch to calendar view', async ({ page }) => {

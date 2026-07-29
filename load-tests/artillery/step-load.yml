@@ -1,0 +1,30 @@
+# Single load level for one step of a step-load (breakpoint-finding) run.
+# Not meant to be run directly for a full test — see ../step-load-artillery.sh,
+# which invokes this once per arrival-rate level (via --overrides) and
+# aggregates the results into a table.
+#
+# Unlike k6/step-load.js (which holds a fixed VU count — a "closed" load
+# model), Artillery's arrivalRate is an "open" model: it injects N new
+# virtual users per SECOND regardless of whether earlier ones have finished.
+# That's a different, and arguably more realistic, way to find a breaking
+# point — concurrency is allowed to pile up under saturation instead of
+# being capped at a fixed VU count.
+#
+# Run one level manually:
+#   LOAD_BASE_URL=... LOAD_PATH=/ npx artillery run \
+#     --overrides '{"config":{"phases":[{"duration":15,"arrivalRate":20}]}}' \
+#     load-tests/artillery/step-load.yml
+config:
+  target: "{{ $processEnvironment.LOAD_BASE_URL }}"
+  http:
+    timeout: 30
+  phases:
+    - duration: 15
+      arrivalRate: 2
+      name: "level"
+
+scenarios:
+  - name: "Step load"
+    flow:
+      - get:
+          url: "{{ $processEnvironment.LOAD_PATH }}"

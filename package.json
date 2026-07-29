@@ -24,6 +24,7 @@
     "load:k6:pages": "k6 run load-tests/k6/public-pages.js",
     "load:k6:ratelimit": "k6 run load-tests/k6/token-route-rate-limit.js",
     "load:k6:step": "bash load-tests/step-load.sh",
+    "load:artillery:step": "bash load-tests/step-load-artillery.sh",
     "load:artillery:smoke": "artillery run load-tests/artillery/smoke.yml",
     "load:artillery:pages": "artillery run load-tests/artillery/public-pages.yml",
     "load:artillery:ratelimit": "artillery run load-tests/artillery/token-route-rate-limit.yml"
