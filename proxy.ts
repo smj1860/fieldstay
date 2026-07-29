@@ -97,6 +97,12 @@ const TOKEN_ROUTES = [
 // Skip auth middleware entirely. These routes either handle their own auth
 // or must be reachable by unauthenticated external parties.
 const BYPASS_ROUTES = [
+  // Uptime monitoring hits this with no session — must return the health
+  // JSON (app/api/health/route.ts), not a 307 to /login. Also skips the
+  // updateSession() Supabase Auth round-trip, which is the point: a health
+  // check that itself depends on a live auth call defeats the purpose.
+  '/api/health',
+
   // Team invite accept page — unauthenticated users arrive here from email links
   '/accept-invite',
 
