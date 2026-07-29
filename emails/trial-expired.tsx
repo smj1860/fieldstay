@@ -38,7 +38,7 @@ export function TrialExpiredEmail({
       <Section style={planBox}>
         <Text style={planBoxTitle}>Plans start at $199/month</Text>
         <Text style={planBoxBody}>
-          1–15 properties · Unlimited crew · Full OwnerRez sync ·
+          1–15 properties · Unlimited crew · Full PMS sync ·
           Inventory · Maintenance · Owner portal
         </Text>
       </Section>

@@ -61,7 +61,7 @@ export default function PrivacyPage() {
                 <dt className="font-semibold text-gray-800">Credentials</dt>
                 <dd className="text-sm mt-0.5">
                   Password (stored as a bcrypt hash — we never see the plaintext). OAuth tokens for
-                  connected integrations (OwnerRez, Uplisting) stored encrypted in Supabase Vault.
+                  connected integrations (OwnerRez, Hospitable) stored encrypted in Supabase Vault.
                 </dd>
               </div>
               <div>
@@ -107,7 +107,7 @@ export default function PrivacyPage() {
             <p className="mt-4 font-medium text-gray-800">Sources</p>
             <ul className="list-disc pl-6 space-y-1 mt-2 text-sm">
               <li>Directly from you when you create an account, configure your organization, or use the Service.</li>
-              <li>From connected third-party platforms (OwnerRez, Uplisting) when you authorize an integration.</li>
+              <li>From connected third-party platforms (OwnerRez, Hospitable) when you authorize an integration.</li>
               <li>Automatically from your device and browser as you interact with the Service.</li>
               <li>From Stripe, for subscription and billing events.</li>
             </ul>

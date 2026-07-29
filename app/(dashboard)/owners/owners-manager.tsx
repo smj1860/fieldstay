@@ -826,7 +826,7 @@ function OwnerCard({
           <p className="text-xs mt-1" style={{ color: 'var(--accent-red)' }}>{revError}</p>
         )}
         <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-          Visible to owner on the portal. OwnerRez integration will auto-populate when connected.
+          Visible to owner on the portal. Auto-populates once your PMS is connected.
         </p>
       </div>
 

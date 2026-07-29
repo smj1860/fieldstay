@@ -26,7 +26,7 @@ All plans include the complete FieldStay platform:
 - Inventory tracking and Kroger cart building
 - Asset health tracking and depreciation reporting
 - Owner portal and financial ledger
-- OwnerRez integration (Hostaway integration in progress)
+- OwnerRez and Hospitable integrations (Hostaway integration in progress)
 - RepuGuard AI review response drafting
 - Guest Guidebook with SMS delivery — unlocked during your trial, and
   after that once you have 3 active sponsors, staying unlocked for as long

@@ -267,7 +267,7 @@ describe('actions/guidebook', () => {
       expect(supabase.from).not.toHaveBeenCalled()
     })
 
-    it('requires an OwnerRez URL when contact method is ownerrez_url', async () => {
+    it('requires a booking page URL when contact method is ownerrez_url', async () => {
       const supabase = makeSupabase({})
       vi.mocked(requireOrgRole).mockResolvedValue({
         supabase, membership, user: { id: 'user_1' },
@@ -277,7 +277,7 @@ describe('actions/guidebook', () => {
         ...validInput(), contactMethod: 'ownerrez_url', ownerRezUrl: '   ',
       })
 
-      expect(result).toEqual({ error: 'Please enter your OwnerRez booking page URL.' })
+      expect(result).toEqual({ error: 'Please enter your booking page URL.' })
     })
 
     it('returns a generic error and never touches the DB when the caller lacks the required role', async () => {

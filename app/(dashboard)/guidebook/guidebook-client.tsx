@@ -928,7 +928,7 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
           <legend style={{ ...labelStyle, padding: 0 }}>When a guest is interested</legend>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {([
-              { value: 'ownerrez_url', label: 'Link guests to your OwnerRez booking page' },
+              { value: 'ownerrez_url', label: 'Link guests to your booking page' },
               { value: 'email',        label: 'Send me an email' },
               { value: 'sms',          label: 'Send me a text' },
             ] as const).map((opt) => (
@@ -950,9 +950,9 @@ function GapNightMessagingSection({ config }: { config: GuidebookConfiguration |
               type="url"
               value={ownerRezUrl}
               onChange={(e) => setOwnerRezUrl(e.target.value)}
-              placeholder="https://app.ownerrez.com/..."
+              placeholder="https://..."
               style={{ ...inputStyle, maxWidth: '100%', marginTop: '8px' }}
-              aria-label="OwnerRez booking page URL"
+              aria-label="Booking page URL"
             />
           )}
         </fieldset>

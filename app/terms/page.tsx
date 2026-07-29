@@ -89,9 +89,9 @@ export default function TermsPage() {
           <section>
             <h2 className="text-xl font-semibold text-gray-900 mb-3">8. Third-Party Integrations</h2>
             <p>
-              The Service integrates with third-party platforms (e.g., OwnerRez, Stripe, Airbnb via
-              iCal). Your use of those platforms is subject to their own terms. We are not responsible
-              for third-party platform outages, data accuracy, or policy changes.
+              The Service integrates with third-party platforms (e.g., OwnerRez, Hospitable, Stripe,
+              Airbnb via iCal). Your use of those platforms is subject to their own terms. We are not
+              responsible for third-party platform outages, data accuracy, or policy changes.
             </p>
           </section>
 
