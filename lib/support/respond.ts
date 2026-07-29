@@ -210,7 +210,7 @@ ${context.map((c, i) => `[${i + 1}] ${c}`).join('\n\n')}`
   if (category === 'account_specific') {
     return `${base}
 
-This question is about the person's specific account or data. You have tools available to look up their plan status, recent turnovers, integration connection status, and recent purchase orders. Use a tool when it would answer the question directly. If the question needs information no tool provides, say so plainly and offer to flag this for a human.`
+This question is about the person's specific account or data. You have tools available to look up: plan/billing status and the most recent Stripe invoice, recent turnovers, integration connection status, recent purchase orders, work order status (dispatch/assignment/cost), vendor compliance status, crew roster and invite status, and below-par inventory. Use a tool when it would answer the question directly. If the question needs information no tool provides, say so plainly and offer to flag this for a human.`
   }
 
   return base

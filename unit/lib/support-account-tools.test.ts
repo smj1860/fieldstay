@@ -4,13 +4,22 @@ vi.mock('server-only', () => ({}))
 vi.mock('@/lib/supabase/server', () => ({
   createServiceClient: vi.fn(),
 }))
+vi.mock('@/lib/stripe/client', () => ({
+  stripe: { invoices: { list: vi.fn() } },
+}))
 
 import { createServiceClient } from '@/lib/supabase/server'
+import { stripe } from '@/lib/stripe/client'
 import {
   getPlanStatus,
   getRecentTurnovers,
   getIntegrationStatus,
   getRecentPurchaseOrders,
+  getWorkOrderStatus,
+  getVendorComplianceStatus,
+  getCrewRosterStatus,
+  getBelowParInventory,
+  getBillingDetails,
   callAccountTool,
   ACCOUNT_TOOLS,
 } from '@/lib/support/account-tools'
@@ -24,7 +33,7 @@ function makeSupabase(queue: Record<string, Resp[]>) {
     const result: Resp = q?.length ? q.shift()! : { data: null, error: null }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const chain: any = {}
-    for (const m of ['select', 'eq', 'gte', 'lte', 'order', 'limit']) {
+    for (const m of ['select', 'eq', 'neq', 'gte', 'lte', 'order', 'limit', 'in']) {
       chain[m] = vi.fn((...args: unknown[]) => {
         calls.push({ table, method: m, args })
         return chain
@@ -233,11 +242,283 @@ describe('ACCOUNT_TOOLS', () => {
     }
   })
 
-  it('declares exactly the four tools callAccountTool knows how to dispatch', () => {
+  it('declares exactly the nine tools callAccountTool knows how to dispatch', () => {
     const names = ACCOUNT_TOOLS.map((t) => t.name).sort()
     expect(names).toEqual([
-      'get_integration_status', 'get_plan_status', 'get_recent_purchase_orders', 'get_recent_turnovers',
+      'get_below_par_inventory', 'get_billing_details', 'get_crew_roster_status',
+      'get_integration_status', 'get_plan_status', 'get_recent_purchase_orders',
+      'get_recent_turnovers', 'get_vendor_compliance_status', 'get_work_order_status',
     ])
+  })
+})
+
+describe('getWorkOrderStatus', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('maps a vendor-assigned work order, marking it dispatched when a dispatch email is on file', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{
+        data: [{
+          wo_number: 'WO-1', title: 'Fix HVAC', status: 'in_progress', priority: 'high',
+          scheduled_date: '2026-08-01', completed_date: null, nte_amount: 500, actual_cost: null,
+          vendor_dispatch_email: 'vendor@example.com', assigned_crew_member_id: null,
+          properties: [{ name: 'Lakeside Lodge' }], vendors: [{ name: 'Cool Air Co' }],
+        }],
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getWorkOrderStatus(ORG_ID)
+
+    expect(result).toEqual({
+      count: 1,
+      workOrders: [{
+        workOrderNumber: 'WO-1', title: 'Fix HVAC', property: 'Lakeside Lodge',
+        status: 'in_progress', priority: 'high', assignedTo: 'Cool Air Co',
+        dispatchedToVendor: true, scheduledDate: '2026-08-01', completedDate: null,
+        nteAmount: 500, actualCost: null,
+      }],
+    })
+    // No crew lookup needed when nothing has an assigned_crew_member_id
+    expect(supabase.calls.some((c) => c.table === 'crew_members')).toBe(false)
+  })
+
+  it('resolves a crew-assigned work order name via a batched crew_members lookup', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{
+        data: [{
+          wo_number: 'WO-2', title: 'Replace lockbox', status: 'assigned', priority: 'low',
+          scheduled_date: null, completed_date: null, nte_amount: null, actual_cost: null,
+          vendor_dispatch_email: null, assigned_crew_member_id: 'crew_1',
+          properties: [{ name: 'Mountain Cabin' }], vendors: null,
+        }],
+        error: null,
+      }],
+      crew_members: [{ data: [{ id: 'crew_1', name: 'Alex Rivera' }], error: null }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getWorkOrderStatus(ORG_ID)
+
+    if ('error' in result) throw new Error('expected a work orders result')
+    expect(result.workOrders[0]?.assignedTo).toBe('Alex Rivera')
+    expect(result.workOrders[0]?.dispatchedToVendor).toBe(false)
+    expect(supabase.calls.some((c) => c.table === 'crew_members' && c.method === 'in' && c.args[1]?.[0] === 'crew_1')).toBe(true)
+  })
+
+  it('reports Unassigned when neither a vendor nor a crew member is on the work order', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{
+        data: [{
+          wo_number: 'WO-3', title: 'Inspect roof', status: 'pending', priority: 'medium',
+          scheduled_date: null, completed_date: null, nte_amount: null, actual_cost: null,
+          vendor_dispatch_email: null, assigned_crew_member_id: null,
+          properties: [{ name: 'Ridge House' }], vendors: null,
+        }],
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getWorkOrderStatus(ORG_ID)
+
+    if ('error' in result) throw new Error('expected a work orders result')
+    expect(result.workOrders[0]?.assignedTo).toBe('Unassigned')
+  })
+
+  it('scopes to the given org, excludes cancelled work orders, and returns an error message on a query error', async () => {
+    const supabase = makeSupabase({
+      work_orders: [{ data: null, error: { message: 'db down' } }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getWorkOrderStatus(ORG_ID)
+
+    expect(result).toEqual({ error: 'Could not fetch work orders.' })
+    expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'eq' && c.args[0] === 'org_id' && c.args[1] === ORG_ID)).toBe(true)
+    expect(supabase.calls.some((c) => c.table === 'work_orders' && c.method === 'neq' && c.args[0] === 'status' && c.args[1] === 'cancelled')).toBe(true)
+  })
+})
+
+describe('getVendorComplianceStatus', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('maps vendor compliance rows scoped to the given org', async () => {
+    const supabase = makeSupabase({
+      vendor_compliance_status: [{
+        data: [{
+          vendor_name: 'Cool Air Co', compliance_status: 'grace_period',
+          expired_doc_count: 1, expiring_soon_count: 0, days_past_expiry: 12,
+        }],
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getVendorComplianceStatus(ORG_ID)
+
+    expect(result).toEqual({
+      count: 1,
+      vendors: [{
+        name: 'Cool Air Co', complianceStatus: 'grace_period',
+        expiredDocCount: 1, expiringSoonCount: 0, daysPastExpiry: 12,
+      }],
+    })
+  })
+
+  it('returns an error message on a query error', async () => {
+    const supabase = makeSupabase({
+      vendor_compliance_status: [{ data: null, error: { message: 'boom' } }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getVendorComplianceStatus(ORG_ID)
+
+    expect(result).toEqual({ error: 'Could not fetch vendor compliance status.' })
+  })
+})
+
+describe('getCrewRosterStatus', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('classifies invite status as not_invited, pending, or accepted', async () => {
+    const supabase = makeSupabase({
+      crew_members: [{
+        data: [
+          { name: 'Not Invited', role: 'cleaning', is_active: true, invite_sent_at: null, invite_accepted_at: null },
+          { name: 'Pending',     role: 'cleaning', is_active: true, invite_sent_at: '2026-07-01T00:00:00Z', invite_accepted_at: null },
+          { name: 'Accepted',    role: 'general',  is_active: true, invite_sent_at: '2026-07-01T00:00:00Z', invite_accepted_at: '2026-07-02T00:00:00Z' },
+        ],
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getCrewRosterStatus(ORG_ID)
+
+    if ('error' in result) throw new Error('expected a crew roster result')
+    expect(result.crew.map((c) => c.inviteStatus)).toEqual(['not_invited', 'pending', 'accepted'])
+  })
+
+  it('returns an error message on a query error', async () => {
+    const supabase = makeSupabase({
+      crew_members: [{ data: null, error: { message: 'boom' } }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getCrewRosterStatus(ORG_ID)
+
+    expect(result).toEqual({ error: 'Could not fetch crew roster.' })
+  })
+})
+
+describe('getBelowParInventory', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('only includes counted items that are actually below par', async () => {
+    const supabase = makeSupabase({
+      inventory_items: [{
+        data: [
+          { name: 'Paper Towels', current_quantity: 1, par_level: 4, first_count_recorded_at: '2026-07-01T00:00:00Z', properties: { name: 'Lakeside Lodge' } },
+          { name: 'Dish Soap',    current_quantity: 5, par_level: 4, first_count_recorded_at: '2026-07-01T00:00:00Z', properties: { name: 'Lakeside Lodge' } },
+          { name: 'Trash Bags',   current_quantity: 0, par_level: 2, first_count_recorded_at: null, properties: { name: 'Mountain Cabin' } },
+        ],
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getBelowParInventory(ORG_ID)
+
+    expect(result).toEqual({
+      count: 1,
+      items: [{ item: 'Paper Towels', property: 'Lakeside Lodge', currentQuantity: 1, parLevel: 4 }],
+    })
+  })
+
+  it('returns an error message on a query error', async () => {
+    const supabase = makeSupabase({
+      inventory_items: [{ data: null, error: { message: 'boom' } }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getBelowParInventory(ORG_ID)
+
+    expect(result).toEqual({ error: 'Could not fetch inventory.' })
+  })
+})
+
+describe('getBillingDetails', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns a null invoice when the org has no Stripe customer yet', async () => {
+    const supabase = makeSupabase({
+      organizations: [{
+        data: { plan: 'starter', plan_status: 'trialing', trial_ends_at: '2026-08-01', max_properties: 15, stripe_customer_id: null },
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getBillingDetails(ORG_ID)
+
+    expect(result).toEqual({
+      plan: 'starter', planStatus: 'trialing', trialEndsAt: '2026-08-01', maxProperties: 15,
+      recentInvoice: null,
+    })
+    expect(stripe.invoices.list).not.toHaveBeenCalled()
+  })
+
+  it('maps the most recent Stripe invoice when a customer is on file', async () => {
+    const supabase = makeSupabase({
+      organizations: [{
+        data: { plan: 'growth', plan_status: 'active', trial_ends_at: null, max_properties: 50, stripe_customer_id: 'cus_1' },
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+    vi.mocked(stripe.invoices.list).mockResolvedValue({
+      data: [{
+        status: 'open', amount_due: 47900, amount_paid: 0,
+        due_date: 1785715200, hosted_invoice_url: 'https://invoice.stripe.com/i/1',
+      }],
+    } as never)
+
+    const result = await getBillingDetails(ORG_ID)
+
+    expect(result).toMatchObject({
+      plan: 'growth', planStatus: 'active',
+      recentInvoice: {
+        status: 'open', amountDue: 479, amountPaid: 0,
+        hostedInvoiceUrl: 'https://invoice.stripe.com/i/1',
+      },
+    })
+    expect(stripe.invoices.list).toHaveBeenCalledWith({ customer: 'cus_1', limit: 1 })
+  })
+
+  it('degrades gracefully with a billingLookupError when Stripe is unreachable', async () => {
+    const supabase = makeSupabase({
+      organizations: [{
+        data: { plan: 'growth', plan_status: 'active', trial_ends_at: null, max_properties: 50, stripe_customer_id: 'cus_1' },
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+    vi.mocked(stripe.invoices.list).mockRejectedValue(new Error('network error'))
+
+    const result = await getBillingDetails(ORG_ID)
+
+    expect(result).toMatchObject({ recentInvoice: null, billingLookupError: expect.any(String) })
+  })
+
+  it('returns an error when the organization is not found', async () => {
+    const supabase = makeSupabase({ organizations: [{ data: null, error: null }] })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await getBillingDetails(ORG_ID)
+
+    expect(result).toEqual({ error: 'Could not find billing information.' })
   })
 })
 
@@ -282,6 +563,56 @@ describe('callAccountTool', () => {
     const result = await callAccountTool('get_recent_purchase_orders', ORG_ID)
 
     expect(result).toEqual({ count: 0, orders: [] })
+  })
+
+  it('dispatches get_work_order_status', async () => {
+    const supabase = makeSupabase({ work_orders: [{ data: [], error: null }] })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await callAccountTool('get_work_order_status', ORG_ID)
+
+    expect(result).toEqual({ count: 0, workOrders: [] })
+  })
+
+  it('dispatches get_vendor_compliance_status', async () => {
+    const supabase = makeSupabase({ vendor_compliance_status: [{ data: [], error: null }] })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await callAccountTool('get_vendor_compliance_status', ORG_ID)
+
+    expect(result).toEqual({ count: 0, vendors: [] })
+  })
+
+  it('dispatches get_crew_roster_status', async () => {
+    const supabase = makeSupabase({ crew_members: [{ data: [], error: null }] })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await callAccountTool('get_crew_roster_status', ORG_ID)
+
+    expect(result).toEqual({ count: 0, crew: [] })
+  })
+
+  it('dispatches get_below_par_inventory', async () => {
+    const supabase = makeSupabase({ inventory_items: [{ data: [], error: null }] })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await callAccountTool('get_below_par_inventory', ORG_ID)
+
+    expect(result).toEqual({ count: 0, items: [] })
+  })
+
+  it('dispatches get_billing_details', async () => {
+    const supabase = makeSupabase({
+      organizations: [{
+        data: { plan: 'starter', plan_status: 'trialing', trial_ends_at: null, max_properties: 15, stripe_customer_id: null },
+        error: null,
+      }],
+    })
+    vi.mocked(createServiceClient).mockReturnValue(supabase as never)
+
+    const result = await callAccountTool('get_billing_details', ORG_ID)
+
+    expect(result).toMatchObject({ plan: 'starter', recentInvoice: null })
   })
 
   it('returns an error for an unrecognized tool name without touching the DB', async () => {
